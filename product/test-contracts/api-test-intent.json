@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 707,
-    "cases": 788,
+    "tests": 708,
+    "cases": 789,
     "classes": 116,
-    "hostedTests": 678,
-    "hostedCases": 745,
+    "hostedTests": 679,
+    "hostedCases": 746,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 7,
@@ -29,8 +29,8 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 152,
-      "cases": 163,
+      "tests": 153,
+      "cases": 164,
       "unknownCases": 0,
       "classes": 55
     },
@@ -8575,8 +8575,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 171,
-        "end": 186
+        "start": 257,
+        "end": 272
+      }
+    },
+    {
+      "cls": "RestartReviewApiTests",
+      "test": "Configured_change_request_approval_freezes_modern_authority_and_signature_provenance",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 159,
+        "end": 242
       }
     },
     {
@@ -8593,8 +8611,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 103,
-        "end": 156
+        "start": 104,
+        "end": 157
       }
     },
     {
@@ -8610,8 +8628,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 158,
-        "end": 169
+        "start": 244,
+        "end": 255
       }
     },
     {
@@ -8628,8 +8646,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 73,
-        "end": 101
+        "start": 74,
+        "end": 102
       }
     },
     {

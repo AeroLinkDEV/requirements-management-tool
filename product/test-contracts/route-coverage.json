@@ -646,6 +646,7 @@
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
         "ChangeRequestReviewRationaleApiTests",
+        "RestartReviewApiTests",
         "ReviewCommentApiTests",
         "TestChangeRequestReviewWorkflowTests"
       ]

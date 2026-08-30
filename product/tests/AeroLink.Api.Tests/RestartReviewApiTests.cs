@@ -20,7 +20,7 @@ namespace AeroLink.Api.Tests;
 public sealed class RestartReviewApiTests
 {
     private static async Task<(Guid ChangeRequestId, Guid ProjectId, Guid? WorkflowId)> SeedAsync(
-        AeroLinkApiFactory factory, bool configured = false)
+        AeroLinkApiFactory factory, bool configured = false, bool modernConfigured = false)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -46,7 +46,8 @@ public sealed class RestartReviewApiTests
         if (configured)
         {
             workflow = new ReviewWorkflow(project.Id, "Frozen system board", ReviewSubject.System, ReviewMode.Parallel,
-                [new("System engineering approval", ProgramRole.SystemEngineer, ReviewStageKind.Approval)],
+                [new("System engineering approval", ProgramRole.SystemEngineer, ReviewStageKind.Approval,
+                    modernConfigured ? ReviewStageAuthorityKind.BaseRole : null)],
                 "test.setup", now);
             workflow.Activate("test.setup", now);
             db.ReviewWorkflows.Add(workflow);
@@ -153,6 +154,91 @@ public sealed class RestartReviewApiTests
         Assert.Equal("ApprovalActivated", notification.Type);
         Assert.Equal("Approve SRCR-00050.00", notification.Title);
         Assert.Contains("authorized to approve", notification.Detail);
+    }
+
+    [Fact]
+    public async Task Configured_change_request_approval_freezes_modern_authority_and_signature_provenance()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory, configured: true, modernConfigured: true);
+        await LoginAsync(client, "author.user");
+
+        // Restart onto the right person so the approval exercises a newly selected, explicit BaseRole
+        // obligation rather than the legacy row seeded as the misrouted historical cycle.
+        using var restarted = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/restart-review",
+            new { reason = "Routed to the wrong systems approver.", approvers = new[] { new { userId = "right.user" } } });
+        Assert.Equal(HttpStatusCode.OK, restarted.StatusCode);
+
+        await LoginAsync(client, "right.user");
+        using var approved = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/approve",
+            new
+            {
+                password = AeroLinkApiFactory.MemberPassword,
+                meaning = "I approve the exact controlled change request.",
+                rationale = "The modern systems-engineering authority reviewed the exact package."
+            });
+        Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+        var detail = await approved.Content.ReadFromJsonAsync<JsonElement>();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var scr = await db.SystemChangeRequests.AsNoTracking()
+            .Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
+            .SingleAsync(x => x.Id == fixture.ChangeRequestId);
+        var cycle = scr.ReviewCycles.Single(x => x.WorkflowId == fixture.WorkflowId && x.Sequence == 2);
+        var step = cycle.Steps.Single();
+        var programId = await db.Projects.AsNoTracking().Where(x => x.Id == fixture.ProjectId)
+            .Select(x => x.ProgramId).SingleAsync();
+        var rightUserId = await db.UserAccounts.AsNoTracking().Where(x => x.UserName == "right.user")
+            .Select(x => x.Id).SingleAsync();
+        var membership = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.UserId == rightUserId
+                && x.Role == ProgramRole.SystemEngineer && x.EndedAt == null)
+            .OrderBy(x => x.Id).SingleAsync();
+        var signature = await db.ElectronicSignatures.AsNoTracking()
+            .SingleAsync(x => x.ArtifactId == fixture.ChangeRequestId && x.Action == "Approval");
+
+        Assert.Equal(ReviewStageKind.Approval, step.StageKind);
+        Assert.Equal(nameof(ProjectAuthoritySource.DirectBaseRole), step.AuthoritySource?.ToString());
+        Assert.Equal(membership.Id, step.AuthoritySourceId);
+        Assert.Equal(fixture.WorkflowId, cycle.WorkflowId);
+        Assert.Equal(1, cycle.WorkflowVersion);
+        Assert.Equal("Approval", signature.Action);
+        Assert.Equal(step.Id, signature.ReviewStepId);
+        Assert.Equal(cycle.Sequence, signature.ReviewCycle);
+        Assert.Equal(step.Position, signature.ReviewStepPosition);
+        Assert.Equal(step.Authority, signature.Authority);
+        Assert.Equal(step.AuthoritySource?.ToString(), signature.AuthoritySource);
+        Assert.Equal(step.AuthoritySourceId, signature.AuthoritySourceId);
+        Assert.Equal(cycle.WorkflowId, signature.WorkflowId);
+        Assert.Equal(cycle.WorkflowVersion, signature.WorkflowVersion);
+
+        var projectedCycle = detail.GetProperty("reviewCycles").EnumerateArray()
+            .Single(x => x.GetProperty("id").GetGuid() == cycle.Id);
+        var projectedStep = projectedCycle.GetProperty("steps").EnumerateArray().Single();
+        Assert.Equal(step.Id, projectedStep.GetProperty("id").GetGuid());
+        Assert.Equal(nameof(ReviewStageKind.Approval), projectedStep.GetProperty("stageKind").GetString());
+        Assert.Equal(nameof(ProjectAuthoritySource.DirectBaseRole),
+            projectedStep.GetProperty("authoritySource").GetString());
+        Assert.Equal(membership.Id, projectedStep.GetProperty("authoritySourceId").GetGuid());
+        Assert.Equal(cycle.WorkflowId, projectedCycle.GetProperty("workflowId").GetGuid());
+        Assert.Equal(cycle.WorkflowVersion, projectedCycle.GetProperty("workflowVersion").GetInt32());
+
+        var signatureProjection = (await client.GetFromJsonAsync<JsonElement>(
+            $"/api/signatures?artifactId={fixture.ChangeRequestId}")).EnumerateArray()
+            .Single(x => x.GetProperty("id").GetGuid() == signature.Id);
+        Assert.Equal("Approval", signatureProjection.GetProperty("action").GetString());
+        Assert.Equal(signature.Id, signatureProjection.GetProperty("id").GetGuid());
+        Assert.Equal(step.Id, signatureProjection.GetProperty("reviewStepId").GetGuid());
+        Assert.Equal(cycle.Sequence, signatureProjection.GetProperty("reviewCycle").GetInt32());
+        Assert.Equal(step.Position, signatureProjection.GetProperty("reviewStepPosition").GetInt32());
+        Assert.Equal(nameof(ProjectAuthoritySource.DirectBaseRole),
+            signatureProjection.GetProperty("authoritySource").GetString());
+        Assert.Equal(membership.Id, signatureProjection.GetProperty("authoritySourceId").GetGuid());
+        Assert.Equal(cycle.WorkflowId, signatureProjection.GetProperty("workflowId").GetGuid());
+        Assert.Equal(cycle.WorkflowVersion, signatureProjection.GetProperty("workflowVersion").GetInt32());
+        Assert.False(signatureProjection.GetProperty("isLegacyAuthoritySource").GetBoolean());
     }
 
     [Fact]

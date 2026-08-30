@@ -24,8 +24,10 @@ public sealed class ApprovalStep
         StageName = stageName.Trim();
         StageKind = stageKind;
         Authority = "Reviewer";
-        AuthoritySource = authoritySource;
-        AuthoritySourceId = authoritySourceId;
+        // A source row has meaning only when its source kind is present. Keep legacy/no-source selections
+        // honest even if a stale caller supplies an identifier alongside ProjectAuthoritySource.None.
+        AuthoritySource = authoritySource is ProjectAuthoritySource.None ? null : authoritySource;
+        AuthoritySourceId = AuthoritySource is null ? null : authoritySourceId;
         State = active ? ApprovalStepState.Active : ApprovalStepState.Pending;
     }
 
@@ -67,8 +69,8 @@ public sealed class ApprovalStep
         ApproverId = id;
         ApproverName = name;
         Authority = role?.ToString() ?? "Reviewer";
-        AuthoritySource = authoritySource;
-        AuthoritySourceId = authoritySourceId;
+        AuthoritySource = authoritySource is ProjectAuthoritySource.None ? null : authoritySource;
+        AuthoritySourceId = AuthoritySource is null ? null : authoritySourceId;
     }
 }
 

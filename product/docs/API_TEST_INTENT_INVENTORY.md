@@ -21,11 +21,11 @@ tokens that supplied host evidence.
 ## Result
 
 <!-- BEGIN GENERATED API TEST INTENT SUMMARY -->
-**707 test methods, 788 known invocations, 116 classes.** This source-exact forecast supports planning only;
+**708 test methods, 789 known invocations, 116 classes.** This source-exact forecast supports planning only;
 it is not migration or rollout authority. All current theories use explicit `InlineData`,
 so every case count is known.
 The inventory does not infer host use from a whole class:
-**678 methods / 745 cases have direct host evidence**,
+**679 methods / 746 cases have direct host evidence**,
 **22 methods / 36 cases are explicitly non-hosted**, and
 **7 methods / 7 cases remain unknown** because their class contains a host fixture or factory but
 the method body does not show the host operation.
@@ -33,7 +33,7 @@ the method body does not show the host operation.
 | Intent | Tests | Cases | Classes | Correct level |
 |---|---:|---:|---:|---|
 | HTTP boundary: route, status, JSON shape | 421 | 473 | 95 | API (must stay hosted) |
-| EF translation / relational constraints | 152 | 163 | 55 | Infrastructure (needs a database, not a host) |
+| EF translation / relational constraints | 153 | 164 | 55 | Infrastructure (needs a database, not a host) |
 | Authentication / authorization wiring | 82 | 86 | 47 | API (must stay hosted) |
 | In-process logic with no HTTP and no client | 29 | 29 | 11 | Domain or Infrastructure (migration candidate) |
 | Filesystem / evidence-root behaviour | 14 | 14 | 8 | API or Infrastructure (must stay hosted) |
@@ -41,7 +41,7 @@ the method body does not show the host operation.
 | Business-rule matrix over data variations | 2 | 16 | 2 | Domain (migration candidate) |
 
 The machine-readable artifact records **16 explicitly hosted candidate methods / 16 cases** and **4 unknown candidate methods / 4 cases**.
-The known hosted candidate share is **16 of 745 cases (2.1%)**,
+The known hosted candidate share is **16 of 746 cases (2.1%)**,
 but that is not a safe ceiling while unknown invocations remain. The static criterion-7 result is therefore
 **unresolved**; it does not close #566 and does not justify closing #563.
 <!-- END GENERATED API TEST INTENT SUMMARY -->
