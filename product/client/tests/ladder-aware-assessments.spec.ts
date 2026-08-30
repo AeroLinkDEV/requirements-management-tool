@@ -23,6 +23,26 @@ async function useEffectiveLadder(
 const draftQueueRequest = (url: string) =>
   url.includes('/api/history/change-requests') && url.includes('state=Draft') && url.includes('pageSize=100')
 
+const assessmentRow = (targetLevel: 'HighLevel' | 'LowLevel', sourceTitle: string) => ({
+  id: `${targetLevel}-assessment`,
+  sourceChangeRequestId: `${targetLevel}-source`,
+  sourceChangeRequestNumber: targetLevel === 'HighLevel' ? 'SRCR-HLR' : 'HLRCR-LLR',
+  sourceTitle,
+  sourceProblem: '',
+  sourceAnalysis: '',
+  sourceSolution: '',
+  sourceChanges: [],
+  targetLevel,
+  state: 'Open',
+  outcome: 'Pending',
+  rationale: '',
+  supersededReason: '',
+  buildReleased: false,
+  linkedChangeRequests: [],
+  reopenings: [],
+  capabilities: { canAssign: false, canEdit: false, canSubmit: false, canApprove: false, canReturn: false, canReopen: false },
+})
+
 test('the effective ladder keeps the FMS System root free of downstream-assessment requests', async ({ page, request }) => {
   const showcase = await showcaseSeed(request)
   await login(page)
@@ -115,6 +135,39 @@ test('multiple effective parents still mount one queue and issue one target requ
   await expect(queue).toHaveCount(1)
   await expect(queue).toHaveAttribute('data-queue-state', /empty|rows/)
   expect(assessmentRequests).toBe(1)
+})
+
+test('a slower prior HLR response cannot overwrite the newer LLR queue', async ({ page, request }) => {
+  const showcase = await showcaseSeed(request)
+  await login(page)
+  let releaseHighLevel = () => {}
+  const highLevelGate = new Promise<void>(resolve => { releaseHighLevel = resolve })
+  let markHighLevelStarted = () => {}
+  const highLevelStarted = new Promise<void>(resolve => { markHighLevelStarted = resolve })
+  let markHighLevelFinished = () => {}
+  const highLevelFinished = new Promise<void>(resolve => { markHighLevelFinished = resolve })
+  await page.route('**/api/downstream-assessments*', async route => {
+    const targetLevel = new URL(route.request().url()).searchParams.get('targetLevel')
+    if (targetLevel === 'HighLevel') {
+      markHighLevelStarted()
+      await highLevelGate
+      await route.fulfill({ json: [assessmentRow('HighLevel', 'STALE HLR RESPONSE')] })
+      markHighLevelFinished()
+      return
+    }
+    await route.fulfill({ json: [assessmentRow('LowLevel', 'CURRENT LLR RESPONSE')] })
+  })
+
+  await page.goto(buildPath(showcase, 'software/change-requests?level=HLR'), { waitUntil: 'domcontentloaded' })
+  await highLevelStarted
+  await page.getByRole('button', { name: /LLR Low-level requirements/ }).click()
+  const queue = page.locator('.downstreamQueue')
+  await expect(queue).toHaveAttribute('data-queue-state', 'rows')
+  await expect(queue).toContainText('CURRENT LLR RESPONSE')
+  releaseHighLevel()
+  await highLevelFinished
+  await expect(queue).toContainText('CURRENT LLR RESPONSE')
+  await expect(queue).not.toContainText('STALE HLR RESPONSE')
 })
 
 test('an incoming parent without ChangeControl makes no queue and issues no queue reads', async ({ page, request }) => {

@@ -64,14 +64,23 @@ const engineeringStatus=(row:Assessment)=>{
 
 export default function DownstreamAssessmentQueue({api,projectId,releaseId,targetLevel,user,onOpenScr,onOpenRequirement,onCreateScr,initialAssessmentId,onAssessmentSelected}:{api:string;projectId:string;releaseId:string;targetLevel:Level;user:AuthUser;onOpenScr:(id:string)=>void;onOpenRequirement:(id:string,level:string)=>void;onCreateScr:(level:Level,assessmentId:string,sourceNumber:string)=>void;initialAssessmentId?:string;onAssessmentSelected:(id?:string)=>void}){
   const [rows,setRows]=useState<Assessment[]>([]),[drafts,setDrafts]=useState<Draft[]>([])
-  const [busy,setBusy]=useState(''),[error,setError]=useState(''),[loadError,setLoadError]=useState(''),[loading,setLoading]=useState(true),[revision,setRevision]=useState(0)
+  const [busy,setBusy]=useState(''),[error,setError]=useState(''),[loadError,setLoadError]=useState(''),[loading,setLoading]=useState(true),[completedLoadKey,setCompletedLoadKey]=useState(''),[revision,setRevision]=useState(0)
   const [approvers,setApprovers]=useState<Record<string,{userId:string;name:string}>>({})
   const [decision,setDecision]=useState<RationaleDecision>(),[rationale,setRationale]=useState('')
   const [selectedId,setSelectedId]=useState(initialAssessmentId??''),[impacts,setImpacts]=useState<Impact[]>([]),[impactBusy,setImpactBusy]=useState(false)
   // React StrictMode replays mount effects in development. The key keeps that replay from issuing a second
   // read while still allowing a real target/release change or post-action revision to reload the queue.
   const requestedLoad=useRef('')
+  const loadGeneration=useRef(0)
+  const loadKey=`${api}|${projectId}|${releaseId}|${targetLevel}|${revision}`
+  // Update during render so a response for the previous target is invalid before the new effect starts.
+  // Otherwise a slow HLR response can briefly or permanently overwrite a newer LLR selection.
+  const latestLoadKey=useRef(loadKey)
+  latestLoadKey.current=loadKey
   const load=useCallback(async()=>{
+    const requestKey=loadKey
+    const generation=++loadGeneration.current
+    const isCurrent=()=>generation===loadGeneration.current&&latestLoadKey.current===requestKey
     const changeRequestType=targetLevel==='System'?'System':'Software'
     setLoading(true);setLoadError('')
     try {
@@ -79,17 +88,20 @@ export default function DownstreamAssessmentQueue({api,projectId,releaseId,targe
         apiRequest<Assessment[]>(`${api}/api/downstream-assessments?projectId=${projectId}&releaseId=${releaseId}&targetLevel=${targetLevel}`),
         apiRequest<{items:Draft[]}>(`${api}/api/history/change-requests?projectId=${projectId}&releaseId=${releaseId}&type=${changeRequestType}${changeRequestType==='Software'?`&level=${targetLevel}`:''}&state=Draft&page=1&pageSize=100`),
       ])
+      if(!isCurrent())return
       setRows(assessments);setDrafts(requests.items)
     } catch(problem) {
+      if(!isCurrent())return
       setLoadError(operationError(problem,'Downstream assessments could not be loaded.'))
-    } finally { setLoading(false) }
-  },[api,projectId,releaseId,targetLevel])
+    } finally {
+      if(isCurrent()){setCompletedLoadKey(requestKey);setLoading(false)}
+    }
+  },[api,loadKey,projectId,releaseId,targetLevel])
   useEffect(()=>{
-    const key=`${api}|${projectId}|${releaseId}|${targetLevel}|${revision}`
-    if(requestedLoad.current===key)return
-    requestedLoad.current=key
+    if(requestedLoad.current===loadKey)return
+    requestedLoad.current=loadKey
     void load()
-  },[api,load,projectId,releaseId,targetLevel,revision])
+  },[load,loadKey])
   useEffect(()=>{setSelectedId(initialAssessmentId??'')},[initialAssessmentId])
   // A deep link restored through Back can be re-derived only once the queue's data has arrived. The
   // prop-change effect above may run while rows are still empty, so re-apply the intent after load:
@@ -108,7 +120,7 @@ export default function DownstreamAssessmentQueue({api,projectId,releaseId,targe
   const downward=impacts.flatMap(impact=>impact.derivedRequirements)
   const level=levelName(targetLevel)
   const headingCopy=`Approved upstream changes waiting for an explicit ${level} engineering conclusion.`
-  if(loading)return <section className="downstreamQueue" aria-labelledby="downstream-title" data-queue-state="loading"><header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream change assessments</h2><p>{headingCopy}</p></div></header><p className="downstreamHelp">Loading {level} assessments…</p></section>
+  if(loading||completedLoadKey!==loadKey)return <section className="downstreamQueue" aria-labelledby="downstream-title" data-queue-state="loading"><header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream change assessments</h2><p>{headingCopy}</p></div></header><p className="downstreamHelp">Loading {level} assessments…</p></section>
   if(loadError)return <section className="downstreamQueue" aria-labelledby="downstream-title" data-queue-state="error"><header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream change assessments</h2><p>{headingCopy}</p></div></header><div className="workspaceError" role="alert">{loadError}</div><button type="button" onClick={()=>void load()}>Retry loading assessments</button></section>
   if(!rows.length)return <section className="downstreamQueue" aria-labelledby="downstream-title" data-queue-state="empty"><header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream change assessments</h2><p>{headingCopy}</p></div></header><p className="downstreamHelp">No {level} downstream assessments are currently recorded.</p></section>
   return <section className="downstreamQueue" aria-labelledby="downstream-title" data-queue-state="rows">
