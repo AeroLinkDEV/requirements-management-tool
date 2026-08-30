@@ -164,8 +164,17 @@ test('a slower prior HLR response cannot overwrite the newer LLR queue', async (
   const queue = page.locator('.downstreamQueue')
   await expect(queue).toHaveAttribute('data-queue-state', 'rows')
   await expect(queue).toContainText('CURRENT LLR RESPONSE')
+  const staleResponseDelivered = page.waitForResponse(response =>
+    response.url().includes('/api/downstream-assessments') &&
+    new URL(response.url()).searchParams.get('targetLevel') === 'HighLevel')
   releaseHighLevel()
   await highLevelFinished
+  await staleResponseDelivered
+  // Cross two browser render boundaries after the stale fetch has completed. On the vulnerable implementation
+  // its Promise.all continuation and React state commit have now had the opportunity to replace the LLR rows.
+  await page.evaluate(() => new Promise<void>(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  }))
   await expect(queue).toContainText('CURRENT LLR RESPONSE')
   await expect(queue).not.toContainText('STALE HLR RESPONSE')
 })
