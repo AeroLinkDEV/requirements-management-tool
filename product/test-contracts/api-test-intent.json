@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 704,
-    "cases": 785,
+    "tests": 706,
+    "cases": 787,
     "classes": 116,
-    "hostedTests": 675,
-    "hostedCases": 742,
+    "hostedTests": 677,
+    "hostedCases": 744,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 7,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 422,
-      "cases": 474,
+      "tests": 423,
+      "cases": 475,
       "unknownCases": 0,
       "classes": 95
     },
@@ -37,8 +37,8 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 81,
-      "cases": 85,
+      "tests": 82,
+      "cases": 86,
       "unknownCases": 0,
       "classes": 47
     },
@@ -7242,6 +7242,24 @@
     },
     {
       "cls": "ProjectConfigurationApiTests",
+      "test": "Active_multi_parent_configuration_projects_each_effective_direct_relationship_once",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 381,
+        "end": 413
+      }
+    },
+    {
+      "cls": "ProjectConfigurationApiTests",
       "test": "An_engineer_can_read_but_cannot_edit_project_configuration",
       "kind": "Fact",
       "intent": "auth-policy",
@@ -7254,8 +7272,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 358,
-        "end": 370
+        "start": 415,
+        "end": 427
       }
     },
     {
@@ -7272,8 +7290,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 334,
-        "end": 356
+        "start": 346,
+        "end": 379
       }
     },
     {
@@ -7290,8 +7308,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 110,
-        "end": 260
+        "start": 116,
+        "end": 269
       }
     },
     {
@@ -7309,7 +7327,7 @@
       ],
       "sourceLines": {
         "start": 58,
-        "end": 108
+        "end": 114
       }
     },
     {
@@ -7326,8 +7344,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 432,
-        "end": 503
+        "start": 501,
+        "end": 572
       }
     },
     {
@@ -7344,8 +7362,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 372,
-        "end": 430
+        "start": 441,
+        "end": 499
       }
     },
     {
@@ -7362,8 +7380,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 262,
-        "end": 332
+        "start": 271,
+        "end": 344
+      }
+    },
+    {
+      "cls": "ProjectConfigurationApiTests",
+      "test": "Project_configuration_read_refuses_a_project_outside_the_callers_scope",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 429,
+        "end": 439
       }
     },
     {

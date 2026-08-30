@@ -53,6 +53,13 @@ public sealed record ProjectLadderReadModel(
     /// Stored legacy and Active non-default configurations project their persisted effective graph.
     /// </summary>
     public IReadOnlyList<LadderStepDraft> EffectiveSteps { get; init; } = [];
+
+    /// <summary>
+    /// The direct parent relationships consumers may use at runtime. This is deliberately derived from the
+    /// effective policy rather than the authored <see cref="Relationships"/> collection: a draft must never
+    /// change applicability before its activation succeeds.
+    /// </summary>
+    public IReadOnlyList<LadderRelationshipDraft> EffectiveRelationships { get; init; } = [];
 }
 
 public sealed record ProjectLadderEditResult(
@@ -351,6 +358,14 @@ public sealed class ProjectLadderAuthoringService(
             .Select((level, index) => new LadderStepDraft(level.ToString(), index + 1, effectivePolicy.Definition(level).Capabilities,
                 effectivePolicy.Definition(level).VerificationProfile?.EnabledKinds))
             .ToArray();
+        var effectiveLevelOrder = effectivePolicy.OrderedLevels
+            .Select((level, index) => (level, index))
+            .ToDictionary(x => x.level, x => x.index);
+        var effectiveRelationships = effectivePolicy.ParentRelationships
+            .OrderBy(x => effectiveLevelOrder[x.Parent])
+            .ThenBy(x => effectiveLevelOrder[x.Child])
+            .Select(x => new LadderRelationshipDraft(x.Parent.ToString(), x.Child.ToString()))
+            .ToArray();
         return new(configuration.ProjectId, configuration.Id, configuration.Classification, configuration.State,
             configuration.IsSealed, configuration.SealedAt, configuration.SealedBy,
             configuration.SealedContentKind, configuration.SealedContentIdentity,
@@ -370,6 +385,10 @@ public sealed class ProjectLadderAuthoringService(
                 })
                 .DistinctBy(level => level.Level)
                 .Select(level => new LadderCatalogueReadModel(level.Level.ToString(), level.Capabilities)).ToArray(),
-            canManage, configuration.VerificationProfileSchemaVersion) { EffectiveSteps = effectiveSteps };
+            canManage, configuration.VerificationProfileSchemaVersion)
+        {
+            EffectiveSteps = effectiveSteps,
+            EffectiveRelationships = effectiveRelationships,
+        };
     }
 }

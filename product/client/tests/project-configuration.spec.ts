@@ -56,6 +56,21 @@ test('Project configuration authors and activates a disposable graph, records hi
   await expect(page.getByText(/active and immutable/i)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Attempt activation' })).toHaveCount(0)
 
+  // The runtime consumer must receive the activated direct graph, not reconstruct the legacy HLR rung or
+  // continue using the pre-activation draft. One target queue means one assessment read even in StrictMode.
+  let lowLevelAssessmentRequests = 0
+  page.on('request', request => {
+    if (request.url().includes('/api/downstream-assessments') && request.url().includes('targetLevel=LowLevel')) {
+      lowLevelAssessmentRequests++
+    }
+  })
+  await page.goto(`/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}/software/change-requests?level=LLR`)
+  const downstreamQueue = page.locator('.downstreamQueue')
+  await expect(downstreamQueue).toHaveCount(1)
+  await expect(downstreamQueue).toContainText('LLR engineering conclusion')
+  await expect(downstreamQueue).toHaveAttribute('data-queue-state', /empty|rows/)
+  expect(lowLevelAssessmentRequests).toBe(1)
+
   await page.goto(`/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}/command-center`)
   const nav = page.getByRole('navigation', { name: 'Primary navigation' })
   await expect(nav).toBeVisible()

@@ -1,12 +1,20 @@
 export type LadderLevel = 'System' | 'HighLevel' | 'LowLevel' | 'Interface'
 
+export type LadderRelationship = {
+  /** Server-owned catalogue vocabulary; runtime policy must not silently discard a future level. */
+  parent: string
+  child: string
+}
+
 export type ProjectLadderProjection = {
   /** Authored steps are intentionally not used by runtime surfaces; the server supplies this effective view. */
   effectiveSteps: {
-    catalogueEntry: LadderLevel
+    catalogueEntry: string
     capabilities: number | string
     enabledArtifactKinds?: string[]
   }[]
+  /** Direct relationships from the effective, activated ladder. Authored draft edges are not runtime truth. */
+  effectiveRelationships?: LadderRelationship[]
   state?: string
   classification?: string
 }
@@ -62,6 +70,23 @@ export function ladderHasAny(
   capability?: number,
 ): boolean {
   return levels.some(level => ladderAllows(ladder, level, capability))
+}
+
+/**
+ * Downstream assessments are applicable only where the effective ladder says that a configured parent with
+ * change control feeds this exact target level. This intentionally does not infer topology from enum order,
+ * treat System specially, or inspect authored draft relationships.
+ */
+export function ladderAllowsDownstreamAssessment(
+  ladder: ProjectLadderProjection | null | undefined,
+  targetLevel: LadderLevel,
+): boolean {
+  if (!ladder || !ladderAllows(ladder, targetLevel)) return false
+  return (ladder.effectiveRelationships ?? []).some(edge => {
+    if (edge.child !== targetLevel) return false
+    const parent = ladder.effectiveSteps.find(step => step.catalogueEntry === edge.parent)
+    return !!parent && (capabilityMask(parent.capabilities) & LadderCapability.ChangeControl) === LadderCapability.ChangeControl
+  })
 }
 
 /** Exact artifact-profile predicate; level verification alone must not activate dormant Procedure surfaces. */
