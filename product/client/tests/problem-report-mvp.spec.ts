@@ -43,6 +43,9 @@ test('an engineer creates a structured Draft PR and advances it through the SCCB
   await page.getByLabel('Search').fill(title)
   await page.locator('.prList').getByText(title).click()
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
+  // The pane has to show this record at Ready for SCCB before the click, so a detail response for another
+  // record arriving late cannot turn the Open click into a different record's lifecycle action. (#793)
+  await expect(page.locator('.prState')).toHaveText('Ready for SCCB')
   await page.locator('.prFlow').getByRole('button', { name: 'Open →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Open')
   await page.getByRole('button', { name: 'Start implementing' }).click()
@@ -84,12 +87,19 @@ test('an Open Problem Report is checked out, corrected, and the correction survi
   await dialog.getByRole('button', { name: 'Save Draft PR' }).click()
   await expect(page.locator('.prState')).toHaveText('Draft')
 
+  // The transition must settle on the server before the identity switch: login() navigates the page away,
+  // and an in-flight transition request caught mid-navigation is aborted, leaving the record a Draft for
+  // whoever opens it next. (#793)
   await page.locator('.prFlow').getByRole('button', { name: 'Ready for SCCB →', exact: true }).click()
+  await expect(page.locator('.prState')).toHaveText('Ready for SCCB')
   await login(page, 'systems.lead', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: 'load' })
   await page.getByLabel('Search').fill(`Autopilot disconnect tone lags ${stamp}`)
   await page.locator('.prList').getByText(`Autopilot disconnect tone lags ${stamp}`).click()
+  // As above: pin the pane to this record at Ready for SCCB before the Open click. (#793)
+  await expect(page.getByRole('heading', { name: `Autopilot disconnect tone lags ${stamp}` })).toBeVisible()
+  await expect(page.locator('.prState')).toHaveText('Ready for SCCB')
   await page.locator('.prFlow').getByRole('button', { name: 'Open →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Open')
 
