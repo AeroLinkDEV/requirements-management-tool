@@ -283,7 +283,7 @@ test('reviewed #563 holds keep every unsafe reusable class out of reuse headroom
   assert.deepEqual(hostArtifact.summary['reusable-host'], { classes: 44, tests: 278, knownCases: 309, unknownCaseTests: 0 })
   assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 44, tests: 266, knownCases: 295, unknownCaseTests: 0 })
   assert.deepEqual(hostArtifact.summary.converted, { classes: 26, tests: 158, knownCases: 174, unknownCaseTests: 0 })
-  assert.deepEqual(hostArtifact.summary['migration-candidate'], { classes: 1, tests: 1, knownCases: 1, unknownCaseTests: 0 })
+  assert.deepEqual(hostArtifact.summary['migration-candidate'], { classes: 2, tests: 2, knownCases: 7, unknownCaseTests: 0 })
 })
 
 test('host classification preserves unknown theory case counts instead of treating them as known zero', () => {
@@ -335,12 +335,12 @@ test('host classification CLI distinguishes known cases from unknown-case method
 
 test('committed inventories expose per-row case and host evidence', () => {
   assert.equal(intentArtifact.schemaVersion, 'aerolink-api-test-intent/v2')
-  assert.equal(intentArtifact.totals.tests, 703)
-  assert.equal(intentArtifact.totals.cases, 779)
+  assert.equal(intentArtifact.totals.tests, 704)
+  assert.equal(intentArtifact.totals.cases, 785)
   assert.equal(intentArtifact.totals.criterion7, 'unresolved')
   assert.ok(intentArtifact.tests.every((row) => Object.hasOwn(row, 'cases') && Object.hasOwn(row, 'hosted') && Array.isArray(row.hostEvidence) && row.sourceLines.start <= row.sourceLines.end))
   assert.equal(hostArtifact.schemaVersion, 'aerolink-api-host-classification/v3')
-  assert.equal(hostArtifact.totals.knownCases, 779)
+  assert.equal(hostArtifact.totals.knownCases, 785)
   assert.equal(hostArtifact.totals.unknownCaseTests, 0)
   assert.ok(hostArtifact.classes.every((row) => Number.isInteger(row.knownCases) && Number.isInteger(row.unknownCaseTests)))
   for (const cls of ['ReleasedExecutionEvidenceApiTests', 'ReleasedExecutionEvidenceAuthorityMismatchTests', 'ProblemReportPagingApiTests', 'ProductionRoutingTests']) {

@@ -303,7 +303,8 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
         IsChangeRequestReviewNotification(notification) || IsTestChangeReviewNotification(notification);
 
     private static bool IsChangeRequestReviewNotification(UserNotification notification) =>
-        notification.Type == "ReviewActivated" && notification.ArtifactId is not null
+        (notification.Type == "ReviewActivated" || notification.Type == "ApprovalActivated")
+        && notification.ArtifactId is not null
         && (notification.Route.StartsWith("scr:", StringComparison.OrdinalIgnoreCase)
             || notification.Route.StartsWith("swcr:", StringComparison.OrdinalIgnoreCase));
 
@@ -313,7 +314,8 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
         && (notification.Type == "ReviewActivated" || notification.Type == "TestChangeRequestApprovalRequested");
 
     private static bool IsDocumentReviewNotification(UserNotification notification) =>
-        notification.Type == "DocumentReviewActivated" && notification.ArtifactId is not null
+        (notification.Type == "DocumentReviewActivated" || notification.Type == "DocumentApprovalActivated")
+        && notification.ArtifactId is not null
         && notification.Route.StartsWith("managed-document:", StringComparison.OrdinalIgnoreCase);
 
     private static DateTimeOffset? ReviewStepActivatedAt(ReviewStepEmailFact step,

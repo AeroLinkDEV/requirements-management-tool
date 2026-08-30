@@ -564,6 +564,43 @@ public sealed class NotificationOutboxTests
     }
 
     [Fact]
+    public async Task A_change_request_approval_activation_dispatches_with_its_frozen_approval_kind()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            await using var db = new AeroLinkDbContext(seed.Options);
+            var request = new SystemChangeRequest("SRCR-00033", 0, seed.ProjectId, seed.ReleaseId,
+                "Approval identity", "P", "A", "S", "author.user", Now);
+            request.AddRequirementChange("author.user", "SYSR-00000002", 0, RequirementLevel.System,
+                RequirementChangeKind.Introduce, "The system shall preserve approval identity.",
+                "Prevent review and approval conflation.", "Review", Now);
+            var workflow = new ReviewWorkflowSpecification(Guid.NewGuid(), Guid.NewGuid(), "Release approval", 1,
+                ReviewMode.Sequential,
+                [new ReviewStageRequirement(0, "Approval", ProgramRole.SystemTestEngineer, ReviewStageKind.Approval)]);
+            request.SubmitForReview("author.user",
+                [new ApproverSelection("approver.user", "Approver User", ProgramRole.SystemTestEngineer)],
+                Now, workflow: workflow);
+            db.SystemChangeRequests.Add(request);
+            db.UserNotifications.Add(new(seed.ProjectId, "approver.user", "ApprovalActivated",
+                "Approve SRCR-00033.00", "You are now authorized to approve SRCR-00033.00.",
+                $"scr:{request.Id}", request.Id, Now));
+            await db.SaveChangesAsync();
+
+            var sender = new RecordingSender();
+            var (links, tokens) = Support();
+            var result = await new NotificationOutbox(db).DispatchPendingAsync(
+                sender, links, tokens, 50, 5, Now.AddMinutes(1), default);
+
+            Assert.Equal(1, result.Sent);
+            var message = Assert.Single(sender.Sent);
+            Assert.Equal("SRCR-00033.00 is ready for your approval — AeroLink", message.Subject);
+            Assert.Contains("Open the approval page", message.PlainTextBody);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
     public async Task An_unnumbered_test_change_assessment_uses_its_frozen_approval_kind_without_minting_an_identifier()
     {
         var seed = await SeedAsync();
@@ -619,8 +656,8 @@ public sealed class NotificationOutboxTests
             }, Now);
             revision.Approve("technical.user", "Technically complete.", Now.AddMinutes(1));
             db.AddRange(document, revision);
-            db.UserNotifications.Add(new(seed.ProjectId, "approver.user", "DocumentReviewActivated",
-                "Review SDP-000001.00", "Release approval is ready.",
+            db.UserNotifications.Add(new(seed.ProjectId, "approver.user", "DocumentApprovalActivated",
+                "Approve SDP-000001.00", "Release approval is ready.",
                 $"managed-document:{document.Id}", document.Id, Now.AddMinutes(1)));
             await db.SaveChangesAsync();
 

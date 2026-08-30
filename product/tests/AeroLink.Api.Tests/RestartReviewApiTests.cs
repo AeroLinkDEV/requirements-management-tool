@@ -127,6 +127,11 @@ public sealed class RestartReviewApiTests
         Assert.Equal("System engineering approval", step.StageName);
         Assert.Equal(ReviewStageKind.Approval, step.StageKind);
         Assert.Equal(nameof(ProgramRole.SystemEngineer), step.Authority);
+        var notification = await db.UserNotifications.SingleAsync(x =>
+            x.ArtifactId == fixture.ChangeRequestId && x.Recipient == "right.user");
+        Assert.Equal("ApprovalActivated", notification.Type);
+        Assert.Equal("Approve SRCR-00050.00", notification.Title);
+        Assert.Contains("authorized to approve", notification.Detail);
     }
 
     [Fact]

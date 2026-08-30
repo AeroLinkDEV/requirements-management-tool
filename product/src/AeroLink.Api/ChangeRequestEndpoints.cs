@@ -1041,7 +1041,9 @@ public static class ChangeRequestEndpoints
                 var cycle = scr.SubmitForReviewWithResolvedTrace(actor.UserName, selections, now, request.Mode, workflow,
                     actor.IsAdministrator, ladderPolicy, verificationPolicy, traceEvidence);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
-                    db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
+                    db.UserNotifications.Add(ReviewNotificationFactory.ForChangeRequest(scr.ProjectId,
+                        step.ApproverId, step.StageKind, scr.DisplayNumber, scr.Title,
+                        $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -1110,7 +1112,9 @@ public static class ChangeRequestEndpoints
                 var cycle = scr.CancelAndRestartForWrongApprover(actor.UserName, request.Reason, corrected, now,
                     workflow: workflow, administratorAuthority: actor.IsAdministrator);
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
-                    db.UserNotifications.Add(new(scr.ProjectId, step.ApproverId, "ReviewActivated", $"Review {scr.DisplayNumber}", $"You are now authorized to review {scr.DisplayNumber}: {scr.Title}", $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
+                    db.UserNotifications.Add(ReviewNotificationFactory.ForChangeRequest(scr.ProjectId,
+                        step.ApproverId, step.StageKind, scr.DisplayNumber, scr.Title,
+                        $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -1202,7 +1206,7 @@ public static class ChangeRequestEndpoints
             if (scr.ActiveReviewCycle?.WorkflowId is null &&
                 !await identity.HasRoleAsync(actor, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct))
                 return Results.Forbid();
-            try { var now = DateTimeOffset.UtcNow; var snapshotHash = scr.ActiveReviewCycle?.SnapshotHash ?? ""; var activeBefore=scr.ActiveReviewCycle!.Steps.Where(x=>x.State==ApprovalStepState.Active).Select(x=>x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase); scr.ApproveActiveStage(actor.UserName, now, request.Rationale); var activated=scr.ActiveReviewCycle?.Steps.Where(x=>x.State==ApprovalStepState.Active&&!activeBefore.Contains(x.ApproverId)).ToList()??[];foreach(var step in activated)db.UserNotifications.Add(new(scr.ProjectId,step.ApproverId,"ReviewActivated",$"Review {scr.DisplayNumber}",$"The prior stage is complete. You are now authorized to review {scr.DisplayNumber}: {scr.Title}",$"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}",scr.Id,now)); db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "SCR", scr.Id, scr.DisplayNumber, "Approve", request.Meaning, snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now, rationale: request.Rationale ?? ""));
+            try { var now = DateTimeOffset.UtcNow; var snapshotHash = scr.ActiveReviewCycle?.SnapshotHash ?? ""; var activeBefore=scr.ActiveReviewCycle!.Steps.Where(x=>x.State==ApprovalStepState.Active).Select(x=>x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase); scr.ApproveActiveStage(actor.UserName, now, request.Rationale); var activated=scr.ActiveReviewCycle?.Steps.Where(x=>x.State==ApprovalStepState.Active&&!activeBefore.Contains(x.ApproverId)).ToList()??[];foreach(var step in activated)db.UserNotifications.Add(ReviewNotificationFactory.ForChangeRequest(scr.ProjectId,step.ApproverId,step.StageKind,scr.DisplayNumber,scr.Title,$"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}",scr.Id,now,priorStageComplete:true)); db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "SCR", scr.Id, scr.DisplayNumber, "Approve", request.Meaning, snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now, rationale: request.Rationale ?? ""));
                 // Approval is what settles the engineering decision, so verification work is raised here rather than
                 // waiting for baseline inclusion. Saved in the same unit of work as the approval itself.
                 await verificationImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct, actor.UserName);
