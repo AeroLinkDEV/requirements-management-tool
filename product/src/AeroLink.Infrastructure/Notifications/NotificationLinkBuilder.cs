@@ -17,7 +17,15 @@ public sealed class NotificationLinkBuilder(IConfiguration configuration)
         get
         {
             var configured = configuration["Notifications:BaseUrl"];
-            return string.IsNullOrWhiteSpace(configured) ? null : configured.TrimEnd('/');
+            if (string.IsNullOrWhiteSpace(configured)) return null;
+            if (!Uri.TryCreate(configured.Trim(), UriKind.Absolute, out var uri)
+                || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+                || string.IsNullOrWhiteSpace(uri.Host)
+                || !string.IsNullOrEmpty(uri.UserInfo)
+                || !string.IsNullOrEmpty(uri.Query)
+                || !string.IsNullOrEmpty(uri.Fragment)
+                || (uri.AbsolutePath != "/" && !string.IsNullOrEmpty(uri.AbsolutePath))) return null;
+            return uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
         }
     }
 

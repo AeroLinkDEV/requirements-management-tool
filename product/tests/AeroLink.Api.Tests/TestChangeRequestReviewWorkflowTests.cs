@@ -401,6 +401,15 @@ public sealed class TestChangeRequestReviewWorkflowTests
             Assert.Equal(2, cycle.Steps.Count);
             Assert.Equal(ApprovalStepState.Active, cycle.Steps.Single(x => x.Position == 0).State);
             Assert.Equal(ApprovalStepState.Pending, cycle.Steps.Single(x => x.Position == 1).State);
+            var initialNotification = await db.UserNotifications.SingleAsync(x =>
+                x.Recipient == "workflow.one" && x.ArtifactId == fixture.ReviewId);
+            var storedReview = await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.ReviewId);
+            var notificationIdentity = string.IsNullOrWhiteSpace(storedReview.DisplayNumber)
+                ? "test change assessment"
+                : storedReview.DisplayNumber;
+            Assert.Equal("ReviewActivated", initialNotification.Type);
+            Assert.Equal($"Review {notificationIdentity}", initialNotification.Title);
+            Assert.Contains("selected you to review", initialNotification.Detail);
         }
 
         await LoginAsync(client, "workflow.one");
@@ -418,8 +427,15 @@ public sealed class TestChangeRequestReviewWorkflowTests
             Assert.Equal(ReviewCycleState.Active, cycle.State);
             Assert.Equal(ApprovalStepState.Approved, cycle.Steps.Single(x => x.Position == 0).State);
             Assert.Equal(ApprovalStepState.Active, cycle.Steps.Single(x => x.Position == 1).State);
-            Assert.True(await db.UserNotifications.AnyAsync(x =>
-                x.Recipient == "workflow.two" && x.Type == "ReviewActivated" && x.ArtifactId == fixture.ReviewId));
+            var activatedNotification = await db.UserNotifications.SingleAsync(x =>
+                x.Recipient == "workflow.two" && x.ArtifactId == fixture.ReviewId);
+            var storedReview = await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.ReviewId);
+            var notificationIdentity = string.IsNullOrWhiteSpace(storedReview.DisplayNumber)
+                ? "test change assessment"
+                : storedReview.DisplayNumber;
+            Assert.Equal("ReviewActivated", activatedNotification.Type);
+            Assert.Equal($"Review {notificationIdentity}", activatedNotification.Title);
+            Assert.Contains("authorized to review", activatedNotification.Detail);
         }
 
         await LoginAsync(client, "workflow.two");

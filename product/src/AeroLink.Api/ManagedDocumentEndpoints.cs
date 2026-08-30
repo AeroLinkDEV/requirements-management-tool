@@ -563,8 +563,8 @@ public static class ManagedDocumentEndpoints
                 db.ManagedDocumentReviewContributors.Add(new(revisionId, cycle, contribution.ContributorId, contribution.EvidenceHash, now));
             if (!contributionEvidence.Any(x => string.Equals(x.ContributorId, data.Revision.InitiatedBy, StringComparison.OrdinalIgnoreCase)))
                 db.ManagedDocumentReviewContributors.Add(new(revisionId, cycle, data.Revision.InitiatedBy, snapshotHash, now));
-            var first = reviewers[0];
-            db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentSubmitted", actor.UserName, $"Submitted {data.Document.DocumentNumber}.{data.Revision.Revision:D2} to the ordered {reviewers.Count}-step independent review route.", now)); db.UserNotifications.Add(new(data.Document.ProjectId, first.UserId, "DocumentReviewActivated", $"Review {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", $"{first.StageName} is ready.", $"managed-document:{data.Document.Id}", data.Document.Id, now));
+            var first = data.Revision.ReviewSteps.Single(x => x.Cycle == cycle && x.State == ManagedDocumentReviewStepState.Active);
+            db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentSubmitted", actor.UserName, $"Submitted {data.Document.DocumentNumber}.{data.Revision.Revision:D2} to the ordered {reviewers.Count}-step independent review route.", now)); db.UserNotifications.Add(ReviewNotificationFactory.ForManagedDocument(data.Document.ProjectId, first.ApproverId, first.Kind, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", first.StageName, $"managed-document:{data.Document.Id}", data.Document.Id, now));
             var resultJson = JsonSerializer.Serialize(new { state = data.Revision.State.ToString(), data.Revision.Version, cycle, snapshotHash });
             db.ManagedDocumentOperations.Add(new(revisionId, "Submit", request.OperationKey, payloadHash, resultJson, now));
             await db.SaveChangesAsync(ct); return Results.Content(resultJson, "application/json");
@@ -671,7 +671,7 @@ public static class ManagedDocumentEndpoints
             {
                 var older = await db.ManagedDocumentRevisions.Where(x => x.DocumentId == data.Document.Id && x.Id != data.Revision.Id && x.State == ManagedDocumentState.Released).ToListAsync(ct); foreach (var prior in older.Where(x => x.Revision < data.Revision.Revision)) prior.Supersede(now);
             }
-            else { var next = data.Revision.ReviewSteps.Single(x => x.Cycle == data.Revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active); db.UserNotifications.Add(new(data.Document.ProjectId, next.ApproverId, "DocumentReviewActivated", $"Review {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", $"{next.StageName} is ready.", $"managed-document:{data.Document.Id}", data.Document.Id, now)); }
+            else { var next = data.Revision.ReviewSteps.Single(x => x.Cycle == data.Revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active); db.UserNotifications.Add(ReviewNotificationFactory.ForManagedDocument(data.Document.ProjectId, next.ApproverId, next.Kind, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", next.StageName, $"managed-document:{data.Document.Id}", data.Document.Id, now)); }
             var resultJson = JsonSerializer.Serialize(new { final, state = data.Revision.State.ToString(), data.Revision.Version, reviewStepId = step.Id, cycle = step.Cycle, authority = step.GrantedAuthority, authoritySource = step.AuthoritySource, contentHash });
             db.ManagedDocumentOperations.Add(new(revisionId, "Approve", request.OperationKey, payloadHash, resultJson, now));
             await db.SaveChangesAsync(ct); return Results.Content(resultJson, "application/json");

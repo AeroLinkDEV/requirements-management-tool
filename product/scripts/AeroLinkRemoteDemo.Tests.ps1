@@ -33,6 +33,8 @@ function New-ValidConfigFile([string]$Path) {
     Upstream          = 'http://127.0.0.1:5080'
     LocalApiBaseUri   = 'http://127.0.0.1:5080'
     AeroLinkRoot      = '$moduleRoot'
+    LogsPath          = '$(Join-Path $tempRoot 'logs')'
+    StatePath         = '$(Join-Path $tempRoot 'state')'
 }
 "@ | Set-Content -LiteralPath $Path -Encoding UTF8
 }
@@ -44,6 +46,8 @@ $config = Get-AeroLinkRemoteDemoConfig -ConfigPath $validConfigPath
 Assert-True ($config.NgrokExecutable -eq 'C:\Tools\ngrok.exe') 'Valid config did not load NgrokExecutable.'
 Assert-True ($config.PublicUrl -eq 'https://example.ngrok-free.dev') 'Valid config did not load PublicUrl.'
 Assert-True ($config.Upstream -eq 'http://127.0.0.1:5080') 'Valid config did not apply the default Upstream.'
+$moduleText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1'))
+Assert-True ($moduleText -match '-NotificationBaseUrl `"\$\(\$Config\.PublicUrl\)`"') 'Remote-demo production helper must pass the protected PublicUrl as the notification-link origin.'
 
 $missingConfig = Join-Path $tempRoot 'missing.psd1'
 $threw = $false
@@ -67,6 +71,18 @@ Set-Content -LiteralPath $missingKeyPath -Value "@{ NgrokExecutable='C:\Tools\ng
 $threw = $false
 try { Get-AeroLinkRemoteDemoConfig -ConfigPath $missingKeyPath } catch { $threw = $true }
 Assert-True $threw 'Config missing a required key should fail closed.'
+
+$unsafePublicUrlPath = Join-Path $tempRoot 'unsafe-public-url.psd1'
+Set-Content -LiteralPath $unsafePublicUrlPath -Value "@{ NgrokExecutable='C:\Tools\ngrok.exe'; PublicUrl='https://operator:password@example.ngrok-free.dev/path?query=1'; TrafficPolicyPath='C:\Tools\policy.yml' }" -Encoding UTF8
+$threw = $false
+try { Get-AeroLinkRemoteDemoConfig -ConfigPath $unsafePublicUrlPath } catch { $threw = $true }
+Assert-True $threw 'Remote-demo PublicUrl with credentials, path, or query must fail closed.'
+
+$pathPublicUrlPath = Join-Path $tempRoot 'path-public-url.psd1'
+Set-Content -LiteralPath $pathPublicUrlPath -Value "@{ NgrokExecutable='C:\Tools\ngrok.exe'; PublicUrl='https://example.ngrok-free.dev/aerolink'; TrafficPolicyPath='C:\Tools\policy.yml' }" -Encoding UTF8
+$threw = $false
+try { Get-AeroLinkRemoteDemoConfig -ConfigPath $pathPublicUrlPath } catch { $threw = $true }
+Assert-True $threw 'Remote-demo PublicUrl must be an origin, not a path that would silently change mail routing.'
 
 # --- 2. ngrok launch arguments contain the contract and no secrets ---
 $arguments = Get-AeroLinkRemoteDemoNgrokArguments -Config $config
@@ -101,7 +117,47 @@ Assert-True ($decision.Decision -eq 'BlockedForeignResponder') 'Foreign 2xx resp
 $decision = Get-AeroLinkRemoteDemoStartDecision -LocalReady $true -OwnedProcessPresent $false -Protected $false -ProbeStatusCode $null
 Assert-True ($decision.Decision -eq 'CanStart') 'Unreachable probe must still allow start; post-start probe enforces 401.'
 
-# --- 5. Public protection classification (401 required) ---
+# --- 5. Notification-link origin must be attributable to the current API process ---
+New-Item -ItemType Directory -Path $config.StatePath -Force | Out-Null
+$runtimeIdentity = { param($C) [pscustomobject]@{ Found = $true; ProcessId = 4242; StartedAt = '2026-08-30T12:34:56.0000000Z'; Detail = 'test runtime' } }
+$originState = [pscustomobject]@{
+    PublicUrl = $config.PublicUrl
+    NotificationBaseUrl = $config.PublicUrl
+    LocalApiPid = 4242
+    LocalApiStartedAt = '2026-08-30T12:34:56.0000000Z'
+}
+$originState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $config.StatePath 'remote-demo-state.json') -Encoding UTF8
+$originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $runtimeIdentity
+Assert-True $originProof.Valid 'Matching public origin plus exact live process identity must be accepted.'
+
+$originState.LocalApiStartedAt = '2026-08-30T08:34:56.0000000-04:00'
+$originState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $config.StatePath 'remote-demo-state.json') -Encoding UTF8
+$originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $runtimeIdentity
+Assert-True $originProof.Valid 'Equivalent process-start instants must match across JSON date materialization and timezone offsets.'
+
+$originState.LocalApiStartedAt = 'not-a-timestamp'
+$originState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $config.StatePath 'remote-demo-state.json') -Encoding UTF8
+$originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $runtimeIdentity
+Assert-True (-not $originProof.Valid) 'An invalid process-start timestamp must fail notification-origin attribution closed.'
+
+$originState.LocalApiStartedAt = '2026-08-30T12:34:56.0000000Z'
+$originState.NotificationBaseUrl = 'http://127.0.0.1:5080'
+$originState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $config.StatePath 'remote-demo-state.json') -Encoding UTF8
+$originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $runtimeIdentity
+Assert-True (-not $originProof.Valid) 'A loopback notification origin must not satisfy protected remote-demo readiness.'
+
+$originState.NotificationBaseUrl = $config.PublicUrl
+$originState.LocalApiPid = 9999
+$originState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $config.StatePath 'remote-demo-state.json') -Encoding UTF8
+$originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $runtimeIdentity
+Assert-True (-not $originProof.Valid) 'A proof recorded for an old API process must be rejected.'
+
+Remove-Item -LiteralPath (Join-Path $config.StatePath 'remote-demo-state.json') -Force
+$originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $runtimeIdentity
+Assert-True (-not $originProof.Valid) 'AlreadyReady must fail closed when notification-origin proof is missing.'
+Assert-True ($moduleText -match "AlreadyReady'[\s\S]+Test-AeroLinkRemoteDemoNotificationOriginProof") 'AlreadyReady must validate durable notification-origin proof before reporting ready.'
+
+# --- 6. Public protection classification (401 required) ---
 $stub401 = {
     param($PublicUrl)
     $response = [pscustomobject]@{ StatusCode = 401 }
@@ -130,7 +186,7 @@ $stubUnreachable = { param($PublicUrl) throw 'network down' }
 $probe = Test-AeroLinkRemoteDemoPublicProtection -Config $config -ProbeScriptBlock $stubUnreachable
 Assert-True ($probe.Protected -eq $false -and $null -eq $probe.StatusCode) 'Unreachable endpoint must not be classified as protected.'
 
-# --- 6. Scheduled-task XML contains no secrets ---
+# --- 7. Scheduled-task XML contains no secrets ---
 $taskConfig = [pscustomobject]@{
     AeroLinkRoot = $moduleRoot
     StatePath = Join-Path $tempRoot 'state'

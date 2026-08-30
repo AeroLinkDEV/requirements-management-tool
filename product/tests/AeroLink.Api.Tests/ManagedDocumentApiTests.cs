@@ -566,6 +566,15 @@ public sealed class ManagedDocumentApiTests
 
         using var technical = factory.CreateClient(); using (var login = await technical.PostAsJsonAsync("/api/auth/login", new { userName = "software.lead", password = AeroLinkApiFactory.MemberPassword })) Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(technical);
         using var technicalApproval = await DecideAsync(technical, documentId, revisionId, "approve", "I confirm the technical review is complete.", "Formal scope and exact working snapshot are technically complete."); Assert.Equal(HttpStatusCode.OK, technicalApproval.StatusCode);
+        using (var notificationScope = factory.Services.CreateScope())
+        {
+            var notificationDb = notificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var approvalNotification = await notificationDb.UserNotifications.SingleAsync(x =>
+                x.ArtifactId == documentId && x.Recipient == "quality.analyst");
+            Assert.Equal("DocumentApprovalActivated", approvalNotification.Type);
+            Assert.Equal("Approve SDP-000001.00", approvalNotification.Title);
+            Assert.Contains("ready for your approval", approvalNotification.Detail);
+        }
         var afterTechnical = await owner.GetFromJsonAsync<JsonElement>($"/api/managed-documents/{documentId}"); var technicalVersion = afterTechnical.GetProperty("revisions")[0].GetProperty("version").GetInt64();
         using var technicalEdit = await owner.PatchAsJsonAsync($"/api/managed-documents/revisions/{revisionId}/formal-summary", new { formalChangeSummary = "Forbidden after approval.", reason = "Must fail.", expectedVersion = technicalVersion }); Assert.Equal(HttpStatusCode.Conflict, technicalEdit.StatusCode);
 

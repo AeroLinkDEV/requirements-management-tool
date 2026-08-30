@@ -22,11 +22,45 @@ Use `STOP_AEROLINK.bat` for a controlled stop. The script only stops listeners w
 
 Logs are under `product/.local/logs`. The authoritative database is `aerolink`; controlled evidence is under `%LOCALAPPDATA%\AeroLink\evidence`.
 
+### Email delivery operability
+
+Email remains an outbox delivery channel over the attributable in-product notification. It never authorizes,
+approves, or signs a controlled record: a mail link opens AeroLink, where authentication and electronic-signature
+confirmation still apply. Configure SMTP only through protected service environment/configuration, never source
+control:
+
+- `Notifications__Smtp__Host`, with optional `Port`, `From`, `UseStartTls`, `UserName`, and `Password`;
+- `Notifications__BaseUrl` as an absolute HTTP(S) origin with no credentials, query, or fragment;
+- `Notifications__UnsubscribeSecret` as a protected value of at least 32 characters.
+
+Use `START_AEROLINK_EMAIL_DEMO.bat` for the local, non-production proof path. It starts pinned
+`smtp4dev` 3.15.0 under `%LOCALAPPDATA%\AeroLink\smtp4dev\3.15.0`, configures only loopback SMTP on
+port 2525, and starts AeroLink with the loopback link origin. Open `http://127.0.0.1:5000` to inspect the
+captured message. `START_AEROLINK_SMTP4DEV.bat`, `AEROLINK_SMTP4DEV_STATUS.bat`, and
+`STOP_AEROLINK_SMTP4DEV.bat` control only that owned catcher; they do not touch `product/.local`, PostgreSQL,
+or controlled records. The first start installs the pinned free tool into the current user's LocalAppData and
+requires ordinary NuGet/network access; no Docker, tunnel, or secret is required.
+
+Global administrators inspect non-secret SMTP/link posture and the newest bounded delivery states in
+**System Operations → Notifications**. It intentionally shows no credentials, message body, or unredacted
+recipient address. The **Send my transport test** operation can deliver only to the signed-in administrator's
+account through the already configured relay; it accepts no SMTP host, recipient, or message from the browser.
+`Pending`, `Sent`, `Failed`, and `Suppressed` remain durable outbox evidence. A missing address, opt-out, or
+superseded queued review obligation is `Suppressed` with a deliberate reason, not a fabricated send.
+
+`START_AEROLINK_SHARED.bat` now derives its LAN origin before API startup so its mail links use that exact
+`http://LAN:5080` address; it still never opens the Windows firewall and remains plaintext demo-only. Protected
+remote demo passes its configured HTTPS `PublicUrl` into the production launcher. If a pre-existing local API
+has an unknown mail-link origin, remote start refuses rather than sending loopback links to remote recipients.
+Successful startup records the exact local API listener process and public origin outside the repository; status
+and repeated recovery accept that proof only while the same process still owns the listener. Restarting the API
+therefore invalidates the proof instead of letting an old tunnel state claim that new mail links are reachable.
+
 ### Root Windows launcher inventory
 
-The root launchers are deliberate operator compatibility surfaces. There are **15 root `.bat` launchers and
-zero root `.cmd` launchers**; the only `.cmd` implementation is `product/scripts/launch.cmd`. Their contents and
-paths are intentionally unchanged. A launcher may be a very small wrapper, but its exact path can be held by a
+The root launchers are deliberate operator compatibility surfaces. There are **19 root `.bat` launchers and
+zero root `.cmd` launchers**; the only `.cmd` implementation is `product/scripts/launch.cmd`. A launcher may be a
+very small wrapper, but its exact path can be held by a
 Task Scheduler task, desktop shortcut, remote-demo recovery configuration, or another Windows machine that Git
 cannot discover. Moving one for cosmetic root cleanup has no meaningful benefit and is not safe without a
 separately proven transition plan.
@@ -34,6 +68,7 @@ separately proven transition plan.
 | Root entry point | Purpose / classification | Implementation and delegation | Repository callers and documentation | External-path risk and final disposition |
 | --- | --- | --- | --- | --- |
 | `AEROLINK_DIAGNOSTICS.bat` | Diagnostics | `product/scripts/Get-AeroLinkDiagnostics.ps1` | `README.md`; this document; historical delivery report | Operator shortcut/task risk is not enumerable from Git; keep stable root entry point. |
+| `AEROLINK_SMTP4DEV_STATUS.bat` | Local email-catcher status | `product/scripts/AeroLinkSmtp4dev.ps1 -Action Status` | This document | Local operator shortcut risk; status never exposes mail contents. |
 | `AEROLINK_REMOTE_DEMO_STATUS.bat` | Protected remote-demo status | `product/scripts/AeroLinkRemoteDemo.ps1 -Action Status` | `docs/REMOTE_DEMO_OPERATOR.md` | Remote operator shortcut/recovery risk; keep stable root entry point. |
 | `BACKUP_AEROLINK.bat` | Backup/recovery | `product/scripts/Backup-AeroLink.ps1` | `README.md`, this document, Managed Documentation; scheduled runner calls the PowerShell script directly | Backup automation and operator shortcuts may retain the path; keep stable root entry point. |
 | `CONFIGURE_AEROLINK_REMOTE_DEMO.bat` | Protected remote-demo scheduled recovery setup | `product/scripts/AeroLinkRemoteDemo.ps1 -Action Configure` with forwarded action/arguments | `docs/REMOTE_DEMO_OPERATOR.md`; remote-demo module error guidance | Recovery setup instructions may be copied to another host; keep stable root entry point. |
@@ -41,16 +76,19 @@ separately proven transition plan.
 | `RESTORE_AEROLINK.bat` | Backup/recovery and isolated restore validation | `product/scripts/Restore-AeroLink.ps1 -BackupArchive ... -TargetDatabase ...` | This document; usage text; historical delivery report | Recovery runbooks and desktop shortcuts may retain the path; keep stable root entry point. |
 | `SCHEDULE_AEROLINK_BACKUP.bat` | Backup scheduler configuration | `product/scripts/Configure-AeroLinkBackupSchedule.ps1` | This document; historical handoffs | The installed task invokes `Invoke-AeroLinkScheduledBackup.ps1` directly, but operator setup paths remain externally visible; keep stable root entry point. |
 | `START_AEROLINK_PRODUCTION.bat` | Production-style local/demo run | Sets `AEROLINK_SCRIPT=Start-AeroLinkProduction.ps1` and calls `product/scripts/launch.cmd` | `README.md`, this document, product/client README, showcase brief, DEC-052 | Desktop shortcuts and demonstration machines can target the exact path; keep stable root entry point. |
+| `START_AEROLINK_EMAIL_DEMO.bat` | Local smtp4dev email proof | Starts the owned local catcher then calls `Start-AeroLinkProduction.ps1` with loopback mail settings | This document | Demonstration shortcut risk; no production credentials or external exposure. |
+| `START_AEROLINK_SMTP4DEV.bat` | Start local email catcher | `product/scripts/AeroLinkSmtp4dev.ps1 -Action Start` | This document | Local operator shortcut risk; catcher state remains outside the repository. |
 | `START_AEROLINK_REMOTE_DEMO.bat` | Protected remote demo start | `product/scripts/AeroLinkRemoteDemo.ps1 -Action Start` | `README.md`; `docs/REMOTE_DEMO_OPERATOR.md` | Remote-demo operator shortcuts can target the exact path; recovery task calls the PowerShell implementation directly; keep stable root entry point. |
 | `START_AEROLINK_SHARED.bat` | Opt-in trusted-LAN demo | Sets `AEROLINK_SCRIPT=Start-AeroLinkProduction.ps1`, adds `-Shared`, and calls `product/scripts/launch.cmd` | `README.md`, product README, DEC-053, production launcher guidance | Shared-demo hosts and shortcuts may retain the path; keep stable root entry point. |
 | `START_AEROLINK.bat` | Day-to-day development | Sets `AEROLINK_SCRIPT=Start-AeroLink.ps1` and calls `product/scripts/launch.cmd` | `README.md`, this document, product/client README, smoke test and API guidance | The dated #783 host audit observed a desktop shortcut targeting this exact path; keep stable root entry point. |
 | `STOP_AEROLINK_REMOTE_DEMO.bat` | Protected remote-demo stop | `product/scripts/AeroLinkRemoteDemo.ps1 -Action Stop -IncludeLocalStack` | `docs/REMOTE_DEMO_OPERATOR.md` | Recovery runbooks and operator shortcuts may retain the path; keep stable root entry point. |
 | `STOP_AEROLINK.bat` | Controlled local stop | `product/scripts/Stop-AeroLink.ps1` | `README.md`, this document, product README | Desktop/operator shutdown shortcuts may retain the path; keep stable root entry point. |
+| `STOP_AEROLINK_SMTP4DEV.bat` | Stop owned local email catcher | `product/scripts/AeroLinkSmtp4dev.ps1 -Action Stop` | This document | Stops only the pinned LocalAppData process and retains captured messages. |
 | `TEST_AEROLINK_CHANGED.bat` | Developer/testing changed-area planner | `product/scripts/Get-AeroLinkTestPlan.ps1` | `product/test-planner/README.md`; planner contract | Developer shortcuts and team runbooks may retain the path; keep stable root entry point. |
 | `VERIFY_AEROLINK_BACKUP.bat` | Backup verification | `product/scripts/Verify-AeroLinkBackup.ps1` | This document; historical delivery report | Scheduled runner calls the PowerShell implementation directly, but recovery runbooks may retain this wrapper; keep stable root entry point. |
 
-There are no launcher-to-launcher calls among the root files. The three start wrappers delegate to
-`product/scripts/launch.cmd`; the backup scheduler and remote-demo recovery tasks call their PowerShell runners
+The email-demo launcher first invokes the pinned local catcher; otherwise the start wrappers delegate to
+`product/scripts/launch.cmd` or their named PowerShell runner. The backup scheduler and remote-demo recovery tasks call their PowerShell runners
 directly. In the dated 2026-08-26 #783 read-only host audit, a desktop shortcut was observed targeting
 `START_AEROLINK.bat`; the scheduled tasks pointed directly to their deeper PowerShell runners. These observations
 confirm compatibility risk but do not expose credentials or claim to cover other machines.

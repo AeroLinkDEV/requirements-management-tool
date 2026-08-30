@@ -187,7 +187,8 @@ $requiredLaunchers = @(
     'CONFIGURE_AEROLINK_REMOTE_DEMO.bat', 'INSTALL_AEROLINK_DOCUMENT_CONNECTOR.bat', 'RESTORE_AEROLINK.bat',
     'SCHEDULE_AEROLINK_BACKUP.bat', 'START_AEROLINK_PRODUCTION.bat', 'START_AEROLINK_REMOTE_DEMO.bat',
     'START_AEROLINK_SHARED.bat', 'START_AEROLINK.bat', 'STOP_AEROLINK_REMOTE_DEMO.bat', 'STOP_AEROLINK.bat',
-    'TEST_AEROLINK_CHANGED.bat', 'VERIFY_AEROLINK_BACKUP.bat'
+    'START_AEROLINK_EMAIL_DEMO.bat', 'START_AEROLINK_SMTP4DEV.bat', 'AEROLINK_SMTP4DEV_STATUS.bat',
+    'STOP_AEROLINK_SMTP4DEV.bat', 'TEST_AEROLINK_CHANGED.bat', 'VERIFY_AEROLINK_BACKUP.bat'
 )
 $actualBatCmd = @(Get-ChildItem -LiteralPath $RepositoryRoot -File | Where-Object { $_.Extension -in '.bat', '.cmd' } | ForEach-Object Name)
 foreach ($name in $requiredLaunchers) { if ($name -notin $actualBatCmd) { Fail "Required root launcher is missing: $name" } }

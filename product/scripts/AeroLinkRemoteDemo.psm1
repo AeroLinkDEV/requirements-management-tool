@@ -77,6 +77,10 @@ function Get-AeroLinkRemoteDemoConfig {
             throw "Remote-demo configuration is missing the required non-secret value '$key'."
         }
     }
+    $publicUri = $null
+    if (-not [uri]::TryCreate(([string]$values['PublicUrl']).Trim(), [System.UriKind]::Absolute, [ref]$publicUri) -or $publicUri.Scheme -ne 'https' -or [string]::IsNullOrWhiteSpace($publicUri.Host) -or $publicUri.AbsolutePath -ne '/' -or -not [string]::IsNullOrEmpty($publicUri.UserInfo) -or -not [string]::IsNullOrEmpty($publicUri.Query) -or -not [string]::IsNullOrEmpty($publicUri.Fragment)) {
+        throw 'Remote-demo PublicUrl must be an absolute HTTPS origin with no credentials, query, or fragment.'
+    }
     if ($values.ContainsKey('AeroLinkRoot') -and -not (Test-Path -LiteralPath ([string]$values['AeroLinkRoot']))) {
         throw "Remote-demo configuration AeroLinkRoot does not exist: $($values['AeroLinkRoot'])"
     }
@@ -87,7 +91,7 @@ function Get-AeroLinkRemoteDemoConfig {
 
     return [pscustomobject]@{
         NgrokExecutable = [string]$values['NgrokExecutable']
-        PublicUrl = [string]$values['PublicUrl']
+        PublicUrl = $publicUri.GetLeftPart([System.UriPartial]::Authority).TrimEnd('/')
         TrafficPolicyPath = [string]$values['TrafficPolicyPath']
         Upstream = if ($values.ContainsKey('Upstream')) { [string]$values['Upstream'] } else { 'http://127.0.0.1:5080' }
         LocalApiBaseUri = if ($values.ContainsKey('LocalApiBaseUri')) { [string]$values['LocalApiBaseUri'] } else { 'http://127.0.0.1:5080' }
@@ -238,6 +242,83 @@ function Test-AeroLinkRemoteDemoLocalReady {
     }
     catch {
         return [pscustomobject]@{ Ready = $false; Detail = "AeroLink local check failed: $($_.Exception.GetType().Name)" }
+    }
+}
+
+function Get-AeroLinkRemoteDemoLocalRuntimeIdentity {
+    <#
+      .SYNOPSIS Identifies the single process that owns the configured local API listener.
+      .DESCRIPTION
+        This is runtime attribution, not a general process search. A missing or
+        ambiguous listener fails closed because it cannot prove which process is
+        producing notification links.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [scriptblock]$RuntimeProbe
+    )
+    if ($null -ne $RuntimeProbe) { return & $RuntimeProbe $Config }
+
+    try {
+        $localUri = [uri]$Config.LocalApiBaseUri
+        $ownerIds = @(Get-NetTCPConnection -State Listen -LocalPort $localUri.Port -ErrorAction Stop |
+            Select-Object -ExpandProperty OwningProcess -Unique)
+        if ($ownerIds.Count -ne 1) {
+            return [pscustomobject]@{ Found = $false; Detail = "Expected one owner for local API port $($localUri.Port), found $($ownerIds.Count)." }
+        }
+        $process = Get-Process -Id $ownerIds[0] -ErrorAction Stop
+        return [pscustomobject]@{
+            Found = $true
+            ProcessId = [int]$process.Id
+            StartedAt = $process.StartTime.ToUniversalTime().ToString('o')
+            Detail = "Local API port $($localUri.Port) is owned by PID $($process.Id)."
+        }
+    }
+    catch {
+        return [pscustomobject]@{ Found = $false; Detail = "Local API runtime identity could not be established: $($_.Exception.GetType().Name)." }
+    }
+}
+
+function Test-AeroLinkRemoteDemoNotificationOriginProof {
+    <#
+      .SYNOPSIS Proves that the current local API was started with the protected public notification origin.
+      .DESCRIPTION
+        A successful remote-demo start records the public origin together with
+        the exact local listener PID and process start time. Repeated starts and
+        status checks accept that evidence only while the same process still owns
+        the listener. Restarting AeroLink therefore invalidates the proof.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [scriptblock]$RuntimeProbe
+    )
+    $stateFile = Join-Path $Config.StatePath 'remote-demo-state.json'
+    if (-not (Test-Path -LiteralPath $stateFile -PathType Leaf)) {
+        return [pscustomobject]@{ Valid = $false; Detail = 'No attributable notification-origin proof is recorded for the current local API.' }
+    }
+    try {
+        $state = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
+        $runtime = Get-AeroLinkRemoteDemoLocalRuntimeIdentity -Config $Config -RuntimeProbe $RuntimeProbe
+        if (-not $runtime.Found) {
+            return [pscustomobject]@{ Valid = $false; Detail = $runtime.Detail }
+        }
+        $originMatches = [string]::Equals([string]$state.NotificationBaseUrl, [string]$Config.PublicUrl, [StringComparison]::OrdinalIgnoreCase)
+        # PowerShell 7 deserializes an ISO JSON timestamp as DateTime while Windows PowerShell can leave it as
+        # text. Compare the exact UTC instant, not those host-specific string representations. Invalid or missing
+        # values still fall into the fail-closed catch below.
+        $stateStartedAt = [DateTimeOffset]$state.LocalApiStartedAt
+        $runtimeStartedAt = [DateTimeOffset]$runtime.StartedAt
+        $processMatches = [int]$state.LocalApiPid -eq [int]$runtime.ProcessId `
+            -and $stateStartedAt.UtcDateTime.Ticks -eq $runtimeStartedAt.UtcDateTime.Ticks
+        if (-not $originMatches -or -not $processMatches) {
+            return [pscustomobject]@{ Valid = $false; Detail = 'Recorded notification origin does not belong to the current local API process.' }
+        }
+        return [pscustomobject]@{ Valid = $true; Detail = "Current local API PID $($runtime.ProcessId) is attributed to notification origin $($Config.PublicUrl)." }
+    }
+    catch {
+        return [pscustomobject]@{ Valid = $false; Detail = "Notification-origin proof is invalid: $($_.Exception.GetType().Name)." }
     }
 }
 
@@ -497,7 +578,10 @@ function Start-AeroLinkRemoteDemoProductionHelper {
     $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $stdout = Join-Path $logDirectory 'production-helper.stdout.log'
     $stderr = Join-Path $logDirectory 'production-helper.stderr.log'
-    $argumentLine = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -DoNotOpenBrowser"
+    # The tunnel's protected public origin is the only honest mail-link origin for a remote recipient.
+    # Pass it before the API starts; an already-running local process is handled below rather than silently
+    # claiming a loopback-configured process can produce reachable remote links.
+    $argumentLine = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -DoNotOpenBrowser -NotificationBaseUrl `"$($Config.PublicUrl)`""
     $process = Start-Process -FilePath $powershell -ArgumentList $argumentLine -WindowStyle Hidden `
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
     $helper = [pscustomobject]@{
@@ -626,6 +710,7 @@ function Start-AeroLinkRemoteDemo {
         [scriptblock]$ProductionHelperStopper,
         [scriptblock]$NgrokLauncher,
         [scriptblock]$PublicProbe,
+        [scriptblock]$LocalRuntimeProbe,
         [int]$PostgresRecoveryTimeoutSeconds = 300,
         [int]$ProductionTimeoutSeconds = 900,
         [int]$NgrokProtectionWaitSeconds = 120
@@ -635,6 +720,7 @@ function Start-AeroLinkRemoteDemo {
     Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'Remote demo start requested.'
     if ($null -eq $LocalReadyTest) { $LocalReadyTest = { param($C) Test-AeroLinkRemoteDemoLocalReady -Config $C } }
 
+    $startedLocalForThisRun = $false
     $local = & $LocalReadyTest $Config
     if (-not $local.Ready) {
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'Local AeroLink not ready; starting/confirming PostgreSQL with a bounded recovery window.'
@@ -654,6 +740,7 @@ function Start-AeroLinkRemoteDemo {
             throw "AEROLINK REMOTE DEMO NOT READY: $($launcher.Detail)"
         }
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production AeroLink ready: $($launcher.Detail)"
+        $startedLocalForThisRun = [bool]$launcher.HelperUsed
         $local = & $LocalReadyTest $Config
         if (-not $local.Ready) {
             Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'AEROLINK REMOTE DEMO NOT READY: local AeroLink readiness lost after launcher.'
@@ -687,8 +774,20 @@ function Start-AeroLinkRemoteDemo {
         -ProbeStatusCode $probe.StatusCode
 
     if ($decision.Decision -eq 'AlreadyReady') {
+        $originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $Config -RuntimeProbe $LocalRuntimeProbe
+        if (-not $originProof.Valid) {
+            Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: $($originProof.Detail)"
+            throw "The tunnel is protected, but reachable notification links are not attributable to the current AeroLink process. $($originProof.Detail) Stop the owned local stack, then start the remote demo again."
+        }
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'Remote demo already ready; no new processes started.'
-        return [pscustomobject]@{ Ready = $true; PublicUrl = $Config.PublicUrl; Detail = $decision.Message }
+        return [pscustomobject]@{ Ready = $true; PublicUrl = $Config.PublicUrl; Detail = "$($decision.Message) $($originProof.Detail)" }
+    }
+    if ($local.Ready -and $decision.Decision -eq 'CanStart' -and -not $startedLocalForThisRun) {
+        $originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $Config -RuntimeProbe $LocalRuntimeProbe
+        if (-not $originProof.Valid) {
+            throw 'AeroLink is already running locally with an unknown notification-link origin. Stop the owned local stack, then start the remote demo so the protected PublicUrl is applied before mail is dispatched.'
+        }
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Existing local AeroLink has attributable notification origin; replacing its missing tunnel. $($originProof.Detail)"
     }
     if ($decision.Decision -ne 'CanStart') {
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: $($decision.Message)"
@@ -719,22 +818,33 @@ function Start-AeroLinkRemoteDemo {
         throw "The just-started tunnel was not protected (expected 401, got $($probeResult.StatusCode)). It was torn down; nothing was left exposed."
     }
 
+    $localAfter = & $LocalReadyTest $Config
+    if (-not $localAfter.Ready) {
+        Stop-Process -Id $launched.Id -Force -ErrorAction SilentlyContinue
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: local AeroLink readiness lost after tunnel start."
+        throw "The tunnel became protected but local AeroLink readiness was lost, so the just-started tunnel was stopped. $($localAfter.Detail)"
+    }
+
+    $runtime = Get-AeroLinkRemoteDemoLocalRuntimeIdentity -Config $Config -RuntimeProbe $LocalRuntimeProbe
+    if (-not $runtime.Found) {
+        Stop-Process -Id $launched.Id -Force -ErrorAction SilentlyContinue
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: $($runtime.Detail)"
+        throw "The tunnel became protected but the notification-link origin could not be attributed to the local AeroLink process, so the just-started tunnel was stopped. $($runtime.Detail)"
+    }
+
     $state = [pscustomobject]@{
         Pid = $launched.Id
         NgrokExecutable = $Config.NgrokExecutable
         PublicUrl = $Config.PublicUrl
+        NotificationBaseUrl = $Config.PublicUrl
+        LocalApiPid = $runtime.ProcessId
+        LocalApiStartedAt = $runtime.StartedAt
         Upstream = $Config.Upstream
         TrafficPolicyPath = $Config.TrafficPolicyPath
         StartedAt = (Get-Date).ToUniversalTime().ToString('o')
     }
     if (-not (Test-Path -LiteralPath $Config.StatePath)) { New-Item -ItemType Directory -Path $Config.StatePath -Force | Out-Null }
     $state | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $Config.StatePath 'remote-demo-state.json') -Encoding UTF8
-
-    $localAfter = & $LocalReadyTest $Config
-    if (-not $localAfter.Ready) {
-        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: local AeroLink readiness lost after tunnel start."
-        throw "The tunnel is protected but local AeroLink readiness was lost. $($localAfter.Detail)"
-    }
 
     Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO READY; protected tunnel PID $($launched.Id); $($probeResult.Detail)"
     return [pscustomobject]@{ Ready = $true; PublicUrl = $Config.PublicUrl; Detail = $probeResult.Detail }
@@ -893,7 +1003,8 @@ function Get-AeroLinkRemoteDemoStatus {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]$Config
+        [Parameter(Mandatory)]$Config,
+        [scriptblock]$LocalRuntimeProbe
     )
 
     $checks = [System.Collections.Generic.List[object]]::new()
@@ -929,6 +1040,9 @@ function Get-AeroLinkRemoteDemoStatus {
     $probe = Test-AeroLinkRemoteDemoPublicProtection -Config $Config
     $checks.Add([pscustomobject]@{ Name = 'Public endpoint 401 protection'; Healthy = $probe.Protected; Detail = $probe.Detail })
 
+    $originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $Config -RuntimeProbe $LocalRuntimeProbe
+    $checks.Add([pscustomobject]@{ Name = 'Reachable notification-link origin'; Healthy = $originProof.Valid; Detail = $originProof.Detail })
+
     $task = Get-AeroLinkRemoteDemoTaskStatus
     $checks.Add([pscustomobject]@{ Name = 'Automatic recovery task'; Healthy = $task.Installed; Detail = $task.Detail })
 
@@ -948,6 +1062,8 @@ Export-ModuleMember -Function `
     Get-AeroLinkRemoteDemoNgrokProcess, `
     Test-AeroLinkRemoteDemoPublicProtection, `
     Test-AeroLinkRemoteDemoLocalReady, `
+    Get-AeroLinkRemoteDemoLocalRuntimeIdentity, `
+    Test-AeroLinkRemoteDemoNotificationOriginProof, `
     New-AeroLinkRemoteDemoRun, `
     Test-AeroLinkRemoteDemoPostgresReady, `
     Start-AeroLinkRemoteDemoPostgres, `

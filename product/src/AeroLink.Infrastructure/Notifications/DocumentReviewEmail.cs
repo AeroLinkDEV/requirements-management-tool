@@ -1,4 +1,5 @@
 using System.Text;
+using AeroLink.Domain.ChangeControl;
 
 namespace AeroLink.Infrastructure.Notifications;
 
@@ -12,6 +13,7 @@ public sealed record DocumentReviewEmailFacts(
     string DisplayNumber,
     string Title,
     string StageName,
+    ReviewStageKind StageKind,
     string Authority,
     string CheckedInBy,
     string Steward,
@@ -28,12 +30,12 @@ public sealed record DocumentReviewEmailFacts(
 internal static class DocumentReviewEmailTemplate
 {
     internal static string Subject(DocumentReviewEmailFacts facts) =>
-        $"{facts.DisplayNumber} is ready for your review — AeroLink";
+        $"{facts.DisplayNumber} is ready for your {Action(facts)} — AeroLink";
 
     internal static string PlainText(DocumentReviewEmailFacts facts, string? link, string? unsubscribe)
     {
         var body = new StringBuilder();
-        body.AppendLine($"{facts.DisplayNumber} is ready for your review.");
+        body.AppendLine($"{facts.DisplayNumber} is ready for your {Action(facts)}.");
         body.AppendLine(facts.Title);
         body.AppendLine();
         body.AppendLine($"Your stage:            {facts.StageName}");
@@ -44,7 +46,7 @@ internal static class DocumentReviewEmailTemplate
         body.AppendLine();
         if (link is not null)
         {
-            body.AppendLine("Open the document review:");
+            body.AppendLine($"Open the document {Action(facts)}:");
             body.AppendLine(link);
         }
         else
@@ -81,12 +83,12 @@ internal static class DocumentReviewEmailTemplate
             subject: Subject(facts),
             // Green rather than the change request's purple: a reader with both in one inbox can tell which
             // kind of decision is waiting before reading a word.
-            eyebrow: "CONTROLLED DOCUMENT · REVIEW REQUESTED",
+            eyebrow: $"CONTROLLED DOCUMENT · {Action(facts).ToUpperInvariant()} REQUESTED",
             eyebrowColour: "#24735d",
-            headline: $"{facts.DisplayNumber} is ready for your review",
+            headline: $"{facts.DisplayNumber} is ready for your {Action(facts)}",
             standfirst: facts.Title,
             rows: rows,
-            buttonLabel: "Open the document review",
+            buttonLabel: $"Open the document {Action(facts)}",
             link: link,
             calloutTitle: "The file stays in AeroLink",
             calloutBody: "No attachment is sent. Open the record to read the exact checked-in document under review and record your signature over its hash.",
@@ -94,9 +96,16 @@ internal static class DocumentReviewEmailTemplate
             calloutRule: "#3b9d8e",
             calloutInk: "#315f5b",
             calloutBodyInk: "#68798b",
-            receivingBecause: $"You are receiving this because you are a named reviewer on {facts.DisplayNumber}.",
+            receivingBecause: $"You are receiving this because you have an active {Action(facts)} obligation on {facts.DisplayNumber}.",
             unsubscribe: unsubscribe);
     }
+
+    private static string Action(DocumentReviewEmailFacts facts) => facts.StageKind switch
+    {
+        ReviewStageKind.Review => "review",
+        ReviewStageKind.Approval => "approval",
+        _ => throw new InvalidOperationException($"Unsupported frozen document review stage kind '{facts.StageKind}'.")
+    };
 
     private static string Date(DateTimeOffset when) => when.ToString("d MMM yyyy");
 }
