@@ -13,6 +13,7 @@ type PaletteEntry={key:string;category:'page'|'artifact';label:string;detail:str
 const commandDefinitions:{label:string;view:View;discipline:Discipline;detail:string;icon:string;artifactKind?:string}[]=[
   {label:'Command Center',view:'dashboard',discipline:'system',detail:'Program health and next actions',icon:'⌂'},
   {label:'My Work',view:'mywork',discipline:'system',detail:'Reviews, signatures, and owned drafts',icon:'◎'},
+  {label:'Team Work',view:'teamwork',discipline:'system',detail:'Project-wide lifecycle board across every build',icon:'◍'},
   {label:'System Requirements Explorer',view:'requirements',discipline:'system',detail:'Read, trace, and compare controlled system requirements',icon:'≡'},
   {label:'Software Requirements Explorer',view:'requirements',discipline:'software',detail:'Read, trace, and compare controlled HLRs and LLRs',icon:'≡'},
   {label:'System Verification',view:'verification',discipline:'systemTest',detail:'The two halves of system test work',icon:'✓'},

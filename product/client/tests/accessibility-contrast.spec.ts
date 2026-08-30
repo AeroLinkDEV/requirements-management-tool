@@ -14,6 +14,7 @@ import { apiLogin, login, selectProgram, surfacePainted, layoutSettled } from '.
 const surfaces = [
   ['Command Center', '/command-center'],
   ['My Work', '/my-work'],
+  ['Team Work', '/team-work'],
   ['Requirements Explorer', '/systems/requirements'],
   ['Change Requests', '/systems/change-requests'],
   ['Verification', '/system-verification'],
