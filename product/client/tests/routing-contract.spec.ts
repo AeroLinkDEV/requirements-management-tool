@@ -30,6 +30,18 @@ test('change-request route generation and parsing preserve both engineering disc
   expect(parseRoute(interfaceChange)).toMatchObject({ view: 'scr', discipline: 'system', artifactKind: 'Interface', artifactId: 'icd-a' })
 })
 
+test('Team Work route generation and parsing preserve project and shell build context', () => {
+  const address = routePath(context, 'teamwork')
+  expect(address).toBe('/programs/program-a/projects/project-a/releases/release-a/team-work')
+  expect(parseRoute(address)).toMatchObject({
+    view: 'teamwork',
+    discipline: 'system',
+    programId: 'program-a',
+    projectId: 'project-a',
+    releaseId: 'release-a',
+  })
+})
+
 test('software authoring routes preserve the selected HLR or LLR level', () => {
   const hlr = routePath(context, 'createSoftwareChange', 'software', undefined, 'HighLevel')
   const llr = routePath(context, 'createSoftwareChange', 'software', undefined, 'LowLevel')

@@ -1,6 +1,6 @@
 export type View =
   | "projects" | "builds" | "baselineImports" | "personnel" | "approvalConfiguration" | "projectConfiguration" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "createInterfaceChange" | "scr" | "baselines" | "history" | "requirements"
-  | "verification" | "testingCoverage" | "testChangeRequests" | "testChangeRequest" | "createTestChangeRequest" | "procedureExplorer" | "testResults" | "documents" | "managedDocuments" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
+  | "verification" | "testingCoverage" | "testChangeRequests" | "testChangeRequest" | "createTestChangeRequest" | "procedureExplorer" | "testResults" | "documents" | "managedDocuments" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "teamwork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
 
@@ -116,6 +116,7 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   const coverageReport = query.get("coverage") === "report";
   if (!path || path === "command-center") return { ...base, view: "dashboard", discipline: "system" };
   if (path === "my-work") return { ...base, view: "mywork", discipline: "system" };
+  if (path === "team-work") return { ...base, view: "teamwork", discipline: "system" };
   if (path === "systems/change-requests") return { ...base, view: "history", discipline: "system", historySelectionId: query.get("selection") || undefined, historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "System" };
   if (path === "software/change-requests") return { ...base, view: "history", discipline: "software", artifactId: query.get("assessment") || undefined, artifactKind: query.get("level") === "LLR" ? "LowLevel" : "HighLevel", historySelectionId: query.get("selection") || undefined, historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: query.get("type") === "All" ? "All" : "Software" };
   if (path === "interfaces/change-requests") return { ...base, view: "history", discipline: "system", historySelectionId: query.get("selection") || undefined, historyStateIntent: historyStateIntent(query.get("state")), historyTypeIntent: "Interface" };
@@ -275,6 +276,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "projectConfiguration": return projectAreaPath("fms-product-development", "projectConfiguration");
     case "dashboard": return `${root}/command-center`;
     case "mywork": return `${root}/my-work`;
+    case "teamwork": return `${root}/team-work`;
     case "createSystemScr": return `${root}/systems/change-requests/new${artifactId ? `?requirement=${encodeURIComponent(artifactId)}` : ""}`;
     case "createSoftwareChange": {
       const query = new URLSearchParams();
