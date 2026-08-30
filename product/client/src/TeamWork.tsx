@@ -84,6 +84,15 @@ const holderBasisLabels: Record<string, string> = {
   selectedAssessmentApprover: "Selected assessment approver obligation",
 };
 
+const familyBadgeLabels: Record<TeamWorkFamily, string> = {
+  system: "System",
+  software: "Software",
+  interface: "Interface",
+  verification: "Verification",
+  problemReport: "Problem Report",
+  assessment: "Assessment",
+};
+
 const originLabels: Record<string, string> = {
   changeRequest: "source change request",
   problemReport: "source problem report",
@@ -163,7 +172,7 @@ const isValidItem = (value: unknown, people: Map<string, TeamWorkPerson>): value
   const { family, lane, holderBasis, currentHolderIds, updatedAt } = value;
   if (!isNonBlankString(value.id) || !guidExpression.test(value.id) || !isFamily(family)
     || !isLane(lane) || !isHolderBasis(holderBasis)
-    || !isNonBlankString(value.title) || !isNonBlankString(value.nativeState)
+    || typeof value.title !== "string" || !isNonBlankString(value.nativeState)
     || !isSafeCanonicalOpenUrl(value.openUrl) || !Array.isArray(currentHolderIds)
     || !currentHolderIds.every(isNonBlankString)
     || !isOptionalString(value.category) || !isOptionalString(value.prefix) || !isOptionalString(value.number)
@@ -171,13 +180,13 @@ const isValidItem = (value: unknown, people: Map<string, TeamWorkPerson>): value
     || !isOptionalString(value.deferredFromState) || !isNonBlankString(updatedAt)
     || Number.isNaN(Date.parse(updatedAt))) return false;
 
-  // Controlled families retain their governed number and prefix. Problem reports may not have a category
-  // while still in Draft, but an identity without both a number and a prefix is never honest to display.
+  // Controlled families retain their governed number. Problem reports may not have a category while still in
+  // Draft, and historical numbers can lack a derivable prefix, so a missing prefix gets a neutral family badge.
   if (family === "assessment") {
     if (!isNonBlankString(value.category) || (value.number !== null && value.number !== undefined)
       || (value.prefix !== null && value.prefix !== undefined)) return false;
-  } else if (!isNonBlankString(value.number) || !isNonBlankString(value.prefix)
-    || (value.family !== "problemReport" && !isNonBlankString(value.category))) {
+  } else if (!isNonBlankString(value.number)
+    || (family !== "problemReport" && !isNonBlankString(value.category))) {
     return false;
   }
 
@@ -263,8 +272,9 @@ const laneFor = (id: string) => lanes.find(lane => lane.id === id);
 
 function TeamWorkCard({ item, people }: { item: TeamWorkItem; people: Map<string, string> }) {
   const holders = item.currentHolderIds.map(id => holderDisplayNameFor(id, people));
-  const badge = item.family === "assessment" ? "Assessment" : item.prefix!;
+  const badge = item.family === "assessment" ? "Assessment" : item.prefix || familyBadgeLabels[item.family];
   const identity = item.family === "assessment" ? item.category! : item.number!;
+  const title = item.title.trim() || "Title not recorded";
   const raisedBy = item.raisedByKind
     ? originLabels[item.raisedByKind]
       ? `Origin: ${originLabels[item.raisedByKind]}`
@@ -282,7 +292,7 @@ function TeamWorkCard({ item, people }: { item: TeamWorkItem; people: Map<string
         {item.deferred && <span className="teamWorkCardDeferred">Deferred</span>}
       </div>
       <div className="teamWorkCardIdentity"><strong>{identity}</strong>{item.category && item.number && <span>{item.category}</span>}</div>
-      <h3>{item.title}</h3>
+      <h3>{title}</h3>
       <div className={`teamWorkLanePill lane-${item.lane}`}><i aria-hidden="true"/>{lane!.title}<span aria-hidden="true">→</span></div>
       <dl className="teamWorkCardFacts">
         <div><dt>Native state</dt><dd>{stateLabel(item.nativeState)}{item.nativeOutcome ? ` · ${stateLabel(item.nativeOutcome)}` : ""}</dd></div>

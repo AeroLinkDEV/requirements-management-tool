@@ -30,7 +30,7 @@ const fixture = {
       allocation: null, deferredFromState: null, updatedAt: '2026-08-29T10:30:00Z', openUrl: '/open/change-request/00000000-0000-0000-0000-000000000005',
     },
     {
-      id: '00000000-0000-0000-0000-000000000006', family: 'problemReport', category: null, prefix: 'PR', number: 'PR-00006.00',
+      id: '00000000-0000-0000-0000-000000000006', family: 'problemReport', category: null, prefix: null, number: 'PR00006.00',
       title: 'Open problem report', lane: 'work', nativeState: 'Open', nativeOutcome: null, currentHolderIds: [], holderBasis: 'responsibleEngineer',
       raisedById: 'historical-reporter', raisedByKind: 'reportedBy', release: null, deferred: false,
       allocation: null, deferredFromState: null, updatedAt: '2026-08-29T10:15:00Z', openUrl: '/open/problem-report/00000000-0000-0000-0000-000000000006',
@@ -108,8 +108,8 @@ test('Team Work is a project-wide four-lane board with API-owned card truth and 
   await expect(interfaceCard).not.toContainText('Author action ·')
   await expect(interfaceCard).toHaveAttribute('href', '/open/change-request/00000000-0000-0000-0000-000000000005')
   const problemReportCard = page.getByRole('link', { name: /Open problem report/ })
-  await expect(problemReportCard.locator('[data-family="problemReport"]')).toHaveText('PR')
-  await expect(problemReportCard).toContainText('PR-00006.00')
+  await expect(problemReportCard.locator('[data-family="problemReport"]')).toHaveText('Problem Report')
+  await expect(problemReportCard).toContainText('PR00006.00')
   await expect(problemReportCard).toContainText('historical-reporter')
   await expect(problemReportCard).not.toContainText('Reported by ·')
   await expect(problemReportCard).toContainText('No current holder')
@@ -122,14 +122,34 @@ test('Team Work is a project-wide four-lane board with API-owned card truth and 
   await expect(page.getByRole('link', { name: /Assessment of HLRCR-00002.00/ })).toContainText('Build 1.5')
   await expect(page.getByRole('link', { name: /Assessment of HLRCR-00002.00/ })).toContainText('HLR assessment')
   await expect(page.getByRole('link', { name: /Assessment of HLRCR-00002.00/ })).not.toContainText('ASMT-')
-  await expect(page.getByRole('link', { name: /Deferred test review/ })).toContainText('Deferred')
-  await expect(page.getByRole('link', { name: /Deferred test review/ })).toContainText('Allocation')
-  await expect(page.getByRole('link', { name: /Deferred test review/ })).toContainText('Build 1.5')
+  const deferredCard = page.getByRole('link', { name: /Deferred test review/ })
+  await expect(deferredCard).toContainText('Deferred')
+  await expect(deferredCard).toContainText('Allocation')
+  await expect(deferredCard).toContainText('Build 1.5')
   await expect(page.locator('main.teamWorkPage')).toContainText('Last updated')
   await expect(page.locator('main.teamWorkPage button')).toHaveCount(0)
   await expect(page.locator('main.teamWorkPage').getByText(/filter|drag|reassign|due date|age/i)).toHaveCount(0)
   if (process.env.AEROLINK_TEAM_WORK_SCREENSHOT)
     await page.screenshot({ path: process.env.AEROLINK_TEAM_WORK_SCREENSHOT, fullPage: true })
+})
+
+test('Team Work preserves a numbered automatic TCR whose title was not persisted', async ({ page }) => {
+  const automaticTcr = {
+    id: '00000000-0000-0000-0000-000000000007', family: 'verification', category: 'system', prefix: 'SYSTPCR', number: 'SYSTPCR-00007.00',
+    title: '', lane: 'work', nativeState: 'Draft', nativeOutcome: 'Pending', currentHolderIds: [], holderBasis: 'assignedEngineer',
+    raisedById: null, raisedByKind: 'problemReport', release: { id: '00000000-0000-0000-0000-0000000000a1', version: '1.6', isReleased: false }, deferred: false,
+    allocation: null, deferredFromState: null, updatedAt: '2026-08-29T08:00:00Z', openUrl: '/open/test-change-request/00000000-0000-0000-0000-000000000007',
+  }
+  await openTeamWork(page, {
+    generatedAt: fixture.generatedAt,
+    totals: { items: 1, returned: 1, unheld: 1 },
+    people: [],
+    items: [automaticTcr],
+  })
+  const card = page.getByRole('link', { name: /SYSTPCR-00007.00/ })
+  await expect(card).toContainText('Title not recorded')
+  await expect(card).toContainText('Assigned engineer obligation')
+  await expect(card).toContainText('source problem report')
 })
 
 test('Team Work surfaces API failures locally and does not invent a card for an invalid projection', async ({ page }) => {
@@ -165,13 +185,22 @@ test('Team Work rejects incomplete controlled identity and fabricated assessment
   let body: unknown = {
     ...fixture,
     items: fixture.items.map(item => item.title === 'Interface change request'
-      ? { ...item, number: null }
+      ? { ...item, title: undefined }
       : item),
   }
   await page.route('**/api/team-work*', async route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) }))
   await login(page)
   await page.getByRole('link', { name: 'Team Work', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('invalid identity')
+
+  body = {
+    ...fixture,
+    items: fixture.items.map(item => item.title === 'Interface change request'
+      ? { ...item, number: null }
+      : item),
+  }
+  await page.reload()
   await expect(page.getByRole('alert')).toContainText('invalid identity')
 
   body = {
