@@ -3,6 +3,8 @@ using AeroLink.Domain.Notifications;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Documents;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Notifications;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -174,6 +176,26 @@ public sealed class NotificationOutboxTests
             second => Assert.Equal("text/html", second.ContentType.MediaType));
     }
 
+    [Theory]
+    [InlineData(null, 25, true)]
+    [InlineData("2525", 2525, true)]
+    [InlineData("0", null, false)]
+    [InlineData("65536", null, false)]
+    [InlineData("not-a-port", null, false)]
+    public void Smtp_port_truth_is_shared_by_dispatch_and_operations(string? configuredPort, int? expectedPort, bool configured)
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["Notifications:Smtp:Host"] = "127.0.0.1",
+            ["Notifications:Smtp:Port"] = configuredPort
+        };
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+        var sender = new SmtpEmailSender(configuration, NullLogger<SmtpEmailSender>.Instance);
+
+        Assert.Equal(expectedPort, SmtpEmailSender.ResolvePort(configuration));
+        Assert.Equal(configured, sender.IsConfigured);
+    }
+
     [Fact]
     public async Task Smtp_sender_delivers_a_real_message_to_a_loopback_smtp_server()
     {
@@ -269,7 +291,7 @@ public sealed class NotificationOutboxTests
         return (new NotificationLinkBuilder(configuration), new UnsubscribeTokenService(configuration));
     }
 
-    private static async Task<(DbContextOptions<AeroLinkDbContext> Options, Guid ProjectId, string Path)> SeedAsync(
+    private static async Task<(DbContextOptions<AeroLinkDbContext> Options, Guid ProjectId, Guid ReleaseId, string Path)> SeedAsync(
         string email = "approver@example.test")
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-notify-{Guid.NewGuid():N}.db");
@@ -278,11 +300,12 @@ public sealed class NotificationOutboxTests
         await db.Database.EnsureCreatedAsync();
         var program = new ProgramRecord("Notify Program", "NTP");
         var project = new ProjectRecord(program.Id, "Software", "Notify Software");
+        var release = new SoftwareRelease(project.Id, "1.0", true);
         var account = new UserAccount("approver.user", "Approver User", email,
             IdentityService.HashPassword("AeroLink!Test2026"), Now);
-        db.AddRange(program, project, account);
+        db.AddRange(program, project, release, account);
         await db.SaveChangesAsync();
-        return (options, project.Id, path);
+        return (options, project.Id, release.Id, path);
     }
 
     private static UserNotification Notification(Guid projectId, string recipient = "approver.user") =>
@@ -501,6 +524,150 @@ public sealed class NotificationOutboxTests
             var delivery = await db.NotificationDeliveries.AsNoTracking().SingleAsync();
             Assert.Equal(NotificationDeliveryState.Suppressed, delivery.State);
             Assert.Contains("no longer active", delivery.LastError);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
+    public async Task An_old_cycle_notification_is_not_reassigned_to_a_later_cycle_for_the_same_person()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            await using var db = new AeroLinkDbContext(seed.Options);
+            var request = new SystemChangeRequest("SRCR-00031", 0, seed.ProjectId, seed.ReleaseId,
+                "Cycle identity", "P", "A", "S", "author.user", Now);
+            request.AddRequirementChange("author.user", "SYSR-00000001", 0, RequirementLevel.System,
+                RequirementChangeKind.Introduce, "The system shall preserve notification cycle identity.",
+                "Prevent stale review mail.", "Review", Now);
+            request.SubmitForReview("author.user", [new("approver.user", "Approver User")], Now);
+            db.SystemChangeRequests.Add(request);
+            db.UserNotifications.Add(new(seed.ProjectId, "approver.user", "ReviewActivated", "Review SRCR-00031.00",
+                "Cycle one is ready.", $"scr:{request.Id}", request.Id, Now));
+            await db.SaveChangesAsync();
+
+            request.RequestChanges("approver.user", "Revise it.", Now.AddMinutes(1));
+            request.SubmitForReview("author.user", [new("approver.user", "Approver User")], Now.AddMinutes(2));
+            await db.SaveChangesAsync();
+
+            var sender = new RecordingSender();
+            var (links, tokens) = Support();
+            var result = await new NotificationOutbox(db).DispatchPendingAsync(
+                sender, links, tokens, 50, 5, Now.AddMinutes(3), default);
+
+            Assert.Equal(1, result.Suppressed);
+            Assert.Empty(sender.Sent);
+            Assert.Equal(NotificationDeliveryState.Suppressed,
+                (await db.NotificationDeliveries.AsNoTracking().SingleAsync()).State);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
+    public async Task An_unnumbered_test_change_assessment_uses_its_frozen_approval_kind_without_minting_an_identifier()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            await using var db = new AeroLinkDbContext(seed.Options);
+            var source = new SystemChangeRequest("SRCR-00032", 0, seed.ProjectId, seed.ReleaseId,
+                "Source change", "P", "A", "S", "author.user", Now);
+            var assessment = new TestChangeReview(seed.ProjectId, seed.ReleaseId, source.Id,
+                TestChangeReviewDiscipline.System, source.DisplayNumber, Now, authorId: "author.user");
+            assessment.RecordNoTestChangeRequired("author.user", "No test procedure is affected.", Now);
+            var workflow = new ReviewWorkflowSpecification(Guid.NewGuid(), Guid.NewGuid(), "Assessment approval", 1,
+                ReviewMode.Sequential,
+                [new ReviewStageRequirement(0, "Approval", ProgramRole.SystemTestEngineer, ReviewStageKind.Approval)]);
+            assessment.SubmitForReview("author.user",
+                [new ApproverSelection("approver.user", "Approver User", ProgramRole.SystemTestEngineer)],
+                everyItemResolved: true, now: Now, workflow: workflow);
+            db.AddRange(source, assessment);
+            db.UserNotifications.Add(new(seed.ProjectId, "approver.user", "TestChangeRequestApprovalRequested",
+                "Assessment approval requested", "You were selected to approve this assessment.",
+                $"test-change-request:{assessment.Id}", assessment.Id, Now));
+            await db.SaveChangesAsync();
+
+            var sender = new RecordingSender();
+            var (links, tokens) = Support();
+            var result = await new NotificationOutbox(db).DispatchPendingAsync(
+                sender, links, tokens, 50, 5, Now.AddMinutes(1), default);
+
+            Assert.Equal(1, result.Sent);
+            var message = Assert.Single(sender.Sent);
+            Assert.Equal("Test change assessment is ready for your approval — AeroLink", message.Subject);
+            Assert.Contains("Test change package", message.PlainTextBody);
+            Assert.DoesNotContain("SYSTPCR-", message.PlainTextBody);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
+    public async Task A_document_approval_notification_uses_the_active_frozen_step_kind()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            await using var db = new AeroLinkDbContext(seed.Options);
+            var document = new ManagedDocument(seed.ProjectId, "SDP-000001", "SDP", "Plan",
+                "Delivery plan", "owner.user", Now);
+            var revision = new ManagedDocumentRevision(document.Id, 0, "owner.user", "Initial issue.", Now);
+            revision.RecordCheckIn(Guid.NewGuid(), Now);
+            revision.SubmitForReview("owner.user", new string('a', 64), new ManagedDocumentReviewer[]
+            {
+                new("technical.user", "Technical User", "Technical review"),
+                new("approver.user", "Approver User", "Release approval", Kind: ReviewStageKind.Approval),
+            }, Now);
+            revision.Approve("technical.user", "Technically complete.", Now.AddMinutes(1));
+            db.AddRange(document, revision);
+            db.UserNotifications.Add(new(seed.ProjectId, "approver.user", "DocumentReviewActivated",
+                "Review SDP-000001.00", "Release approval is ready.",
+                $"managed-document:{document.Id}", document.Id, Now.AddMinutes(1)));
+            await db.SaveChangesAsync();
+
+            var sender = new RecordingSender();
+            var (links, tokens) = Support();
+            var result = await new NotificationOutbox(db).DispatchPendingAsync(
+                sender, links, tokens, 50, 5, Now.AddMinutes(2), default);
+
+            Assert.Equal(1, result.Sent);
+            var message = Assert.Single(sender.Sent);
+            Assert.Equal("SDP-000001.00 is ready for your approval — AeroLink", message.Subject);
+            Assert.Contains("Open the document approval", message.PlainTextBody);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
+    public async Task A_closed_document_review_notification_is_suppressed_instead_of_falling_back_to_stale_prose()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            await using var db = new AeroLinkDbContext(seed.Options);
+            var document = new ManagedDocument(seed.ProjectId, "SDP-000002", "SDP", "Plan",
+                "Returned plan", "owner.user", Now);
+            var revision = new ManagedDocumentRevision(document.Id, 0, "owner.user", "Initial issue.", Now);
+            revision.RecordCheckIn(Guid.NewGuid(), Now);
+            revision.SubmitForReview("owner.user", new string('b', 64), new ManagedDocumentReviewer[]
+            {
+                new("approver.user", "Approver User", "Technical review"),
+                new("final.user", "Final User", "Release approval", Kind: ReviewStageKind.Approval),
+            }, Now);
+            db.AddRange(document, revision);
+            db.UserNotifications.Add(new(seed.ProjectId, "approver.user", "DocumentReviewActivated",
+                "Review SDP-000002.00", "Technical review is ready.",
+                $"managed-document:{document.Id}", document.Id, Now));
+            await db.SaveChangesAsync();
+            revision.Return("approver.user", "Revise the document.", Now.AddMinutes(1));
+            await db.SaveChangesAsync();
+
+            var sender = new RecordingSender();
+            var (links, tokens) = Support();
+            var result = await new NotificationOutbox(db).DispatchPendingAsync(
+                sender, links, tokens, 50, 5, Now.AddMinutes(2), default);
+
+            Assert.Equal(1, result.Suppressed);
+            Assert.Empty(sender.Sent);
         }
         finally { File.Delete(seed.Path); }
     }

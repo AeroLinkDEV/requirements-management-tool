@@ -58,7 +58,9 @@ switch ($Action) {
         if ((Get-Listener $SmtpPort) -or (Get-Listener $WebPort)) {
             throw "Port $SmtpPort or $WebPort is already listening. Refusing to attach to or replace another process."
         }
-        $arguments = "--smtpport $SmtpPort --urls http://127.0.0.1:$WebPort --db `"$data`""
+        # This is an unauthenticated development catcher, so every protocol must be local-only and relay
+        # must stay disabled. The web URL does not govern SMTP/IMAP/POP binding in smtp4dev.
+        $arguments = "--allowremoteconnections- --bindaddress 127.0.0.1 --disableipv6+ --smtpport $SmtpPort --imapport= --pop3port= --relaysmtpserver= --urls http://127.0.0.1:$WebPort --db `"$data`" --locksettings+"
         $process = Start-Process -FilePath $tool -ArgumentList $arguments -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
         $deadline = (Get-Date).AddSeconds(15)
         do {

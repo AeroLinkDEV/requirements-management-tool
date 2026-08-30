@@ -34,10 +34,18 @@ public sealed class SmtpEmailSender(IConfiguration configuration, ILogger<SmtpEm
 {
     private string? Host => Blank(configuration["Notifications:Smtp:Host"]);
     private string From => Blank(configuration["Notifications:Smtp:From"]) ?? "aerolink@localhost";
-    private int Port => int.TryParse(configuration["Notifications:Smtp:Port"], out var port) ? port : 25;
+    private int Port => ResolvePort(configuration)
+        ?? throw new InvalidOperationException("The configured SMTP port must be between 1 and 65535.");
     private bool UseStartTls => !string.Equals(configuration["Notifications:Smtp:UseStartTls"], "false", StringComparison.OrdinalIgnoreCase);
 
-    public bool IsConfigured => Host is not null;
+    public bool IsConfigured => Host is not null && ResolvePort(configuration) is not null;
+
+    public static int? ResolvePort(IConfiguration source)
+    {
+        var configured = Blank(source["Notifications:Smtp:Port"]);
+        if (configured is null) return 25;
+        return int.TryParse(configured, out var port) && port is > 0 and <= 65535 ? port : null;
+    }
 
     public async Task SendAsync(EmailMessage message, CancellationToken ct)
     {

@@ -52,6 +52,9 @@ superseded queued review obligation is `Suppressed` with a deliberate reason, no
 `http://LAN:5080` address; it still never opens the Windows firewall and remains plaintext demo-only. Protected
 remote demo passes its configured HTTPS `PublicUrl` into the production launcher. If a pre-existing local API
 has an unknown mail-link origin, remote start refuses rather than sending loopback links to remote recipients.
+Successful startup records the exact local API listener process and public origin outside the repository; status
+and repeated recovery accept that proof only while the same process still owns the listener. Restarting the API
+therefore invalidates the proof instead of letting an old tunnel state claim that new mail links are reachable.
 
 ### Root Windows launcher inventory
 

@@ -23,7 +23,8 @@ public sealed record ReviewEmailFacts(
     int Introduced,
     int Modified,
     int Retired,
-    DateTimeOffset RespondBy);
+    DateTimeOffset RespondBy,
+    string PackageSummary = "");
 
 /// <summary>
 /// Renders the review request as a mail client will actually show it.
@@ -112,6 +113,7 @@ internal static class ReviewEmailTemplate
 
     private static string Package(ReviewEmailFacts facts)
     {
+        if (!string.IsNullOrWhiteSpace(facts.PackageSummary)) return facts.PackageSummary;
         var parts = new List<string>();
         if (facts.Introduced > 0) parts.Add($"{facts.Introduced} introduced");
         if (facts.Modified > 0) parts.Add($"{facts.Modified} modified");

@@ -135,7 +135,7 @@ type Performance = {
 };
 type NotificationOperations = {
   generatedAt: string;
-  smtp: { configured: boolean; hostConfigured: boolean; port: number; useStartTls: boolean; credentialsConfigured: boolean; fromConfigured: boolean };
+  smtp: { configured: boolean; hostConfigured: boolean; port?: number; portValid: boolean; useStartTls: boolean; credentialsConfigured: boolean; fromConfigured: boolean };
   links: { configured: boolean; valid: boolean; baseUrl?: string };
   totals: { pending: number; sent: number; failed: number; suppressed: number };
   deliveries: { id: string; recipient: string; address: string; state: string; attempts: number; detail?: string; createdAt: string; completedAt?: string }[];
@@ -222,7 +222,7 @@ export default function EnterpriseControlCenter({
   };
   const load = useCallback(async () => {
     try {
-      const [o, w, p, n] = await Promise.all([
+      const [o, w, p] = await Promise.all([
         fetch(`${api}/api/enterprise-hardening/overview?projectId=${projectId}`),
         fetch(
           `${api}/api/enterprise-requirements/workspace?projectId=${projectId}&page=1&pageSize=100&sort=updated`,
@@ -230,7 +230,6 @@ export default function EnterpriseControlCenter({
         fetch(
           `${api}/api/enterprise-requirements/performance?projectId=${projectId}`,
         ),
-        fetch(`${api}/api/operations/notifications`),
       ]);
       if (o.ok) setOverview(await o.json());
       if (w.ok) {
@@ -239,12 +238,26 @@ export default function EnterpriseControlCenter({
         setSelectedId((x) => x || data.items[0]?.id || "");
       }
       if (p.ok) setPerformance(await p.json());
-      if (n.ok) setNotificationOperations(await n.json());
-      else setError("Notification delivery operations could not be loaded.");
     } catch {
       setError("System operations could not be loaded. Refresh to try again.");
     }
   }, [api, projectId]);
+  const loadNotificationOperations = useCallback(async () => {
+    try {
+      const response = await fetch(`${api}/api/operations/notifications`);
+      if (response.ok) {
+        setNotificationOperations(await response.json());
+        return;
+      }
+      setNotificationOperations(undefined);
+      setError(response.status === 403
+        ? "Notification delivery operations are available only to global administrators."
+        : "Notification delivery operations could not be loaded.");
+    } catch {
+      setNotificationOperations(undefined);
+      setError("Notification delivery operations could not be loaded. Refresh to try again.");
+    }
+  }, [api]);
   const queueTransportTest = async () => {
     const result = await mutate(
       "operations.notifications.transport-test",
@@ -257,13 +270,19 @@ export default function EnterpriseControlCenter({
     setMessage(result.state === "Suppressed"
       ? `Email test was deliberately suppressed: ${result.detail || "the current administrator has no deliverable address."}`
       : "Email transport test queued for this administrator account.");
-    await load();
+    await loadNotificationOperations();
   };
   useEffect(() => {
     load();
     const timer = setInterval(load, 2500);
     return () => clearInterval(timer);
   }, [load]);
+  useEffect(() => {
+    if (tab !== "notifications") return;
+    loadNotificationOperations();
+    const timer = setInterval(loadNotificationOperations, 2500);
+    return () => clearInterval(timer);
+  }, [loadNotificationOperations, tab]);
   const loadArtifact = useCallback(async () => {
     if (!selectedId) return;
     const [a, d] = await Promise.all([
@@ -577,7 +596,7 @@ export default function EnterpriseControlCenter({
             </div>
             <div className="enterpriseGrid">
               <section><div className="sectionTitle"><div><h3>Effective transport</h3><p>Configuration state without secret material</p></div></div>
-                <p>SMTP host: <b>{notificationOperations.smtp.hostConfigured ? "configured" : "not configured"}</b> · port {notificationOperations.smtp.port} · STARTTLS {notificationOperations.smtp.useStartTls ? "on" : "off"}</p>
+                <p>SMTP host: <b>{notificationOperations.smtp.hostConfigured ? "configured" : "not configured"}</b> · port {notificationOperations.smtp.portValid ? notificationOperations.smtp.port : "invalid"} · STARTTLS {notificationOperations.smtp.useStartTls ? "on" : "off"}</p>
                 <p>Credentials: <b>{notificationOperations.smtp.credentialsConfigured ? "configured" : "not configured"}</b> · From address {notificationOperations.smtp.fromConfigured ? "configured" : "default"}</p>
                 <p>Mail-link origin: <b>{notificationOperations.links.valid ? notificationOperations.links.baseUrl : "not configured or invalid"}</b></p>
               </section>

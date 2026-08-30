@@ -1,4 +1,5 @@
 using AeroLink.Infrastructure.Notifications;
+using AeroLink.Domain.ChangeControl;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -9,8 +10,9 @@ namespace AeroLink.Infrastructure.Tests;
 /// </summary>
 public sealed class DocumentReviewEmailTests
 {
-    private static DocumentReviewEmailFacts Facts(string title = "System Requirements Document — FMS 1.6 candidate") =>
-        new("SYSRD-0004.03", title, "Independent technical review · step 1 of 2", "Systems Engineering Lead",
+    private static DocumentReviewEmailFacts Facts(string title = "System Requirements Document — FMS 1.6 candidate",
+        ReviewStageKind stageKind = ReviewStageKind.Review) =>
+        new("SYSRD-0004.03", title, "Independent technical review · step 1 of 2", stageKind, "Systems Engineering Lead",
             "Maya Patel", "Daniel Reyes", new DateTimeOffset(2026, 8, 14, 9, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2026, 8, 20, 9, 0, 0, TimeSpan.Zero));
 
@@ -18,6 +20,16 @@ public sealed class DocumentReviewEmailTests
     public void The_subject_leads_with_the_identifier_and_the_ask()
     {
         Assert.Equal("SYSRD-0004.03 is ready for your review — AeroLink", DocumentReviewEmailTemplate.Subject(Facts()));
+    }
+
+    [Fact]
+    public void A_frozen_document_approval_stage_is_not_described_as_review()
+    {
+        var facts = Facts(stageKind: ReviewStageKind.Approval);
+
+        Assert.Equal("SYSRD-0004.03 is ready for your approval — AeroLink", DocumentReviewEmailTemplate.Subject(facts));
+        Assert.Contains("Open the document approval", DocumentReviewEmailTemplate.PlainText(facts, "https://aerolink.example.test/open/managed-document/x", null));
+        Assert.Contains("APPROVAL REQUESTED", DocumentReviewEmailTemplate.Html(facts, "https://aerolink.example.test/open/managed-document/x", null));
     }
 
     [Fact]

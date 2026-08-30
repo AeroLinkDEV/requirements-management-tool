@@ -33,6 +33,8 @@ function New-ValidConfigFile([string]$Path) {
     Upstream          = 'http://127.0.0.1:5080'
     LocalApiBaseUri   = 'http://127.0.0.1:5080'
     AeroLinkRoot      = '$moduleRoot'
+    LogsPath          = '$(Join-Path $tempRoot 'logs')'
+    StatePath         = '$(Join-Path $tempRoot 'state')'
 }
 "@ | Set-Content -LiteralPath $Path -Encoding UTF8
 }
@@ -115,7 +117,36 @@ Assert-True ($decision.Decision -eq 'BlockedForeignResponder') 'Foreign 2xx resp
 $decision = Get-AeroLinkRemoteDemoStartDecision -LocalReady $true -OwnedProcessPresent $false -Protected $false -ProbeStatusCode $null
 Assert-True ($decision.Decision -eq 'CanStart') 'Unreachable probe must still allow start; post-start probe enforces 401.'
 
-# --- 5. Public protection classification (401 required) ---
+# --- 5. Notification-link origin must be attributable to the current API process ---
+New-Item -ItemType Directory -Path $config.StatePath -Force | Out-Null
+$runtimeIdentity = { param($C) [pscustomobject]@{ Found = $true; ProcessId = 4242; StartedAt = '2026-08-30T12:34:56.0000000Z'; Detail = 'test runtime' } }
+$originState = [pscustomobject]@{
+    PublicUrl = $config.PublicUrl
+    NotificationBaseUrl = $config.PublicUrl
+    LocalApiPid = 4242
+    LocalApiStartedAt = '2026-08-30T12:34:56.0000000Z'
+}
+$originState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $config.StatePath 'remote-demo-state.json') -Encoding UTF8
+$originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $runtimeIdentity
+Assert-True $originProof.Valid 'Matching public origin plus exact live process identity must be accepted.'
+
+$originState.NotificationBaseUrl = 'http://127.0.0.1:5080'
+$originState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $config.StatePath 'remote-demo-state.json') -Encoding UTF8
+$originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $runtimeIdentity
+Assert-True (-not $originProof.Valid) 'A loopback notification origin must not satisfy protected remote-demo readiness.'
+
+$originState.NotificationBaseUrl = $config.PublicUrl
+$originState.LocalApiPid = 9999
+$originState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $config.StatePath 'remote-demo-state.json') -Encoding UTF8
+$originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $runtimeIdentity
+Assert-True (-not $originProof.Valid) 'A proof recorded for an old API process must be rejected.'
+
+Remove-Item -LiteralPath (Join-Path $config.StatePath 'remote-demo-state.json') -Force
+$originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $runtimeIdentity
+Assert-True (-not $originProof.Valid) 'AlreadyReady must fail closed when notification-origin proof is missing.'
+Assert-True ($moduleText -match "AlreadyReady'[\s\S]+Test-AeroLinkRemoteDemoNotificationOriginProof") 'AlreadyReady must validate durable notification-origin proof before reporting ready.'
+
+# --- 6. Public protection classification (401 required) ---
 $stub401 = {
     param($PublicUrl)
     $response = [pscustomobject]@{ StatusCode = 401 }
@@ -144,7 +175,7 @@ $stubUnreachable = { param($PublicUrl) throw 'network down' }
 $probe = Test-AeroLinkRemoteDemoPublicProtection -Config $config -ProbeScriptBlock $stubUnreachable
 Assert-True ($probe.Protected -eq $false -and $null -eq $probe.StatusCode) 'Unreachable endpoint must not be classified as protected.'
 
-# --- 6. Scheduled-task XML contains no secrets ---
+# --- 7. Scheduled-task XML contains no secrets ---
 $taskConfig = [pscustomobject]@{
     AeroLinkRoot = $moduleRoot
     StatePath = Join-Path $tempRoot 'state'

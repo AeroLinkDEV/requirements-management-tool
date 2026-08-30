@@ -19,6 +19,7 @@ internal sealed record ReviewDispatchFacts(
 
 internal sealed record ReviewStepEmailFact(
     Guid ArtifactId,
+    Guid CycleId,
     string BaseNumber,
     int Revision,
     string Title,
@@ -32,7 +33,32 @@ internal sealed record ReviewStepEmailFact(
     ReviewMode Mode,
     int Sequence,
     DateTimeOffset StartedAt,
+    DateTimeOffset? DecidedAt,
     bool IsChangeRequest);
+
+internal sealed record DocumentReviewDispatchFacts(
+    IReadOnlyDictionary<Guid, DocumentReviewEmailFacts> Facts,
+    IReadOnlySet<Guid> ActiveNotificationIds,
+    IReadOnlyDictionary<Guid, string> SuppressionReasons);
+
+internal sealed record DocumentReviewStepEmailFact(
+    Guid DocumentId,
+    Guid RevisionId,
+    string DocumentNumber,
+    string Title,
+    string StewardId,
+    int Revision,
+    string OwnerId,
+    DateTimeOffset? SubmittedAt,
+    string ApproverId,
+    string StageName,
+    ReviewStageKind StageKind,
+    string GrantedAuthority,
+    int Position,
+    int Cycle,
+    DateTimeOffset? AssignedAt,
+    ManagedDocumentReviewStepState State,
+    DateTimeOffset? DecidedAt);
 
 /// <summary>
 /// Queues deliveries for in-app notifications, and drains that queue.
@@ -134,11 +160,20 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
                 continue;
             }
 
+            if (IsDocumentReviewNotification(notification)
+                && !documentFacts.ActiveNotificationIds.Contains(notification.Id))
+            {
+                delivery.Suppress(documentFacts.SuppressionReasons.GetValueOrDefault(notification.Id,
+                    "The document review obligation was no longer active when email dispatch ran."), now);
+                suppressed++;
+                continue;
+            }
+
             try
             {
                 await sender.SendAsync(
                     Compose(notification, delivery, links, tokens, reviewFacts.Facts.GetValueOrDefault(notification.Id),
-                        documentFacts.GetValueOrDefault(notification.Id)), ct);
+                        documentFacts.Facts.GetValueOrDefault(notification.Id)), ct);
                 delivery.MarkSent(now);
                 sent++;
             }
@@ -177,9 +212,9 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
                            where changeRequestIds.Contains(scr.Id) && cycle.State == ReviewCycleState.Active
                            select new
                            {
-                               ArtifactId = scr.Id, scr.BaseNumber, scr.Revision, scr.Title, scr.AuthorId,
+                               ArtifactId = scr.Id, CycleId = cycle.Id, scr.BaseNumber, scr.Revision, scr.Title, scr.AuthorId,
                                step.ApproverId, step.StageName, step.StageKind, step.Authority, step.Position, step.State,
-                               cycle.Mode, cycle.Sequence, cycle.StartedAt,
+                               cycle.Mode, cycle.Sequence, cycle.StartedAt, step.DecidedAt,
                            }).ToListAsync(ct);
         var testChangeSteps = await (from step in db.ApprovalSteps.AsNoTracking()
                                      join cycle in db.ReviewCycles.AsNoTracking() on step.ReviewCycleId equals cycle.Id
@@ -187,17 +222,17 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
                                      where testChangeIds.Contains(review.Id) && cycle.State == ReviewCycleState.Active
                                      select new
                                      {
-                                         ArtifactId = review.Id, review.BaseNumber, review.Revision, review.Title, review.AuthorId,
+                                         ArtifactId = review.Id, CycleId = cycle.Id, review.BaseNumber, review.Revision, review.Title, review.AuthorId,
                                          step.ApproverId, step.StageName, step.StageKind, step.Authority, step.Position, step.State,
-                                         cycle.Mode, cycle.Sequence, cycle.StartedAt,
+                                         cycle.Mode, cycle.Sequence, cycle.StartedAt, step.DecidedAt,
                                      }).ToListAsync(ct);
 
-        var steps = changeRequestSteps.Select(x => new ReviewStepEmailFact(x.ArtifactId, x.BaseNumber, x.Revision,
+        var steps = changeRequestSteps.Select(x => new ReviewStepEmailFact(x.ArtifactId, x.CycleId, x.BaseNumber, x.Revision,
                 x.Title, x.AuthorId, x.ApproverId, x.StageName, x.StageKind, x.Authority, x.Position, x.State,
-                x.Mode, x.Sequence, x.StartedAt, true))
-            .Concat(testChangeSteps.Select(x => new ReviewStepEmailFact(x.ArtifactId, x.BaseNumber, x.Revision,
+                x.Mode, x.Sequence, x.StartedAt, x.DecidedAt, true))
+            .Concat(testChangeSteps.Select(x => new ReviewStepEmailFact(x.ArtifactId, x.CycleId, x.BaseNumber, x.Revision,
                 x.Title, x.AuthorId, x.ApproverId, x.StageName, x.StageKind, x.Authority, x.Position, x.State,
-                x.Mode, x.Sequence, x.StartedAt, false)))
+                x.Mode, x.Sequence, x.StartedAt, x.DecidedAt, false)))
             .ToList();
         if (steps.Count == 0) return new(new Dictionary<Guid, ReviewEmailFacts>(), new HashSet<Guid>(),
             new Dictionary<Guid, string>());
@@ -223,7 +258,8 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
         {
             var activeSteps = steps.Where(x => x.ArtifactId == notification.ArtifactId!.Value
                     && string.Equals(x.ApproverId, notification.Recipient, StringComparison.OrdinalIgnoreCase)
-                    && x.State == ApprovalStepState.Active)
+                    && x.State == ApprovalStepState.Active
+                    && ReviewStepActivatedAt(x, steps) == notification.CreatedAt)
                 .ToList();
             if (activeSteps.Count == 0) continue;
             if (activeSteps.Count != 1)
@@ -239,15 +275,12 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
             var mine = activeSteps[0];
 
             activeNotificationIds.Add(notification.Id);
-            // Legacy, unnumbered automatic test-change reviews are valid obligations, but have no honest
-            // controlled TCR identifier. Let their existing plain notification speak for itself; do not mint
-            // a controlled-looking number just to use the rich template.
-            if (!mine.IsChangeRequest && string.IsNullOrWhiteSpace(mine.BaseNumber)) continue;
-
             var total = stageCounts.GetValueOrDefault(mine.ArtifactId, 1);
             var stage = string.IsNullOrWhiteSpace(mine.StageName) ? "Review" : mine.StageName;
             resolved[notification.Id] = new ReviewEmailFacts(
-                ArtifactNumber.Display(mine.BaseNumber, mine.Revision),
+                mine.IsChangeRequest || !string.IsNullOrWhiteSpace(mine.BaseNumber)
+                    ? ArtifactNumber.Display(mine.BaseNumber, mine.Revision)
+                    : "Test change assessment",
                 mine.Title,
                 $"{stage} · stage {mine.Position + 1} of {total}",
                 mine.StageKind,
@@ -260,7 +293,8 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
                 mine.IsChangeRequest ? counts[mine.ArtifactId].Where(x => x.Kind == RequirementChangeKind.Retire).Sum(x => x.Count) : 0,
                 // The same five days My Work counts an approval overdue against. One convention, so the
                 // email and the queue never disagree about when a decision was wanted.
-                mine.StartedAt.AddDays(5));
+                mine.StartedAt.AddDays(5),
+                mine.IsChangeRequest ? "" : "Test change package");
         }
         return new(resolved, activeNotificationIds, suppressionReasons);
     }
@@ -278,31 +312,50 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
         && notification.Route.StartsWith("test-change-request:", StringComparison.OrdinalIgnoreCase)
         && (notification.Type == "ReviewActivated" || notification.Type == "TestChangeRequestApprovalRequested");
 
+    private static bool IsDocumentReviewNotification(UserNotification notification) =>
+        notification.Type == "DocumentReviewActivated" && notification.ArtifactId is not null
+        && notification.Route.StartsWith("managed-document:", StringComparison.OrdinalIgnoreCase);
+
+    private static DateTimeOffset? ReviewStepActivatedAt(ReviewStepEmailFact step,
+        IReadOnlyCollection<ReviewStepEmailFact> allSteps)
+    {
+        if (step.Mode == ReviewMode.Parallel || step.Position == 0) return step.StartedAt;
+        return allSteps.SingleOrDefault(x => x.CycleId == step.CycleId && x.Position == step.Position - 1)?.DecidedAt;
+    }
+
     /// <summary>
     /// The same gathering for a document review. Kept separate from the change request one rather than
     /// generalised, because the two hang off different aggregates: a change request review lives on a
     /// ReviewCycle, and a document review lives on the revision itself with an integer round. Forcing one
     /// query to serve both would obscure that rather than remove it.
     /// </summary>
-    private async Task<Dictionary<Guid, DocumentReviewEmailFacts>> DocumentReviewFactsAsync(
+    private async Task<DocumentReviewDispatchFacts> DocumentReviewFactsAsync(
         IReadOnlyCollection<UserNotification> notifications, CancellationToken ct)
     {
-        var candidates = notifications.Where(x => x.Type == "DocumentReviewActivated" && x.ArtifactId is not null).ToList();
-        if (candidates.Count == 0) return [];
+        var candidates = notifications.Where(IsDocumentReviewNotification).ToList();
+        if (candidates.Count == 0) return new(new Dictionary<Guid, DocumentReviewEmailFacts>(),
+            new HashSet<Guid>(), new Dictionary<Guid, string>());
 
         var documentIds = candidates.Select(x => x.ArtifactId!.Value).Distinct().ToList();
-        var steps = await (from step in db.ManagedDocumentReviewSteps.AsNoTracking()
+        var rows = await (from step in db.ManagedDocumentReviewSteps.AsNoTracking()
                            join revision in db.ManagedDocumentRevisions.AsNoTracking() on step.RevisionId equals revision.Id
                            join document in db.ManagedDocuments.AsNoTracking() on revision.DocumentId equals document.Id
                            where documentIds.Contains(document.Id)
                                && revision.State == ManagedDocumentState.InReview
                            select new
                            {
-                               DocumentId = document.Id, document.DocumentNumber, document.Title, document.StewardId,
+                               DocumentId = document.Id, RevisionId = revision.Id,
+                               document.DocumentNumber, document.Title, document.StewardId,
                                revision.Revision, revision.OwnerId, revision.SubmittedAt,
-                               step.ApproverId, step.StageName, step.GrantedAuthority, step.Position, step.Cycle,
+                               step.ApproverId, step.StageName, step.Kind, step.GrantedAuthority, step.Position, step.Cycle,
+                               step.AssignedAt, step.State, step.DecidedAt,
                            }).ToListAsync(ct);
-        if (steps.Count == 0) return [];
+        var steps = rows.Select(x => new DocumentReviewStepEmailFact(x.DocumentId, x.RevisionId,
+            x.DocumentNumber, x.Title, x.StewardId, x.Revision, x.OwnerId, x.SubmittedAt,
+            x.ApproverId, x.StageName, x.Kind, x.GrantedAuthority, x.Position, x.Cycle,
+            x.AssignedAt, x.State, x.DecidedAt)).ToList();
+        if (steps.Count == 0) return new(new Dictionary<Guid, DocumentReviewEmailFacts>(),
+            new HashSet<Guid>(), new Dictionary<Guid, string>());
 
         var people = steps.SelectMany(x => new[] { x.StewardId, x.OwnerId }).Distinct().ToList();
         var names = (await db.UserAccounts.AsNoTracking().Where(x => people.Contains(x.UserName))
@@ -310,21 +363,36 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
             .ToDictionary(x => x.UserName, x => x.DisplayName, StringComparer.OrdinalIgnoreCase);
 
         var resolved = new Dictionary<Guid, DocumentReviewEmailFacts>();
+        var activeNotificationIds = new HashSet<Guid>();
+        var suppressionReasons = new Dictionary<Guid, string>();
+        var currentCycleByRevision = steps.GroupBy(x => x.RevisionId)
+            .ToDictionary(x => x.Key, x => x.Max(y => y.Cycle));
         foreach (var notification in candidates)
         {
-            var mine = steps.SingleOrDefault(x => x.DocumentId == notification.ArtifactId!.Value
-                && string.Equals(x.ApproverId, notification.Recipient, StringComparison.OrdinalIgnoreCase));
-            // The round closed or the reviewer changed between raising this and draining the queue. There is
-            // no stage left to describe, so the message falls back to its plain form.
-            if (mine is null) continue;
+            var activeSteps = steps.Where(x => x.DocumentId == notification.ArtifactId!.Value
+                    && x.Cycle == currentCycleByRevision[x.RevisionId]
+                    && x.State == ManagedDocumentReviewStepState.Active
+                    && string.Equals(x.ApproverId, notification.Recipient, StringComparison.OrdinalIgnoreCase)
+                    && DocumentReviewStepActivatedAt(x, steps) == notification.CreatedAt)
+                .ToList();
+            if (activeSteps.Count == 0) continue;
+            if (activeSteps.Count != 1)
+            {
+                suppressionReasons[notification.Id] =
+                    "More than one active frozen document review obligation matched this notification; its exact stage could not be established.";
+                continue;
+            }
+            var mine = activeSteps[0];
+            activeNotificationIds.Add(notification.Id);
 
-            var round = steps.Count(x => x.DocumentId == mine.DocumentId && x.Cycle == mine.Cycle);
+            var round = steps.Count(x => x.RevisionId == mine.RevisionId && x.Cycle == mine.Cycle);
             var submitted = mine.SubmittedAt ?? notification.CreatedAt;
             var stage = string.IsNullOrWhiteSpace(mine.StageName) ? "Review" : mine.StageName;
             resolved[notification.Id] = new DocumentReviewEmailFacts(
                 $"{mine.DocumentNumber}.{mine.Revision:D2}",
                 mine.Title,
                 $"{stage} · step {mine.Position + 1} of {round}",
+                mine.StageKind,
                 string.IsNullOrWhiteSpace(mine.GrantedAuthority) ? "Reviewer" : mine.GrantedAuthority,
                 names.GetValueOrDefault(mine.OwnerId, mine.OwnerId),
                 names.GetValueOrDefault(mine.StewardId, mine.StewardId),
@@ -333,7 +401,15 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
                 // in the product disagrees about when a decision was wanted.
                 submitted.AddDays(5));
         }
-        return resolved;
+        return new(resolved, activeNotificationIds, suppressionReasons);
+    }
+
+    private static DateTimeOffset? DocumentReviewStepActivatedAt(DocumentReviewStepEmailFact step,
+        IReadOnlyCollection<DocumentReviewStepEmailFact> allSteps)
+    {
+        if (step.Position == 0) return step.AssignedAt;
+        return allSteps.SingleOrDefault(x => x.RevisionId == step.RevisionId && x.Cycle == step.Cycle
+            && x.Position == step.Position - 1)?.DecidedAt;
     }
 
     internal static EmailMessage Compose(UserNotification notification, NotificationDelivery delivery,

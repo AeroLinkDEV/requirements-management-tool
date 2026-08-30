@@ -44,8 +44,7 @@ public static class OperationsEndpoints
         var baseUrl = links.BaseUrl;
         var validBaseUrl = baseUrl is not null;
         var smtpHost = configuration["Notifications:Smtp:Host"]?.Trim();
-        var smtpPort = int.TryParse(configuration["Notifications:Smtp:Port"], out var configuredPort)
-            && configuredPort is > 0 and <= 65535 ? configuredPort : 25;
+        var smtpPort = SmtpEmailSender.ResolvePort(configuration);
         var hasCredentials = !string.IsNullOrWhiteSpace(configuration["Notifications:Smtp:UserName"])
             && !string.IsNullOrWhiteSpace(configuration["Notifications:Smtp:Password"]);
         return Results.Ok(new
@@ -56,6 +55,7 @@ public static class OperationsEndpoints
                 configured = sender.IsConfigured,
                 hostConfigured = !string.IsNullOrWhiteSpace(smtpHost),
                 port = smtpPort,
+                portValid = smtpPort is not null,
                 useStartTls = !string.Equals(configuration["Notifications:Smtp:UseStartTls"], "false", StringComparison.OrdinalIgnoreCase),
                 credentialsConfigured = hasCredentials,
                 // A from address is not a secret, but do not echo arbitrary configuration in this operation.
