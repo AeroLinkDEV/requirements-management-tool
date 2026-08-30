@@ -50,12 +50,22 @@ public sealed class ChangeRequestReviewRationaleApiTests : IClassFixture<SharedA
         var step = detail.GetProperty("reviewCycles")[0].GetProperty("steps")[0];
         Assert.Equal("Approved", step.GetProperty("state").GetString());
         Assert.Equal("The proposed wording matches the verified HLR behavior.", step.GetProperty("rationale").GetString());
+        Assert.Equal(nameof(ReviewStageKind.Review), step.GetProperty("stageKind").GetString());
+        Assert.Equal(JsonValueKind.Null, step.GetProperty("authoritySource").ValueKind);
+        Assert.Equal(JsonValueKind.Null, step.GetProperty("authoritySourceId").ValueKind);
 
         using var scope = _host.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var signature = await db.ElectronicSignatures.AsNoTracking()
-            .SingleAsync(x => x.ArtifactId == fixture.ChangeRequestId && x.Action == "Approve");
+            .SingleAsync(x => x.ArtifactId == fixture.ChangeRequestId && x.Action == "Review");
         Assert.Equal("The proposed wording matches the verified HLR behavior.", signature.Rationale);
+
+        var signatureProjection = (await client.GetFromJsonAsync<JsonElement>(
+            $"/api/signatures?artifactId={fixture.ChangeRequestId}")).EnumerateArray().Single();
+        Assert.Equal("Review", signatureProjection.GetProperty("action").GetString());
+        Assert.Equal("", signatureProjection.GetProperty("authoritySource").GetString());
+        Assert.Equal(JsonValueKind.Null, signatureProjection.GetProperty("authoritySourceId").ValueKind);
+        Assert.True(signatureProjection.GetProperty("isLegacyAuthoritySource").GetBoolean());
     }
 
     [Fact]

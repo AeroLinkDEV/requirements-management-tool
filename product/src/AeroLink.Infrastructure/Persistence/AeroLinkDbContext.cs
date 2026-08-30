@@ -917,6 +917,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.StageName).HasMaxLength(120);
             b.Property(x => x.StageKind).HasConversion<string>().HasMaxLength(20).HasDefaultValue(ReviewStageKind.Review);
             b.Property(x => x.Authority).HasMaxLength(40);
+            // Nullable by design: rows recorded before Slice 7 have no recoverable source row and must remain
+            // explicitly legacy rather than receiving a fabricated sentinel.
+            b.Property(x => x.AuthoritySource).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.AuthoritySourceId);
             b.Property(x => x.Rationale).HasMaxLength(4000);
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.HasIndex(x => new { x.ReviewCycleId, x.Position }).IsUnique();

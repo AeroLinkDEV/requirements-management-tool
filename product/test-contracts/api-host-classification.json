@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 116,
-    "tests": 706,
-    "knownCases": 787,
+    "tests": 707,
+    "knownCases": 788,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 44,
-      "tests": 266,
-      "knownCases": 295,
+      "tests": 267,
+      "knownCases": 296,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -350,8 +350,8 @@
     },
     {
       "cls": "TestChangeRequestReviewWorkflowTests",
-      "tests": 45,
-      "knownCases": 49,
+      "tests": 46,
+      "knownCases": 50,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",

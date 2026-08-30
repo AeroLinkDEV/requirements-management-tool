@@ -2,7 +2,7 @@
 
 **Last materially reconciled: 2026-08-29.**
 
-**Product checkpoint used for this snapshot:** the #816 Slice 4 authority cutover on branch `glm/816-slice4-workflow-authority` (PR #851, whose final head SHA is recorded in the PR), built on protected `main` at `3d2820dbd5bb8b7d1de511928ee06f54ffdd9217`. That is a checkpoint, not a promise that live `main` will not move. Always refresh GitHub before starting work.
+**Product checkpoint used for this snapshot:** the #816 Slice 7 authority-provenance and integrated-acceptance completion, built on protected `main` at `14fdffc7c7f70fb9960f198c50f0913dc34b11f7`. That is a checkpoint, not a promise that live `main` will not move. Always refresh GitHub before starting work.
 
 This is the single living product-level orientation record for AeroLink. It answers what the product is, what architecture is currently supported, what remains intentionally outside its claims, and where authoritative detail lives.
 
@@ -248,7 +248,7 @@ A review workflow stage records two independent facts:
 - the **required project authority**, represented explicitly as either `BaseRole` (a base project role) or `LeadershipPosition` (an accountable position, answered by its current primary and valid standing backup); and
 - the **signature meaning**, which comes only from the stage's `ReviewStageKind` (`Review` or `Approval`) and never from a person's roles.
 
-Workflow stages recorded before this cutover carry no authority kind: they remain readable through explicit legacy-compatibility semantics and are never reinterpreted under today's vocabulary. New and revised workflow configuration must be explicit, the server refuses legacy/ambiguous writes, and all workflow authority resolves through the one central effective-authority resolver so the candidate picker, the signing gate, and the audit record answer identically. Historical and in-flight review workflow versions stay frozen and are not rewritten under current terminology.
+Workflow stages recorded before this cutover carry no authority kind: they remain readable through explicit legacy-compatibility semantics and are never reinterpreted under today's vocabulary. New and revised workflow configuration must be explicit, the server refuses legacy/ambiguous writes, and all workflow authority resolves through the one central effective-authority resolver so the candidate picker, the signing gate, and the audit record answer identically. Each newly assigned review step freezes the exact authority source and source-row identity, and the resulting electronic signature copies that provenance together with the frozen workflow, stage, cycle, position, and Review/Approval meaning. Historical rows with no recoverable source remain explicitly null rather than receiving fabricated provenance; historical and in-flight review workflow versions stay frozen and are not rewritten under current terminology.
 
 See [Security and Identity Model](docs/product-definition/SECURITY_AND_IDENTITY_MODEL.md).
 
@@ -302,7 +302,7 @@ This is intentionally short. For the narrative history, use [docs/PROJECT_HISTOR
 - #762 / PR #767 unified normal Case/Procedure software UX.
 - #765 phases 1–6 culminating in PR #774 richer Project-scoped Problem Reports and Related Problem Reports.
 - #778 repository knowledge/hygiene programme.
-- #816 Slices 2–4 / PR #851: Project Leadership + central effective-authority resolver, and the review workflow required-authority cutover (explicit BaseRole/LeadershipPosition demands, Review/Approval from the stage kind, retired Reviewer/Approver vocabulary).
+- #816 Slices 2–7: Project Leadership and standing-backup authority, Personnel and workflow cutover, email/shared-access operability, ladder-aware assessment visibility, frozen approval-step/signature provenance, and disposable integrated SMTP-to-authenticated-signature acceptance.
 
 ## Live backlog and active work
 

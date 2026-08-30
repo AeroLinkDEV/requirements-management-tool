@@ -7,12 +7,19 @@ using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Notifications;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
+using AeroLink.Infrastructure.Notifications;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using System.Net.Sockets;
+using System.Text;
 
 namespace AeroLink.Api.Tests;
 
@@ -226,6 +233,42 @@ public sealed class TestChangeRequestReviewWorkflowTests
             $"/api/releases/{releaseId}/test-change-reviews");
         return list.GetProperty("items").EnumerateArray()
             .Single(x => x.GetProperty("id").GetGuid() == reviewId);
+    }
+
+    private static string DecodeBase64MimeParts(string raw)
+    {
+        var decoded = new StringBuilder();
+        var block = new StringBuilder();
+        var inBase64 = false;
+        foreach (var line in raw.Split(["\r\n", "\n"], StringSplitOptions.None))
+        {
+            if (!inBase64)
+            {
+                if (line.Equals("Content-Transfer-Encoding: base64", StringComparison.OrdinalIgnoreCase))
+                {
+                    inBase64 = true;
+                    block.Clear();
+                }
+                continue;
+            }
+
+            if (line.StartsWith("--", StringComparison.Ordinal))
+            {
+                AppendDecoded(block, decoded);
+                inBase64 = false;
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(line)) block.Append(line.Trim());
+        }
+        if (inBase64) AppendDecoded(block, decoded);
+        return decoded.ToString();
+    }
+
+    private static void AppendDecoded(StringBuilder block, StringBuilder decoded)
+    {
+        if (block.Length == 0) return;
+        decoded.Append(Encoding.UTF8.GetString(Convert.FromBase64String(block.ToString())));
     }
 
     private static async Task PreparePackageAsync(HttpClient client, Fixture fixture, bool writeCase = true)
@@ -808,13 +851,200 @@ public sealed class TestChangeRequestReviewWorkflowTests
         var cycle = await db.ReviewCycles.Include(x => x.Steps)
             .SingleAsync(x => x.TestChangeReviewId == fixture.ReviewId);
         var signature = await db.ElectronicSignatures.SingleAsync(x => x.ArtifactId == fixture.ReviewId);
+        var frozenStep = cycle.Steps.Single();
+        var expectedPosition = authority == ProgramRole.SystemTestLead
+            ? ProjectLeadershipPosition.SystemTestLead
+            : ProjectLeadershipPosition.ConfigurationManager;
+        var programId = await db.Projects.AsNoTracking().Where(x => x.Id == fixture.ProjectId)
+            .Select(x => x.ProgramId).SingleAsync();
+        var expectedAssignment = await db.ProjectLeadershipAssignments.AsNoTracking()
+            .SingleAsync(x => x.ProgramId == programId && x.Position == expectedPosition
+                && x.EndedAt == null && x.HolderUserId ==
+                    db.UserAccounts.Where(u => u.UserName == signer).Select(u => u.Id).Single());
         Assert.Equal(rationale, review.ApprovalRationale);
         Assert.Equal(meaning, signature.Meaning);
         Assert.NotEqual(rationale, signature.Meaning);
         Assert.Equal(authority.ToString(), signature.Authority);
+        Assert.Equal(frozenStep.StageKind.ToString(), signature.Action);
+        Assert.Equal(frozenStep.Id, signature.ReviewStepId);
+        Assert.Equal(cycle.Sequence, signature.ReviewCycle);
+        Assert.Equal(frozenStep.Position, signature.ReviewStepPosition);
+        Assert.Equal(nameof(ProjectAuthoritySource.LeadershipPrimary), signature.AuthoritySource);
+        Assert.Equal(expectedAssignment.Id, signature.AuthoritySourceId);
+        Assert.Equal(cycle.WorkflowId, signature.WorkflowId);
+        Assert.Equal(cycle.WorkflowVersion, signature.WorkflowVersion);
         Assert.Equal(cycle.SnapshotHash, signature.ContentHash);
         Assert.Equal(signer, signature.UserName);
-        Assert.Equal(cycle.Steps.Single().DecidedAt, signature.SignedAt);
+        Assert.Equal(frozenStep.DecidedAt, signature.SignedAt);
+
+        var signatureProjection = (await client.GetFromJsonAsync<JsonElement>(
+            $"/api/signatures?artifactId={fixture.ReviewId}")).EnumerateArray().Single();
+        Assert.Equal(signature.Id, signatureProjection.GetProperty("id").GetGuid());
+        Assert.Equal(signature.AuthoritySource, signatureProjection.GetProperty("authoritySource").GetString());
+        Assert.Equal(signature.AuthoritySourceId, signatureProjection.GetProperty("authoritySourceId").GetGuid());
+        Assert.False(signatureProjection.GetProperty("isLegacyAuthoritySource").GetBoolean());
+    }
+
+    [Fact]
+    public async Task A_real_review_submission_outbox_mail_and_authenticated_approval_keep_the_frozen_authority()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = Task.Run(async () =>
+        {
+            using var socket = await listener.AcceptTcpClientAsync();
+            using var stream = socket.GetStream();
+            using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
+            await using var writer = new StreamWriter(stream, Encoding.ASCII, leaveOpen: true) { AutoFlush = true };
+            await writer.WriteLineAsync("220 loopback smtp ready");
+            var data = new StringBuilder();
+            var inData = false;
+            while (true)
+            {
+                var line = await reader.ReadLineAsync();
+                if (line is null) break;
+                if (inData)
+                {
+                    if (line == ".") { inData = false; await writer.WriteLineAsync("250 accepted"); continue; }
+                    data.AppendLine(line);
+                    continue;
+                }
+                if (line.StartsWith("EHLO", StringComparison.OrdinalIgnoreCase)
+                    || line.StartsWith("HELO", StringComparison.OrdinalIgnoreCase))
+                    await writer.WriteLineAsync("250 loopback");
+                else if (line.StartsWith("MAIL FROM", StringComparison.OrdinalIgnoreCase)
+                    || line.StartsWith("RCPT TO", StringComparison.OrdinalIgnoreCase))
+                    await writer.WriteLineAsync("250 accepted");
+                else if (line.Equals("DATA", StringComparison.OrdinalIgnoreCase))
+                {
+                    inData = true;
+                    await writer.WriteLineAsync("354 send data");
+                }
+                else if (line.Equals("QUIT", StringComparison.OrdinalIgnoreCase))
+                {
+                    await writer.WriteLineAsync("221 bye");
+                    break;
+                }
+                else await writer.WriteLineAsync("250 accepted");
+            }
+            received.TrySetResult(data.ToString());
+        });
+
+        try
+        {
+            using var factory = new AeroLinkApiFactory();
+            using var client = factory.CreateClient();
+            var fixture = await SeedAsync(factory);
+            Guid workflowId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                var workflow = new ReviewWorkflow(fixture.ProjectId, "SMTP approval", ReviewSubject.SystemTest,
+                    ReviewMode.Sequential,
+                    [new ReviewWorkflowStageDraft("Final approval", ProgramRole.SystemTestEngineer,
+                        ReviewStageKind.Approval, ReviewStageAuthorityKind.BaseRole)],
+                    "test.setup", DateTimeOffset.UtcNow);
+                workflow.Activate("test.setup", DateTimeOffset.UtcNow);
+                db.ReviewWorkflows.Add(workflow);
+                await db.SaveChangesAsync();
+                workflowId = workflow.Id;
+            }
+
+            await PreparePackageAsync(client, fixture);
+            await SubmitAsync(client, fixture.ReviewId, new { approvers = new[] { new { userId = "workflow.one" } } });
+
+            var settings = new Dictionary<string, string?>
+            {
+                ["Notifications:Smtp:Host"] = "127.0.0.1",
+                ["Notifications:Smtp:Port"] = port.ToString(),
+                ["Notifications:Smtp:UseStartTls"] = "false",
+                ["Notifications:Smtp:From"] = "aerolink@localhost",
+                ["Notifications:BaseUrl"] = "https://aerolink.example.test",
+                ["Notifications:UnsubscribeSecret"] = "smtp-acceptance-secret-0123456789-abcd",
+            };
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                var sender = new SmtpEmailSender(configuration, NullLogger<SmtpEmailSender>.Instance);
+                var dispatch = await new NotificationOutbox(db).DispatchPendingAsync(sender,
+                    new NotificationLinkBuilder(configuration), new UnsubscribeTokenService(configuration),
+                    50, 5, DateTimeOffset.UtcNow, default);
+                Assert.Equal(1, dispatch.Sent);
+                var delivery = await db.NotificationDeliveries.AsNoTracking().SingleAsync();
+                Assert.NotEqual(Guid.Empty, delivery.Id);
+                Assert.Equal("workflow.one", delivery.Recipient);
+                Assert.Equal("workflow.one@example.test", delivery.Address);
+                Assert.Equal(NotificationDeliveryState.Sent, delivery.State);
+                Assert.Equal(1, delivery.Attempts);
+                Assert.NotNull(delivery.CompletedAt);
+            }
+
+            var mail = await received.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await server;
+            // System.Net.Mail transports both alternate views as base64; decode the captured MIME parts before
+            // checking the exact user-visible link and ensure no mutation route is mailed.
+            var readableMail = DecodeBase64MimeParts(mail);
+            Assert.Contains($"https://aerolink.example.test/open/test-change-request/{fixture.ReviewId}", readableMail);
+            Assert.Contains("ready for your approval", readableMail, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain($"/api/test-change-reviews/{fixture.ReviewId}/approve", readableMail);
+
+            using var anonymous = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+            using var anonymousOpen = await anonymous.GetAsync($"/open/test-change-request/{fixture.ReviewId}");
+            Assert.Equal(HttpStatusCode.Redirect, anonymousOpen.StatusCode);
+            Assert.Equal("/", anonymousOpen.Headers.Location?.ToString());
+
+            using var recipientClient = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+            await LoginAsync(recipientClient, "workflow.one");
+            Guid programId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                programId = await db.Projects.AsNoTracking().Where(x => x.Id == fixture.ProjectId)
+                    .Select(x => x.ProgramId).SingleAsync();
+            }
+            using var opened = await recipientClient.GetAsync($"/open/test-change-request/{fixture.ReviewId}");
+            Assert.Equal(HttpStatusCode.Redirect, opened.StatusCode);
+            Assert.Equal($"/programs/{programId}/projects/{fixture.ProjectId}/releases/{fixture.ReleaseId}/system-verification/change-requests/{fixture.ReviewId}",
+                opened.Headers.Location?.ToString());
+
+            using var approved = await recipientClient.PostAsJsonAsync($"/api/test-change-reviews/{fixture.ReviewId}/approve",
+                new { rationale = "Approval is supported by the controlled package.",
+                    password = AeroLinkApiFactory.MemberPassword, meaning = "I approve the exact package." });
+            Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
+
+            using var assertScope = factory.Services.CreateScope();
+            var assertDb = assertScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var cycle = await assertDb.ReviewCycles.Include(x => x.Steps)
+                .SingleAsync(x => x.TestChangeReviewId == fixture.ReviewId);
+            var step = cycle.Steps.Single();
+            var membership = await assertDb.ProgramMemberships.AsNoTracking()
+                .Where(x => x.ProgramId ==
+                    assertDb.Projects.Where(p => p.Id == fixture.ProjectId).Select(p => p.ProgramId).Single()
+                    && x.UserId == assertDb.UserAccounts.Where(u => u.UserName == "workflow.one")
+                        .Select(u => u.Id).Single()
+                    && x.EndedAt == null && x.Role == ProgramRole.SystemTestEngineer)
+                .OrderBy(x => x.Id).SingleAsync();
+            var signature = await assertDb.ElectronicSignatures.AsNoTracking()
+                .SingleAsync(x => x.ArtifactId == fixture.ReviewId);
+            Assert.Equal(workflowId, cycle.WorkflowId);
+            Assert.Equal(ReviewStageKind.Approval, step.StageKind);
+            Assert.Equal(nameof(ProjectAuthoritySource.DirectBaseRole), step.AuthoritySource?.ToString());
+            Assert.Equal(membership.Id, step.AuthoritySourceId);
+            Assert.Equal("Approval", signature.Action);
+            Assert.Equal(step.Id, signature.ReviewStepId);
+            Assert.Equal(step.AuthoritySource?.ToString(), signature.AuthoritySource);
+            Assert.Equal(step.AuthoritySourceId, signature.AuthoritySourceId);
+            Assert.Equal(cycle.WorkflowId, signature.WorkflowId);
+            Assert.Equal(cycle.WorkflowVersion, signature.WorkflowVersion);
+        }
+        finally
+        {
+            listener.Stop();
+            try { await server; } catch (Exception) { }
+        }
     }
 
     [Fact]
@@ -965,6 +1195,29 @@ public sealed class TestChangeRequestReviewWorkflowTests
         var steps = cycle.GetProperty("steps").EnumerateArray().ToList();
         Assert.Equal("Active", steps[0].GetProperty("state").GetString());
         Assert.Equal("Pending", steps[1].GetProperty("state").GetString());
+
+        // The projection exposes the frozen stage identity and exact source row. The source must be the
+        // membership that answered this stage, not a role label reconstructed by the client.
+        using (var provenanceScope = factory.Services.CreateScope())
+        {
+            var provenanceDb = provenanceScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var workflowOneId = await provenanceDb.UserAccounts.AsNoTracking()
+                .Where(x => x.UserName == "workflow.one").Select(x => x.Id).SingleAsync();
+            var programId = await provenanceDb.Projects.AsNoTracking().Where(x => x.Id == fixture.ProjectId)
+                .Select(x => x.ProgramId).SingleAsync();
+            var expectedMembership = await provenanceDb.ProgramMemberships.AsNoTracking()
+                .Where(x => x.ProgramId == programId && x.UserId == workflowOneId
+                    && x.EndedAt == null && x.Role == ProgramRole.SystemTestEngineer)
+                .OrderBy(x => x.Id).SingleAsync();
+            var expectedCycle = await provenanceDb.ReviewCycles.AsNoTracking()
+                .SingleAsync(x => x.TestChangeReviewId == fixture.ReviewId);
+            Assert.Equal(nameof(ReviewStageKind.Review), steps[0].GetProperty("stageKind").GetString());
+            Assert.Equal(nameof(ProjectAuthoritySource.DirectBaseRole),
+                steps[0].GetProperty("authoritySource").GetString());
+            Assert.Equal(expectedMembership.Id, steps[0].GetProperty("authoritySourceId").GetGuid());
+            Assert.Equal(expectedCycle.WorkflowId, cycle.GetProperty("workflowId").GetGuid());
+            Assert.Equal(expectedCycle.WorkflowLogicalId, cycle.GetProperty("workflowLogicalId").GetGuid());
+        }
 
         await LoginAsync(client, "workflow.two");
         var asTwo = await ReadItemAsync(client, fixture.ReleaseId, fixture.ReviewId);
@@ -1228,6 +1481,31 @@ public sealed class TestChangeRequestReviewWorkflowTests
             new { approvers = new[] { new { userId = "workflow.config.backup" } }, mode = "Sequential" });
 
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        await LoginAsync(client, "workflow.config.backup");
+        using var approved = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/approve",
+            new { password = AeroLinkApiFactory.MemberPassword, meaning = "Signed as the standing Configuration Manager backup." });
+        Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var cycle = await db.ReviewCycles.Include(x => x.Steps)
+            .SingleAsync(x => x.ChangeRequestId == draftId);
+        var step = cycle.Steps.Single();
+        var backup = await db.ProjectLeadershipBackups.AsNoTracking()
+            .SingleAsync(x => x.ProgramId ==
+                db.Projects.Where(p => p.Id == fixture.ProjectId).Select(p => p.ProgramId).Single()
+                && x.Position == ProjectLeadershipPosition.ConfigurationManager
+                && x.BackupUserId == db.UserAccounts.Where(u => u.UserName == "workflow.config.backup")
+                    .Select(u => u.Id).Single()
+                && x.RemovedAt == null);
+        var signature = await db.ElectronicSignatures.AsNoTracking()
+            .SingleAsync(x => x.ArtifactId == draftId);
+        Assert.Equal(nameof(ProjectAuthoritySource.LeadershipBackup), step.AuthoritySource?.ToString());
+        Assert.Equal(backup.Id, step.AuthoritySourceId);
+        Assert.Equal("Review", signature.Action);
+        Assert.Equal(step.Id, signature.ReviewStepId);
+        Assert.Equal(step.AuthoritySource?.ToString(), signature.AuthoritySource);
+        Assert.Equal(step.AuthoritySourceId, signature.AuthoritySourceId);
     }
 
     [Fact]

@@ -455,6 +455,77 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
         Assert.False(await _resolver.IsSatisfiedAsync(rawRetired.Id, _program.Id, legacyLead, _now));
     }
 
+    [Fact]
+    public async Task Direct_membership_provenance_uses_the_canonical_role_precedence_not_guid_order()
+    {
+        // Engineer accepts several memberships. The authority label and source row must identify the same
+        // role; choosing the smallest GUID would make those two facts disagree nondeterministically.
+        var person = Person("multi-role", ProgramRole.ProjectEngineer, ProgramRole.SystemEngineer);
+        var memberships = await _db.ProgramMemberships.Where(x => x.UserId == person.Id).ToListAsync();
+        var expected = memberships.Single(x => x.Role == ProgramRole.SystemEngineer);
+
+        var decision = await _resolver.ResolveAsync(person.Id, _program.Id,
+            ProjectAuthorityRequirement.BaseRole(ProgramRole.Engineer), _now);
+        var holders = await _resolver.ResolveHolderDecisionsAsync(_program.Id,
+            ProjectAuthorityRequirement.BaseRole(ProgramRole.Engineer), _now);
+
+        Assert.Equal(ProjectAuthoritySource.DirectBaseRole, decision.Source);
+        Assert.Equal(expected.Id, decision.SourceId);
+        Assert.Equal(expected.Id, Assert.Single(holders, x => x.UserId == person.Id).Decision.SourceId);
+    }
+
+    [Fact]
+    public async Task Legacy_holder_projection_preserves_direct_membership_precedence_over_leadership()
+    {
+        // Legacy Engineer demands resolve direct base membership before the leadership compatibility bridge.
+        // Candidate projection must retain that same source, or the picker can freeze a different authority
+        // from the one the per-person signing gate would report.
+        var person = Person("multi-authority", ProgramRole.SystemEngineer);
+        Assign(person, ProjectLeadershipPosition.SystemEngineeringLead);
+        var membership = await _db.ProgramMemberships.SingleAsync(x => x.UserId == person.Id);
+        var requirement = ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.Engineer);
+
+        var decision = await _resolver.ResolveAsync(person.Id, _program.Id, requirement, _now);
+        var holder = Assert.Single(await _resolver.ResolveHolderDecisionsAsync(_program.Id, requirement, _now),
+            x => x.UserId == person.Id);
+
+        Assert.Equal(ProjectAuthoritySource.DirectBaseRole, decision.Source);
+        Assert.Equal(membership.Id, decision.SourceId);
+        Assert.Equal(decision, holder.Decision);
+    }
+
+    [Fact]
+    public async Task Every_live_source_exposes_its_exact_row_id_and_global_admin_is_null()
+    {
+        var primary = Person("source-primary", ProgramRole.SystemEngineer);
+        Assign(primary, ProjectLeadershipPosition.SystemEngineeringLead);
+        var backup = Person("source-backup", ProgramRole.SystemEngineer);
+        BackUp(backup, ProjectLeadershipPosition.SystemEngineeringLead);
+        var delegator = Person("source-delegator", ProgramRole.Approver);
+        var delegatee = Person("source-delegatee");
+        var delegation = new RoleDelegation(_program.Id, delegator.Id, delegatee.Id, ProgramRole.Approver,
+            _now.AddMinutes(-1), _now.AddHours(1), "Temporary cover", "test", _now);
+        _db.RoleDelegations.Add(delegation);
+        var administrator = new UserAccount(IdentityService.SystemAdministratorUserName, "Global Administrator",
+            "global-source@example.test", IdentityService.HashPassword("StrongPass!2026"), _now);
+        _db.Add(administrator);
+        await _db.SaveChangesAsync();
+
+        var assignment = await _db.ProjectLeadershipAssignments.SingleAsync(x => x.HolderUserId == primary.Id);
+        var leadershipBackup = await _db.ProjectLeadershipBackups.SingleAsync(x => x.BackupUserId == backup.Id);
+        var primaryDecision = await ResolveAsync(primary, ProjectLeadershipPosition.SystemEngineeringLead);
+        var backupDecision = await ResolveAsync(backup, ProjectLeadershipPosition.SystemEngineeringLead);
+        var delegationDecision = await _resolver.ResolveAsync(delegatee.Id, _program.Id,
+            ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.Approver), _now);
+        var administratorDecision = await _resolver.ResolveAsync(administrator.Id, _program.Id,
+            ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.SystemEngineeringLead), _now);
+
+        Assert.Equal(assignment.Id, primaryDecision.SourceId);
+        Assert.Equal(leadershipBackup.Id, backupDecision.SourceId);
+        Assert.Equal(delegation.Id, delegationDecision.SourceId);
+        Assert.Null(administratorDecision.SourceId);
+    }
+
     public void Dispose()
     {
         _db.Database.CloseConnection();

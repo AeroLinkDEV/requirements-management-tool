@@ -11,7 +11,8 @@ public sealed class ApprovalStep
 {
     private ApprovalStep() { }
     internal ApprovalStep(Guid reviewCycleId, int position, string approverId, string approverName, bool active,
-        string stageName = "", ReviewStageKind stageKind = ReviewStageKind.Review)
+        string stageName = "", ReviewStageKind stageKind = ReviewStageKind.Review,
+        ProjectAuthoritySource? authoritySource = null, Guid? authoritySourceId = null)
     {
         Id = Guid.NewGuid();
         ReviewCycleId = reviewCycleId;
@@ -23,6 +24,8 @@ public sealed class ApprovalStep
         StageName = stageName.Trim();
         StageKind = stageKind;
         Authority = "Reviewer";
+        AuthoritySource = authoritySource;
+        AuthoritySourceId = authoritySourceId;
         State = active ? ApprovalStepState.Active : ApprovalStepState.Pending;
     }
 
@@ -38,6 +41,10 @@ public sealed class ApprovalStep
     /// </summary>
     public ReviewStageKind StageKind { get; private set; }
     public string Authority { get; private set; } = string.Empty;
+    /// <summary>The exact authority source frozen when this step was assigned. Null is honest legacy data.</summary>
+    public ProjectAuthoritySource? AuthoritySource { get; private set; }
+    /// <summary>The membership/assignment/delegation/backup row that supplied <see cref="AuthoritySource"/>.</summary>
+    public Guid? AuthoritySourceId { get; private set; }
     /// <summary>
     /// Why this reviewer decided as they did. Approval rationale is the reviewer's own reasoning about the
     /// exact content they examined; it is distinct from the engineering rationale carried by the artifact
@@ -54,11 +61,14 @@ public sealed class ApprovalStep
         State = ApprovalStepState.Returned; Rationale = rationale.Trim(); DecidedAt = now;
     }
     internal void Activate() => State = ApprovalStepState.Active;
-    internal void Replace(string id, string name, ProgramRole? role)
+    internal void Replace(string id, string name, ProgramRole? role,
+        ProjectAuthoritySource? authoritySource = null, Guid? authoritySourceId = null)
     {
         ApproverId = id;
         ApproverName = name;
         Authority = role?.ToString() ?? "Reviewer";
+        AuthoritySource = authoritySource;
+        AuthoritySourceId = authoritySourceId;
     }
 }
 
@@ -122,8 +132,14 @@ public sealed class ReviewCycle
             var step = new ApprovalStep(Id, index, approvers[index].UserId, approvers[index].Name,
                 Mode == ReviewMode.Parallel || index == 0,
                 workflow is null ? "" : configuredStage?.Name ?? $"Additional reviewer {index - workflow.Stages.Count + 1}",
-                workflow is null ? ReviewStageKind.Review : configuredStage?.Kind ?? ReviewStageKind.Review);
-            step.Replace(approvers[index].UserId, approvers[index].Name, approvers[index].Role);
+                workflow is null ? ReviewStageKind.Review : configuredStage?.Kind ?? ReviewStageKind.Review,
+                approvers[index].AuthoritySource == ProjectAuthoritySource.None
+                    ? null : approvers[index].AuthoritySource,
+                approvers[index].AuthoritySourceId);
+            step.Replace(approvers[index].UserId, approvers[index].Name, approvers[index].Role,
+                approvers[index].AuthoritySource == ProjectAuthoritySource.None
+                    ? null : approvers[index].AuthoritySource,
+                approvers[index].AuthoritySourceId);
             _steps.Add(step);
         }
     }
@@ -307,7 +323,9 @@ public sealed class ReviewCycle
         // submission and quietly break it before anybody signed.
         var stage = workflow?.Stages.SingleOrDefault(x => x.Position == position);
         if (stage is not null) workflow!.ValidateStage(stage, replacement);
-        _steps[position].Replace(replacement.UserId, replacement.Name, replacement.Role);
+        _steps[position].Replace(replacement.UserId, replacement.Name, replacement.Role,
+            replacement.AuthoritySource == ProjectAuthoritySource.None ? null : replacement.AuthoritySource,
+            replacement.AuthoritySourceId);
     }
 
     internal void Cancel(string reason, DateTimeOffset now)
@@ -331,4 +349,5 @@ public sealed class ReviewCycle
 /// A chosen approver. The authority is resolved outside the domain, because program membership lives in a
 /// different aggregate; it rides along so a recorded procedure can be enforced without reaching for it.
 /// </summary>
-public sealed record ApproverSelection(string UserId, string Name, ProgramRole? Role = null);
+public sealed record ApproverSelection(string UserId, string Name, ProgramRole? Role = null,
+    ProjectAuthoritySource AuthoritySource = ProjectAuthoritySource.None, Guid? AuthoritySourceId = null);

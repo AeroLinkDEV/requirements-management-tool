@@ -111,6 +111,7 @@ public sealed class RestartReviewApiTests
         using var response = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/restart-review",
             new { reason = "Routed to the wrong systems approver.", approvers = new[] { new { userId = "right.user" } } });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var detail = await response.Content.ReadFromJsonAsync<JsonElement>();
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -127,6 +128,26 @@ public sealed class RestartReviewApiTests
         Assert.Equal("System engineering approval", step.StageName);
         Assert.Equal(ReviewStageKind.Approval, step.StageKind);
         Assert.Equal(nameof(ProgramRole.SystemEngineer), step.Authority);
+        var rightUserId = await db.UserAccounts.AsNoTracking().Where(x => x.UserName == "right.user")
+            .Select(x => x.Id).SingleAsync();
+        var programId = await db.Projects.AsNoTracking().Where(p => p.Id == fixture.ProjectId)
+            .Select(p => p.ProgramId).SingleAsync();
+        var rightMembership = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.ProgramId == programId)
+            .Where(x => x.UserId == rightUserId && x.Role == ProgramRole.SystemEngineer && x.EndedAt == null)
+            .OrderBy(x => x.Id).SingleAsync();
+        Assert.Equal(nameof(ProjectAuthoritySource.DirectBaseRole), step.AuthoritySource?.ToString());
+        Assert.Equal(rightMembership.Id, step.AuthoritySourceId);
+        var projectedCycle = detail.GetProperty("reviewCycles").EnumerateArray()
+            .Single(x => x.GetProperty("state").GetString() == nameof(ReviewCycleState.Active));
+        var projectedStep = projectedCycle.GetProperty("steps").EnumerateArray().Single();
+        Assert.Equal(step.Id, projectedStep.GetProperty("id").GetGuid());
+        Assert.Equal(nameof(ReviewStageKind.Approval), projectedStep.GetProperty("stageKind").GetString());
+        Assert.Equal(nameof(ProjectAuthoritySource.DirectBaseRole),
+            projectedStep.GetProperty("authoritySource").GetString());
+        Assert.Equal(rightMembership.Id, projectedStep.GetProperty("authoritySourceId").GetGuid());
+        Assert.Equal(active.WorkflowId, projectedCycle.GetProperty("workflowId").GetGuid());
+        Assert.Equal(active.WorkflowVersion, projectedCycle.GetProperty("workflowVersion").GetInt32());
         var notification = await db.UserNotifications.SingleAsync(x =>
             x.ArtifactId == fixture.ChangeRequestId && x.Recipient == "right.user");
         Assert.Equal("ApprovalActivated", notification.Type);

@@ -374,9 +374,13 @@ public static class VerificationImpactEndpoints
                             cycle.WorkflowVersion,
                             steps = cycle.Steps.OrderBy(x => x.Position).Select(step => new
                             {
+                                step.Id,
                                 step.Position,
                                 stageName = step.StageName,
+                                stageKind = step.StageKind.ToString(),
                                 authority = step.Authority,
+                                authoritySource = step.AuthoritySource?.ToString(),
+                                authoritySourceId = step.AuthoritySourceId,
                                 approverId = step.ApproverId,
                                 approverName = step.ApproverName,
                                 rationale = step.Rationale,
@@ -2462,7 +2466,11 @@ public static class VerificationImpactEndpoints
                         .Select(x => x.ProgramId).SingleAsync(ct);
                     if (!await identity.HasRoleAsync(approver.Id, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct))
                         return Results.BadRequest(new { error = $"{approver.DisplayName} does not hold Approver authority for this Program." });
-                    selections = [new ApproverSelection(approver.UserName, approver.DisplayName, ProgramRole.Approver)];
+                    var resolved = await WorkflowEndpoints.StageAuthorityWithDecisionAsync(db, review.ProjectId,
+                        approver.Id, ProgramRole.Approver, ct);
+                    selections = [new ApproverSelection(approver.UserName, approver.DisplayName,
+                        resolved.Role, resolved.Decision.Granted ? resolved.Decision.Source : ProjectAuthoritySource.None,
+                        resolved.Decision.SourceId)];
                 }
                 else
                 {
@@ -2487,14 +2495,16 @@ public static class VerificationImpactEndpoints
                     {
                         var chosen = requested[index];
                         var account = directory[chosen.UserId.Trim().ToLowerInvariant()];
-                        var role = index < workflow.Stages.Count
-                            ? await WorkflowEndpoints.StageAuthorityAsync(db, review.ProjectId, account.Id,
+                        var resolution = index < workflow.Stages.Count
+                            ? await WorkflowEndpoints.StageAuthorityWithDecisionAsync(db, review.ProjectId, account.Id,
                                 workflow.Stages[index], ct)
-                            : (await WorkflowEndpoints.AuthoritiesAsync(db, review.ProjectId, [account.Id], ct))
-                                .GetValueOrDefault(account.Id);
+                            : (await WorkflowEndpoints.AuthoritiesWithDecisionsAsync(db, review.ProjectId,
+                                [account.Id], ct)).GetValueOrDefault(account.Id);
+                        var role = resolution.Role;
                         if (role is null)
                             return Results.BadRequest(new { error = $"{account.DisplayName} does not hold authority to sign this review." });
-                        selections.Add(new ApproverSelection(account.UserName, account.DisplayName, role));
+                        selections.Add(new ApproverSelection(account.UserName, account.DisplayName, role,
+                            resolution.Decision.Source, resolution.Decision.SourceId));
                     }
                 }
                 var now = DateTimeOffset.UtcNow;
@@ -2610,10 +2620,18 @@ public static class VerificationImpactEndpoints
                     db.UserNotifications.Add(ReviewNotificationFactory.ForTestChangeRequest(review.ProjectId,
                         step.ApproverId, step.StageKind, review.DisplayNumber, http.UserAccount().DisplayName,
                         $"test-change-request:{review.Id}", review.Id, now, priorStageComplete: true));
+                // activeStep was captured before the aggregate mutation above. Signature provenance must
+                // describe the frozen obligation that was actually exercised, not the current workflow.
                 db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId,
-                    "TestChangeRequest", review.Id, review.DisplayNumber, "Approve", request.Meaning.Trim(),
-                    snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now,
-                    activeStep.Authority, rationale: request.Rationale.Trim()));
+                    "TestChangeRequest", review.Id, review.DisplayNumber, activeStep.StageKind.ToString(),
+                    request.Meaning.Trim(), snapshotHash,
+                    http.Connection.RemoteIpAddress?.ToString() ?? "local", now,
+                    authority: activeStep.Authority, reviewStepId: activeStep.Id,
+                    reviewCycle: cycle.Sequence, reviewStepPosition: activeStep.Position,
+                    rationale: request.Rationale.Trim(),
+                    authoritySource: activeStep.AuthoritySource?.ToString() ?? "",
+                    workflowId: cycle.WorkflowId, workflowVersion: cycle.WorkflowVersion,
+                    authoritySourceId: activeStep.AuthoritySourceId));
                 await db.SaveChangesAsync(ct);
                 // The exact Case origin must already be Approved when PostgreSQL validates the polymorphic
                 // origin. Keep both saves in one transaction so approval and assessment raising are still one

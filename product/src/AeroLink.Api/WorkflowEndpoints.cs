@@ -24,6 +24,9 @@ public static class WorkflowEndpoints
     /// <summary>One offered signer for one stage, carrying why they qualify so the picker can say so.</summary>
     private sealed record StageCandidate(string UserId, string Name, string Role, string Via);
 
+    /// <summary>The role label retained for compatibility, paired with the resolver's exact evidence row.</summary>
+    public readonly record struct AuthorityResolution(ProgramRole? Role, ProjectAuthorityDecision Decision);
+
     public static void MapWorkflowEndpoints(this WebApplication app)
     {
         app.MapGet("/api/review-workflows", async (Guid projectId, HttpContext http, AeroLinkDbContext db,
@@ -195,8 +198,11 @@ public static class WorkflowEndpoints
             {
                 var accepted = ProgramRoleAuthority.Satisfying(required);
                 var held = rolesByUser.GetValueOrDefault(userId) ?? [];
-                foreach (var role in held)
-                    if (accepted.Contains(role)) return role.ToString();
+                // Keep the displayed role in the same canonical precedence as ProjectAuthorityResolver.
+                // Iterating the materialized membership rows would let insertion/Guid order disagree with the
+                // source row frozen when the stage is selected for a multi-role user.
+                foreach (var role in accepted)
+                    if (held.Contains(role)) return role.ToString();
                 return required.ToString();
             }
 
@@ -321,39 +327,45 @@ public static class WorkflowEndpoints
     public static async Task<Dictionary<Guid, ProgramRole?>> AuthoritiesAsync(AeroLinkDbContext db,
         Guid projectId, IReadOnlyList<Guid> userIds, CancellationToken ct)
     {
-        var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
+        var resolved = await AuthoritiesWithDecisionsAsync(db, projectId, userIds, ct);
+        return resolved.ToDictionary(x => x.Key, x => x.Value.Role);
+    }
+
+    /// <summary>Resolves the strongest effective authority and retains its source row for freezing.</summary>
+    public static async Task<Dictionary<Guid, AuthorityResolution>> AuthoritiesWithDecisionsAsync(
+        AeroLinkDbContext db, Guid projectId, IReadOnlyList<Guid> userIds, CancellationToken ct)
+    {
+        var programId = await db.Projects.Where(x => x.Id == projectId)
+            .Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
         if (programId is null || userIds.Count == 0) return [];
         var resolver = new ProjectAuthorityResolver(db);
         var now = DateTimeOffset.UtcNow;
         var memberships = await db.ProgramMemberships.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.EndedAt == null && userIds.Contains(x.UserId))
-            .Select(x => new { x.UserId, x.Role }).ToListAsync(ct);
-        var result = new Dictionary<Guid, ProgramRole?>();
-        foreach (var userId in userIds)
+            .Select(x => new { x.Id, x.UserId, x.Role }).ToListAsync(ct);
+        var result = new Dictionary<Guid, AuthorityResolution>();
+        foreach (var userId in userIds.Distinct())
         {
-            ProgramRole? resolvedRole = null;
             foreach (var candidate in ParticipationAuthorities)
             {
-                var requirement = ProjectAuthorityRequirement.LegacyRoleDemand(candidate,
-                    allowProgramAdministratorSubstitution: true);
-                var decision = await resolver.ResolveAsync(userId, programId.Value, requirement, now, ct);
+                var decision = await resolver.ResolveAsync(userId, programId.Value,
+                    ProjectAuthorityRequirement.LegacyRoleDemand(candidate,
+                        allowProgramAdministratorSubstitution: true), now, ct);
                 if (!decision.Granted) continue;
-
-                if (decision.Source == ProjectAuthoritySource.AdministratorSubstitution)
-                    resolvedRole = ProgramRole.Administrator;
-                else if (decision.Source == ProjectAuthoritySource.DirectBaseRole)
-                {
-                    var accepted = ProgramRoleAuthority.Satisfying(candidate)
-                        .Where(role => !SingularProgramRoles.IsSingular(role)).ToList();
-                    var held = memberships.Where(x => x.UserId == userId && accepted.Contains(x.Role))
-                        .Select(x => x.Role).ToHashSet();
-                    resolvedRole = accepted.Where(held.Contains).Select(role => (ProgramRole?)role).FirstOrDefault();
-                }
-                else
-                    resolvedRole = candidate;
+                ProgramRole? role = decision.Source == ProjectAuthoritySource.AdministratorSubstitution
+                    ? ProgramRole.Administrator
+                    : decision.Source == ProjectAuthoritySource.DirectBaseRole
+                        // The resolver chose the source row using the canonical accepted-role precedence.
+                        // Freeze the same role label beside it; re-scanning the user's roles here could select
+                        // a different role when one account has several accepted memberships.
+                        ? memberships.Where(m => m.UserId == userId && m.Id == decision.SourceId)
+                            .Select(m => (ProgramRole?)m.Role).FirstOrDefault()
+                        : candidate;
+                result[userId] = new AuthorityResolution(role, decision);
                 break;
             }
-            result[userId] = resolvedRole;
+            if (!result.ContainsKey(userId))
+                result[userId] = new AuthorityResolution(null, ProjectAuthorityDecision.Denied);
         }
         return result;
     }
@@ -371,14 +383,22 @@ public static class WorkflowEndpoints
     public static async Task<ProgramRole?> StageAuthorityAsync(AeroLinkDbContext db, Guid projectId,
         Guid userId, ProgramRole requiredRole, CancellationToken ct)
     {
+        return (await StageAuthorityWithDecisionAsync(db, projectId, userId, requiredRole, ct)).Role;
+    }
+
+    /// <summary>Legacy-role stage resolution with the exact authority provenance beside its role label.</summary>
+    public static async Task<AuthorityResolution> StageAuthorityWithDecisionAsync(AeroLinkDbContext db,
+        Guid projectId, Guid userId, ProgramRole requiredRole, CancellationToken ct)
+    {
         var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId)
             .SingleOrDefaultAsync(ct);
-        if (programId is null) return null;
+        if (programId is null) return new(null, ProjectAuthorityDecision.Denied);
         var decision = await new ProjectAuthorityResolver(db).ResolveAsync(userId, programId.Value,
             ProjectAuthorityRequirement.LegacyRoleDemand(requiredRole,
                 allowProgramAdministratorSubstitution: true), DateTimeOffset.UtcNow, ct);
-        if (!decision.Granted) return null;
-        if (decision.Source == ProjectAuthoritySource.AdministratorSubstitution) return ProgramRole.Administrator;
+        if (!decision.Granted) return new(null, decision);
+        if (decision.Source == ProjectAuthoritySource.AdministratorSubstitution)
+            return new(ProgramRole.Administrator, decision);
 
         // Preserve the actual base role on the frozen signature where a membership answered the demand.
         // Leadership, standing-backup and delegation decisions instead record the exact configured demand:
@@ -386,19 +406,18 @@ public static class WorkflowEndpoints
         // cannot disagree about whether the person may occupy this stage.
         if (decision.Source == ProjectAuthoritySource.DirectBaseRole)
         {
-            var accepted = SingularProgramRoles.IsPositionGoverned(requiredRole)
-                ? []
-                : ProgramRoleAuthority.Satisfying(requiredRole)
-                    .Where(role => !SingularProgramRoles.IsSingular(role)).ToList();
-            var roles = await db.ProgramMemberships.AsNoTracking()
-                .Where(x => x.ProgramId == programId && x.UserId == userId && x.EndedAt == null
-                            && accepted.Contains(x.Role))
-                .Select(x => x.Role).ToListAsync(ct);
-            if (roles.Contains(requiredRole)) return requiredRole;
-            foreach (var role in accepted)
-                if (roles.Contains(role)) return role;
+            // ResolveAsync selected this exact membership row. Use its role for the compatibility label so
+            // the frozen Authority and AuthoritySourceId cannot describe different memberships.
+            if (decision.SourceId is { } sourceId)
+            {
+                var sourceRole = await db.ProgramMemberships.AsNoTracking()
+                    .Where(x => x.Id == sourceId && x.ProgramId == programId && x.UserId == userId
+                        && x.EndedAt == null)
+                    .Select(x => (ProgramRole?)x.Role).SingleOrDefaultAsync(ct);
+                if (sourceRole is not null) return new(sourceRole, decision);
+            }
         }
-        return requiredRole;
+        return new(requiredRole, decision);
     }
 
     /// <summary>
@@ -411,16 +430,23 @@ public static class WorkflowEndpoints
     public static async Task<ProgramRole?> StageAuthorityAsync(AeroLinkDbContext db, Guid projectId,
         Guid userId, ReviewStageRequirement stage, CancellationToken ct)
     {
+        return (await StageAuthorityWithDecisionAsync(db, projectId, userId, stage, ct)).Role;
+    }
+
+    /// <summary>Stage-aware resolution that returns both compatibility role and frozen authority provenance.</summary>
+    public static async Task<AuthorityResolution> StageAuthorityWithDecisionAsync(AeroLinkDbContext db,
+        Guid projectId, Guid userId, ReviewStageRequirement stage, CancellationToken ct)
+    {
         if (stage.AuthorityKind is null)
-            return await StageAuthorityAsync(db, projectId, userId, stage.RequiredRole, ct);
+            return await StageAuthorityWithDecisionAsync(db, projectId, userId, stage.RequiredRole, ct);
         var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId)
             .SingleOrDefaultAsync(ct);
-        if (programId is null) return null;
+        if (programId is null) return new(null, ProjectAuthorityDecision.Denied);
         var decision = await new ProjectAuthorityResolver(db).ResolveAsync(userId, programId.Value,
             stage.RequiredAuthority, DateTimeOffset.UtcNow, ct);
-        if (!decision.Granted) return null;
-        if (decision.Source == ProjectAuthoritySource.AdministratorSubstitution) return ProgramRole.Administrator;
-        return stage.RequiredRole;
+        if (!decision.Granted) return new(null, decision);
+        return new(decision.Source == ProjectAuthoritySource.AdministratorSubstitution
+            ? ProgramRole.Administrator : stage.RequiredRole, decision);
     }
 
     private static readonly ProgramRole[] ParticipationAuthorities =
