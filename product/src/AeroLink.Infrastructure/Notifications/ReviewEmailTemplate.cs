@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using AeroLink.Domain.ChangeControl;
 
 namespace AeroLink.Infrastructure.Notifications;
 
@@ -14,6 +15,7 @@ public sealed record ReviewEmailFacts(
     string DisplayNumber,
     string Title,
     string StageName,
+    ReviewStageKind StageKind,
     string Authority,
     string Order,
     string SubmittedBy,
@@ -36,12 +38,12 @@ internal static class ReviewEmailTemplate
 {
     /// <summary>The identifier and the ask first, the product last — a subject line is read in a list.</summary>
     internal static string Subject(ReviewEmailFacts facts) =>
-        $"{facts.DisplayNumber} is ready for your review — AeroLink";
+        $"{facts.DisplayNumber} is ready for your {Action(facts)} — AeroLink";
 
     internal static string PlainText(ReviewEmailFacts facts, string? link, string? unsubscribe)
     {
         var body = new StringBuilder();
-        body.AppendLine($"{facts.DisplayNumber} is ready for your review.");
+        body.AppendLine($"{facts.DisplayNumber} is ready for your {Action(facts)}.");
         body.AppendLine(facts.Title);
         body.AppendLine();
         body.AppendLine($"Your stage:            {facts.StageName}");
@@ -53,7 +55,7 @@ internal static class ReviewEmailTemplate
         body.AppendLine();
         if (link is not null)
         {
-            body.AppendLine("Open the review page:");
+            body.AppendLine($"Open the {Action(facts)} page:");
             body.AppendLine(link);
         }
         else
@@ -62,7 +64,7 @@ internal static class ReviewEmailTemplate
             body.AppendLine("deployment, so a direct link could not be included.)");
         }
         body.AppendLine();
-        body.AppendLine("Approval is recorded on that page with your electronic signature. Nothing in this");
+        body.AppendLine("Your decision is recorded on that page with your electronic signature. Nothing in this");
         body.AppendLine("message approves anything, and replying to it changes nothing.");
         if (unsubscribe is not null)
         {
@@ -77,9 +79,9 @@ internal static class ReviewEmailTemplate
     internal static string Html(ReviewEmailFacts facts, string? link, string? unsubscribe) =>
         ReviewEmailShell.Render(
             subject: Subject(facts),
-            eyebrow: "SYSTEM CHANGE REQUEST · REVIEW REQUESTED",
+            eyebrow: $"CONTROLLED CHANGE · {Action(facts).ToUpperInvariant()} REQUESTED",
             eyebrowColour: "#6748a8",
-            headline: $"{facts.DisplayNumber} is ready for your review",
+            headline: $"{facts.DisplayNumber} is ready for your {Action(facts)}",
             standfirst: facts.Title,
             rows:
             [
@@ -90,15 +92,15 @@ internal static class ReviewEmailTemplate
                 ("Package", Package(facts)),
                 ("Response requested by", Date(facts.RespondBy)),
             ],
-            buttonLabel: "Open the review page",
+            buttonLabel: $"Open the {Action(facts)} page",
             link: link,
             calloutTitle: "You are signing for the whole submitted package",
-            calloutBody: "Approval is recorded on the page with your electronic signature. Nothing in this message approves anything, and nothing here can be changed by replying to it.",
+            calloutBody: "Your decision is recorded on the page with your electronic signature. Nothing in this message approves anything, and nothing here can be changed by replying to it.",
             calloutTint: "#eef6ff",
             calloutRule: "#4b89cf",
             calloutInk: "#345979",
             calloutBodyInk: "#5e7489",
-            receivingBecause: $"You are receiving this because you are a named approver on {facts.DisplayNumber}.",
+            receivingBecause: $"You are receiving this because you have an active {Action(facts)} obligation on {facts.DisplayNumber}.",
             unsubscribe: unsubscribe);
 
     private static void Row(StringBuilder html, string label, string value, bool last = false)
@@ -120,6 +122,13 @@ internal static class ReviewEmailTemplate
     }
 
     private static string Date(DateTimeOffset when) => when.ToString("d MMM yyyy");
+
+    private static string Action(ReviewEmailFacts facts) => facts.StageKind switch
+    {
+        ReviewStageKind.Review => "review",
+        ReviewStageKind.Approval => "approval",
+        _ => throw new InvalidOperationException($"Unsupported frozen review stage kind '{facts.StageKind}'.")
+    };
 
     private static string E(string value) => WebUtility.HtmlEncode(value);
 }

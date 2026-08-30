@@ -4,12 +4,35 @@ using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Notifications;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Notifications;
 
 public sealed record NotificationDispatchResult(int Sent, int Suppressed, int Failed);
+
+internal sealed record ReviewDispatchFacts(
+    IReadOnlyDictionary<Guid, ReviewEmailFacts> Facts,
+    IReadOnlySet<Guid> ActiveNotificationIds,
+    IReadOnlyDictionary<Guid, string> SuppressionReasons);
+
+internal sealed record ReviewStepEmailFact(
+    Guid ArtifactId,
+    string BaseNumber,
+    int Revision,
+    string Title,
+    string AuthorId,
+    string ApproverId,
+    string StageName,
+    ReviewStageKind StageKind,
+    string Authority,
+    int Position,
+    ApprovalStepState State,
+    ReviewMode Mode,
+    int Sequence,
+    DateTimeOffset StartedAt,
+    bool IsChangeRequest);
 
 /// <summary>
 /// Queues deliveries for in-app notifications, and drains that queue.
@@ -85,7 +108,7 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
         var notifications = (await db.UserNotifications.AsNoTracking()
                 .Where(x => notificationIds.Contains(x.Id)).ToListAsync(ct))
             .ToDictionary(x => x.Id);
-        var facts = await ReviewFactsAsync(notifications.Values, ct);
+        var reviewFacts = await ReviewFactsAsync(notifications.Values, ct);
         var documentFacts = await DocumentReviewFactsAsync(notifications.Values, ct);
 
         var sent = 0; var failed = 0; var suppressed = 0;
@@ -99,10 +122,22 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
                 continue;
             }
 
+            if (IsReviewObligationNotification(notification)
+                && !reviewFacts.ActiveNotificationIds.Contains(notification.Id))
+            {
+                // The named person was replaced, or the cycle ended, before the queued delivery reached a
+                // relay. Sending the original "you are authorised" wording after that would be a false
+                // assertion about a controlled obligation. Retain the deliberate non-send as evidence.
+                delivery.Suppress(reviewFacts.SuppressionReasons.GetValueOrDefault(notification.Id,
+                    "The review obligation was no longer active when email dispatch ran."), now);
+                suppressed++;
+                continue;
+            }
+
             try
             {
                 await sender.SendAsync(
-                    Compose(notification, delivery, links, tokens, facts.GetValueOrDefault(notification.Id),
+                    Compose(notification, delivery, links, tokens, reviewFacts.Facts.GetValueOrDefault(notification.Id),
                         documentFacts.GetValueOrDefault(notification.Id)), ct);
                 delivery.MarkSent(now);
                 sent++;
@@ -120,34 +155,55 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
 
     /// <summary>
     /// Gathers what a review request has to say beyond its own title, for the notifications in this batch
-    /// that are one. Everything else — and everything this cannot resolve — composes exactly as before, so a
-    /// notification kind with no template is a plainer message rather than a missing one.
+    /// that are one. A queued review notification whose selected, frozen obligation is no longer active is
+    /// explicitly suppressed by the caller; it must never fall back to stale "you are authorised" prose.
     /// </summary>
-    private async Task<Dictionary<Guid, ReviewEmailFacts>> ReviewFactsAsync(
+    private async Task<ReviewDispatchFacts> ReviewFactsAsync(
         IReadOnlyCollection<UserNotification> notifications, CancellationToken ct)
     {
-        var candidates = notifications.Where(x => x.Type == "ReviewActivated" && x.ArtifactId is not null
-            && (x.Route.StartsWith("scr:", StringComparison.OrdinalIgnoreCase)
-                || x.Route.StartsWith("swcr:", StringComparison.OrdinalIgnoreCase))).ToList();
-        if (candidates.Count == 0) return [];
+        var candidates = notifications.Where(IsReviewObligationNotification).ToList();
+        if (candidates.Count == 0) return new(new Dictionary<Guid, ReviewEmailFacts>(), new HashSet<Guid>(),
+            new Dictionary<Guid, string>());
 
-        var artifactIds = candidates.Select(x => x.ArtifactId!.Value).Distinct().ToList();
+        var changeRequestCandidates = candidates.Where(IsChangeRequestReviewNotification).ToList();
+        var testChangeCandidates = candidates.Where(IsTestChangeReviewNotification).ToList();
+        var changeRequestIds = changeRequestCandidates.Select(x => x.ArtifactId!.Value).Distinct().ToList();
+        var testChangeIds = testChangeCandidates.Select(x => x.ArtifactId!.Value).Distinct().ToList();
         // Every step of every open cycle on these packages, not just the recipient's: "stage 2 of 3" cannot
         // be answered without the other two.
-        var steps = await (from step in db.ApprovalSteps.AsNoTracking()
+        var changeRequestSteps = await (from step in db.ApprovalSteps.AsNoTracking()
                            join cycle in db.ReviewCycles.AsNoTracking() on step.ReviewCycleId equals cycle.Id
                            join scr in db.SystemChangeRequests.AsNoTracking() on cycle.ChangeRequestId equals scr.Id
-                           where artifactIds.Contains(scr.Id) && cycle.State == ReviewCycleState.Active
+                           where changeRequestIds.Contains(scr.Id) && cycle.State == ReviewCycleState.Active
                            select new
                            {
                                ArtifactId = scr.Id, scr.BaseNumber, scr.Revision, scr.Title, scr.AuthorId,
-                               step.ApproverId, step.StageName, step.Authority, step.Position,
+                               step.ApproverId, step.StageName, step.StageKind, step.Authority, step.Position, step.State,
                                cycle.Mode, cycle.Sequence, cycle.StartedAt,
                            }).ToListAsync(ct);
-        if (steps.Count == 0) return [];
+        var testChangeSteps = await (from step in db.ApprovalSteps.AsNoTracking()
+                                     join cycle in db.ReviewCycles.AsNoTracking() on step.ReviewCycleId equals cycle.Id
+                                     join review in db.TestChangeReviews.AsNoTracking() on cycle.TestChangeReviewId equals review.Id
+                                     where testChangeIds.Contains(review.Id) && cycle.State == ReviewCycleState.Active
+                                     select new
+                                     {
+                                         ArtifactId = review.Id, review.BaseNumber, review.Revision, review.Title, review.AuthorId,
+                                         step.ApproverId, step.StageName, step.StageKind, step.Authority, step.Position, step.State,
+                                         cycle.Mode, cycle.Sequence, cycle.StartedAt,
+                                     }).ToListAsync(ct);
+
+        var steps = changeRequestSteps.Select(x => new ReviewStepEmailFact(x.ArtifactId, x.BaseNumber, x.Revision,
+                x.Title, x.AuthorId, x.ApproverId, x.StageName, x.StageKind, x.Authority, x.Position, x.State,
+                x.Mode, x.Sequence, x.StartedAt, true))
+            .Concat(testChangeSteps.Select(x => new ReviewStepEmailFact(x.ArtifactId, x.BaseNumber, x.Revision,
+                x.Title, x.AuthorId, x.ApproverId, x.StageName, x.StageKind, x.Authority, x.Position, x.State,
+                x.Mode, x.Sequence, x.StartedAt, false)))
+            .ToList();
+        if (steps.Count == 0) return new(new Dictionary<Guid, ReviewEmailFacts>(), new HashSet<Guid>(),
+            new Dictionary<Guid, string>());
 
         var counts = (await db.RequirementChanges.AsNoTracking()
-                .Where(x => artifactIds.Contains(x.ChangeRequestId))
+                .Where(x => changeRequestIds.Contains(x.ChangeRequestId))
                 .GroupBy(x => new { x.ChangeRequestId, x.Kind })
                 .Select(g => new { g.Key.ChangeRequestId, g.Key.Kind, Count = g.Count() })
                 .ToListAsync(ct))
@@ -161,34 +217,66 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
 
         var stageCounts = steps.GroupBy(x => x.ArtifactId).ToDictionary(g => g.Key, g => g.Count());
         var resolved = new Dictionary<Guid, ReviewEmailFacts>();
+        var activeNotificationIds = new HashSet<Guid>();
+        var suppressionReasons = new Dictionary<Guid, string>();
         foreach (var notification in candidates)
         {
-            var mine = steps.SingleOrDefault(x => x.ArtifactId == notification.ArtifactId!.Value
-                && string.Equals(x.ApproverId, notification.Recipient, StringComparison.OrdinalIgnoreCase));
-            // The cycle closed, or the approver was replaced, between raising this and draining the queue.
-            // There is no longer a stage to describe, so the message falls back to its plain form.
-            if (mine is null) continue;
+            var activeSteps = steps.Where(x => x.ArtifactId == notification.ArtifactId!.Value
+                    && string.Equals(x.ApproverId, notification.Recipient, StringComparison.OrdinalIgnoreCase)
+                    && x.State == ApprovalStepState.Active)
+                .ToList();
+            if (activeSteps.Count == 0) continue;
+            if (activeSteps.Count != 1)
+            {
+                // Notification history names an artifact and recipient, not an ApprovalStep. If a frozen
+                // parallel workflow deliberately assigns the same person more than one active stage, guessing
+                // which StageKind produced this queued notice would fabricate the email's review/approval ask.
+                // Retain a deliberate non-send until a future notification identity can name the exact step.
+                suppressionReasons[notification.Id] =
+                    "More than one active frozen review obligation matched this notification; its exact stage could not be established.";
+                continue;
+            }
+            var mine = activeSteps[0];
 
-            var package = counts[notification.ArtifactId!.Value];
+            activeNotificationIds.Add(notification.Id);
+            // Legacy, unnumbered automatic test-change reviews are valid obligations, but have no honest
+            // controlled TCR identifier. Let their existing plain notification speak for itself; do not mint
+            // a controlled-looking number just to use the rich template.
+            if (!mine.IsChangeRequest && string.IsNullOrWhiteSpace(mine.BaseNumber)) continue;
+
             var total = stageCounts.GetValueOrDefault(mine.ArtifactId, 1);
             var stage = string.IsNullOrWhiteSpace(mine.StageName) ? "Review" : mine.StageName;
             resolved[notification.Id] = new ReviewEmailFacts(
                 ArtifactNumber.Display(mine.BaseNumber, mine.Revision),
                 mine.Title,
                 $"{stage} · stage {mine.Position + 1} of {total}",
+                mine.StageKind,
                 string.IsNullOrWhiteSpace(mine.Authority) ? "Reviewer" : mine.Authority,
                 $"{mine.Mode} · cycle {mine.Sequence}",
                 authors.GetValueOrDefault(mine.AuthorId, mine.AuthorId),
                 mine.StartedAt,
-                package.Where(x => x.Kind == RequirementChangeKind.Introduce).Sum(x => x.Count),
-                package.Where(x => x.Kind == RequirementChangeKind.Modify).Sum(x => x.Count),
-                package.Where(x => x.Kind == RequirementChangeKind.Retire).Sum(x => x.Count),
+                mine.IsChangeRequest ? counts[mine.ArtifactId].Where(x => x.Kind == RequirementChangeKind.Introduce).Sum(x => x.Count) : 0,
+                mine.IsChangeRequest ? counts[mine.ArtifactId].Where(x => x.Kind == RequirementChangeKind.Modify).Sum(x => x.Count) : 0,
+                mine.IsChangeRequest ? counts[mine.ArtifactId].Where(x => x.Kind == RequirementChangeKind.Retire).Sum(x => x.Count) : 0,
                 // The same five days My Work counts an approval overdue against. One convention, so the
                 // email and the queue never disagree about when a decision was wanted.
                 mine.StartedAt.AddDays(5));
         }
-        return resolved;
+        return new(resolved, activeNotificationIds, suppressionReasons);
     }
+
+    private static bool IsReviewObligationNotification(UserNotification notification) =>
+        IsChangeRequestReviewNotification(notification) || IsTestChangeReviewNotification(notification);
+
+    private static bool IsChangeRequestReviewNotification(UserNotification notification) =>
+        notification.Type == "ReviewActivated" && notification.ArtifactId is not null
+        && (notification.Route.StartsWith("scr:", StringComparison.OrdinalIgnoreCase)
+            || notification.Route.StartsWith("swcr:", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsTestChangeReviewNotification(UserNotification notification) =>
+        notification.ArtifactId is not null
+        && notification.Route.StartsWith("test-change-request:", StringComparison.OrdinalIgnoreCase)
+        && (notification.Type == "ReviewActivated" || notification.Type == "TestChangeRequestApprovalRequested");
 
     /// <summary>
     /// The same gathering for a document review. Kept separate from the change request one rather than

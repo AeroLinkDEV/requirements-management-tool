@@ -133,6 +133,13 @@ type Performance = {
   allPassed: boolean;
   samples: { name: string; targetMs: number; p95Ms: number; passed: boolean }[];
 };
+type NotificationOperations = {
+  generatedAt: string;
+  smtp: { configured: boolean; hostConfigured: boolean; port: number; useStartTls: boolean; credentialsConfigured: boolean; fromConfigured: boolean };
+  links: { configured: boolean; valid: boolean; baseUrl?: string };
+  totals: { pending: number; sent: number; failed: number; suppressed: number };
+  deliveries: { id: string; recipient: string; address: string; state: string; attempts: number; detail?: string; createdAt: string; completedAt?: string }[];
+};
 type Tab =
   | "command"
   | "content"
@@ -141,7 +148,8 @@ type Tab =
   | "jobs"
   | "configuration"
   | "assurance"
-  | "qualification";
+  | "qualification"
+  | "notifications";
 
 /**
  * Saved-view contracts are stored as arbitrary JSON, and this tab renders shared views created by anyone.
@@ -188,6 +196,7 @@ export default function EnterpriseControlCenter({
     >([]),
     [redline, setRedline] = useState<Redline>(),
     [performance, setPerformance] = useState<Performance>(),
+    [notificationOperations, setNotificationOperations] = useState<NotificationOperations>(),
     [message, setMessage] = useState(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -212,23 +221,44 @@ export default function EnterpriseControlCenter({
     }
   };
   const load = useCallback(async () => {
-    const [o, w, p] = await Promise.all([
-      fetch(`${api}/api/enterprise-hardening/overview?projectId=${projectId}`),
-      fetch(
-        `${api}/api/enterprise-requirements/workspace?projectId=${projectId}&page=1&pageSize=100&sort=updated`,
-      ),
-      fetch(
-        `${api}/api/enterprise-requirements/performance?projectId=${projectId}`,
-      ),
-    ]);
-    if (o.ok) setOverview(await o.json());
-    if (w.ok) {
-      const data = await w.json();
-      setRequirements(data.items);
-      setSelectedId((x) => x || data.items[0]?.id || "");
+    try {
+      const [o, w, p, n] = await Promise.all([
+        fetch(`${api}/api/enterprise-hardening/overview?projectId=${projectId}`),
+        fetch(
+          `${api}/api/enterprise-requirements/workspace?projectId=${projectId}&page=1&pageSize=100&sort=updated`,
+        ),
+        fetch(
+          `${api}/api/enterprise-requirements/performance?projectId=${projectId}`,
+        ),
+        fetch(`${api}/api/operations/notifications`),
+      ]);
+      if (o.ok) setOverview(await o.json());
+      if (w.ok) {
+        const data = await w.json();
+        setRequirements(data.items);
+        setSelectedId((x) => x || data.items[0]?.id || "");
+      }
+      if (p.ok) setPerformance(await p.json());
+      if (n.ok) setNotificationOperations(await n.json());
+      else setError("Notification delivery operations could not be loaded.");
+    } catch {
+      setError("System operations could not be loaded. Refresh to try again.");
     }
-    if (p.ok) setPerformance(await p.json());
   }, [api, projectId]);
+  const queueTransportTest = async () => {
+    const result = await mutate(
+      "operations.notifications.transport-test",
+      "The configured email transport test could not be queued.",
+      () => apiRequest<{ state: string; detail?: string }>(`${api}/api/operations/notifications/transport-test`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId }),
+      }),
+    );
+    if (!result) return;
+    setMessage(result.state === "Suppressed"
+      ? `Email test was deliberately suppressed: ${result.detail || "the current administrator has no deliverable address."}`
+      : "Email transport test queued for this administrator account.");
+    await load();
+  };
   useEffect(() => {
     load();
     const timer = setInterval(load, 2500);
@@ -496,6 +526,7 @@ export default function EnterpriseControlCenter({
             ["configuration", "Product line"],
             ["assurance", "Assurance"],
             ["qualification", "Qualification"],
+            ["notifications", "Notifications"],
           ] as [Tab, string][]
         ).map((x) => (
           <button
@@ -523,6 +554,40 @@ export default function EnterpriseControlCenter({
             projectId={projectId}
             mode="assurance"
           />
+        </section>
+      )}
+      {tab === "notifications" && (
+        <section className="enterpriseBody">
+          <div className="enterpriseHero">
+            <div>
+              <p>INSTALLATION OPERATIONS / EMAIL OUTBOX</p>
+              <h2>{notificationOperations?.smtp.configured ? "SMTP transport configured" : "SMTP transport not configured"}</h2>
+              <span>Recent delivery evidence only. Credentials, mail bodies, and unredacted recipient addresses are never rendered here.</span>
+            </div>
+            <button onClick={queueTransportTest} disabled={busy || !notificationOperations?.smtp.configured}>
+              {busy ? "Queueing…" : "Send my transport test"}
+            </button>
+          </div>
+          {notificationOperations ? <>
+            <div className="enterpriseMetrics">
+              {collection("Pending", notificationOperations.totals.pending, "awaiting configured SMTP")}
+              {collection("Sent", notificationOperations.totals.sent, "recent delivery evidence")}
+              {collection("Failed", notificationOperations.totals.failed, "retry limit reached", notificationOperations.totals.failed ? "warn" : "")}
+              {collection("Suppressed", notificationOperations.totals.suppressed, "deliberate non-sends")}
+            </div>
+            <div className="enterpriseGrid">
+              <section><div className="sectionTitle"><div><h3>Effective transport</h3><p>Configuration state without secret material</p></div></div>
+                <p>SMTP host: <b>{notificationOperations.smtp.hostConfigured ? "configured" : "not configured"}</b> · port {notificationOperations.smtp.port} · STARTTLS {notificationOperations.smtp.useStartTls ? "on" : "off"}</p>
+                <p>Credentials: <b>{notificationOperations.smtp.credentialsConfigured ? "configured" : "not configured"}</b> · From address {notificationOperations.smtp.fromConfigured ? "configured" : "default"}</p>
+                <p>Mail-link origin: <b>{notificationOperations.links.valid ? notificationOperations.links.baseUrl : "not configured or invalid"}</b></p>
+              </section>
+              <section><div className="sectionTitle"><div><h3>Recent delivery state</h3><p>Newest 100 entries; details are bounded operational status</p></div></div>
+                {notificationOperations.deliveries.length ? notificationOperations.deliveries.map((delivery) => <article className="signalRow" key={delivery.id}>
+                  <i className={delivery.state === "Failed" ? "attention" : "ok"}>{delivery.state === "Failed" ? "!" : "✓"}</i><div><b>{delivery.state} · {delivery.recipient} · {delivery.address}</b><span>{delivery.attempts} attempt{delivery.attempts === 1 ? "" : "s"} · {new Date(delivery.completedAt || delivery.createdAt).toLocaleString()}{delivery.detail ? ` · ${delivery.detail}` : ""}</span></div>
+                </article>) : <div className="emptyEnterprise"><b>No email deliveries yet</b><p>Queue an administrator transport test after configuring SMTP.</p></div>}
+              </section>
+            </div>
+          </> : <div className="emptyEnterprise"><b>Loading notification operations</b><p>Refresh if configuration evidence is unavailable.</p></div>}
         </section>
       )}
       {tab === "command" && overview && (

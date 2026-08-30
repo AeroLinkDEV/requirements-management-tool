@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 701,
-    "cases": 777,
-    "classes": 114,
-    "hostedTests": 673,
-    "hostedCases": 740,
+    "tests": 703,
+    "cases": 779,
+    "classes": 115,
+    "hostedTests": 675,
+    "hostedCases": 742,
     "nonHostedTests": 21,
     "nonHostedCases": 30,
     "unknownHostTests": 7,
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 79,
-      "cases": 83,
+      "tests": 81,
+      "cases": 85,
       "unknownCases": 0,
-      "classes": 46
+      "classes": 47
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -4875,6 +4875,41 @@
       "sourceLines": {
         "start": 18,
         "end": 36
+      }
+    },
+    {
+      "cls": "NotificationOperationsApiTests",
+      "test": "Authenticated_project_member_cannot_inspect_global_notification_operations",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 13,
+        "end": 35
+      }
+    },
+    {
+      "cls": "NotificationOperationsApiTests",
+      "test": "Notification_operations_are_global_administrator_only_and_never_return_secrets_or_bodies",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 37,
+        "end": 75
       }
     },
     {

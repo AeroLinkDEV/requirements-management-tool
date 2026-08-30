@@ -2,10 +2,15 @@ using AeroLink.Domain.Identity;
 using AeroLink.Domain.Notifications;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.ChangeControl;
 using AeroLink.Infrastructure.Notifications;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -27,9 +32,25 @@ public sealed class NotificationOutboxTests
         Assert.Equal($"https://aerolink.example.test/open/managed-document/{id}", links.LinkFor($"managed-document:{id}"));
     }
 
+    [Theory]
+    [InlineData("ftp://aerolink.example.test")]
+    [InlineData("https://operator:password@aerolink.example.test")]
+    [InlineData("https://aerolink.example.test/tenant")]
+    [InlineData("https://aerolink.example.test/?source=mail")]
+    public void Notification_base_url_fails_closed_when_it_is_not_a_clean_public_origin(string configuredBaseUrl)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Notifications:BaseUrl"] = configuredBaseUrl
+        }).Build();
+
+        Assert.Null(new NotificationLinkBuilder(configuration).BaseUrl);
+    }
+
     private static ReviewEmailFacts Facts(string title = "Reduce flight-plan reload latency",
+        ReviewStageKind stageKind = ReviewStageKind.Review,
         int introduced = 2, int modified = 5, int retired = 1) =>
-        new("SRCR-00039.00", title, "Independent assurance · stage 2 of 3", "Software Quality Analyst",
+        new("SRCR-00039.00", title, "Independent assurance · stage 2 of 3", stageKind, "Software Quality Analyst",
             "Sequential · cycle 2", "Maya Patel", new DateTimeOffset(2026, 8, 12, 9, 0, 0, TimeSpan.Zero),
             introduced, modified, retired, new DateTimeOffset(2026, 8, 19, 9, 0, 0, TimeSpan.Zero));
 
@@ -38,6 +59,28 @@ public sealed class NotificationOutboxTests
     {
         // "AeroLink: Review SRCR-00039.00" buried both in a list of subjects that all start the same way.
         Assert.Equal("SRCR-00039.00 is ready for your review — AeroLink", ReviewEmailTemplate.Subject(Facts()));
+    }
+
+    [Fact]
+    public void A_frozen_approval_stage_is_described_as_approval_not_review()
+    {
+        var facts = Facts(stageKind: ReviewStageKind.Approval);
+
+        Assert.Equal("SRCR-00039.00 is ready for your approval — AeroLink", ReviewEmailTemplate.Subject(facts));
+        Assert.Contains("Open the approval page", ReviewEmailTemplate.PlainText(facts, "https://aerolink.example.test/open/scr/x", null));
+        Assert.Contains("APPROVAL REQUESTED", ReviewEmailTemplate.Html(facts, "https://aerolink.example.test/open/scr/x", null));
+    }
+
+    [Fact]
+    public void A_frozen_review_stage_does_not_claim_that_the_reviewer_is_approving()
+    {
+        var plain = ReviewEmailTemplate.PlainText(Facts(), "https://aerolink.example.test/open/scr/x", null);
+        var html = ReviewEmailTemplate.Html(Facts(), "https://aerolink.example.test/open/scr/x", null);
+
+        Assert.Contains("Your decision is recorded", plain);
+        Assert.Contains("Your decision is recorded", html);
+        Assert.DoesNotContain("Approval is recorded", plain);
+        Assert.DoesNotContain("Approval is recorded", html);
     }
 
     [Fact]
@@ -132,6 +175,57 @@ public sealed class NotificationOutboxTests
     }
 
     [Fact]
+    public async Task Smtp_sender_delivers_a_real_message_to_a_loopback_smtp_server()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = Task.Run(async () =>
+        {
+            using var client = await listener.AcceptTcpClientAsync();
+            using var stream = client.GetStream();
+            using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
+            await using var writer = new StreamWriter(stream, Encoding.ASCII, leaveOpen: true) { AutoFlush = true };
+            await writer.WriteLineAsync("220 loopback smtp ready");
+            var data = new StringBuilder();
+            var inData = false;
+            while (true)
+            {
+                var line = await reader.ReadLineAsync();
+                if (line is null) break;
+                if (inData)
+                {
+                    if (line == ".") { inData = false; await writer.WriteLineAsync("250 accepted"); continue; }
+                    data.AppendLine(line); continue;
+                }
+                if (line.StartsWith("EHLO", StringComparison.OrdinalIgnoreCase) || line.StartsWith("HELO", StringComparison.OrdinalIgnoreCase)) await writer.WriteLineAsync("250 loopback");
+                else if (line.StartsWith("MAIL FROM", StringComparison.OrdinalIgnoreCase) || line.StartsWith("RCPT TO", StringComparison.OrdinalIgnoreCase)) await writer.WriteLineAsync("250 accepted");
+                else if (line.Equals("DATA", StringComparison.OrdinalIgnoreCase)) { inData = true; await writer.WriteLineAsync("354 send data"); }
+                else if (line.Equals("QUIT", StringComparison.OrdinalIgnoreCase)) { await writer.WriteLineAsync("221 bye"); break; }
+                else await writer.WriteLineAsync("250 accepted");
+            }
+            received.TrySetResult(data.ToString());
+        });
+        var settings = new Dictionary<string, string?>
+        {
+            ["Notifications:Smtp:Host"] = "127.0.0.1",
+            ["Notifications:Smtp:Port"] = port.ToString(),
+            ["Notifications:Smtp:UseStartTls"] = "false",
+            ["Notifications:Smtp:From"] = "aerolink@localhost"
+        };
+        var sender = new SmtpEmailSender(new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), NullLogger<SmtpEmailSender>.Instance);
+
+        await sender.SendAsync(new EmailMessage("approver@example.test", "Transport proof", "plain proof", "<b>html proof</b>"), default);
+        var message = await received.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await server;
+
+        Assert.Contains("Subject: Transport proof", message);
+        Assert.Contains("To: approver@example.test", message);
+        Assert.Contains("multipart/alternative", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Composing_a_notification_still_produces_a_text_body_that_says_everything()
     {
         var (links, tokens) = Support();
@@ -192,8 +286,12 @@ public sealed class NotificationOutboxTests
     }
 
     private static UserNotification Notification(Guid projectId, string recipient = "approver.user") =>
-        new(projectId, recipient, "ReviewActivated", "Review SRCR-00031.00",
+        new(projectId, recipient, "NotificationTransportTest", "Review SRCR-00031.00",
             "You are now authorized to review SRCR-00031.00: Oceanic routing.", "scr:11111111-1111-1111-1111-111111111111", null, Now);
+
+    private static UserNotification ReviewNotification(Guid projectId) =>
+        new(projectId, "approver.user", "ReviewActivated", "Review SRCR-00031.00",
+            "You are now authorized to review SRCR-00031.00: Oceanic routing.", "scr:11111111-1111-1111-1111-111111111111", Guid.Parse("11111111-1111-1111-1111-111111111111"), Now);
 
     [Fact]
     public async Task Raising_a_notification_queues_its_delivery_without_anyone_asking()
@@ -380,6 +478,29 @@ public sealed class NotificationOutboxTests
             // Pending and inspectable. Dropping them quietly is how an approval goes unnoticed for a week.
             Assert.Equal(NotificationDeliveryState.Pending,
                 (await db.NotificationDeliveries.AsNoTracking().SingleAsync()).State);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
+    public async Task A_review_notification_with_no_longer_active_frozen_step_is_suppressed_not_sent_as_authorised()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            await using var db = new AeroLinkDbContext(seed.Options);
+            db.UserNotifications.Add(ReviewNotification(seed.ProjectId));
+            await db.SaveChangesAsync();
+
+            var sender = new RecordingSender();
+            var (links, tokens) = Support();
+            var result = await new NotificationOutbox(db).DispatchPendingAsync(sender, links, tokens, 50, 5, Now, default);
+
+            Assert.Equal(1, result.Suppressed);
+            Assert.Empty(sender.Sent);
+            var delivery = await db.NotificationDeliveries.AsNoTracking().SingleAsync();
+            Assert.Equal(NotificationDeliveryState.Suppressed, delivery.State);
+            Assert.Contains("no longer active", delivery.LastError);
         }
         finally { File.Delete(seed.Path); }
     }

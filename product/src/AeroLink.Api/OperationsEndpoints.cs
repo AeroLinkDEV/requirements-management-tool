@@ -1,7 +1,9 @@
 using System.Text.Json;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Notifications;
 using AeroLink.Domain.Requirements;
+using AeroLink.Infrastructure.Notifications;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,6 +15,8 @@ public static class OperationsEndpoints
     {
         var group=app.MapGroup("/api/operations");
         group.MapGet("/overview",OverviewAsync);
+        group.MapGet("/notifications",NotificationOperationsAsync);
+        group.MapPost("/notifications/transport-test",QueueNotificationTransportTestAsync);
         group.MapPost("/qualification-runs",RecordQualificationAsync);
         group.MapPost("/restore-drills",RecordRestoreDrillAsync);
         group.MapPost("/retention-policies",RecordRetentionPolicyAsync);
@@ -22,6 +26,100 @@ public static class OperationsEndpoints
         app.MapAeroLinkExternalIdentityAdminEndpoints();
         app.MapAeroLinkVerificationImpactEndpoints();
         return app;
+    }
+
+    // SMTP configuration and delivery history are installation operations, not project data. A global
+    // administrator is the narrow existing authority that may inspect another person's notification address
+    // and a relay's failure classification. Do this check before querying deliveries.
+    private static async Task<IResult> NotificationOperationsAsync(HttpContext http, AeroLinkDbContext db,
+        IConfiguration configuration, IEmailSender sender, NotificationLinkBuilder links, CancellationToken ct)
+    {
+        if (!http.UserAccount().IsAdministrator) return Results.Forbid();
+        // Sequence is the provider-safe chronological queue key. SQLite cannot translate DateTimeOffset ORDER BY.
+        var deliveryCounts = await db.NotificationDeliveries.AsNoTracking()
+            .GroupBy(x => x.State).Select(x => new { State = x.Key, Count = x.Count() }).ToListAsync(ct);
+        var deliveries = await db.NotificationDeliveries.AsNoTracking().OrderByDescending(x => x.Sequence)
+            .Take(100).ToListAsync(ct);
+        var configuredBaseUrl = configuration["Notifications:BaseUrl"];
+        var baseUrl = links.BaseUrl;
+        var validBaseUrl = baseUrl is not null;
+        var smtpHost = configuration["Notifications:Smtp:Host"]?.Trim();
+        var smtpPort = int.TryParse(configuration["Notifications:Smtp:Port"], out var configuredPort)
+            && configuredPort is > 0 and <= 65535 ? configuredPort : 25;
+        var hasCredentials = !string.IsNullOrWhiteSpace(configuration["Notifications:Smtp:UserName"])
+            && !string.IsNullOrWhiteSpace(configuration["Notifications:Smtp:Password"]);
+        return Results.Ok(new
+        {
+            generatedAt = DateTimeOffset.UtcNow,
+            smtp = new
+            {
+                configured = sender.IsConfigured,
+                hostConfigured = !string.IsNullOrWhiteSpace(smtpHost),
+                port = smtpPort,
+                useStartTls = !string.Equals(configuration["Notifications:Smtp:UseStartTls"], "false", StringComparison.OrdinalIgnoreCase),
+                credentialsConfigured = hasCredentials,
+                // A from address is not a secret, but do not echo arbitrary configuration in this operation.
+                fromConfigured = !string.IsNullOrWhiteSpace(configuration["Notifications:Smtp:From"])
+            },
+            links = new { configured = !string.IsNullOrWhiteSpace(configuredBaseUrl), valid = validBaseUrl, baseUrl = validBaseUrl ? baseUrl : null },
+            totals = new
+            {
+                pending = DeliveryCount(NotificationDeliveryState.Pending),
+                sent = DeliveryCount(NotificationDeliveryState.Sent),
+                failed = DeliveryCount(NotificationDeliveryState.Failed),
+                suppressed = DeliveryCount(NotificationDeliveryState.Suppressed)
+            },
+            deliveries = deliveries.Select(x => new
+            {
+                x.Id, x.NotificationId, x.Recipient, address = RedactAddress(x.Address),
+                channel = x.Channel.ToString(), state = x.State.ToString(), x.Attempts,
+                // Relay exceptions can contain operational detail; cap their exposed form to a bounded,
+                // non-body status while the full server-side delivery record remains controlled evidence.
+                detail = SafeDeliveryDetail(x.State, x.LastError), x.CreatedAt, x.UpdatedAt, x.CompletedAt
+            })
+        });
+
+        int DeliveryCount(NotificationDeliveryState state) => deliveryCounts.SingleOrDefault(x => x.State == state)?.Count ?? 0;
+    }
+
+    private static async Task<IResult> QueueNotificationTransportTestAsync(NotificationTransportTestRequest request,
+        HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var actor = http.UserAccount();
+        if (!actor.IsAdministrator) return Results.Forbid();
+        if (!await db.Projects.AsNoTracking().AnyAsync(x => x.Id == request.ProjectId, ct)) return Results.NotFound();
+        // The destination and relay settings never come from the caller. This is an operational proof of the
+        // configured deployment, not an SMTP proxy or address-discovery API.
+        var now = DateTimeOffset.UtcNow;
+        var notification = new UserNotification(request.ProjectId, actor.UserName, "NotificationTransportTest",
+            "AeroLink email delivery test", "This is a configured AeroLink notification transport test.", "", null, now);
+        db.UserNotifications.Add(notification);
+        await db.SaveChangesAsync(ct);
+        var delivery = await db.NotificationDeliveries.AsNoTracking()
+            .SingleAsync(x => x.NotificationId == notification.Id, ct);
+        return Results.Accepted("/api/operations/notifications", new
+        {
+            delivery.Id, state = delivery.State.ToString(), delivery.Attempts,
+            detail = SafeDeliveryDetail(delivery.State, delivery.LastError), delivery.CreatedAt
+        });
+    }
+
+    private static string? SafeDeliveryDetail(NotificationDeliveryState state, string detail)
+    {
+        var trimmed = (detail ?? "").Trim();
+        if (trimmed.Length == 0) return null;
+        // Only the application's deliberate suppression reasons are fit for display. Relay exceptions can
+        // contain recipient and server implementation detail; the retained record remains available to an
+        // operator through protected server diagnostics without turning this API into a message proxy.
+        if (state != NotificationDeliveryState.Suppressed) return "SMTP delivery failed; inspect protected server diagnostics.";
+        return trimmed.Length <= 240 ? trimmed : trimmed[..240] + "…";
+    }
+
+    private static string RedactAddress(string address)
+    {
+        var at = address.IndexOf('@');
+        if (at <= 0 || at == address.Length - 1) return "not-recorded";
+        return $"{address[0]}***@{address[(at + 1)..]}";
     }
 
     private static async Task<IResult> OverviewAsync(Guid projectId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)
@@ -51,3 +149,4 @@ public sealed record RecordRestoreDrillRequest(Guid ProjectId,string BackupLocat
 public sealed record RecordRetentionPolicyRequest(Guid ProjectId,string RecordType,int RetentionDays,bool LegalHold,string Rationale);
 public sealed record RecordUpgradeEvidenceRequest(Guid ProjectId,string FromVersion,string ToVersion,string PreflightJson,string PostCheckJson,string EvidenceHash,bool Passed);
 public sealed record OpenOperationalAlertRequest(Guid ProjectId,string Severity,string Signal,string Detail,string RunbookUrl);
+public sealed record NotificationTransportTestRequest(Guid ProjectId);

@@ -77,6 +77,10 @@ function Get-AeroLinkRemoteDemoConfig {
             throw "Remote-demo configuration is missing the required non-secret value '$key'."
         }
     }
+    $publicUri = $null
+    if (-not [uri]::TryCreate(([string]$values['PublicUrl']).Trim(), [System.UriKind]::Absolute, [ref]$publicUri) -or $publicUri.Scheme -ne 'https' -or [string]::IsNullOrWhiteSpace($publicUri.Host) -or $publicUri.AbsolutePath -ne '/' -or -not [string]::IsNullOrEmpty($publicUri.UserInfo) -or -not [string]::IsNullOrEmpty($publicUri.Query) -or -not [string]::IsNullOrEmpty($publicUri.Fragment)) {
+        throw 'Remote-demo PublicUrl must be an absolute HTTPS origin with no credentials, query, or fragment.'
+    }
     if ($values.ContainsKey('AeroLinkRoot') -and -not (Test-Path -LiteralPath ([string]$values['AeroLinkRoot']))) {
         throw "Remote-demo configuration AeroLinkRoot does not exist: $($values['AeroLinkRoot'])"
     }
@@ -87,7 +91,7 @@ function Get-AeroLinkRemoteDemoConfig {
 
     return [pscustomobject]@{
         NgrokExecutable = [string]$values['NgrokExecutable']
-        PublicUrl = [string]$values['PublicUrl']
+        PublicUrl = $publicUri.GetLeftPart([System.UriPartial]::Authority).TrimEnd('/')
         TrafficPolicyPath = [string]$values['TrafficPolicyPath']
         Upstream = if ($values.ContainsKey('Upstream')) { [string]$values['Upstream'] } else { 'http://127.0.0.1:5080' }
         LocalApiBaseUri = if ($values.ContainsKey('LocalApiBaseUri')) { [string]$values['LocalApiBaseUri'] } else { 'http://127.0.0.1:5080' }
@@ -497,7 +501,10 @@ function Start-AeroLinkRemoteDemoProductionHelper {
     $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $stdout = Join-Path $logDirectory 'production-helper.stdout.log'
     $stderr = Join-Path $logDirectory 'production-helper.stderr.log'
-    $argumentLine = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -DoNotOpenBrowser"
+    # The tunnel's protected public origin is the only honest mail-link origin for a remote recipient.
+    # Pass it before the API starts; an already-running local process is handled below rather than silently
+    # claiming a loopback-configured process can produce reachable remote links.
+    $argumentLine = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -DoNotOpenBrowser -NotificationBaseUrl `"$($Config.PublicUrl)`""
     $process = Start-Process -FilePath $powershell -ArgumentList $argumentLine -WindowStyle Hidden `
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
     $helper = [pscustomobject]@{
@@ -689,6 +696,9 @@ function Start-AeroLinkRemoteDemo {
     if ($decision.Decision -eq 'AlreadyReady') {
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'Remote demo already ready; no new processes started.'
         return [pscustomobject]@{ Ready = $true; PublicUrl = $Config.PublicUrl; Detail = $decision.Message }
+    }
+    if ($local.Ready -and $decision.Decision -eq 'CanStart') {
+        throw 'AeroLink is already running locally with an unknown notification-link origin. Stop the owned local stack, then start the remote demo so the protected PublicUrl is applied before mail is dispatched.'
     }
     if ($decision.Decision -ne 'CanStart') {
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: $($decision.Message)"

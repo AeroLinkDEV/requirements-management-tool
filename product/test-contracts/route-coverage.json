@@ -327,6 +327,7 @@
         "ManagedDocumentApiTests",
         "ManagedDocumentRecoveryApiTests",
         "ManualTestChangeRequestApiTests",
+        "NotificationOperationsApiTests",
         "OpenDigitalThreadTests",
         "PersonnelDirectoryApiTests",
         "PreReleaseEvidenceVisibilityTests",
@@ -1387,6 +1388,14 @@
     },
     {
       "method": "POST",
+      "path": "/api/operations/notifications/transport-test",
+      "file": "OperationsEndpoints.cs",
+      "coveredBy": [
+        "NotificationOperationsApiTests"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/operations/qualification-runs",
       "file": "OperationsEndpoints.cs",
       "coveredBy": []
@@ -2311,6 +2320,7 @@
       "path": "/api/workspaces",
       "file": "WorkspaceEndpoints.cs",
       "coveredBy": [
+        "NotificationOperationsApiTests",
         "ProcedureDiscussionApiTests",
         "SecurityHardeningTests",
         "TestProcedureDocumentApiTests",

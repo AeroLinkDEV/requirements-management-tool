@@ -2,7 +2,8 @@
 param(
     [switch]$DoNotOpenBrowser,
     [switch]$SkipClientBuild,
-    [switch]$Shared
+    [switch]$Shared,
+    [string]$NotificationBaseUrl
 )
 
 # Starts AeroLink the way a demonstration or an on-premises workstation should run it: the client compiled, and
@@ -80,6 +81,27 @@ function Test-AeroLinkFirewallRule {
     return $rules.Count -gt 0
 }
 
+function Resolve-AeroLinkNotificationBaseUrl([string]$Candidate) {
+    if ([string]::IsNullOrWhiteSpace($Candidate)) { return $null }
+    $uri = $null
+    if (-not [uri]::TryCreate($Candidate.Trim(), [System.UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -notin @('http', 'https') -or [string]::IsNullOrWhiteSpace($uri.Host) -or $uri.AbsolutePath -ne '/' -or -not [string]::IsNullOrEmpty($uri.UserInfo) -or -not [string]::IsNullOrEmpty($uri.Query) -or -not [string]::IsNullOrEmpty($uri.Fragment)) {
+        throw 'NotificationBaseUrl must be an absolute http/https origin with no credentials, query, or fragment.'
+    }
+    return $uri.GetLeftPart([System.UriPartial]::Authority).TrimEnd('/')
+}
+
+$lan = $null
+if ($Shared) {
+    # Resolve before process creation: an address printed after startup is not enough when outbound mail
+    # needs the very same reachable origin. Do not guess a loopback fallback for another person's message.
+    $lan = Get-AeroLinkLanAddress
+    if (-not $lan) { throw 'Shared mode requires a reachable LAN IPv4 address so notification links are not fabricated.' }
+    $effectiveNotificationBaseUrl = "http://${lan}:5080"
+}
+else {
+    $effectiveNotificationBaseUrl = Resolve-AeroLinkNotificationBaseUrl $NotificationBaseUrl
+}
+
 # Prerequisites first, before anything that takes minutes. Without this the launcher installed npm packages,
 # compiled the client, started the API and waited two minutes for a health endpoint that could never answer,
 # then reported "No .NET SDKs were found" — the right diagnosis, four minutes after it was knowable.
@@ -137,6 +159,7 @@ Start-AeroLinkService `
         ASPNETCORE_ENVIRONMENT = 'Development'
         Client__StaticFiles    = $distRoot
         AllowedHosts           = $allowedHosts
+        Notifications__BaseUrl = $effectiveNotificationBaseUrl
     }
 
 # The document itself, because a ready API that serves no client is the failure this script was written to
@@ -154,9 +177,15 @@ Write-Host 'AeroLink is ready.' -ForegroundColor Green
 Write-Host "Website and API: $url  (one origin, production build)"
 Write-Host "Sign in: admin / AeroLink!2026"
 Write-Host "Logs: $logs"
+if ($effectiveNotificationBaseUrl) {
+    Write-Host "Notification link origin: $effectiveNotificationBaseUrl" -ForegroundColor DarkGray
+}
+else {
+    Write-Host 'Notification link origin: not configured (mail remains truthful but omits direct links).' -ForegroundColor DarkGray
+}
+Write-Host 'SMTP diagnostics: configure Notifications__Smtp__Host (and optional port/TLS/account settings) outside source control.' -ForegroundColor DarkGray
 
 if ($Shared) {
-    $lan = Get-AeroLinkLanAddress
     Write-Host ''
     if ($lan) {
         Write-Host 'Other people on this network can open AeroLink here:' -ForegroundColor Cyan

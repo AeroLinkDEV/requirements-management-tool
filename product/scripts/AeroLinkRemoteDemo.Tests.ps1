@@ -44,6 +44,8 @@ $config = Get-AeroLinkRemoteDemoConfig -ConfigPath $validConfigPath
 Assert-True ($config.NgrokExecutable -eq 'C:\Tools\ngrok.exe') 'Valid config did not load NgrokExecutable.'
 Assert-True ($config.PublicUrl -eq 'https://example.ngrok-free.dev') 'Valid config did not load PublicUrl.'
 Assert-True ($config.Upstream -eq 'http://127.0.0.1:5080') 'Valid config did not apply the default Upstream.'
+$moduleText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1'))
+Assert-True ($moduleText -match '-NotificationBaseUrl `"\$\(\$Config\.PublicUrl\)`"') 'Remote-demo production helper must pass the protected PublicUrl as the notification-link origin.'
 
 $missingConfig = Join-Path $tempRoot 'missing.psd1'
 $threw = $false
@@ -67,6 +69,18 @@ Set-Content -LiteralPath $missingKeyPath -Value "@{ NgrokExecutable='C:\Tools\ng
 $threw = $false
 try { Get-AeroLinkRemoteDemoConfig -ConfigPath $missingKeyPath } catch { $threw = $true }
 Assert-True $threw 'Config missing a required key should fail closed.'
+
+$unsafePublicUrlPath = Join-Path $tempRoot 'unsafe-public-url.psd1'
+Set-Content -LiteralPath $unsafePublicUrlPath -Value "@{ NgrokExecutable='C:\Tools\ngrok.exe'; PublicUrl='https://operator:password@example.ngrok-free.dev/path?query=1'; TrafficPolicyPath='C:\Tools\policy.yml' }" -Encoding UTF8
+$threw = $false
+try { Get-AeroLinkRemoteDemoConfig -ConfigPath $unsafePublicUrlPath } catch { $threw = $true }
+Assert-True $threw 'Remote-demo PublicUrl with credentials, path, or query must fail closed.'
+
+$pathPublicUrlPath = Join-Path $tempRoot 'path-public-url.psd1'
+Set-Content -LiteralPath $pathPublicUrlPath -Value "@{ NgrokExecutable='C:\Tools\ngrok.exe'; PublicUrl='https://example.ngrok-free.dev/aerolink'; TrafficPolicyPath='C:\Tools\policy.yml' }" -Encoding UTF8
+$threw = $false
+try { Get-AeroLinkRemoteDemoConfig -ConfigPath $pathPublicUrlPath } catch { $threw = $true }
+Assert-True $threw 'Remote-demo PublicUrl must be an origin, not a path that would silently change mail routing.'
 
 # --- 2. ngrok launch arguments contain the contract and no secrets ---
 $arguments = Get-AeroLinkRemoteDemoNgrokArguments -Config $config
