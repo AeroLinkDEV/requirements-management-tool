@@ -121,3 +121,10 @@ public readonly record struct ProjectAuthorityDecision(
         ProjectAuthoritySource source, ProjectLeadershipPosition? position = null, Guid? sourceId = null) =>
         new(true, source, position, sourceId);
 }
+
+/// <summary>
+/// One currently eligible authority holder and the exact project row that grants that authority.
+/// The row identifier is deliberately kept beside the decision rather than reduced to a display label;
+/// workflow stages freeze this value as evidence and must remain explainable after the roster changes.
+/// </summary>
+public readonly record struct ProjectAuthorityHolder(Guid UserId, ProjectAuthorityDecision Decision);

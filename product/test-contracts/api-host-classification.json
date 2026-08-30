@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 116,
-    "tests": 706,
-    "knownCases": 787,
+    "tests": 708,
+    "knownCases": 789,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 44,
-      "tests": 266,
-      "knownCases": 295,
+      "tests": 267,
+      "knownCases": 296,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -27,8 +27,8 @@
     },
     "reusable-host": {
       "classes": 44,
-      "tests": 278,
-      "knownCases": 309,
+      "tests": 279,
+      "knownCases": 310,
       "unknownCaseTests": 0
     }
   },
@@ -350,8 +350,8 @@
     },
     {
       "cls": "TestChangeRequestReviewWorkflowTests",
-      "tests": 45,
-      "knownCases": 49,
+      "tests": 46,
+      "knownCases": 50,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
@@ -1179,6 +1179,19 @@
       ]
     },
     {
+      "cls": "RestartReviewApiTests",
+      "tests": 5,
+      "knownCases": 5,
+      "unknownCaseTests": 0,
+      "classification": "reusable-host",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "AuthoredSectionTests",
       "tests": 4,
       "knownCases": 4,
@@ -1242,19 +1255,6 @@
       "classification": "reusable-host",
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "RestartReviewApiTests",
-      "tests": 4,
-      "knownCases": 4,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "auth-policy",
-        "ef-translation",
         "http-boundary"
       ]
     },

@@ -48,6 +48,29 @@ public sealed class ReviewWorkflowTests
     }
 
     [Fact]
+    public void A_new_legacy_fallback_cycle_keeps_resolved_authority_provenance()
+    {
+        var sourceId = Guid.NewGuid();
+        var cycle = ReadyScr().SubmitForReview("author", [new ApproverSelection("approver", "Approver",
+            ProgramRole.Approver, ProjectAuthoritySource.Delegation, sourceId)], Now);
+
+        var step = Assert.Single(cycle.Steps);
+        Assert.Equal(ProjectAuthoritySource.Delegation, step.AuthoritySource);
+        Assert.Equal(sourceId, step.AuthoritySourceId);
+    }
+
+    [Fact]
+    public void A_no_source_selection_cannot_freeze_a_source_row_id()
+    {
+        var cycle = ReadyScr().SubmitForReview("author", [new ApproverSelection("approver", "Approver",
+            ProgramRole.Approver, ProjectAuthoritySource.None, Guid.NewGuid())], Now);
+
+        var step = Assert.Single(cycle.Steps);
+        Assert.Null(step.AuthoritySource);
+        Assert.Null(step.AuthoritySourceId);
+    }
+
+    [Fact]
     public void A_review_that_follows_the_procedure_records_which_one_and_which_version()
     {
         var workflow = Workflow();
@@ -185,6 +208,46 @@ public sealed class ReviewWorkflowTests
 
         scr.ReplaceFutureApprover("author", 1, new("cm.two", "Second CM", ProgramRole.ConfigurationManager), Now, workflow);
         Assert.Equal("Second CM", scr.ActiveReviewCycle!.Steps.Single(x => x.Position == 1).ApproverName);
+    }
+
+    [Fact]
+    public void Replacing_a_future_approver_freezes_the_replacement_source()
+    {
+        var workflow = Workflow().Specification();
+        var scr = ReadyScr();
+        scr.SubmitForReview("author",
+            [new("peer", "Peer Engineer", ProgramRole.Reviewer, ProjectAuthoritySource.DirectBaseRole, Guid.NewGuid()),
+             new("cm", "Configuration Manager", ProgramRole.ConfigurationManager, ProjectAuthoritySource.LeadershipPrimary, Guid.NewGuid())],
+            Now, workflow: workflow);
+        var sourceId = Guid.NewGuid();
+
+        scr.ReplaceFutureApprover("author", 1,
+            new("cm.two", "Second CM", ProgramRole.ConfigurationManager,
+                ProjectAuthoritySource.LeadershipBackup, sourceId), Now, workflow);
+
+        var replacement = scr.ActiveReviewCycle!.Steps.Single(x => x.Position == 1);
+        Assert.Equal(ProjectAuthoritySource.LeadershipBackup, replacement.AuthoritySource);
+        Assert.Equal(sourceId, replacement.AuthoritySourceId);
+    }
+
+    [Fact]
+    public void Replacing_with_no_source_cannot_freeze_a_stale_source_row_id()
+    {
+        var workflow = Workflow().Specification();
+        var scr = ReadyScr();
+        scr.SubmitForReview("author",
+            [new("peer", "Peer Engineer", ProgramRole.Reviewer, ProjectAuthoritySource.DirectBaseRole, Guid.NewGuid()),
+             new("cm", "Configuration Manager", ProgramRole.ConfigurationManager,
+                 ProjectAuthoritySource.LeadershipPrimary, Guid.NewGuid())],
+            Now, workflow: workflow);
+
+        scr.ReplaceFutureApprover("author", 1,
+            new("cm.two", "Second CM", ProgramRole.ConfigurationManager,
+                ProjectAuthoritySource.None, Guid.NewGuid()), Now, workflow);
+
+        var replacement = scr.ActiveReviewCycle!.Steps.Single(x => x.Position == 1);
+        Assert.Null(replacement.AuthoritySource);
+        Assert.Null(replacement.AuthoritySourceId);
     }
 
     [Fact]

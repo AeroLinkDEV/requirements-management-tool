@@ -998,6 +998,7 @@ public static class ChangeRequestEndpoints
                     var chosen = request.Approvers[index];
                     var account = directory[chosen.UserId];
                     ProgramRole? role;
+                    ProjectAuthorityDecision authorityDecision;
                     if (workflow is null)
                     {
                         // No configured workflow means the legacy single-independent-Approver contract:
@@ -1011,21 +1012,33 @@ public static class ChangeRequestEndpoints
                             {
                                 error = $"{account.DisplayName} does not hold Approver authority. With no review workflow configured, the reviewer must be an Approver."
                             });
-                        role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
-                            ProgramRole.Approver, ct);
+                        var resolved = await WorkflowEndpoints.StageAuthorityWithDecisionAsync(db, scr.ProjectId,
+                            account.Id, ProgramRole.Approver, ct);
+                        role = resolved.Role;
+                        authorityDecision = resolved.Decision;
                     }
                     else if (index < workflow.Stages.Count)
-                        role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
-                            workflow.Stages[index], ct);
+                    {
+                        var resolved = await WorkflowEndpoints.StageAuthorityWithDecisionAsync(db, scr.ProjectId,
+                            account.Id, workflow.Stages[index], ct);
+                        role = resolved.Role;
+                        authorityDecision = resolved.Decision;
+                    }
                     else
                         // Additional signers are allowed beyond the configured minimum, but they must still
                         // be active participants in this Program. A role is resolved from the server roster;
                         // the client cannot turn an unrelated account into an extra reviewer.
-                        role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
-                            .GetValueOrDefault(account.Id);
+                    {
+                        var resolved = (await WorkflowEndpoints.AuthoritiesWithDecisionsAsync(db, scr.ProjectId,
+                            [account.Id], ct)).GetValueOrDefault(account.Id);
+                        role = resolved.Role;
+                        authorityDecision = resolved.Decision;
+                    }
                     if (workflow is not null && role is null)
                         return Results.BadRequest(new { error = $"{account.DisplayName} does not hold authority to sign this review." });
-                    selections.Add(new ApproverSelection(account.UserName, account.DisplayName, role));
+                    selections.Add(new ApproverSelection(account.UserName, account.DisplayName, role,
+                        authorityDecision.Granted ? authorityDecision.Source : ProjectAuthoritySource.None,
+                        authorityDecision.SourceId));
                 }
                 // Contention is settled here rather than while the author was writing, because until now
                 // nothing was in front of reviewers and there was nothing to be second to. Whoever submits
@@ -1088,6 +1101,7 @@ public static class ChangeRequestEndpoints
                     var chosen = request.Approvers[index];
                     var account = directory[chosen.UserId];
                     ProgramRole? role;
+                    ProjectAuthorityDecision authorityDecision;
                     if (workflow is null)
                     {
                         if (!await identity.HasRoleAsync(account.Id, programId, ProgramRole.Approver,
@@ -1096,18 +1110,30 @@ public static class ChangeRequestEndpoints
                             {
                                 error = $"{account.DisplayName} does not hold Approver authority. With no review workflow configured, the reviewer must be an Approver."
                             });
-                        role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
-                            ProgramRole.Approver, ct);
+                        var resolved = await WorkflowEndpoints.StageAuthorityWithDecisionAsync(db, scr.ProjectId,
+                            account.Id, ProgramRole.Approver, ct);
+                        role = resolved.Role;
+                        authorityDecision = resolved.Decision;
                     }
                     else if (index < workflow.Stages.Count)
-                        role = await WorkflowEndpoints.StageAuthorityAsync(db, scr.ProjectId, account.Id,
-                            workflow.Stages[index], ct);
+                    {
+                        var resolved = await WorkflowEndpoints.StageAuthorityWithDecisionAsync(db, scr.ProjectId,
+                            account.Id, workflow.Stages[index], ct);
+                        role = resolved.Role;
+                        authorityDecision = resolved.Decision;
+                    }
                     else
-                        role = (await WorkflowEndpoints.AuthoritiesAsync(db, scr.ProjectId, [account.Id], ct))
-                            .GetValueOrDefault(account.Id);
+                    {
+                        var resolved = (await WorkflowEndpoints.AuthoritiesWithDecisionsAsync(db, scr.ProjectId,
+                            [account.Id], ct)).GetValueOrDefault(account.Id);
+                        role = resolved.Role;
+                        authorityDecision = resolved.Decision;
+                    }
                     if (workflow is not null && role is null)
                         return Results.BadRequest(new { error = $"{account.DisplayName} does not hold authority to sign this review." });
-                    corrected.Add(new ApproverSelection(account.UserName, account.DisplayName, role));
+                    corrected.Add(new ApproverSelection(account.UserName, account.DisplayName, role,
+                        authorityDecision.Granted ? authorityDecision.Source : ProjectAuthoritySource.None,
+                        authorityDecision.SourceId));
                 }
                 var cycle = scr.CancelAndRestartForWrongApprover(actor.UserName, request.Reason, corrected, now,
                     workflow: workflow, administratorAuthority: actor.IsAdministrator);
@@ -1206,13 +1232,45 @@ public static class ChangeRequestEndpoints
             if (scr.ActiveReviewCycle?.WorkflowId is null &&
                 !await identity.HasRoleAsync(actor, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct))
                 return Results.Forbid();
-            try { var now = DateTimeOffset.UtcNow; var snapshotHash = scr.ActiveReviewCycle?.SnapshotHash ?? ""; var activeBefore=scr.ActiveReviewCycle!.Steps.Where(x=>x.State==ApprovalStepState.Active).Select(x=>x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase); scr.ApproveActiveStage(actor.UserName, now, request.Rationale); var activated=scr.ActiveReviewCycle?.Steps.Where(x=>x.State==ApprovalStepState.Active&&!activeBefore.Contains(x.ApproverId)).ToList()??[];foreach(var step in activated)db.UserNotifications.Add(ReviewNotificationFactory.ForChangeRequest(scr.ProjectId,step.ApproverId,step.StageKind,scr.DisplayNumber,scr.Title,$"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}",scr.Id,now,priorStageComplete:true)); db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "SCR", scr.Id, scr.DisplayNumber, "Approve", request.Meaning, snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now, rationale: request.Rationale ?? ""));
+            var cycle = scr.ActiveReviewCycle;
+            if (cycle is null)
+                return Results.BadRequest(new { error = "This change request has no active review." });
+            var activeStep = cycle.Steps.SingleOrDefault(x => x.State == ApprovalStepState.Active
+                && string.Equals(x.ApproverId, actor.UserName, StringComparison.OrdinalIgnoreCase));
+            if (activeStep is null)
+                return Results.BadRequest(new { error = "Only the active approver can approve this review stage." });
+            try
+            {
+                var now = DateTimeOffset.UtcNow;
+                // Capture the exact active step before the domain advances it. The signature is evidence of
+                // this frozen obligation, never a re-resolution against today's workflow or roster.
+                var snapshotHash = cycle.SnapshotHash;
+                var activeBefore = cycle.Steps.Where(x => x.State == ApprovalStepState.Active)
+                    .Select(x => x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                scr.ApproveActiveStage(actor.UserName, now, request.Rationale);
+                var activated = scr.ActiveReviewCycle?.Steps
+                    .Where(x => x.State == ApprovalStepState.Active && !activeBefore.Contains(x.ApproverId)).ToList() ?? [];
+                foreach (var step in activated)
+                    db.UserNotifications.Add(ReviewNotificationFactory.ForChangeRequest(scr.ProjectId,
+                        step.ApproverId, step.StageKind, scr.DisplayNumber, scr.Title,
+                        $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now,
+                        priorStageComplete: true));
+                db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId,
+                    "SCR", scr.Id, scr.DisplayNumber, activeStep.StageKind.ToString(), request.Meaning,
+                    snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now,
+                    authority: activeStep.Authority, reviewStepId: activeStep.Id, reviewCycle: cycle.Sequence,
+                    reviewStepPosition: activeStep.Position, rationale: request.Rationale ?? "",
+                    authoritySource: activeStep.AuthoritySource?.ToString() ?? "",
+                    workflowId: cycle.WorkflowId, workflowVersion: cycle.WorkflowVersion,
+                    authoritySourceId: activeStep.AuthoritySourceId));
                 // Approval is what settles the engineering decision, so verification work is raised here rather than
                 // waiting for baseline inclusion. Saved in the same unit of work as the approval itself.
                 await verificationImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct, actor.UserName);
                 await downstreamImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct);
                 await problemReports.RecordApprovedCorrectiveActionsAsync(scr, actor.UserName, now, ct);
-                await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr)); }
+                await repository.SaveAsync(ct);
+                return Results.Ok(ApiMap.ChangeRequestDetail(scr));
+            }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
@@ -1260,6 +1318,9 @@ public static class ChangeRequestEndpoints
                 return new
                 {
                     x.Id, x.ArtifactType, x.ArtifactId, x.ArtifactRevision, x.Action, x.Authority,
+                    x.AuthoritySource, x.AuthoritySourceId, x.WorkflowId, x.WorkflowVersion,
+                    x.ReviewStepId, x.ReviewCycle, x.ReviewStepPosition, x.Rationale,
+                    isLegacyAuthoritySource = string.IsNullOrWhiteSpace(x.AuthoritySource),
                     x.Meaning, x.ContentHash, x.UserName, x.DisplayName, x.SignedAt,
                     signatureStatus = status.Status,
                     isSuperseded = status.IsSuperseded,
