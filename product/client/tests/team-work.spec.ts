@@ -676,6 +676,56 @@ test('Team Work rejects retired role vocabulary and fabricated stage provenance'
   await page.reload()
   await expect(page.getByRole('alert')).toContainText('invalid identity, lifecycle, holder obligation')
 
+  body = {
+    ...fixture,
+    items: fixture.items.map(item => item.title === 'Parallel review change'
+      ? { ...item, currentHolderIds: [], activeStageObligations: [] }
+      : item),
+  }
+  await page.reload()
+  await expect(page.getByRole('alert')).toContainText('invalid identity, lifecycle, holder obligation')
+
+  body = {
+    ...fixture,
+    items: fixture.items.map(item => item.title === 'Parallel review change'
+      ? {
+          ...item,
+          holderBasis: 'activeApprovalStage',
+          activeStageObligations: [
+            { holderId: 'alice', stageKind: 'approval' },
+            { holderId: 'bob', stageKind: 'approval' },
+          ],
+        }
+      : item),
+  }
+  await page.reload()
+  await expect(page.getByRole('alert')).toContainText('invalid identity, lifecycle, holder obligation')
+
+  body = {
+    ...fixture,
+    items: fixture.items.map(item => item.title === 'Parallel review change'
+      ? { ...item, lane: 'sign' }
+      : item),
+  }
+  await page.reload()
+  await expect(page.getByRole('alert')).toContainText('invalid identity, lifecycle, holder obligation')
+
+  body = {
+    ...fixture,
+    items: fixture.items.map(item => item.title === 'Parallel review change'
+      ? {
+          ...item,
+          holderBasis: 'activeReviewAndApprovalStages',
+          activeStageObligations: [
+            { holderId: 'alice', stageKind: 'review' },
+            { holderId: 'bob', stageKind: 'approval' },
+          ],
+        }
+      : item),
+  }
+  await page.reload()
+  await expect(page.getByRole('alert')).toContainText('invalid identity, lifecycle, holder obligation')
+
   body = fixture
   await page.reload()
   await expect(page.getByRole('alert')).toHaveCount(0)

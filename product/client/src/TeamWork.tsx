@@ -232,7 +232,11 @@ function isValidItem(value: unknown, people: Map<string, TeamWorkPerson>): value
     || holderBasis === "activeApprovalStage"
     || holderBasis === "activeReviewAndApprovalStages";
   if (stageBasedHolderBasis
-    && (family === "problemReport" || family === "assessment" || value.nativeState !== "InReview")) return false;
+    && (family === "problemReport" || family === "assessment" || value.nativeState !== "InReview"
+      || activeStageObligations.length === 0)) return false;
+  if (holderBasis === "activeReviewStage" && lane !== "review") return false;
+  if ((holderBasis === "activeApprovalStage" || holderBasis === "activeReviewAndApprovalStages")
+    && lane !== "sign") return false;
   if (holderBasis === "activeReviewStage"
     && (!everyHolderHasAnObligation
       || obligationKinds.some(kind => kind !== "review"))) return false;
