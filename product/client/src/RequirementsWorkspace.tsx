@@ -868,7 +868,7 @@ export default function RequirementsWorkspace({
           heading={release.isReleased ? `Approved documents for ${release.version}` : `Draft documents for ${release.version}`}
         />
       )}
-      <section className="reqCommand">
+      <section className={`reqCommand requirementsCommand${selected || deepLinkMissing ? " inspecting" : ""}`}>
         <div className="reqSearch">
           <span>⌕</span>
           <input
@@ -886,112 +886,116 @@ export default function RequirementsWorkspace({
               : `${data?.totalCount.toLocaleString() ?? 0} found`}
           </kbd>
         </div>
-        <select
-          aria-label="Level filter"
-          value={level}
-          disabled={scope === "System"}
-          onChange={(e) => {
-            setLevel(e.target.value);
-            setPage(1);
-          }}
-        >
-          {scope === "System" ? (
-            <option value="System">System requirements</option>
-          ) : (
-            <>
-              <option value="Software">All software requirements</option>
-              {ladderAllows(ladder, "HighLevel") && <option value="HighLevel">Software HLR</option>}
-              {ladderAllows(ladder, "LowLevel") && <option value="LowLevel">Software LLR</option>}
-            </>
-          )}
-        </select>
-        <select
-          aria-label="Verification filter"
-          value={verification}
-          onChange={(e) => {
-            setVerification(e.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">All verification</option>
-          <option>Test</option>
-          <option>Analysis</option>
-          <option>Inspection</option>
-          <option>Demonstration</option>
-        </select>
-        {/*
-          The control beside this one filters on the verification *method* an author declared, which says
-          what kind of evidence is intended and nothing about whether any exists. This one answers the
-          question an engineer actually arrives with.
-        */}
-        <select
-          aria-label="Coverage state filter"
-          value={coverageState}
-          onChange={(e) => {
-            setCoverageState(e.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">All coverage</option>
-          <option value="covered">Covered</option>
-          <option value="suspect">Suspect</option>
-          <option value="uncovered">Not covered</option>
-        </select>
-        <input
-          className="tagFilter"
-          aria-label="Tag filter"
-          value={tag}
-          onChange={(e) => {
-            setTag(e.target.value);
-            setPage(1);
-          }}
-          placeholder="Filter tag"
-        />
-        <button
-          className={showAdvanced ? "advanced active" : "advanced"}
-          onClick={() => setShowAdvanced((x) => !x)}
-        >
-          Advanced
-        </button>
-        <button
-          className="clear"
-          disabled={!filterChips.length}
-          onClick={clearFilters}
-        >
-          Clear
-        </button>
-        <label className="pageSizeControl">
-          Rows
+        <div className="reqPrimaryFilters" role="group" aria-label="Requirement filters">
           <select
-            aria-label="Rows per page"
-            value={pageSize}
+            aria-label="Level filter"
+            value={level}
+            disabled={scope === "System"}
             onChange={(e) => {
-              setPageSize(Number(e.target.value));
+              setLevel(e.target.value);
               setPage(1);
             }}
           >
-            <option value="25">25</option>
-            <option value="50">50</option>
-            <option value="100">100</option>
+            {scope === "System" ? (
+              <option value="System">System requirements</option>
+            ) : (
+              <>
+                <option value="Software">All software requirements</option>
+                {ladderAllows(ladder, "HighLevel") && <option value="HighLevel">Software HLR</option>}
+                {ladderAllows(ladder, "LowLevel") && <option value="LowLevel">Software LLR</option>}
+              </>
+            )}
           </select>
-        </label>
-        <div className="modeSwitch" aria-label="Requirement view mode">
-          <button
-            aria-label="Table view"
-            title="Table view"
-            className={mode === "table" ? "active" : ""}
-            onClick={() => setMode("table")}
+          <select
+            aria-label="Verification filter"
+            value={verification}
+            onChange={(e) => {
+              setVerification(e.target.value);
+              setPage(1);
+            }}
           >
-            ▦
+            <option value="">All verification</option>
+            <option>Test</option>
+            <option>Analysis</option>
+            <option>Inspection</option>
+            <option>Demonstration</option>
+          </select>
+          {/*
+            The control beside this one filters on the verification *method* an author declared, which says
+            what kind of evidence is intended and nothing about whether any exists. This one answers the
+            question an engineer actually arrives with.
+          */}
+          <select
+            aria-label="Coverage state filter"
+            value={coverageState}
+            onChange={(e) => {
+              setCoverageState(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">All coverage</option>
+            <option value="covered">Covered</option>
+            <option value="suspect">Suspect</option>
+            <option value="uncovered">Not covered</option>
+          </select>
+          <input
+            className="tagFilter"
+            aria-label="Tag filter"
+            value={tag}
+            onChange={(e) => {
+              setTag(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Filter tag"
+          />
+        </div>
+        <div className="reqToolbarActions" role="group" aria-label="Explorer display controls">
+          <button
+            className={showAdvanced ? "advanced active" : "advanced"}
+            onClick={() => setShowAdvanced((x) => !x)}
+          >
+            Advanced
           </button>
           <button
-            aria-label="Document view"
-            title="Document view"
-            className={mode === "document" ? "active" : ""}
-            onClick={() => setMode("document")}
+            className="clear"
+            disabled={!filterChips.length}
+            onClick={clearFilters}
           >
-            ☷
+            Clear
           </button>
+          <label className="pageSizeControl">
+            Rows
+            <select
+              aria-label="Rows per page"
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+            >
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+          <div className="modeSwitch" aria-label="Requirement view mode">
+            <button
+              aria-label="Table view"
+              title="Table view"
+              className={mode === "table" ? "active" : ""}
+              onClick={() => setMode("table")}
+            >
+              ▦
+            </button>
+            <button
+              aria-label="Document view"
+              title="Document view"
+              className={mode === "document" ? "active" : ""}
+              onClick={() => setMode("document")}
+            >
+              ☷
+            </button>
+          </div>
         </div>
       </section>
       {showAdvanced && (
