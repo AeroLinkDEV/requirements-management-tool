@@ -65,11 +65,16 @@ export default function ProblemReportCenter({api,projectId,releaseId,releases,us
   const categories=useCategoryVocabulary(api);
   const [targetFilter,setTargetFilter]=useState(()=>new URLSearchParams(location.search).get("targetBuild")??"");
   const refreshSequence=useRef(0);
-  // The record the detail pane is committed to, as opposed to the render-scoped `selected` a long-running
-  // refresh captured when it started. open() writes it before its request goes out, so a detail response
-  // that loses the selection race can be recognized and dropped instead of replacing a record the reader
-  // chose afterwards — which once let a lifecycle button meant for one report act on another (issue #793).
+  // The reader's latest selection intent, as opposed to the render-scoped `selected` a long-running refresh
+  // captured when it started. Opening a record claims it before its request goes out, and saving a new one
+  // claims the created record; a refresh claims nothing — it serves the intent it observed when it began,
+  // and a detail response may take the pane only if the intent is still its own record. Without this, a
+  // late response for a previously selected record could silently replace the record the reader chose
+  // afterwards, and a lifecycle button meant for one report would act on another (issue #793).
   const selectedIdRef=useRef<string|undefined>(undefined);
+  // The record the pane is actually committed to — the last detail that was allowed to apply. A failed open
+  // hands the intent back to this, so pane, address and intent can never disagree about which record is shown.
+  const appliedIdRef=useRef<string|undefined>(undefined);
   const openSequence=useRef(0);
   // What the queue was actually asked for, as opposed to what is being typed. The dropdowns commit on
   // Apply filters; the search box commits itself a moment after typing stops.
@@ -86,19 +91,39 @@ export default function ProblemReportCenter({api,projectId,releaseId,releases,us
   const isOwner=selected?.responsibleEngineerId===user.userName;
   const isFinished=selected?.state==="Closed"||terminalDispositions.includes(selected?.state??"");
 
-  const refresh=async(selectId?:string,requestedPage=page)=>{const sequence=++refreshSequence.current;try{setError("");const params=new URLSearchParams({projectId,page:String(requestedPage),pageSize:String(queuePageSize)});if(appliedSearch.trim())params.set("search",appliedSearch.trim());if(appliedFilters.state)params.set("state",appliedFilters.state);if(appliedFilters.severity)params.set("severity",appliedFilters.severity);if(appliedFilters.priority)params.set("priority",appliedFilters.priority);if(appliedFilters.category)params.set("category",appliedFilters.category);if(appliedFilters.categoryFamily)params.set("categoryFamily",appliedFilters.categoryFamily);if(appliedFilters.owner.trim())params.set("owner",appliedFilters.owner.trim());const scope=new URLSearchParams({projectId});if(targetFilter==="unassigned"){params.set("targetUnassigned","true");scope.set("targetUnassigned","true")}else if(targetFilter){params.set("targetReleaseId",targetFilter);scope.set("targetReleaseId",targetFilter)}const [list,summary]=await Promise.all([call(api,`/api/problem-reports?${params}`),call(api,`/api/problem-reports/dashboard?${scope}`)]);if(sequence!==refreshSequence.current)return;setReports(list.items);setPage(list.page??requestedPage);setReportTotal(list.totalCount??list.items.length);setTotalPages(list.totalPages??(list.items.length?1:0));setDashboard(summary);const requested=selectId??selectedIdRef.current??initialReportId;let detail:Report|undefined;if(requested){const candidate=await call(api,`/api/problem-reports/${requested}`) as Report;const matchesTarget=!targetFilter||(targetFilter==="unassigned"?!candidate.targetReleaseId:candidate.targetReleaseId===targetFilter);if(matchesTarget)detail=candidate}if(!detail&&list.items[0])detail=await call(api,`/api/problem-reports/${list.items[0].id}`) as Report;if(sequence!==refreshSequence.current)return;
-    // A detail response that lost the selection race must not take the pane: the reader has opened another
-    // record while this one was in flight, and a pane that silently switched records would let a lifecycle
-    // action land on a record the reader did not select. A refresh asked for an explicit record — the one
-    // just created or just acted on — is not racing anybody and always applies.
-    const superseded=!selectId&&detail!==undefined&&selectedIdRef.current!==undefined&&selectedIdRef.current!==detail.id;if(superseded)detail=undefined;const id=detail?.id;if(detail){setSelected(detail);selectedIdRef.current=detail.id;setOwner({userId:detail.responsibleEngineerId,name:detail.responsibleEngineerId});
+  const refresh=async(selectId?:string,requestedPage=page)=>{
+    // Everything this refresh will serve is fixed here, before any request goes out: the record it asks
+    // for and the selection intent it observed. If the reader opens another record while the refresh is
+    // in flight, the refresh's responses belong to an older decision and must not take the pane.
+    const intentAtStart=selectedIdRef.current;
+    const requested=selectId??intentAtStart??initialReportId;
+    const sequence=++refreshSequence.current;try{setError("");const params=new URLSearchParams({projectId,page:String(requestedPage),pageSize:String(queuePageSize)});if(appliedSearch.trim())params.set("search",appliedSearch.trim());if(appliedFilters.state)params.set("state",appliedFilters.state);if(appliedFilters.severity)params.set("severity",appliedFilters.severity);if(appliedFilters.priority)params.set("priority",appliedFilters.priority);if(appliedFilters.category)params.set("category",appliedFilters.category);if(appliedFilters.categoryFamily)params.set("categoryFamily",appliedFilters.categoryFamily);if(appliedFilters.owner.trim())params.set("owner",appliedFilters.owner.trim());const scope=new URLSearchParams({projectId});if(targetFilter==="unassigned"){params.set("targetUnassigned","true");scope.set("targetUnassigned","true")}else if(targetFilter){params.set("targetReleaseId",targetFilter);scope.set("targetReleaseId",targetFilter)}const [list,summary]=await Promise.all([call(api,`/api/problem-reports?${params}`),call(api,`/api/problem-reports/dashboard?${scope}`)]);if(sequence!==refreshSequence.current)return;setReports(list.items);setPage(list.page??requestedPage);setReportTotal(list.totalCount??list.items.length);setTotalPages(list.totalPages??(list.items.length?1:0));setDashboard(summary);let detail:Report|undefined;let fallback=false;if(requested){const candidate=await call(api,`/api/problem-reports/${requested}`) as Report;const matchesTarget=!targetFilter||(targetFilter==="unassigned"?!candidate.targetReleaseId:candidate.targetReleaseId===targetFilter);if(matchesTarget)detail=candidate}if(!detail&&list.items[0]){fallback=true;detail=await call(api,`/api/problem-reports/${list.items[0].id}`) as Report}if(sequence!==refreshSequence.current)return;
+    // A detail response that lost the selection race must not take the pane, whoever issued it: an
+    // implicit queue refresh re-asking for the previously selected record, or an explicit refresh for the
+    // record a lifecycle action just changed. If the reader opened another record while either was in
+    // flight, the reader's newer decision wins and this response is dropped — a pane that silently
+    // switched records would let a lifecycle action land on a record the reader did not select. The one
+    // exception is the queue's own fallback to its first row when the selected record cannot be served
+    // (filtered out, or nothing selected yet): that is this refresh's own decision, and it stands unless
+    // the reader decided something newer after the refresh began.
+    const superseded=detail!==undefined&&(fallback?selectedIdRef.current!==intentAtStart:selectedIdRef.current!==undefined&&selectedIdRef.current!==detail.id);if(superseded)detail=undefined;const id=detail?.id;if(detail){
+    // The address must follow the committed record whenever it changes — including when a refresh
+    // commits a record the reader claimed while an earlier open for it is still in flight — so the
+    // pane and the address can never name different records. A same-record re-fetch leaves the
+    // address alone, and a first commit on a fresh page (nothing applied before) keeps the original
+    // no-rewrite behavior for the queue's auto-selection.
+    const addressStale=appliedIdRef.current!==undefined&&appliedIdRef.current!==detail.id;setSelected(detail);selectedIdRef.current=detail.id;appliedIdRef.current=detail.id;setOwner({userId:detail.responsibleEngineerId,name:detail.responsibleEngineerId});
     // The record being read belongs in the address, or a refresh lands on whatever happens to be first.
     //
     // Opening a report from the queue already did this; creating one did not, and the gap was invisible while
     // the queue was filtered by build — the new report was usually the only row, so falling back to items[0]
     // picked it by luck. Project-scoped, the queue holds every report in the Project and that luck is gone:
     // a refresh after creating a report jumped to the lowest-numbered record in the database.
-    if(selectId||(requested&&requested!==id))onSelected(id,targetFilter)}else if(!superseded){setSelected(undefined);if(requested)onSelected(undefined,targetFilter)}}catch(reason){if(sequence===refreshSequence.current)setError(reason instanceof Error?reason.message:"Unable to load problem reports.")}};
+    if(selectId||addressStale||(requested&&requested!==id))onSelected(id,targetFilter)}else if(selectedIdRef.current===intentAtStart){const hadRecord=appliedIdRef.current!==undefined;setSelected(undefined);selectedIdRef.current=undefined;appliedIdRef.current=undefined;if(requested||hadRecord)onSelected(undefined,targetFilter)}}catch(reason){
+    // A failure is the reader's problem only while the record it was loading is still the reader's
+    // intent. A refresh whose target was superseded mid-flight — an open moved the reader elsewhere
+    // while its detail request was underway — reports nothing: the pane already names the newer record.
+    if(sequence===refreshSequence.current&&(requested===undefined||selectedIdRef.current===undefined||selectedIdRef.current===requested))setError(reason instanceof Error?reason.message:"Unable to load problem reports.")}};
   // oxlint-disable-next-line react-hooks/exhaustive-deps -- filters are applied deliberately with Apply filters.
   useEffect(()=>{void refresh(undefined,page)},[api,projectId,releaseId,page,appliedSearch,appliedFilters,targetFilter]);// eslint-disable-line react-hooks/exhaustive-deps
   /**
@@ -117,7 +142,17 @@ export default function ProblemReportCenter({api,projectId,releaseId,releases,us
   const changeTargetFilter=(value:string)=>{const url=new URL(location.href);if(value)url.searchParams.set("targetBuild",value);else url.searchParams.delete("targetBuild");history.pushState({},"",`${url.pathname}${url.search}`);setPage(1);setTargetFilter(value)};
   const applyFilters=()=>{setPage(1);setAppliedFilters({state:stateFilter,severity:severityFilter,priority:priorityFilter,owner:ownerFilter,category:categoryFilter,categoryFamily:categoryFamilyFilter})};
   const visible=useMemo(()=>reports,[reports]);
-  const open=async(id:string)=>{const sequence=++openSequence.current;const previousId=selectedIdRef.current;selectedIdRef.current=id;try{const detail=await call(api,`/api/problem-reports/${id}`);if(sequence!==openSequence.current)return;setSelected(detail);selectedIdRef.current=detail.id;setOwner({userId:detail.responsibleEngineerId,name:detail.responsibleEngineerId});setTab("record");onSelected(id,targetFilter)}catch(reason){selectedIdRef.current=previousId;setError(reason instanceof Error?reason.message:"Unable to open report.")}};
+  const open=async(id:string)=>{const sequence=++openSequence.current;selectedIdRef.current=id;try{const detail=await call(api,`/api/problem-reports/${id}`);
+    // A success may commit only if this open still owns the selection intent: a queue fallback or clear
+    // that committed while the request was in flight supersedes it. Re-committing a record another path
+    // already committed is harmless — and it re-syncs the address, which that other path may have missed.
+    if(sequence!==openSequence.current||selectedIdRef.current!==id)return;setSelected(detail);selectedIdRef.current=detail.id;appliedIdRef.current=detail.id;setOwner({userId:detail.responsibleEngineerId,name:detail.responsibleEngineerId});setTab("record");onSelected(id,targetFilter)}catch(reason){
+    // An open the reader has already superseded owns nothing: it must not revert the newer selection, and
+    // its failure is not the current request's error. A current failure hands the intent back to the
+    // record the pane is actually showing right now — not to whatever was applied when the open began,
+    // because a refresh may legitimately have committed a newer record since. And when that newer record
+    // is this very one, the duplicate failure is invisible: the record is already on screen.
+    if(sequence===openSequence.current&&selectedIdRef.current===id&&appliedIdRef.current!==id){selectedIdRef.current=appliedIdRef.current;setError(reason instanceof Error?reason.message:"Unable to open report.")}}};
   const action=async(path:string,payload:Record<string,unknown>={})=>{if(!selected)return false;try{setBusy(true);await call(api,`/api/problem-reports/${selected.id}/${path}`,"POST",{expectedVersion:selected.version,...payload});setNote("");noteDraft.clear();await refresh(selected.id);return true}catch(reason){setError(reason instanceof Error?reason.message:"Controlled action failed.");return false}finally{setBusy(false)}};
   /**
    * Relating and unrelating are controlled acts on both records, so they go through the dedicated
@@ -145,7 +180,10 @@ export default function ProblemReportCenter({api,projectId,releaseId,releases,us
     if(await action("transition",{targetState:target,rationale:reviveRationale.trim()})){
       setShowRevive(false);setReviveRationale("");setShowEdit(true)}};
   const createReport=async(event:FormEvent)=>{event.preventDefault();const problem=toPlainText(create.problemRich).trim();if(!create.title.trim()||!problem){setError("Title and Problem Description are required for a Draft PR.");return}try{setBusy(true);const created=await call(api,"/api/problem-reports","POST",{projectId,releaseId,title:create.title.trim(),problem,problemRich:create.problemRich,additionalInformation:toPlainText(create.additionalInformationRich),additionalInformationRich:create.additionalInformationRich,severity:create.severity,priority:create.priority,category:create.category||null,classification:"Engineering anomaly",origin:"Manual report",impactAssessmentJson:JSON.stringify(create.impacts),
-      ...Object.fromEntries(PROBLEM_REPORT_NARRATIVE.flatMap(field=>[[field.key,create[field.key]],[field.plain,toPlainText(create[field.key])]]))});setShowCreate(false);setCreate(newDraft());createDraft.clear();await refresh(created.id)}catch(reason){setError(reason instanceof Error?reason.message:"Unable to create report.")}finally{setBusy(false)}};
+      ...Object.fromEntries(PROBLEM_REPORT_NARRATIVE.flatMap(field=>[[field.key,create[field.key]],[field.plain,toPlainText(create[field.key])]]))});setShowCreate(false);setCreate(newDraft());createDraft.clear();
+      // Saving a new Problem Report is itself a decision to select it, so the created record becomes the
+      // reader's selection intent before its detail is asked for.
+      selectedIdRef.current=created.id;await refresh(created.id)}catch(reason){setError(reason instanceof Error?reason.message:"Unable to create report.")}finally{setBusy(false)}};
   // Who holds the record right now. A Problem Report is edited under the same exclusive server lease as every
   // other controlled record, so the page has to be able to say "somebody else has this" rather than offering
   // a control whose check-in would be refused.
