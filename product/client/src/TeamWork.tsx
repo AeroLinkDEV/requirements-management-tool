@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
+import { createPortal } from "react-dom";
 import type { AuthUser } from "./IdentityCenter";
 import { stateLabel } from "./presentation";
 import "./TeamWork.css";
@@ -222,14 +223,19 @@ function isValidItem(value: unknown, people: Map<string, TeamWorkPerson>): value
     return false;
   })) return false;
   const obligationKinds = activeStageObligations.map(obligation => obligation.stageKind);
+  const obligationHolders = new Set(
+    activeStageObligations.map(obligation => obligation.holderId.toLowerCase()),
+  );
+  const everyHolderHasAnObligation = obligationHolders.size === holders.size
+    && [...holders].every(holder => obligationHolders.has(holder));
   if (holderBasis === "activeReviewStage"
-    && (activeStageObligations.length !== currentHolderIds.length
+    && (!everyHolderHasAnObligation
       || obligationKinds.some(kind => kind !== "review"))) return false;
   if (holderBasis === "activeApprovalStage"
-    && (activeStageObligations.length !== currentHolderIds.length
+    && (!everyHolderHasAnObligation
       || obligationKinds.some(kind => kind !== "approval"))) return false;
   if (holderBasis === "activeReviewAndApprovalStages"
-    && (activeStageObligations.length !== currentHolderIds.length
+    && (!everyHolderHasAnObligation
       || !obligationKinds.includes("review") || !obligationKinds.includes("approval"))) return false;
   if (!holderBasis.startsWith("activeReview") && holderBasis !== "activeApprovalStage"
     && activeStageObligations.length !== 0) return false;
@@ -333,8 +339,11 @@ function writeAffinity(viewerId: string, projectId: string, person: TeamWorkPers
   const project = viewer[projectId] ?? {};
   const key = person.userId.toLowerCase();
   project[key] = Math.min(999, (project[key] ?? 0) + 1);
+  const retained = Object.entries(project)
+    .filter(([personId, count]) => personId !== key && Number.isFinite(count) && count > 0)
+    .slice(0, 63);
   viewer[projectId] = Object.fromEntries(
-    Object.entries(project).filter(([, count]) => Number.isFinite(count) && count > 0).slice(0, 64),
+    [[key, project[key]], ...retained],
   );
   store.viewers[viewerId] = viewer;
 
@@ -1063,13 +1072,14 @@ export default function TeamWork({ api, projectId, user }: {
           )}
         </>
       )}
-      {drawerHolder && (
+      {drawerHolder && createPortal(
         <TeamWorkDrawer
           person={drawerHolder}
           items={response.items}
           people={peopleByIdentity}
           onClose={closeDrawer}
-        />
+        />,
+        document.body,
       )}
     </main>
   );

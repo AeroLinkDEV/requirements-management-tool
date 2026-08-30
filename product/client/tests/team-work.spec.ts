@@ -375,6 +375,34 @@ test('Team Work searches people and opens a holder drawer with shared-item facts
   await expect(page).not.toHaveURL(/holder=/)
 })
 
+test('Team Work keeps its holder drawer contained at a 320px viewport', async ({ page }) => {
+  const longIdentity = 'API Alice With A Deliberately Long Controlled Identity'
+  const body = {
+    ...fixture,
+    people: fixture.people.map(person => person.userName === 'alice'
+      ? { ...person, displayName: longIdentity }
+      : person),
+    items: fixture.items.map(item => item.title === 'Parallel review change'
+      ? { ...item, title: 'Parallel review change with a deliberately long controlled record title' }
+      : item),
+  }
+  await openTeamWork(page, body)
+  const deepLink = new URL(page.url())
+  deepLink.searchParams.set('holder', 'alice')
+  await page.setViewportSize({ width: 320, height: 760 })
+  await page.goto(deepLink.toString())
+  const drawer = page.getByRole('dialog', { name: longIdentity })
+  await expect(drawer).toBeVisible()
+  const bounds = await drawer.boundingBox()
+  expect(bounds).not.toBeNull()
+  expect(bounds!.width).toBeLessThanOrEqual(320)
+  expect(await drawer.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  const documentWidthWithDrawer = await page.evaluate(() => document.documentElement.scrollWidth)
+  await drawer.getByRole('button', { name: 'Close current holder' }).click()
+  await expect(drawer).toHaveCount(0)
+  expect(documentWidthWithDrawer).toBe(await page.evaluate(() => document.documentElement.scrollWidth))
+})
+
 test('Team Work retains zero-hold members, scopes affinity storage, and exposes the exact zero-holder empty state', async ({ page }) => {
   const zero = { userId: '00000000-0000-0000-0000-0000000000ae', userName: 'erin', displayName: 'API Erin', isCurrentProjectMember: true, accountState: 'locked', baseRoles: ['SoftwareTestEngineer'], disciplineAffinities: ['software'], holds: 0, byLane: { work: 0, review: 0, sign: 0, approved: 0 } }
   const body = { ...fixture, totals: { ...fixture.totals, unheld: 3 }, people: [...fixture.people, zero] }
@@ -410,6 +438,20 @@ test('Team Work validates active obligation uniqueness and invalid holder URL st
   await expect(page).not.toHaveURL(/holder=not-a-person/)
 })
 
+test('Team Work opens a valid initial holder deep link and preserves unrelated URL state', async ({ page }) => {
+  await page.route('**/api/team-work*', async route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(fixture) }))
+  await login(page)
+  const teamWorkHref = await page.getByRole('link', { name: 'Team Work', exact: true }).getAttribute('href')
+  expect(teamWorkHref).toBeTruthy()
+  await page.goto(`${teamWorkHref}?mode=keep&holder=alice#register`)
+
+  await expect(page.getByRole('dialog', { name: 'API Alice' })).toBeVisible()
+  await expect(page).toHaveURL(/mode=keep&holder=alice#register$/)
+  await page.getByRole('dialog').getByRole('button', { name: 'Close current holder' }).click()
+  await expect(page).toHaveURL(/mode=keep#register$/)
+})
+
 test('Team Work attributes mixed frozen Review and Approval obligations to the right holder', async ({ page }) => {
   const people = fixture.people.map(person => person.userName === 'alice' || person.userName === 'bob'
     ? { ...person, byLane: { work: 0, review: 0, sign: 1, approved: 0 } }
@@ -438,6 +480,33 @@ test('Team Work attributes mixed frozen Review and Approval obligations to the r
   await expect(drawer.getByText('Also API Alice')).toBeVisible()
 })
 
+test('Team Work preserves one holder with simultaneous frozen Review and Approval obligations', async ({ page }) => {
+  const people = fixture.people.map(person => person.userName === 'alice'
+    ? { ...person, byLane: { work: 0, review: 0, sign: 1, approved: 0 } }
+    : person.userName === 'bob'
+      ? { ...person, holds: 0, byLane: { work: 0, review: 0, sign: 0, approved: 0 } }
+      : person)
+  const items = fixture.items.map(item => item.title === 'Parallel review change'
+    ? {
+        ...item,
+        lane: 'sign',
+        currentHolderIds: ['alice'],
+        holderBasis: 'activeReviewAndApprovalStages',
+        activeStageObligations: [
+          { holderId: 'alice', stageKind: 'review' },
+          { holderId: 'alice', stageKind: 'approval' },
+        ],
+      }
+    : item)
+  await openTeamWork(page, { ...fixture, people, items })
+
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await expect(page.locator('[data-lane="sign"]')).toContainText('Parallel review change')
+  await page.getByRole('button', { name: /API Alice/ }).click()
+  await expect(page.getByRole('dialog', { name: 'API Alice' })
+    .getByText('Awaiting their signature').locator('..')).toContainText('1')
+})
+
 test('Team Work composes filters against unique items and clear preserves holder grouping', async ({ page }) => {
   await openTeamWork(page)
   await page.getByRole('button', { name: 'Current holder', exact: true }).click()
@@ -460,6 +529,8 @@ test('Team Work drawer traps focus, restores its trigger, preserves query state,
   await expect(close).toBeFocused()
   await page.keyboard.press('Shift+Tab')
   await expect(drawer.getByRole('link', { name: /Parallel review change/ })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(close).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(drawer).toHaveCount(0)
   await expect(alice).toBeFocused()
@@ -520,6 +591,34 @@ test('Team Work scopes deterministic modern-discipline affinity by viewer, proje
   await page.getByRole('button', { name: /API Alice/ }).click()
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('aerolink-teamwork-affinity') || '{}'))
   expect(stored.viewers[me.id][projectId][fixture.people[0].userId]).toBe(3)
+})
+
+test('Team Work retains a newly selected affinity when its scoped map is already full', async ({ page }) => {
+  await page.route('**/api/team-work*', async route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(fixture) }))
+  await login(page)
+  const identityResponse = await page.request.get(`${apiBase}/api/auth/me`)
+  expect(identityResponse.ok(), await identityResponse.text()).toBeTruthy()
+  const me = await identityResponse.json() as { id: string }
+  const projectId = locationProjectId(page.url())
+  await page.evaluate(({ viewerId, project }) => {
+    const counts = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [
+      `00000000-0000-0000-0001-${String(index + 1).padStart(12, '0')}`,
+      index + 1,
+    ]))
+    localStorage.setItem('aerolink-teamwork-affinity', JSON.stringify({
+      version: 1,
+      viewers: { [viewerId]: { [project]: counts } },
+    }))
+  }, { viewerId: me.id, project: projectId })
+
+  await page.getByRole('link', { name: 'Team Work', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Team Work', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: /API Bob/ }).click()
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('aerolink-teamwork-affinity') || '{}'))
+  const scoped = stored.viewers[me.id][projectId]
+  expect(Object.keys(scoped)).toHaveLength(64)
+  expect(scoped[fixture.people[1].userId]).toBe(1)
 })
 
 test('Team Work rejects retired role vocabulary and fabricated stage provenance', async ({ page }) => {
