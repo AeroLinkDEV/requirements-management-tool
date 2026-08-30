@@ -31,6 +31,21 @@ test('AeroLink starts against the real API and presents a valid entry state', as
   await expect(page.getByRole('heading', { name: seedless ? 'Create your first program' : 'Command Center' })).toBeVisible()
 })
 
+test('The sign-in story panel gives truthful workspace context without changing authentication', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.locator('.loginBrand')).toContainText('AeroLink')
+  await expect(page.locator('.loginStoryContext')).toContainText('CONTROLLED ENGINEERING WORKSPACE')
+  await expect(page.locator('.loginStoryContext')).toContainText('Requirements, change, verification, and evidence')
+  await expect(page.locator('.loginStoryEndpoint')).toContainText(new URL(page.url()).origin)
+  await expect(page.getByLabel('Username')).toBeVisible()
+  await expect(page.getByLabel('Password')).toBeVisible()
+  await expect(page.getByRole('button', { name: /Sign in securely/ })).toBeVisible()
+  await page.getByLabel('Username').fill('admin')
+  await page.getByLabel('Password').fill('AeroLink!2026')
+  await page.getByRole('button', { name: /Sign in securely/ }).click()
+  await expect(page.getByRole('heading', { name: /Create your first program|Projects/ })).toBeVisible()
+})
+
 test('Sign in recovers cleanly when the local API is temporarily unavailable', async ({ page }) => {
   await page.route('**/api/auth/login', route => route.abort('connectionrefused'))
   await page.goto('/')

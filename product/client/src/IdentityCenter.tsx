@@ -129,6 +129,14 @@ export function LoginPage({
       setBusy(false);
     }
   };
+  const workspaceOrigin = window.location.origin;
+  let apiOrigin = "";
+  try {
+    apiOrigin = new URL(api, workspaceOrigin).origin;
+  } catch {
+    apiOrigin = "";
+  }
+  const showApiOrigin = apiOrigin !== "" && apiOrigin !== workspaceOrigin;
   const signIn = (
     <form onSubmit={submit}>
       <div className="securityMark">◈</div>
@@ -262,8 +270,41 @@ export function LoginPage({
     <main className="loginPage">
       <section className="loginStory">
         <div className="loginBrand">
-          <span>▲</span>AeroLink
+          <span aria-hidden="true">▲</span>AeroLink
         </div>
+        {setup && !setup.bootstrapRequired && (
+          <>
+            <div className="loginStoryContext">
+              <p className="loginStoryEyebrow">
+                CONTROLLED ENGINEERING WORKSPACE
+              </p>
+              <h1>
+                Requirements, change, verification, and evidence in one
+                connected record.
+              </h1>
+              <p className="loginStoryBody">
+                Sign in to reach the programs you are authorized for. Review
+                decisions and verification evidence stay attributable to their
+                approved revisions.
+              </p>
+              <div className="loginStoryTrust">
+                <span>PROJECT ACCESS IS ENFORCED</span>
+              </div>
+            </div>
+            <div className="loginStoryEndpoint">
+              <div>
+                <span>WORKSPACE ORIGIN</span>
+                <b>{workspaceOrigin}</b>
+              </div>
+              {showApiOrigin && (
+                <div>
+                  <span>API ORIGIN</span>
+                  <b>{apiOrigin}</b>
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </section>
       <section className="loginPanel">
         {setup ? (
