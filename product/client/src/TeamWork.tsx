@@ -228,6 +228,11 @@ function isValidItem(value: unknown, people: Map<string, TeamWorkPerson>): value
   );
   const everyHolderHasAnObligation = obligationHolders.size === holders.size
     && [...holders].every(holder => obligationHolders.has(holder));
+  const stageBasedHolderBasis = holderBasis === "activeReviewStage"
+    || holderBasis === "activeApprovalStage"
+    || holderBasis === "activeReviewAndApprovalStages";
+  if (stageBasedHolderBasis
+    && (family === "problemReport" || family === "assessment" || value.nativeState !== "InReview")) return false;
   if (holderBasis === "activeReviewStage"
     && (!everyHolderHasAnObligation
       || obligationKinds.some(kind => kind !== "review"))) return false;

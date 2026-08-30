@@ -628,20 +628,58 @@ test('Team Work rejects retired role vocabulary and fabricated stage provenance'
       ? { ...person, baseRoles: ['Reviewer'], disciplineAffinities: [] }
       : person),
   }
-  await openTeamWork(page, retiredRole)
+  let body: unknown = retiredRole
+  await page.route('**/api/team-work*', async route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) }))
+  await login(page)
+  await page.getByRole('link', { name: 'Team Work', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('invalid identity, account state, roles, affinity')
 
-  await page.unroute('**/api/team-work*')
-  const fabricatedAssessment = {
+  body = {
     ...fixture,
     items: fixture.items.map(item => item.family === 'assessment'
-      ? { ...item, activeStageObligations: [{ holderId: 'charlie', stageKind: 'approval' }] }
+      ? {
+          ...item,
+          holderBasis: 'activeApprovalStage',
+          activeStageObligations: [{ holderId: 'charlie', stageKind: 'approval' }],
+        }
       : item),
   }
-  await page.route('**/api/team-work*', async route =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(fabricatedAssessment) }))
   await page.reload()
   await expect(page.getByRole('alert')).toContainText('invalid identity, lifecycle, holder obligation')
+
+  body = {
+    ...fixture,
+    items: fixture.items.map(item => item.family === 'problemReport'
+      ? {
+          ...item,
+          currentHolderIds: ['alice'],
+          holderBasis: 'activeReviewStage',
+          activeStageObligations: [{ holderId: 'alice', stageKind: 'review' }],
+        }
+      : item),
+  }
+  await page.reload()
+  await expect(page.getByRole('alert')).toContainText('invalid identity, lifecycle, holder obligation')
+
+  body = {
+    ...fixture,
+    items: fixture.items.map(item => item.nativeState === 'Draft'
+      ? {
+          ...item,
+          currentHolderIds: ['alice'],
+          holderBasis: 'activeReviewStage',
+          activeStageObligations: [{ holderId: 'alice', stageKind: 'review' }],
+        }
+      : item),
+  }
+  await page.reload()
+  await expect(page.getByRole('alert')).toContainText('invalid identity, lifecycle, holder obligation')
+
+  body = fixture
+  await page.reload()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await expect(page.getByRole('link', { name: /Parallel review change/ })).toBeVisible()
 })
 
 function locationProjectId(url: string) {
