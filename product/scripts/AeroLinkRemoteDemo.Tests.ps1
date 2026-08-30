@@ -130,6 +130,17 @@ $originState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $config.Stat
 $originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $runtimeIdentity
 Assert-True $originProof.Valid 'Matching public origin plus exact live process identity must be accepted.'
 
+$originState.LocalApiStartedAt = '2026-08-30T08:34:56.0000000-04:00'
+$originState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $config.StatePath 'remote-demo-state.json') -Encoding UTF8
+$originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $runtimeIdentity
+Assert-True $originProof.Valid 'Equivalent process-start instants must match across JSON date materialization and timezone offsets.'
+
+$originState.LocalApiStartedAt = 'not-a-timestamp'
+$originState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $config.StatePath 'remote-demo-state.json') -Encoding UTF8
+$originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $runtimeIdentity
+Assert-True (-not $originProof.Valid) 'An invalid process-start timestamp must fail notification-origin attribution closed.'
+
+$originState.LocalApiStartedAt = '2026-08-30T12:34:56.0000000Z'
 $originState.NotificationBaseUrl = 'http://127.0.0.1:5080'
 $originState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $config.StatePath 'remote-demo-state.json') -Encoding UTF8
 $originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $runtimeIdentity
