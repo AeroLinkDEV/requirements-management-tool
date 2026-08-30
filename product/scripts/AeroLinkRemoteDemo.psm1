@@ -305,8 +305,13 @@ function Test-AeroLinkRemoteDemoNotificationOriginProof {
             return [pscustomobject]@{ Valid = $false; Detail = $runtime.Detail }
         }
         $originMatches = [string]::Equals([string]$state.NotificationBaseUrl, [string]$Config.PublicUrl, [StringComparison]::OrdinalIgnoreCase)
+        # PowerShell 7 deserializes an ISO JSON timestamp as DateTime while Windows PowerShell can leave it as
+        # text. Compare the exact UTC instant, not those host-specific string representations. Invalid or missing
+        # values still fall into the fail-closed catch below.
+        $stateStartedAt = [DateTimeOffset]$state.LocalApiStartedAt
+        $runtimeStartedAt = [DateTimeOffset]$runtime.StartedAt
         $processMatches = [int]$state.LocalApiPid -eq [int]$runtime.ProcessId `
-            -and [string]::Equals([string]$state.LocalApiStartedAt, [string]$runtime.StartedAt, [StringComparison]::Ordinal)
+            -and $stateStartedAt.UtcDateTime.Ticks -eq $runtimeStartedAt.UtcDateTime.Ticks
         if (-not $originMatches -or -not $processMatches) {
             return [pscustomobject]@{ Valid = $false; Detail = 'Recorded notification origin does not belong to the current local API process.' }
         }
