@@ -1644,7 +1644,7 @@ public sealed class ProblemReportCheckoutApiTests
             var manifest = snapshot.GetProperty("supportingAttachments");
             Assert.Equal(active.Count, manifest.GetArrayLength());
             Assert.All(active, item => Assert.Contains(manifest.EnumerateArray(), entry =>
-                entry.GetProperty("sha256").GetString() == item.Sha256 && entry.GetProperty("id").GetGuid() == item.Id));
+                entry.GetProperty("sha256").GetString() == item.Sha256 && entry.GetProperty("attachmentId").GetGuid() == item.Id));
         }
         else
         {

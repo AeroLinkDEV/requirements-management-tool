@@ -93,7 +93,7 @@ public sealed class ProblemReportPostgresQualificationTests
             var manifest = JsonDocument.Parse(checkedIn!.SnapshotJson).RootElement.GetProperty("supportingAttachments");
             Assert.Equal(active.Count, manifest.GetArrayLength());
             Assert.All(active, item => Assert.Contains(manifest.EnumerateArray(), entry =>
-                entry.GetProperty("sha256").GetString() == item.Sha256 && entry.GetProperty("id").GetGuid() == item.Id));
+                entry.GetProperty("sha256").GetString() == item.Sha256 && entry.GetProperty("attachmentId").GetGuid() == item.Id));
         }
         else
             Assert.Null(checkedIn);
