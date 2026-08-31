@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 733,
-    "cases": 817,
-    "classes": 116,
-    "hostedTests": 703,
-    "hostedCases": 773,
+    "tests": 736,
+    "cases": 820,
+    "classes": 118,
+    "hostedTests": 706,
+    "hostedCases": 776,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 8,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 435,
-      "cases": 487,
+      "tests": 438,
+      "cases": 490,
       "unknownCases": 0,
-      "classes": 95
+      "classes": 97
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -10000,6 +10000,60 @@
       "sourceLines": {
         "start": 131,
         "end": 156
+      }
+    },
+    {
+      "cls": "ShowcaseSeedApiTests",
+      "test": "Showcase_seed_endpoint_builds_the_controlled_dataset_on_disposable_sqlite",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 13,
+        "end": 58
+      }
+    },
+    {
+      "cls": "ShowcaseUpgradeApiTests",
+      "test": "Upgrade_can_add_a_pending_interface_scenario_with_current_authority_timestamps",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "showcase-factory",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 14,
+        "end": 48
+      }
+    },
+    {
+      "cls": "ShowcaseUpgradeApiTests",
+      "test": "Upgrade_returns_conflict_without_active_sqa_identity_or_current_authority",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "showcase-factory",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 50,
+        "end": 106
       }
     },
     {

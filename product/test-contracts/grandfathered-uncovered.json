@@ -88,8 +88,6 @@
     "POST /api/reqif/jobs/{}/cancel",
     "POST /api/reqif/jobs/{}/reject",
     "POST /api/review-workflows/{}/retire",
-    "POST /api/showcase/seed",
-    "POST /api/showcase/upgrade",
     "POST /api/v1/oslc/rm/consume",
     "PUT /api/change-requests/{}/draft",
     "PUT /api/edit-sessions/{}/autosave",
