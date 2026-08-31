@@ -63,11 +63,14 @@ test('emphasis applied in the browser survives check-in and reload', async ({ pa
   await raise.getByLabel('Title').fill(title)
 
   const body = raise.getByRole('textbox', { name: 'Problem Description paragraph 1' })
-  await body.click()
-  await page.keyboard.type('The tone is late on every approach.')
+  // The document-like editor owns an initial paragraph directly; fill that paragraph rather than
+  // manufacturing a Paragraph block through the old block-model toolbar.
+  await body.fill('The tone is late on every approach.')
+  await expect(body).toHaveText('The tone is late on every approach.')
   // Emphasis applies to a selection, which is how the toolbar works: select the word, press Bold.
   await selectWithin(page, body, 'late')
-  await raise.getByRole('button', { name: 'Bold', exact: true }).click()
+  await body.locator('xpath=..').getByRole('group', { name: 'Emphasis for Problem Description paragraph 1' })
+    .getByRole('button', { name: 'Bold', exact: true }).click()
 
   await expect(body.locator('strong')).toHaveText('late')
   await chooseCategory(raise, 'Code Issue — Functional Impact')
@@ -119,7 +122,8 @@ test('text that looks like markup is stored and shown as text', async ({ page, r
   // Emphasise it too: hostile text that carries a mark is the harder case, because it exercises the
   // run split as well as the text itself.
   await selectWithin(page, body, hostile)
-  await raise.getByRole('button', { name: 'Bold', exact: true }).click()
+  await body.locator('xpath=..').getByRole('group', { name: 'Emphasis for Problem Description paragraph 1' })
+    .getByRole('button', { name: 'Bold', exact: true }).click()
   await chooseCategory(raise, 'Code Issue — Functional Impact')
   await raise.getByRole('button', { name: 'Save Draft PR' }).click()
 
