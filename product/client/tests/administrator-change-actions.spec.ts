@@ -76,14 +76,15 @@ test('administrator actions work identically for another authors System and Soft
     for (const action of ['Check out & edit', 'Defer', 'Configure & Submit Review', 'Attach'])
       await expect(page.getByRole('button', { name: action, exact: true })).toBeVisible()
 
-    await page.getByLabel('Label').fill('Administrator recovery evidence')
-    await page.getByLabel('Description').fill('Uploaded by the actual acting administrator.')
-    await page.getByLabel('File').setInputFiles({
+    const attachmentForm = page.getByRole('form', { name: 'Attach a supporting file' })
+    await attachmentForm.getByLabel('Label').fill('Administrator recovery evidence')
+    await attachmentForm.getByLabel('Description').fill('Uploaded by the actual acting administrator.')
+    await attachmentForm.getByLabel('File', { exact: true }).setInputFiles({
       name: 'administrator-recovery.txt',
       mimeType: 'text/plain',
       buffer: Buffer.from('controlled administrator recovery evidence'),
     })
-    await page.getByRole('button', { name: 'Attach', exact: true }).click()
+    await attachmentForm.getByRole('button', { name: 'Attach', exact: true }).click()
     await expect(page.getByText('Stored, hashed, and attributed.')).toBeVisible()
     await expect(page.locator('.attachmentList')).toContainText('admin')
 
