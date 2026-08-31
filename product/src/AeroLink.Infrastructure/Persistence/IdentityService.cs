@@ -227,6 +227,12 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
     {
         var now = DateTimeOffset.UtcNow;
         var programs = await db.Programs.AsNoTracking().Select(x => x.Id).ToListAsync(ct);
+        // FMS closure authority is controlled by FmsShowcaseSeeder's fresh-program path or an explicit
+        // operator upgrade. The directory pass may grant the other seeded roles, but must not silently create
+        // a missing SQA authority on an existing FMS database before backup/target confirmation.
+        var fmsProgramId = await db.Programs.AsNoTracking()
+            .Where(x => x.Code == FmsShowcaseSeeder.ProgramCode)
+            .Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct);
         var demoPasswordHash = IdentityService.HashPassword(DemoPassword);
         var directory = People.Concat(GeneratedPeople()).ToList();
         var userNames = directory.Select(x => x.User).ToList();
@@ -259,7 +265,8 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
                 && (user.DisplayName != person.Name || user.Email != person.Email))
                 user.RefreshDirectoryProfile(person.Name, person.Email);
             foreach (var program in programs) foreach (var role in person.Roles)
-                if (membershipKeys.Add((user.Id, program, role)))
+                if (!(fmsProgramId == program && role == ProgramRole.SoftwareQualityAnalyst)
+                    && membershipKeys.Add((user.Id, program, role)))
                     db.ProgramMemberships.Add(new(user.Id, program, role, "system.bootstrap", now));
         }
         await db.SaveChangesAsync(ct);

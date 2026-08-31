@@ -17,6 +17,9 @@ namespace AeroLink.Infrastructure.Persistence;
 /// <summary>One checked expectation about the showcase, and whether it currently holds.</summary>
 public sealed record ShowcaseInvariant(string Key, bool Holds, string Detail);
 
+public sealed record ShowcaseUpgradeAuthorityDecision(bool Ready, string Code, string Detail,
+    DateTimeOffset? ClosureAt = null);
+
 public sealed record FmsShowcaseSummary(Guid ProgramId, Guid ProjectId, Guid ReleasedBaselineId, Guid ActiveReleaseId,
     int SystemRequirements, int HighLevelRequirements, int LowLevelRequirements, int HistoricalScrs,
     int HistoricalSwcrs, int TraceLinks, int TestProcedures, int TestExecutions, int Documents);
@@ -25,6 +28,11 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
 {
     private readonly IProjectLadderPolicyResolver resolver = policyResolver ?? new EffectiveProjectLadderPolicyResolver(db);
     public const string ProgramCode = "FMSLIVE";
+    private const string QualityAnalystUserName = "quality.analyst";
+    // The fresh showcase is a historical record. Its SQA authority must therefore pre-date the deterministic
+    // Build 1.5 closure evidence below; using UtcNow would make a new seed approve work before the authority
+    // that supposedly approved it existed.
+    private static readonly DateTimeOffset FreshSqaMembershipGrantedAt = new(2024, 1, 8, 14, 0, 0, TimeSpan.Zero);
     // Scenario ownership is recorded in one immutable upgrade-step row per artifact. Prose markers below
     // are display breadcrumbs only; they are never used to locate or mutate controlled rows.
     private const string InterfaceScenarioMarkerPrefix = "[FMSLIVE showcase scenario: interface-";
@@ -51,12 +59,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var existing = await db.Programs.AsNoTracking().SingleOrDefaultAsync(x => x.Code == ProgramCode, ct);
         if (existing is not null)
         {
-            // IdentitySeeder runs before the FMS seed on a fresh startup, but the Program does not exist
-            // during that pass. Repair only this required canonical membership here before any controlled
-            // closure can be frozen; the normal post-Program IdentitySeeder pass still grants every other
-            // seeded role and membership.
-            await EnsureQualityAnalystMembershipAsync(existing.Id, ct);
-            await UpgradeAsync(existing.Id, ct);
+            // An existing FMS database is operator-owned state. Startup and the showcase seed endpoint are
+            // discovery/retry boundaries, not approval to add controlled scenarios, memberships, or closure
+            // evidence. The explicit /api/showcase/upgrade command is the backup-confirmed repair path.
             return await SummarizeAsync(existing.Id, ct);
         }
 
@@ -159,15 +164,16 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         db.CandidateBaselines.Add(baseline16); await db.SaveChangesAsync(ct);
         // The fresh path runs the same ordered steps, so a database seeded today records them as applied
         // and a later start does not try to reconcile what was just built.
-        await EnsureQualityAnalystMembershipAsync(program.Id, ct);
+        await EnsureQualityAnalystMembershipAsync(program.Id, FreshSqaMembershipGrantedAt, ct);
+        await EnsureFreshControlledActorMembershipsAsync(program.Id, FreshSqaMembershipGrantedAt, ct);
         await UpgradeAsync(program.Id, ct);
         return await SummarizeAsync(program.Id, ct);
     }
 
-    private async Task<bool> EnsureQualityAnalystMembershipAsync(Guid programId, CancellationToken ct)
+    private async Task<bool> EnsureQualityAnalystMembershipAsync(Guid programId, DateTimeOffset grantedAt, CancellationToken ct)
     {
         var account = await db.UserAccounts.AsNoTracking()
-            .SingleOrDefaultAsync(x => x.UserName == "quality.analyst" && x.State == AccountState.Active, ct)
+            .SingleOrDefaultAsync(x => x.UserName == QualityAnalystUserName && x.State == AccountState.Active, ct)
             ?? throw new InvalidOperationException(
                 "The seeded quality.analyst account is required before FMS closure scenarios can be frozen.");
 
@@ -182,9 +188,114 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (history.Count > 0) return false;
 
         db.ProgramMemberships.Add(new ProgramMembership(account.Id, programId, ProgramRole.SoftwareQualityAnalyst,
-            "system.bootstrap", DateTimeOffset.UtcNow));
+            "system.bootstrap", grantedAt));
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    private static readonly (string UserName, ProgramRole[] Roles)[] FreshControlledActors =
+    [
+        ("systems.author", [ProgramRole.Engineer, ProgramRole.SystemEngineer]),
+        ("software.author", [ProgramRole.Engineer, ProgramRole.SoftwareEngineer]),
+        ("systems.reviewer", [ProgramRole.Reviewer, ProgramRole.Approver]),
+        ("assurance.reviewer", [ProgramRole.Reviewer, ProgramRole.Approver]),
+        ("lead.reviewer", [ProgramRole.Reviewer, ProgramRole.Approver]),
+        ("manager.reviewer", [ProgramRole.ProgramManager, ProgramRole.Approver]),
+        ("cm.fms", [ProgramRole.ConfigurationManager]),
+        ("test.author", [ProgramRole.TestEngineer]),
+        ("test.engineer", [ProgramRole.TestEngineer]),
+        ("engineer.demo", [ProgramRole.Engineer]),
+        ("release.manager", [ProgramRole.ConfigurationManager, ProgramRole.ProgramManager]),
+        ("program.manager", [ProgramRole.ProgramManager, ProgramRole.Approver]),
+        ("software.lead", [ProgramRole.Reviewer, ProgramRole.Approver, ProgramRole.SoftwareEngineeringLead]),
+    ];
+
+    private async Task EnsureFreshControlledActorMembershipsAsync(Guid programId, DateTimeOffset grantedAt,
+        CancellationToken ct)
+    {
+        var names = FreshControlledActors.Select(x => x.UserName).ToArray();
+        var accounts = await db.UserAccounts.Where(x => names.Contains(x.UserName)).ToDictionaryAsync(x => x.UserName,
+            StringComparer.OrdinalIgnoreCase, ct);
+        var existing = (await db.ProgramMemberships.AsNoTracking().Where(x => x.ProgramId == programId).ToListAsync(ct))
+            .Select(x => (x.UserId, x.Role)).ToHashSet();
+        foreach (var actor in FreshControlledActors)
+        {
+            if (!accounts.TryGetValue(actor.UserName, out var account) || account.State != AccountState.Active)
+                throw new InvalidOperationException($"The seeded {actor.UserName} account is required and must be active before FMS controlled scenarios are created.");
+            foreach (var role in actor.Roles)
+                if (existing.Add((account.Id, role)))
+                    db.ProgramMemberships.Add(new ProgramMembership(account.Id, programId, role, "system.bootstrap", grantedAt));
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static readonly (string UserName, ProgramRole Role)[] InterfaceScenarioActors =
+    [
+        ("systems.author", ProgramRole.Engineer),
+        ("systems.author", ProgramRole.SystemEngineer),
+        ("software.author", ProgramRole.Engineer),
+        ("software.author", ProgramRole.SoftwareEngineer),
+        ("systems.reviewer", ProgramRole.Reviewer),
+        ("systems.reviewer", ProgramRole.Approver),
+        ("assurance.reviewer", ProgramRole.Reviewer),
+        ("assurance.reviewer", ProgramRole.Approver),
+        ("lead.reviewer", ProgramRole.Reviewer),
+        ("lead.reviewer", ProgramRole.Approver),
+        ("manager.reviewer", ProgramRole.ProgramManager),
+        ("manager.reviewer", ProgramRole.Approver),
+        ("cm.fms", ProgramRole.ConfigurationManager),
+    ];
+
+    private static readonly (string UserName, ProgramRole Role)[] ProblemReportScenarioActors =
+    [
+        ("systems.author", ProgramRole.Engineer),
+        ("software.author", ProgramRole.Engineer),
+        ("test.engineer", ProgramRole.TestEngineer),
+        ("engineer.demo", ProgramRole.Engineer),
+        ("test.author", ProgramRole.TestEngineer),
+        ("systems.reviewer", ProgramRole.Reviewer),
+    ];
+
+    private async Task EnsureCurrentProgramAuthorityAsync(Guid programId, string userName, ProgramRole role,
+        DateTimeOffset effectiveAt, CancellationToken ct)
+    {
+        var account = await db.UserAccounts.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.UserName == userName, ct);
+        if (account is null)
+            throw new InvalidOperationException($"{userName} is required as an active {role} actor before FMS controlled scenarios are created.");
+        if (account.State != AccountState.Active)
+            throw new InvalidOperationException($"{userName} cannot act as {role}: the account is not active.");
+        var authorityGrants = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.UserId == account.Id && x.ProgramId == programId && x.Role == role && x.EndedAt == null)
+            .Select(x => x.GrantedAt).ToListAsync(ct);
+        if (!authorityGrants.Any(x => x <= effectiveAt))
+            throw new InvalidOperationException($"{userName} cannot act as {role}: no current program authority covers {effectiveAt:O}.");
+    }
+
+    private async Task<DateTimeOffset> EffectiveInterfaceTimelineAtAsync(Guid programId, DateTimeOffset baselineAt,
+        CancellationToken ct)
+    {
+        var names = InterfaceScenarioActors.Select(x => x.UserName).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var actorIds = await db.UserAccounts.AsNoTracking().Where(x => names.Contains(x.UserName))
+            .Select(x => x.Id).ToListAsync(ct);
+        var grants = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.ProgramId == programId && actorIds.Contains(x.UserId) && x.EndedAt == null)
+            .Select(x => x.GrantedAt).ToListAsync(ct);
+        var latestGrant = grants.Count == 0 ? (DateTimeOffset?)null : grants.Max();
+        return latestGrant is { } grant && grant >= baselineAt ? grant.AddMinutes(1) : baselineAt;
+    }
+
+    private async Task<DateTimeOffset> EffectiveProblemReportTimelineAtAsync(Guid programId,
+        DateTimeOffset baselineAt, CancellationToken ct)
+    {
+        var names = ProblemReportScenarioActors.Select(x => x.UserName).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var actorIds = await db.UserAccounts.AsNoTracking().Where(x => names.Contains(x.UserName))
+            .Select(x => x.Id).ToListAsync(ct);
+        var grants = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.ProgramId == programId && actorIds.Contains(x.UserId) && x.EndedAt == null)
+            .Select(x => x.GrantedAt).ToListAsync(ct);
+        var latestGrant = grants.Count == 0 ? (DateTimeOffset?)null : grants.Max();
+        return latestGrant is { } grant && grant >= baselineAt ? grant.AddMinutes(1) : baselineAt;
     }
 
     /// <summary>
@@ -200,8 +311,95 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     /// interrupted upgrade resumes at the step it stopped on rather than repeating the ones that already
     /// succeeded, and a step added later applies on its own without renumbering anything.
     /// </summary>
+    public async Task<ShowcaseUpgradeAuthorityDecision> CheckUpgradeAuthorityAsync(Guid programId,
+        CancellationToken ct = default)
+    {
+        var account = await db.UserAccounts.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.UserName == QualityAnalystUserName, ct);
+        if (account is null)
+            return new(false, "quality_analyst_account_missing",
+                "The quality.analyst account is required before controlled closure evidence can be upgraded.");
+        if (account.State != AccountState.Active)
+            return new(false, "quality_analyst_account_inactive",
+                "The quality.analyst account is not active; no closure approval may be attributed to it.");
+
+        var memberships = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.UserId == account.Id && x.ProgramId == programId
+                && x.Role == ProgramRole.SoftwareQualityAnalyst)
+            .ToListAsync(ct);
+        if (!memberships.Any(x => x.EndedAt is null))
+            return new(false, "quality_analyst_membership_inactive",
+                "An unended SoftwareQualityAnalyst membership is required before controlled closure evidence can be upgraded.");
+
+        var closureAt = await HistoricalClosureApprovalAtAsync(programId, memberships, ct);
+        if (closureAt is null)
+            return new(false, "closure_evidence_unavailable",
+                "Two attributable Build 1.5 failed-execution to passing-retest chains are required before closure evidence can be upgraded.");
+        if (!memberships.Any(x => x.GrantedAt <= closureAt.Value
+                && (x.EndedAt is null || x.EndedAt.Value > closureAt.Value)))
+            return new(false, "quality_analyst_membership_does_not_cover_closure",
+                $"The quality.analyst membership history does not cover the historical closure approval at {closureAt.Value:O}; an operator-created membership is not backdated.");
+
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId)
+            .Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct);
+        if (projectId is { } project)
+        {
+            var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == project)
+                .ToDictionaryAsync(x => x.Version, ct);
+            var interfacePending = false;
+            if (releases.TryGetValue("1.6", out var activeRelease))
+                for (var index = 1; index <= 8 && !interfacePending; index++)
+                    interfacePending = await ResolveInterfaceScenarioAsync(programId, project, activeRelease.Id, index, ct) is null;
+
+            var problemPending = false;
+            if (releases.TryGetValue("1.5", out var released)
+                && releases.TryGetValue("1.6", out activeRelease))
+                for (var index = 1; index <= 8 && !problemPending; index++)
+                {
+                    var expected = IsHistoricalProblemReportScenario(index) ? released.Id : activeRelease.Id;
+                    problemPending = await ResolveProblemReportScenarioAsync(programId, project, index, expected, ct) is null;
+                }
+
+            if (interfacePending)
+            {
+                var effectiveAt = await EffectiveInterfaceTimelineAtAsync(programId,
+                    new DateTimeOffset(2024, 12, 2, 10, 0, 0, TimeSpan.Zero), ct);
+                try
+                {
+                    foreach (var actor in InterfaceScenarioActors)
+                        await EnsureCurrentProgramAuthorityAsync(programId, actor.UserName, actor.Role, effectiveAt, ct);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return new(false, "showcase_actor_authority_unavailable", ex.Message, closureAt);
+                }
+            }
+
+            if (problemPending)
+            {
+                var effectiveAt = await EffectiveProblemReportTimelineAtAsync(programId,
+                    new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero), ct);
+                try
+                {
+                    foreach (var actor in ProblemReportScenarioActors)
+                        await EnsureCurrentProgramAuthorityAsync(programId, actor.UserName, actor.Role, effectiveAt, ct);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return new(false, "showcase_actor_authority_unavailable", ex.Message, closureAt);
+                }
+            }
+        }
+
+        return new(true, "ready", "The active quality.analyst account and current authority cover the controlled closure evidence.", closureAt);
+    }
+
     public async Task<IReadOnlyList<string>> UpgradeAsync(Guid programId, CancellationToken ct = default)
     {
+        var authority = await CheckUpgradeAuthorityAsync(programId, ct);
+        if (!authority.Ready)
+            throw new InvalidOperationException($"FMS showcase upgrade cannot proceed: {authority.Code} {authority.Detail}");
+
         var applied = new List<string>();
         var steps = new (string Key, Func<Guid, CancellationToken, Task<string?>> Run)[]
         {
@@ -242,6 +440,46 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             applied.Add($"{step.Key}: {detail ?? "No change required."}");
         }
         return applied;
+    }
+
+    private async Task<DateTimeOffset?> HistoricalClosureApprovalAtAsync(Guid programId,
+        IReadOnlyCollection<ProgramMembership> memberships, CancellationToken ct)
+    {
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId)
+            .Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct);
+        if (projectId is null) return null;
+        var releaseId = await db.Releases.Where(x => x.ProjectId == projectId.Value && x.Version == "1.5")
+            .Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct);
+        if (releaseId is null) return null;
+        var buildIds = (await db.SoftwareBuilds.AsNoTracking()
+                .Where(x => x.ProjectId == projectId.Value && x.ReleaseId == releaseId.Value)
+                .Select(x => x.Id).ToListAsync(ct)).ToHashSet();
+        var executions = await db.TestExecutions.AsNoTracking()
+            .Where(x => x.ProjectId == projectId.Value && x.ReleaseId == releaseId.Value)
+            .ToListAsync(ct);
+        var pairs = executions
+            .Where(x => x.Outcome == TestOutcome.Fail && x.SoftwareBuildId is { } buildId && buildIds.Contains(buildId))
+            .OrderBy(x => x.ExecutedAt).ThenBy(x => x.Id)
+            .Select(failure => new
+            {
+                Failure = failure,
+                Retest = executions.Where(candidate => candidate.RetestOfExecutionId == failure.Id
+                        && candidate.Outcome == TestOutcome.Pass && candidate.SoftwareBuildId is { } buildId
+                        && buildIds.Contains(buildId)
+                        && candidate.ProcedureRevisionId == failure.ProcedureRevisionId)
+                    .OrderBy(candidate => candidate.RecordedAt).ThenBy(candidate => candidate.Id)
+                    .FirstOrDefault(),
+            })
+            .Where(pair => pair.Retest is not null)
+            .ToList();
+        if (pairs.Count < 2) return null;
+        var planned = pairs[1].Retest!.RecordedAt.AddHours(1);
+        // A pre-existing installation may have received its current authority years after the deterministic
+        // historical execution. Do not backdate that authority; move the new operator-triggered approval
+        // after the real grant while retaining the failed-execution -> passing-retest causal chain.
+        var latestCurrentGrant = memberships.Where(x => x.EndedAt is null)
+            .Select(x => (DateTimeOffset?)x.GrantedAt).Max();
+        return latestCurrentGrant is { } grant && grant >= planned ? grant.AddMinutes(1) : planned;
     }
 
     private async Task<string?> ReconcileProblemReportBuildScopeAsync(Guid programId, CancellationToken ct)
@@ -951,7 +1189,19 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         foreach (var number in await db.RequirementChanges.Where(x => existingRequestIds.Contains(x.ChangeRequestId))
                      .Select(x => x.BaseNumber).ToListAsync(ct))
             usedRequirementNumbers.Add(number);
-        var now = new DateTimeOffset(2024, 12, 2, 10, 0, 0, TimeSpan.Zero);
+        var now = await EffectiveInterfaceTimelineAtAsync(programId,
+            new DateTimeOffset(2024, 12, 2, 10, 0, 0, TimeSpan.Zero), ct);
+        var missingScenarioCount = 0;
+        for (var index = 1; index <= 8; index++)
+            if (await ResolveInterfaceScenarioAsync(programId, projectId, releaseId, index, ct) is null)
+                missingScenarioCount++;
+        if (missingScenarioCount > 0)
+            // This is a preflight, before any new request, requirement change, review or baseline selection
+            // is written. A current account without current role authority is not a plausible historical
+            // signature, and a stale/ended authority must never be repaired by the showcase seeder.
+            foreach (var actor in InterfaceScenarioActors)
+                await EnsureCurrentProgramAuthorityAsync(programId, actor.UserName, actor.Role, now, ct);
+
         var baseline = await db.CandidateBaselines
             .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.ReleaseId == releaseId && x.BaseNumber == "SW-01.60", ct);
 
@@ -1056,7 +1306,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 .Where(x => actorHandles.Contains(x.UserName)).ToListAsync(ct))
             .ToDictionary(x => x.UserName, x => x.DisplayName, StringComparer.OrdinalIgnoreCase);
         string? ActorName(string actor) => actorNames.TryGetValue(actor, out var name) ? name : null;
-        var now = new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero);
+        var now = await EffectiveProblemReportTimelineAtAsync(programId,
+            new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero), ct);
 
         for (var i = 1; i <= 8; i++)
         {
@@ -1234,6 +1485,12 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
 
     private async Task EnsureProblemReportControlledEvidenceAsync(Guid programId, Guid projectId, CancellationToken ct)
     {
+        var authority = await CheckUpgradeAuthorityAsync(programId, ct);
+        if (!authority.Ready)
+            throw new InvalidOperationException($"Controlled Problem Report evidence cannot be upgraded: {authority.Code} {authority.Detail}");
+        var approvedClosureAt = authority.ClosureAt
+            ?? throw new InvalidOperationException("Controlled Problem Report evidence has no attributable closure timestamp.");
+
         var releasedReleaseId = await db.Releases.Where(x => x.ProjectId == projectId && x.Version == "1.5")
             .Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct)
             ?? throw new InvalidOperationException("The FMS 1.5 release is required for historical closure-scenario evidence.");
@@ -1262,19 +1519,20 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             throw new InvalidOperationException("FMS closure scenarios require two failed Build 1.5 executions with passing retest successors.");
 
         // The host seeds the demo directory before FMS data. A frozen controlled closure must name the
-        // actual seeded SQA account and membership. An ended membership is deliberate authority history:
-        // preserve it and leave a new closure candidate waiting rather than restoring authority.
+        // actual seeded active SQA account and membership. The upgrade preflight above is deliberately
+        // strict: no controlled closure candidate is attributed while the account is disabled/locked, the
+        // current membership is ended, or the historical membership does not cover the approval time.
         var sqaAccount = await db.UserAccounts.AsNoTracking()
-            .SingleOrDefaultAsync(x => x.UserName == "quality.analyst", ct)
+            .SingleOrDefaultAsync(x => x.UserName == QualityAnalystUserName && x.State == AccountState.Active, ct)
             ?? throw new InvalidOperationException("The seeded quality.analyst account is required before FMS closure scenarios can be frozen.");
         var sqaAccountId = sqaAccount.Id;
         var sqaMemberships = await db.ProgramMemberships.AsNoTracking()
             .Where(x => x.UserId == sqaAccountId && x.ProgramId == programId
                 && x.Role == ProgramRole.SoftwareQualityAnalyst)
             .ToListAsync(ct);
-        if (sqaMemberships.Count == 0)
-            throw new InvalidOperationException("The seeded quality.analyst membership history is required before FMS closure scenarios can be frozen.");
-        var hasActiveSqa = sqaMemberships.Any(x => x.EndedAt is null);
+        if (!sqaMemberships.Any(x => x.EndedAt is null))
+            throw new InvalidOperationException("The current quality.analyst SoftwareQualityAnalyst membership is required before FMS closure scenarios can be frozen.");
+        var hasActiveSqa = true;
         var actorHandles = new[] { "test.engineer", "quality.analyst" };
         var actorNames = (await db.UserAccounts.AsNoTracking()
                 .Where(x => actorHandles.Contains(x.UserName)).ToListAsync(ct))
@@ -1373,7 +1631,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 candidate = candidateDecision.Candidate;
                 if (index == 7 && hasActiveSqa)
                 {
-                    var closureAt = execution.RecordedAt.AddHours(1);
+                    var closureAt = approvedClosureAt;
                     report.ApproveClosure("quality.analyst", sqaAccountId, closureAt);
                     var closureRevision = AddScenarioRevision(report, "ClosureApproved", "quality.analyst", closureAt, ActorName("quality.analyst"),
                         ProblemReportState.WaitingForSqaToClose, ProblemReportState.Closed,

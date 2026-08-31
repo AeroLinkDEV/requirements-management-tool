@@ -35,6 +35,9 @@ public sealed class ShowcaseApiFixture : IAsyncLifetime
             // Controlled FMS closure evidence must be attributable to the seeded SQA account.
             await new IdentitySeeder(db).EnsureSeededAsync();
             Summary = await new FmsShowcaseSeeder(db).EnsureSeededAsync();
+            // Production performs a second identity pass after all showcase Programs exist. Keep this template
+            // in the same state as a real demo startup so HTTP tests exercise the post-Program authority graph.
+            await new IdentitySeeder(db).EnsureSeededAsync();
         }
         // Clearing pools is what guarantees the handle is released before anything copies the file. A copy taken
         // mid-write fails in whichever test happened to take it, which is the hardest kind of failure to read.

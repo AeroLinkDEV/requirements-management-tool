@@ -89,7 +89,7 @@ public sealed class FmsShowcaseSeederTests
                 .Where(x => interfaceScenarioIds.Contains(x.Id))
                 .OrderBy(x => x.BaseNumber).Select(x => new { x.BaseNumber, x.Revision, x.State, x.AuthorId }).ToListAsync();
             var firstReports = await db.ProblemReports.AsNoTracking().Where(x => reportScenarioIds.Contains(x.Id))
-                .OrderBy(x => x.ReportNumber).Select(x => new { x.Id, x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId, x.ResolutionVerificationExecutionId, x.AdditionalInformation, x.CreatedAt }).ToListAsync();
+                .OrderBy(x => x.ReportNumber).Select(x => new { x.Id, x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId, x.ResolutionVerificationExecutionId, x.ClosureApprovedAt, x.AdditionalInformation, x.CreatedAt }).ToListAsync();
 
             Assert.Equal(8, firstInterface.Count);
             Assert.Equal(8, firstReports.Count);
@@ -166,8 +166,10 @@ public sealed class FmsShowcaseSeederTests
                 if (index == 7)
                 {
                     var sqaAccountId = await db.UserAccounts.Where(x => x.UserName == "quality.analyst").Select(x => x.Id).SingleAsync();
-                    Assert.True(await db.ProgramMemberships.AnyAsync(x => x.UserId == sqaAccountId
-                        && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null));
+                    var sqaMembership = await db.ProgramMemberships.SingleAsync(x => x.UserId == sqaAccountId
+                        && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null);
+                    Assert.NotNull(report.ClosureApprovedAt);
+                    Assert.True(sqaMembership.GrantedAt <= report.ClosureApprovedAt.Value);
                     Assert.Equal(sqaAccountId, candidate.ApprovedByAccountId);
                     Assert.True(await db.ProblemReportRevisions.AnyAsync(x => x.ProblemReportId == report.Id && x.EventType == "ClosureApproved"));
                     Assert.Equal(ProblemReportEvidenceContract.Hash(candidate.ClosurePackageJson), candidate.ClosurePackageHash);
@@ -186,7 +188,7 @@ public sealed class FmsShowcaseSeederTests
                 .Where(x => interfaceScenarioIds.Contains(x.Id))
                 .OrderBy(x => x.BaseNumber).Select(x => new { x.BaseNumber, x.Revision, x.State, x.AuthorId }).ToListAsync();
             var secondReports = await db.ProblemReports.AsNoTracking().Where(x => reportScenarioIds.Contains(x.Id))
-                .OrderBy(x => x.ReportNumber).Select(x => new { x.Id, x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId, x.ResolutionVerificationExecutionId, x.AdditionalInformation, x.CreatedAt }).ToListAsync();
+                .OrderBy(x => x.ReportNumber).Select(x => new { x.Id, x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId, x.ResolutionVerificationExecutionId, x.ClosureApprovedAt, x.AdditionalInformation, x.CreatedAt }).ToListAsync();
             Assert.Equal(firstInterface, secondInterface);
             Assert.Equal(firstReports, secondReports);
             Assert.All(await seeder.CheckInvariantsAsync(summary.ProgramId), x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
@@ -209,6 +211,17 @@ public sealed class FmsShowcaseSeederTests
             var sqaId = await db.UserAccounts.Where(x => x.UserName == "quality.analyst").Select(x => x.Id).SingleAsync();
             var membership = await db.ProgramMemberships.SingleAsync(x => x.UserId == sqaId && x.ProgramId == summary.ProgramId
                 && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null);
+            var scenarioRowsBefore = await db.ShowcaseUpgradeSteps.CountAsync(x => x.ProgramId == summary.ProgramId);
+            var membershipRowsBefore = await db.ProgramMemberships.CountAsync(x => x.UserId == sqaId
+                && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.SoftwareQualityAnalyst);
+            var account = await db.UserAccounts.SingleAsync(x => x.Id == sqaId);
+            account.Disable(membership.GrantedAt.AddMinutes(1));
+            await db.SaveChangesAsync();
+            var disabledAuthority = await seeder.CheckUpgradeAuthorityAsync(summary.ProgramId);
+            Assert.False(disabledAuthority.Ready);
+            Assert.Equal("quality_analyst_account_inactive", disabledAuthority.Code);
+            account.Enable();
+            await db.SaveChangesAsync();
             membership.End("admin", membership.GrantedAt.AddHours(1));
             var reportIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/problem-report/");
             var report7Id = reportIds[6];
@@ -218,8 +231,12 @@ public sealed class FmsShowcaseSeederTests
 
             await seeder.EnsureSeededAsync();
 
-            Assert.Equal(1, await db.ProgramMemberships.CountAsync(x => x.UserId == sqaId && x.ProgramId == summary.ProgramId
-                && x.Role == ProgramRole.SoftwareQualityAnalyst));
+            Assert.Equal(membershipRowsBefore, await db.ProgramMemberships.CountAsync(x => x.UserId == sqaId
+                && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.SoftwareQualityAnalyst));
+            Assert.Equal(scenarioRowsBefore, await db.ShowcaseUpgradeSteps.CountAsync(x => x.ProgramId == summary.ProgramId));
+            var endedAuthority = await seeder.CheckUpgradeAuthorityAsync(summary.ProgramId);
+            Assert.False(endedAuthority.Ready);
+            Assert.Equal("quality_analyst_membership_inactive", endedAuthority.Code);
             Assert.False(await db.ProgramMemberships.AnyAsync(x => x.UserId == sqaId && x.ProgramId == summary.ProgramId
                 && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null));
             report7 = await db.ProblemReports.AsNoTracking().SingleAsync(x => x.Id == report7Id);
@@ -236,6 +253,40 @@ public sealed class FmsShowcaseSeederTests
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             if (File.Exists(path)) File.Delete(path);
         }
+    }
+
+    [Fact]
+    public async Task New_interface_scenarios_require_current_authority_for_every_controlled_actor()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-showcase-interface-authority-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            await new IdentitySeeder(db).EnsureSeededAsync();
+            var seeder = new FmsShowcaseSeeder(db);
+            var summary = await seeder.EnsureSeededAsync();
+
+            var leadId = await db.UserAccounts.Where(x => x.UserName == "lead.reviewer").Select(x => x.Id).SingleAsync();
+            var leadMembership = await db.ProgramMemberships.SingleAsync(x => x.UserId == leadId
+                && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.Reviewer && x.EndedAt == null);
+            leadMembership.End("admin", leadMembership.GrantedAt.AddDays(1));
+            var missing = await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
+                && x.StepKey == "scenario-richness/interface/01");
+            db.ShowcaseUpgradeSteps.Remove(missing);
+            db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
+                && x.StepKey == "scenario-richness"));
+            await db.SaveChangesAsync();
+            var requestCount = await db.SystemChangeRequests.CountAsync(x => x.ProjectId == summary.ProjectId);
+
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.UpgradeAsync(summary.ProgramId));
+            Assert.Contains("lead.reviewer", failure.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(requestCount, await db.SystemChangeRequests.CountAsync(x => x.ProjectId == summary.ProjectId));
+            Assert.False(await db.ShowcaseUpgradeSteps.AnyAsync(x => x.ProgramId == summary.ProgramId
+                && x.StepKey == "scenario-richness/interface/01"));
+        }
+        finally { File.Delete(path); }
     }
 
     [Fact]

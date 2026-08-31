@@ -66,12 +66,27 @@ public static class WorkspaceEndpoints
         });
 
         // The repair command for an existing local showcase: apply any outstanding steps and report what
-        // changed. Safe to run repeatedly, and safe to run again after an interrupted attempt.
+        // changed. This is deliberately explicit because it can add controlled history. The active SQA
+        // identity, current authority, and historical membership coverage are checked before any step runs;
+        // an operator must arrange the backup/target confirmation and authority outside this startup path.
         app.MapPost("/api/showcase/upgrade", async (HttpContext http, AeroLinkDbContext db, FmsShowcaseSeeder seeder, TestProcedureDocumentBootstrap procedureDocuments, CancellationToken ct) =>
         {
             if (!http.UserAccount().IsAdministrator) return Results.Forbid();
             var program = await db.Programs.AsNoTracking().SingleOrDefaultAsync(x => x.Code == FmsShowcaseSeeder.ProgramCode, ct);
             if (program is null) return Results.NotFound(new { error = "No showcase Program is installed.", code = "showcase_absent" });
+            var authority = await seeder.CheckUpgradeAuthorityAsync(program.Id, ct);
+            if (!authority.Ready)
+            {
+                var conflictInvariants = await seeder.CheckInvariantsAsync(program.Id, ct);
+                return Results.Conflict(new
+                {
+                    applied = Array.Empty<string>(),
+                    healthy = false,
+                    code = authority.Code,
+                    error = authority.Detail,
+                    invariants = conflictInvariants,
+                });
+            }
             var applied = await seeder.UpgradeAsync(program.Id, ct);
             // An upgrade step can add procedures, and a procedure in no document is invisible to the rail.
             await procedureDocuments.EnsureAllAsync(ct);

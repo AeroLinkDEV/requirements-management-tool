@@ -135,7 +135,8 @@ await using (var scope = app.Services.CreateAsyncScope())
         await scope.ServiceProvider.GetRequiredService<FmsShowcaseSeeder>().EnsureSeededAsync();
         await scope.ServiceProvider.GetRequiredService<SecondShowcaseSeeder>().EnsureSeededAsync();
         // IdentitySeeder runs below after all showcase Programs exist, granting every seeded directory role
-        // to each Program. The FMS seeder repairs only the SQA membership it must have before freezing closure.
+        // to each Program. An existing FMS is otherwise read-only here; controlled enrichment is the
+        // explicit backup-confirmed /api/showcase/upgrade operation.
         await scope.ServiceProvider.GetRequiredService<ImportPracticeSeeder>().EnsureSeededAsync();
     }
     if (!restoreValidationReadOnly && seedDemoAccounts)

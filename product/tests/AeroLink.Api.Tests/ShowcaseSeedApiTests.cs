@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using AeroLink.Domain.Identity;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
 
@@ -28,10 +30,30 @@ public sealed class ShowcaseSeedApiTests
         Assert.Equal(520, summary.GetProperty("testExecutions").GetInt32());
 
         // The endpoint is the operator-facing retry boundary. A second request must reuse the durable
-        // ownership rows and preserve the exact controlled summary on the same disposable database.
+        // ownership rows and preserve the exact controlled summary on the same disposable database. Remove
+        // the SQA row first to prove this existing-FMS path does not recreate authority as a side effect.
+        var programId = summary.GetProperty("programId").GetGuid();
+        Guid sqaId;
+        int scenarioRows;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            sqaId = await db.UserAccounts.Where(x => x.UserName == "quality.analyst").Select(x => x.Id).SingleAsync();
+            scenarioRows = await db.ShowcaseUpgradeSteps.CountAsync(x => x.ProgramId == programId);
+            db.ProgramMemberships.RemoveRange(await db.ProgramMemberships.Where(x => x.UserId == sqaId
+                && x.ProgramId == programId && x.Role == ProgramRole.SoftwareQualityAnalyst).ToListAsync());
+            await db.SaveChangesAsync();
+        }
         using var retry = await client.PostAsync("/api/showcase/seed", content: null);
         Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
         Assert.Equal(summary.GetProperty("projectId").GetGuid(),
             (await retry.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("projectId").GetGuid());
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Equal(scenarioRows, await db.ShowcaseUpgradeSteps.CountAsync(x => x.ProgramId == programId));
+            Assert.Empty(await db.ProgramMemberships.Where(x => x.UserId == sqaId
+                && x.ProgramId == programId && x.Role == ProgramRole.SoftwareQualityAnalyst).ToListAsync());
+        }
     }
 }
