@@ -315,6 +315,7 @@ function App() {
     [selectedScrId, setSelectedScrId] = useState(initialRoute.view === "scr" ? initialRoute.artifactId ?? "" : ""),
     [selectedArtifactId,setSelectedArtifactId]=useState(initialRoute.artifactId ?? ""),
     [selectedArtifactKind,setSelectedArtifactKind]=useState(initialRoute.artifactKind ?? ""),
+    [selectedArtifactRevisionId,setSelectedArtifactRevisionId]=useState(initialRoute.artifactRevisionId ?? ""),
     [requirementRevisionId,setRequirementRevisionId]=useState(initialRoute.requirementRevisionId ?? ""),
     [requirementProposalId,setRequirementProposalId]=useState(initialRoute.requirementProposalId ?? ""),
     [testChangeRequestProposalId,setTestChangeRequestProposalId]=useState(initialRoute.testChangeRequestProposalId ?? ""),
@@ -408,7 +409,7 @@ function App() {
     if (release && release.id !== selectedReleaseId)
       setSelectedReleaseId(release.id);
   }, [release, selectedReleaseId]);
-  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setCoverageReport(route.coverageReport??false);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setHistorySelectionId(route.historySelectionId??"");setTestChangeRequestSelectionId(route.testChangeRequestSelectionId??"");setTestChangeRequestProposalId(route.testChangeRequestProposalId??"");setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setRequirementRevisionId(route.requirementRevisionId??"");setRequirementProposalId(route.requirementProposalId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
+  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setCoverageReport(route.coverageReport??false);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setHistorySelectionId(route.historySelectionId??"");setTestChangeRequestSelectionId(route.testChangeRequestSelectionId??"");setTestChangeRequestProposalId(route.testChangeRequestProposalId??"");setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setSelectedArtifactRevisionId(route.artifactRevisionId??"");setRequirementRevisionId(route.requirementRevisionId??"");setRequirementProposalId(route.requirementProposalId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
   const paletteShortcutEnabled = !!context && !projectLevelViews.includes(view);
   useEffect(()=>{const handler=(event:KeyboardEvent)=>{if(paletteShortcutEnabled&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape"){setPaletteOpen(false);setDisplayOpen(false)}};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[paletteShortcutEnabled]);
   useEffect(()=>{document.documentElement.dataset.density=density;localStorage.setItem('aerolink-density',density)},[density]);
@@ -549,11 +550,11 @@ function App() {
       setToast("That link is missing its destination, so nothing was opened. This is a defect — please report it.");
       return;
     }
-    const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(artifactKind==="Interface"?"Interface":area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setHistorySelectionId("");setTestChangeRequestSelectionId("");setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+    const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(artifactKind==="Interface"?"Interface":area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setHistorySelectionId("");setTestChangeRequestSelectionId("");setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setSelectedArtifactRevisionId("");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
   const openCoverage = (area:"systemTest"|"softwareTest", level?:"HighLevel"|"LowLevel") => {
     const artifactKind = area === "softwareTest" ? (level === "LowLevel" ? "LowLevel" : "HighLevel") : "";
     setRequirementProposalId(""); setTestChangeRequestProposalId(""); setView("procedureExplorer"); setDiscipline(area);
-    setCoverageReport(true); setSelectedArtifactId(""); setSelectedArtifactKind(artifactKind); setRequirementRevisionId("");
+    setCoverageReport(true); setSelectedArtifactId(""); setSelectedArtifactKind(artifactKind); setSelectedArtifactRevisionId(""); setRequirementRevisionId("");
     if (context) history.pushState({}, "", coverageExplorerPath(context, area, level));
   };
   const changeCoverageLevel = (level?: "HighLevel" | "LowLevel") => {
@@ -582,7 +583,7 @@ function App() {
       return;
     }
     setSelectedReleaseId(owned.id);
-    setView("scr");setDiscipline(discipline);setSelectedScrId(id);setSelectedArtifactId(id);setSelectedArtifactKind("");setRequirementRevisionId("");setRequirementProposalId(proposalId ?? "");
+    setView("scr");setDiscipline(discipline);setSelectedScrId(id);setSelectedArtifactId(id);setSelectedArtifactKind("");setSelectedArtifactRevisionId("");setRequirementRevisionId("");setRequirementProposalId(proposalId ?? "");
     if(context){const path=routePath({...context,releaseId:owned.id},"scr",discipline,id);history.pushState({},"",proposalId ? `${path}?proposalId=${encodeURIComponent(proposalId)}` : path);}
   };
   const linkPendingAssessment=async(changeRequestId:string)=>{
@@ -596,14 +597,14 @@ function App() {
   const openVerificationProcedure=(artifact?:{artifactId?:string;procedureId?:string;revisionId?:string;displayNumber?:string;level?:string;artifactKind?:string})=>{
     const area:Discipline=artifact?.level==="System"?"systemTest":"softwareTest";
     const kind = artifact?.artifactKind === "Procedure" ? "Procedure" : artifact?.artifactKind === "Case" ? "Case" : undefined;
-    setView("procedureExplorer");setDiscipline(area);setSelectedArtifactId("");setSelectedArtifactKind(kind ?? artifact?.level ?? "");setRequirementRevisionId("");
+    setView("procedureExplorer");setDiscipline(area);setSelectedArtifactId("");setSelectedArtifactKind(kind ?? artifact?.level ?? "");setSelectedArtifactRevisionId("");setRequirementRevisionId("");
     if(context){const path=routePath(context,"procedureExplorer",area,undefined,artifact?.level);const params=new URLSearchParams();const prefix=area==="systemTest"?"procedure":kind === "Procedure" ? "procedure" : "case";if(artifact?.displayNumber)params.set(prefix,artifact.displayNumber);const artifactId=artifact?.artifactId ?? artifact?.procedureId;if(artifactId)params.set(`${prefix}Id`,artifactId);if(artifact?.revisionId)params.set(`${prefix}RevisionId`,artifact.revisionId);if(area === "softwareTest" && artifact?.level)params.set("artifactLevel", artifact.level);if(area === "softwareTest" && kind)params.set("artifactKind", kind);history.pushState({},"",`${path}${params.size?`?${params}`:""}`)}
   };
   // The inverse of the procedure deep link: a procedure trace names an exact requirement revision, and the
   // Requirements Explorer must open that exact revision rather than whichever revision is newest now.
   const openRequirementRevision=(requirement:{id:string;revisionId:string;level:string})=>{
     const area:Discipline=requirement.level==="System"?"system":"software";
-    setView("requirements");setDiscipline(area);setSelectedArtifactId(requirement.id);
+    setView("requirements");setDiscipline(area);setSelectedArtifactId(requirement.id);setSelectedArtifactRevisionId("");
     setSelectedArtifactKind(requirement.level);setRequirementRevisionId(requirement.revisionId);
     if(context){const base=routePath(context,"requirements",area,requirement.id);const query=new URLSearchParams();query.set("requirementRevisionId",requirement.revisionId);history.pushState({},"",`${base}&${query}`)}
   };
@@ -624,7 +625,7 @@ function App() {
       setToast('That Test Change Request link is missing its destination, so nothing was opened.');
       return;
     }
-    setView('testChangeRequest'); setDiscipline(area); setSelectedArtifactId(change.testChangeReviewId);
+    setView('testChangeRequest'); setDiscipline(area); setSelectedArtifactId(change.testChangeReviewId); setSelectedArtifactRevisionId("");
     setSelectedArtifactKind(routeKind); setTestChangeRequestProposalId(change.proposalId ?? '');
     if (context) history.pushState({}, '', routePath(context, 'testChangeRequest', area, change.testChangeReviewId, routeKind, undefined, undefined, undefined, change.proposalId));
   };
@@ -641,7 +642,7 @@ function App() {
   };
   const buildsPath=projectAreaPath(projectSlugOf(project?.project.name??""),"builds");
   const showProjects=()=>{setView("projects");history.pushState({},"","/projects")};
-  const exitBuild=()=>{setPaletteOpen(false);setDisplayOpen(false);setView("builds");setSelectedArtifactId("");setSelectedArtifactKind("");setSelectedScrId("");history.pushState({},"",buildsPath)};
+  const exitBuild=()=>{setPaletteOpen(false);setDisplayOpen(false);setView("builds");setSelectedArtifactId("");setSelectedArtifactKind("");setSelectedArtifactRevisionId("");setSelectedScrId("");history.pushState({},"",buildsPath)};
   /**
    * Opening a Project card names the Project it opens.
    *
@@ -737,7 +738,7 @@ function App() {
    );
    if (!viewAllowed)
      return inShell(<main className="artifactState"><div><span>!</span><h1>Workspace unavailable</h1><p>This level or capability is not present in the active project ladder.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
-  if(view==="artifact"&&selectedArtifactId&&selectedArtifactKind)return inShell(<ArtifactRecordPage api={API} kind={selectedArtifactKind} id={selectedArtifactId} releaseId={release?.id??""} onBack={()=>navigate("dashboard")} onOpen={(kind,id)=>{if(kind==="change-request")navigate("scr","system",id);else if(kind==="requirement")navigate("requirements","system",id);else navigate("artifact","system",id,kind)}}/>);
+  if(view==="artifact"&&selectedArtifactId&&selectedArtifactKind)return inShell(<ArtifactRecordPage api={API} kind={selectedArtifactKind} id={selectedArtifactId} revisionId={selectedArtifactRevisionId||undefined} releaseId={release?.id??""} onBack={()=>navigate("dashboard")} onOpen={(kind,id)=>{if(kind==="change-request")navigate("scr","system",id);else if(kind==="requirement")navigate("requirements","system",id);else navigate("artifact","system",id,kind)}}/>);
   // A released build is closed, so this says so instead of opening an editor whose save the server will refuse.
   // The action stays visible on the navigation rather than disappearing: somebody looking for how to raise a
   // change needs to be told where to raise it, and a menu item that vanishes when you switch build teaches

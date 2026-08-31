@@ -53,6 +53,9 @@ export type AppRoute = {
   releaseId?: string;
   artifactId?: string;
   artifactKind?: string;
+  /// The exact verification artifact revision a trace deep link opens. Immutable, so a procedure/case link
+  /// cannot silently fall forward to the release-effective or latest revision after later revisions exist.
+  artifactRevisionId?: string;
   /// The exact requirement revision a procedure trace deep link opens. Immutable, so a trace that names a
   /// requirement revision keeps naming it after later revisions exist.
   requirementRevisionId?: string;
@@ -219,7 +222,7 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
     const artifactKind = decoded(tail[1]);
     if (artifactKind && ["problem-report", "baseline", "build"].includes(artifactKind))
       return { ...base, view: "notFound", discipline: "system" };
-    return { ...base, view: "artifact", discipline: "system", artifactKind, artifactId: decoded(tail[2]) };
+    return { ...base, view: "artifact", discipline: "system", artifactKind, artifactId: decoded(tail[2]), artifactRevisionId: query.get("revisionId") || undefined };
   }
   return { ...base, view: "notFound", discipline: "system" };
 }
@@ -253,7 +256,7 @@ export const projectConfigurationApprovalsPath = (slug: string) =>
 export const projectConfigurationAssurancePath = (slug: string) =>
   `${projectAreaPath(slug, "projectConfiguration")}/assurance`;
 
-export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent, selectionId?: string, proposalId?: string) {
+export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent, selectionId?: string, proposalId?: string, artifactRevisionId?: string) {
   const root = `/programs/${context.programId}/projects/${context.projectId}/releases/${context.releaseId}`;
   const historyPath = (scope: "systems" | "software" | "interfaces") => {
     const path = `${root}/${scope}/change-requests`;
@@ -332,7 +335,10 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "integrations": return `${root}/integration-command-center`;
     case "admin": return `${root}/administration`;
     case "reviewWorkflows": return `${root}/review-workflows`;
-    case "artifact": return `${root}/artifacts/${artifactKind}/${artifactId}`;
+    case "artifact": {
+      const path = `${root}/artifacts/${artifactKind}/${artifactId}`;
+      return artifactRevisionId ? `${path}?revisionId=${encodeURIComponent(artifactRevisionId)}` : path;
+    }
     default: return root;
   }
 }
@@ -372,6 +378,7 @@ export type ExactTraceArtifact = {
   level?: string | null
   buildId?: string | null
   artifactId?: string | null
+  revisionId?: string | null
 }
 
 export function exactTraceArtifactPath(context: RouteContext, node: ExactTraceArtifact): string | undefined {
@@ -401,7 +408,7 @@ export function exactTraceArtifactPath(context: RouteContext, node: ExactTraceAr
   }
 
   if (node.kind === 'TestProcedure' || node.kind === 'TestCase')
-    return routePath(scoped, 'artifact', 'system', node.id, node.kind === 'TestProcedure' ? 'test-procedure' : 'test-case');
+    return routePath(scoped, 'artifact', 'system', node.id, node.kind === 'TestProcedure' ? 'test-procedure' : 'test-case', undefined, undefined, undefined, undefined, node.revisionId ?? undefined);
   if (node.kind === 'TestExecution') return routePath(scoped, 'artifact', 'system', node.id, 'test-execution');
   if (node.kind === 'Evidence') return routePath(scoped, 'artifact', 'system', node.id, 'evidence');
 

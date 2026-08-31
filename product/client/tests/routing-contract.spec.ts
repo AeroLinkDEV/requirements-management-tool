@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { artifactPath, coverageExplorerPath, parseRoute, routePath } from '../src/routing'
+import { artifactPath, coverageExplorerPath, exactTraceArtifactPath, parseRoute, routePath } from '../src/routing'
 
 const context = {
   programId: 'program-a',
@@ -91,6 +91,18 @@ test('problem reports and configuration baselines are active while retired produ
   expect(parseRoute(`${root}/baselines`)).toMatchObject({ view: 'baselines' })
   for (const kind of ['problem-report', 'baseline', 'build'])
     expect(parseRoute(`${root}/artifacts/${kind}/record-a`)).toMatchObject({ view: 'notFound' })
+})
+
+test('exact verification artifact routes preserve immutable revision identity alongside release context', () => {
+  const revisionId = 'revision-procedure-00'
+  const path = routePath(context, 'artifact', 'system', 'procedure-a', 'test-procedure', undefined, undefined, undefined, undefined, revisionId)
+  expect(path).toBe('/programs/program-a/projects/project-a/releases/release-a/artifacts/test-procedure/procedure-a?revisionId=revision-procedure-00')
+  expect(parseRoute(path)).toMatchObject({
+    view: 'artifact', artifactKind: 'test-procedure', artifactId: 'procedure-a', artifactRevisionId: revisionId,
+  })
+  expect(exactTraceArtifactPath(context, {
+    id: 'procedure-a', kind: 'TestProcedure', revisionId, buildId: 'release-a', displayNumber: 'HLRTP-000001.00',
+  })).toBe(path)
 })
 
 test('controlled document TCR links open the exact package in its build and discipline', () => {

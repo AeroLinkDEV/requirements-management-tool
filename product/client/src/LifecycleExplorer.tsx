@@ -31,7 +31,7 @@ type ChangeRequestDetail = {
   type: string; title: string; state: string; requirementChanges: ChangeRequestProposal[];
 };
 type ChangeRequestTraceNode = {
-  id: string; kind: string; displayNumber: string; title?: string | null; state?: string | null;
+  id: string; kind: string; displayNumber: string; title?: string | null; state?: string | null; revisionId?: string | null;
   projectId?: string | null; buildId?: string | null; buildVersion?: string | null; revision?: number | null;
   level?: string | null; artifactId?: string | null; baselineMembershipIds?: string[] | null;
 };
@@ -100,9 +100,10 @@ function ChangeRequestThread({
     level: node.level,
     artifactId: node.id,
   });
-  const exactPathArtifactHref = (kind: string, item: { id: string; displayNumber?: string; level?: string }) => traceArtifactHref?.({
+  const exactPathArtifactHref = (kind: string, item: { id: string; revisionId?: string; displayNumber?: string; level?: string }) => traceArtifactHref?.({
     id: item.id,
     kind,
+    revisionId: item.revisionId,
     displayNumber: item.displayNumber ?? item.id,
     level: item.level,
   });
@@ -170,9 +171,9 @@ function ChangeRequestThread({
         <div className="completeThreadPath" role="list" aria-label="Existing baseline-exact requirement path">
           {exactPath.nodes.map((node, index) => <div className="completeThreadStep" key={node.revisionId}>
             {index > 0 && <i className="threadConnector" aria-hidden="true">›</i>}
-            <article><small>{node.level === "System" ? "SYSTEM REQUIREMENT" : node.level === "HighLevel" ? "HLR" : "LLR"}</small><ExactArtifactLink href={exactPathNodeHref(node)}>{node.displayNumber}</ExactArtifactLink><span>{node.statement}</span></article>
+            <article><small>{node.level === "System" ? "SYSTEM REQUIREMENT" : node.level === "HighLevel" ? "HLR" : "LLR"}</small><ExactArtifactLink className="completeThreadExactIdentifier" href={exactPathNodeHref(node)}>{node.displayNumber}</ExactArtifactLink><span>{node.statement}</span></article>
           </div>)}
-          <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.artifact ? "missing" : ""}><small>TEST ARTIFACT</small>{exactPath.artifact ? <ExactArtifactLink href={exactPathArtifactHref(exactPath.artifact.artifactKind === "Procedure" ? "TestProcedure" : "TestCase", exactPath.artifact)}>{exactPath.artifact.displayNumber}</ExactArtifactLink> : <b>Not linked</b>}<span>{exactPath.artifact?.title ?? "Verification linkage required"}</span></article></div>
+          <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.artifact ? "missing" : ""}><small>TEST ARTIFACT</small>{exactPath.artifact ? <ExactArtifactLink className="completeThreadExactIdentifier completeThreadTestArtifact" href={exactPathArtifactHref(exactPath.artifact.artifactKind === "Procedure" ? "TestProcedure" : "TestCase", exactPath.artifact)}>{exactPath.artifact.displayNumber}</ExactArtifactLink> : <b>Not linked</b>}<span>{exactPath.artifact?.title ?? "Verification linkage required"}</span></article></div>
           <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.execution ? "missing" : ""}><small>TEST RESULT</small>{exactPath.execution ? <ExactArtifactLink href={exactPathArtifactHref("TestExecution", exactPath.execution)}>{exactPath.execution.outcome}</ExactArtifactLink> : <b>Not executed</b>}<span>{exactPath.execution?.determination ?? "Authoritative result required"}</span></article></div>
           <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.execution?.evidence.length ? "missing" : ""}><small>TEST EVIDENCE</small>{exactPath.execution?.evidence[0] ? <ExactArtifactLink href={exactPathArtifactHref("Evidence", exactPath.execution.evidence[0])}>{exactPath.execution.evidence[0].originalFileName}</ExactArtifactLink> : <b>Not attached</b>}<span>{exactPath.execution?.evidence[0]?.sha256 ?? (exactPath.execution?.evidenceReference ? `External reference only: ${exactPath.execution.evidenceReference}` : "Checksummed evidence required")}</span></article></div>
           <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.build ? "missing" : ""}><small>BUILD</small>{exactPath.build ? <ExactArtifactLink href={exactPathArtifactHref("Build", exactPath.build)}>{exactPath.build.buildNumber}</ExactArtifactLink> : <b>{exactPath.baseline.displayNumber}</b>}<span>{exactPath.build ? `${exactPath.build.state} · ${exactPath.baseline.displayNumber}` : exactPath.baseline.name}</span></article></div>
@@ -221,6 +222,7 @@ function ChangeRequestGraphMap({
     if (!board) return;
     const boardRect = board.getBoundingClientRect();
     const next: TraceConnector[] = [];
+    const railOrdinals = new Map<HTMLElement, [number, number]>();
     for (let edgeIndex = 0; edgeIndex < trace.edges.length; edgeIndex += 1) {
       const edge = trace.edges[edgeIndex];
       const from = nodeByKey.get(`${edge.fromKind}:${edge.fromId}`);
@@ -278,10 +280,13 @@ function ChangeRequestGraphMap({
         if (intermediate && fromLayer) {
           route = "same-layer-rail";
           const layerRect = fromLayer.getBoundingClientRect();
-          // Keep rails inside the board's padding. Alternating sides prevents a fan-out from collapsing into
-          // one unreadable stroke while preserving the edge's source/target direction.
+          // Keep rails inside the board's padding. Each side receives its own offset sequence so a fan-out
+          // cannot collapse into one unreadable stroke while preserving source/target direction.
           const side = edgeIndex % 2 === 0 ? 1 : -1;
-          const railX = (side > 0 ? layerRect.right : layerRect.left) - boardRect.left + side * 5;
+          const ordinals = railOrdinals.get(fromLayer) ?? [0, 0];
+          const ordinal = side > 0 ? ordinals[0]++ : ordinals[1]++;
+          railOrdinals.set(fromLayer, ordinals);
+          const railX = (side > 0 ? layerRect.right : layerRect.left) - boardRect.left + side * (5 + ordinal * 7);
           const startX = fromCenterX;
           const endX = toCenterX;
           const sourceBend = startX + (railX - startX) * 0.55;
@@ -329,7 +334,7 @@ function ChangeRequestGraphMap({
   }, [measure]);
 
   return <>
-    <div className="crGraphBoard" ref={boardRef} role="group" aria-label="Connected Digital Thread map"
+    <div className="crGraphBoard" ref={boardRef} role="group" aria-label="Connected Digital Thread map. At narrow widths, scroll horizontally to inspect every connected card and arrow." tabIndex={0}
       data-representable-edge-count={representableEdgeCount}
       data-rendered-connector-count={connectors.length}
       data-unrepresentable-edge-count={trace.edges.length - representableEdgeCount}>
@@ -367,6 +372,7 @@ function ChangeRequestGraphMap({
           </div>
         </section>)}
       </div>
+      <p className="crGraphPanHint">Scroll horizontally to inspect every connected card and arrow.</p>
     </div>
     <div className="crGraphEdges" role="list" aria-label="Connected Digital Thread relationships">
       {trace.edges.length ? trace.edges.map(edge => {
@@ -405,6 +411,20 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
   const [changeRequestTrace, setChangeRequestTrace] = useState<ChangeRequestTrace>();
   const [changeRequestBaselineId, setChangeRequestBaselineId] = useState<string>();
   const [changeRequestPathError, setChangeRequestPathError] = useState<string>();
+  const completePathNodeHref = (node: CompletePath["nodes"][number]) => traceArtifactHref?.({
+    id: node.revisionId,
+    kind: "RequirementRevision",
+    displayNumber: node.displayNumber,
+    level: node.level,
+    artifactId: node.id,
+  });
+  const completePathArtifactHref = (item: NonNullable<CompletePath["artifact"]>) => traceArtifactHref?.({
+    id: item.id,
+    kind: item.artifactKind === "Procedure" ? "TestProcedure" : "TestCase",
+    revisionId: item.revisionId,
+    displayNumber: item.displayNumber,
+    level: item.level,
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -645,12 +665,14 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
             {completePath ? <div className="completeThreadPath" role="list" aria-label={`Complete digital thread for ${focus.displayNumber}`}>
               {completePath.nodes.map((node, index) => <div className="completeThreadStep" key={node.revisionId}>
                 {index > 0 && <i className="threadConnector" aria-hidden="true">›</i>}
-                <button type="button" className={node.revisionId === focus.revisionId ? "selected" : ""} onClick={() => { setQuery(node.displayNumber.replace(/\.\d{2}$/, "")); setFocusId(node.revisionId); }}>
+                <article className={node.revisionId === focus.revisionId ? "selected" : ""}>
                   <small>{node.level === "System" ? "SYSTEM REQUIREMENT" : node.level === "HighLevel" ? "HLR" : "LLR"}</small>
-                  <b>{node.displayNumber}</b><span>{node.statement}</span>
-                </button>
+                  <ExactArtifactLink className="completeThreadExactIdentifier" href={completePathNodeHref(node)}>{node.displayNumber}</ExactArtifactLink>
+                  <button type="button" className="completeThreadFocus" onClick={() => { setQuery(node.displayNumber.replace(/\.\d{2}$/, "")); setFocusId(node.revisionId); }}>Focus exact requirement</button>
+                  <span>{node.statement}</span>
+                </article>
               </div>)}
-              <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!completePath.artifact ? "missing" : ""}><small>TEST {artifactNoun.toUpperCase()}</small><b>{completePath.artifact?.displayNumber ?? "Not linked"}</b><span>{completePath.artifact?.title ?? `${artifactNoun} linkage required`}</span></article></div>
+              <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!completePath.artifact ? "missing" : ""}><small>TEST {artifactNoun.toUpperCase()}</small>{completePath.artifact ? <ExactArtifactLink className="completeThreadExactIdentifier completeThreadTestArtifact" href={completePathArtifactHref(completePath.artifact)}>{completePath.artifact.displayNumber}</ExactArtifactLink> : <b>Not linked</b>}<span>{completePath.artifact?.title ?? `${artifactNoun} linkage required`}</span></article></div>
               <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!completePath.execution ? "missing" : ""}><small>TEST RESULT</small><b>{completePath.execution?.outcome ?? "Not executed"}</b><span>{completePath.execution?.determination ?? "Authoritative result required"}</span></article></div>
               <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!completePath.execution?.evidence.length ? "missing" : ""}><small>TEST EVIDENCE</small><b>{completePath.execution?.evidence[0]?.originalFileName ?? "Not attached"}</b><span>{completePath.execution?.evidence[0]?.sha256 ?? (completePath.execution?.evidenceReference ? `External reference only: ${completePath.execution.evidenceReference}` : "Checksummed evidence required")}</span></article></div>
               <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!completePath.build ? "missing" : ""}><small>BUILD</small><b>{completePath.build?.buildNumber ?? completePath.baseline.displayNumber}</b><span>{completePath.build ? `${completePath.build.state} · ${completePath.baseline.displayNumber}` : completePath.baseline.name}</span></article></div>

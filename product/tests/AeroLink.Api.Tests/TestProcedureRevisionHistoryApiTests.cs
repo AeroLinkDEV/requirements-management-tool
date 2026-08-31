@@ -167,6 +167,25 @@ Assert.Equal("Verify route sequencing and discontinuities",
 Assert.Equal(fixture.Revision01Id,
     newArtifact.GetProperty("details").GetProperty("revisionId").GetGuid());
 
+// A trace link carries the immutable revision as well as its artifact and release. The release-effective
+// revision remains the default for an unqualified artifact route, but an exact link must open the requested
+// revision and reject a revision that is not carried by that release rather than silently retargeting it.
+var exactOldArtifact = await JsonAsync(client,
+    $"/api/artifacts/test-procedure/{fixture.ProcedureId}?releaseId={fixture.Release15Id}&revisionId={fixture.Revision00Id}");
+Assert.Equal("SYSTP-42150.00", exactOldArtifact.GetProperty("identifier").GetString());
+Assert.Equal(fixture.Revision00Id,
+    exactOldArtifact.GetProperty("details").GetProperty("revisionId").GetGuid());
+
+var exactNewArtifact = await JsonAsync(client,
+    $"/api/artifacts/test-procedure/{fixture.ProcedureId}?releaseId={fixture.Release16Id}&revisionId={fixture.Revision01Id}");
+Assert.Equal("SYSTP-42150.01", exactNewArtifact.GetProperty("identifier").GetString());
+Assert.Equal(fixture.Revision01Id,
+    exactNewArtifact.GetProperty("details").GetProperty("revisionId").GetGuid());
+
+using var mismatchedRevision = await client.GetAsync(
+    $"/api/artifacts/test-procedure/{fixture.ProcedureId}?releaseId={fixture.Release16Id}&revisionId={fixture.Revision00Id}");
+Assert.Equal(HttpStatusCode.NotFound, mismatchedRevision.StatusCode);
+
         var retiredList = await JsonAsync(client,
             $"/api/test-procedures?projectId={fixture.ProjectId}&scope=System" +
             "&search=route%20sequencing%20and%20discontinuities&page=1&pageSize=25");

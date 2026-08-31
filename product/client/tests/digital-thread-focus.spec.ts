@@ -46,6 +46,8 @@ test("opening the Digital Thread from a requirement focuses that requirement and
   expect(url).toContain("/traceability");
   await page.reload({ waitUntil: "load" });
   await expect(page.locator(".digitalThreadStage header b").first()).toHaveText(/^SYSR-000011\./);
+  const exactRequirement = page.locator(".completeThreadPath").getByRole("link", { name: /^SYSR-000011\.\d{2}$/ });
+  await expect(exactRequirement).toHaveAttribute("href", /\/requirements\/[^?]+\?discipline=system&requirementRevisionId=/);
 });
 
 test("a change request opens its stable-ID Digital Thread with exact chain, provenance, and proposal truth", async ({
@@ -100,6 +102,23 @@ test("a change request opens its stable-ID Digital Thread with exact chain, prov
     execution: { id: "77777777-7777-4777-8777-777777777777", outcome: "Pass", executedBy: "test.engineer", executedAt: "2026-08-27T12:00:00Z", determination: "Authoritative result", evidenceReference: "evidence-999901", evidence: [{ id: "88888888-8888-4888-8888-888888888888", originalFileName: "evidence-999901.bin", sha256: "9999999999999999999999999999999999999999999999999999999999999999", size: 12, uploadedAt: "2026-08-27T12:00:00Z" }] },
     build: { id: showcase.activeReleaseId, buildNumber: "1.6", state: "In work", recordedAt: "2026-08-27T12:00:00Z" },
   }}));
+  // Model a later effective revision so a missing revisionId would still produce a successful but wrong
+  // artifact page. The exact trace link must select the revision displayed by the baseline path.
+  const exactArtifactRevisionId = "66666666-6666-4666-8666-666666666666";
+  await page.route("**/api/artifacts/test-case/*", async route => {
+    const requestedRevisionId = new URL(route.request().url()).searchParams.get("revisionId");
+    const exact = requestedRevisionId === exactArtifactRevisionId;
+    await route.fulfill({ json: {
+      kind: "test-case",
+      id: "55555555-5555-4555-8555-555555555555",
+      identifier: exact ? "HLRTP-999901.00" : "HLRTP-999901.01",
+      title: exact ? "Exact verification artifact" : "Later effective verification artifact",
+      state: "Approved",
+      subtitle: "HighLevel verification case",
+      details: { revisionId: exact ? exactArtifactRevisionId : "99999999-9999-4999-8999-999999999999" },
+      related: [],
+    }});
+  });
   await page.goto(new URL(`/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}/systems/change-requests/${candidate!.id}`, page.url()).toString(), { waitUntil: "load" });
   const digitalThreadLink = page.getByRole("link", { name: "Open Digital Thread →" });
   await expect(digitalThreadLink).toHaveAttribute("href", new RegExp(`/traceability/change-requests/${candidate!.id}$`));
@@ -125,7 +144,7 @@ test("a change request opens its stable-ID Digital Thread with exact chain, prov
   await expect(historicalEdge).toContainText("From downstream assessment");
   const upstreamFocus = page.getByRole("button", { name: "Focus SRCR-999900.00" });
   await upstreamFocus.focus();
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("Space");
   await expect(upstreamFocus).toHaveAttribute("aria-pressed", "true");
   const upstreamLink = page.locator(".crGraphNode").filter({ hasText: "SRCR-999900.00" }).getByRole("link", { name: /SRCR-999900\.00/ });
   await upstreamLink.focus();
@@ -138,7 +157,7 @@ test("a change request opens its stable-ID Digital Thread with exact chain, prov
   await expect(page.getByRole("heading", { name: "Existing baseline-exact requirement path" })).toBeVisible();
   const baselinePath = page.locator(".crBaselinePath");
   await expect(baselinePath.getByRole("link", { name: "HLR-999901.01" })).toHaveAttribute("href", new RegExp(`/requirements/${exactArtifactId}\\?discipline=software&requirementRevisionId=${exactRevisionId}$`));
-  await expect(baselinePath.getByRole("link", { name: "HLRTP-999901.00" })).toHaveAttribute("href", /\/artifacts\/test-case\/55555555-5555-4555-8555-555555555555$/);
+  await expect(baselinePath.getByRole("link", { name: "HLRTP-999901.00" })).toHaveAttribute("href", new RegExp(`/artifacts/test-case/55555555-5555-4555-8555-555555555555\\?revisionId=${exactArtifactRevisionId}$`));
   await expect(baselinePath.getByRole("link", { name: "Pass", exact: true })).toHaveAttribute("href", /\/artifacts\/test-execution\/77777777-7777-4777-8777-777777777777$/);
   await expect(baselinePath.getByRole("link", { name: "evidence-999901.bin", exact: true })).toHaveAttribute("href", /\/artifacts\/evidence\/88888888-8888-4888-8888-888888888888$/);
   const buildStep = baselinePath.locator(".completeThreadStep").filter({ hasText: "BUILD" });
@@ -156,12 +175,25 @@ test("a change request opens its stable-ID Digital Thread with exact chain, prov
     const path = testInfo.outputPath(name);
     await page.screenshot({ path, fullPage: false });
     expect(pngSize(path)).toEqual({ width, height });
+    if (width === 900) {
+      console.log(await page.evaluate(() => ({
+        document: { scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth },
+        elements: Array.from(document.querySelectorAll<HTMLElement>("body *")).map(element => ({
+          tag: element.tagName, className: element.className, id: element.id,
+          left: Math.round(element.getBoundingClientRect().left), right: Math.round(element.getBoundingClientRect().right),
+          width: Math.round(element.getBoundingClientRect().width), scrollWidth: element.scrollWidth, clientWidth: element.clientWidth,
+        })).filter(item => item.right > document.documentElement.clientWidth || item.left < 0).slice(-20),
+      })));
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    }
   };
   await captureViewport(1440, 900, "cr-thread-1440x900.png");
   await page.screenshot({ path: testInfo.outputPath("cr-thread-full-page.png"), fullPage: true });
   await captureViewport(1280, 900, "cr-thread-1280x900.png");
   await captureViewport(1920, 1080, "cr-thread-1920x1080.png");
   await captureViewport(900, 900, "cr-thread-narrow.png");
+  await expect(graphMap.getByText("Scroll horizontally to inspect every connected card and arrow.")).toBeVisible();
+  await expect.poll(() => graphMap.evaluate(board => board.scrollWidth > board.clientWidth)).toBe(true);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goBack();
   await expect(page.getByRole("link", { name: "Open Digital Thread →" })).toBeVisible();
@@ -169,6 +201,10 @@ test("a change request opens its stable-ID Digital Thread with exact chain, prov
   await expect(page.getByRole("heading", { name: "Connected controlled story" })).toBeVisible();
   await page.reload({ waitUntil: "load" });
   await expect(page.getByRole("heading", { name: "Connected controlled story" })).toBeVisible();
+  await page.locator(".crBaselinePath").getByRole("link", { name: "HLRTP-999901.00" }).click();
+  await expect(page).toHaveURL(new RegExp(`/artifacts/test-case/55555555-5555-4555-8555-555555555555\\?revisionId=${exactArtifactRevisionId}$`));
+  await expect(page.getByRole("heading", { name: "HLRTP-999901.00", exact: true })).toBeVisible();
+  await expect(page.getByText("Exact verification artifact", { exact: true })).toBeVisible();
 });
 
 test("a mismatched CR detail fails closed without showing unrelated Digital Thread content", async ({ page, request }) => {
