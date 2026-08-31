@@ -367,6 +367,109 @@ public sealed class FmsShowcaseSeederTests
     }
 
     [Fact]
+    public async Task Late_actor_grant_covers_every_new_failed_execution_problem_report_revision()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-showcase-pr-new-authority-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            await new IdentitySeeder(db).EnsureSeededAsync();
+            var seeder = new FmsShowcaseSeeder(db);
+            var summary = await seeder.EnsureSeededAsync();
+            var scenario7Id = Guid.Parse(await db.ShowcaseUpgradeSteps.AsNoTracking()
+                .Where(x => x.ProgramId == summary.ProgramId && x.StepKey == "scenario-richness/problem-report/07")
+                .Select(x => x.Detail).SingleAsync());
+            var scenario7VerificationId = await db.ProblemReports.AsNoTracking()
+                .Where(x => x.Id == scenario7Id).Select(x => x.ResolutionVerificationExecutionId).SingleAsync();
+
+            // Remove only the durable ownership pointer for scenario 06. The old controlled report remains
+            // immutable history; the explicit upgrade must create a new owned scenario and attribute every
+            // new action on the real authority timeline rather than the 2024 execution that motivated it.
+            db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
+                && x.StepKey == "scenario-richness/problem-report/06"));
+            db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
+                && x.StepKey == "scenario-richness"));
+
+            var testEngineer = await db.UserAccounts.SingleAsync(x => x.UserName == "test.engineer");
+            var priorMembership = await db.ProgramMemberships.SingleAsync(x => x.UserId == testEngineer.Id
+                && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.TestEngineer && x.EndedAt == null);
+            var endedAt = DateTimeOffset.UtcNow;
+            priorMembership.End("operator", endedAt);
+            var lateGrant = endedAt.AddMinutes(1);
+            db.ProgramMemberships.Add(new ProgramMembership(testEngineer.Id, summary.ProgramId,
+                ProgramRole.TestEngineer, "operator", lateGrant));
+            await db.SaveChangesAsync();
+
+            var ready = await seeder.CheckUpgradeAuthorityAsync(summary.ProgramId);
+            Assert.True(ready.Ready, ready.Detail);
+            await seeder.UpgradeAsync(summary.ProgramId);
+
+            var newReportId = Guid.Parse(await db.ShowcaseUpgradeSteps.AsNoTracking()
+                .Where(x => x.ProgramId == summary.ProgramId && x.StepKey == "scenario-richness/problem-report/06")
+                .Select(x => x.Detail).SingleAsync());
+            var revisions = (await db.ProblemReportRevisions.AsNoTracking()
+                .Where(x => x.ProblemReportId == newReportId).ToListAsync()).OrderBy(x => x.OccurredAt).ToList();
+            Assert.NotEmpty(revisions);
+            Assert.All(revisions, revision => Assert.True(revision.OccurredAt >= lateGrant,
+                $"{revision.EventType} by {revision.Actor} occurred at {revision.OccurredAt:O} before {lateGrant:O}."));
+
+            var requiredRoles = new Dictionary<string, ProgramRole>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["test.engineer"] = ProgramRole.TestEngineer,
+                ["systems.reviewer"] = ProgramRole.Reviewer,
+                ["quality.analyst"] = ProgramRole.SoftwareQualityAnalyst,
+            };
+            var accounts = await db.UserAccounts.AsNoTracking()
+                .Where(x => requiredRoles.Keys.Contains(x.UserName)).ToDictionaryAsync(x => x.UserName, StringComparer.OrdinalIgnoreCase);
+            var memberships = await db.ProgramMemberships.AsNoTracking()
+                .Where(x => x.ProgramId == summary.ProgramId && accounts.Values.Select(a => a.Id).Contains(x.UserId))
+                .ToListAsync();
+            foreach (var revision in revisions)
+            {
+                var account = accounts[revision.Actor];
+                var role = requiredRoles[revision.Actor];
+                Assert.Contains(memberships, membership => membership.UserId == account.Id && membership.Role == role
+                    && membership.GrantedAt <= revision.OccurredAt
+                    && (membership.EndedAt is null || membership.EndedAt.Value > revision.OccurredAt));
+            }
+
+            var report = await db.ProblemReports.AsNoTracking().SingleAsync(x => x.Id == newReportId);
+            var verificationId = Assert.IsType<Guid>(report.ResolutionVerificationExecutionId);
+            var verification = await db.TestExecutions.AsNoTracking().SingleAsync(x => x.Id == verificationId);
+            Assert.Equal(TestOutcome.Pass, verification.Outcome);
+            Assert.True(verification.RecordedAt >= lateGrant);
+            var predecessorId = Assert.IsType<Guid>(verification.RetestOfExecutionId);
+            var predecessor = await db.TestExecutions.AsNoTracking().SingleAsync(x => x.Id == predecessorId);
+            Assert.Equal(TestOutcome.Pass, predecessor.Outcome);
+            Assert.NotNull(predecessor.RetestOfExecutionId);
+            Assert.True(predecessor.RecordedAt < lateGrant);
+            Assert.Equal(predecessor.ProjectId, verification.ProjectId);
+            Assert.Equal(predecessor.ReleaseId, verification.ReleaseId);
+            Assert.Equal(predecessor.SoftwareBuildId, verification.SoftwareBuildId);
+            Assert.Equal(predecessor.ProcedureRevisionId, verification.ProcedureRevisionId);
+            var policyDecision = await new ProblemReportClosureVerificationPolicy(db)
+                .ValidateAsync(report, verification, CancellationToken.None);
+            Assert.True(policyDecision.Accepted, $"{policyDecision.Code} {policyDecision.Error}");
+            Assert.Equal("test.engineer", verification.ExecutedBy);
+            Assert.Single(await db.ShowcaseUpgradeSteps.AsNoTracking().Where(x => x.ProgramId == summary.ProgramId
+                && x.StepKey == "scenario-richness/problem-report-verification/06").ToListAsync());
+
+            var executionCount = await db.TestExecutions.CountAsync();
+            Assert.Empty(await seeder.UpgradeAsync(summary.ProgramId));
+            Assert.Equal(executionCount, await db.TestExecutions.CountAsync());
+            Assert.Equal(scenario7VerificationId, await db.ProblemReports.AsNoTracking()
+                .Where(x => x.Id == scenario7Id).Select(x => x.ResolutionVerificationExecutionId).SingleAsync());
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task Existing_collidable_low_numbers_are_not_mistaken_for_owned_showcase_scenarios()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-showcase-collision-{Guid.NewGuid():N}.db");

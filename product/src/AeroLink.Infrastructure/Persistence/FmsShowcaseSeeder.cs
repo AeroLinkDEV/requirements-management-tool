@@ -39,6 +39,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     private const string ProblemReportScenarioMarkerPrefix = "[FMSLIVE showcase scenario: problem-report-";
     private const string InterfaceScenarioStepPrefix = "scenario-richness/interface/";
     private const string ProblemReportScenarioStepPrefix = "scenario-richness/problem-report/";
+    private const string ProblemReportVerificationExecutionStepPrefix = "scenario-richness/problem-report-verification/";
     private const int PreferredScenarioNumber = 86601;
     private static readonly string[] InterfaceScenarioAuthors = ["systems.author", "software.author"];
     private static readonly string[] ProblemReportOwners =
@@ -49,6 +50,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     private static string ProblemReportScenarioMarker(int index) => $"{ProblemReportScenarioMarkerPrefix}{index:D2}]";
     private static string InterfaceScenarioStepKey(int index) => $"{InterfaceScenarioStepPrefix}{index:D2}";
     private static string ProblemReportScenarioStepKey(int index) => $"{ProblemReportScenarioStepPrefix}{index:D2}";
+    private static string ProblemReportVerificationExecutionStepKey(int index) =>
+        $"{ProblemReportVerificationExecutionStepPrefix}{index:D2}";
 
     // Only the historical Build 1.5 scenarios carry governed closure evidence. Build 1.6 remains an
     // in-work release and its Problem Reports deliberately stop at an honest active/rejected state.
@@ -288,14 +291,20 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     private async Task<DateTimeOffset> EffectiveProblemReportTimelineAtAsync(Guid programId,
         DateTimeOffset baselineAt, CancellationToken ct)
     {
+        var latestGrant = await LatestCurrentProblemReportActorGrantAsync(programId, ct);
+        return latestGrant is { } grant && grant >= baselineAt ? grant.AddMinutes(1) : baselineAt;
+    }
+
+    private async Task<DateTimeOffset?> LatestCurrentProblemReportActorGrantAsync(Guid programId,
+        CancellationToken ct)
+    {
         var names = ProblemReportScenarioActors.Select(x => x.UserName).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var actorIds = await db.UserAccounts.AsNoTracking().Where(x => names.Contains(x.UserName))
             .Select(x => x.Id).ToListAsync(ct);
         var grants = await db.ProgramMemberships.AsNoTracking()
             .Where(x => x.ProgramId == programId && actorIds.Contains(x.UserId) && x.EndedAt == null)
             .Select(x => x.GrantedAt).ToListAsync(ct);
-        var latestGrant = grants.Count == 0 ? (DateTimeOffset?)null : grants.Max();
-        return latestGrant is { } grant && grant >= baselineAt ? grant.AddMinutes(1) : baselineAt;
+        return grants.Count == 0 ? null : grants.Max();
     }
 
     /// <summary>
@@ -396,21 +405,15 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                     return new(false, "showcase_actor_authority_unavailable", ex.Message, closureAt);
                 }
 
-                // The SQA approval must follow any newly-created controlled PR evidence. If an existing
-                // installation granted a required PR actor years after the deterministic execution, move
-                // the operator-triggered evidence/approval timeline after that real grant; never backdate
-                // either authority or evidence. Recheck the SQA membership against the moved timestamp so
-                // an ending membership fails before UpgradeAsync can write anything.
-                // EffectiveProblemReportTimelineAtAsync returns the deterministic baseline when all grants
-                // pre-date it. Only a timeline moved by a real late grant should move the historical SQA
-                // approval; otherwise a fresh seed would unnecessarily rewrite its June 2024 chronology
-                // merely because the baseline used for new PR drafts is in December.
-                var deterministicProblemTimeline = new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero);
-                if (effectiveAt != deterministicProblemTimeline && effectiveAt >= closureAt.Value)
-                    // Leave room for the verification, relationship and candidate events for both governed
-                    // scenarios. They share one timestamp per report and are therefore still ordered before
-                    // this operator-triggered closure approval.
-                    closureAt = effectiveAt.AddMinutes(10);
+                // The SQA approval must follow every newly-created controlled PR action. Use the historical
+                // closure as the baseline, then move it only when a real actor grant occurred later. Two
+                // hours leaves the deterministic draft-to-verification sequence (at most fifty minutes),
+                // both governed evidence rows, and their ordering ahead of the approval without inventing
+                // authority before the operator's actual grant.
+                var authorityCoveredClosureAt = await EffectiveProblemReportTimelineAtAsync(programId,
+                    closureAt.Value, ct);
+                if (authorityCoveredClosureAt > closureAt.Value)
+                    closureAt = authorityCoveredClosureAt.AddHours(2);
                 if (!memberships.Any(x => x.GrantedAt <= closureAt.Value
                         && (x.EndedAt is null || x.EndedAt.Value > closureAt.Value)))
                     return new(false, "quality_analyst_membership_does_not_cover_closure",
@@ -1346,7 +1349,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             var retestPair = i is 6 or 7 ? failurePairs[i - 6] : null;
             var createdAt = retestPair is null
                 ? now.AddDays(i)
-                : retestPair.Failure.ExecutedAt.AddMinutes(5);
+                : await EffectiveProblemReportTimelineAtAsync(programId,
+                    retestPair.Failure.ExecutedAt.AddMinutes(5), ct);
             var report = new ProblemReport(projectId, reportNumber,
                 i == 1 ? "Navigation database handoff follow-up" : $"FMS showcase problem report {i}",
                 "The FMS demonstration record captures a controlled engineering concern for this scenario.",
@@ -1563,19 +1567,13 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         // CheckUpgradeAuthorityAsync has already preflighted every actor used by pending Problem Report
         // scenarios. Keep newly-created evidence after the latest real grant even when the mapped report
         // itself was authored in the original deterministic 2024 timeline.
-        var deterministicProblemTimeline = new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero);
-        var effectiveProblemTimeline = await EffectiveProblemReportTimelineAtAsync(programId,
-            deterministicProblemTimeline, ct);
-        // The helper returns the deterministic baseline when all current grants already pre-date it. That
-        // baseline is for new draft records, not a reason to move an existing 2024 execution's evidence into
-        // December. Only retain a timeline override when a real late grant caused the helper to move it.
-        DateTimeOffset? evidenceTimelineAt = effectiveProblemTimeline == deterministicProblemTimeline
-            ? null : effectiveProblemTimeline;
+        var latestProblemActorGrant = await LatestCurrentProblemReportActorGrantAsync(programId, ct);
         DateTimeOffset? lastEvidenceAt = null;
-        DateTimeOffset EvidenceAt(TestExecution execution)
+        DateTimeOffset EvidenceAt(TestExecution execution, DateTimeOffset lastReportEventAt)
         {
             var at = execution.RecordedAt.AddMinutes(1);
-            if (evidenceTimelineAt is { } requiredAt && at < requiredAt) at = requiredAt;
+            if (latestProblemActorGrant is { } grant && at <= grant) at = grant.AddMinutes(1);
+            if (at <= lastReportEventAt) at = lastReportEventAt.AddMinutes(1);
             if (lastEvidenceAt is { } previous && at <= previous) at = previous.AddMinutes(1);
             lastEvidenceAt = at;
             return at;
@@ -1594,11 +1592,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 ?? throw new InvalidOperationException($"The {ProblemReportScenarioStepKey(index)} ownership record is missing.");
             var pair = failurePairs[index - 6];
             var failure = pair.Failure;
-            var execution = pair.Retest!;
-            // Reuse one controlled timestamp for all rows created for this report. The next governed report
-            // receives a strictly later timestamp, preserving event ordering without putting the closure
-            // candidate after its own SQA approval.
-            var evidenceAt = EvidenceAt(execution);
+            var reportRevisionTimes = await db.ProblemReportRevisions.AsNoTracking()
+                .Where(x => x.ProblemReportId == report.Id).Select(x => x.OccurredAt).ToListAsync(ct);
+            var lastReportEventAt = reportRevisionTimes.Count == 0 ? report.CreatedAt : reportRevisionTimes.Max();
 
             // Reopening a frozen historical closure deliberately clears its verification execution and
             // advances the report revision. The old Build 1.5 retest is no longer a valid successor for that
@@ -1621,18 +1617,41 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(report.Id, "TestExecution",
                     failure.Id, ProblemReportRelationshipPolicy.OriginatingFailure,
                     ProblemReportRelationshipProducer.FailureCreationWorkflow, report.ReportedBy, report.CreatedAt));
+                await db.SaveChangesAsync(ct);
             }
+
+            var execution = report.ResolutionVerificationExecutionId is { } selectedExecutionId
+                ? await db.TestExecutions.SingleOrDefaultAsync(x => x.Id == selectedExecutionId, ct)
+                    ?? throw new InvalidOperationException($"The {marker} scenario names missing verification execution {selectedExecutionId}.")
+                : pair.Retest!;
+            var verificationDecision = await policy.ValidateAsync(report, execution, ct);
+            if (report.ResolutionVerificationExecutionId is null
+                && !verificationDecision.Accepted
+                && verificationDecision.Code == "pr_verification_not_successor")
+            {
+                // The historical Build 1.5 pass remains the causal retest, but it cannot verify corrective
+                // action authored years later. Add one owned synthetic successor after the current Verifying
+                // boundary. Its immutable identity is recorded before the report adopts it, so an interrupted
+                // upgrade resumes without duplicating controlled execution evidence.
+                var successorAt = lastReportEventAt.AddMinutes(1);
+                if (latestProblemActorGrant is { } grant && successorAt <= grant)
+                    successorAt = grant.AddMinutes(1);
+                execution = await EnsureProblemReportVerificationSuccessorAsync(programId, index, report,
+                    failure, pair.Retest!, successorAt, ct);
+                verificationDecision = await policy.ValidateAsync(report, execution, ct);
+            }
+            if (!verificationDecision.Accepted)
+                throw new InvalidOperationException($"The {marker} scenario failed closure verification policy: {verificationDecision.Code} {verificationDecision.Error}");
+
+            // Reuse one controlled timestamp for all rows created for this report. The next governed report
+            // receives a strictly later timestamp, preserving event ordering without putting the closure
+            // candidate after its own SQA approval.
+            var evidenceAt = EvidenceAt(execution, lastReportEventAt);
 
             if (report.ResolutionVerificationExecutionId is null)
             {
                 if (report.State != ProblemReportState.Verifying)
                     throw new InvalidOperationException($"The {marker} scenario cannot record verification from {report.State}.");
-                // This is the same authority used by /verify. It proves project/build scope, exact Build 1.5
-                // procedure effectivity, a passing result, attributable evidence, and a retest chain to the
-                // linked failure before the report is allowed to enter SQA closure.
-                var decision = await policy.ValidateAsync(report, execution, ct);
-                if (!decision.Accepted)
-                    throw new InvalidOperationException($"The {marker} scenario failed closure verification policy: {decision.Code} {decision.Error}");
                 report.RecordResolutionVerification("test.engineer", execution.Id, evidenceAt);
                 AddScenarioRevision(report, "ResolutionVerified", "test.engineer", evidenceAt, ActorName("test.engineer"),
                     ProblemReportState.Verifying, ProblemReportState.WaitingForSqaToClose,
@@ -1691,6 +1710,44 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             }
         }
         await db.SaveChangesAsync(ct);
+    }
+
+    private async Task<TestExecution> EnsureProblemReportVerificationSuccessorAsync(Guid programId, int index,
+        ProblemReport report, TestExecution failure, TestExecution predecessor, DateTimeOffset recordedAt,
+        CancellationToken ct)
+    {
+        var stepKey = ProblemReportVerificationExecutionStepKey(index);
+        var recorded = await db.ShowcaseUpgradeSteps.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.ProgramId == programId && x.StepKey == stepKey, ct);
+        if (recorded is not null)
+        {
+            if (!Guid.TryParse(recorded.Detail, out var executionId))
+                throw new InvalidOperationException($"The {stepKey} ownership record does not contain an execution identity.");
+            var existing = await db.TestExecutions.SingleOrDefaultAsync(x => x.Id == executionId, ct)
+                ?? throw new InvalidOperationException($"The {stepKey} ownership record names a missing test execution.");
+            if (existing.ProjectId != report.ProjectId
+                || existing.ReleaseId != report.TargetReleaseId
+                || existing.SoftwareBuildId != failure.SoftwareBuildId
+                || existing.ProcedureRevisionId != failure.ProcedureRevisionId
+                || existing.RetestOfExecutionId != predecessor.Id
+                || existing.Outcome != TestOutcome.Pass
+                || !string.Equals(existing.ExecutedBy, "test.engineer", StringComparison.OrdinalIgnoreCase)
+                || existing.RecordedAt < recordedAt)
+                throw new InvalidOperationException($"The {stepKey} ownership record names an execution outside its controlled showcase scope.");
+            return existing;
+        }
+
+        if (failure.SoftwareBuildId is null || failure.ReleaseId is null || report.TargetReleaseId != failure.ReleaseId)
+            throw new InvalidOperationException($"The {ProblemReportScenarioMarker(index)} scenario cannot create an exact Build 1.5 successor execution.");
+        await EnsureCurrentProgramAuthorityAsync(programId, "test.engineer", ProgramRole.TestEngineer, recordedAt, ct);
+        var execution = new TestExecution(report.ProjectId, failure.ProcedureRevisionId, failure.SoftwareBuildId,
+            predecessor.Id, TestOutcome.Pass, "test.engineer", "FMS integration rig / controlled corrective retest",
+            "A new controlled successor retest confirms the corrected deterministic showcase path.",
+            $"evidence/fms-1.5/problem-report-{index:D2}-successor.json", recordedAt, recordedAt, failure.ReleaseId);
+        db.TestExecutions.Add(execution);
+        db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId, stepKey, execution.Id.ToString("D"), recordedAt));
+        await db.SaveChangesAsync(ct);
+        return execution;
     }
 
     private async Task<bool> ScenarioRichnessCompleteAsync(Guid programId, CancellationToken ct)
