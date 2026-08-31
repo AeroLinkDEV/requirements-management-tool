@@ -61,7 +61,10 @@ test('relating two Problem Reports records it on both, and unlinking removes bot
   await expect(other.locator('.prRelatedCard')).toContainText(one.displayNumber)
 
   // Opening the related record from the card is the whole reason it is a link and not a label.
-  await other.locator('.prRelatedOpen').click()
+  const relatedLink = other.locator('.prRelatedOpen').filter({ hasText: one.displayNumber })
+  await expect(relatedLink).toHaveAttribute('href', new RegExp(`/problem-reports/${one.id}$`))
+  await expect(relatedLink).toHaveJSProperty('tagName', 'A')
+  await relatedLink.click()
   await expect(page.getByRole('heading', { name: first })).toBeVisible({ timeout: 30_000 })
 
   // Removed from this side; gone from the other one too.

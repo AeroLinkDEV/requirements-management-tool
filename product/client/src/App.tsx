@@ -1062,6 +1062,7 @@ function App() {
         onBack={() => navigate("dashboard")}
         onOpenVerification={(target) => navigate("testResults", target?.discipline === "software" ? "softwareTest" : "systemTest", target?.problemReportId, target?.discipline === "software" ? "HighLevel" : undefined)}
         onOpenArtifact={(kind,id,identifier)=>{if(kind==="change-request")navigate("scr",identifier?.startsWith("HLRCR-")||identifier?.startsWith("LLRCR-")?"software":"system",id);else if(kind==="problem-report")navigate("problemReports","system",id);else if(kind==="managed-document")navigate("managedDocuments","system",id);else if(kind==="requirement")navigate("requirements",identifier?.startsWith("SYSR-")?"system":"software",id);else navigate("artifact","system",id,kind)}}
+        problemReportHref={id => context ? routePath(context, "problemReports", "system", id) : undefined}
       />
     );
   if (view === "code" && project && release)

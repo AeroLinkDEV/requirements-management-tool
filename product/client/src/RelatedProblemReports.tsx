@@ -1,6 +1,7 @@
 import { useState } from "react";
 import ProblemReportPicker from "./ProblemReportPicker";
 import { PersonName } from "./People";
+import ExactArtifactLink from "./ExactArtifactLink";
 import "./RelatedProblemReports.css";
 
 /**
@@ -27,7 +28,7 @@ const spaced = (value: string) =>
     : value === "ReadyForSccb" ? "Ready for SCCB"
       : value.replace(/([a-z])([A-Z])/g, "$1 $2");
 
-export default function RelatedProblemReports({ api, projectId, reportId, related, canEdit, busy, onLink, onUnlink, onOpen }: {
+export default function RelatedProblemReports({ api, projectId, reportId, related, canEdit, busy, onLink, onUnlink, onOpen, hrefFor }: {
   api: string;
   projectId: string;
   reportId: string;
@@ -37,6 +38,7 @@ export default function RelatedProblemReports({ api, projectId, reportId, relate
   onLink: (relatedId: string) => Promise<void>;
   onUnlink: (relatedId: string) => Promise<void>;
   onOpen: (id: string) => void;
+  hrefFor?: (id: string) => string | undefined;
 }) {
   const [picking, setPicking] = useState(false);
 
@@ -84,19 +86,26 @@ export default function RelatedProblemReports({ api, projectId, reportId, relate
 
       {related.length > 0 && (
         <div className="prRelatedList">
-          {related.map(item => (
-            <div key={item.id} className="prRelatedCard">
-              <button type="button" className="prRelatedOpen" onClick={() => onOpen(item.id)}>
-                <i>PR</i>
-                <span>
-                  <b>{item.displayNumber} — {item.title}</b>
-                  <small>Raised by <PersonName userName={item.reportedBy} displayName={item.reportedByDisplayName ?? undefined} /></small>
-                </span>
-                <span className="prRelatedState">
-                  <em>{spaced(item.state)}</em>
-                  {item.targetBuild && <em className="build">{item.targetBuild}</em>}
-                </span>
-              </button>
+          {related.map(item => {
+            // The endpoint returns the related Problem Report aggregate id and its current controlled
+            // display number. This canonical route opens that same authorized aggregate/detail; it does
+            // not fabricate a revision route from a display number that has no separate revision id.
+            const href = hrefFor?.(item.id);
+            const card = <>
+              <i>PR</i>
+              <span>
+                <b>{item.displayNumber} — {item.title}</b>
+                <small>Raised by <PersonName userName={item.reportedBy} displayName={item.reportedByDisplayName ?? undefined} /></small>
+              </span>
+              <span className="prRelatedState">
+                <em>{spaced(item.state)}</em>
+                {item.targetBuild && <em className="build">{item.targetBuild}</em>}
+              </span>
+            </>;
+            return <div key={item.id} className="prRelatedCard">
+              {href
+                ? <ExactArtifactLink className="prRelatedOpen" href={href} onOpen={() => onOpen(item.id)} title="Open this controlled Problem Report">{card}</ExactArtifactLink>
+                : <button type="button" className="prRelatedOpen" onClick={() => onOpen(item.id)}>{card}</button>}
               {canEdit && (
                 <button
                   type="button"
@@ -109,7 +118,7 @@ export default function RelatedProblemReports({ api, projectId, reportId, relate
                 </button>
               )}
             </div>
-          ))}
+          })}
         </div>
       )}
     </section>

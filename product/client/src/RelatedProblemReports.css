@@ -19,7 +19,7 @@
 .prRelatedOpen {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 11px; align-items: center;
   width: 100%; padding: 9px 11px; border: 1px solid #e8eef5; border-radius: 7px;
-  background: #f8fbfd; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  background: #f8fbfd; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: none; box-sizing: border-box;
 }
 .prRelatedOpen:hover, .prRelatedOpen:focus-visible { background: #eef5fb; border-color: #cfdeec; }
 .prRelatedOpen:focus-visible, .prRelatedUnlink:focus-visible { outline: 2px solid #16766f; outline-offset: 1px; }
