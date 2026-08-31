@@ -107,12 +107,15 @@ type EditorProps = {
   /** Use document-like narrative controls for Problem Report fields. Other authored surfaces retain the
    * explicit block editor because tables/symbols/references are first-class there. */
   documentLike?: boolean;
+  /** The first narrative field introduces paste/drop authoring once. Repeating the same prose above every
+   * field turns a document editor back into a stack of diagnostic widgets. */
+  showDocumentGuidance?: boolean;
   /** Parents use this to keep controlled Save/check-in behind an in-flight image upload. */
   onUploadingChange?: (uploading: boolean) => void;
   onChange: (value: string) => void;
 };
 
-export function RichContentEditor({ api, projectId, editSessionId, value, label, placeholder, disabled, documentLike = false, onUploadingChange, onChange }: EditorProps) {
+export function RichContentEditor({ api, projectId, editSessionId, value, label, placeholder, disabled, documentLike = false, showDocumentGuidance = false, onUploadingChange, onChange }: EditorProps) {
   const blocks = useMemo(() => readBlocks(value), [value]);
   const blocksRef = useRef(blocks);
   const [uploading, setUploading] = useState(false);
@@ -261,7 +264,7 @@ export function RichContentEditor({ api, projectId, editSessionId, value, label,
     >
       <div className="richEditorHead">
         <b>{label}</b>
-        {documentLike && <span className="richEditorHint">Write naturally · paste or drop PNG/JPEG figures where they belong</span>}
+        {documentLike && showDocumentGuidance && <span className="richEditorHint">Write naturally · paste or drop PNG/JPEG figures where they belong</span>}
         <div className="richToolbar" role="group" aria-label={`Add content to ${label}`}>
           {!documentLike && (
             <button type="button" disabled={disabled} onClick={() => append({ type: "paragraph", text: "" })}>Paragraph</button>
@@ -285,7 +288,7 @@ export function RichContentEditor({ api, projectId, editSessionId, value, label,
         aria-hidden="true"
       />
       {error && <p className="richError" role="alert">{error}</p>}
-      {documentLike && <p className="richDropHint" aria-live="polite">{dragging ? "Drop to place the figure in this narrative." : "Figures stay controlled and appear at the current paragraph."}</p>}
+      {documentLike && dragging && <p className="richDropHint" aria-live="polite">Drop to place the figure in this narrative.</p>}
 
       {blocks.length === 0 && !documentLike && (
         <p className="richEmpty">{placeholder ?? "Add a paragraph, a table, or a figure."}</p>
@@ -305,7 +308,20 @@ export function RichContentEditor({ api, projectId, editSessionId, value, label,
           </li>
         )}
         {blocks.map((block, index) => (
-          <li key={index} data-rich-block-index={index} className={documentLike && block.type === "paragraph" ? "richDocumentParagraph" : undefined}>
+          <li
+            key={index}
+            data-rich-block-index={index}
+            className={documentLike
+              ? block.type === "paragraph"
+                ? "richDocumentParagraph"
+                : block.type === "image"
+                  ? "richDocumentImage"
+                  : undefined
+              : undefined}
+            style={documentLike && block.type === "image"
+              ? { "--rich-image-width": `${Math.min(100, Math.max(25, block.widthPercent ?? 100))}%` } as CSSProperties
+              : undefined}
+          >
             <div className="richBlockBar">
               <span>{block.type}</span>
               <div>

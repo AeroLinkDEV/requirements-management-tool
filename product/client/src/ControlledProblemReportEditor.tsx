@@ -312,7 +312,7 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
         {error && <div className="workspaceError" role="alert">{error}</div>}
         {uploadsPending > 0 && <div className="workspaceNotice" role="status" aria-live="polite">Storing {uploadsPending} inline image{uploadsPending === 1 ? '' : 's'}… Save and check in will be enabled when the upload finishes.</div>}
         <label>Title<input required value={draft.title} onChange={event => set('title', event.target.value)} /></label>
-        <RichContentEditor api={api} projectId={projectId} editSessionId={session?.id} label="Problem Description" value={draft.problemRich} documentLike onUploadingChange={onUploadingChange} onChange={value => set('problemRich', value)} />
+        <RichContentEditor api={api} projectId={projectId} editSessionId={session?.id} label="Problem Description" value={draft.problemRich} documentLike showDocumentGuidance onUploadingChange={onUploadingChange} onChange={value => set('problemRich', value)} />
         <RichContentEditor api={api} projectId={projectId} editSessionId={session?.id} label="Additional Information" value={draft.additionalInformationRich} documentLike onUploadingChange={onUploadingChange} onChange={value => set('additionalInformationRich', value)} />
         <div className="prFormGrid">
           <label>Severity<select value={draft.severity} onChange={event => set('severity', event.target.value)}>{['Critical', 'High', 'Major', 'Minor', 'Trivial'].map(x => <option key={x}>{x}</option>)}</select></label>

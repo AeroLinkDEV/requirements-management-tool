@@ -7,7 +7,7 @@
 .richContentView p { margin: 0; color: var(--ink-900); line-height: var(--leading-body, 1.5); }
 .richContentView figure { margin: 0; display: grid; gap: 6px; }
 .richImageRow { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; width: 100%; }
-.richImageRow .richImageFigure { min-width: min(220px, 100%); flex: 1 1 280px; }
+.richImageRow .richImageFigure { min-width: min(220px, 100%); }
 .richImageFigure img { display: block; width: 100%; height: auto; }
 .richImageUnavailable { margin: 0; padding: 9px 11px; border: 1px dashed #a4262c; border-radius: var(--radius-sm, 6px); color: #8d1f25; background: #fff8f8; font-size: 12px; line-height: 1.4; }
 .richContentView figcaption { font-size: 12px; color: var(--ink-500); }
@@ -63,11 +63,18 @@ html input.richFileInput { position: absolute; width: 1px; height: 1px; overflow
 
 .richBlocks { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .richBlocks > li { border: 1px solid var(--line); border-radius: var(--radius-sm, 6px); background: white; padding: 8px 10px; display: grid; gap: 8px; }
-.richBlocksDocument { gap: 6px; }
+.richBlocksDocument { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 6px; }
+.richBlocksDocument > li { flex: 1 1 100%; width: 100%; }
+.richBlocksDocument > li.richDocumentImage {
+  flex: 0 1 calc(var(--rich-image-width, 100%) - 6px);
+  width: calc(var(--rich-image-width, 100%) - 6px);
+  min-width: min(220px, 100%);
+}
 .richBlocksDocument > li { border: 0; padding: 0; background: transparent; }
 .richBlocksDocument > li.richDocumentParagraph .richBlockBar { display: none; }
 .richBlocksDocument > li:has(.richImageEdit) { padding: 8px; border: 1px solid #dce5ee; border-radius: 9px; }
-.richBlocksDocument > li:has(.richImageEdit) .richBlockBar > span { font-size: 12px; }
+.richBlocksDocument > li:has(.richImageEdit) .richBlockBar { justify-content: flex-end; }
+.richBlocksDocument > li:has(.richImageEdit) .richBlockBar > span { display: none; }
 .richBlocksDocument > li:has(.richImageEdit) .richBlockBar > div button:first-child,
 .richBlocksDocument > li:has(.richImageEdit) .richBlockBar > div button:nth-child(2) { display: none; }
 .richEmptyParagraph { min-height: 74px; }

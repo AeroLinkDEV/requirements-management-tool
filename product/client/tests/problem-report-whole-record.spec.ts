@@ -145,8 +145,55 @@ test('a delayed inline image upload keeps create save behind the pending upload'
   await expect(raise.getByText(/Storing .*inline image/)).toBeVisible()
 
   releaseUpload()
-  await expect(raise.getByRole('button', { name: 'Save Draft PR', exact: true })).toBeEnabled({ timeout: 30_000 })
+  await expect(raise.getByRole('button', { name: /^Save Draft PR/ })).toBeEnabled({ timeout: 30_000 })
   await page.unroute('**/api/content/images**')
+})
+
+test('resized adjacent figures share a document row and guidance is not repeated per narrative field', async ({ page }) => {
+  test.setTimeout(300_000)
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+  await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: 'load' })
+  await page.getByRole('button', { name: '+ Record problem' }).click()
+  const raise = page.getByRole('dialog', { name: 'Record a problem' })
+  await raise.getByLabel('Title').fill(`Adjacent inline figures ${Date.now()}`)
+  await writeField(raise, 'Problem Description', 'Text above the paired figures.')
+  await expect(raise.getByText(/Write naturally · paste or drop/)).toHaveCount(1)
+  await expect(raise.getByText('Figures stay controlled and appear at the current paragraph.')).toHaveCount(0)
+
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+  await raise.locator('.richEditor').first().locator('input[type=file]').setInputFiles([
+    { name: 'left-recovery.png', mimeType: 'image/png', buffer: png },
+    { name: 'right-recovery.png', mimeType: 'image/png', buffer: png },
+  ])
+  const sizes = raise.getByRole('slider', { name: /Problem Description figure .* size/ })
+  await expect(sizes).toHaveCount(2, { timeout: 30_000 })
+  await sizes.nth(0).fill('50')
+  await sizes.nth(1).fill('50')
+
+  const editorFigures = raise.locator('.richEditor').first().locator('.richDocumentImage')
+  const editorLeft = await editorFigures.nth(0).boundingBox()
+  const editorRight = await editorFigures.nth(1).boundingBox()
+  expect(editorLeft).not.toBeNull()
+  expect(editorRight).not.toBeNull()
+  expect(Math.abs(editorLeft!.y - editorRight!.y)).toBeLessThan(2)
+
+  await editorFigures.nth(1).getByRole('button', { name: 'Add text below figure' }).click()
+  await raise.getByRole('textbox', { name: 'Problem Description paragraph 4' }).fill('Text below the paired figures.')
+  await chooseCategory(raise, 'Code Issue — Functional Impact')
+  await raise.getByRole('button', { name: 'Save Draft PR' }).click()
+
+  const imageArticle = page.locator('.prNarrative article').filter({ has: page.locator('.richImageRow') })
+  await expect(imageArticle).toContainText('Text below the paired figures.', { timeout: 30_000 })
+  const readerFigures = imageArticle.locator('.richImageFigure')
+  await expect(readerFigures).toHaveCount(2)
+  const readerLeft = await readerFigures.nth(0).boundingBox()
+  const readerRight = await readerFigures.nth(1).boundingBox()
+  expect(readerLeft).not.toBeNull()
+  expect(readerRight).not.toBeNull()
+  expect(Math.abs(readerLeft!.y - readerRight!.y)).toBeLessThan(2)
 })
 
 test('a delayed inline image upload keeps checkout save and check-in behind the pending upload', async ({ page }) => {
