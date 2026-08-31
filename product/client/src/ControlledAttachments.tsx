@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { FormEvent } from "react";
 import { PersonName } from "./People";
 import { stateLabel } from "./presentation";
 import "./ControlledAttachments.css";
@@ -42,6 +43,8 @@ type Props = {
   editSessionId?: string;
   /** Attaching is an authoring act. A reader sees the files; they do not add to them. */
   canAttach: boolean;
+  /** Lets a containing controlled editor keep check-in disabled while a supporting-file write is active. */
+  onBusyChange?: (busy: boolean) => void;
 };
 
 export default function ControlledAttachments({
@@ -52,6 +55,7 @@ export default function ControlledAttachments({
   revisionId,
   editSessionId,
   canAttach,
+  onBusyChange,
 }: Props) {
   const [items, setItems] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
@@ -80,25 +84,40 @@ export default function ControlledAttachments({
   const upload = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
+    const values = new FormData(form);
+    const file = values.get("file");
+    const label = String(values.get("label") || "").trim();
+    if (!(file instanceof File) || file.size === 0 || !label) {
+      setError("Choose a file and enter a label before attaching it.");
+      return;
+    }
     const body = new FormData(form);
+    body.set("label", label);
+    body.set("description", String(values.get("description") || "").trim());
+    body.set("file", file);
     body.set("projectId", projectId);
     body.set("artifactType", artifactType);
     body.set("artifactId", artifactId);
     if (revisionId) body.set("revisionId", revisionId);
     if (editSessionId) body.set("editSessionId", editSessionId);
-    setBusy(true);
+    setBusy(true); onBusyChange?.(true);
     setError("");
     setMessage("");
-    const response = await fetch(uploadUrl(), { method: "POST", body });
-    setBusy(false);
-    if (!response.ok) {
-      const detail = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(detail.error || "The file could not be stored.");
-      return;
+    try {
+      const response = await fetch(uploadUrl(), { method: "POST", body });
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => ({}))) as { error?: string };
+        setError(detail.error || "The file could not be stored.");
+        return;
+      }
+      form.reset();
+      setMessage("Stored, hashed, and attributed.");
+      await load();
+    } catch {
+      setError("The file could not be stored because the attachment service was unavailable.");
+    } finally {
+      setBusy(false); onBusyChange?.(false);
     }
-    form.reset();
-    setMessage("Stored, hashed, and attributed.");
-    await load();
   };
 
   const newVersion = async (item: Attachment, file: File) => {
@@ -112,15 +131,21 @@ export default function ControlledAttachments({
     body.set("label", item.label);
     body.set("description", item.description);
     body.set("file", file);
-    setError("");
-    const response = await fetch(uploadUrl(), { method: "POST", body });
-    if (!response.ok) {
-      const detail = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(detail.error || "The new version could not be stored.");
-      return;
+    setBusy(true); onBusyChange?.(true); setError("");
+    try {
+      const response = await fetch(uploadUrl(), { method: "POST", body });
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => ({}))) as { error?: string };
+        setError(detail.error || "The new version could not be stored.");
+        return;
+      }
+      setMessage(`${item.label} advanced to the next controlled version.`);
+      await load();
+    } catch {
+      setError("The new version could not be stored because the attachment service was unavailable.");
+    } finally {
+      setBusy(false); onBusyChange?.(false);
     }
-    setMessage(`${item.label} advanced to the next controlled version.`);
-    await load();
   };
 
   const verify = async (item: Attachment) => {
@@ -136,25 +161,30 @@ export default function ControlledAttachments({
 
   const remove = async () => {
     if (!removing || !editSessionId || !removalReason.trim()) return;
-    setBusy(true); setError(""); setMessage("");
-    const response = await fetch(`${api}/api/enterprise-hardening/attachments/${removing.id}/withdraw`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ editSessionId, reason: removalReason.trim() }),
-    });
-    setBusy(false);
-    if (!response.ok) {
-      const detail = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(detail.error || "The supporting file could not be removed from the current set.");
-      return;
+    setBusy(true); onBusyChange?.(true); setError(""); setMessage("");
+    try {
+      const response = await fetch(`${api}/api/enterprise-hardening/attachments/${removing.id}/withdraw`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ editSessionId, reason: removalReason.trim() }),
+      });
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => ({}))) as { error?: string };
+        setError(detail.error || "The supporting file could not be removed from the current set.");
+        return;
+      }
+      setMessage(`${removing.originalFileName} was removed from the current set; its controlled history remains available.`);
+      setRemoving(undefined); setRemovalReason(""); await load();
+    } catch {
+      setError("The supporting file could not be removed because the attachment service was unavailable.");
+    } finally {
+      setBusy(false); onBusyChange?.(false);
     }
-    setMessage(`${removing.originalFileName} was removed from the current set; its controlled history remains available.`);
-    setRemoving(undefined); setRemovalReason(""); await load();
   };
 
   return (
-    <div className="attachmentPanel">
+      <div className="attachmentPanel">
       {canAttach && (
-        <form className="attachmentUpload" onSubmit={upload}>
+        <form className="attachmentUpload" aria-label="Attach a supporting file" onSubmit={event => void upload(event)}>
           <label>
             Label
             <input name="label" placeholder="Supplier interface datasheet" required />
@@ -167,7 +197,7 @@ export default function ControlledAttachments({
             File
             <input type="file" name="file" accept=".png,.jpg,.jpeg,.pdf,.docx,.xlsx,.txt,.log,.csv" required />
           </label>
-          <button disabled={busy}>{busy ? "Checksumming…" : "Attach"}</button>
+          <button type="submit" disabled={busy}>{busy ? "Checksumming…" : "Attach"}</button>
         </form>
       )}
       {error && (
@@ -217,6 +247,7 @@ export default function ControlledAttachments({
                     New version
                     <input
                       type="file" accept=".png,.jpg,.jpeg,.pdf,.docx,.xlsx,.txt,.log,.csv"
+                      disabled={busy}
                       onChange={(event) => {
                         const file = event.target.files?.[0];
                         event.target.value = "";

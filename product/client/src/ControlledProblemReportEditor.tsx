@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
 import { useDebouncedSave } from './autosave'
 import { RichContentEditor } from './RichContent'
 import { emptyRichContent, fromPlainText, toPlainText } from './richContentModel'
@@ -92,6 +91,8 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
   const [busy, setBusy] = useState(false)
   const [savedAt, setSavedAt] = useState('')
   const [uploadsPending, setUploadsPending] = useState(0)
+  const [inlineUploadsPending, setInlineUploadsPending] = useState(0)
+  const [attachmentUploadsPending, setAttachmentUploadsPending] = useState(0)
   // The working copy exactly as the checkout returned it. This is what "changed" is measured against.
   const baseline = useRef<string>('')
   // The working copy as of the last recovery snapshot. Deliberately separate from the baseline: these are
@@ -107,12 +108,25 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
   const lastSavedRef = useRef('')
   const savingRef = useRef(false)
   const uploadsPendingRef = useRef(0)
+  const inlineUploadsPendingRef = useRef(0)
+  const attachmentUploadsPendingRef = useRef(0)
 
   const onUploadingChange = useCallback((uploading: boolean) => {
+    inlineUploadsPendingRef.current = Math.max(0, inlineUploadsPendingRef.current + (uploading ? 1 : -1))
     uploadsPendingRef.current = Math.max(0, uploadsPendingRef.current + (uploading ? 1 : -1))
+    setInlineUploadsPending(inlineUploadsPendingRef.current)
     setUploadsPending(uploadsPendingRef.current)
     if (uploading) setStatus('Storing inline image…')
     else setStatus(current => current === 'Storing inline image…' ? 'Checked out' : current)
+  }, [])
+
+  const onAttachmentBusyChange = useCallback((uploading: boolean) => {
+    attachmentUploadsPendingRef.current = Math.max(0, attachmentUploadsPendingRef.current + (uploading ? 1 : -1))
+    uploadsPendingRef.current = Math.max(0, uploadsPendingRef.current + (uploading ? 1 : -1))
+    setAttachmentUploadsPending(attachmentUploadsPendingRef.current)
+    setUploadsPending(uploadsPendingRef.current)
+    if (uploading) setStatus('Storing supporting file…')
+    else setStatus(current => current === 'Storing supporting file…' ? 'Checked out' : current)
   }, [])
 
   const serialize = useCallback((value: Editable) => JSON.stringify({
@@ -228,6 +242,11 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
   }, [api, session?.id])
 
   const discard = async () => {
+    if (uploadsPendingRef.current > 0) {
+      setError('Wait for image and supporting-file uploads to finish before discarding the checkout.')
+      setStatus('Upload in progress')
+      return
+    }
     const current = sessionRef.current
     if (current) {
       const response = await fetch(`${api}/api/controlled-editing/sessions/${current.id}/discard`, {
@@ -240,15 +259,14 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
     onClose()
   }
 
-  const checkIn = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
+  const checkIn = async () => {
     if (!sessionRef.current || !draft) return
     if (!draft.title.trim() || !toPlainText(draft.problemRich).trim()) {
       setError('Title and Problem Description cannot be blank.'); return
     }
     if (uploadsPendingRef.current > 0) {
-      setError('Wait for inline image uploads to finish before saving or checking in.');
-      setStatus('Image upload in progress')
+      setError('Wait for image and supporting-file uploads to finish before saving or checking in.')
+      setStatus('Upload in progress')
       return
     }
     setBusy(true); setError('')
@@ -280,8 +298,8 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
   /** Writes the recovery snapshot now. The controlled record is untouched until check-in. */
   const saveOnly = async () => {
     if (uploadsPendingRef.current > 0) {
-      setError('Wait for inline image uploads to finish before saving or checking in.')
-      setStatus('Image upload in progress')
+      setError('Wait for image and supporting-file uploads to finish before saving or checking in.')
+      setStatus('Upload in progress')
       return
     }
     const pending = serialized
@@ -299,19 +317,26 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
   return <div className="prModal" role="dialog" aria-label={`Edit ${report.displayNumber}`}>
     {!draft
       ? <section className="prCheckoutState"><button type="button" className="close" aria-label="Close" onClick={onClose}>×</button><p>{report.displayNumber}</p><h2>{status}</h2>{error && <div className="workspaceError" role="alert">{error}</div>}</section>
-      : <form onSubmit={checkIn} className="prWholeRecord">
+      : <div className="prWholeRecord">
         <header className="prEditorHead">
           {/* Named for what it does. It discards the checkout, exactly like the footer control, and two
               buttons in one dialog both announcing themselves as "Close" left a screen-reader user unable
               to tell the dismiss from the one that keeps the work. */}
-          <button type="button" className="close" aria-label="Discard checkout and close" onClick={() => void discard()}>×</button>
+          <button type="button" className="close" aria-label="Discard checkout and close" disabled={busy || uploadsPending > 0} onClick={() => void discard()}>×</button>
           <p>{report.displayNumber} · CONTROLLED DRAFT / EXCLUSIVE LEASE</p>
           <h2>Edit Problem Report</h2>
           <div className="prCheckoutMeta"><span>{status}</span><small>Lease expires {session ? new Date(session.expiresAt).toLocaleTimeString() : '—'}</small></div>
         </header>
         <div className="prEditorBody">
         {error && <div className="workspaceError" role="alert">{error}</div>}
-        {uploadsPending > 0 && <div className="workspaceNotice" role="status" aria-live="polite">Storing {uploadsPending} inline image{uploadsPending === 1 ? '' : 's'}… Save and check in will be enabled when the upload finishes.</div>}
+        {uploadsPending > 0 && <div className="workspaceNotice" role="status" aria-live="polite">
+          {inlineUploadsPending > 0 && attachmentUploadsPending > 0
+            ? `Storing ${inlineUploadsPending} inline image${inlineUploadsPending === 1 ? '' : 's'} and ${attachmentUploadsPending} supporting file${attachmentUploadsPending === 1 ? '' : 's'}…`
+            : inlineUploadsPending > 0
+              ? `Storing ${inlineUploadsPending} inline image${inlineUploadsPending === 1 ? '' : 's'}…`
+              : `Storing ${attachmentUploadsPending} supporting file${attachmentUploadsPending === 1 ? '' : 's'}…`}
+          {' '}Save and check in will be enabled when the upload finishes.
+        </div>}
         <label>Title<input required value={draft.title} onChange={event => set('title', event.target.value)} /></label>
         <RichContentEditor api={api} projectId={projectId} editSessionId={session?.id} label="Problem Description" value={draft.problemRich} documentLike showDocumentGuidance onUploadingChange={onUploadingChange} onChange={value => set('problemRich', value)} />
         <RichContentEditor api={api} projectId={projectId} editSessionId={session?.id} label="Additional Information" value={draft.additionalInformationRich} documentLike onUploadingChange={onUploadingChange} onChange={value => set('additionalInformationRich', value)} />
@@ -326,7 +351,7 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
         <section className="prSupportingFiles" aria-label="Problem Report supporting files">
           <div className="prSectionHeading"><h3>Supporting files</h3><p>Controlled files stay beside the narrative and are versioned independently.</p></div>
           {session && <ControlledAttachments api={api} projectId={projectId} artifactType="ProblemReport" artifactId={report.id}
-            editSessionId={session.id} canAttach />}
+            editSessionId={session.id} canAttach onBusyChange={onAttachmentBusyChange} />}
         </section>
         <fieldset className="prImpactEditor"><legend>Impact matrix</legend>{impactFields.map(([key, label]) =>
           <label key={key}>{label}<select aria-label={label} value={draft.impacts[key] ?? 'Unknown'} onChange={event => set('impacts', { ...draft.impacts, [key]: event.target.value })}>{['Unknown', 'No', 'Yes'].map(value => <option key={value}>{value}</option>)}</select></label>)}
@@ -339,16 +364,16 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
             "Save and check in" the moment anything has actually changed, because a window that offers to
             commit when there is nothing to commit teaches people to ignore it. */}
         <footer className="prCheckoutFoot">
-          <button type="button" className="danger" disabled={busy} onClick={() => void discard()}>Discard checkout</button>
+          <button type="button" className="danger" disabled={busy || uploadsPending > 0} onClick={() => void discard()}>Discard checkout</button>
           <span className="prFootSpacer" />
           {unsaved
             ? <span className="prDirty">● Unsaved changes</span>
             : savedAt && <span className="prSaved">✓ Saved {savedAt}</span>}
           <button type="button" className="quiet" disabled={busy || uploadsPending > 0 || !unsaved} onClick={() => void saveOnly()}>Save</button>
           {dirty
-            ? <button className="primaryAction" disabled={busy || uploadsPending > 0}>{busy ? 'Checking in…' : uploadsPending > 0 ? 'Waiting for image…' : 'Save and check in'}</button>
-            : <button type="button" className="quiet" disabled={busy} onClick={() => void discard()}>Close</button>}
+            ? <button type="button" className="primaryAction" disabled={busy || uploadsPending > 0} onClick={() => void checkIn()}>{busy ? 'Checking in…' : uploadsPending > 0 ? 'Waiting for upload…' : 'Save and check in'}</button>
+            : <button type="button" className="quiet" disabled={busy || uploadsPending > 0} onClick={() => void discard()}>Close</button>}
         </footer>
-      </form>}
+      </div>}
   </div>
 }

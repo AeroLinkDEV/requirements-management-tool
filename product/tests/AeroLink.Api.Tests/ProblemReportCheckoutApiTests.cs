@@ -10,6 +10,7 @@ using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,6 +28,9 @@ namespace AeroLink.Api.Tests;
 /// </summary>
 public sealed class ProblemReportCheckoutApiTests
 {
+    private sealed record TcrAttachmentFixture(Guid ReviewId, string Author, string OtherEngineer,
+        string TestLead, string Bystander);
+
     /// <summary>
     /// Checks a report out, applies <paramref name="edit"/> to the working copy the server handed back, and
     /// checks it in. Shared with the lifecycle tests so they exercise the real editing path rather than a
@@ -72,6 +76,44 @@ public sealed class ProblemReportCheckoutApiTests
             new ProgramMembership(sccb.Id, program.Id, ProgramRole.SoftwareQualityAnalyst, "test.setup", DateTimeOffset.UtcNow));
         await db.SaveChangesAsync();
         return (project.Id, release.Id, sccbUserName);
+    }
+
+    private static async Task<TcrAttachmentFixture> SeedTcrAttachmentAsync(AeroLinkApiFactory factory,
+        Guid projectId, Guid releaseId, Guid sourceReportId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var project = await db.Projects.SingleAsync(x => x.Id == projectId);
+        var source = await db.ProblemReports.AsNoTracking().SingleAsync(x => x.Id == sourceReportId);
+        var now = DateTimeOffset.UtcNow;
+        var suffix = Guid.NewGuid().ToString("N")[..10];
+        var author = $"tcr.author.{suffix}";
+        var other = $"tcr.other.{suffix}";
+        var lead = $"tcr.lead.{suffix}";
+        var bystander = $"tcr.bystander.{suffix}";
+        var accounts = new[]
+        {
+            new UserAccount(author, "TCR Attachment Author", $"{author}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now),
+            new UserAccount(other, "TCR Attachment Other Engineer", $"{other}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now),
+            new UserAccount(lead, "TCR Attachment Test Lead", $"{lead}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now),
+            new UserAccount(bystander, "TCR Attachment Bystander", $"{bystander}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now),
+        };
+        var review = TestChangeReview.FromProblemReport(projectId, releaseId, sourceReportId,
+            TestChangeReviewDiscipline.System, source.DisplayNumber, now, authorId: author);
+        review.Assign(lead, author, now);
+        db.AddRange(accounts);
+        db.AddRange(
+            new ProgramMembership(accounts[0].Id, project.ProgramId, ProgramRole.TestEngineer, "test.setup", now),
+            new ProgramMembership(accounts[1].Id, project.ProgramId, ProgramRole.TestEngineer, "test.setup", now),
+            new ProgramMembership(accounts[2].Id, project.ProgramId, ProgramRole.TestLead, "test.setup", now),
+            new ProgramMembership(accounts[3].Id, project.ProgramId, ProgramRole.Reviewer, "test.setup", now));
+        db.Add(review);
+        await db.SaveChangesAsync();
+        return new(review.Id, author, other, lead, bystander);
     }
 
     private static async Task<Guid> RaiseAsync(HttpClient client, Guid projectId, Guid releaseId)
@@ -1588,6 +1630,88 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.Equal(HttpStatusCode.Conflict, quota.StatusCode);
     }
 
+    [Fact]
+    public async Task Test_change_request_supporting_attachment_uses_server_authority_and_rejects_revision_metadata()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "TCRATTACH");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+        var fixture = await SeedTcrAttachmentAsync(factory, projectId, releaseId, reportId);
+        var url = $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=TestChangeRequest&artifactId={fixture.ReviewId}";
+
+        await LoginAsync(client, fixture.Bystander, AeroLinkApiFactory.MemberPassword);
+        using (var bystander = await client.PostAsync(url,
+                   TcrSupportingFile(projectId, fixture.ReviewId, "unrelated.txt", "bystander")))
+            Assert.Equal(HttpStatusCode.Forbidden, bystander.StatusCode);
+
+        await LoginAsync(client, fixture.OtherEngineer, AeroLinkApiFactory.MemberPassword);
+        using (var other = await client.PostAsync(url,
+                   TcrSupportingFile(projectId, fixture.ReviewId, "assigned.txt", "wrong holder")))
+            Assert.Equal(HttpStatusCode.Forbidden, other.StatusCode);
+
+        await LoginAsync(client, fixture.Author, AeroLinkApiFactory.MemberPassword);
+        var forgedRevision = Guid.NewGuid();
+        using (var forged = await client.PostAsync(url,
+                   TcrSupportingFile(projectId, fixture.ReviewId, "forged.txt", "revision metadata", forgedRevision)))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, forged.StatusCode);
+            Assert.Contains("revision_identity_not_supported", await forged.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        }
+        using (var allowed = await client.PostAsync(url,
+                   TcrSupportingFile(projectId, fixture.ReviewId, "author.txt", "author attachment")))
+            Assert.Equal(HttpStatusCode.Created, allowed.StatusCode);
+
+        await LoginAsync(client, fixture.TestLead, AeroLinkApiFactory.MemberPassword);
+        using (var lead = await client.PostAsync(url,
+                   TcrSupportingFile(projectId, fixture.ReviewId, "lead.txt", "lead correction")))
+            Assert.Equal(HttpStatusCode.Created, lead.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.DoesNotContain(await db.ControlledAttachments.AsNoTracking()
+            .Where(x => x.ArtifactType == "TestChangeRequest" && x.ArtifactId == fixture.ReviewId).ToListAsync(),
+            item => item.RevisionId == forgedRevision);
+    }
+
+    [Fact]
+    public async Task Test_change_request_supporting_attachment_rejects_non_draft_and_released_builds()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "TCRATTACHSTATE");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+        var fixture = await SeedTcrAttachmentAsync(factory, projectId, releaseId, reportId);
+        var url = $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=TestChangeRequest&artifactId={fixture.ReviewId}";
+        await LoginAsync(client, fixture.Author, AeroLinkApiFactory.MemberPassword);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var review = await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.ReviewId);
+            review.Defer("Pause this package while its source is re-evaluated.", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+        using (var deferred = await client.PostAsync(url,
+                   TcrSupportingFile(projectId, fixture.ReviewId, "deferred.txt", "must be refused")))
+            Assert.Equal(HttpStatusCode.Conflict, deferred.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var review = await db.TestChangeReviews.SingleAsync(x => x.Id == fixture.ReviewId);
+            review.Reinstate(DateTimeOffset.UtcNow);
+            var release = await db.Releases.SingleAsync(x => x.Id == releaseId);
+            release.MarkReleased(DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+        using var released = await client.PostAsync(url,
+            TcrSupportingFile(projectId, fixture.ReviewId, "released.txt", "must be refused"));
+        Assert.Equal(HttpStatusCode.Conflict, released.StatusCode);
+    }
+
     private static MultipartFormDataContent SupportingFile(Guid projectId, Guid artifactId, Guid sessionId,
         string fileName, string contentType, byte[] bytes, Guid? logicalId = null)
     {
@@ -1601,6 +1725,22 @@ public sealed class ProblemReportCheckoutApiTests
         content.Add(new StringContent("Exact supplier analysis retained with the Problem Report."), "description");
         var file = new ByteArrayContent(bytes);
         file.Headers.ContentType = new(contentType);
+        content.Add(file, "file", fileName);
+        return content;
+    }
+
+    private static MultipartFormDataContent TcrSupportingFile(Guid projectId, Guid artifactId,
+        string fileName, string text, Guid? revisionId = null)
+    {
+        var content = new MultipartFormDataContent();
+        content.Add(new StringContent(projectId.ToString()), "projectId");
+        content.Add(new StringContent(artifactId.ToString()), "artifactId");
+        content.Add(new StringContent("TestChangeRequest"), "artifactType");
+        content.Add(new StringContent("TCR supporting evidence"), "label");
+        content.Add(new StringContent("Server authorization regression."), "description");
+        if (revisionId is Guid value) content.Add(new StringContent(value.ToString()), "revisionId");
+        var file = new ByteArrayContent(Encoding.UTF8.GetBytes(text));
+        file.Headers.ContentType = new("text/plain");
         content.Add(file, "file", fileName);
         return content;
     }

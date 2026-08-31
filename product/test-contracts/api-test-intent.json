@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 730,
-    "cases": 814,
+    "tests": 732,
+    "cases": 816,
     "classes": 116,
-    "hostedTests": 701,
-    "hostedCases": 771,
+    "hostedTests": 703,
+    "hostedCases": 773,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 7,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 434,
-      "cases": 486,
+      "tests": 435,
+      "cases": 487,
       "unknownCases": 0,
       "classes": 95
     },
@@ -37,8 +37,8 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 85,
-      "cases": 89,
+      "tests": 86,
+      "cases": 90,
       "unknownCases": 0,
       "classes": 48
     },
@@ -5501,8 +5501,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 220,
-        "end": 259
+        "start": 262,
+        "end": 301
       }
     },
     {
@@ -5518,8 +5518,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 760,
-        "end": 775
+        "start": 802,
+        "end": 817
       }
     },
     {
@@ -5535,8 +5535,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1194,
-        "end": 1227
+        "start": 1236,
+        "end": 1269
       }
     },
     {
@@ -5552,8 +5552,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1233,
-        "end": 1262
+        "start": 1275,
+        "end": 1304
       }
     },
     {
@@ -5570,8 +5570,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 728,
-        "end": 758
+        "start": 770,
+        "end": 800
       }
     },
     {
@@ -5587,8 +5587,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 110,
-        "end": 152
+        "start": 152,
+        "end": 194
       }
     },
     {
@@ -5605,8 +5605,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 154,
-        "end": 181
+        "start": 196,
+        "end": 223
       }
     },
     {
@@ -5623,8 +5623,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 998,
-        "end": 1043
+        "start": 1040,
+        "end": 1085
       }
     },
     {
@@ -5641,8 +5641,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1515,
-        "end": 1589
+        "start": 1557,
+        "end": 1631
       }
     },
     {
@@ -5659,8 +5659,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 537,
-        "end": 572
+        "start": 579,
+        "end": 614
       }
     },
     {
@@ -5676,8 +5676,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 183,
-        "end": 218
+        "start": 225,
+        "end": 260
       }
     },
     {
@@ -5694,8 +5694,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 430,
-        "end": 460
+        "start": 472,
+        "end": 502
       }
     },
     {
@@ -5711,8 +5711,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 261,
-        "end": 300
+        "start": 303,
+        "end": 342
       }
     },
     {
@@ -5729,8 +5729,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 302,
-        "end": 428
+        "start": 344,
+        "end": 470
       }
     },
     {
@@ -5747,8 +5747,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 894,
-        "end": 917
+        "start": 936,
+        "end": 959
       }
     },
     {
@@ -5765,8 +5765,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 860,
-        "end": 892
+        "start": 902,
+        "end": 934
       }
     },
     {
@@ -5782,8 +5782,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 978,
-        "end": 996
+        "start": 1020,
+        "end": 1038
       }
     },
     {
@@ -5800,8 +5800,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 777,
-        "end": 858
+        "start": 819,
+        "end": 900
       }
     },
     {
@@ -5817,8 +5817,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1268,
-        "end": 1307
+        "start": 1310,
+        "end": 1349
       }
     },
     {
@@ -5835,8 +5835,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 919,
-        "end": 976
+        "start": 961,
+        "end": 1018
       }
     },
     {
@@ -5853,8 +5853,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 574,
-        "end": 607
+        "start": 616,
+        "end": 649
       }
     },
     {
@@ -5871,8 +5871,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 665,
-        "end": 726
+        "start": 707,
+        "end": 768
       }
     },
     {
@@ -5889,8 +5889,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 609,
-        "end": 663
+        "start": 651,
+        "end": 705
       }
     },
     {
@@ -5907,8 +5907,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 462,
-        "end": 535
+        "start": 504,
+        "end": 577
       }
     },
     {
@@ -5925,8 +5925,44 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 1309,
-        "end": 1513
+        "start": 1351,
+        "end": 1555
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Test_change_request_supporting_attachment_rejects_non_draft_and_released_builds",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 1678,
+        "end": 1713
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Test_change_request_supporting_attachment_uses_server_authority_and_rejects_revision_metadata",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 1633,
+        "end": 1676
       }
     },
     {

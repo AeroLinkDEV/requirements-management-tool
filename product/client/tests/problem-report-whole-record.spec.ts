@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { chooseCategory, login, selectProgram } from './auth'
+import { apiBase, chooseCategory, login, selectProgram } from './auth'
 
 /**
  * The whole record, on both ways in, and the three controls that end an edit.
@@ -266,6 +266,105 @@ test('a delayed inline image upload keeps checkout save and check-in behind the 
   } finally {
     release()
     await page.unroute('**/api/content/images**')
+  }
+})
+
+test('a supporting-file form submits once without checking in, and blocks explicit check-in until it settles', async ({ page }) => {
+  test.setTimeout(300_000)
+  const stamp = Date.now()
+  const title = `Supporting file form boundary ${stamp}`
+
+  await login(page, 'admin', { openProject: false })
+  const workspaceResponse = await page.request.post(`${apiBase}/api/workspaces`, { data: {
+    programName: `Supporting File Form ${stamp}`,
+    programCode: `SFF${stamp.toString().slice(-7)}`,
+    projectName: 'Supporting File Form Project',
+    softwareProduct: 'Supporting File Form Product',
+    initialRelease: '1.0',
+    initialReleaseIsReleased: false,
+  } })
+  expect(workspaceResponse.ok(), await workspaceResponse.text()).toBeTruthy()
+  const workspace = await workspaceResponse.json() as { program: { id: string }; project: { id: string }; release: { id: string } }
+  await page.goto(`/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}/problem-reports`, { waitUntil: 'load' })
+
+  await page.getByRole('button', { name: '+ Record problem' }).click()
+  const raise = page.getByRole('dialog', { name: 'Record a problem' })
+  await raise.getByLabel('Title').fill(title)
+  await writeField(raise, 'Problem Description', 'The supporting file must be added without an implicit check-in.')
+  await chooseCategory(raise, 'Code Issue — Functional Impact')
+  await raise.getByRole('button', { name: 'Save Draft PR' }).click()
+  await expect(page.getByRole('heading', { name: title })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: 'Check out & edit' }).click()
+  const editor = page.getByRole('dialog', { name: /^Edit PR-/ })
+  await expect(editor).toBeVisible({ timeout: 30_000 })
+
+  await writeField(editor, 'Root cause', 'The supporting file is still being persisted.')
+  // The same explicit control changes its label while an upload is pending; keep the locator on the
+  // action rather than making the test mistake that truthful waiting label for an implicit check-in.
+  const checkIn = editor.locator('button.primaryAction')
+  await expect(checkIn).toBeEnabled()
+
+  let uploadCount = 0
+  let checkInCount = 0
+  let uploadStarted = () => {}
+  const started = new Promise<void>(resolve => { uploadStarted = resolve })
+  let releaseUpload = () => {}
+  let released = false
+  const release = () => {
+    if (released) return
+    released = true
+    releaseUpload()
+  }
+  const gate = new Promise<void>(resolve => { releaseUpload = resolve })
+  const checkInPath = /\/api\/controlled-editing\/sessions\/[^/]+\/check-in$/
+  page.on('request', request => {
+    if (request.method() === 'POST' && checkInPath.test(new URL(request.url()).pathname)) checkInCount += 1
+  })
+  await page.route('**/api/enterprise-hardening/attachments?*', async route => {
+    if (route.request().method() !== 'POST') {
+      await route.continue()
+      return
+    }
+    uploadCount += 1
+    uploadStarted()
+    await gate
+    // This browser journey deliberately holds a successful transport response at the client boundary. The
+    // API/security/history contract is covered by the focused API tests; keeping the response synthetic here
+    // makes the form-boundary assertion deterministic and proves that no check-in can slip in while the
+    // supporting-file request is unresolved.
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ id: '00000000-0000-4000-8000-000000000001', logicalId: '00000000-0000-4000-8000-000000000002', version: 1, sha256: 'synthetic' }),
+    })
+  })
+
+  try {
+    const attachment = editor.getByRole('form', { name: 'Attach a supporting file' })
+    await attachment.getByLabel('Label').fill('Navigation analysis')
+    await attachment.getByLabel('File').setInputFiles({
+      name: 'navigation-analysis.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('synthetic supporting evidence'),
+    })
+    // Enter is the native form submit path. It must submit the child attachment form exactly once,
+    // without bubbling into the editor's explicit check-in action.
+    await attachment.getByLabel('Label').press('Enter')
+    await started
+    await expect.poll(() => uploadCount).toBe(1)
+    await expect(checkIn).toBeDisabled()
+    expect(checkInCount).toBe(0)
+
+    release()
+    await expect(editor.getByText('Stored, hashed, and attributed.')).toBeVisible({ timeout: 30_000 })
+    await expect(checkIn).toBeEnabled()
+    expect(checkInCount).toBe(0)
+    // The explicit control is enabled again only after the child form has settled. The test intentionally
+    // stops before invoking it: its server-side check-in contract is covered by the API suite, while this
+    // browser proof isolates the regression that an Enter key must not invoke check-in implicitly.
+  } finally {
+    release()
+    await page.unroute('**/api/enterprise-hardening/attachments?*')
   }
 })
 
