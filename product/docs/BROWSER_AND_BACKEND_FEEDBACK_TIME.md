@@ -335,6 +335,26 @@ browser.
 
 This is the same growth that makes the shard-count reasoning above worth re-measuring rather than inheriting.
 
+### The Infrastructure job outgrew its original timeout
+
+Protected Product run 33432756016 measured about three minutes of setup and then more than 16 minutes 53
+seconds in `AeroLink.Infrastructure.Tests` before the 20-minute outer job limit cancelled the runner. After
+the deterministic failures from that run were corrected, run 33438875792 measured about three minutes of
+setup and exactly 27 minutes 1 second in the suite before the 30-minute outer limit cancelled it. The same
+exact head completed all 751 tests locally in 27 minutes 6 seconds, with 705 passed and 46 expected
+PostgreSQL-only skips.
+
+Protected run 33442155318 then showed that the hosted Windows runner needs more headroom than either the
+local result or the preceding hosted sample implied. After roughly three minutes of setup, the suite ran for
+37 minutes 1 second before the 40-minute outer job limit cancelled it. No test had failed: expensive
+deterministic showcase cases continued to complete throughout the run, including 6-10 minute seed/upgrade
+cases, and the latest passing test completed only 2 minutes 39 seconds before cancellation.
+
+The Infrastructure job limit is therefore 60 minutes. Its six-minute per-test blame-hang budget remains
+unchanged, so a genuinely hung test still fails early enough to finalize and upload diagnostics. This adds
+outer-job headroom for the measured hosted suite plus setup and diagnostic finalization; it does not weaken
+test selection or hang detection.
+
 ## API startup floor, measured (563A, 2026-08-14)
 
 Per-shard telemetry (schema `aerolink-api-telemetry/v2`) splits each hosted API test's wall time into

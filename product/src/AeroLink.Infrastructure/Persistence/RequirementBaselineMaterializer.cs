@@ -18,19 +18,23 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
     ILadderPolicy? policy = null, IProjectLadderPolicyResolver? policyResolver = null)
 {
     public Task<MaterializationResult> MaterializeAsync(Guid baselineId, string actorId, DateTimeOffset now, CancellationToken ct)
-        => MaterializeCoreAsync(baselineId, actorId, now, ct, allowLegacyHistoricalSeed: false);
+        => MaterializeCoreAsync(baselineId, actorId, now, ct, allowLegacyHistoricalSeed: false,
+            joinExistingTransaction: false);
 
     // The clean showcase creates and materializes a characterized pre-#738 release in one controlled seed
     // operation. This internal seam is deliberately unavailable through the normal DI/API materializer, so
     // migrated v1 rows selected into a new baseline cannot reuse the historical Unspecified exemption.
     internal Task<MaterializationResult> MaterializeLegacyHistoricalSeedAsync(Guid baselineId, string actorId,
-        DateTimeOffset now, CancellationToken ct)
-        => MaterializeCoreAsync(baselineId, actorId, now, ct, allowLegacyHistoricalSeed: true);
+        DateTimeOffset now, CancellationToken ct, bool joinExistingTransaction = false)
+        => MaterializeCoreAsync(baselineId, actorId, now, ct, allowLegacyHistoricalSeed: true,
+            joinExistingTransaction);
 
     private async Task<MaterializationResult> MaterializeCoreAsync(Guid baselineId, string actorId, DateTimeOffset now,
-        CancellationToken ct, bool allowLegacyHistoricalSeed)
+        CancellationToken ct, bool allowLegacyHistoricalSeed, bool joinExistingTransaction)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        if (joinExistingTransaction && db.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("The caller requested baseline materialization in an existing transaction, but none is active.");
+        await using var transaction = joinExistingTransaction ? null : await db.Database.BeginTransactionAsync(ct);
         var baseline = await db.CandidateBaselines.Include(x => x.Selections).Include(x => x.ExternalPackageSelections).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == baselineId, ct)
             ?? throw new DomainException("Baseline not found.");
         if (baseline.State != CandidateBaselineState.Frozen) throw new DomainException("Freeze the baseline before materializing its requirements.");
@@ -327,7 +331,8 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
         db.LadderSealActor = actorId;
         try
         {
-            await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
+            await db.SaveChangesAsync(ct);
+            if (transaction is not null) await transaction.CommitAsync(ct);
         }
         finally { db.LadderSealActor = priorSealActor; }
         return new MaterializationResult(hash, current.Count, created);

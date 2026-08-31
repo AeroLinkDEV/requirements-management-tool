@@ -11,8 +11,8 @@ import { chooseCategory, login, selectProgram, writeRichField } from './auth'
  * nothing at all to the person who found the mistake in it, whose only remaining move was to raise a
  * second report contradicting the first.
  *
- * Priya Raman holds Airworthiness and nothing else: a member of the Program with no engineering authority
- * anywhere, and not this report's owner. Every gate that used to exist would have refused her.
+ * Marcus Hale holds Software Quality Assurance and nothing else: a member of the Program with no engineering
+ * authority anywhere, and not this report's owner. Every gate that used to exist would have refused him.
  */
 test('a Project member who does not own a Verifying Problem Report can still correct it', async ({ page }) => {
   test.setTimeout(240_000)
@@ -62,9 +62,9 @@ test('a Project member who does not own a Verifying Problem Report can still cor
   await expect(page.locator('.prState')).toHaveText('Verifying')
 
   // The reported case, exactly: a report in Verifying, opened by somebody who does not own it.
-  await open('airworthiness.lead')
+  await open('quality.analyst')
   await expect(page.locator('.prState')).toHaveText('Verifying')
-  await expect(page.locator('.prIdentity')).not.toContainText('Priya Raman')
+  await expect(page.locator('.prIdentity')).not.toContainText('Marcus Hale')
 
   await page.getByRole('button', { name: 'Check out & edit' }).click()
   const editor = page.getByRole('dialog', { name: /^Edit PR-/ })
@@ -75,11 +75,10 @@ test('a Project member who does not own a Verifying Problem Report can still cor
 
   // Correcting the report does not take it: the assignment is somebody else's decision, and History
   // credits the correction to whoever actually made it.
-  await expect(page.locator('.prIdentity')).not.toContainText('Priya Raman')
+  await expect(page.locator('.prIdentity')).not.toContainText('Marcus Hale')
   await page.getByRole('button', { name: /^History/ }).click()
   await expect(page.locator('.prTimeline').getByText('Details Checked In').first()).toBeVisible({ timeout: 30_000 })
-  // The timeline names the account rather than the display name the identity panel resolves. That
-  // difference is not this change's to make, so this asserts what the surface actually says.
+  // History credits the exact person who made the correction, not the responsible engineer who still owns it.
   await expect(page.locator('.prTimeline article').filter({ hasText: 'Details Checked In' }).first())
-    .toContainText('airworthiness.lead')
+    .toContainText('Marcus Hale')
 })

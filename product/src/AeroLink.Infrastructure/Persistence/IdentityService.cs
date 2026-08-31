@@ -227,13 +227,23 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
     {
         var now = DateTimeOffset.UtcNow;
         var programs = await db.Programs.AsNoTracking().Select(x => x.Id).ToListAsync(ct);
+        // FMS closure authority is controlled by FmsShowcaseSeeder's fresh-program path or an explicit
+        // operator upgrade. The directory pass may grant the other seeded roles, but must not silently create
+        // a missing SQA authority on an existing FMS database before backup/target confirmation.
+        var fmsProgramId = await db.Programs.AsNoTracking()
+            .Where(x => x.Code == FmsShowcaseSeeder.ProgramCode)
+            .Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct);
         var demoPasswordHash = IdentityService.HashPassword(DemoPassword);
         var directory = People.Concat(GeneratedPeople()).ToList();
         var userNames = directory.Select(x => x.User).ToList();
         var users = (await db.UserAccounts.Where(x => userNames.Contains(x.UserName)).ToListAsync(ct))
             .ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
+        // FMSLIVE is an operator-owned controlled showcase once its Program row exists. Its memberships
+        // and Project Leadership assignments are created by the fresh FMS transaction or the explicit,
+        // backup-confirmed showcase upgrade; the ordinary directory pass must not silently repair them.
+        var identitySeedPrograms = programs.Where(x => x != fmsProgramId).ToList();
         var membershipKeys = (await db.ProgramMemberships.AsNoTracking()
-                .Where(x => programs.Contains(x.ProgramId))
+                .Where(x => identitySeedPrograms.Contains(x.ProgramId))
                 .Select(x => new { x.UserId, x.ProgramId, x.Role })
                 .ToListAsync(ct))
             .Select(x => (x.UserId, x.ProgramId, x.Role))
@@ -258,12 +268,12 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
                     x => x.EventType == "IdentityUpdated" && x.Target == user.UserName, ct)
                 && (user.DisplayName != person.Name || user.Email != person.Email))
                 user.RefreshDirectoryProfile(person.Name, person.Email);
-            foreach (var program in programs) foreach (var role in person.Roles)
+            foreach (var program in identitySeedPrograms) foreach (var role in person.Roles)
                 if (membershipKeys.Add((user.Id, program, role)))
                     db.ProgramMemberships.Add(new(user.Id, program, role, "system.bootstrap", now));
         }
         await db.SaveChangesAsync(ct);
-        await EnsureSeededLeadershipAsync(programs, now, ct);
+        await EnsureSeededLeadershipAsync(identitySeedPrograms, now, ct);
     }
 
     /// <summary>

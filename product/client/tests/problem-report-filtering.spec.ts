@@ -53,20 +53,40 @@ test('the queue filters as the search is typed, with no refresh to press', async
 test('the queue can be narrowed to one kind of problem', async ({ page, request }) => {
   test.setTimeout(120_000)
   await apiLogin(request)
-  await showcaseSeed(request)
+  const showcase = await showcaseSeed(request)
+  const distinctive = `Category filter ${Date.now()}`
+  const codeTitle = `${distinctive} code defect`
+  const toolingTitle = `${distinctive} tooling defect`
+  for (const [category, title] of [['CodeFunctional', codeTitle], ['EnvironmentTooling', toolingTitle]]) {
+    const raised = await request.post(`${apiBase}/api/problem-reports`, { data: {
+      category,
+      projectId: showcase.projectId,
+      releaseId: showcase.activeReleaseId,
+      title,
+      problem: 'Raised so this journey owns one record in each category it filters.',
+    } })
+    expect(raised.ok(), await raised.text()).toBeTruthy()
+  }
 
   await login(page)
   await page.getByRole('link', { name: 'Problem Reports' }).click()
   await expect(page.getByRole('heading', { name: 'Problem Report queue' })).toBeVisible({ timeout: 30_000 })
   await expect(page.locator('.prList button').first()).toBeVisible({ timeout: 30_000 })
 
-  // The two records above are the ones this journey owns, and they are the ones it filters to.
+  await page.getByLabel('Search').fill(distinctive)
   await page.getByLabel('Category', { exact: true }).selectOption('CodeFunctional')
   await page.getByRole('button', { name: 'Apply filters' }).click()
-  await expect(page.locator('.prList button').first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.prList button')).toHaveCount(1, { timeout: 30_000 })
+  await expect(page.locator('.prList')).toContainText(codeTitle)
+  await expect(page.locator('.prList')).not.toContainText(toolingTitle)
 
   await page.getByLabel('Category', { exact: true }).selectOption('EnvironmentTooling')
   await page.getByRole('button', { name: 'Apply filters' }).click()
+  await expect(page.locator('.prList button')).toHaveCount(1, { timeout: 30_000 })
+  await expect(page.locator('.prList')).toContainText(toolingTitle)
+  await expect(page.locator('.prList')).not.toContainText(codeTitle)
+
+  await page.getByLabel('Search').fill(`${distinctive} missing`)
   await expect(page.locator('.prEmpty')).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText('No Problem Reports match these filters.')).toBeVisible()
 })

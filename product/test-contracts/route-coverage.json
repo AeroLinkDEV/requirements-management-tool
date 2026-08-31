@@ -302,8 +302,6 @@
         "ChangeRequestReviewRationaleApiTests",
         "ChangeRequestUpstreamTraceApiTests",
         "ClosedReleaseAuthoringTests",
-        "CodeTraceabilityApiTests",
-        "ConfigurationPublicationApiTests",
         "ControlledEditingCheckInApiTests",
         "ControlledEditingProcedureAuthorityTests",
         "ControlledProcedureDocumentApiTests",
@@ -315,7 +313,6 @@
         "DocumentReviewCommentApiTests",
         "DocumentReviewLinkOutlivedTests",
         "DownstreamAssessmentReopenApiTests",
-        "DraftDocumentApiTests",
         "EffectiveExecutionAuthorityApiTests",
         "ExternalIdentityAdminApiTests",
         "GovernanceEvidenceApiTests",
@@ -371,6 +368,9 @@
         "SecurityBoundaryTests",
         "SecurityHardeningTests",
         "SharedHostIsolationTests",
+        "ShowcaseApiFixture",
+        "ShowcaseSeedApiTests",
+        "ShowcaseUpgradeApiTests",
         "SoftwareChangeRequestLevelHistoryTests",
         "TeamWorkProjectionApiTests",
         "TestChangeRequestConsolidationTests",
@@ -2018,10 +2018,7 @@
       "path": "/api/setup/bootstrap",
       "file": "AuthEndpoints.cs",
       "coveredBy": [
-        "CodeTraceabilityApiTests",
-        "ConfigurationPublicationApiTests",
         "ControlledEditingCheckInApiTests",
-        "DraftDocumentApiTests",
         "GovernanceEvidenceApiTests",
         "IdentifierAllocationTests",
         "OpenDigitalThreadTests",
@@ -2039,13 +2036,17 @@
       "method": "POST",
       "path": "/api/showcase/seed",
       "file": "WorkspaceEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "ShowcaseSeedApiTests"
+      ]
     },
     {
       "method": "POST",
       "path": "/api/showcase/upgrade",
       "file": "WorkspaceEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "ShowcaseUpgradeApiTests"
+      ]
     },
     {
       "method": "POST",

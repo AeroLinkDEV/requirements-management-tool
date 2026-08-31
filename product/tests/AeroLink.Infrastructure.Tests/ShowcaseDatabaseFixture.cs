@@ -38,6 +38,9 @@ public sealed class ShowcaseDatabaseFixture : IAsyncLifetime
         await using (var db = new AeroLinkDbContext(options))
         {
             await db.Database.EnsureCreatedAsync();
+            // The FMS seeder freezes controlled closure evidence. Seed the directory first so the
+            // package records the real quality.analyst account rather than a synthetic empty identity.
+            await new IdentitySeeder(db).EnsureSeededAsync();
             Summary = await new FmsShowcaseSeeder(db).EnsureSeededAsync();
         }
         // Pooling is off on the connection string, but clearing pools is what guarantees the file handle is

@@ -34,7 +34,7 @@ test('software proposals govern exact build-scoped upward allocations and derive
     solution: 'Store and review exact upstream revision identities.', requirementChanges,
   } })
   const submit = (id: string, version: number) => request.post(`${apiBase}/api/change-requests/${id}/submit`, { data: {
-    expectedVersion: version, mode: 'Sequential', approvers: [{ userId: 'systems.reviewer', name: 'Systems Reviewer' }],
+    expectedVersion: version, mode: 'Sequential', approvers: [{ userId: 'test.engineer', name: 'Ethan Brooks' }],
   } })
 
   const missingResponse = await draft(`Missing upward allocation ${Date.now()}`, [proposal()])

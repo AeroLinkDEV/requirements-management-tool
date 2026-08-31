@@ -125,12 +125,18 @@ await using (var scope = app.Services.CreateAsyncScope())
         // It is internal, idempotent, and refuses (with no partial state) if typed v2 readiness is missing.
         await scope.ServiceProvider.GetRequiredService<SoftwareProcedureExecutionCutoverAuthority>().EnsureCompletedAsync();
     }
+    // FMS closure scenarios are controlled records, so the first demo-data start must have the seeded
+    // SQA directory available before their frozen closure package is written. Keep the post-Program pass
+    // below: it grants the same directory membership to Programs created by the showcase seeders.
+    if (!restoreValidationReadOnly && builder.Configuration.GetValue<bool>("DemoData:Enabled") && seedDemoAccounts)
+        await scope.ServiceProvider.GetRequiredService<IdentitySeeder>().EnsureSeededAsync();
     if (!restoreValidationReadOnly && builder.Configuration.GetValue<bool>("DemoData:Enabled"))
     {
         await scope.ServiceProvider.GetRequiredService<FmsShowcaseSeeder>().EnsureSeededAsync();
         await scope.ServiceProvider.GetRequiredService<SecondShowcaseSeeder>().EnsureSeededAsync();
-        // Before the identity seeding below, which grants the demo directory membership of every Program
-        // that exists by then. A practice Program created afterwards would have no members at all.
+        // IdentitySeeder runs below after all showcase Programs exist, granting every seeded directory role
+        // to each Program. An existing FMS is otherwise read-only here; controlled enrichment is the
+        // explicit backup-confirmed /api/showcase/upgrade operation.
         await scope.ServiceProvider.GetRequiredService<ImportPracticeSeeder>().EnsureSeededAsync();
     }
     if (!restoreValidationReadOnly && seedDemoAccounts)

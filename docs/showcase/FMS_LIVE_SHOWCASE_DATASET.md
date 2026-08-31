@@ -73,14 +73,49 @@ data, and GitLab is identified as the source of truth for code and merge content
 
 ## Active FMS 1.6 development
 
-At initial seed, FMS 1.6 begins from the FMS 1.5 predecessor baseline and contains eight controlled change requests:
+At initial seed, FMS 1.6 begins from the FMS 1.5 predecessor baseline and contains sixteen controlled change
+requests. Eight are the original System/HLR/LLR work packages and eight are Interface contract scenarios:
 
-- 2 Approved and selected in the working candidate baseline
-- 2 In Review
-- 3 Draft
-- 1 Deferred
+- 3 Selected for Baseline, 2 Approved, 3 In Review, 5 Draft, 2 Deferred, and 1 Withdrawn
+- Interface scenarios include a direct approval, a selected contract, pending multi-person review, deferral,
+  withdrawal, and untouched Draft work
 
-The seeded changes include a new system-level oceanic round-robin function and representative HLR and LLR modifications. Subsequent realistic testing may add approved, returned, deferred, or draft records; these are persistent product data, not seed drift. The FMS 1.6 workspace remains editable and is not released.
+The seeded changes include a new system-level oceanic round-robin function, representative HLR and LLR
+modifications, and exact ICDCR/ICDR requirement proposals. Subsequent realistic testing may add approved,
+returned, deferred, or draft records; these are persistent product data, not seed drift. The FMS 1.6 workspace
+remains editable and is not released.
+
+### Problem Reports and work distribution
+
+The deterministic FMS seed also carries eight Problem Reports: six historical records target released Build 1.5
+and two records remain against in-work Build 1.6 (one Verifying and one Rejected). Every one has an authoritative controlled `BuildScope`
+link to its target release, so build work lists and the report centre answer the same scope question. They
+intentionally cover Draft, Open, Implementing, Verifying, Waiting for SQA closure, Closed, and Rejected states,
+with Task, Improvement, Code, Requirements, Test, and Environment categories. The two governed verification
+scenarios target Build 1.5 and carry a real failed-execution → passing-retest predecessor chain, a controlled
+`ResolutionVerification` link, immutable `ResolutionVerified` history, and closure candidate evidence; the
+closed scenario also carries a frozen `ClosureApproved` package. Responsible work is distributed across five
+eligible synthetic engineers/test engineers; the broader identity seed includes additional project members with
+no current obligations, so Team Work can show both populated and zero-obligation people without inventing
+ownership.
+
+Interface and Problem Report scenario ownership is recorded durably in one immutable
+`ShowcaseUpgradeStep` mapping per scenario key; its detail is the exact created artifact GUID. The visible FMS
+marker in narrative text is only a display breadcrumb and is never used to locate or mutate a controlled row,
+so user-authored content that happens to contain the same text is safe. Scenarios prefer the deterministic
+`86601` number range; if a legitimate record already occupies a preferred number, the next free number is
+selected. The upgrade marker is written only after all scenario postconditions pass. An interrupted or
+incomplete enrichment remains unchanged at startup and is retried only by the explicit, administrator-only
+`POST /api/showcase/upgrade` operation after the operator has verified the target database and backup.
+
+On a fresh demo-data startup, the seeded identity directory is created before FMS controlled closure evidence
+is frozen, and one database transaction creates the complete FMS dataset or rolls it all back. That transaction
+grants only current job/base-eligibility memberships required by its controlled scenarios; review/approval
+meaning remains on the selected workflow stages, and Project Leadership authority remains on its assignments.
+Once `FMSLIVE` exists, the normal startup and `/api/showcase/seed` identity passes leave its memberships and
+Project Leadership assignments unchanged. Controlled enrichment of an existing FMS is operator-controlled
+through `POST /api/showcase/upgrade`, after target confirmation and a verified backup; it never runs as an
+automatic incomplete-enrichment retry.
 
 ## Terminology
 

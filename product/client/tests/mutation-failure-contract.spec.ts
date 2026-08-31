@@ -79,6 +79,23 @@ test('a rejected approval preserves signature input and records no approval evid
   const suffix = Date.now().toString().slice(-7)
   const showcase = await showcaseSeed(request)
 
+  await apiLogin(request)
+  const workflowResponse = await request.post(`${apiBase}/api/review-workflows`, { data: {
+    projectId: showcase.projectId,
+    name: `Rejected approval fixture ${suffix}`,
+    appliesTo: 'System',
+    mode: 'Sequential',
+    stages: [{
+      name: 'Systems assessment',
+      kind: 'Review',
+      requiredAuthority: { kind: 'BaseRole', role: 'SystemEngineer' },
+    }],
+  } })
+  expect(workflowResponse.ok(), await workflowResponse.text()).toBeTruthy()
+  const workflow = await workflowResponse.json()
+  const activated = await request.post(`${apiBase}/api/review-workflows/${workflow.id}/activate`, { data: {} })
+  expect(activated.ok(), await activated.text()).toBeTruthy()
+
   await apiLogin(request, 'systems.author')
   const draftResponse = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
     projectId: showcase.projectId,
@@ -139,4 +156,8 @@ test('a rejected approval preserves signature input and records no approval evid
   const signatures = await request.get(`${apiBase}/api/signatures?artifactId=${draft.id}`)
   expect(signatures.ok(), await signatures.text()).toBeTruthy()
   expect(await signatures.json()).toEqual([])
+
+  await apiLogin(request)
+  const retired = await request.post(`${apiBase}/api/review-workflows/${workflow.id}/retire`, { data: {} })
+  expect(retired.ok(), await retired.text()).toBeTruthy()
 })

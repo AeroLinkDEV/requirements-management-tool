@@ -17,7 +17,7 @@ public sealed class CodeTraceabilityApiTests(ShowcaseApiFixture showcase)
     {
         using var factory = showcase.CreateFactory();
         using var client = factory.CreateClient();
-        await BootstrapAsync(client);
+        await ShowcaseApiFixture.LoginAdministratorAsync(client);
         var summary = showcase.Summary;
 
         // The active build's campaign baseline is not materialized, so there is no exact requirement
@@ -117,7 +117,7 @@ public sealed class CodeTraceabilityApiTests(ShowcaseApiFixture showcase)
     {
         using var factory = showcase.CreateFactory();
         using var client = factory.CreateClient();
-        await BootstrapAsync(client);
+        await ShowcaseApiFixture.LoginAdministratorAsync(client);
         var summary = showcase.Summary;
         var path = await client.GetFromJsonAsync<JsonElement>($"/api/traceability/path?projectId={summary.ProjectId}&baselineId={summary.ReleasedBaselineId}");
 
@@ -134,7 +134,7 @@ public sealed class CodeTraceabilityApiTests(ShowcaseApiFixture showcase)
     {
         using var factory = showcase.CreateFactory();
         using var client = factory.CreateClient();
-        await BootstrapAsync(client);
+        await ShowcaseApiFixture.LoginAdministratorAsync(client);
         var summary = showcase.Summary;
         var original = await client.GetFromJsonAsync<JsonElement>($"/api/traceability/path?projectId={summary.ProjectId}&baselineId={summary.ReleasedBaselineId}");
         var llrRevisionId = original.GetProperty("nodes").EnumerateArray().Last().GetProperty("revisionId").GetGuid();
@@ -169,17 +169,4 @@ public sealed class CodeTraceabilityApiTests(ShowcaseApiFixture showcase)
         Assert.Equal(new string('a', 64), attached.GetProperty("sha256").GetString());
     }
 
-    private static async Task BootstrapAsync(HttpClient client)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/setup/bootstrap")
-        {
-            Content = JsonContent.Create(new { displayName = "Administrator", email = "admin@example.test", password = AeroLinkApiFactory.AdministratorPassword }),
-        };
-        request.Headers.Add("X-AeroLink-Bootstrap-Secret", AeroLinkApiFactory.BootstrapSecret);
-        using var created = await client.SendAsync(request);
-        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-        using var login = await client.PostAsJsonAsync("/api/auth/login", new { userName = "admin", password = AeroLinkApiFactory.AdministratorPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
 }

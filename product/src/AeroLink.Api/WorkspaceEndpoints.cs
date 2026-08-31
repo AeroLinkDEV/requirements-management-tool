@@ -43,12 +43,13 @@ public static class WorkspaceEndpoints
         }).AllowAnonymous();
 
         // The practice Program is seeded here as well as at boot, because a demonstration database is seeded
-        // at boot while the journeys seed through this endpoint. Before the identities, which grant the demo
-        // directory membership of every Program that exists by then.
+        // at boot while the journeys seed through this endpoint. Create the directory first so the FMS
+        // closure scenarios can freeze a real SQA account identity; run it again after Programs exist to
+        // grant the demo directory membership of every Program created by this endpoint.
         // The procedure documents are ensured last, after every seeder that can create a Project or a
         // procedure: seeding through this endpoint happens long after the startup bootstrap ran, so nothing
         // it creates would be written into a document until the next restart.
-        app.MapPost("/api/showcase/seed", async (HttpContext http,FmsShowcaseSeeder seeder, SecondShowcaseSeeder secondShowcase, ImportPracticeSeeder practice, IdentitySeeder identities, ManagedDocumentShowcaseSeeder documents, EnterpriseRequirementsService workspace, TestProcedureDocumentBootstrap procedureDocuments, IConfiguration configuration, CancellationToken ct) => {if(!http.UserAccount().IsAdministrator)return Results.Forbid();if(!configuration.GetValue<bool>("Identity:SeedDemoAccounts"))return Results.NotFound();var result=await seeder.EnsureSeededAsync(ct); await secondShowcase.EnsureSeededAsync(ct); await practice.EnsureSeededAsync(ct); await identities.EnsureSeededAsync(ct); await workspace.SynchronizeProjectAsync(result.ProjectId,"system.workspace",ct); await documents.EnsureSeededAsync(ct); await procedureDocuments.EnsureAllAsync(ct); return Results.Ok(result); });
+        app.MapPost("/api/showcase/seed", async (HttpContext http,FmsShowcaseSeeder seeder, SecondShowcaseSeeder secondShowcase, ImportPracticeSeeder practice, IdentitySeeder identities, ManagedDocumentShowcaseSeeder documents, EnterpriseRequirementsService workspace, TestProcedureDocumentBootstrap procedureDocuments, IConfiguration configuration, CancellationToken ct) => {if(!http.UserAccount().IsAdministrator)return Results.Forbid();if(!configuration.GetValue<bool>("Identity:SeedDemoAccounts"))return Results.NotFound(); await identities.EnsureSeededAsync(ct); var result=await seeder.EnsureSeededAsync(ct); await secondShowcase.EnsureSeededAsync(ct); await practice.EnsureSeededAsync(ct); await identities.EnsureSeededAsync(ct); await workspace.SynchronizeProjectAsync(result.ProjectId,"system.workspace",ct); await documents.EnsureSeededAsync(ct); await procedureDocuments.EnsureAllAsync(ct); return Results.Ok(result); });
 
         // What the showcase upgrade has and has not applied to this installation, and whether the invariants
         // it is meant to guarantee actually hold. An upgrade that reports success is not the same as a
@@ -65,12 +66,27 @@ public static class WorkspaceEndpoints
         });
 
         // The repair command for an existing local showcase: apply any outstanding steps and report what
-        // changed. Safe to run repeatedly, and safe to run again after an interrupted attempt.
+        // changed. This is deliberately explicit because it can add controlled history. The active SQA
+        // identity, current authority, and historical membership coverage are checked before any step runs;
+        // an operator must arrange the backup/target confirmation and authority outside this startup path.
         app.MapPost("/api/showcase/upgrade", async (HttpContext http, AeroLinkDbContext db, FmsShowcaseSeeder seeder, TestProcedureDocumentBootstrap procedureDocuments, CancellationToken ct) =>
         {
             if (!http.UserAccount().IsAdministrator) return Results.Forbid();
             var program = await db.Programs.AsNoTracking().SingleOrDefaultAsync(x => x.Code == FmsShowcaseSeeder.ProgramCode, ct);
             if (program is null) return Results.NotFound(new { error = "No showcase Program is installed.", code = "showcase_absent" });
+            var authority = await seeder.CheckUpgradeAuthorityAsync(program.Id, ct);
+            if (!authority.Ready)
+            {
+                var conflictInvariants = await seeder.CheckInvariantsAsync(program.Id, ct);
+                return Results.Conflict(new
+                {
+                    applied = Array.Empty<string>(),
+                    healthy = false,
+                    code = authority.Code,
+                    error = authority.Detail,
+                    invariants = conflictInvariants,
+                });
+            }
             var applied = await seeder.UpgradeAsync(program.Id, ct);
             // An upgrade step can add procedures, and a procedure in no document is invisible to the rail.
             await procedureDocuments.EnsureAllAsync(ct);
@@ -228,7 +244,8 @@ public static class WorkspaceEndpoints
                 lowLevelRequirements = await requirements.CountAsync(x => x.Level == RequirementLevel.LowLevel, ct),
                 historicalScrs = await requests.CountAsync(x => x.Type == ChangeRequestType.System, ct),
                 historicalSwcrs = await requests.CountAsync(x => x.Type == ChangeRequestType.Software, ct),
-                activeRequests = await requests.CountAsync(x => x.State != ChangeRequestState.Deferred, ct),
+                activeRequests = await requests.CountAsync(x => x.State != ChangeRequestState.Deferred
+                    && x.State != ChangeRequestState.Withdrawn, ct),
                 traceLinks = await db.RequirementTraces.CountAsync(x => revisionIds.Contains(x.SourceRevisionId) && revisionIds.Contains(x.TargetRevisionId), ct),
                 testArtifacts = testArtifactCount,
                 testProcedures = testArtifactCount, // compatibility alias

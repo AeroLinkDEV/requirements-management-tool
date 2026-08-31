@@ -74,6 +74,56 @@ public sealed class IdentityPersistenceTests
     }
 
     [Fact]
+    public async Task Existing_fms_identity_pass_is_read_only_for_memberships_and_leadership()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        await using var db = new AeroLinkDbContext(options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow.AddDays(-1);
+        var program = new ProgramRecord("Existing FMS Showcase", FmsShowcaseSeeder.ProgramCode);
+        var holder = new UserAccount("existing.fms.holder", "Existing FMS Holder", "holder@aerolink.local",
+            IdentityService.HashPassword("StrongPass!2026"), now);
+        db.AddRange(program, holder);
+        await db.SaveChangesAsync();
+        db.ProgramMemberships.Add(new ProgramMembership(holder.Id, program.Id, ProgramRole.Engineer, "operator", now));
+        db.ProjectLeadershipAssignments.Add(new ProjectLeadershipAssignment(program.Id,
+            ProjectLeadershipPosition.ProjectEngineer, holder.Id, "operator", now));
+        await db.SaveChangesAsync();
+
+        var membershipsBefore = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.ProgramId == program.Id)
+            .OrderBy(x => x.Id)
+            .Select(x => new { x.Id, x.UserId, x.Role, x.GrantedAt, x.EndedAt, x.GrantedBy })
+            .ToListAsync();
+        var leadershipBefore = await db.ProjectLeadershipAssignments.AsNoTracking()
+            .Where(x => x.ProgramId == program.Id)
+            .OrderBy(x => x.Id)
+            .Select(x => new { x.Id, x.Position, x.HolderUserId, x.AssignedAt, x.AssignedBy })
+            .ToListAsync();
+
+        // This is the same pass called both during normal startup and by POST /api/showcase/seed. It may
+        // reconcile the global directory, but an existing FMS Program is outside its authority scope.
+        var identities = new IdentitySeeder(db);
+        await identities.EnsureSeededAsync();
+        await identities.EnsureSeededAsync();
+
+        var membershipsAfter = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.ProgramId == program.Id)
+            .OrderBy(x => x.Id)
+            .Select(x => new { x.Id, x.UserId, x.Role, x.GrantedAt, x.EndedAt, x.GrantedBy })
+            .ToListAsync();
+        var leadershipAfter = await db.ProjectLeadershipAssignments.AsNoTracking()
+            .Where(x => x.ProgramId == program.Id)
+            .OrderBy(x => x.Id)
+            .Select(x => new { x.Id, x.Position, x.HolderUserId, x.AssignedAt, x.AssignedBy })
+            .ToListAsync();
+
+        Assert.Equal(membershipsBefore, membershipsAfter);
+        Assert.Equal(leadershipBefore, leadershipAfter);
+    }
+
+    [Fact]
     public void Mfa_secrets_are_standard_base32_and_totp_matches_rfc_6238()
     {
         var generated = IdentityService.CreateMfaSecret();

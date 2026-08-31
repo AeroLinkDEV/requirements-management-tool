@@ -12,7 +12,7 @@ test('downstream assessment actions follow authority and submit without a form-n
 
   const unauthorizedContext=await browser.newContext()
   const unauthorized=await unauthorizedContext.newPage()
-  await login(unauthorized,'systems.reviewer')
+  await login(unauthorized,'assurance.reviewer')
   await openNavigationGroup(unauthorized,'SOFTWARE ENGINEERING')
   await unauthorized.getByRole('link',{name:'Software Change Requests'}).click()
   const unauthorizedQueue=unauthorized.locator('.downstreamQueue')

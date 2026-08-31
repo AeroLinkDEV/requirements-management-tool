@@ -274,6 +274,7 @@ public sealed class SecondShowcaseSeederTests
         {
             await using var db = new AeroLinkDbContext(options);
             await db.Database.EnsureCreatedAsync();
+            await new IdentitySeeder(db).EnsureSeededAsync();
             var fms = await new FmsShowcaseSeeder(db).EnsureSeededAsync();
             var before = await SnapshotFmsAsync(db, fms.ProjectId);
             var consumers = LadderConsumerManifestCatalog.RequiredConsumerIds

@@ -70,6 +70,14 @@ test('relating two Problem Reports records it on both, and unlinking removes bot
   await relatedLink.click()
   await expect(page).toHaveURL(new RegExp(`/problem-reports/${one.id}\\?snapshotId=${relatedOne.snapshotId}$`))
   await expect(page.getByRole('heading', { name: first })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(`${one.displayNumber} · HISTORICAL RECORD`)).toBeVisible()
+
+  // The exact link intentionally opened an immutable historical snapshot. Return to the live aggregate
+  // before exercising the controlled unlink action; a historical record must never expose live mutation.
+  await open(first)
+  await expect(page).toHaveURL(new RegExp(`/problem-reports/${one.id}$`))
+  await expect(page.getByText(`${one.displayNumber} · CONTROLLED RECORD`)).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Related Problem Reports' })).toBeVisible()
 
   // Removed from this side; gone from the other one too.
   await page.getByRole('region', { name: 'Related Problem Reports' })

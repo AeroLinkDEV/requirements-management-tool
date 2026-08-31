@@ -173,11 +173,13 @@ not reconstruct that lifecycle truth from roles or browser state. Review holders
 come from the frozen active `ApprovalStep` records, not current workflow configuration, base project roles, or
 Project Leadership. Incorporated, withdrawn, closed, rejected, superseded, linked, and unnumbered records leave the
 active projection under explicit family policy. The Team Work client workspace now provides the read-only,
-project-wide four-lane lifecycle board, people strip, search/type/build filters, current-holder grouping, and
-truthful current-holder detail drawer using that server projection and canonical record links. Its people ordering
-and local affinity nudge use only modern base project roles; Project Leadership remains separate metadata and
-Review/Approval remain frozen workflow-stage meanings. Holder identity is 0..N, including parallel obligations,
-and no write, assignment, due-date, or age-in-state behavior is implied.
+project-wide four-lane lifecycle board, people strip, search/build filters, layer-first contextual artifact-type
+filters, current-holder grouping, and canonical record links. Selecting a person replaces the current person filter
+and keeps the board visible; current-holder detail is available only through a separate explicit action. Reusable
+person avatars use repository-owned synthetic portraits where available and retain an initials fallback. People
+ordering and the local affinity nudge use only modern base project roles; Project Leadership remains separate
+metadata and Review/Approval remain frozen workflow-stage meanings. Holder identity is 0..N, including parallel
+obligations, and no write, assignment, due-date, or age-in-state behavior is implied.
 
 ## Problem Reports
 
@@ -188,7 +190,11 @@ The #765 improvement programme delivered a substantially richer Problem Report w
 - correction/editing by appropriate Project members while preserving exclusive lease/history behavior;
 - a meaningful fixed category vocabulary with provenance for migrated classifications;
 - structured rich authored content and inline emphasis without storing arbitrary executable markup;
-- a larger whole-record create/edit experience with explicit Save vs Save-and-check-in semantics;
+- a document-like whole-record create/edit experience with explicit Save vs Save-and-check-in semantics, natural
+  image paste/drop, bounded resizing, responsive side-by-side image layout, and typed content persistence through
+  revision and generated output;
+- controlled supporting attachments with immutable versions, SHA-256 metadata, attributable add/remove/replace
+  history, revision-frozen attachment manifests, authorized download, and generated-output manifest entries;
 - impact/evidence improvements;
 - controlled symmetric same-Project “Related Problem Reports” relationships visible from either report, with history and closure-candidate invalidation.
 
@@ -215,6 +221,10 @@ The FMS Product Development dataset remains the principal deterministic live dem
 - Build/version 1.5 is the released immutable predecessor.
 - Build/version 1.6 is the active in-work successor used to demonstrate current controlled development.
 - The effective software verification profile supports the full HLR/LLR Case → Procedure model.
+- Named deterministic scenarios provide representative lifecycle, later-revision, trace-branching, assessment,
+  verification/evidence, Interface, Problem Report, review/approval, leadership, avatar, and distributed-work
+  coverage. Fresh showcase creation is rollback-atomic; upgrading an existing synthetic showcase is an explicit
+  administrator action that requires positive target and backup confirmation and never runs during ordinary startup.
 
 The showcase is synthetic demonstration data. It must not be confused with live customer/company controlled engineering data.
 

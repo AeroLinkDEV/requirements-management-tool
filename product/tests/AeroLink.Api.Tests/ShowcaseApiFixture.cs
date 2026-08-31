@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Http.Json;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -32,7 +34,12 @@ public sealed class ShowcaseApiFixture : IAsyncLifetime
         await using (var db = new AeroLinkDbContext(options))
         {
             await db.Database.EnsureCreatedAsync();
+            // Controlled FMS closure evidence must be attributable to the seeded SQA account.
+            await new IdentitySeeder(db).EnsureSeededAsync();
             Summary = await new FmsShowcaseSeeder(db).EnsureSeededAsync();
+            // Production performs a second identity pass after all showcase Programs exist. Keep this template
+            // in the same state as a real demo startup so HTTP tests exercise the post-Program authority graph.
+            await new IdentitySeeder(db).EnsureSeededAsync();
         }
         // Clearing pools is what guarantees the handle is released before anything copies the file. A copy taken
         // mid-write fails in whichever test happened to take it, which is the hardest kind of failure to read.
@@ -48,6 +55,18 @@ public sealed class ShowcaseApiFixture : IAsyncLifetime
     /// <summary>A factory whose database begins as a copy of the seeded showcase.</summary>
     internal AeroLinkApiFactory CreateFactory(bool enableEnterpriseJobWorker = false) =>
         new(showcaseTemplate: _templatePath, enableEnterpriseJobWorker: enableEnterpriseJobWorker);
+
+    /// <summary>Signs in through the identity that already belongs to the copied showcase.</summary>
+    internal static async Task LoginAdministratorAsync(HttpClient client)
+    {
+        using var login = await client.PostAsJsonAsync("/api/auth/login", new
+        {
+            userName = IdentityService.SystemAdministratorUserName,
+            password = IdentitySeeder.DemoPassword,
+        });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
+    }
 }
 
 /// <summary>
