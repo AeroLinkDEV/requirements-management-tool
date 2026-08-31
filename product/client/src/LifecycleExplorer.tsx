@@ -207,6 +207,8 @@ function ChangeRequestGraphMap({
   const nodeRefs = useRef(new Map<string, HTMLElement>());
   const [connectors, setConnectors] = useState<TraceConnector[]>([]);
   const nodeByKey = useMemo(() => new Map(trace.nodes.map(node => [`${node.kind}:${node.id}`, node])), [trace.nodes]);
+  const representableEdgeCount = useMemo(() => trace.edges.filter(edge => nodeByKey.has(`${edge.fromKind}:${edge.fromId}`)
+    && nodeByKey.has(`${edge.toKind}:${edge.toId}`)).length, [nodeByKey, trace.edges]);
 
   const measure = useCallback(() => {
     const board = boardRef.current;
@@ -252,7 +254,10 @@ function ChangeRequestGraphMap({
   }, [measure]);
 
   return <>
-    <div className="crGraphBoard" ref={boardRef} role="group" aria-label="Connected Digital Thread map">
+    <div className="crGraphBoard" ref={boardRef} role="group" aria-label="Connected Digital Thread map"
+      data-representable-edge-count={representableEdgeCount}
+      data-rendered-connector-count={connectors.length}
+      data-unrepresentable-edge-count={trace.edges.length - representableEdgeCount}>
       <svg className="crGraphConnectors" aria-hidden="true">
         <defs>
           <marker id="crGraphArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">

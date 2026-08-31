@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
 import { apiBase, apiLogin, login, openNavigationGroup, selectProgram, showcaseSeed } from "./auth";
+
+const pngSize = (path: string) => {
+  const bytes = readFileSync(path);
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+};
 
 /**
  * "Open complete Digital Thread" navigated to the thread and then focused whichever requirement happened to
@@ -104,6 +110,11 @@ test("a change request opens its stable-ID Digital Thread with exact chain, prov
   await expect(page.getByText(detail.displayNumber, { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Author-stated relationship", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("From downstream assessment", { exact: true }).first()).toBeVisible();
+  const graphMap = page.locator(".crGraphBoard");
+  await expect(graphMap).toHaveAttribute("data-representable-edge-count", "5");
+  await expect(graphMap).toHaveAttribute("data-unrepresentable-edge-count", "0");
+  await expect(graphMap).toHaveAttribute("data-rendered-connector-count", "5");
+  await expect(graphMap.locator(".crGraphConnector")).toHaveCount(5);
   const historicalEdge = page.locator(".crGraphEdge").filter({ hasText: "SRCR-999900.00" }).filter({ hasText: "SRCR-999903.00" });
   await expect(historicalEdge).toContainText("Author-stated relationship");
   await expect(historicalEdge).toContainText("From downstream assessment");
@@ -125,19 +136,28 @@ test("a change request opens its stable-ID Digital Thread with exact chain, prov
   await expect(baselinePath.getByRole("link", { name: "HLRTP-999901.00" })).toHaveAttribute("href", /\/artifacts\/test-case\/55555555-5555-4555-8555-555555555555$/);
   await expect(baselinePath.getByRole("link", { name: "Pass", exact: true })).toHaveAttribute("href", /\/artifacts\/test-execution\/77777777-7777-4777-8777-777777777777$/);
   await expect(baselinePath.getByRole("link", { name: "evidence-999901.bin", exact: true })).toHaveAttribute("href", /\/artifacts\/evidence\/88888888-8888-4888-8888-888888888888$/);
+  const buildStep = baselinePath.locator(".completeThreadStep").filter({ hasText: "BUILD" });
+  await expect(buildStep.locator("[data-exact-artifact-link=unresolved]")).toHaveText("1.6");
+  await expect(buildStep.getByRole("link")).toHaveCount(0);
   await expect(page.getByText("Authoritative result", { exact: true })).toBeVisible();
   await expect(page.getByText("evidence-999901.bin", { exact: true })).toBeVisible();
   await expect(page.getByText("1.6", { exact: true }).last()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Proposed requirement changes" })).toBeVisible();
   await expect(page.getByText(detail.requirementChanges[0].displayNumber, { exact: true })).toBeVisible();
   await expect(page.getByText(/not materialized requirement revisions/i)).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("cr-thread-1440x900.png"), fullPage: true });
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.screenshot({ path: testInfo.outputPath("cr-thread-1280x900.png"), fullPage: true });
-  await page.setViewportSize({ width: 1920, height: 1080 });
-  await page.screenshot({ path: testInfo.outputPath("cr-thread-1920x1080.png"), fullPage: true });
-  await page.setViewportSize({ width: 900, height: 900 });
-  await page.screenshot({ path: testInfo.outputPath("cr-thread-narrow.png"), fullPage: true });
+  const captureViewport = async (width: number, height: number, name: string) => {
+    await page.setViewportSize({ width, height });
+    expect(page.viewportSize()).toMatchObject({ width, height });
+    const path = testInfo.outputPath(name);
+    await page.screenshot({ path, fullPage: false });
+    expect(pngSize(path)).toEqual({ width, height });
+  };
+  await captureViewport(1440, 900, "cr-thread-1440x900.png");
+  await page.screenshot({ path: testInfo.outputPath("cr-thread-full-page.png"), fullPage: true });
+  await captureViewport(1280, 900, "cr-thread-1280x900.png");
+  await captureViewport(1920, 1080, "cr-thread-1920x1080.png");
+  await captureViewport(900, 900, "cr-thread-narrow.png");
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.goBack();
   await expect(page.getByRole("link", { name: "Open Digital Thread →" })).toBeVisible();
   await page.goForward();

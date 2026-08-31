@@ -140,16 +140,17 @@ html .traceLinkState.closed { color: #28704f; }
    remains available to non-visual readers, while cards and directional relationships carry the primary visual
    grammar of the Phase 4 design direction. */
 .crGraphBoard { position: relative; border: 1px solid #dfe8eb; border-radius: 12px; background: #f6fafb; padding: 14px; overflow: hidden; }
-.crGraphBoardLayers { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; }
-.crGraphConnectors { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.crGraphBoardLayers { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.crGraphConnectors { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .crGraphConnectors marker path { fill: #54a79c; }
 .crGraphConnector { fill: none; stroke: #8bbdb7; stroke-width: 1.75; opacity: .88; }
 .crGraphConnector.selected { stroke: #218579; stroke-width: 2.75; opacity: 1; }
-.crGraphLayer { position: relative; z-index: 1; min-width: 0; border: 1px solid #dfe7eb; border-radius: 10px; background: rgba(255,255,255,.68); padding: 10px; }
+.crGraphLayer { position: relative; min-width: 0; border: 1px solid #dfe7eb; border-radius: 10px; background: rgba(255,255,255,.68); padding: 10px; }
+.crGraphLayer > * { position: relative; z-index: 2; }
 .crGraphLayer-other { grid-column: 1 / -1; }
 .crGraphLayer h4 { margin: 0 0 9px; color: #637687; font-size: 10px; font-weight: 850; letter-spacing: .08em; }
 .crGraphNodeList { display: grid; gap: 8px; }
-.crGraphNode { position: relative; z-index: 3; min-width: 0; display: grid; gap: 5px; border: 1px solid #d5e2e6; border-radius: 9px; background: #fff; padding: 9px; box-shadow: 0 5px 14px rgba(16,36,57,.06); }
+.crGraphNode { position: relative; z-index: 2; min-width: 0; display: grid; gap: 5px; border: 1px solid #d5e2e6; border-radius: 9px; background: #fff; padding: 9px; box-shadow: 0 5px 14px rgba(16,36,57,.06); }
 .crGraphNode.selected { border-color: #42a597; background: #eff9f6; box-shadow: 0 0 0 3px rgba(58,167,151,.13), 0 8px 19px rgba(16,70,68,.1); }
 .crGraphNode.proposed { border-style: dashed; border-color: #d3a64a; background: #fffdf6; }
 .crGraphNodeFocus { min-width: 0; display: grid; gap: 4px; border: 0; background: transparent; padding: 0; color: #1d354d; text-align: left; cursor: pointer; }
