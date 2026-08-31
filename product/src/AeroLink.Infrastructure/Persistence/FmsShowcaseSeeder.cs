@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -26,6 +27,7 @@ public sealed record FmsShowcaseSummary(Guid ProgramId, Guid ProjectId, Guid Rel
 
 public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicyResolver? policyResolver = null)
 {
+    private static readonly SemaphoreSlim UpgradeGate = new(1, 1);
     private readonly IProjectLadderPolicyResolver resolver = policyResolver ?? new EffectiveProjectLadderPolicyResolver(db);
     public const string ProgramCode = "FMSLIVE";
     private const string QualityAnalystUserName = "quality.analyst";
@@ -44,6 +46,18 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     private static readonly string[] InterfaceScenarioAuthors = ["systems.author", "software.author"];
     private static readonly string[] ProblemReportOwners =
         ["systems.author", "software.author", "test.engineer", "engineer.demo", "test.author", "test.engineer", "software.author", "systems.author"];
+    private static readonly (ProjectLeadershipPosition Position, string UserName, ProgramRole RequiredRole)[]
+        ShowcaseLeadershipRoster =
+        [
+            (ProjectLeadershipPosition.ProjectEngineer, "project.lead", ProgramRole.ProjectEngineer),
+            (ProjectLeadershipPosition.ProgramManager, "program.manager", ProgramRole.ProgramManager),
+            (ProjectLeadershipPosition.EngineeringManager, "engineering.manager", ProgramRole.EngineeringManager),
+            (ProjectLeadershipPosition.ConfigurationManager, "cm.fms", ProgramRole.ConfigurationManager),
+            (ProjectLeadershipPosition.SystemEngineeringLead, "systems.lead", ProgramRole.SystemEngineer),
+            (ProjectLeadershipPosition.SoftwareEngineeringLead, "software.lead", ProgramRole.SoftwareEngineer),
+            (ProjectLeadershipPosition.SystemTestLead, "test.engineer", ProgramRole.SystemTestEngineer),
+            (ProjectLeadershipPosition.SoftwareTestLead, "test.author", ProgramRole.SoftwareTestEngineer),
+        ];
     private static readonly string[] Topics = ["flight plan", "lateral navigation", "vertical navigation", "performance prediction", "navigation database", "guidance", "radio navigation", "position estimation", "fuel management", "crew interface", "departure procedures", "arrival procedures", "approach management", "airspace constraints", "route sequencing"];
 
     private static string InterfaceScenarioMarker(int index) => $"{InterfaceScenarioMarkerPrefix}{index:D2}]";
@@ -169,6 +183,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         // and a later start does not try to reconcile what was just built.
         await EnsureQualityAnalystMembershipAsync(program.Id, FreshSqaMembershipGrantedAt, ct);
         await EnsureFreshControlledActorMembershipsAsync(program.Id, FreshSqaMembershipGrantedAt, ct);
+        await EnsureFreshLeadershipRosterAsync(program.Id, FreshSqaMembershipGrantedAt, ct);
         await UpgradeAsync(program.Id, ct);
         return await SummarizeAsync(program.Id, ct);
     }
@@ -228,6 +243,43 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             foreach (var role in actor.Roles)
                 if (existing.Add((account.Id, role)))
                     db.ProgramMemberships.Add(new ProgramMembership(account.Id, programId, role, "system.bootstrap", grantedAt));
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task EnsureFreshLeadershipRosterAsync(Guid programId, DateTimeOffset assignedAt,
+        CancellationToken ct)
+    {
+        var names = ShowcaseLeadershipRoster.Select(x => x.UserName).ToArray();
+        var accounts = await db.UserAccounts.Where(x => names.Contains(x.UserName))
+            .ToDictionaryAsync(x => x.UserName, StringComparer.OrdinalIgnoreCase, ct);
+        foreach (var expected in ShowcaseLeadershipRoster)
+            if (!accounts.TryGetValue(expected.UserName, out var account) || account.State != AccountState.Active)
+                throw new InvalidOperationException(
+                    $"The seeded {expected.UserName} account is required and must be active before the FMS {expected.Position} position is created.");
+
+        var memberships = await db.ProgramMemberships.Where(x => x.ProgramId == programId).ToListAsync(ct);
+        var assignments = await db.ProjectLeadershipAssignments.Where(x => x.ProgramId == programId).ToListAsync(ct);
+        foreach (var expected in ShowcaseLeadershipRoster)
+        {
+            var account = accounts[expected.UserName];
+            if (!memberships.Any(x => x.UserId == account.Id && x.Role == expected.RequiredRole && x.EndedAt == null))
+            {
+                var historical = memberships.Any(x => x.UserId == account.Id && x.Role == expected.RequiredRole);
+                if (historical)
+                    throw new InvalidOperationException(
+                        $"The fresh FMS {expected.Position} holder has an ended {expected.RequiredRole} membership that cannot be silently restored.");
+                db.ProgramMemberships.Add(new ProgramMembership(account.Id, programId, expected.RequiredRole,
+                    "system.bootstrap", assignedAt));
+            }
+
+            var history = assignments.Where(x => x.Position == expected.Position).ToList();
+            if (history.Count == 0)
+                db.ProjectLeadershipAssignments.Add(new ProjectLeadershipAssignment(programId, expected.Position,
+                    account.Id, "system.bootstrap", assignedAt));
+            else if (history.Count != 1 || history[0].EndedAt is not null || history[0].HolderUserId != account.Id)
+                throw new InvalidOperationException(
+                    $"The fresh FMS {expected.Position} position has conflicting assignment history.");
         }
         await db.SaveChangesAsync(ct);
     }
@@ -307,6 +359,55 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         return grants.Count == 0 ? null : grants.Max();
     }
 
+    private async Task<ShowcaseUpgradeAuthorityDecision?> CheckLeadershipRosterAuthorityAsync(Guid programId,
+        CancellationToken ct)
+    {
+        var expectedNames = ShowcaseLeadershipRoster.Select(x => x.UserName).ToArray();
+        var expectedAccounts = await db.UserAccounts.AsNoTracking().Where(x => expectedNames.Contains(x.UserName))
+            .ToDictionaryAsync(x => x.UserName, StringComparer.OrdinalIgnoreCase, ct);
+        var assignments = await db.ProjectLeadershipAssignments.AsNoTracking()
+            .Where(x => x.ProgramId == programId).ToListAsync(ct);
+        var holderIds = assignments.Select(x => x.HolderUserId)
+            .Concat(expectedAccounts.Values.Select(x => x.Id)).Distinct().ToArray();
+        var accountsById = await db.UserAccounts.AsNoTracking().Where(x => holderIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, ct);
+        var memberships = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.ProgramId == programId && holderIds.Contains(x.UserId)).ToListAsync(ct);
+
+        foreach (var expected in ShowcaseLeadershipRoster)
+        {
+            if (!expectedAccounts.TryGetValue(expected.UserName, out var expectedAccount)
+                || expectedAccount.State != AccountState.Active)
+                return new(false, "showcase_leadership_account_unavailable",
+                    $"The active {expected.UserName} account is required before the FMS {expected.Position} roster can be upgraded.");
+
+            var history = assignments.Where(x => x.Position == expected.Position).ToList();
+            var active = history.Where(x => x.EndedAt is null).ToList();
+            if (active.Count > 1)
+                return new(false, "showcase_leadership_history_conflict",
+                    $"The FMS {expected.Position} position has multiple active holders and must be reconciled explicitly.");
+            if (active.Count == 1)
+            {
+                var holder = active[0];
+                if (!accountsById.TryGetValue(holder.HolderUserId, out var holderAccount)
+                    || holderAccount.State != AccountState.Active
+                    || !memberships.Any(x => x.UserId == holder.HolderUserId && x.Role == expected.RequiredRole
+                        && x.EndedAt is null))
+                    return new(false, "showcase_leadership_holder_ineligible",
+                        $"The existing FMS {expected.Position} holder is not an active {expected.RequiredRole} member; the showcase upgrade will not replace operator-owned authority.");
+                continue;
+            }
+            if (history.Count > 0)
+                // An ended assignment is attributable operator history and remains a deliberate vacancy.
+                continue;
+            if (!memberships.Any(x => x.UserId == expectedAccount.Id && x.Role == expected.RequiredRole
+                    && x.EndedAt is null))
+                return new(false, "showcase_leadership_membership_unavailable",
+                    $"The active {expected.UserName} {expected.RequiredRole} membership is required before the FMS {expected.Position} position can be created.");
+        }
+        return null;
+    }
+
     /// <summary>
     /// Brings an already-seeded showcase Program up to the invariants the current seeder produces.
     ///
@@ -316,9 +417,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     /// product describes as impossible, because the code that raises those items shipped afterwards and the
     /// seeder returned early on every subsequent start.
     ///
-    /// Each step is keyed, ordered and idempotent, and records itself only after its own work commits. An
-    /// interrupted upgrade resumes at the step it stopped on rather than repeating the ones that already
-    /// succeeded, and a step added later applies on its own without renumbering anything.
+    /// Each step is keyed, ordered and idempotent. The explicit upgrade is serialized and committed as one
+    /// transaction, so a concurrent or interrupted request cannot expose controlled rows without their step
+    /// markers. A step added later applies on its own without renumbering anything.
     /// </summary>
     public async Task<ShowcaseUpgradeAuthorityDecision> CheckUpgradeAuthorityAsync(Guid programId,
         CancellationToken ct = default)
@@ -339,6 +440,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (!memberships.Any(x => x.EndedAt is null))
             return new(false, "quality_analyst_membership_inactive",
                 "An unended SoftwareQualityAnalyst membership is required before controlled closure evidence can be upgraded.");
+
+        var leadership = await CheckLeadershipRosterAuthorityAsync(programId, ct);
+        if (leadership is not null) return leadership;
 
         var closureAt = await HistoricalClosureApprovalAtAsync(programId, memberships, ct);
         if (closureAt is null)
@@ -426,50 +530,100 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
 
     public async Task<IReadOnlyList<string>> UpgradeAsync(Guid programId, CancellationToken ct = default)
     {
-        var authority = await CheckUpgradeAuthorityAsync(programId, ct);
-        if (!authority.Ready)
-            throw new InvalidOperationException($"FMS showcase upgrade cannot proceed: {authority.Code} {authority.Detail}");
-
-        var applied = new List<string>();
-        var steps = new (string Key, Func<Guid, CancellationToken, Task<string?>> Run)[]
+        await UpgradeGate.WaitAsync(ct);
+        try
         {
-            ("release-campaign", async (id, token) => { await EnsureReleaseCampaignAsync(id, token); return "Release campaign present."; }),
-            ("product-line", async (id, token) => { await EnsureProductLineAsync(id, token); return "Product-line configuration present."; }),
-            ("verification-impact", ReconcileVerificationImpactAsync),
-            ("downstream-impact", ReconcileDownstreamImpactAsync),
-            ("test-change-reviews", EnsureTestChangeReviewsAsync),
-            ("problem-report-build-scope", ReconcileProblemReportBuildScopeAsync),
-            ("controlled-test-change-identity", ReconcileControlledTestChangeIdentityAsync),
-            ("verification-coverage-gap", async (id, token) => { await EnsureVerificationCoverageGapAsync(id, token); return "In-work suspect coverage present."; }),
-            ("approver-identity", ReconcileApproverIdentityAsync),
-            ("released-campaign", EnsureReleasedCampaignAsync),
-            ("code-traceability-demo", EnsureCodeTraceabilityAsync),
-            ("scenario-richness", EnsureScenarioRichnessAsync),
-        };
+            var isolation = db.Database.IsNpgsql() ? IsolationLevel.ReadCommitted : IsolationLevel.Serializable;
+            await using var transaction = await db.Database.BeginTransactionAsync(isolation, ct);
+            if (db.Database.IsNpgsql())
+                // The database lock covers multiple API instances. READ COMMITTED deliberately takes its
+                // post-wait snapshots after the prior holder commits, so the next request sees every marker.
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT pg_advisory_xact_lock(hashtext('aerolink-showcase-upgrade'), hashtext({programId.ToString("D")}))", ct);
 
-        foreach (var step in steps)
-        {
-            var recorded = await db.ShowcaseUpgradeSteps
-                .SingleOrDefaultAsync(x => x.ProgramId == programId && x.StepKey == step.Key, ct);
-            if (recorded is not null)
+            var authority = await CheckUpgradeAuthorityAsync(programId, ct);
+            if (!authority.Ready)
+                throw new InvalidOperationException($"FMS showcase upgrade cannot proceed: {authority.Code} {authority.Detail}");
+
+            var applied = new List<string>();
+            var steps = new (string Key, Func<Guid, CancellationToken, Task<string?>> Run)[]
             {
-                // Scenario richness has externally visible postconditions. An older build could have
-                // recorded its marker before the final rows/links were committed; do not let that marker
-                // turn an incomplete showcase into a permanent no-op. Removing only the upgrade marker
-                // makes the next run retry the owned additive work, while all controlled rows remain intact.
-                if (step.Key == "scenario-richness" && !await ScenarioRichnessCompleteAsync(programId, ct))
+                ("leadership-roster", EnsureShowcaseLeadershipRosterAsync),
+                ("release-campaign", async (id, token) => { await EnsureReleaseCampaignAsync(id, token); return "Release campaign present."; }),
+                ("product-line", async (id, token) => { await EnsureProductLineAsync(id, token); return "Product-line configuration present."; }),
+                ("verification-impact", ReconcileVerificationImpactAsync),
+                ("downstream-impact", ReconcileDownstreamImpactAsync),
+                ("test-change-reviews", EnsureTestChangeReviewsAsync),
+                ("problem-report-build-scope", ReconcileProblemReportBuildScopeAsync),
+                ("controlled-test-change-identity", ReconcileControlledTestChangeIdentityAsync),
+                ("verification-coverage-gap", async (id, token) => { await EnsureVerificationCoverageGapAsync(id, token); return "In-work suspect coverage present."; }),
+                ("approver-identity", ReconcileApproverIdentityAsync),
+                ("released-campaign", EnsureReleasedCampaignAsync),
+                ("code-traceability-demo", EnsureCodeTraceabilityAsync),
+                ("scenario-richness", EnsureScenarioRichnessAsync),
+            };
+
+            foreach (var step in steps)
+            {
+                var recorded = await db.ShowcaseUpgradeSteps
+                    .SingleOrDefaultAsync(x => x.ProgramId == programId && x.StepKey == step.Key, ct);
+                if (recorded is not null)
                 {
-                    db.ShowcaseUpgradeSteps.Remove(recorded);
-                    await db.SaveChangesAsync(ct);
+                    // Scenario richness has externally visible postconditions. An older build could have
+                    // recorded its marker before the final rows/links were committed; do not let that marker
+                    // turn an incomplete showcase into a permanent no-op. Removing only the upgrade marker
+                    // makes the same atomic run retry the owned additive work.
+                    if (step.Key == "scenario-richness" && !await ScenarioRichnessCompleteAsync(programId, ct))
+                    {
+                        db.ShowcaseUpgradeSteps.Remove(recorded);
+                        await db.SaveChangesAsync(ct);
+                    }
+                    else continue;
                 }
-                else continue;
+                var detail = await step.Run(programId, ct);
+                db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId, step.Key,
+                    detail ?? "No change required.", DateTimeOffset.UtcNow));
+                await db.SaveChangesAsync(ct);
+                applied.Add($"{step.Key}: {detail ?? "No change required."}");
             }
-            var detail = await step.Run(programId, ct);
-            db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId, step.Key, detail ?? "No change required.", DateTimeOffset.UtcNow));
-            await db.SaveChangesAsync(ct);
-            applied.Add($"{step.Key}: {detail ?? "No change required."}");
+            await transaction.CommitAsync(ct);
+            return applied;
         }
-        return applied;
+        finally
+        {
+            UpgradeGate.Release();
+        }
+    }
+
+    private async Task<string?> EnsureShowcaseLeadershipRosterAsync(Guid programId, CancellationToken ct)
+    {
+        var names = ShowcaseLeadershipRoster.Select(x => x.UserName).ToArray();
+        var accounts = await db.UserAccounts.Where(x => names.Contains(x.UserName))
+            .ToDictionaryAsync(x => x.UserName, StringComparer.OrdinalIgnoreCase, ct);
+        var assignments = await db.ProjectLeadershipAssignments.Where(x => x.ProgramId == programId).ToListAsync(ct);
+        var added = 0;
+        var preserved = 0;
+        var deliberateVacancies = 0;
+        var now = DateTimeOffset.UtcNow;
+        foreach (var expected in ShowcaseLeadershipRoster)
+        {
+            var history = assignments.Where(x => x.Position == expected.Position).ToList();
+            if (history.Any(x => x.EndedAt is null))
+            {
+                preserved++;
+                continue;
+            }
+            if (history.Count > 0)
+            {
+                deliberateVacancies++;
+                continue;
+            }
+            db.ProjectLeadershipAssignments.Add(new ProjectLeadershipAssignment(programId, expected.Position,
+                accounts[expected.UserName].Id, "system.showcase-upgrade", now));
+            added++;
+        }
+        await db.SaveChangesAsync(ct);
+        return $"Project Leadership roster reconciled: {added} added, {preserved} preserved, {deliberateVacancies} deliberate vacancies.";
     }
 
     private async Task<DateTimeOffset?> HistoricalClosureApprovalAtAsync(Guid programId,

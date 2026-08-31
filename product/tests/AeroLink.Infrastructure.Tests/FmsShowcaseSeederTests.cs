@@ -11,6 +11,19 @@ namespace AeroLink.Infrastructure.Tests;
 
 public sealed class FmsShowcaseSeederTests
 {
+    private static readonly (ProjectLeadershipPosition Position, string UserName, ProgramRole RequiredRole)[]
+        ExpectedLeadership =
+        [
+            (ProjectLeadershipPosition.ProjectEngineer, "project.lead", ProgramRole.ProjectEngineer),
+            (ProjectLeadershipPosition.ProgramManager, "program.manager", ProgramRole.ProgramManager),
+            (ProjectLeadershipPosition.EngineeringManager, "engineering.manager", ProgramRole.EngineeringManager),
+            (ProjectLeadershipPosition.ConfigurationManager, "cm.fms", ProgramRole.ConfigurationManager),
+            (ProjectLeadershipPosition.SystemEngineeringLead, "systems.lead", ProgramRole.SystemEngineer),
+            (ProjectLeadershipPosition.SoftwareEngineeringLead, "software.lead", ProgramRole.SoftwareEngineer),
+            (ProjectLeadershipPosition.SystemTestLead, "test.engineer", ProgramRole.SystemTestEngineer),
+            (ProjectLeadershipPosition.SoftwareTestLead, "test.author", ProgramRole.SoftwareTestEngineer),
+        ];
+
     private static async Task<Guid[]> OwnedScenarioIdsAsync(AeroLinkDbContext db, Guid programId, string prefix)
     {
         var details = await db.ShowcaseUpgradeSteps.AsNoTracking()
@@ -82,6 +95,22 @@ public sealed class FmsShowcaseSeederTests
             await new IdentitySeeder(db).EnsureSeededAsync();
             var seeder = new FmsShowcaseSeeder(db);
             var summary = await seeder.EnsureSeededAsync();
+            var leadershipAccounts = await db.UserAccounts.AsNoTracking()
+                .Where(x => ExpectedLeadership.Select(expected => expected.UserName).Contains(x.UserName))
+                .ToDictionaryAsync(x => x.UserName, StringComparer.OrdinalIgnoreCase);
+            var firstLeadership = await db.ProjectLeadershipAssignments.AsNoTracking()
+                .Where(x => x.ProgramId == summary.ProgramId).OrderBy(x => x.Position).ToListAsync();
+            Assert.Equal(8, firstLeadership.Count);
+            foreach (var expected in ExpectedLeadership)
+            {
+                var account = leadershipAccounts[expected.UserName];
+                var assignment = Assert.Single(firstLeadership, x => x.Position == expected.Position);
+                Assert.Equal(account.Id, assignment.HolderUserId);
+                Assert.Equal("system.bootstrap", assignment.AssignedBy);
+                Assert.Equal(new DateTimeOffset(2024, 1, 8, 14, 0, 0, TimeSpan.Zero), assignment.AssignedAt);
+                Assert.True(await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.ProgramId == summary.ProgramId
+                    && x.UserId == account.Id && x.Role == expected.RequiredRole && x.EndedAt == null));
+            }
             var release15Id = await db.Releases.Where(x => x.ProjectId == summary.ProjectId && x.Version == "1.5").Select(x => x.Id).SingleAsync();
             var interfaceScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/interface/");
             var reportScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/problem-report/");
@@ -191,6 +220,10 @@ public sealed class FmsShowcaseSeederTests
                 .OrderBy(x => x.ReportNumber).Select(x => new { x.Id, x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId, x.ResolutionVerificationExecutionId, x.ClosureApprovedAt, x.AdditionalInformation, x.CreatedAt }).ToListAsync();
             Assert.Equal(firstInterface, secondInterface);
             Assert.Equal(firstReports, secondReports);
+            Assert.Equal(firstLeadership.Select(x => (x.Id, x.Position, x.HolderUserId, x.AssignedAt, x.EndedAt)),
+                (await db.ProjectLeadershipAssignments.AsNoTracking().Where(x => x.ProgramId == summary.ProgramId)
+                    .OrderBy(x => x.Position).ToListAsync())
+                .Select(x => (x.Id, x.Position, x.HolderUserId, x.AssignedAt, x.EndedAt)));
             Assert.All(await seeder.CheckInvariantsAsync(summary.ProgramId), x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
         }
         finally { File.Delete(path); }
@@ -461,6 +494,66 @@ public sealed class FmsShowcaseSeederTests
             Assert.Equal(executionCount, await db.TestExecutions.CountAsync());
             Assert.Equal(scenario7VerificationId, await db.ProblemReports.AsNoTracking()
                 .Where(x => x.Id == scenario7Id).Select(x => x.ResolutionVerificationExecutionId).SingleAsync());
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Concurrent_explicit_upgrades_are_atomic_and_preserve_a_deliberate_leadership_vacancy()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-showcase-concurrent-upgrade-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            Guid programId;
+            int priorReportCount;
+            Guid endedAssignmentId;
+            await using (var initial = new AeroLinkDbContext(options))
+            {
+                await initial.Database.EnsureCreatedAsync();
+                await new IdentitySeeder(initial).EnsureSeededAsync();
+                var summary = await new FmsShowcaseSeeder(initial).EnsureSeededAsync();
+                programId = summary.ProgramId;
+                priorReportCount = await initial.ProblemReports.CountAsync(x => x.ProjectId == summary.ProjectId);
+
+                var ended = await initial.ProjectLeadershipAssignments.SingleAsync(x => x.ProgramId == programId
+                    && x.Position == ProjectLeadershipPosition.SoftwareTestLead && x.EndedAt == null);
+                endedAssignmentId = ended.Id;
+                ended.End("operator", DateTimeOffset.UtcNow);
+                initial.ShowcaseUpgradeSteps.Remove(await initial.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == programId
+                    && x.StepKey == "leadership-roster"));
+                initial.ShowcaseUpgradeSteps.Remove(await initial.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == programId
+                    && x.StepKey == "scenario-richness/problem-report/01"));
+                initial.ShowcaseUpgradeSteps.Remove(await initial.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == programId
+                    && x.StepKey == "scenario-richness"));
+                await initial.SaveChangesAsync();
+            }
+
+            await using var firstDb = new AeroLinkDbContext(options);
+            await using var secondDb = new AeroLinkDbContext(options);
+            var results = await Task.WhenAll(
+                new FmsShowcaseSeeder(firstDb).UpgradeAsync(programId),
+                new FmsShowcaseSeeder(secondDb).UpgradeAsync(programId));
+            Assert.Single(results, result => result.Count > 0);
+            Assert.Single(results, result => result.Count == 0);
+
+            await using var verify = new AeroLinkDbContext(options);
+            Assert.Equal(8, await verify.ShowcaseUpgradeSteps.CountAsync(x => x.ProgramId == programId
+                && x.StepKey.StartsWith("scenario-richness/problem-report/")));
+            Assert.Equal(priorReportCount + 1, await verify.ProblemReports.CountAsync());
+            Assert.Single(await verify.ShowcaseUpgradeSteps.Where(x => x.ProgramId == programId
+                && x.StepKey == "leadership-roster").ToListAsync());
+            var preserved = await verify.ProjectLeadershipAssignments.Where(x => x.ProgramId == programId
+                && x.Position == ProjectLeadershipPosition.SoftwareTestLead).ToListAsync();
+            var only = Assert.Single(preserved);
+            Assert.Equal(endedAssignmentId, only.Id);
+            Assert.NotNull(only.EndedAt);
+            Assert.False(await verify.ProjectLeadershipAssignments.AnyAsync(x => x.ProgramId == programId
+                && x.Position == ProjectLeadershipPosition.SoftwareTestLead && x.EndedAt == null));
         }
         finally
         {
