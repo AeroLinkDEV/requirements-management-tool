@@ -18,6 +18,10 @@ namespace AeroLink.Infrastructure.Persistence;
 /// </summary>
 public static class PngImage
 {
+    // A 4K capture is about eight million pixels. Allow that normal engineering artifact, but reject larger
+    // images before either the filtered scanlines or the RGB PDF payload can make a publication worker spend
+    // hundreds of megabytes on one figure.
+    private const long MaximumDecodedPixels = 10_000_000L;
     /// <summary>
     /// Whether these bytes really are the image they claim to be.
     ///
@@ -107,15 +111,23 @@ public static class PngImage
         if (colorType == 3 && palette is null) return false;
         // A very large capture would decode into hundreds of megabytes. The document is better served by the
         // alt text than by exhausting the server that generates it.
-        if ((long)width * height > 40_000_000L) return false;
+        if ((long)width * height > MaximumDecodedPixels) return false;
 
         compressed.Position = 0;
         using var inflate = new ZLibStream(compressed, CompressionMode.Decompress);
-        using var raw = new MemoryStream();
-        inflate.CopyTo(raw);
-        var scanline = width * channels;
-        var pixels = raw.ToArray();
-        if (pixels.Length < (long)(scanline + 1) * height) return false;
+        var scanline = checked(width * channels);
+        var expected = checked((long)(scanline + 1) * height);
+        // Never CopyTo an attacker-controlled deflate stream. Decode only the exact number of scanline bytes
+        // the validated IHDR permits, then require EOF so trailing decompressed data cannot become a bomb.
+        var pixels = new byte[checked((int)expected)];
+        var read = 0;
+        while (read < pixels.Length)
+        {
+            var count = inflate.Read(pixels, read, pixels.Length - read);
+            if (count == 0) return false;
+            read += count;
+        }
+        if (inflate.ReadByte() != -1) return false;
 
         var output = new byte[(long)width * height * 3];
         var previous = new byte[scanline];

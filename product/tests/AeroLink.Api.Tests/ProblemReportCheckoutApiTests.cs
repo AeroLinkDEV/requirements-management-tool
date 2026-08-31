@@ -633,7 +633,9 @@ public sealed class ProblemReportCheckoutApiTests
 
     private static byte[] Png()
     {
-        var raw = new byte[] { 0, 255, 0, 0, 0, 255, 0, 0, 0, 0, 255, 255, 255, 255, 255 };
+        // Two RGB scanlines: one filter byte followed by six pixel bytes each. Keep the fixture
+        // structurally valid so it exercises publication rather than relying on a tolerant PNG decoder.
+        var raw = new byte[] { 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 255 };
         using var compressed = new MemoryStream();
         using (var zlib = new ZLibStream(compressed, CompressionLevel.Optimal, true)) zlib.Write(raw);
         using var output = new MemoryStream();

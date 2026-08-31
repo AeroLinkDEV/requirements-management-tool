@@ -33,6 +33,9 @@ public sealed record ProfessionalPublication(string Product, string Program, str
 
 public static class ProfessionalPublicationRenderer
 {
+    // PDFs decode PNGs to RGB before Flate-compressing them. Keep all retained decoded payloads within a
+    // bounded publication budget; Word embeds the already capped source bytes without this decode step.
+    private const long MaximumPdfDecodedPixels = 16_000_000L;
     public static GeneratedOutput Render(ProfessionalPublication publication, string format, string stem) => format.Equals("pdf", StringComparison.OrdinalIgnoreCase)
         ? new(BuildPdf(publication), "application/pdf", stem + ".pdf")
         : new(BuildDocx(publication), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", stem + ".docx");
@@ -272,7 +275,7 @@ public static class ProfessionalPublicationRenderer
                 case "image":
                     var placement = Placement(block, assets);
                     if (placement is not null) body.Append(ImageDrawing(placement, ++placementNumber));
-                    else body.Append(P(Text(block, "alt", "Invalid controlled image"), "Callout"));
+                    else body.Append(P("[Image not retrieved: " + Text(block, "caption", Text(block, "alt", "image")) + "]", "Callout"));
                     break;
             }
         }
@@ -306,11 +309,16 @@ public static class ProfessionalPublicationRenderer
     private static List<(PublicationImage Image, byte[] Payload, string Filter)> PdfImages(ProfessionalPublication publication)
     {
         var result = new List<(PublicationImage, byte[], string)>();
+        long decodedPixels = 0;
         foreach (var image in Images(publication))
         {
             if (!image.IsPng) { result.Add((image with { Index = result.Count + 1 }, image.Bytes, "DCTDecode")); continue; }
+            var expectedPixels = (long)image.Width * image.Height;
+            if (expectedPixels > MaximumPdfDecodedPixels - decodedPixels) continue;
             if (!PngImage.TryDecodeRgb(image.Bytes, out var width, out var height, out var rgb)) continue;
+            var pixels = (long)width * height;
             result.Add((image with { Index = result.Count + 1, Width = width, Height = height }, Deflate(rgb), "FlateDecode"));
+            decodedPixels += pixels;
         }
         return result;
     }
@@ -336,7 +344,7 @@ public static class ProfessionalPublicationRenderer
         pageStreams.AddRange(Paginate(control, p, true));
         foreach (var section in p.Sections)
         {
-            pageStreams.AddRange(PaginateSection(section, p));
+            pageStreams.AddRange(PaginateSection(section, p, assets));
         }
         var placements = p.Sections.SelectMany(x => x.Records)
             .SelectMany(Blocks)
@@ -364,14 +372,15 @@ public static class ProfessionalPublicationRenderer
         foreach (var line in lines) { var height = line.Size + line.After; if (used + height > max && current.Count > 0) { pages.Add(PdfContentPage(current, p, control)); current = []; used = 0; } current.Add(line); used += height; }
         if (current.Count > 0) pages.Add(PdfContentPage(current, p, control)); return pages;
     }
-    private static IEnumerable<string> PaginateSection(PublicationSection section, ProfessionalPublication p)
+    private static IEnumerable<string> PaginateSection(PublicationSection section, ProfessionalPublication p,
+        IReadOnlyDictionary<string, PublicationImage> assets)
     {
         const int max = 650; var pages = new List<string>(); var current = new List<PdfLine> { new(section.Heading.ToUpperInvariant(), 18, true, "2E74B5", 0, 8) }; if (!string.IsNullOrWhiteSpace(section.Introduction)) current.AddRange(Wrap(section.Introduction, 92).Select(x => new PdfLine(x, 9, false, "526274", 0, 6))); var used = current.Sum(LineHeight);
         foreach (var record in section.Records)
         {
             var block = new List<PdfLine> { new(record.Number + " | " + record.Classification, 11, true, "2E74B5", 0, 3) }; if (!string.IsNullOrWhiteSpace(record.Title)) block.AddRange(Wrap(record.Title, 92).Select(x => new PdfLine(x, 9, true, "25364D", 0, 3)));
             block.AddRange(Wrap(record.Body, 105).Select(x => new PdfLine(x, 8, false, "25364D", 0, 2)));
-            foreach (var rich in RichPdfLines(record)) block.Add(rich);
+            foreach (var rich in RichPdfLines(record, assets)) block.Add(rich);
             foreach (var detail in record.Details) block.AddRange(Wrap(detail.Label + ": " + detail.Value, 110).Select(x => new PdfLine(x, 7, false, "718096", 0, 2))); block.Add(new("", 5, false, "25364D", 0, 4)); var height = block.Sum(LineHeight);
             if (used + height > max && current.Count > 0) { pages.Add(PdfContentPage(current, p, false)); current = [new(section.Heading.ToUpperInvariant() + " - CONTINUED", 10, true, "718096", 0, 8)]; used = current.Sum(LineHeight); }
             current.AddRange(block); used += height;
@@ -407,14 +416,21 @@ public static class ProfessionalPublicationRenderer
         return s.Append("ET\n").ToString();
     }
     private static (double,double,double) Rgb(string hex) => (Convert.ToInt32(hex[..2],16)/255d,Convert.ToInt32(hex.Substring(2,2),16)/255d,Convert.ToInt32(hex.Substring(4,2),16)/255d);
-    private static IEnumerable<PdfLine> RichPdfLines(PublicationRecord record)
+    private static IEnumerable<PdfLine> RichPdfLines(PublicationRecord record, IReadOnlyDictionary<string, PublicationImage> assets)
     {
         foreach (var block in Blocks(record)) switch (BlockType(block))
         {
             case "paragraph": foreach(var line in Wrap(Text(block,"text",""),105)) yield return new(line,8,false); break;
             case "symbol": yield return new("Controlled symbol: "+Text(block,"value",""),9,true,"168578",12,3); break;
             case "reference": yield return new("Reference: "+Text(block,"label","")+" -> "+Text(block,"target",""),8,false,"526274",12,3); break;
-            case "image": yield return new("Inline controlled image: "+Text(block,"caption",Text(block,"alt","image")),8,true,"168578",12,3); break;
+            case "image":
+                {
+                    var label = Text(block, "caption", Text(block, "alt", "image"));
+                    yield return Placement(block, assets) is null
+                        ? new("[Image not retrieved: " + label + "]", 8, true, "A4262C", 12, 3)
+                        : new("Inline controlled image: " + label, 8, true, "168578", 12, 3);
+                    break;
+                }
             case "table" when block.TryGetProperty("rows",out var rows)&&rows.ValueKind==JsonValueKind.Array:
                 foreach(var row in rows.EnumerateArray().Where(x=>x.ValueKind==JsonValueKind.Array)) yield return new(string.Join(" | ",row.EnumerateArray().Select(x=>x.ToString())),8,false,"25364D",12,2);
                 break;

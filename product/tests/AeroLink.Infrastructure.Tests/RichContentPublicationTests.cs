@@ -13,19 +13,24 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class RichContentPublicationTests
 {
     /// <summary>A two-by-two PNG: red, green on the top row, blue, white below.</summary>
-    private static byte[] Png()
+    private static byte[] Png() => Png(2, 2,
+    [
+        0, 255, 0, 0, 0, 255, 0,
+        0, 0, 0, 255, 255, 255, 255,
+    ]);
+
+    private static byte[] Png(int width, int height, byte[] raw)
     {
-        var raw = new byte[] // one filter byte per scanline, then RGB triples
-        {
-            0, 255, 0, 0, 0, 255, 0,
-            0, 0, 0, 255, 255, 255, 255,
-        };
         using var compressed = new MemoryStream();
         using (var zlib = new ZLibStream(compressed, CompressionLevel.Optimal, true)) zlib.Write(raw);
 
         using var output = new MemoryStream();
         output.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
-        Chunk(output, "IHDR", [0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0]);
+        Span<byte> header = stackalloc byte[13];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header, width);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header[4..], height);
+        header[8] = 8; header[9] = 2; // eight-bit RGB, non-interlaced
+        Chunk(output, "IHDR", header.ToArray());
         Chunk(output, "IDAT", compressed.ToArray());
         Chunk(output, "IEND", []);
         return output.ToArray();
@@ -77,6 +82,15 @@ public sealed class RichContentPublicationTests
     }
 
     [Fact]
+    public void A_png_deflate_bomb_is_refused_before_the_compressed_stream_can_expand_unboundedly()
+    {
+        // IHDR permits exactly four decompressed bytes (filter + RGB). The tiny ZIP representation expands to
+        // megabytes, which used to be copied to an unbounded MemoryStream before that mismatch was checked.
+        var bomb = Png(1, 1, Enumerable.Repeat((byte)0, 2 * 1024 * 1024).ToArray());
+        Assert.False(PngImage.TryDecodeRgb(bomb, out _, out _, out _));
+    }
+
+    [Fact]
     public void An_authored_image_reaches_the_document_as_its_bytes()
     {
         var id = Guid.NewGuid();
@@ -113,6 +127,27 @@ public sealed class RichContentPublicationTests
         var prepared = RichContentPublisher.ForPublication(stored, new Dictionary<Guid, string>());
         Assert.Contains("Image not retrieved: Figure 1", prepared);
         Assert.DoesNotContain("dataUri", prepared);
+    }
+
+    [Fact]
+    public void Publication_cap_selects_the_first_authored_images_deterministically()
+    {
+        var first = Guid.NewGuid(); var second = Guid.NewGuid(); var third = Guid.NewGuid(); var fourth = Guid.NewGuid(); var fifth = Guid.NewGuid();
+        var sizes = new Dictionary<Guid, long>
+        {
+            [first] = 12 * 1024 * 1024,
+            [second] = 12 * 1024 * 1024,
+            [third] = 12 * 1024 * 1024,
+            [fourth] = 12 * 1024 * 1024,
+            [fifth] = 12 * 1024 * 1024,
+        };
+
+        // Exactly 48 MiB fits. Reversing database enumeration must not change which authored figures a
+        // signed report renders: the ordered block references are the authority.
+        Assert.Equal([first, second, third, fourth],
+            RichContentPublisher.SelectForPublication([first, second, third, fourth, fifth], sizes));
+        Assert.Equal([fifth, fourth, third, second],
+            RichContentPublisher.SelectForPublication([fifth, fourth, third, second, first], sizes));
     }
 
     [Fact]
@@ -183,6 +218,28 @@ public sealed class RichContentPublicationTests
         Assert.Contains("384 0 0 384", pdf); // 80% occurrence
         Assert.True(pdf.IndexOf("First caption", StringComparison.Ordinal) < pdf.IndexOf("Second caption", StringComparison.Ordinal));
         Assert.True(pdf.IndexOf("First alt", StringComparison.Ordinal) < pdf.IndexOf("Second alt", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Pdf_limits_total_decoded_png_pixels_and_names_the_omitted_figure()
+    {
+        // Each 4,000 x 2,000 line-art PNG is highly compressible but decodes to 24 MB RGB. The PDF retains
+        // only the first two (16M pixels total); the authored third figure remains a visible placeholder.
+        var raw = new byte[(4_000 * 3 + 1) * 2_000];
+        var uris = new List<string>();
+        for (var index = 0; index < 3; index++)
+        {
+            raw[^1] = (byte)(index + 1);
+            uris.Add("data:image/png;base64," + Convert.ToBase64String(Png(4_000, 2_000, raw)));
+        }
+        var rich = "{\"blocks\":[" + string.Join(",", uris.Select((uri, index) =>
+            $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"Cap {index + 1}\",\"caption\":\"Cap {index + 1}\"}}")) + "]}";
+
+        var output = ProfessionalPublicationRenderer.Render(Publication(rich), "pdf", "inline-images-cap");
+        var pdf = Encoding.ASCII.GetString(output.Content);
+
+        Assert.Equal(2, Count(pdf, "/Subtype /Image"));
+        Assert.Contains("[Image not retrieved: Cap 3]", pdf);
     }
 
     private static ProfessionalPublication Publication(string rich) => new(
