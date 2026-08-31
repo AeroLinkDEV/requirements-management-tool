@@ -153,6 +153,18 @@ public sealed class RichContentPublicationTests
         Assert.True(document.IndexOf("descr=\"First alt\"", StringComparison.Ordinal) < document.IndexOf("First caption", StringComparison.Ordinal));
         Assert.True(document.IndexOf("First caption", StringComparison.Ordinal) < document.IndexOf("descr=\"Second alt\"", StringComparison.Ordinal));
         Assert.Contains("Second caption", document);
+
+        // The package asset is intentionally shared, but each visual placement must still own a unique
+        // wp:docPr and pic:cNvPr ID. Word treats those IDs as drawing identities, not media identities.
+        var docPrIds = System.Text.RegularExpressions.Regex.Matches(document, "<wp:docPr id=\"(\\d+)\"")
+            .Select(match => match.Groups[1].Value).ToArray();
+        var cNvPrIds = System.Text.RegularExpressions.Regex.Matches(document, "<pic:cNvPr id=\"(\\d+)\"")
+            .Select(match => match.Groups[1].Value).ToArray();
+        Assert.Equal(2, docPrIds.Length);
+        Assert.Equal(docPrIds.Length, docPrIds.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(2, cNvPrIds.Length);
+        Assert.Equal(cNvPrIds.Length, cNvPrIds.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(docPrIds.Order(StringComparer.Ordinal), cNvPrIds.Order(StringComparer.Ordinal));
     }
 
     [Fact]

@@ -334,16 +334,167 @@ public sealed class ProblemReportCheckoutApiTests
             new { expectedVersion = recoveryVersion });
         Assert.Equal(HttpStatusCode.BadRequest, forgedCheckIn.StatusCode);
 
-        // The immutable revision made at creation remains renderable from its exact snapshot even after the
-        // current image catalog row is withdrawn. A historical PR must not become a blank document.
+        // Withdraw the exact image the accepted report revision references. The immutable revision must remain
+        // renderable from its frozen snapshot, while current output must truthfully identify that the live
+        // attachment is no longer available rather than silently embedding withdrawn bytes.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var item = await db.ControlledAttachments.SingleAsync(x => x.Id == sameProjectImage);
+            item.Withdraw();
+            await db.SaveChangesAsync();
+        }
+
         using var historical = await client.GetAsync($"/api/problem-reports/{allowedId}/download?revision=0&format=docx");
         Assert.Equal(HttpStatusCode.OK, historical.StatusCode);
         var historicalBytes = await historical.Content.ReadAsByteArrayAsync();
         using var zip = new ZipArchive(new MemoryStream(historicalBytes), ZipArchiveMode.Read);
-        Assert.Contains(zip.Entries, entry => entry.FullName.StartsWith("word/media/", StringComparison.Ordinal));
+        var historicalMedia = Assert.Single(zip.Entries,
+            entry => entry.FullName.StartsWith("word/media/", StringComparison.Ordinal));
+        await using (var mediaStream = historicalMedia.Open())
+        using (var mediaBytes = new MemoryStream())
+        {
+            await mediaStream.CopyToAsync(mediaBytes);
+            Assert.Equal(Png(), mediaBytes.ToArray());
+        }
+        using var historicalPdf = await client.GetAsync($"/api/problem-reports/{allowedId}/download?revision=0&format=pdf");
+        Assert.Equal(HttpStatusCode.OK, historicalPdf.StatusCode);
+        var historicalPdfText = Encoding.ASCII.GetString(await historicalPdf.Content.ReadAsByteArrayAsync());
+        Assert.Contains("/Subtype /Image", historicalPdfText);
         using var currentPdf = await client.GetAsync($"/api/problem-reports/{allowedId}/download?format=pdf");
         Assert.Equal(HttpStatusCode.OK, currentPdf.StatusCode);
         Assert.Equal("application/pdf", currentPdf.Content.Headers.ContentType?.MediaType);
+        var currentPdfText = Encoding.ASCII.GetString(await currentPdf.Content.ReadAsByteArrayAsync());
+        Assert.DoesNotContain("/Subtype /Image", currentPdfText);
+        Assert.Contains("Image not retrieved", currentPdfText);
+        using var currentDocx = await client.GetAsync($"/api/problem-reports/{allowedId}/download?format=docx");
+        Assert.Equal(HttpStatusCode.OK, currentDocx.StatusCode);
+        using var currentZip = new ZipArchive(new MemoryStream(await currentDocx.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
+        Assert.DoesNotContain(currentZip.Entries, entry => entry.FullName.StartsWith("word/media/", StringComparison.Ordinal));
+        using var currentDocument = new StreamReader(currentZip.GetEntry("word/document.xml")!.Open());
+        Assert.Contains("Image not retrieved", await currentDocument.ReadToEndAsync());
+    }
+
+    [Fact]
+    public async Task Problem_report_output_reads_a_persisted_v4_snapshot_without_rewriting_its_hash()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRV4OUT");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+
+        string historicalJson;
+        string historicalHash;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var report = await db.ProblemReports.SingleAsync(x => x.Id == reportId);
+            historicalJson = ProblemReportEvidenceContract.SerializeForSchema(report, 4);
+            historicalHash = ProblemReportEvidenceContract.Hash(historicalJson);
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
+                "LegacyV4Fixture", "history.engineer", historicalHash, historicalJson,
+                DateTimeOffset.UtcNow.AddMinutes(1), snapshotSchemaVersion: 4));
+            await db.SaveChangesAsync();
+        }
+
+        using var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&format=docx");
+        Assert.Equal(HttpStatusCode.OK, output.StatusCode);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            output.Content.Headers.ContentType?.MediaType);
+        using var zip = new ZipArchive(new MemoryStream(await output.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
+        using var document = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
+        var documentText = await document.ReadToEndAsync();
+        Assert.Contains("Snapshot schema", documentText);
+        Assert.Contains("PRV4OUT", documentText);
+        Assert.Equal(historicalHash, ProblemReportEvidenceContract.Hash(historicalJson));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Problem_report_output_reads_retained_legacy_snapshot_schemas_without_rewriting_their_hash(int schema)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, $"PRLEGACY{schema}");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+
+        string historicalJson;
+        string historicalHash;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var report = await db.ProblemReports.SingleAsync(x => x.Id == reportId);
+            historicalJson = LegacyOutputSnapshot(report, schema);
+            historicalHash = ProblemReportEvidenceContract.Hash(historicalJson);
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
+                $"LegacyV{schema}Fixture", "history.engineer", historicalHash, historicalJson,
+                DateTimeOffset.UtcNow.AddMinutes(1), snapshotSchemaVersion: schema));
+            await db.SaveChangesAsync();
+        }
+
+        using var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&format=docx");
+        Assert.Equal(HttpStatusCode.OK, output.StatusCode);
+        using var zip = new ZipArchive(new MemoryStream(await output.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
+        using var document = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
+        var documentText = await document.ReadToEndAsync();
+        Assert.Contains($"Snapshot schema", documentText);
+        Assert.Contains($">{schema}<", documentText);
+        Assert.Equal(historicalHash, ProblemReportEvidenceContract.Hash(historicalJson));
+        if (schema == 2)
+            Assert.Contains("Legacy type", documentText);
+    }
+
+    [Fact]
+    public async Task A_tampered_persisted_snapshot_is_refused_by_both_output_formats()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRTAMPER");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var report = await db.ProblemReports.SingleAsync(x => x.Id == reportId);
+            var source = ProblemReportEvidenceContract.Serialize(report);
+            var tampered = JsonNode.Parse(source)!.AsObject();
+            tampered["title"] = "Changed outside controlled history";
+            var tamperedJson = tampered.ToJsonString();
+            // Retain the authentic hash while changing the bytes. The generator must fail closed before it
+            // can publish a document that claims to be the committed revision.
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
+                "TamperedFixture", "history.engineer", ProblemReportEvidenceContract.Hash(source), tamperedJson,
+                DateTimeOffset.UtcNow.AddMinutes(1), snapshotSchemaVersion: ProblemReportEvidenceContract.SchemaVersion));
+            await db.SaveChangesAsync();
+        }
+
+        foreach (var format in new[] { "docx", "pdf" })
+        {
+            using var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&format={format}");
+            Assert.Equal(HttpStatusCode.NotFound, output.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task A_non_member_cannot_download_current_or_frozen_problem_report_output()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRAUTHOUT");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+        var nonMember = await SeedNonMemberAsync(factory, "PRAUTHOUT");
+        await LoginAsync(client, nonMember, AeroLinkApiFactory.MemberPassword);
+
+        using var current = await client.GetAsync($"/api/problem-reports/{reportId}/download?format=docx");
+        Assert.Equal(HttpStatusCode.Forbidden, current.StatusCode);
+        using var frozen = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&format=pdf");
+        Assert.Equal(HttpStatusCode.Forbidden, frozen.StatusCode);
     }
 
     private static async Task<Guid> UploadImageAsync(HttpClient client, Guid projectId, string fileName)
@@ -357,6 +508,39 @@ public sealed class ProblemReportCheckoutApiTests
         using var response = await client.PostAsync("/api/content/images", content);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+    }
+
+    private static string LegacyOutputSnapshot(ProblemReport report, int schema)
+    {
+        var snapshot = JsonNode.Parse(ProblemReportEvidenceContract.Serialize(report))!.AsObject();
+        snapshot["schemaVersion"] = schema;
+        if (schema == 1)
+            snapshot["contract"] = "aerolink.problem-report-closure-review";
+        if (schema <= 2)
+        {
+            snapshot["type"] = "Code";
+            snapshot.Remove("category");
+            snapshot.Remove("categoryProvenance");
+        }
+
+        // These fields were added after the legacy envelopes. Leaving them absent proves the reader falls
+        // back to the exact plain value recorded by the old schema instead of borrowing today's rich content.
+        if (schema <= 3)
+            foreach (var field in new[] { "analysisRich", "problemRich", "additionalInformationRich", "systemAircraftImpactRich",
+                                          "workaroundRich", "rootCauseRich", "effectsRich", "containmentRich", "correctiveActionRich" })
+                snapshot.Remove(field);
+        return snapshot.ToJsonString();
+    }
+
+    private static async Task<string> SeedNonMemberAsync(AeroLinkApiFactory factory, string prefix)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var userName = $"{prefix.ToLowerInvariant()}.external.{Guid.NewGuid():N}";
+        db.UserAccounts.Add(new UserAccount(userName, "External reviewer", $"{userName}@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow));
+        await db.SaveChangesAsync();
+        return userName;
     }
 
     private static Task<HttpResponseMessage> CreateWithImageAsync(HttpClient client, Guid projectId, Guid releaseId,

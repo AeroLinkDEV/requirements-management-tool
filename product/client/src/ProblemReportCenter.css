@@ -14,6 +14,10 @@
 .prEditButton{float:right;margin:-2px 0 8px 12px;padding:7px 10px;border:1px solid #cbd9e6;border-radius:7px;background:#fff;color:#2d6289;font-size:11px;font-weight:750}
 .prPager{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-top:1px solid #e0e8f0}.prPager span{color:#607188;font-size:12px;font-weight:700}.prPager button{padding:7px 10px;border:1px solid #cbd9e6;border-radius:7px;background:#fff;color:#2d6289;font-weight:700}.prPager button:disabled{cursor:not-allowed;opacity:.45}
 
+/* Operators can reach the deterministic current output and every renderable historical report revision
+   without copying an API URL. The links remain native so normal tab, keyboard, and save-link behavior work. */
+.prOutputActions{display:flex;align-items:center;gap:10px;margin-top:14px;padding:9px 12px;border:1px solid #dce7ee;border-radius:9px;background:#f7fbfd;font-size:11px}.prOutputActions span{margin-right:auto;color:#667488;font-weight:700}.prOutputActions a,.prRevisionOutputs a{color:#176b69;font-size:11px;font-weight:750;text-decoration:none}.prOutputActions a:hover,.prOutputActions a:focus-visible,.prRevisionOutputs a:hover,.prRevisionOutputs a:focus-visible{text-decoration:underline}.prRevisionOutputs{display:flex;flex-wrap:wrap;gap:8px;margin-left:auto}
+
 /* Editing under an exclusive server lease, like every other controlled record. */
 .prCheckoutHeld{clear:both;margin:0 0 14px;padding:11px 13px;border:1px solid #e0cfa8;border-radius:9px;background:#fffaf0;color:#6c5527;font-size:12px;line-height:1.5}
 .prCheckoutHeld b{display:block;margin-bottom:2px;color:#8a6a1c}

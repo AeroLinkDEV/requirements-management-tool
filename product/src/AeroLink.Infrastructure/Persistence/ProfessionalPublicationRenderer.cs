@@ -242,6 +242,7 @@ public static class ProfessionalPublicationRenderer
     {
         var assets = images.ToDictionary(x => x.Key, StringComparer.Ordinal);
         var body = new StringBuilder();
+        var placementNumber = 0;
         foreach (var block in Blocks(record))
         {
             switch (BlockType(block))
@@ -270,7 +271,7 @@ public static class ProfessionalPublicationRenderer
                     break;
                 case "image":
                     var placement = Placement(block, assets);
-                    if (placement is not null) body.Append(ImageDrawing(placement));
+                    if (placement is not null) body.Append(ImageDrawing(placement, ++placementNumber));
                     else body.Append(P(Text(block, "alt", "Invalid controlled image"), "Callout"));
                     break;
             }
@@ -278,13 +279,17 @@ public static class ProfessionalPublicationRenderer
         return body.ToString();
     }
 
-    private static string ImageDrawing(PublicationImagePlacement placement)
+    private static string ImageDrawing(PublicationImagePlacement placement, int placementNumber)
     {
         var image = placement.Asset;
         var cx = 5_400_000L * placement.WidthPercent / 100;
         var cy = Math.Clamp((long)(cx * Math.Max(1, image.Height) / (double)Math.Max(1, image.Width)), 1_800_000L, 4_000_000L);
         var alt = SecurityElement.Escape(placement.Alt);
-        return $"<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{100 + image.Index}\" name=\"ControlledImage{image.Index}\" descr=\"{alt}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"{image.Index}\" name=\"image{image.Index}.{image.Extension}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rId{image.Index + 3}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
+        // wp:docPr and pic:cNvPr IDs identify drawing *placements*, not media assets. Reusing the
+        // deduplicated asset index for a repeated image produces an invalid Open XML package because
+        // Word requires every non-visual drawing property ID to be unique in the document.
+        var drawingId = 100 + placementNumber;
+        return $"<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{drawingId}\" name=\"ControlledImage{placementNumber}\" descr=\"{alt}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"{drawingId}\" name=\"image{image.Index}.{image.Extension}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rId{image.Index + 3}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
             + P(placement.Caption.Length > 0 ? placement.Caption : placement.Alt, "RecordMeta");
     }
     private static (int Width,int Height) JpegSize(byte[] bytes)

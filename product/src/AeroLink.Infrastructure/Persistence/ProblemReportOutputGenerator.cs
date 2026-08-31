@@ -25,7 +25,7 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
 
         var selected = await SelectSnapshotAsync(report, revision, ct);
         if (selected is null) return null;
-        var (snapshot, snapshotJson, snapshotHash, snapshotSchema, frozen) = selected.Value;
+        var (snapshot, snapshotJson, snapshotHash, snapshotSchema, frozen, legacyType) = selected.Value;
         if (snapshot.Id != report.Id || snapshot.ProjectId != report.ProjectId
             || snapshot.Revision != (revision ?? report.Revision)) return null;
 
@@ -79,6 +79,8 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
             ("Snapshot schema", snapshotSchema.ToString()),
             ("Snapshot SHA-256", snapshotHash),
         };
+        if (legacyType is not null)
+            metadata.Insert(1, ("Legacy type", legacyType));
         var publication = new ProfessionalPublication(
             project.SoftwareProduct,
             program.Name + " (" + program.Code + ")",
@@ -103,14 +105,14 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
             SafeFileName(snapshot.DisplayNumber + "_" + snapshot.Title));
     }
 
-    private async Task<(ProblemReportEvidenceSnapshot Snapshot, string Json, string Hash, int Schema, bool Frozen)?>
+    private async Task<(ProblemReportEvidenceSnapshot Snapshot, string Json, string Hash, int Schema, bool Frozen, string? LegacyType)?>
         SelectSnapshotAsync(ProblemReport report, int? revision, CancellationToken ct)
     {
         if (revision is null)
         {
             var json = ProblemReportEvidenceContract.Serialize(report);
             return (ProblemReportEvidenceContract.Create(report), json,
-                ProblemReportEvidenceContract.Hash(json), ProblemReportEvidenceContract.SchemaVersion, false);
+                ProblemReportEvidenceContract.Hash(json), ProblemReportEvidenceContract.SchemaVersion, false, null);
         }
 
         // SQLite (used by the hosted API contract tests) cannot order DateTimeOffset in SQL. Read only the
@@ -123,13 +125,151 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
         var row = rows.OrderByDescending(x => x.OccurredAt).FirstOrDefault();
         if (row is null || string.IsNullOrWhiteSpace(row.SnapshotJson)
             || !string.Equals(ProblemReportEvidenceContract.Hash(row.SnapshotJson), row.SnapshotHash, StringComparison.OrdinalIgnoreCase)) return null;
-        ProblemReportEvidenceSnapshot? snapshot;
-        try { snapshot = JsonSerializer.Deserialize<ProblemReportEvidenceSnapshot>(row.SnapshotJson, SnapshotOptions); }
+        var parsed = ReadStoredSnapshot(row.SnapshotJson, row.SnapshotSchemaVersion);
+        return parsed is null ? null
+            : (parsed.Value.Snapshot, row.SnapshotJson, row.SnapshotHash, row.SnapshotSchemaVersion, true, parsed.Value.LegacyType);
+    }
+
+    /// <summary>
+    /// Reads the immutable snapshot envelope in the schema in which it was written. This is deliberately a
+    /// reader-only compatibility boundary: the original JSON and hash returned by SelectSnapshotAsync are
+    /// never reserialized or replaced with today's aggregate. v1 was the closure-review envelope, v2 the
+    /// original shared evidence envelope (with Type), v3 added Category, v4 added authored narrative fields,
+    /// and v5 added authored image layout. Missing fields therefore render as "not recorded", never as a
+    /// value borrowed from the current Problem Report.
+    /// </summary>
+    private static (ProblemReportEvidenceSnapshot Snapshot, string? LegacyType)? ReadStoredSnapshot(string json, int expectedSchema)
+    {
+        StoredSnapshot? stored;
+        try { stored = JsonSerializer.Deserialize<StoredSnapshot>(json, SnapshotOptions); }
         catch (JsonException) { return null; }
-        if (snapshot is null || !string.Equals(snapshot.Contract, ProblemReportEvidenceContract.Contract, StringComparison.Ordinal)
-            || snapshot.SchemaVersion != row.SnapshotSchemaVersion
-            || snapshot.SchemaVersion is not (4 or ProblemReportEvidenceContract.SchemaVersion)) return null;
-        return (snapshot, row.SnapshotJson, row.SnapshotHash, row.SnapshotSchemaVersion, true);
+        if (stored is null || stored.SchemaVersion != expectedSchema) return null;
+
+        var expectedContract = expectedSchema == 1
+            ? "aerolink.problem-report-closure-review"
+            : ProblemReportEvidenceContract.Contract;
+        if (!string.Equals(stored.Contract, expectedContract, StringComparison.Ordinal)
+            || expectedSchema is < 1 or > ProblemReportEvidenceContract.SchemaVersion)
+            return null;
+
+        var type = stored.Type;
+        var snapshot = new ProblemReportEvidenceSnapshot
+        {
+            Contract = stored.Contract!,
+            SchemaVersion = expectedSchema,
+            Id = stored.Id,
+            ProjectId = stored.ProjectId,
+            ReportNumber = Text(stored.ReportNumber),
+            Revision = stored.Revision,
+            DisplayNumber = Text(stored.DisplayNumber, stored.ReportNumber),
+            Title = Text(stored.Title),
+            Problem = Text(stored.Problem),
+            Analysis = Text(stored.Analysis),
+            AnalysisRich = Text(stored.AnalysisRich, stored.Analysis),
+            ReportedBy = Text(stored.ReportedBy),
+            ResponsibleEngineerId = Text(stored.ResponsibleEngineerId),
+            TargetReleaseId = stored.TargetReleaseId,
+            ProblemRich = Text(stored.ProblemRich),
+            AdditionalInformation = Text(stored.AdditionalInformation),
+            AdditionalInformationRich = Text(stored.AdditionalInformationRich, stored.AdditionalInformation),
+            SystemAircraftImpact = Text(stored.SystemAircraftImpact),
+            SystemAircraftImpactRich = Text(stored.SystemAircraftImpactRich, stored.SystemAircraftImpact),
+            Category = stored.Category,
+            CategoryProvenance = stored.CategoryProvenance,
+            Workaround = Text(stored.Workaround),
+            WorkaroundRich = Text(stored.WorkaroundRich, stored.Workaround),
+            ImpactAssessmentJson = Text(stored.ImpactAssessmentJson, "{}"),
+            Classification = Text(stored.Classification),
+            Severity = Text(stored.Severity),
+            Priority = Text(stored.Priority),
+            Origin = Text(stored.Origin),
+            AffectedConfiguration = Text(stored.AffectedConfiguration),
+            RootCause = Text(stored.RootCause),
+            RootCauseRich = Text(stored.RootCauseRich, stored.RootCause),
+            Effects = Text(stored.Effects),
+            EffectsRich = Text(stored.EffectsRich, stored.Effects),
+            Containment = Text(stored.Containment),
+            ContainmentRich = Text(stored.ContainmentRich, stored.Containment),
+            CorrectiveAction = Text(stored.CorrectiveAction),
+            CorrectiveActionRich = Text(stored.CorrectiveActionRich, stored.CorrectiveAction),
+            Disposition = stored.Disposition,
+            DispositionRationale = Text(stored.DispositionRationale),
+            ResolutionVerificationExecutionId = stored.ResolutionVerificationExecutionId,
+            ClosureApprovedBy = stored.ClosureApprovedBy,
+            ClosureApprovedByName = Text(stored.ClosureApprovedByName),
+            ClosureApprovedAt = stored.ClosureApprovedAt,
+            IsReleaseBlocker = stored.IsReleaseBlocker,
+            ReleaseBlockerVersion = stored.ReleaseBlockerVersion,
+            WaiverRationale = Text(stored.WaiverRationale),
+            WaivedBy = Text(stored.WaivedBy),
+            WaivedAt = stored.WaivedAt,
+            State = Text(stored.State),
+            CreatedAt = stored.CreatedAt ?? DateTimeOffset.MinValue,
+            UpdatedAt = stored.UpdatedAt ?? stored.CreatedAt ?? DateTimeOffset.MinValue,
+            Version = stored.Version,
+        };
+        return (snapshot, type);
+    }
+
+    private static string Text(string? value, string? fallback = null) => value ?? fallback ?? "";
+
+    // All members are optional because this is a reader for deployed historical envelopes. Do not add
+    // defaults that source current aggregate state: an omitted historical field means it was not recorded.
+    private sealed class StoredSnapshot
+    {
+        public string? Contract { get; set; }
+        public int SchemaVersion { get; set; }
+        public Guid Id { get; set; }
+        public Guid ProjectId { get; set; }
+        public string? ReportNumber { get; set; }
+        public int Revision { get; set; }
+        public string? DisplayNumber { get; set; }
+        public string? Title { get; set; }
+        public string? Problem { get; set; }
+        public string? Analysis { get; set; }
+        public string? AnalysisRich { get; set; }
+        public string? ReportedBy { get; set; }
+        public string? ResponsibleEngineerId { get; set; }
+        public Guid? TargetReleaseId { get; set; }
+        public string? ProblemRich { get; set; }
+        public string? AdditionalInformation { get; set; }
+        public string? AdditionalInformationRich { get; set; }
+        public string? SystemAircraftImpact { get; set; }
+        public string? SystemAircraftImpactRich { get; set; }
+        public string? Type { get; set; }
+        public string? Category { get; set; }
+        public string? CategoryProvenance { get; set; }
+        public string? Workaround { get; set; }
+        public string? WorkaroundRich { get; set; }
+        public string? ImpactAssessmentJson { get; set; }
+        public string? Classification { get; set; }
+        public string? Severity { get; set; }
+        public string? Priority { get; set; }
+        public string? Origin { get; set; }
+        public string? AffectedConfiguration { get; set; }
+        public string? RootCause { get; set; }
+        public string? RootCauseRich { get; set; }
+        public string? Effects { get; set; }
+        public string? EffectsRich { get; set; }
+        public string? Containment { get; set; }
+        public string? ContainmentRich { get; set; }
+        public string? CorrectiveAction { get; set; }
+        public string? CorrectiveActionRich { get; set; }
+        public string? Disposition { get; set; }
+        public string? DispositionRationale { get; set; }
+        public Guid? ResolutionVerificationExecutionId { get; set; }
+        public Guid? ClosureApprovedBy { get; set; }
+        public string? ClosureApprovedByName { get; set; }
+        public DateTimeOffset? ClosureApprovedAt { get; set; }
+        public bool IsReleaseBlocker { get; set; }
+        public long ReleaseBlockerVersion { get; set; }
+        public string? WaiverRationale { get; set; }
+        public string? WaivedBy { get; set; }
+        public DateTimeOffset? WaivedAt { get; set; }
+        public string? State { get; set; }
+        public DateTimeOffset? CreatedAt { get; set; }
+        public DateTimeOffset? UpdatedAt { get; set; }
+        public long Version { get; set; }
     }
 
     private static PublicationRecord Record(string number, string title, string plain, string rich,
