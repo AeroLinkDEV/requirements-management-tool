@@ -261,7 +261,9 @@ export function RichContentEditor({ api, projectId, editSessionId, value, label,
         <b>{label}</b>
         {documentLike && <span className="richEditorHint">Write naturally · paste or drop PNG/JPEG figures where they belong</span>}
         <div className="richToolbar" role="group" aria-label={`Add content to ${label}`}>
-          <button type="button" disabled={disabled} onClick={() => append({ type: "paragraph", text: "" })}>Paragraph</button>
+          {!documentLike && (
+            <button type="button" disabled={disabled} onClick={() => append({ type: "paragraph", text: "" })}>Paragraph</button>
+          )}
           {!documentLike && <button type="button" disabled={disabled} onClick={() => append({ type: "table", caption: "", rows: [["", ""], ["", ""]] })}>Table</button>}
           <button type="button" disabled={disabled || uploading} onClick={() => fileInput.current?.click()}>
             {uploading ? "Storing…" : documentLike ? "Insert image" : "Image"}

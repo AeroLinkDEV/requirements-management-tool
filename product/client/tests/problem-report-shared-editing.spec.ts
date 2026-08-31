@@ -29,8 +29,6 @@ test('a Project member who does not own a Verifying Problem Report can still cor
   await page.getByRole('button', { name: '+ Record problem' }).click()
   const raise = page.getByRole('dialog', { name: 'Record a problem' })
   await raise.getByLabel('Title').fill(title)
-  await raise.getByRole('group', { name: 'Add content to Problem Description' })
-    .getByRole('button', { name: 'Paragraph' }).click()
   await raise.getByRole('textbox', { name: 'Problem Description paragraph 1' })
     .fill('The disconnect tone follows the disconnect by about a second.')
   await chooseCategory(raise, 'Code Issue — Functional Impact')

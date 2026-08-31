@@ -3,7 +3,7 @@ using AeroLink.Domain.Common;
 namespace AeroLink.Domain.Requirements;
 
 public enum ControlledAttachmentState { Active, Superseded, Withdrawn }
-public enum ControlledAttachmentStorageOperationState { Pending, Available, RolledBack, RepairRequired }
+public enum ControlledAttachmentStorageOperationState { Pending, Available, RolledBack, RepairRequired, CleanedUp }
 public enum EditSessionState { Active, Committed, Abandoned, Conflict, Expired, ForceUnlocked }
 public enum IntegrityCheckpointState { Healthy, Attention, Failed }
 
@@ -133,6 +133,21 @@ public sealed class ControlledAttachmentStorageOperation
     {
         if (State == ControlledAttachmentStorageOperationState.Available) return;
         State = ControlledAttachmentStorageOperationState.RolledBack; Detail = Required(detail);
+        UpdatedAt = now; CompletedAt = now;
+    }
+
+    /// <summary>
+    /// Completes a durable reclamation intent after the unreferenced filesystem object has been removed.
+    /// Cleanup is deliberately a distinct terminal state: it must never be interpreted as an available
+    /// controlled attachment by reconciliation after the database row has already been reclaimed.
+    /// </summary>
+    public void CompleteCleanup(DateTimeOffset now)
+    {
+        if (State is ControlledAttachmentStorageOperationState.Available
+            or ControlledAttachmentStorageOperationState.RolledBack)
+            return;
+        State = ControlledAttachmentStorageOperationState.CleanedUp;
+        Detail = "The expired recovery image and its database row were reclaimed.";
         UpdatedAt = now; CompletedAt = now;
     }
 

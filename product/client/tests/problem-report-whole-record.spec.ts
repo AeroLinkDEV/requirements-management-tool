@@ -20,10 +20,8 @@ const NARRATIVE = [
   'System / aircraft impact',
 ]
 
-/** Types into a rich field's first paragraph, adding one if the field is empty. */
+/** Types into a document-like field's first paragraph; the block primitive is intentionally hidden. */
 async function writeField(scope: import('@playwright/test').Locator, label: string, text: string) {
-  const group = scope.getByRole('group', { name: `Add content to ${label}` })
-  await group.getByRole('button', { name: 'Paragraph', exact: true }).click()
   await scope.getByRole('textbox', { name: `${label} paragraph 1` }).fill(text)
 }
 

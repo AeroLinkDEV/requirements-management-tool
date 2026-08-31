@@ -16,7 +16,7 @@
   margin: 0; padding: 8px 12px; border-left: 3px solid var(--accent);
   background: #f7f9fb; display: grid; gap: 2px;
 }
-.richContentView blockquote span { font-size: 10px; letter-spacing: 0.08em; color: var(--ink-500); }
+.richContentView blockquote span { font-size: 12px; letter-spacing: 0.08em; color: var(--ink-500); }
 .richContentView blockquote b { font-size: 15px; color: var(--ink-900); }
 .richReference { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .richReference code { font-size: 12px; color: var(--ink-700); background: #f7f9fb; padding: 1px 6px; border-radius: 4px; }
@@ -38,8 +38,8 @@
 .richEditorHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .richEditorHead > b { font-size: 13px; color: var(--ink-900); }
 .richEditorDocument .richEditorHead { align-items: baseline; }
-.richEditorHint { flex: 1 1 240px; color: var(--ink-500); font-size: 11px; }
-.richDropHint { margin: 0; color: var(--ink-500); font-size: 11px; }
+.richEditorHint { flex: 1 1 240px; color: var(--ink-500); font-size: 12px; }
+.richDropHint { margin: 0; color: var(--ink-500); font-size: 12px; }
 .richEditorDocument.is-dragging { border-color: #16766f; background: #f0fbf8; box-shadow: 0 0 0 2px #16766f33; }
 .richToolbar { display: flex; gap: 6px; flex-wrap: wrap; }
 .richToolbar button {
@@ -67,12 +67,12 @@ html input.richFileInput { position: absolute; width: 1px; height: 1px; overflow
 .richBlocksDocument > li { border: 0; padding: 0; background: transparent; }
 .richBlocksDocument > li.richDocumentParagraph .richBlockBar { display: none; }
 .richBlocksDocument > li:has(.richImageEdit) { padding: 8px; border: 1px solid #dce5ee; border-radius: 9px; }
-.richBlocksDocument > li:has(.richImageEdit) .richBlockBar > span { font-size: 10px; }
+.richBlocksDocument > li:has(.richImageEdit) .richBlockBar > span { font-size: 12px; }
 .richBlocksDocument > li:has(.richImageEdit) .richBlockBar > div button:first-child,
 .richBlocksDocument > li:has(.richImageEdit) .richBlockBar > div button:nth-child(2) { display: none; }
 .richEmptyParagraph { min-height: 74px; }
 .richBlockBar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.richBlockBar > span { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-500); }
+.richBlockBar > span { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-500); }
 .richBlockBar > div { display: flex; gap: 4px; }
 .richBlockBar button {
   min-height: 28px; min-width: 28px; padding: 0 8px; font-size: 12px;
@@ -84,18 +84,18 @@ html input.richFileInput { position: absolute; width: 1px; height: 1px; overflow
 .richBlocks textarea { width: 100%; min-height: 76px; resize: vertical; font: inherit; font-size: 13px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink-900); }
 .richBlocks > li > input { width: 100%; font: inherit; font-size: 13px; min-height: var(--control-height-sm, 36px); padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; }
 .richPair { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
-.richPair label { display: grid; gap: 3px; font-size: 11px; color: var(--ink-500); }
+.richPair label { display: grid; gap: 3px; font-size: 12px; color: var(--ink-500); }
 .richPair input { font: inherit; font-size: 13px; min-height: var(--control-height-sm, 36px); padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink-900); }
 
 .richImageEdit { display: grid; gap: 8px; }
 .richImageEdit > img { display: block; max-width: 100%; max-height: 420px; object-fit: contain; object-position: left top; border: 1px solid var(--line); border-radius: 6px; background: white; }
-.richImageSize { display: grid; grid-template-columns: auto auto; align-items: center; gap: 5px 8px; max-width: 360px; color: var(--ink-500); font-size: 11px; }
+.richImageSize { display: grid; grid-template-columns: auto auto; align-items: center; gap: 5px 8px; max-width: 360px; color: var(--ink-500); font-size: 12px; }
 .richImageSize output { color: var(--ink-900); font-weight: 700; }
 .richImageSize input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
-.richInsertBelow { justify-self: start; min-height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: white; color: var(--ink-700); font-size: 11px; cursor: pointer; }
+.richInsertBelow { justify-self: start; min-height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: white; color: var(--ink-700); font-size: 12px; cursor: pointer; }
 
 .richTableEdit { display: grid; gap: 8px; }
-.richTableEdit > label { display: grid; gap: 3px; font-size: 11px; color: var(--ink-500); }
+.richTableEdit > label { display: grid; gap: 3px; font-size: 12px; color: var(--ink-500); }
 .richTableEdit > label input { font: inherit; font-size: 13px; min-height: var(--control-height-sm, 36px); padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink-900); }
 .richTableEdit td { border: 1px solid var(--line); padding: 2px; }
 .richTableEdit td input { width: 100%; min-width: 110px; font: inherit; font-size: 13px; min-height: 30px; padding: 0 6px; border: 0; background: transparent; color: var(--ink-900); }
@@ -112,7 +112,7 @@ html input.richFileInput { position: absolute; width: 1px; height: 1px; overflow
   border: 1px solid var(--line); border-radius: 6px; background: white; color: var(--ink-900); cursor: pointer;
 }
 .richTableButtons button:hover:not(:disabled) { background: #eef2f7; }
-.richTableNote { margin: 0; font-size: 11px; color: var(--ink-500); }
+.richTableNote { margin: 0; font-size: 12px; color: var(--ink-500); }
 
 /* Emphasis inside a paragraph. The body is contenteditable, so it has to look and behave like the
    textarea it replaced — same box, same growth, same focus ring — or the field reads as a different
@@ -125,7 +125,7 @@ html input.richFileInput { position: absolute; width: 1px; height: 1px; overflow
 }
 .richMarks button:nth-child(2) { font-style: italic; }
 .richMarks button:nth-child(3) { text-decoration: underline; }
-.richMarks button:nth-child(4) { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 11px; }
+.richMarks button:nth-child(4) { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; }
 .richMarks button.on { border-color: #16766f; background: #e4f2f0; color: #0f5751; }
 .richMarks button:disabled { opacity: .5; cursor: not-allowed; }
 .richMarks button:focus-visible, .richParagraphBody:focus-visible { outline: 2px solid #16766f; outline-offset: 1px; }

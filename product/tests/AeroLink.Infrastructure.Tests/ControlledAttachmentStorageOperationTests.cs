@@ -89,4 +89,45 @@ public sealed class ControlledAttachmentStorageOperationTests
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
     }
+
+    [Fact]
+    public async Task Expired_recovery_cleanup_is_replayed_from_its_durable_journal()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-inline-cleanup-{Guid.NewGuid():N}");
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        try
+        {
+            var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options;
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var program = new ProgramRecord("Cleanup program", "CLN");
+            var project = new ProjectRecord(program.Id, "Cleanup project", "Controlled image recovery");
+            db.AddRange(program, project);
+            await db.SaveChangesAsync();
+
+            var store = new EvidenceFileStore(root);
+            var operationId = Guid.NewGuid();
+            var staged = await store.StageAsync(new MemoryStream([7, 8, 9]), operationId, "inline-image", "expired.png",
+                "image/png", default);
+            await store.PromoteAsync(staged, default);
+            var operation = new ControlledAttachmentStorageOperation(operationId, project.Id, "InlineImageDraftCleanup",
+                Guid.NewGuid(), null, Guid.NewGuid(), 1, "Expired image", staged.OriginalFileName, staged.ContentType,
+                staged.Size, staged.Sha256, staged.StorageKey, staged.StorageKey, "system.cleanup", DateTimeOffset.UtcNow);
+            db.Add(operation);
+            await db.SaveChangesAsync();
+
+            var recovered = await new ControlledAttachmentStorageCoordinator(db, store)
+                .ReconcileAsync(operation, "system.integrity", DateTimeOffset.UtcNow, default);
+
+            Assert.Null(recovered);
+            Assert.Equal(ControlledAttachmentStorageOperationState.CleanedUp, operation.State);
+            Assert.False(store.Exists(staged.StorageKey));
+            Assert.Null(await db.ControlledAttachments.SingleOrDefaultAsync(x => x.Id == operation.ArtifactId));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
 }

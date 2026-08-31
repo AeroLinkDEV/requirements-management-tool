@@ -28,6 +28,32 @@ public sealed class ControlledAttachmentStorageCoordinator(AeroLinkDbContext db,
                 ? await db.ControlledAttachments.SingleOrDefaultAsync(x => x.Id == attachmentId, ct)
                 : null;
 
+        // Expired browser-recovery rows use the same durable operation table, but their intent is
+        // reclamation rather than adoption. Never run them through the normal pending-object path: doing so
+        // would recreate a controlled attachment after its recovery row was intentionally removed.
+        if (operation.ArtifactType == "InlineImageDraftCleanup")
+        {
+            await using var cleanupTransaction = await db.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable, ct);
+            try
+            {
+                if (files.Exists(operation.StorageKey))
+                    files.Delete(operation.StorageKey);
+                if (files.Exists(operation.StagingKey))
+                    files.Delete(operation.StagingKey);
+                operation.CompleteCleanup(now);
+                await db.SaveChangesAsync(ct);
+                await cleanupTransaction.CommitAsync(ct);
+            }
+            catch (Exception ex) when (ex is IOException or EvidenceIntegrityException or UnauthorizedAccessException)
+            {
+                operation.RequireRepair($"Expired inline-image cleanup could not remove its object: {ex.Message}", now);
+                await db.SaveChangesAsync(ct);
+                await cleanupTransaction.CommitAsync(ct);
+            }
+            return null;
+        }
+
         await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
         if (operation.EditSessionId is Guid sessionId)
         {

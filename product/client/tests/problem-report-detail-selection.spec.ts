@@ -28,7 +28,6 @@ const createDraft = async (page: Page, title: string) => {
   await page.getByRole('button', { name: '+ Record problem' }).click()
   const dialog = page.getByRole('dialog', { name: 'Record a problem' })
   await dialog.getByLabel('Title').fill(title)
-  await dialog.getByRole('group', { name: 'Add content to Problem Description' }).getByRole('button', { name: 'Paragraph' }).click()
   await dialog.getByRole('textbox', { name: 'Problem Description paragraph 1' }).fill('The pane must keep showing the record the reader selected.')
   await chooseCategory(dialog, 'Code Issue — Functional Impact')
   await dialog.getByRole('button', { name: 'Save Draft PR' }).click()

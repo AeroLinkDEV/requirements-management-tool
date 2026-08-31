@@ -57,6 +57,14 @@ public static class PngImage
         var hasScan = false;
         var hasEntropyData = false;
         var inEntropy = false;
+        var progressive = false;
+        var quantTables = new bool[4];
+        var dcTables = new bool[4];
+        var acTables = new bool[4];
+        var frameComponents = new Dictionary<byte, byte>();
+        const long maximumPixels = 100_000_000L;
+        const int maximumDimension = 32_768;
+
         while (offset < bytes.Length)
         {
             if (inEntropy)
@@ -92,31 +100,129 @@ public static class PngImage
             if (offset + 2 > bytes.Length) return false;
             var segmentLength = BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(offset, 2));
             if (segmentLength < 2 || segmentLength > bytes.Length - offset) return false;
-            var segmentEnd = offset + segmentLength;
+            var payloadStart = offset + 2;
+            var payloadLength = segmentLength - 2;
+            var payload = bytes.AsSpan(payloadStart, payloadLength);
+            var segmentEnd = payloadStart + payloadLength;
 
-            if (marker is >= 0xC0 and <= 0xC3 or >= 0xC5 and <= 0xC7 or >= 0xC9 and <= 0xCB or >= 0xCD and <= 0xCF)
+            switch (marker)
             {
-                // SOF payload: precision, height, width, component count. Require non-zero dimensions and
-                // at least one component so an otherwise well-framed marker cannot stand in for an image.
-                if (segmentLength < 8) return false;
-                var height = BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(offset + 3, 2));
-                var width = BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(offset + 5, 2));
-                if (bytes[offset + 2] == 0 || width == 0 || height == 0 || bytes[offset + 7] == 0) return false;
-                hasFrame = true;
-            }
-
-            if (marker == 0xDA)
-            {
-                // SOS has a header followed by entropy-coded data. The component count and spectral fields
-                // make the minimum legal baseline header six bytes plus the two-byte length itself.
-                if (segmentLength < 6) return false;
-                hasScan = true;
-                hasEntropyData = false;
-                inEntropy = true;
+                case 0xDB: // Define Quantization Table(s).
+                    if (!ReadQuantizationTables(payload, quantTables)) return false;
+                    break;
+                case 0xC4: // Define Huffman Table(s).
+                    if (!ReadHuffmanTables(payload, dcTables, acTables)) return false;
+                    break;
+                case >= 0xC0 and <= 0xC3:
+                case >= 0xC5 and <= 0xC7:
+                case >= 0xC9 and <= 0xCB:
+                case >= 0xCD and <= 0xCF:
+                    progressive = marker is 0xC2 or 0xC6 or 0xCA or 0xCE;
+                    if (!ReadFrame(payload, quantTables, frameComponents,
+                        progressive,
+                        maximumDimension, maximumPixels)) return false;
+                    hasFrame = true;
+                    break;
+                case 0xDA: // Start of Scan.
+                    if (!hasFrame || !ReadScan(payload, frameComponents, dcTables, acTables, progressive)) return false;
+                    hasScan = true;
+                    inEntropy = true;
+                    break;
             }
             offset = segmentEnd;
         }
         return false;
+    }
+
+    private static bool ReadQuantizationTables(ReadOnlySpan<byte> payload, bool[] tables)
+    {
+        var offset = 0;
+        while (offset < payload.Length)
+        {
+            var info = payload[offset++];
+            var precision = info >> 4;
+            var id = info & 0x0F;
+            if (precision > 1 || id > 3) return false;
+            var tableBytes = precision == 0 ? 64 : 128;
+            if (offset + tableBytes > payload.Length) return false;
+            tables[id] = true;
+            offset += tableBytes;
+        }
+        return offset == payload.Length;
+    }
+
+    private static bool ReadHuffmanTables(ReadOnlySpan<byte> payload, bool[] dcTables, bool[] acTables)
+    {
+        var offset = 0;
+        while (offset < payload.Length)
+        {
+            if (payload.Length - offset < 17) return false;
+            var info = payload[offset++];
+            var tableClass = info >> 4;
+            var tableId = info & 0x0F;
+            if (tableClass > 1 || tableId > 3) return false;
+            var symbolCount = 0;
+            for (var i = 0; i < 16; i++) symbolCount += payload[offset + i];
+            offset += 16;
+            if (offset + symbolCount > payload.Length) return false;
+            if (tableClass == 0) dcTables[tableId] = true;
+            else acTables[tableId] = true;
+            offset += symbolCount;
+        }
+        return offset == payload.Length;
+    }
+
+    private static bool ReadFrame(ReadOnlySpan<byte> payload, bool[] quantTables,
+        Dictionary<byte, byte> components, bool progressive, int maximumDimension, long maximumPixels)
+    {
+        components.Clear();
+        // SOF segment length is 8 + 3*N, therefore its payload is exactly 6 + 3*N.
+        if (payload.Length < 9 || payload[0] != 8) return false;
+        var height = BinaryPrimitives.ReadUInt16BigEndian(payload[1..3]);
+        var width = BinaryPrimitives.ReadUInt16BigEndian(payload[3..5]);
+        var count = payload[5];
+        if (width == 0 || height == 0 || width > maximumDimension || height > maximumDimension
+            || (long)width * height > maximumPixels || count is < 1 or > 4
+            || payload.Length != 6 + 3 * count) return false;
+
+        for (var i = 0; i < count; i++)
+        {
+            var at = 6 + 3 * i;
+            var id = payload[at];
+            var quant = payload[at + 2];
+            if (components.ContainsKey(id) || quant > 3 || !quantTables[quant]) return false;
+            components.Add(id, quant);
+        }
+        return true;
+    }
+
+    private static bool ReadScan(ReadOnlySpan<byte> payload, IReadOnlyDictionary<byte, byte> components,
+        bool[] dcTables, bool[] acTables, bool progressive)
+    {
+        // SOS segment length is 6 + 2*N, hence payload is 4 + 2*N.
+        if (payload.Length < 6) return false;
+        var count = payload[0];
+        if (count is < 1 or > 4 || payload.Length != 4 + 2 * count) return false;
+        var seen = new HashSet<byte>();
+        for (var i = 0; i < count; i++)
+        {
+            var at = 1 + 2 * i;
+            var component = payload[at];
+            var selectors = payload[at + 1];
+            var dc = selectors >> 4;
+            var ac = selectors & 0x0F;
+            if (!components.ContainsKey(component) || !seen.Add(component) || dc > 3 || ac > 3
+                || !dcTables[dc] || !acTables[ac]) return false;
+        }
+
+        var spectralStart = payload[^3];
+        var spectralEnd = payload[^2];
+        var successive = payload[^1];
+        if (spectralStart > spectralEnd || spectralEnd > 63 || (successive >> 4) > 13 || (successive & 0x0F) > 13)
+            return false;
+        // Baseline scans must carry the complete 0..63 band with no successive approximation. Progressive
+        // scans use the spectral/successive fields to split that band across multiple scans.
+        return progressive || (spectralStart == 0 && spectralEnd == 63 && successive == 0);
     }
 
     /// <summary>Reads the dimensions from IHDR alone, without decoding pixels.</summary>

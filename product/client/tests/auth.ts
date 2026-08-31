@@ -218,16 +218,11 @@ export async function chooseCategory(scope: Locator | Page, label: string) {
 /**
  * Writes into a rich authored field.
  *
- * Every Problem Report narrative field holds structure now, so it is a block editor rather than a
- * textarea: a paragraph has to exist before there is anywhere to type. Adding one and filling it is what
- * a person does, and doing it here keeps that detail out of every journey that just wants to say what
- * the field contains.
+ * Every Problem Report narrative field holds typed structure internally, while document-like editing opens
+ * directly on its first paragraph. The block primitive stays hidden from ordinary authoring; typing and
+ * Enter continuation are the authoring interaction.
  */
 export async function writeRichField(scope: Locator | Page, label: string, text: string) {
   const body = scope.getByRole("textbox", { name: `${label} paragraph 1` })
-  // A field that already holds content has its paragraph; adding another would leave an empty one behind.
-  if (await body.count() === 0)
-    await scope.getByRole("group", { name: `Add content to ${label}` })
-      .getByRole("button", { name: "Paragraph", exact: true }).click()
   await body.fill(text)
 }

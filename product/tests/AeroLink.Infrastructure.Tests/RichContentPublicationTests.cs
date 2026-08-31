@@ -84,13 +84,60 @@ public sealed class RichContentPublicationTests
     [Fact]
     public void A_jpeg_requires_a_structural_frame_scan_and_terminal_eoi()
     {
-        var jpeg = Convert.FromBase64String(
+        var jpeg = MinimalJpeg(); /* legacy fixture retained in source for provenance:
             "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/AX//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/AX//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/Aqf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/Iqf/2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8Qf//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8Qf//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8Qf//Z");
 
+        */
         Assert.True(PngImage.IsDeclaredImage(jpeg, "image/jpeg"));
         Assert.False(PngImage.IsDeclaredImage(jpeg[..^2], "image/jpeg"));
         Assert.False(PngImage.IsDeclaredImage([.. jpeg, (byte)0x00], "image/jpeg"));
         Assert.False(PngImage.IsDeclaredImage([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10], "image/jpeg"));
+    }
+
+    [Fact]
+    public void A_jpeg_rejects_missing_tables_bad_lengths_and_resource_bombs()
+    {
+        var missingQuantization = MinimalJpeg();
+        var frame = Array.IndexOf(missingQuantization, (byte)0xC0);
+        missingQuantization[frame + 12] = 1; // frame component selects a table that was not declared
+        Assert.False(PngImage.IsDeclaredImage(missingQuantization, "image/jpeg"));
+
+        var missingHuffman = MinimalJpeg();
+        var scan = Array.IndexOf(missingHuffman, (byte)0xDA);
+        missingHuffman[scan + 6] = 0x10; // AC table 1 was not declared
+        Assert.False(PngImage.IsDeclaredImage(missingHuffman, "image/jpeg"));
+
+        var malformedFrameLength = MinimalJpeg();
+        frame = Array.IndexOf(malformedFrameLength, (byte)0xC0);
+        malformedFrameLength[frame + 3] = 0x0A; // SOF payload is no longer exactly 6 + 3*N bytes
+        Assert.False(PngImage.IsDeclaredImage(malformedFrameLength, "image/jpeg"));
+
+        var resourceBomb = MinimalJpeg();
+        frame = Array.IndexOf(resourceBomb, (byte)0xC0);
+        resourceBomb[frame + 5] = 0xFF;
+        resourceBomb[frame + 6] = 0xFF;
+        resourceBomb[frame + 7] = 0xFF;
+        resourceBomb[frame + 8] = 0xFF;
+        Assert.False(PngImage.IsDeclaredImage(resourceBomb, "image/jpeg"));
+    }
+
+    private static byte[] MinimalJpeg()
+    {
+        using var output = new MemoryStream();
+        output.Write([0xFF, 0xD8]);
+        Segment(output, 0xDB, [0x00, .. Enumerable.Repeat((byte)1, 64)]);
+        Segment(output, 0xC0, [8, 0, 1, 0, 1, 1, 1, 0x11, 0]);
+        Segment(output, 0xC4, [0x00, 1, .. Enumerable.Repeat((byte)0, 15), 0]);
+        Segment(output, 0xC4, [0x10, 1, .. Enumerable.Repeat((byte)0, 15), 0]);
+        Segment(output, 0xDA, [1, 1, 0, 0, 63, 0]);
+        output.Write([0x00, 0xFF, 0xD9]);
+        return output.ToArray();
+
+        static void Segment(Stream target, byte marker, byte[] payload)
+        {
+            target.Write([0xFF, marker, (byte)((payload.Length + 2) >> 8), (byte)(payload.Length + 2)]);
+            target.Write(payload);
+        }
     }
 
     [Fact]
@@ -185,7 +232,8 @@ public sealed class RichContentPublicationTests
         var uri = "data:image/png;base64," + Convert.ToBase64String(Png());
         var rich = "{\"blocks\":["
             + $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"First alt\",\"caption\":\"First caption\",\"widthPercent\":40}},"
-            + $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"Second alt\",\"caption\":\"Second caption\",\"widthPercent\":80}}]}}";
+            + $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"Second alt\",\"caption\":\"Second caption\",\"widthPercent\":60}},"
+            + "{\"type\":\"paragraph\",\"text\":\"Text below figures.\"}]}";
         var output = ProfessionalPublicationRenderer.Render(Publication(rich), "docx", "inline-images");
 
         using var zip = new ZipArchive(new MemoryStream(output.Content), ZipArchiveMode.Read);
@@ -195,11 +243,13 @@ public sealed class RichContentPublicationTests
 
         Assert.Equal(1, media); // identical bytes are one package asset, not one asset per occurrence
         Assert.Equal(1, relationships.Split("Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\"").Length - 1);
-        Assert.Contains("cx=\"2160000\"", document); // 40% of the document width
-        Assert.Contains("cx=\"4320000\"", document); // 80% of the document width
+        Assert.Contains("<w:tbl", document); // adjacent figures share one fixed-layout Word row
+        Assert.Contains("cx=\"3600000\"", document); // 40% of the row width
+        Assert.Contains("cx=\"5400000\"", document); // 60% of the row width
         Assert.True(document.IndexOf("descr=\"First alt\"", StringComparison.Ordinal) < document.IndexOf("First caption", StringComparison.Ordinal));
         Assert.True(document.IndexOf("First caption", StringComparison.Ordinal) < document.IndexOf("descr=\"Second alt\"", StringComparison.Ordinal));
         Assert.Contains("Second caption", document);
+        Assert.True(document.IndexOf("Second caption", StringComparison.Ordinal) < document.IndexOf("Text below figures.", StringComparison.Ordinal));
 
         // The package asset is intentionally shared, but each visual placement must still own a unique
         // wp:docPr and pic:cNvPr ID. Word treats those IDs as drawing identities, not media identities.
@@ -220,16 +270,18 @@ public sealed class RichContentPublicationTests
         var uri = "data:image/png;base64," + Convert.ToBase64String(Png());
         var rich = "{\"blocks\":["
             + $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"First alt\",\"caption\":\"First caption\",\"widthPercent\":40}},"
-            + $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"Second alt\",\"caption\":\"Second caption\",\"widthPercent\":80}}]}}";
+            + $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"Second alt\",\"caption\":\"Second caption\",\"widthPercent\":60}},"
+            + "{\"type\":\"paragraph\",\"text\":\"Text below figures.\"}]}";
         var output = ProfessionalPublicationRenderer.Render(Publication(rich), "pdf", "inline-images");
         var pdf = Encoding.ASCII.GetString(output.Content);
 
         Assert.Equal(1, Count(pdf, "/Subtype /Image"));
         Assert.Equal(2, Count(pdf, "/Im1 Do"));
-        Assert.Contains("192 0 0 192", pdf); // 40% occurrence
-        Assert.Contains("384 0 0 384", pdf); // 80% occurrence
+        Assert.Contains("187.2 0 0 187.2", pdf); // 40% occurrence in the shared row
+        Assert.Contains("280.8 0 0 280.8", pdf); // 60% occurrence in the shared row
         Assert.True(pdf.IndexOf("First caption", StringComparison.Ordinal) < pdf.IndexOf("Second caption", StringComparison.Ordinal));
         Assert.True(pdf.IndexOf("First alt", StringComparison.Ordinal) < pdf.IndexOf("Second alt", StringComparison.Ordinal));
+        Assert.True(pdf.IndexOf("Second alt", StringComparison.Ordinal) < pdf.IndexOf("Text below figures.", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -759,7 +759,7 @@ public static class RequirementsEndpoints
             StagedEvidence? staged=null;
             ControlledAttachmentStorageOperation? storageOperation=null;
             var operationId=Guid.NewGuid();
-            var expiredKeys=Array.Empty<string>();
+            var expiredCleanupOperations=new List<ControlledAttachmentStorageOperation>();
             var committed=false;
             try
             {
@@ -793,8 +793,20 @@ public static class RequirementsEndpoints
                 var expiredRecovery=db.Database.IsSqlite()
                     ?(await recoveryQuery.ToListAsync(ct)).Where(x=>x.UploadedAt<recoveryCutoff).ToList()
                     :await recoveryQuery.Where(x=>x.UploadedAt<recoveryCutoff).ToListAsync(ct);
-                expiredKeys=expiredRecovery.Select(x=>x.StorageKey).ToArray();
-                if(expiredRecovery.Count>0){db.ControlledAttachments.RemoveRange(expiredRecovery);await db.SaveChangesAsync(ct);}
+                if(expiredRecovery.Count>0)
+                {
+                    // The row and its bytes cannot be removed atomically. Record the reclamation intent in
+                    // the same transaction as the row deletion first; a crash after commit is then a durable,
+                    // retryable cleanup operation rather than an untracked filesystem orphan.
+                    var cleanupNow=DateTimeOffset.UtcNow;
+                    expiredCleanupOperations=expiredRecovery.Select(x=>new ControlledAttachmentStorageOperation(
+                        Guid.NewGuid(),projectId,"InlineImageDraftCleanup",x.Id,x.RevisionId,x.LogicalId,x.Version,
+                        x.Label,x.OriginalFileName,x.ContentType,x.Size,x.Sha256,x.StorageKey,x.StorageKey,
+                        actor.UserName,cleanupNow)).ToList();
+                    db.ControlledAttachmentStorageOperations.AddRange(expiredCleanupOperations);
+                    db.ControlledAttachments.RemoveRange(expiredRecovery);
+                    await db.SaveChangesAsync(ct);
+                }
 
                 var used=await db.ControlledAttachments.AsNoTracking()
                     .Where(x=>x.ProjectId==projectId&&(x.ArtifactType=="InlineImage"||x.ArtifactType=="InlineImageDraft"))
@@ -802,7 +814,8 @@ public static class RequirementsEndpoints
                 // A staged operation is a quota reservation even before its attachment row exists. Counting
                 // pending reservations closes the interval between the intent commit and final metadata commit.
                 used+=await db.ControlledAttachmentStorageOperations.AsNoTracking()
-                    .Where(x=>x.ProjectId==projectId&&x.State==ControlledAttachmentStorageOperationState.Pending)
+                    .Where(x=>x.ProjectId==projectId&&x.State==ControlledAttachmentStorageOperationState.Pending
+                        &&(x.ArtifactType=="InlineImage"||x.ArtifactType=="InlineImageDraft"))
                     .SumAsync(x=>(long?)x.Size,ct)??0;
                 if(used>=MaximumInlineImageBytesPerProject||file.Length>MaximumInlineImageBytesPerProject-used)
                     return Results.Conflict(new{error="This Project has reached its controlled inline-image storage limit.",code="inline_image_project_quota",limitBytes=MaximumInlineImageBytesPerProject});
@@ -810,7 +823,8 @@ public static class RequirementsEndpoints
                     .Where(x=>x.ProjectId==projectId&&(x.ArtifactType=="InlineImage"||x.ArtifactType=="InlineImageDraft")&&x.UploadedBy==actor.UserName)
                     .SumAsync(x=>(long?)x.Size,ct)??0;
                 actorUsed+=await db.ControlledAttachmentStorageOperations.AsNoTracking()
-                    .Where(x=>x.ProjectId==projectId&&x.State==ControlledAttachmentStorageOperationState.Pending&&x.Actor==actor.UserName)
+                    .Where(x=>x.ProjectId==projectId&&x.State==ControlledAttachmentStorageOperationState.Pending
+                        &&(x.ArtifactType=="InlineImage"||x.ArtifactType=="InlineImageDraft")&&x.Actor==actor.UserName)
                     .SumAsync(x=>(long?)x.Size,ct)??0;
                 if(actorUsed>=MaximumInlineImageBytesPerActorPerProject||file.Length>MaximumInlineImageBytesPerActorPerProject-actorUsed)
                     return Results.Conflict(new{error="You have reached your controlled inline-image storage limit for this Project.",code="inline_image_actor_quota",limitBytes=MaximumInlineImageBytesPerActorPerProject});
@@ -857,14 +871,21 @@ public static class RequirementsEndpoints
                     storageOperation.StorageKey,null,actor.UserName,now);
                 db.ControlledAttachments.Add(attachment);storageOperation.Complete(attachment.Id,DateTimeOffset.UtcNow);
                 await db.SaveChangesAsync(ct);await commitTransaction.CommitAsync(ct);committed=true;
-                foreach(var key in expiredKeys)
+                foreach(var cleanup in expiredCleanupOperations)
                 {
-                    try{store.Delete(key);}
-                    catch(Exception ex) when(ex is IOException or UnauthorizedAccessException)
+                    try
                     {
-                        loggerFactory.CreateLogger("InlineImageRecovery").LogWarning(ex,"Could not reclaim expired inline-image object {StorageKey}.",key);
+                        store.Delete(cleanup.StorageKey);
+                        if(cleanup.StagingKey!=cleanup.StorageKey)store.Delete(cleanup.StagingKey);
+                        cleanup.CompleteCleanup(DateTimeOffset.UtcNow);
+                    }
+                    catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or EvidenceIntegrityException)
+                    {
+                        cleanup.RequireRepair($"Could not reclaim expired inline-image object {cleanup.StorageKey}: {ex.Message}",DateTimeOffset.UtcNow);
+                        loggerFactory.CreateLogger("InlineImageRecovery").LogWarning(ex,"Could not reclaim expired inline-image object {StorageKey}; durable cleanup will retry.",cleanup.StorageKey);
                     }
                 }
+                if(expiredCleanupOperations.Count>0)await db.SaveChangesAsync(ct);
                 return Results.Created($"/api/content/images/{attachment.Id}",new{attachment.Id,attachment.OriginalFileName,attachment.Size,attachment.Sha256,recoveryExpiresAt=recovery?attachment.UploadedAt.AddDays(30):(DateTimeOffset?)null});
             }
             catch(Exception ex) when(IsInlineImageConcurrencyConflict(ex))

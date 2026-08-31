@@ -61,8 +61,6 @@ test('emphasis applied in the browser survives check-in and reload', async ({ pa
   await page.getByRole('button', { name: '+ Record problem' }).click()
   const raise = page.getByRole('dialog', { name: 'Record a problem' })
   await raise.getByLabel('Title').fill(title)
-  await raise.getByRole('group', { name: 'Add content to Problem Description' })
-    .getByRole('button', { name: 'Paragraph' }).click()
 
   const body = raise.getByRole('textbox', { name: 'Problem Description paragraph 1' })
   await body.click()
@@ -108,8 +106,6 @@ test('text that looks like markup is stored and shown as text', async ({ page, r
   await page.getByRole('button', { name: '+ Record problem' }).click()
   const raise = page.getByRole('dialog', { name: 'Record a problem' })
   await raise.getByLabel('Title').fill(title)
-  await raise.getByRole('group', { name: 'Add content to Problem Description' })
-    .getByRole('button', { name: 'Paragraph' }).click()
 
   const body = raise.getByRole('textbox', { name: 'Problem Description paragraph 1' })
   await body.click()
