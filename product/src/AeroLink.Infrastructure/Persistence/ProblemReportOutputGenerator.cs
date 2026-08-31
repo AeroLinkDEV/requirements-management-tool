@@ -13,7 +13,7 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
 {
     private static readonly JsonSerializerOptions SnapshotOptions = new() { PropertyNameCaseInsensitive = true };
 
-    public async Task<GeneratedOutput?> GenerateAsync(Guid problemReportId, int? revision, string format,
+    public async Task<GeneratedOutput?> GenerateAsync(Guid problemReportId, int? revision, Guid? snapshotId, string format,
         CancellationToken ct)
     {
         if (!format.Equals("docx", StringComparison.OrdinalIgnoreCase)
@@ -23,11 +23,12 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
             .SingleOrDefaultAsync(x => x.Id == problemReportId, ct);
         if (report is null) return null;
 
-        var selected = await SelectSnapshotAsync(report, revision, ct);
+        var selected = await SelectSnapshotAsync(report, revision, snapshotId, ct);
         if (selected is null) return null;
-        var (snapshot, snapshotJson, snapshotHash, snapshotSchema, frozen, legacyType) = selected.Value;
+        var (snapshot, snapshotJson, snapshotHash, snapshotSchema, frozen, legacyType,
+            selectedSnapshotId, selectedOccurredAt) = selected.Value;
         if (snapshot.Id != report.Id || snapshot.ProjectId != report.ProjectId
-            || snapshot.Revision != (revision ?? report.Revision)) return null;
+            || snapshot.Revision != (frozen ? revision ?? snapshot.Revision : report.Revision)) return null;
 
         var project = await db.Projects.AsNoTracking().SingleOrDefaultAsync(x => x.Id == snapshot.ProjectId, ct);
         if (project is null) return null;
@@ -59,9 +60,14 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
         };
 
         var revisions = await db.ProblemReportRevisions.AsNoTracking()
-            .Where(x => x.ProblemReportId == report.Id && (!revision.HasValue || x.Revision <= revision.Value))
+            .Where(x => x.ProblemReportId == report.Id && (!frozen || x.Revision <= snapshot.Revision))
             .ToListAsync(ct);
-        var history = revisions.OrderBy(x => x.Revision).ThenBy(x => x.OccurredAt).Select(x => (
+        if (selectedSnapshotId is Guid exactId && selectedOccurredAt is DateTimeOffset exactTime)
+            revisions = revisions.Where(x => x.Revision < snapshot.Revision
+                    || (x.Revision == snapshot.Revision
+                        && (x.OccurredAt < exactTime || (x.OccurredAt == exactTime && x.Id.CompareTo(exactId) <= 0))))
+                .ToList();
+        var history = revisions.OrderBy(x => x.Revision).ThenBy(x => x.OccurredAt).ThenBy(x => x.Id).Select(x => (
             Revision: x.Revision.ToString("D2"),
             Status: string.IsNullOrWhiteSpace(x.ToState) ? x.EventType : x.ToState,
             Date: x.OccurredAt.UtcDateTime.ToString("yyyy-MM-dd"),
@@ -105,29 +111,34 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
             SafeFileName(snapshot.DisplayNumber + "_" + snapshot.Title));
     }
 
-    private async Task<(ProblemReportEvidenceSnapshot Snapshot, string Json, string Hash, int Schema, bool Frozen, string? LegacyType)?>
-        SelectSnapshotAsync(ProblemReport report, int? revision, CancellationToken ct)
+    private async Task<(ProblemReportEvidenceSnapshot Snapshot, string Json, string Hash, int Schema, bool Frozen,
+        string? LegacyType, Guid? SnapshotId, DateTimeOffset? OccurredAt)?>
+        SelectSnapshotAsync(ProblemReport report, int? revision, Guid? snapshotId, CancellationToken ct)
     {
-        if (revision is null)
+        if (revision is null && snapshotId is null)
         {
             var json = ProblemReportEvidenceContract.Serialize(report);
             return (ProblemReportEvidenceContract.Create(report), json,
-                ProblemReportEvidenceContract.Hash(json), ProblemReportEvidenceContract.SchemaVersion, false, null);
+                ProblemReportEvidenceContract.Hash(json), ProblemReportEvidenceContract.SchemaVersion, false, null,
+                null, null);
         }
 
         // SQLite (used by the hosted API contract tests) cannot order DateTimeOffset in SQL. Read only the
         // immutable candidate rows, then order their captured event times in memory; no current record is
         // consulted to choose the historical snapshot.
         var rows = await db.ProblemReportRevisions.AsNoTracking()
-            .Where(x => x.ProblemReportId == report.Id && x.Revision == revision.Value)
-            .Select(x => new { x.SnapshotJson, x.SnapshotHash, x.SnapshotSchemaVersion, x.OccurredAt })
+            .Where(x => x.ProblemReportId == report.Id
+                && (snapshotId.HasValue ? x.Id == snapshotId.Value : x.Revision == revision!.Value))
+            .Select(x => new { x.Id, x.Revision, x.SnapshotJson, x.SnapshotHash, x.SnapshotSchemaVersion, x.OccurredAt })
             .ToListAsync(ct);
-        var row = rows.OrderByDescending(x => x.OccurredAt).FirstOrDefault();
+        var row = rows.OrderByDescending(x => x.OccurredAt).ThenByDescending(x => x.Id).FirstOrDefault();
         if (row is null || string.IsNullOrWhiteSpace(row.SnapshotJson)
+            || (revision.HasValue && row.Revision != revision.Value)
             || !string.Equals(ProblemReportEvidenceContract.Hash(row.SnapshotJson), row.SnapshotHash, StringComparison.OrdinalIgnoreCase)) return null;
         var parsed = ReadStoredSnapshot(row.SnapshotJson, row.SnapshotSchemaVersion);
-        return parsed is null ? null
-            : (parsed.Value.Snapshot, row.SnapshotJson, row.SnapshotHash, row.SnapshotSchemaVersion, true, parsed.Value.LegacyType);
+        return parsed is null || parsed.Value.Snapshot.Revision != row.Revision ? null
+            : (parsed.Value.Snapshot, row.SnapshotJson, row.SnapshotHash, row.SnapshotSchemaVersion, true,
+                parsed.Value.LegacyType, row.Id, row.OccurredAt);
     }
 
     /// <summary>

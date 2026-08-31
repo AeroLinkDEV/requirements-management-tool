@@ -429,6 +429,66 @@ public sealed class ProblemReportCheckoutApiTests
     }
 
     [Fact]
+    public async Task Problem_report_output_selects_the_exact_snapshot_when_numeric_revisions_repeat()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var seeded = await SeedAsync(factory, "PREXACTOUTPUT");
+        var reportId = await RaiseAsync(client, seeded.ProjectId, seeded.ReleaseId);
+        var otherReportId = await RaiseAsync(client, seeded.ProjectId, seeded.ReleaseId);
+
+        Guid firstSnapshotId;
+        Guid secondSnapshotId;
+        Guid foreignSnapshotId;
+        string firstTitle;
+        const string secondTitle = "The second lifecycle event at the same numeric revision";
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var first = (await db.ProblemReportRevisions.AsNoTracking()
+                    .Where(x => x.ProblemReportId == reportId && x.Revision == 0).ToListAsync())
+                .OrderBy(x => x.OccurredAt).ThenBy(x => x.Id).First();
+            firstSnapshotId = first.Id;
+            using (var firstDocument = JsonDocument.Parse(first.SnapshotJson))
+                firstTitle = firstDocument.RootElement.GetProperty("title").GetString()!;
+
+            var secondJson = JsonNode.Parse(first.SnapshotJson)!.AsObject();
+            secondJson["title"] = secondTitle;
+            var serializedSecond = secondJson.ToJsonString();
+            var second = new ProblemReportRevision(reportId, 0, "SameRevisionFollowUp", "history.engineer",
+                ProblemReportEvidenceContract.Hash(serializedSecond), serializedSecond,
+                first.OccurredAt.AddSeconds(1), first.SnapshotSchemaVersion);
+            db.ProblemReportRevisions.Add(second);
+            await db.SaveChangesAsync();
+            secondSnapshotId = second.Id;
+            foreignSnapshotId = await db.ProblemReportRevisions.AsNoTracking()
+                .Where(x => x.ProblemReportId == otherReportId).Select(x => x.Id).FirstAsync();
+        }
+
+        static async Task<string> DocumentXml(HttpResponseMessage response)
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var zip = new ZipArchive(new MemoryStream(await response.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
+            using var reader = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
+            return await reader.ReadToEndAsync();
+        }
+
+        using var firstOutput = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&snapshotId={firstSnapshotId}&format=docx");
+        var firstXml = await DocumentXml(firstOutput);
+        Assert.Contains(firstTitle, firstXml);
+        Assert.DoesNotContain(secondTitle, firstXml);
+
+        using var secondOutput = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&snapshotId={secondSnapshotId}&format=docx");
+        Assert.Contains(secondTitle, await DocumentXml(secondOutput));
+
+        using var foreign = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&snapshotId={foreignSnapshotId}&format=docx");
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+        using var missing = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&snapshotId={Guid.NewGuid()}&format=docx");
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+    }
+
+    [Fact]
     public async Task Current_and_frozen_problem_report_output_refuse_a_changed_inline_image_blob()
     {
         using var factory = new AeroLinkApiFactory();

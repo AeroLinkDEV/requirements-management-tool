@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 722,
-    "cases": 806,
+    "tests": 723,
+    "cases": 807,
     "classes": 116,
-    "hostedTests": 693,
-    "hostedCases": 763,
+    "hostedTests": 694,
+    "hostedCases": 764,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 7,
@@ -29,8 +29,8 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 154,
-      "cases": 168,
+      "tests": 155,
+      "cases": 169,
       "unknownCases": 0,
       "classes": 56
     },
@@ -5518,8 +5518,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 598,
-        "end": 613
+        "start": 658,
+        "end": 673
       }
     },
     {
@@ -5535,8 +5535,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1032,
-        "end": 1065
+        "start": 1092,
+        "end": 1125
       }
     },
     {
@@ -5552,8 +5552,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1071,
-        "end": 1100
+        "start": 1131,
+        "end": 1160
       }
     },
     {
@@ -5570,8 +5570,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 566,
-        "end": 596
+        "start": 626,
+        "end": 656
       }
     },
     {
@@ -5605,8 +5605,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 836,
-        "end": 881
+        "start": 896,
+        "end": 941
       }
     },
     {
@@ -5623,8 +5623,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 431,
-        "end": 466
+        "start": 491,
+        "end": 526
       }
     },
     {
@@ -5711,8 +5711,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 732,
-        "end": 755
+        "start": 792,
+        "end": 815
       }
     },
     {
@@ -5729,8 +5729,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 698,
-        "end": 730
+        "start": 758,
+        "end": 790
       }
     },
     {
@@ -5746,8 +5746,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 816,
-        "end": 834
+        "start": 876,
+        "end": 894
       }
     },
     {
@@ -5764,8 +5764,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 615,
-        "end": 696
+        "start": 675,
+        "end": 756
       }
     },
     {
@@ -5781,8 +5781,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1106,
-        "end": 1145
+        "start": 1166,
+        "end": 1205
       }
     },
     {
@@ -5799,8 +5799,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 757,
-        "end": 814
+        "start": 817,
+        "end": 874
       }
     },
     {
@@ -5817,8 +5817,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 468,
-        "end": 501
+        "start": 528,
+        "end": 561
       }
     },
     {
@@ -5835,8 +5835,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 503,
-        "end": 564
+        "start": 563,
+        "end": 624
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Problem_report_output_selects_the_exact_snapshot_when_numeric_revisions_repeat",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 431,
+        "end": 489
       }
     },
     {

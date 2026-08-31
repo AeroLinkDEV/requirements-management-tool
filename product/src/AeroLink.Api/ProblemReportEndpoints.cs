@@ -381,7 +381,7 @@ public static class ProblemReportEndpoints
             }, waivers, duplicateDiagnostic, currentNames));
     }
 
-    private static async Task<IResult> DownloadAsync(Guid id, int? revision, string? format, HttpContext http,
+    private static async Task<IResult> DownloadAsync(Guid id, int? revision, Guid? snapshotId, string? format, HttpContext http,
         AeroLinkDbContext db, ProblemReportOutputGenerator generator, CancellationToken ct)
     {
         var projectId = await db.ProblemReports.AsNoTracking().Where(x => x.Id == id)
@@ -391,7 +391,7 @@ public static class ProblemReportEndpoints
         var requestedFormat = string.IsNullOrWhiteSpace(format) ? "docx" : format.Trim().ToLowerInvariant();
         if (requestedFormat is not ("docx" or "pdf"))
             return Results.BadRequest(new { error = "Problem Report output format must be docx or pdf." });
-        var output = await generator.GenerateAsync(id, revision, requestedFormat, ct);
+        var output = await generator.GenerateAsync(id, revision, snapshotId, requestedFormat, ct);
         return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
     }
 

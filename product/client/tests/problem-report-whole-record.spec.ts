@@ -228,7 +228,7 @@ test('Problem Report output links distinguish the current record from its exact 
 
   await page.getByRole('button', { name: /^History/ }).click()
   await expect(page.getByRole('link', { name: 'DOCX · rev 00' }))
-    .toHaveAttribute('href', /\/api\/problem-reports\/[0-9a-f-]{36}\/download\?format=docx&revision=0$/)
+    .toHaveAttribute('href', /\/api\/problem-reports\/[0-9a-f-]{36}\/download\?format=docx&revision=0&snapshotId=[0-9a-f-]{36}$/)
   await expect(page.getByRole('link', { name: 'PDF · rev 00' }))
-    .toHaveAttribute('href', /\/api\/problem-reports\/[0-9a-f-]{36}\/download\?format=pdf&revision=0$/)
+    .toHaveAttribute('href', /\/api\/problem-reports\/[0-9a-f-]{36}\/download\?format=pdf&revision=0&snapshotId=[0-9a-f-]{36}$/)
 })
