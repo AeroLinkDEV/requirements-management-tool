@@ -14,6 +14,7 @@ import {
 import { targetsFor } from "./presentation";
 import { LadderCapability, ladderAllows, ladderHasAny } from "./projectLadder";
 import type { ProjectLadderProjection } from "./projectLadder";
+import ExactArtifactLink from "./ExactArtifactLink";
 import "./RequirementsWorkspace.css";
 
 type Field = {
@@ -142,6 +143,8 @@ type ImpactItem = {
   name?: string;
   type?: string;
   revisionId?: string;
+  artifactRevisionId?: string;
+  artifactKind?: string;
   isSuspect?: boolean;
   coverageState?: "Confirmed" | "Suspect";
 };
@@ -210,9 +213,14 @@ type Props = {
   onProposeChange: (requirementId: string, level?: Requirement["level"]) => void;
   onOpenRequirement: (id: string) => void;
   requirementHref: (id: string) => string;
+  /** Native exact link for a controlled requirement revision. Aggregate routes are not a safe fallback here. */
+  requirementRevisionHref?: (requirement: { id: string; revisionId: string; level: string }) => string | undefined;
+  /** SPA selection for an exact revision; native modified clicks remain on the exact href. */
+  onOpenRequirementRevision?: (requirement: { id: string; revisionId: string; level: string }) => void;
   onCloseRequirement: () => void;
   onOpenTraceability: (artifactId?: string) => void;
-  onOpenVerification: (artifact?: { artifactId: string; procedureId?: string; revisionId?: string; displayNumber?: string; level?: string }) => void;
+  verificationArtifactHref?: (artifact: { artifactId: string; procedureId?: string; revisionId?: string; artifactRevisionId?: string; artifactKind?: string; displayNumber?: string; level?: string }) => string | undefined;
+  onOpenVerification: (artifact?: { artifactId: string; procedureId?: string; revisionId?: string; artifactRevisionId?: string; artifactKind?: string; displayNumber?: string; level?: string }) => void;
 };
 
 const parseTags = (json: string) => {
@@ -237,8 +245,11 @@ export default function RequirementsWorkspace({
   onProposeChange,
   onOpenRequirement,
   requirementHref,
+  requirementRevisionHref,
+  onOpenRequirementRevision,
   onCloseRequirement,
   onOpenTraceability,
+  verificationArtifactHref,
   onOpenVerification,
 }: Props) {
   const appliedInitialView = useRef(false);
@@ -573,6 +584,32 @@ export default function RequirementsWorkspace({
     setSectionId("");
     setPage(1);
   };
+  const requirementIdentity = (item: ImpactItem) => item.revisionId
+    ? { id: item.id, revisionId: item.revisionId, level: item.level ?? scope }
+    : undefined;
+  const focusImpactRequirement = (item: ImpactItem) => {
+    const identity = requirementIdentity(item);
+    if (identity && onOpenRequirementRevision) onOpenRequirementRevision(identity);
+    else onOpenRequirement(item.id);
+  };
+  const impactRequirementLink = (item: ImpactItem) => {
+    const identity = requirementIdentity(item);
+    return <ExactArtifactLink
+      href={identity ? requirementRevisionHref?.(identity) : undefined}
+      onOpen={identity && onOpenRequirementRevision ? () => onOpenRequirementRevision(identity) : undefined}
+      title={identity ? "Open this exact requirement revision" : "This requirement revision is not available as an exact link"}
+    >{item.displayNumber}</ExactArtifactLink>;
+  };
+  const rowRequirementHref = (item: Requirement) => requirementRevisionHref?.({
+    id: item.id,
+    revisionId: item.revisionId,
+    level: item.level,
+  }) ?? requirementHref(item.id);
+  const openRequirementRow = (item: Requirement) => onOpenRequirementRevision?.({
+    id: item.id,
+    revisionId: item.revisionId,
+    level: item.level,
+  }) ?? onOpenRequirement(item.id);
   /**
    * Owner lifecycle. The server is the authority — it answers Not Found for a view that is not yours — so
    * these read the same failure the API reports rather than guessing at one.
@@ -1247,11 +1284,11 @@ export default function RequirementsWorkspace({
                 >
                   <a
                     className="requirementTarget"
-                    href={requirementHref(item.id)}
+                    href={rowRequirementHref(item)}
                     onClick={(event) => {
                       if (event.detail !== 0 && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
                         event.preventDefault();
-                        onOpenRequirement(item.id);
+                        openRequirementRow(item);
                         void open(item);
                       }
                     }}
@@ -1293,7 +1330,7 @@ export default function RequirementsWorkspace({
                           : `No ${verificationArtifactNoun(item.level).toLowerCase()} covers this revision. Open the verification trace.`
                       }
                       onClick={() => {
-                        onOpenRequirement(item.id);
+                        openRequirementRow(item);
                         open(item);
                         setInspectorTab("trace");
                       }}
@@ -1317,11 +1354,11 @@ export default function RequirementsWorkspace({
                 <article key={item.id}>
                   <a
                     className="requirementTarget"
-                    href={requirementHref(item.id)}
+                    href={rowRequirementHref(item)}
                     onClick={(event) => {
                       if (event.detail !== 0 && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
                         event.preventDefault();
-                        onOpenRequirement(item.id);
+                        openRequirementRow(item);
                         void open(item);
                       }
                     }}
@@ -1461,13 +1498,13 @@ export default function RequirementsWorkspace({
                   </button>
                 )) : <div className="traceEmpty"><b>No active change package</b><span>This requirement has no Draft, In Review, or Approved proposal awaiting baseline effectivity.</span></div>}
                 <h3>Upstream requirements</h3>
-                {impact?.parents.map((item) => <button type="button" className="traceRelation linkedArtifact" key={item.id} onClick={() => onOpenRequirement(item.id)}><b>{item.displayNumber}</b><p>{item.statement}</p><small>{item.type} · {item.level} · Open requirement →</small></button>)}
+                {impact?.parents.map((item) => <article className="traceRelation" key={item.id}><div className="traceRelationTarget">{impactRequirementLink(item)}<button type="button" onClick={() => focusImpactRequirement(item)}>Focus exact requirement</button></div><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
                 {!impact?.parents.length && <div className="traceEmpty"><span>No upstream requirement is recorded.</span></div>}
                 <h3>Downstream requirements</h3>
-                {impact?.children.map((item) => <button type="button" className="traceRelation linkedArtifact" key={item.id} onClick={() => onOpenRequirement(item.id)}><b>{item.displayNumber}</b><p>{item.statement}</p><small>{item.type} · {item.level} · Open requirement →</small></button>)}
+                {impact?.children.map((item) => <article className="traceRelation" key={item.id}><div className="traceRelationTarget">{impactRequirementLink(item)}<button type="button" onClick={() => focusImpactRequirement(item)}>Focus exact requirement</button></div><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
                 {!impact?.children.length && <div className="traceEmpty"><span>No downstream requirement is recorded.</span></div>}
                 <h3>Verification coverage</h3>
-                {impact?.tests.map((item) => { const unsettled = item.coverageState !== "Confirmed"; const target = { artifactId: item.id, revisionId: item.revisionId, displayNumber: item.displayNumber, level: item.level }; const noun = verificationArtifactNoun(item.level).toLowerCase(); return <article className={`traceRelation${unsettled ? " attention" : ""}`} key={item.revisionId ?? item.id}><button type="button" className="linkedArtifactText" onClick={() => onOpenVerification(target)}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · Open {noun} →</small></button><small>{unsettled ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{unsettled && <button type="button" onClick={() => onOpenVerification(target)}>Resolve in Verification →</button>}</article>; })}
+                {impact?.tests.map((item) => { const unsettled = item.coverageState !== "Confirmed"; const target = { artifactId: item.id, revisionId: item.artifactRevisionId ?? item.revisionId, artifactRevisionId: item.artifactRevisionId, artifactKind: item.artifactKind, displayNumber: item.displayNumber, level: item.level }; const noun = verificationArtifactNoun(item.level).toLowerCase(); return <article className={`traceRelation${unsettled ? " attention" : ""}`} key={item.artifactRevisionId ?? item.revisionId ?? item.id}><ExactArtifactLink className="linkedArtifactText" href={verificationArtifactHref?.(target)} onOpen={verificationArtifactHref?.(target) ? () => onOpenVerification(target) : undefined} title={verificationArtifactHref?.(target) ? "Open this exact verification artifact" : undefined}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · Open {noun} →</small></ExactArtifactLink><small>{unsettled ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{unsettled && <button type="button" onClick={() => onOpenVerification(target)}>Resolve in Verification →</button>}</article>; })}
                 {!impact?.tests.length && <div className="traceEmpty attention"><span>No verification artifact currently covers this revision.</span></div>}
               </div>
             )}

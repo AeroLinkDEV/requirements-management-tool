@@ -1,6 +1,7 @@
 import { useState } from "react";
 import ProblemReportPicker from "./ProblemReportPicker";
 import { PersonName } from "./People";
+import ExactArtifactLink from "./ExactArtifactLink";
 import "./RelatedProblemReports.css";
 
 /**
@@ -15,6 +16,8 @@ import "./RelatedProblemReports.css";
 export type RelatedReport = {
   id: string;
   displayNumber: string;
+  /** Immutable ProblemReportRevision.Id used by the strict historical route, when one is available. */
+  snapshotId?: string | null;
   title: string;
   state: string;
   severity: string;
@@ -27,7 +30,7 @@ const spaced = (value: string) =>
     : value === "ReadyForSccb" ? "Ready for SCCB"
       : value.replace(/([a-z])([A-Z])/g, "$1 $2");
 
-export default function RelatedProblemReports({ api, projectId, reportId, related, canEdit, busy, onLink, onUnlink, onOpen }: {
+export default function RelatedProblemReports({ api, projectId, reportId, related, canEdit, busy, onLink, onUnlink, onOpen, hrefFor }: {
   api: string;
   projectId: string;
   reportId: string;
@@ -36,7 +39,8 @@ export default function RelatedProblemReports({ api, projectId, reportId, relate
   busy: boolean;
   onLink: (relatedId: string) => Promise<void>;
   onUnlink: (relatedId: string) => Promise<void>;
-  onOpen: (id: string) => void;
+  onOpen?: (id: string, snapshotId?: string) => void;
+  hrefFor?: (report: RelatedReport) => string | undefined;
 }) {
   const [picking, setPicking] = useState(false);
 
@@ -84,19 +88,26 @@ export default function RelatedProblemReports({ api, projectId, reportId, relate
 
       {related.length > 0 && (
         <div className="prRelatedList">
-          {related.map(item => (
-            <div key={item.id} className="prRelatedCard">
-              <button type="button" className="prRelatedOpen" onClick={() => onOpen(item.id)}>
-                <i>PR</i>
-                <span>
-                  <b>{item.displayNumber} — {item.title}</b>
-                  <small>Raised by <PersonName userName={item.reportedBy} displayName={item.reportedByDisplayName ?? undefined} /></small>
-                </span>
-                <span className="prRelatedState">
-                  <em>{spaced(item.state)}</em>
-                  {item.targetBuild && <em className="build">{item.targetBuild}</em>}
-                </span>
-              </button>
+          {related.map(item => {
+            // The endpoint returns an immutable snapshot id only when the exact historical route can
+            // validate it. Never fall back to the aggregate route for a display number that includes a
+            // revision suffix — that would silently open a different controlled record later.
+            const href = hrefFor?.(item);
+            const card = <>
+              <i>PR</i>
+              <span>
+                <b>{item.displayNumber} — {item.title}</b>
+                <small>Raised by <PersonName userName={item.reportedBy} displayName={item.reportedByDisplayName ?? undefined} /></small>
+              </span>
+              <span className="prRelatedState">
+                <em>{spaced(item.state)}</em>
+                {item.targetBuild && <em className="build">{item.targetBuild}</em>}
+              </span>
+            </>;
+            return <div key={item.id} className="prRelatedCard">
+              {href
+                ? <ExactArtifactLink className="prRelatedOpen" href={href} onOpen={onOpen ? () => onOpen(item.id, item.snapshotId ?? undefined) : undefined} title="Open this exact controlled Problem Report">{card}</ExactArtifactLink>
+                : <div className="prRelatedOpen" data-exact-artifact-link="unresolved" title="This exact Problem Report revision is not openable in the current scope">{card}</div>}
               {canEdit && (
                 <button
                   type="button"
@@ -109,7 +120,7 @@ export default function RelatedProblemReports({ api, projectId, reportId, relate
                 </button>
               )}
             </div>
-          ))}
+          })}
         </div>
       )}
     </section>

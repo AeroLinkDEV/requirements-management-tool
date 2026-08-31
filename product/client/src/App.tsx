@@ -4,7 +4,7 @@ import CommandPalette from "./CommandPalette";
 import { officialBuildName, verificationArtifactLevel, verificationArtifactRouteKey } from "./presentation";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
-import { coverageExplorerPath, exactTraceArtifactPath, projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectSlugOf, readRoute, routePath } from "./routing";
+import { coverageExplorerPath, exactTraceArtifactPath, problemReportSnapshotPath, projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectSlugOf, readRoute, routePath } from "./routing";
 import type { AppRoute, Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, View } from "./routing";
 import { usePasswordVisibilityControls } from "./PasswordVisibility";
 import {
@@ -317,8 +317,9 @@ function App() {
     [selectedArtifactKind,setSelectedArtifactKind]=useState(initialRoute.artifactKind ?? ""),
     [selectedArtifactRevisionId,setSelectedArtifactRevisionId]=useState(initialRoute.artifactRevisionId ?? ""),
     [requirementRevisionId,setRequirementRevisionId]=useState(initialRoute.requirementRevisionId ?? ""),
-    [requirementProposalId,setRequirementProposalId]=useState(initialRoute.requirementProposalId ?? ""),
-    [testChangeRequestProposalId,setTestChangeRequestProposalId]=useState(initialRoute.testChangeRequestProposalId ?? ""),
+     [requirementProposalId,setRequirementProposalId]=useState(initialRoute.requirementProposalId ?? ""),
+     [testChangeRequestProposalId,setTestChangeRequestProposalId]=useState(initialRoute.testChangeRequestProposalId ?? ""),
+     [historicalProblemReportSnapshotId,setHistoricalProblemReportSnapshotId]=useState(initialRoute.historicalProblemReportSnapshotId ?? ""),
     [paletteOpen,setPaletteOpen]=useState(false),
     [displayOpen,setDisplayOpen]=useState(false),
     [density,setDensity]=useState<WorkspaceDensity>(()=>(localStorage.getItem('aerolink-density')==='compact'?'compact':'comfortable')),
@@ -409,7 +410,7 @@ function App() {
     if (release && release.id !== selectedReleaseId)
       setSelectedReleaseId(release.id);
   }, [release, selectedReleaseId]);
-  useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setCoverageReport(route.coverageReport??false);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setHistorySelectionId(route.historySelectionId??"");setTestChangeRequestSelectionId(route.testChangeRequestSelectionId??"");setTestChangeRequestProposalId(route.testChangeRequestProposalId??"");setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setSelectedArtifactRevisionId(route.artifactRevisionId??"");setRequirementRevisionId(route.requirementRevisionId??"");setRequirementProposalId(route.requirementProposalId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
+   useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setCoverageReport(route.coverageReport??false);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setHistorySelectionId(route.historySelectionId??"");setTestChangeRequestSelectionId(route.testChangeRequestSelectionId??"");setTestChangeRequestProposalId(route.testChangeRequestProposalId??"");setHistoricalProblemReportSnapshotId(route.historicalProblemReportSnapshotId??"");setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setSelectedArtifactRevisionId(route.artifactRevisionId??"");setRequirementRevisionId(route.requirementRevisionId??"");setRequirementProposalId(route.requirementProposalId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
   const paletteShortcutEnabled = !!context && !projectLevelViews.includes(view);
   useEffect(()=>{const handler=(event:KeyboardEvent)=>{if(paletteShortcutEnabled&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape"){setPaletteOpen(false);setDisplayOpen(false)}};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[paletteShortcutEnabled]);
   useEffect(()=>{document.documentElement.dataset.density=density;localStorage.setItem('aerolink-density',density)},[density]);
@@ -543,6 +544,7 @@ function App() {
     setRequirementProposalId("");
     setTestChangeRequestProposalId("");
     setCoverageReport(false);
+    setHistoricalProblemReportSnapshotId("");
     if(viewsRequiringArtifact.includes(target)&&!artifactId){
       // Refused rather than half-performed. Reporting it and staying put is honest; pushing a route that
       // cannot resolve is not.
@@ -551,6 +553,16 @@ function App() {
       return;
     }
     const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(artifactKind==="Interface"?"Interface":area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setHistorySelectionId("");setTestChangeRequestSelectionId("");setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setSelectedArtifactRevisionId("");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+  const openProblemReport=(id:string|undefined,snapshotId?:string,targetBuild?:string,replace=false)=>{
+    navigate("problemReports","system",id,undefined,replace);
+    setHistoricalProblemReportSnapshotId(snapshotId ?? "");
+    if(context){
+      const path=id&&snapshotId ? problemReportSnapshotPath(context,id,snapshotId) : routePath(context,"problemReports","system",id);
+      const url=new URL(path,location.origin);
+      if(targetBuild)url.searchParams.set("targetBuild",targetBuild);
+      history.replaceState({},"",`${url.pathname}${url.search}`);
+    }
+  };
   const openCoverage = (area:"systemTest"|"softwareTest", level?:"HighLevel"|"LowLevel") => {
     const artifactKind = area === "softwareTest" ? (level === "LowLevel" ? "LowLevel" : "HighLevel") : "";
     setRequirementProposalId(""); setTestChangeRequestProposalId(""); setView("procedureExplorer"); setDiscipline(area);
@@ -738,7 +750,11 @@ function App() {
    );
    if (!viewAllowed)
      return inShell(<main className="artifactState"><div><span>!</span><h1>Workspace unavailable</h1><p>This level or capability is not present in the active project ladder.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
-  if(view==="artifact"&&selectedArtifactId&&selectedArtifactKind)return inShell(<ArtifactRecordPage api={API} kind={selectedArtifactKind} id={selectedArtifactId} revisionId={selectedArtifactRevisionId||undefined} releaseId={release?.id??""} onBack={()=>navigate("dashboard")} onOpen={(kind,id)=>{if(kind==="change-request")navigate("scr","system",id);else if(kind==="requirement")navigate("requirements","system",id);else navigate("artifact","system",id,kind)}}/>);
+  if(view==="artifact"&&selectedArtifactId&&selectedArtifactKind)return inShell(<ArtifactRecordPage api={API} kind={selectedArtifactKind} id={selectedArtifactId} revisionId={selectedArtifactRevisionId||undefined} releaseId={release?.id??""} onBack={()=>navigate("dashboard")} relatedHref={item=>{
+    if(!context)return undefined;
+    if((item.kind==="test-procedure"||item.kind==="test-case")&&!item.revisionId)return undefined;
+    return routePath(context,"artifact","system",item.id,item.kind,undefined,undefined,undefined,undefined,item.revisionId);
+  }}/>);
   // A released build is closed, so this says so instead of opening an editor whose save the server will refuse.
   // The action stays visible on the navigation rather than disappearing: somebody looking for how to raise a
   // change needs to be told where to raise it, and a menu item that vanishes when you switch build teaches
@@ -802,8 +818,15 @@ function App() {
         onBack={() => navigate("history", discipline, undefined, undefined, false, undefined, historyTypeIntent)}
         onChanged={loadData}
         onOpenScr={(id) => navigate("scr", discipline, id, historyTypeIntent === "Interface" ? "Interface" : undefined)}
-        onOpenRequirement={(id,level)=>navigate("requirements",level==="System"?"system":"software",id)}
-        onOpenProblemReport={(id)=>navigate("problemReports","system",id)}
+        onOpenRequirementRevision={openRequirementRevision}
+        requirementRevisionHref={requirement => context ? exactTraceArtifactPath(context, {
+          id: requirement.revisionId,
+          kind: "RequirementRevision",
+          artifactId: requirement.id,
+          level: requirement.level,
+        }) : undefined}
+         onOpenProblemReport={(id,snapshotId)=>openProblemReport(id,snapshotId)}
+         problemReportHref={report => report.snapshotId && context ? problemReportSnapshotPath(context, report.id, report.snapshotId) : undefined}
         digitalThreadHref={context ? routePath(context, "lifecycle", discipline, selectedScrId, "change-request") : undefined}
         onDisciplineResolved={(resolved,changeRequestType) => {
           if (resolved !== discipline) setDiscipline(resolved);
@@ -882,9 +905,26 @@ function App() {
         onProposeChange={(id, level) => navigate(discipline === "software" ? "createSoftwareChange" : "createSystemScr", discipline, id, level)}
         onOpenRequirement={(id) => navigate("requirements",discipline,id)}
         requirementHref={id => context ? routePath(context, "requirements", discipline, id) : "#"}
+        onOpenRequirementRevision={openRequirementRevision}
+        requirementRevisionHref={requirement => context ? exactTraceArtifactPath(context, {
+          id: requirement.revisionId,
+          kind: "RequirementRevision",
+          artifactId: requirement.id,
+          level: requirement.level,
+        }) : undefined}
         onCloseRequirement={() => navigate("requirements", discipline, undefined, undefined, true)}
-        onOpenTraceability={(artifactId) => navigate("lifecycle", discipline, artifactId, artifactId ? "requirement" : undefined)}
-        onOpenVerification={openVerificationProcedure}
+         onOpenTraceability={(artifactId) => navigate("lifecycle", discipline, artifactId, artifactId ? "requirement" : undefined)}
+         verificationArtifactHref={artifact => {
+           const kind = artifact.artifactKind === "Case" ? "TestCase" : artifact.artifactKind === "Procedure" ? "TestProcedure" : undefined;
+           return context && kind ? exactTraceArtifactPath(context, {
+             id: artifact.artifactId,
+             kind,
+             revisionId: artifact.artifactRevisionId ?? artifact.revisionId,
+             displayNumber: artifact.displayNumber,
+             level: artifact.level,
+           }) : undefined;
+         }}
+         onOpenVerification={openVerificationProcedure}
       />
     );
   // Browsing the controlled procedure inventory, the verification twin of the requirements explorer.
@@ -931,10 +971,17 @@ function App() {
          user={user}
          ladder={ladder}
          initialReviewId={selectedArtifactId}
-        initialRegisterSelectionId={testChangeRequestSelectionId || undefined}
-        onBack={() => navigate("dashboard")}
-        onOpenRequirementRevision={openRequirementRevision}
-        onRaiseTestChangeRequest={() => navigate("createTestChangeRequest", discipline, undefined, selectedArtifactKind)}
+         initialRegisterSelectionId={testChangeRequestSelectionId || undefined}
+         onBack={() => navigate("dashboard")}
+         onOpenRequirementRevision={openRequirementRevision}
+         requirementRevisionHref={requirement => context ? exactTraceArtifactPath(context, {
+           id: requirement.revisionId,
+           kind: "RequirementRevision",
+           artifactId: requirement.id,
+           level: requirement.level,
+         }) : undefined}
+         traceArtifactHref={node => context ? exactTraceArtifactPath(context, node) : undefined}
+         onRaiseTestChangeRequest={() => navigate("createTestChangeRequest", discipline, undefined, selectedArtifactKind)}
         onOpenTestChangeRequest={id => navigate("testChangeRequest", discipline, id, selectedArtifactKind)}
         registerHref={id => context ? routePath(context, "testChangeRequest", discipline, id, selectedArtifactKind) : "#"}
         onRegisterSelectionChange={id => {
@@ -1050,12 +1097,13 @@ function App() {
         releases={project.releases}
         user={user}
         initialReportId={selectedArtifactId||undefined}
-        initialSnapshotId={initialRoute.historicalProblemReportSnapshotId}
-        onSelected={(id,targetBuild)=>{navigate("problemReports","system",id,undefined,true);if(targetBuild){const url=new URL(location.href);url.searchParams.set("targetBuild",targetBuild);history.replaceState({},"",`${url.pathname}${url.search}`)}}}
+         initialSnapshotId={historicalProblemReportSnapshotId || undefined}
+         onSelected={(id,targetBuild,snapshotId)=>openProblemReport(id,snapshotId,targetBuild,id===undefined)}
         onBack={() => navigate("dashboard")}
-        onOpenVerification={(target) => navigate("testResults", target?.discipline === "software" ? "softwareTest" : "systemTest", target?.problemReportId, target?.discipline === "software" ? "HighLevel" : undefined)}
-        onOpenArtifact={(kind,id,identifier)=>{if(kind==="change-request")navigate("scr",identifier?.startsWith("HLRCR-")||identifier?.startsWith("LLRCR-")?"software":"system",id);else if(kind==="problem-report")navigate("problemReports","system",id);else if(kind==="managed-document")navigate("managedDocuments","system",id);else if(kind==="requirement")navigate("requirements",identifier?.startsWith("SYSR-")?"system":"software",id);else navigate("artifact","system",id,kind)}}
-      />
+         onOpenVerification={(target) => navigate("testResults", target?.discipline === "software" ? "softwareTest" : "systemTest", target?.problemReportId, target?.discipline === "software" ? "HighLevel" : undefined)}
+         onOpenArtifact={(kind,id,identifier)=>{if(kind==="change-request")navigate("scr",identifier?.startsWith("HLRCR-")||identifier?.startsWith("LLRCR-")?"software":"system",id);else if(kind==="problem-report")navigate("problemReports","system",id);else if(kind==="managed-document")navigate("managedDocuments","system",id);else if(kind==="requirement")navigate("requirements",identifier?.startsWith("SYSR-")?"system":"software",id);else navigate("artifact","system",id,kind)}}
+         problemReportHref={report => report.snapshotId && context ? problemReportSnapshotPath(context, report.id, report.snapshotId) : undefined}
+       />
     );
   if (view === "code" && project && release)
     return inShell(

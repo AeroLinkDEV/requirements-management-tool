@@ -12,7 +12,7 @@ test('Digital Thread reuses projected lifecycle data and the shared exact-link c
     const response = await route.fetch()
     const body = await response.json()
     if (body.items?.[0]) body.items[0].parents = [{
-      id: 'parent-revision', linkId: 'trace-lifecycle-link', displayNumber: 'SYSR-000001.00',
+      id: 'parent-revision', revisionId: 'parent-revision', artifactId: 'parent-artifact', linkId: 'trace-lifecycle-link', displayNumber: 'SYSR-000001.00',
       level: 'System', type: 'AllocatedFrom', lifecycle: {
         state, causeKind: 'InternalRequirementRevision', causeRequirementRevisionId: 'cause-revision',
         events,
@@ -41,6 +41,8 @@ test('Digital Thread reuses projected lifecycle data and the shared exact-link c
   await page.getByRole('link', { name: 'Digital Thread' }).click()
   await page.getByRole('button', { name: 'Evidence table' }).click()
   await page.getByText('Explore relationships and evidence').first().click()
+  await expect(page.getByRole('link', { name: 'SYSR-000001.00 · System' }))
+    .toHaveAttribute('href', /\/requirements\/parent-artifact\?discipline=system&requirementRevisionId=parent-revision$/)
   await expect(page.getByLabel('Exact link lifecycle Suspect')).toBeVisible()
   expect(lifecycleGets).toBe(0)
   await page.getByPlaceholder('Record why this exact relationship is under assessment.')

@@ -216,6 +216,15 @@ Assert.Equal(HttpStatusCode.NotFound, mismatchedRevision.StatusCode);
                  && x.GetProperty("id").GetGuid() == fixture.RetirementExecutionId
                  && x.GetProperty("title").GetString() == "Verify route sequencing and discontinuities result");
 
+        var exactExecutionArtifact = await JsonAsync(client,
+            $"/api/artifacts/test-execution/{fixture.RetirementExecutionId}");
+        var exactProcedureLink = Assert.Single(
+            exactExecutionArtifact.GetProperty("related").EnumerateArray());
+        Assert.Equal("test-procedure", exactProcedureLink.GetProperty("kind").GetString());
+        Assert.Equal(fixture.ProcedureId, exactProcedureLink.GetProperty("id").GetGuid());
+        Assert.Equal(fixture.Revision02Id, exactProcedureLink.GetProperty("revisionId").GetGuid());
+        Assert.Equal("SYSTP-42150.02", exactProcedureLink.GetProperty("identifier").GetString());
+
         var discardedSearch = await JsonAsync(client,
             $"/api/search?projectId={fixture.ProjectId}&query=forged%20retirement%20rename");
         Assert.DoesNotContain(discardedSearch.GetProperty("items").EnumerateArray(),

@@ -5,6 +5,7 @@ import { ApiError, apiRequest, operationError } from './apiClient'
 import { RichCaseField, RichContentView } from './RichContent'
 import { fromPlainText, toPlainText } from './richContentModel'
 import { testChangeRequestAcronym, verificationArtifactChangeSegment, verificationArtifactNoun, verificationArtifactPrefix, verificationArtifactTargetSegment, verificationArtifactWord, verificationOriginLabel } from './presentation'
+import ExactArtifactLink from './ExactArtifactLink'
 // The requirements queue's stylesheet, imported rather than copied. The testing side is meant to be the same
 // surface for the same kind of work, and a second stylesheet that merely looked like it would drift the first
 // time either was touched.
@@ -58,7 +59,7 @@ const emptyDraft={kind:'Introduce' as Kind,baseNumber:'',revision:0,title:'',obj
  * invented. Nothing proposed here is a controlled procedure revision until the package is approved and
  * materialised into a build.
  */
-export default function TestChangeRequestWorkspace({api,projectId,reviewId,discipline,canAuthor,onClose,onChanged,onOpenRequirementRevision,onOpenTestChangeRequest,supersededBy}:{api:string;projectId:string;reviewId:string;discipline:string;canAuthor:boolean;onClose:()=>void;onChanged:()=>void;onOpenRequirementRevision:(requirement:{id:string;revisionId:string;level:string})=>void;onOpenTestChangeRequest:(id:string)=>void;supersededBy?:SupersededBy}){
+export default function TestChangeRequestWorkspace({api,projectId,reviewId,discipline,canAuthor,onClose,onChanged,onOpenRequirementRevision,requirementRevisionHref,onOpenTestChangeRequest,supersededBy}:{api:string;projectId:string;reviewId:string;discipline:string;canAuthor:boolean;onClose:()=>void;onChanged:()=>void;onOpenRequirementRevision:(requirement:{id:string;revisionId:string;level:string})=>void;requirementRevisionHref?:(requirement:{id:string;revisionId:string;level:string})=>string|undefined;onOpenTestChangeRequest:(id:string)=>void;supersededBy?:SupersededBy}){
   const [item,setItem]=useState<Package>()
   const currentArtifactLevel = item?.artifactLevel ?? item?.procedureLevel ?? 'System'
   const currentArtifactKind = item?.artifactKind
@@ -284,6 +285,12 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
   const requirementDetails=(revisionId:string)=>
     (item?.drivingRequirementChoices??[]).find(x=>x.revisionId===revisionId)
       ??(item?.artifactTargets??item?.procedureTargets??[]).flatMap(x=>x.currentCoverage).find(x=>x.revisionId===revisionId)
+  const requirementNativeLink=(known:{id:string;revisionId:string;level:string;displayNumber:string})=><ExactArtifactLink
+    className="drawerArtifactLink"
+    href={requirementRevisionHref?.({id:known.id,revisionId:known.revisionId,level:known.level})}
+    onOpen={()=>onOpenRequirementRevision(known)}
+    title="Open this exact requirement revision"
+  >{known.displayNumber}</ExactArtifactLink>
   const requirementLabel=(revisionId:string)=>{
     const known=requirementDetails(revisionId)
     return known?`${known.displayNumber} · ${known.statement}`:revisionId
@@ -291,7 +298,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
   const requirementLinks=(ids:string[])=>ids.map((revisionId,index)=>{
     const known=requirementDetails(revisionId)
     return known
-      ? <span key={revisionId}>{index>0?', ':''}<button type="button" className="drawerArtifactLink" onClick={()=>onOpenRequirementRevision(known)}>{known.displayNumber}</button> · {known.statement}</span>
+      ? <span key={revisionId}>{index>0?', ':''}{requirementNativeLink(known)} · {known.statement}</span>
       : <span key={revisionId}>{index>0?', ':''}{revisionId}</span>
   })
   const procedureCoverageDelta=(change:ProcedureChange)=>{
@@ -491,7 +498,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
                 onChange={event=>setDraft(current=>({...current,removed:event.target.checked
                   ?current.removed.filter(id=>id!==coverage.revisionId)
                   :[...current.removed,coverage.revisionId]}))}/>
-              <span><b>{coverage.displayNumber}</b> {coverage.statement} · {coverage.isSuspect?'Suspect':'Confirmed'}
+              <span><span onClick={event=>event.stopPropagation()}>{requirementNativeLink(coverage)}</span> {coverage.statement} · {coverage.isSuspect?'Suspect':'Confirmed'}
                 {coverage.isSuspect
                   ? ' · lifecycle evidence; excluded from successor exact parents'
                   : !mayRemove?' · retained; outside this package change scope':''}</span>
@@ -522,7 +529,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
                       const next={...current};delete next[choice.revisionId];return next
                     })
                   }}/>
-                <span><b>{choice.displayNumber}</b> {choice.statement}</span>
+                <span><span onClick={event=>event.stopPropagation()}>{requirementNativeLink(choice)}</span> {choice.statement}</span>
               </label>)}
             {requirementOptions.length===0&&
               <p className="drawerEmpty">{requirementQuery

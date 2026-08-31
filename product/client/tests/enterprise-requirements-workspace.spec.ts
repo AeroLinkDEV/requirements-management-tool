@@ -135,7 +135,8 @@ test("requirements explorer primary targets are native links in table and docume
   expect(tableHref).toBeTruthy();
   const tableUrlObject = new URL(tableHref!, page.url());
   expect(tableUrlObject.pathname).toMatch(new RegExp(`^${contextRoot}/requirements/[0-9a-f-]{36}$`));
-  expect(tableUrlObject.search).toBe('?discipline=system');
+  expect(tableUrlObject.searchParams.get('discipline')).toBe('system');
+  expect(tableUrlObject.searchParams.get('requirementRevisionId')).toMatch(/^[0-9a-f-]{36}$/);
   const tableUrl = tableUrlObject.toString();
   const [opened] = await Promise.all([
     page.context().waitForEvent('page', { timeout: 30_000 }),
@@ -161,7 +162,9 @@ test("requirements explorer primary targets are native links in table and docume
   expect(documentHref).toBeTruthy();
   const documentUrlObject = new URL(documentHref!, page.url());
   expect(documentUrlObject.pathname).toMatch(new RegExp(`^${contextRoot}/requirements/[0-9a-f-]{36}$`));
-  expect(documentUrlObject.search).toBe('?discipline=system');
+  expect(documentUrlObject.searchParams.get('discipline')).toBe('system');
+  expect(documentUrlObject.searchParams.get('requirementRevisionId'))
+    .toMatch(/^[0-9a-f-]{36}$/);
   await documentTarget.click();
   await expect(page.getByRole('button', { name: 'Close requirement inspector' })).toBeVisible();
 });

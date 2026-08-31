@@ -135,9 +135,10 @@ test('modifying an HLR hydrates its exact parent and preserves an engineer repla
   await page.getByLabel('Title').fill('Replace HLR upward allocation')
   await page.getByRole('button',{name:'Save HLRCR Draft'}).click()
 
-  const controlledParent=page.locator('.artifactReferenceCloud button').filter({hasText:replacement.displayNumber})
+  const controlledParent=page.locator('.artifactReferenceCloud a.exactArtifactLink').filter({hasText:replacement.displayNumber})
   await expect(controlledParent).toBeVisible()
+  await expect(controlledParent).toHaveAttribute('href', new RegExp(`/requirements/${replacement.artifactId}\\?discipline=system&requirementRevisionId=${replacement.revisionId}$`))
   await controlledParent.click()
-  await expect(page).toHaveURL(/\/requirements\/[0-9a-f-]+\?discipline=system$/i)
+  await expect(page).toHaveURL(new RegExp(`/requirements/${replacement.artifactId}\\?discipline=system&requirementRevisionId=${replacement.revisionId}$`, 'i'))
   await expect(page.getByRole('heading',{name:'System Requirements Explorer'})).toBeVisible()
 })
