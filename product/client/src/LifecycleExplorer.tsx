@@ -183,7 +183,13 @@ function ChangeRequestThread({
 }
 
 type TraceGraphLayer = { id: string; title: string; nodes: ChangeRequestTraceNode[] };
-type TraceConnector = { key: string; path: string; selected: boolean; relation: string };
+type TraceConnector = {
+  key: string;
+  path: string;
+  selected: boolean;
+  relation: string;
+  route: "cross-layer" | "same-layer-horizontal" | "same-layer-vertical" | "same-layer-rail";
+};
 
 /**
  * Render the server-composed graph as a map, not as unrelated category lists. Cards stay in semantic layers,
@@ -215,7 +221,8 @@ function ChangeRequestGraphMap({
     if (!board) return;
     const boardRect = board.getBoundingClientRect();
     const next: TraceConnector[] = [];
-    for (const edge of trace.edges) {
+    for (let edgeIndex = 0; edgeIndex < trace.edges.length; edgeIndex += 1) {
+      const edge = trace.edges[edgeIndex];
       const from = nodeByKey.get(`${edge.fromKind}:${edge.fromId}`);
       const to = nodeByKey.get(`${edge.toKind}:${edge.toId}`);
       const fromElement = from && nodeRefs.current.get(`${from.kind}:${from.id}`);
@@ -223,18 +230,65 @@ function ChangeRequestGraphMap({
       if (!fromElement || !toElement) continue;
       const fromRect = fromElement.getBoundingClientRect();
       const toRect = toElement.getBoundingClientRect();
-      const startX = fromRect.right - boardRect.left;
-      const startY = fromRect.top + fromRect.height / 2 - boardRect.top;
-      const endX = toRect.left - boardRect.left;
-      const endY = toRect.top + toRect.height / 2 - boardRect.top;
-      const distance = Math.max(24, Math.abs(endX - startX) * 0.45);
-      const direction = endX >= startX ? 1 : -1;
-      const path = `M ${startX} ${startY} C ${startX + distance * direction} ${startY}, ${endX - distance * direction} ${endY}, ${endX} ${endY}`;
+      const fromLayer = fromElement.closest<HTMLElement>(".crGraphLayer");
+      const toLayer = toElement.closest<HTMLElement>(".crGraphLayer");
+      const sameLayer = Boolean(fromLayer && fromLayer === toLayer);
+      const fromCenterX = fromRect.left + fromRect.width / 2 - boardRect.left;
+      const toCenterX = toRect.left + toRect.width / 2 - boardRect.left;
+      const fromCenterY = fromRect.top + fromRect.height / 2 - boardRect.top;
+      const toCenterY = toRect.top + toRect.height / 2 - boardRect.top;
+      let route: TraceConnector["route"] = "cross-layer";
+      let path: string;
+
+      if (sameLayer && Math.abs(toCenterY - fromCenterY) > 8) {
+        // A layer can contain a root CR plus multiple upstream/downstream CRs. A left/right route between
+        // their cards is hidden by the cards themselves, so same-layer edges use the truthful direction of
+        // the stacked nodes: bottom-to-top when travelling down, top-to-bottom when travelling up. If a
+        // branch skips a card, take a presentation-only rail just outside the layer so the whole edge stays
+        // visible without ever placing it above controlled artifact text.
+        const down = toCenterY > fromCenterY;
+        const startY = (down ? fromRect.bottom : fromRect.top) - boardRect.top;
+        const endY = (down ? toRect.top : toRect.bottom) - boardRect.top;
+        const intermediate = fromLayer && [...fromLayer.querySelectorAll<HTMLElement>(".crGraphNode")].some(candidate => {
+          if (candidate === fromElement || candidate === toElement) return false;
+          const rect = candidate.getBoundingClientRect();
+          return rect.top > Math.min(fromRect.top, toRect.top) + 1 && rect.bottom < Math.max(fromRect.bottom, toRect.bottom) - 1;
+        });
+        if (intermediate && fromLayer) {
+          route = "same-layer-rail";
+          const layerRect = fromLayer.getBoundingClientRect();
+          // Keep rails inside the board's padding. Alternating sides prevents a fan-out from collapsing into
+          // one unreadable stroke while preserving the edge's source/target direction.
+          const side = edgeIndex % 2 === 0 ? 1 : -1;
+          const railX = (side > 0 ? layerRect.right : layerRect.left) - boardRect.left + side * 5;
+          const startX = fromCenterX;
+          const endX = toCenterX;
+          const sourceBend = startX + (railX - startX) * 0.55;
+          const targetBend = railX + (endX - railX) * 0.55;
+          path = `M ${startX} ${startY} C ${sourceBend} ${startY}, ${railX} ${startY}, ${railX} ${startY} L ${railX} ${endY} C ${railX} ${endY}, ${targetBend} ${endY}, ${endX} ${endY}`;
+        } else {
+          route = "same-layer-vertical";
+          const distance = Math.max(18, Math.abs(endY - startY) * 0.35);
+          const startX = fromCenterX;
+          const endX = toCenterX;
+          path = `M ${startX} ${startY} C ${startX} ${startY + distance * (down ? 1 : -1)}, ${endX} ${endY - distance * (down ? 1 : -1)}, ${endX} ${endY}`;
+        }
+      } else {
+        const startX = fromRect.right - boardRect.left;
+        const startY = fromCenterY;
+        const endX = toRect.left - boardRect.left;
+        const endY = toCenterY;
+        const distance = Math.max(24, Math.abs(endX - startX) * 0.45);
+        const direction = endX >= startX ? 1 : -1;
+        route = sameLayer ? "same-layer-horizontal" : "cross-layer";
+        path = `M ${startX} ${startY} C ${startX + distance * direction} ${startY}, ${endX - distance * direction} ${endY}, ${endX} ${endY}`;
+      }
       next.push({
         key: `${edge.fromKind}:${edge.fromId}:${edge.toKind}:${edge.toId}:${edge.relation}`,
         path,
         selected: edge.fromId === selectedId || edge.toId === selectedId,
         relation: traceRelationLabel(edge.relation),
+        route,
       });
     }
     setConnectors(next);
@@ -264,7 +318,7 @@ function ChangeRequestGraphMap({
             <path d="M 0 0 L 8 4 L 0 8 z" />
           </marker>
         </defs>
-        {connectors.map(connector => <path className={`crGraphConnector${connector.selected ? " selected" : ""}`} key={connector.key} d={connector.path} markerEnd="url(#crGraphArrow)"><title>{connector.relation}</title></path>)}
+        {connectors.map(connector => <path className={`crGraphConnector${connector.selected ? " selected" : ""}`} key={connector.key} d={connector.path} data-route={connector.route} markerEnd="url(#crGraphArrow)"><title>{connector.relation}</title></path>)}
       </svg>
       <div className="crGraphBoardLayers" role="list" aria-label="Connected Digital Thread nodes">
         {layers.map(layer => <section className={`crGraphLayer crGraphLayer-${layer.id}`} key={layer.id} aria-label={layer.title}>
