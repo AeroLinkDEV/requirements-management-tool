@@ -71,7 +71,8 @@
 .teamWorkPerson { position: relative; display: flex; width: 100%; min-width: 0; min-height: 74px; align-items: flex-start; gap: 7px; padding: 7px 7px 25px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--ink-900); text-align: left; cursor: pointer; scroll-snap-align: start; }
 .teamWorkPerson:hover, .teamWorkPerson:focus-visible, .teamWorkPerson.selected { border-color: var(--teal-700); box-shadow: 0 2px 7px rgba(18,37,65,.12); outline: none; }
 .teamWorkPerson .personAvatar { flex: 0 0 32px; width: 32px; height: 32px; border-width: 1px; }
-.teamWorkPersonDetails { position: absolute; right: 8px; bottom: 5px; padding: 0 2px; border: 0; background: transparent; color: var(--teal-700); font-size: 12px; line-height: 1.2; font-weight: 800; text-decoration: underline; cursor: pointer; }
+.teamWorkPersonDetails { padding: 0 2px; border: 0; background: transparent; color: var(--teal-700); font-size: 12px; line-height: 1.2; font-weight: 800; text-decoration: underline; cursor: pointer; }
+.teamWorkPeopleStrip > div[role="listitem"] .teamWorkPersonDetails { position: absolute; right: 8px; bottom: 5px; }
 .teamWorkPersonDetails:focus-visible { outline: 2px solid var(--teal-600); outline-offset: 2px; border-radius: 3px; }
 .teamWorkPersonInfo { display: grid; min-width: 0; gap: 1px; padding-right: 18px; }
 .teamWorkPersonInfo strong { display: -webkit-box; overflow: hidden; text-overflow: ellipsis; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 12px; line-height: 1.18; }
@@ -96,6 +97,7 @@
 .teamWorkHolderGroup > header > span { display: inline-grid; place-items: center; min-width: 25px; height: 25px; border-radius: 50%; background: #e2eeee; color: var(--teal-700); font-size: 12px; font-weight: 800; }
 .teamWorkHolderGroup h2 { margin: 0; font-size: 16px; }
 .teamWorkHolderPerson { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.teamWorkHolderPerson .teamWorkPersonDetails { flex: 0 0 auto; margin-left: auto; }
 .teamWorkHolderHeading { display: inline-flex; align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: var(--teal-700); font-size: 16px; font-weight: 800; text-align: left; cursor: pointer; }
 .teamWorkHolderHeading .personAvatar { width: 28px; height: 28px; border-width: 1px; }
 .teamWorkHolderItems { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; padding-top: 12px; }

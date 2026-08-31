@@ -587,6 +587,39 @@ test('Team Work composes filters against unique items and clear preserves holder
   await expect(page.locator('[data-team-work-card="true"]')).toHaveCount(7)
 })
 
+test('Team Work keeps holder-group Details beside the person heading and opens the right drawer', async ({ page }) => {
+  await openTeamWork(page)
+  await page.getByRole('button', { name: 'Current holder', exact: true }).click()
+
+  const group = page.locator('.teamWorkHolderGroup').filter({ hasText: 'API Alice' }).first()
+  const heading = group.locator('.teamWorkHolderHeading')
+  const details = group.getByRole('button', { name: 'View details for API Alice', exact: true })
+  await expect(heading).toBeVisible()
+  await expect(details).toBeVisible()
+  const headingBounds = await heading.boundingBox()
+  const detailsBounds = await details.boundingBox()
+  expect(headingBounds).not.toBeNull()
+  expect(detailsBounds).not.toBeNull()
+  expect(Math.abs(detailsBounds!.y - headingBounds!.y)).toBeLessThan(30)
+  expect(detailsBounds!.x).toBeGreaterThan(headingBounds!.x)
+
+  await details.click()
+  const drawer = page.getByRole('dialog', { name: 'API Alice' })
+  await expect(drawer).toBeVisible()
+  await expect(drawer.getByText('Currently holds').locator('..')).toContainText('1')
+  await drawer.getByRole('button', { name: 'Close current holder' }).click()
+  await expect(drawer).toHaveCount(0)
+})
+
+test('Team Work exposes a keyboard-focusable horizontal board hint at a narrow breakpoint', async ({ page }) => {
+  await openTeamWork(page)
+  await page.setViewportSize({ width: 900, height: 760 })
+  await expect(page.getByText('Scroll horizontally to see all lifecycle lanes', { exact: false })).toBeVisible()
+  const board = page.locator('.teamWorkBoard[data-team-work-board="true"]')
+  await board.focus()
+  await expect(board).toBeFocused()
+})
+
 test('Team Work drawer traps focus, restores its trigger, preserves query state, and follows history', async ({ page }) => {
   await openTeamWork(page)
   await page.evaluate(() => history.replaceState({}, '', `${location.pathname}?mode=keep`))
