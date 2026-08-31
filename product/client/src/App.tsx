@@ -802,8 +802,15 @@ function App() {
         onBack={() => navigate("history", discipline, undefined, undefined, false, undefined, historyTypeIntent)}
         onChanged={loadData}
         onOpenScr={(id) => navigate("scr", discipline, id, historyTypeIntent === "Interface" ? "Interface" : undefined)}
-        onOpenRequirement={(id,level)=>navigate("requirements",level==="System"?"system":"software",id)}
+        onOpenRequirementRevision={openRequirementRevision}
+        requirementRevisionHref={requirement => context ? exactTraceArtifactPath(context, {
+          id: requirement.revisionId,
+          kind: "RequirementRevision",
+          artifactId: requirement.id,
+          level: requirement.level,
+        }) : undefined}
         onOpenProblemReport={(id)=>navigate("problemReports","system",id)}
+        problemReportHref={id => context ? routePath(context, "problemReports", "system", id) : undefined}
         digitalThreadHref={context ? routePath(context, "lifecycle", discipline, selectedScrId, "change-request") : undefined}
         onDisciplineResolved={(resolved,changeRequestType) => {
           if (resolved !== discipline) setDiscipline(resolved);

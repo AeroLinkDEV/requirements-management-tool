@@ -45,7 +45,9 @@ test('a PR links to change requests and System TCRs without changing its lifecyc
   await expect(page.getByRole('heading', { name: 'Driving Problem Reports' })).toBeVisible()
   await expect(page.getByText(report.displayNumber, { exact: true })).toBeVisible()
   const changeRequestId = new URL(page.url()).pathname.split('/').at(-1)!
-  await page.locator('.artifactReferenceCard').filter({hasText:report.displayNumber}).click()
+  const drivingLink = page.locator('.artifactReferenceCard').filter({hasText:report.displayNumber})
+  await expect(drivingLink).toHaveAttribute('href', new RegExp(`/problem-reports/${report.id}$`))
+  await drivingLink.click()
   await expect(page).toHaveURL(new RegExp(`/problem-reports/${report.id}$`))
   await expect(page.getByRole('heading',{name:'Problem Reports',exact:true})).toBeVisible()
   await expect(page.getByRole('heading',{name:title})).toBeVisible()

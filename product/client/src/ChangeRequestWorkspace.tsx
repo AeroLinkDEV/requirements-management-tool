@@ -13,6 +13,7 @@ import type {
 import PersonPicker from "./PersonPicker";
 import ControlledAttachments from "./ControlledAttachments";
 import ChangeRequestJiraLink from "./ChangeRequestJiraLink";
+import ExactArtifactLink from "./ExactArtifactLink";
 import { PersonName } from "./People";
 import { personLabel } from "./PeopleRegistry";
 import ReviewCycleCard from "./ReviewCycleCard";
@@ -247,8 +248,13 @@ type Props = {
   onOpenScr: (id: string) => void;
   /** Exact proposal selected from the Requirements Explorer, when navigation came from that chooser. */
   initialRequirementProposalId?: string;
-  onOpenRequirement: (id: string, level: RequirementLevel) => void;
+  /** Opens the exact requirement revision named by an allocated upstream reference. */
+  onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void;
+  /** Builds the canonical browser URL for that exact requirement revision. */
+  requirementRevisionHref?: (requirement: { id: string; revisionId: string; level: string }) => string | undefined;
   onOpenProblemReport: (id: string) => void;
+  /** Builds the canonical browser URL for a driving Problem Report. */
+  problemReportHref?: (id: string) => string | undefined;
   onDisciplineResolved: (discipline: "system" | "software", changeRequestType?: "Interface") => void;
   digitalThreadHref?: string;
   /**
@@ -437,8 +443,10 @@ function AuditEvidence({ event }: { event: Audit }) {
   );
 }
 
-function ExactUpstreamReferences({api,projectId,releaseId,childLevel,revisionIds,onOpen}:{api:string;projectId:string;releaseId:string;childLevel:RequirementLevel;revisionIds:string[];onOpen:(id:string,level:RequirementLevel)=>void}) {
-  const [references,setReferences]=useState<{revisionId:string;artifactId:string;displayNumber:string;level:RequirementLevel}[]>([])
+type ExactRequirementReference = {revisionId:string;artifactId:string;displayNumber:string;level:RequirementLevel}
+
+function ExactUpstreamReferences({api,projectId,releaseId,childLevel,revisionIds,onOpen,hrefFor}:{api:string;projectId:string;releaseId:string;childLevel:RequirementLevel;revisionIds:string[];onOpen:(reference:ExactRequirementReference)=>void;hrefFor?:(reference:ExactRequirementReference)=>string|undefined}) {
+  const [references,setReferences]=useState<ExactRequirementReference[]>([])
   const [loaded,setLoaded]=useState(false)
   const revisionKey=revisionIds.join(',')
   useEffect(()=>{
@@ -454,7 +462,10 @@ function ExactUpstreamReferences({api,projectId,releaseId,childLevel,revisionIds
   },[api,childLevel,projectId,releaseId,revisionKey])
   if(!revisionKey)return <span>No exact upstream revisions allocated</span>
   if(!loaded)return <span>Loading exact upstream revisions…</span>
-  return <span className="artifactReferenceCloud">{references.map(reference=><button type="button" key={reference.revisionId} onClick={()=>onOpen(reference.artifactId,reference.level)}>{reference.displayNumber}</button>)}{references.length<revisionIds.length&&<i>Unavailable controlled revision</i>}</span>
+  return <span className="artifactReferenceCloud">{references.map(reference=>{
+    const href=hrefFor?.(reference)
+    return <ExactArtifactLink key={reference.revisionId} href={href} onOpen={href ? ()=>onOpen(reference) : undefined} title={href ? "Open this exact requirement revision" : undefined}>{reference.displayNumber}</ExactArtifactLink>
+  })}{references.length<revisionIds.length&&<i>Unavailable controlled revision</i>}</span>
 }
 
 export default function ChangeRequestWorkspace({
@@ -465,8 +476,10 @@ export default function ChangeRequestWorkspace({
   onChanged,
   onOpenScr,
   initialRequirementProposalId,
-  onOpenRequirement,
+  onOpenRequirementRevision,
+  requirementRevisionHref,
   onOpenProblemReport,
+  problemReportHref,
   onDisciplineResolved,
   digitalThreadHref,
   releases,
@@ -1633,13 +1646,14 @@ export default function ChangeRequestWorkspace({
             {drivingProblemReports.length > 0 && (
               <section className="workspaceCard">
                 <div className="workspaceTitle"><div><h2>Driving Problem Reports</h2><p>The problem records that authorized this engineering response</p></div></div>
-                {drivingProblemReports.map((report) => (
-                  <button type="button" className="requirementView artifactReferenceCard" key={report.id} onClick={()=>onOpenProblemReport(report.id)}>
+                {drivingProblemReports.map((report) => {
+                  const href=problemReportHref?.(report.id)
+                  return <ExactArtifactLink className="requirementView artifactReferenceCard" key={report.id} href={href} onOpen={href ? ()=>onOpenProblemReport(report.id) : undefined} title={href ? "Open this controlled Problem Report" : undefined}>
                     <div><b>{report.displayNumber}</b><span>{stateLabel(report.state)}</span></div>
                     <p>{report.title}</p>
                     <footer><small>Linked as a proposed corrective action</small><em>Open controlled PR →</em></footer>
-                  </button>
-                ))}
+                  </ExactArtifactLink>
+                })}
               </section>
             )}
 
@@ -1671,7 +1685,9 @@ export default function ChangeRequestWorkspace({
                       <div className="upstreamReferences">
                         {parseObject(item.attributesJson).derived === true
                           ? `Derived exception — ${item.rationale}`
-                          : <ExactUpstreamReferences api={api} projectId={scr.projectId} releaseId={scr.targetReleaseId} childLevel={item.level} revisionIds={item.upstreamRevisionIds??[]} onOpen={onOpenRequirement}/>}
+                          : <ExactUpstreamReferences api={api} projectId={scr.projectId} releaseId={scr.targetReleaseId} childLevel={item.level} revisionIds={item.upstreamRevisionIds??[]}
+                              onOpen={reference => onOpenRequirementRevision({ id: reference.artifactId, revisionId: reference.revisionId, level: reference.level })}
+                              hrefFor={reference => requirementRevisionHref?.({ id: reference.artifactId, revisionId: reference.revisionId, level: reference.level })} />}
                       </div>
                     )}
                     <footer><small>{item.verificationMethod} · {item.rationale || "No rationale recorded"}</small><em>Downstream impact assessed after approval</em></footer>
