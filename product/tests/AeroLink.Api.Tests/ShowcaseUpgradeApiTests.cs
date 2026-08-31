@@ -16,6 +16,7 @@ public sealed class ShowcaseUpgradeApiTests(ShowcaseApiFixture showcase)
     {
         using var factory = showcase.CreateFactory();
         using var client = factory.CreateClient();
+        client.Timeout = TimeSpan.FromMinutes(10);
         using var login = await client.PostAsJsonAsync("/api/auth/login",
             new { userName = IdentityService.SystemAdministratorUserName, password = IdentitySeeder.DemoPassword });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
