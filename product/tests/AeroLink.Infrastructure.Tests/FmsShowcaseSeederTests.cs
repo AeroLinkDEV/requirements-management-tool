@@ -1,5 +1,6 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -45,13 +46,58 @@ public sealed class FmsShowcaseSeederTests
             Assert.Equal(historicalReviews.Count, historicalReviews.Select(x => new { x.ChangeRequestId, x.Discipline }).Distinct().Count());
             Assert.True(await db.RequirementRevisions.GroupBy(x => x.ArtifactId).AllAsync(x => x.Count() >= 1));
             var active = db.SystemChangeRequests.Where(x => x.TargetReleaseId == first.ActiveReleaseId);
-            Assert.Equal(8, await active.CountAsync()); Assert.Equal(2, await active.CountAsync(x => x.State == ChangeRequestState.SelectedForBaseline));
-            Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Approved)); Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.InReview)); Assert.Equal(3, await active.CountAsync(x => x.State == ChangeRequestState.Draft)); Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Deferred));
+            Assert.Equal(16, await active.CountAsync()); Assert.Equal(3, await active.CountAsync(x => x.State == ChangeRequestState.SelectedForBaseline));
+            Assert.Equal(2, await active.CountAsync(x => x.State == ChangeRequestState.Approved)); Assert.Equal(3, await active.CountAsync(x => x.State == ChangeRequestState.InReview)); Assert.Equal(5, await active.CountAsync(x => x.State == ChangeRequestState.Draft)); Assert.Equal(2, await active.CountAsync(x => x.State == ChangeRequestState.Deferred)); Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Withdrawn));
             var codeRecords = await db.CodeTraceabilityRecords.AsNoTracking().ToListAsync();
             Assert.Equal(9, codeRecords.Count);
             Assert.Equal(5, codeRecords.Count(x => x.ReleaseId != first.ActiveReleaseId));
             Assert.Equal(4, codeRecords.Count(x => x.ReleaseId == first.ActiveReleaseId));
             Assert.All(codeRecords, x => Assert.True(x.IsDemonstration));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Enrichment_is_deterministic_and_covers_active_interface_and_problem_report_lifecycles()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-showcase-scenarios-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var seeder = new FmsShowcaseSeeder(db);
+            var summary = await seeder.EnsureSeededAsync();
+            var firstInterface = await db.SystemChangeRequests.AsNoTracking()
+                .Where(x => x.ProjectId == summary.ProjectId && x.Type == ChangeRequestType.Interface)
+                .OrderBy(x => x.BaseNumber).Select(x => new { x.BaseNumber, x.Revision, x.State, x.AuthorId }).ToListAsync();
+            var firstReports = await db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == summary.ProjectId)
+                .OrderBy(x => x.ReportNumber).Select(x => new { x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId }).ToListAsync();
+
+            Assert.Equal(8, firstInterface.Count);
+            Assert.Equal(8, firstReports.Count);
+            Assert.Contains(firstInterface, x => x.State == ChangeRequestState.SelectedForBaseline);
+            Assert.Contains(firstInterface, x => x.State == ChangeRequestState.InReview);
+            Assert.Contains(firstInterface, x => x.State == ChangeRequestState.Deferred);
+            Assert.Contains(firstInterface, x => x.State == ChangeRequestState.Withdrawn);
+            Assert.Contains(firstReports, x => x.State == ProblemReportState.Draft);
+            Assert.Contains(firstReports, x => x.State == ProblemReportState.Implementing);
+            Assert.Contains(firstReports, x => x.State == ProblemReportState.Verifying);
+            Assert.Contains(firstReports, x => x.State == ProblemReportState.WaitingForSqaToClose);
+            Assert.Contains(firstReports, x => x.State == ProblemReportState.Closed);
+            Assert.Contains(firstReports, x => x.State == ProblemReportState.Rejected);
+            Assert.True(firstReports.Select(x => x.ResponsibleEngineerId).Distinct(StringComparer.OrdinalIgnoreCase).Count() >= 5);
+            Assert.Contains(firstReports, x => x.TargetReleaseId == summary.ReleasedBaselineId || x.TargetReleaseId == summary.ActiveReleaseId);
+
+            await seeder.EnsureSeededAsync();
+            var secondInterface = await db.SystemChangeRequests.AsNoTracking()
+                .Where(x => x.ProjectId == summary.ProjectId && x.Type == ChangeRequestType.Interface)
+                .OrderBy(x => x.BaseNumber).Select(x => new { x.BaseNumber, x.Revision, x.State, x.AuthorId }).ToListAsync();
+            var secondReports = await db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == summary.ProjectId)
+                .OrderBy(x => x.ReportNumber).Select(x => new { x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId }).ToListAsync();
+            Assert.Equal(firstInterface, secondInterface);
+            Assert.Equal(firstReports, secondReports);
+            Assert.All(await seeder.CheckInvariantsAsync(summary.ProgramId), x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
         }
         finally { File.Delete(path); }
     }

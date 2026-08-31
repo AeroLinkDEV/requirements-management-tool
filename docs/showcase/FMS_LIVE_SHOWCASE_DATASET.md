@@ -73,14 +73,26 @@ data, and GitLab is identified as the source of truth for code and merge content
 
 ## Active FMS 1.6 development
 
-At initial seed, FMS 1.6 begins from the FMS 1.5 predecessor baseline and contains eight controlled change requests:
+At initial seed, FMS 1.6 begins from the FMS 1.5 predecessor baseline and contains sixteen controlled change
+requests. Eight are the original System/HLR/LLR work packages and eight are Interface contract scenarios:
 
-- 2 Approved and selected in the working candidate baseline
-- 2 In Review
-- 3 Draft
-- 1 Deferred
+- 3 Selected for Baseline, 2 Approved, 3 In Review, 5 Draft, 2 Deferred, and 1 Withdrawn
+- Interface scenarios include a direct approval, a selected contract, pending multi-person review, deferral,
+  withdrawal, and untouched Draft work
 
-The seeded changes include a new system-level oceanic round-robin function and representative HLR and LLR modifications. Subsequent realistic testing may add approved, returned, deferred, or draft records; these are persistent product data, not seed drift. The FMS 1.6 workspace remains editable and is not released.
+The seeded changes include a new system-level oceanic round-robin function, representative HLR and LLR
+modifications, and exact ICDCR/ICDR requirement proposals. Subsequent realistic testing may add approved,
+returned, deferred, or draft records; these are persistent product data, not seed drift. The FMS 1.6 workspace
+remains editable and is not released.
+
+### Problem Reports and work distribution
+
+The deterministic FMS seed also carries eight Problem Reports split across the released 1.5 and in-work 1.6
+builds. They intentionally cover Draft, Open, Implementing, Verifying, Waiting for SQA closure, Closed, and
+Rejected states, with Task, Improvement, Code, Requirements, Test, and Environment categories. Responsible
+work is distributed across six named synthetic people; the broader identity seed includes additional project
+members with no current obligations, so Team Work can show both populated and zero-obligation people without
+inventing ownership.
 
 ## Terminology
 

@@ -163,6 +163,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             ("approver-identity", ReconcileApproverIdentityAsync),
             ("released-campaign", EnsureReleasedCampaignAsync),
             ("code-traceability-demo", EnsureCodeTraceabilityAsync),
+            ("scenario-richness", EnsureScenarioRichnessAsync),
         };
 
         foreach (var step in steps)
@@ -568,6 +569,21 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var documents = await db.ControlledDocuments.CountAsync(x => x.ProjectId == projectId, ct);
         var campaigns = await db.ReleaseCampaigns.CountAsync(x => x.ProjectId == projectId, ct);
         var components = await db.ProductLineComponents.CountAsync(x => x.ProjectId == projectId, ct);
+        var interfaceRequests = await db.SystemChangeRequests.AsNoTracking()
+            .Where(x => x.ProjectId == projectId && x.Type == ChangeRequestType.Interface)
+            .ToListAsync(ct);
+        var problemReports = await db.ProblemReports.AsNoTracking()
+            .Where(x => x.ProjectId == projectId).ToListAsync(ct);
+        var requiredInterfaceStates = new[]
+        {
+            ChangeRequestState.Draft, ChangeRequestState.InReview, ChangeRequestState.Approved,
+            ChangeRequestState.SelectedForBaseline, ChangeRequestState.Deferred, ChangeRequestState.Withdrawn,
+        };
+        var requiredProblemStates = new[]
+        {
+            ProblemReportState.Draft, ProblemReportState.Implementing, ProblemReportState.Verifying,
+            ProblemReportState.WaitingForSqaToClose, ProblemReportState.Closed, ProblemReportState.Rejected,
+        };
 
         return
         [
@@ -582,6 +598,15 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 $"{approved} approved or selected change request(s) and {impacts} verification-impact item(s)."),
             new("release-campaign", campaigns >= 1, $"{campaigns} release campaign(s)."),
             new("product-line", components >= 1, $"{components} product-line component(s)."),
+            new("interface-scenarios", interfaceRequests.Count >= 8
+                    && requiredInterfaceStates.All(state => interfaceRequests.Any(x => x.State == state)),
+                $"{interfaceRequests.Count} Interface change-control scenario(s); the active build should show draft, review, approval, selection, deferral and withdrawal."),
+            new("problem-report-scenarios", problemReports.Count >= 8
+                    && requiredProblemStates.All(state => problemReports.Any(x => x.State == state)),
+                $"{problemReports.Count} Problem Report scenario(s); lifecycle variety should include active, closure and rejected records."),
+            new("work-distribution", problemReports.Select(x => x.ResponsibleEngineerId)
+                    .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count() >= 5,
+                $"{problemReports.Select(x => x.ResponsibleEngineerId).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count()} responsible people hold seeded Problem Report work."),
         ];
     }
 
@@ -693,6 +718,194 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         foreach(var (variant,reuse) in new[]{(released,releasedReuse),(active,activeReuse)})
         {var components=await db.VariantComponentSelections.AsNoTracking().Where(x=>x.VariantId==variant.Id).Select(x=>new{revisionId=x.ComponentRevisionId,x.ApplicabilityJson}).ToListAsync(ct);var manifest=JsonSerializer.Serialize(new{format="AeroLink product-variant-manifest/v2",variant=variant.VariantKey,components,libraries=new[]{new{reuseId=reuse.Id,libraryId=library.Id,selectedRevisionId=reuse.SelectedRevisionId,latestUpstreamRevisionId=reuse.LatestUpstreamRevisionId,mode=reuse.Mode.ToString(),syncState=reuse.SynchronizationState.ToString(),reuse.ApplicabilityJson}}});var next=(await db.ProductVariantBaselines.Where(x=>x.VariantId==variant.Id).MaxAsync(x=>(int?)x.Revision,ct)??0)+1;db.ProductVariantBaselines.Add(new ProductVariantBaseline(variant.Id,next,manifest,Hash(manifest),actor,now.AddDays(3)));}
         var templateBody=JsonSerializer.Serialize(new{titlePrefix="Configured System Requirements",subtitle="Exact product-line requirements, traceability, verification evidence, and controlled rich content"});var template=new DocumentTemplate(projectId,"TPL-00001","AeroLink configured SYSRD",templateBody,actor,now);var templateRevision=template.Approve(actor,now);var templateSnapshot=JsonSerializer.Serialize(new{template.TemplateNumber,template.Title,templateKind="SYSRD",organization="AeroLink Flight Systems",body=JsonSerializer.Deserialize<object>(templateBody)});db.AddRange(template,new DocumentTemplateRevision(template.Id,templateRevision,"SYSRD","AeroLink Flight Systems",templateBody,Hash(templateSnapshot),actor,now));await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Adds a small, deterministic cross-section of the records people reach from the showcase landing page.
+    ///
+    /// The original FMS seed was excellent at exercising the released requirement/test volume, but it was
+    /// almost entirely a single historical shape: no Interface change-control work and no Problem Reports.
+    /// That made Team Work and the PR centre look empty even though the rest of the programme was populated.
+    /// These rows are deliberately created through the same aggregate lifecycle as authored records, and are
+    /// keyed by their controlled number so an upgrade or restart cannot multiply them. No released baseline
+    /// row is edited and no persistent data is cleared.
+    /// </summary>
+    private async Task<string?> EnsureScenarioRichnessAsync(Guid programId, CancellationToken ct)
+    {
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleOrDefaultAsync(ct);
+        if (projectId == Guid.Empty) return null;
+        var releases = await db.Releases.Where(x => x.ProjectId == projectId).ToDictionaryAsync(x => x.Version, ct);
+        if (!releases.TryGetValue("1.6", out var active) || !releases.TryGetValue("1.5", out var released))
+            return "The FMS build pair is not available for scenario enrichment.";
+
+        var interfaceCount = await EnsureInterfaceScenariosAsync(projectId, active.Id, ct);
+        var problemCount = await EnsureProblemReportScenariosAsync(projectId, released.Id, active.Id, ct);
+        return $"Ensured {interfaceCount} Interface change-control scenarios and {problemCount} Problem Report scenarios across Builds 1.5 and 1.6.";
+    }
+
+    private async Task<int> EnsureInterfaceScenariosAsync(Guid projectId, Guid releaseId, CancellationToken ct)
+    {
+        var existing = await db.SystemChangeRequests
+            .Where(x => x.ProjectId == projectId && x.TargetReleaseId == releaseId && x.Type == ChangeRequestType.Interface)
+            .ToListAsync(ct);
+        var byNumber = existing.ToDictionary(x => x.BaseNumber, StringComparer.OrdinalIgnoreCase);
+        var authors = new[] { "systems.author", "software.author", "software.lead", "quality.analyst", "systems.author", "software.author", "software.lead", "release.manager" };
+        var now = new DateTimeOffset(2024, 12, 2, 10, 0, 0, TimeSpan.Zero);
+        var baseline = await db.CandidateBaselines
+            .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.ReleaseId == releaseId && x.BaseNumber == "SW-01.60", ct);
+
+        for (var i = 1; i <= 8; i++)
+        {
+            var baseNumber = $"ICDCR-{i:D5}";
+            if (byNumber.ContainsKey(baseNumber)) continue;
+            var author = authors[i - 1];
+            var request = new SystemChangeRequest(baseNumber, 0, projectId, releaseId,
+                i == 1 ? "Align navigation interface timing contract" : $"FMS 1.6 interface contract scenario {i}",
+                "The controlled interface contract needs a documented FMS 1.6 decision.",
+                "The interface impact was reviewed against the current navigation and display boundaries.",
+                "Record the exact interface behaviour and its compatibility decision.", author, now.AddDays(i), ChangeRequestType.Interface);
+            request.AddRequirementChange(author, $"ICDR-{i:D5}", 0, RequirementLevel.Interface,
+                RequirementChangeKind.Introduce,
+                $"The FMS interface shall preserve deterministic navigation exchange behaviour {i:D2}.",
+                "The interface requirement is retained as controlled showcase content.", "Not Applicable", now.AddDays(i));
+
+            switch (i)
+            {
+                case 2:
+                    request.SubmitForReview(author, [new("assurance.reviewer", "Development Assurance Reviewer")], now.AddDays(i).AddHours(1));
+                    break;
+                case 3:
+                    request.SubmitForReview(author, [new("assurance.reviewer", "Development Assurance Reviewer")], now.AddDays(i).AddHours(1));
+                    request.ApproveActiveStage("assurance.reviewer", now.AddDays(i).AddHours(2));
+                    break;
+                case 4:
+                    request.SubmitForReview(author, [new("lead.reviewer", "Maya Patel")], now.AddDays(i).AddHours(1));
+                    request.ApproveActiveStage("lead.reviewer", now.AddDays(i).AddHours(2));
+                    break;
+                case 5:
+                    request.Defer(author, "Deferred pending the next interface supplier coordination window.", now.AddDays(i).AddHours(1));
+                    break;
+                case 6:
+                    request.Withdraw(author, "Withdrawn after the interface contract was consolidated into another package.", now.AddDays(i).AddHours(1));
+                    break;
+                case 7:
+                    request.SubmitForReview(author,
+                        [new("lead.reviewer", "Maya Patel"), new("manager.reviewer", "Olivia Chen")], now.AddDays(i).AddHours(1));
+                    break;
+            }
+
+            db.SystemChangeRequests.Add(request);
+            byNumber.Add(baseNumber, request);
+            // Selection is a separate fact from approval. Keep one Interface example in the active candidate
+            // only when the expected draft baseline is available; an older installation without that baseline
+            // must not be made to look as though a build accepted work it cannot name.
+            if (i == 4 && baseline is not null && baseline.State == CandidateBaselineState.Draft)
+                baseline.Select(request, "cm.fms", now.AddDays(i).AddHours(3));
+        }
+        await db.SaveChangesAsync(ct);
+        return byNumber.Count;
+    }
+
+    private async Task<int> EnsureProblemReportScenariosAsync(Guid projectId, Guid releasedId, Guid activeId, CancellationToken ct)
+    {
+        var existing = await db.ProblemReports.Where(x => x.ProjectId == projectId).ToListAsync(ct);
+        var byNumber = existing.ToDictionary(x => x.ReportNumber, StringComparer.OrdinalIgnoreCase);
+        var owners = new[] { "systems.author", "software.author", "test.engineer", "quality.analyst", "software.lead", "test.engineer", "software.author", "release.manager" };
+        var reporters = new[] { "systems.author", "software.author", "test.engineer", "quality.analyst", "software.lead", "systems.author", "software.author", "release.manager" };
+        var categories = new[]
+        {
+            ProblemReportCategory.TaskDriver, ProblemReportCategory.ProductImprovement,
+            ProblemReportCategory.CodeFunctional, ProblemReportCategory.CodeNonFunctional,
+            ProblemReportCategory.RequirementsDocumentation, ProblemReportCategory.TestBlocking,
+            ProblemReportCategory.TestNonBlocking, ProblemReportCategory.EnvironmentTooling,
+        };
+        // SQLite stores DateTimeOffset as a value it cannot order server-side. This is the bounded execution
+        // set for one showcase Project, so keep the provider-neutral ordering in memory.
+        var firstExecutionId = (await db.TestExecutions.AsNoTracking().Where(x => x.ProjectId == projectId)
+                .Select(x => new { x.Id, x.ExecutedAt }).ToListAsync(ct))
+            .OrderBy(x => x.ExecutedAt).Select(x => (Guid?)x.Id).FirstOrDefault();
+        var now = new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero);
+
+        for (var i = 1; i <= 8; i++)
+        {
+            var reportNumber = $"PR-{i:D5}";
+            if (byNumber.ContainsKey(reportNumber)) continue;
+            var owner = owners[i - 1];
+            var report = new ProblemReport(projectId, reportNumber,
+                i == 1 ? "Navigation database handoff follow-up" : $"FMS showcase problem report {i}",
+                "The FMS demonstration record captures a controlled engineering concern for this scenario.",
+                "Initial triage is retained with the report so the reader can follow the decision.", reporters[i - 1], now.AddDays(i),
+                classification: "FMS engineering record",
+                severity: i is 3 or 6 ? ProblemReportSeverity.High : ProblemReportSeverity.Major,
+                priority: i is 1 or 6 ? ProblemReportPriority.High : ProblemReportPriority.Normal,
+                origin: i is 6 or 7 ? "Test execution" : "Engineering review",
+                affectedConfiguration: i <= 4 ? "FMS 1.5" : "FMS 1.6",
+                targetReleaseId: i <= 4 ? releasedId : activeId,
+                responsibleEngineerId: owner,
+                additionalInformation: "Synthetic, deterministic showcase content; no external incident is implied.",
+                category: categories[i - 1]);
+
+            var eventTime = now.AddDays(i);
+            switch (i)
+            {
+                case 2:
+                    report.ReadyForSccb(owner, eventTime.AddHours(1));
+                    break;
+                case 3:
+                    report.ReadyForSccb(owner, eventTime.AddHours(1));
+                    report.OpenBySccb("systems.reviewer", eventTime.AddHours(2));
+                    break;
+                case 4:
+                    report.ReadyForSccb(owner, eventTime.AddHours(1));
+                    report.OpenBySccb("systems.reviewer", eventTime.AddHours(2));
+                    report.BeginImplementation(owner, eventTime.AddHours(3));
+                    break;
+                case 5:
+                    report.ReadyForSccb(owner, eventTime.AddHours(1));
+                    report.OpenBySccb("systems.reviewer", eventTime.AddHours(2));
+                    report.BeginImplementation(owner, eventTime.AddHours(3));
+                    report.BeginInvestigation(owner, "The implementation path and affected interface were reviewed.",
+                        "The demonstration root cause is bounded to the scenario record.", "No aircraft effect is claimed.",
+                        "The active build remains clearly identified while work is in progress.", eventTime.AddHours(4));
+                    report.ProposeResolution(owner, "Apply the controlled corrective action in the next FMS 1.6 review.", eventTime.AddHours(5));
+                    break;
+                case 6:
+                    report.ReadyForSccb(owner, eventTime.AddHours(1));
+                    report.OpenBySccb("systems.reviewer", eventTime.AddHours(2));
+                    report.BeginImplementation(owner, eventTime.AddHours(3));
+                    report.BeginInvestigation(owner, "The test finding was reproduced and isolated to the seeded path.",
+                        "The deterministic test setup was the source of the observation.", "No released-build safety claim is changed.",
+                        "Retain the failed observation and use the recorded retest evidence.", eventTime.AddHours(4));
+                    report.ProposeResolution(owner, "Correct the test setup and retain the retest result.", eventTime.AddHours(5));
+                    if (firstExecutionId is Guid execution)
+                        report.RecordResolutionVerification("test.engineer", execution, eventTime.AddHours(6));
+                    break;
+                case 7:
+                    report.ReadyForSccb(owner, eventTime.AddHours(1));
+                    report.OpenBySccb("systems.reviewer", eventTime.AddHours(2));
+                    report.BeginImplementation(owner, eventTime.AddHours(3));
+                    report.BeginInvestigation(owner, "The correction was verified against the controlled scenario.",
+                        "A non-functional test weakness was identified and corrected.", "No operational effect is claimed.",
+                        "The active record remains available for SQA closure.", eventTime.AddHours(4));
+                    report.ProposeResolution(owner, "Retain the corrected verification path in the active build.", eventTime.AddHours(5));
+                    if (firstExecutionId is Guid verified)
+                    {
+                        report.RecordResolutionVerification("test.engineer", verified, eventTime.AddHours(6));
+                        report.ApproveClosure("quality.analyst", Guid.Empty, eventTime.AddHours(7));
+                    }
+                    break;
+                case 8:
+                    report.ReadyForSccb(owner, eventTime.AddHours(1));
+                    report.OpenBySccb("systems.reviewer", eventTime.AddHours(2));
+                    report.ApplyDisposition(owner, ProblemReportDisposition.CannotReproduce,
+                        "The reported condition could not be reproduced in the controlled showcase setup.", null, eventTime.AddHours(3));
+                    break;
+            }
+            db.ProblemReports.Add(report);
+            byNumber.Add(reportNumber, report);
+        }
+        await db.SaveChangesAsync(ct);
+        return byNumber.Count;
     }
 
     /// <summary>
