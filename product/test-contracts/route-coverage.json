@@ -1713,6 +1713,7 @@
         "BaselineImportApiTests",
         "ProcedureTestChangeControlApiTests",
         "ProjectConfigurationApiTests",
+        "TeamWorkProjectionApiTests",
         "VerificationVocabularyApiTests"
       ]
     },
@@ -2434,6 +2435,7 @@
         "BaselineImportApiTests",
         "ProcedureTestChangeControlApiTests",
         "ProjectConfigurationApiTests",
+        "TeamWorkProjectionApiTests",
         "VerificationVocabularyApiTests"
       ]
     },

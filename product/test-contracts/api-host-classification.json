@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 116,
-    "tests": 708,
-    "knownCases": 789,
+    "tests": 709,
+    "knownCases": 790,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 44,
-      "tests": 267,
-      "knownCases": 296,
+      "tests": 268,
+      "knownCases": 297,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -521,6 +521,19 @@
       ]
     },
     {
+      "cls": "TeamWorkProjectionApiTests",
+      "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy",
+        "http-boundary",
+        "in-process-logic"
+      ]
+    },
+    {
       "cls": "TestExecutionEffectivityApiTests",
       "tests": 6,
       "knownCases": 6,
@@ -565,19 +578,6 @@
       "reason": "Reviewed #563 hold: bootstrap-dependent image-upload methods share first-install state and fixed workspace data. Keep those methods fresh; split any stateless header/auth methods before considering SharedApiHost.",
       "intents": [
         "http-boundary"
-      ]
-    },
-    {
-      "cls": "TeamWorkProjectionApiTests",
-      "tests": 5,
-      "knownCases": 5,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
-      "intents": [
-        "auth-policy",
-        "http-boundary",
-        "in-process-logic"
       ]
     },
     {

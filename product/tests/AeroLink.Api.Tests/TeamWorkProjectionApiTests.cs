@@ -265,6 +265,77 @@ public sealed class TeamWorkProjectionApiTests
     }
 
     [Fact]
+    public async Task Project_projection_labels_a_valid_interface_downstream_assessment()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedBaseAsync(factory);
+
+        // Give the fixture viewer the existing configuration-management authority so the test can
+        // activate the same effective ladder a project owner would use. The assessment is then
+        // constructed against that resolved policy, rather than bypassing ladder applicability.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var viewer = await db.UserAccounts.SingleAsync(account => account.UserName == fixture.Viewer);
+            var project = await db.Projects.SingleAsync(item => item.Id == fixture.ProjectId);
+            db.Add(new ProgramMembership(viewer.Id, project.ProgramId, ProgramRole.ConfigurationManager, "test", DateTimeOffset.UtcNow));
+            db.Add(new ProjectLeadershipAssignment(project.ProgramId, ProjectLeadershipPosition.ConfigurationManager,
+                viewer.Id, "test", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        await SignInAsync(client, fixture.Viewer);
+        using (var edit = await client.PutAsJsonAsync($"/api/projects/{fixture.ProjectId}/configuration", new
+        {
+            expectedVersion = 1,
+            reason = "Enable Interface downstream assessment coverage",
+            steps = new[]
+            {
+                new { catalogueEntry = "System", position = 1, capabilities = 7 },
+                new { catalogueEntry = "Interface", position = 2, capabilities = 1 },
+            },
+            relationships = new[] { new { parent = "System", child = "Interface" } },
+        }))
+        {
+            var editBody = await edit.Content.ReadAsStringAsync();
+            Assert.True(edit.IsSuccessStatusCode, $"{edit.StatusCode}: {editBody}");
+        }
+        using (var activation = await client.PostAsJsonAsync($"/api/projects/{fixture.ProjectId}/configuration/activate",
+            new { expectedVersion = 2, reason = "Activate Interface downstream assessment coverage" }))
+        {
+            Assert.True(activation.IsSuccessStatusCode, await activation.Content.ReadAsStringAsync());
+        }
+
+        Guid assessmentId;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var resolver = scope.ServiceProvider.GetRequiredService<IProjectLadderPolicyResolver>();
+            var policy = await resolver.ResolveAsync(fixture.ProjectId);
+            Assert.True(policy.IsDownstreamTarget(RequirementLevel.Interface));
+            var now = DateTimeOffset.UtcNow;
+            var source = Change("SRCR-90002", 0, fixture.ProjectId, fixture.ReleaseA,
+                "Interface assessment source", fixture.Viewer, ChangeRequestState.Approved, now);
+            var assessment = new DownstreamChangeAssessment(fixture.ProjectId, fixture.ReleaseA, source.Id,
+                source.DisplayNumber, RequirementLevel.Interface, now, policy);
+            db.AddRange(source, assessment);
+            await db.SaveChangesAsync();
+            assessmentId = assessment.Id;
+        }
+
+        using var response = await client.GetAsync($"/api/team-work?projectId={fixture.ProjectId}");
+        using var body = await ReadSuccessAsync(response);
+        var item = body.RootElement.GetProperty("items").EnumerateArray()
+            .Single(value => value.GetProperty("id").GetGuid() == assessmentId);
+        Assert.Equal("assessment", item.GetProperty("family").GetString());
+        Assert.Equal("Interface", item.GetProperty("layer").GetString());
+        Assert.Equal("Interface assessment", item.GetProperty("category").GetString());
+        Assert.Contains(body.RootElement.GetProperty("layers").EnumerateArray(),
+            layer => layer.GetProperty("id").GetString() == "Interface");
+    }
+
+    [Fact]
     public void Team_work_classifies_every_current_program_role_explicitly()
     {
         var expected = new Dictionary<ProgramRole, string?>

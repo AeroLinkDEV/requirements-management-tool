@@ -702,10 +702,11 @@ function TeamWorkDrawer({ person, items, people, onClose }: {
   );
 }
 
-function TeamWorkBoard({ items, group, people, onHolder, onDetails }: {
+function TeamWorkBoard({ items, group, people, selectedPerson, onHolder, onDetails }: {
   items: TeamWorkItem[];
   group: "lifecycle" | "holder";
   people: Map<string, TeamWorkPerson>;
+  selectedPerson: string | null;
   onHolder: (person: TeamWorkPerson, trigger?: HTMLElement) => void;
   onDetails?: (person: TeamWorkPerson, trigger?: HTMLElement) => void;
 }) {
@@ -781,8 +782,8 @@ function TeamWorkBoard({ items, group, people, onHolder, onDetails }: {
                     <div className="teamWorkHolderPerson">
                       <button
                         type="button"
-                        className="teamWorkHolderHeading"
-                        aria-pressed="false"
+                        className={`teamWorkHolderHeading${selectedPerson === person.userName.toLowerCase() ? " selected" : ""}`}
+                        aria-pressed={selectedPerson === person.userName.toLowerCase()}
                         onClick={event => onHolder(person, event.currentTarget)}
                       >
                         <PersonAvatar userName={person.userName} displayName={person.displayName} size="small" />
@@ -1217,6 +1218,7 @@ export default function TeamWork({ api, projectId, user }: {
               items={filteredItems}
               group={group}
               people={peopleByIdentity}
+              selectedPerson={selectedPerson}
               onHolder={(person, trigger) => selectPerson(person, trigger, false)}
               onDetails={showDetails}
             />

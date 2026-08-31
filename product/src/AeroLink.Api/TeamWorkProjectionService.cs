@@ -609,6 +609,7 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db, IProjectLadd
         RequirementLevel.System => "Assessment",
         RequirementLevel.HighLevel => "HLR assessment",
         RequirementLevel.LowLevel => "LLR assessment",
+        RequirementLevel.Interface => "Interface assessment",
         _ => throw new DomainException($"The assessment target level '{level}' is not supported by Team Work."),
     };
 

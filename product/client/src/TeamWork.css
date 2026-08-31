@@ -99,6 +99,7 @@
 .teamWorkHolderPerson { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .teamWorkHolderPerson .teamWorkPersonDetails { flex: 0 0 auto; margin-left: auto; }
 .teamWorkHolderHeading { display: inline-flex; align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: var(--teal-700); font-size: 16px; font-weight: 800; text-align: left; cursor: pointer; }
+.teamWorkHolderHeading.selected { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
 .teamWorkHolderHeading .personAvatar { width: 28px; height: 28px; border-width: 1px; }
 .teamWorkHolderItems { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; padding-top: 12px; }
 .teamWorkFilteredEmpty button { padding: 0; border: 0; background: transparent; color: var(--teal-700); font: inherit; font-weight: 800; text-decoration: underline; cursor: pointer; }

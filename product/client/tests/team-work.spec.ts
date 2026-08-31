@@ -595,6 +595,7 @@ test('Team Work keeps holder-group Details beside the person heading and opens t
   const heading = group.locator('.teamWorkHolderHeading')
   const details = group.getByRole('button', { name: 'View details for API Alice', exact: true })
   await expect(heading).toBeVisible()
+  await expect(heading).toHaveAttribute('aria-pressed', 'false')
   await expect(details).toBeVisible()
   const headingBounds = await heading.boundingBox()
   const detailsBounds = await details.boundingBox()
@@ -602,6 +603,14 @@ test('Team Work keeps holder-group Details beside the person heading and opens t
   expect(detailsBounds).not.toBeNull()
   expect(Math.abs(detailsBounds!.y - headingBounds!.y)).toBeLessThan(30)
   expect(detailsBounds!.x).toBeGreaterThan(headingBounds!.x)
+
+  await heading.click()
+  await expect(heading).toHaveAttribute('aria-pressed', 'true')
+  await expect(heading).toHaveClass(/selected/)
+  await expect(page.locator('[data-team-work-board="true"]')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Clear person', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Clear person', exact: true }).click()
+  await expect(heading).toHaveAttribute('aria-pressed', 'false')
 
   await details.click()
   const drawer = page.getByRole('dialog', { name: 'API Alice' })
