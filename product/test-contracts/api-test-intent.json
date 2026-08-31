@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 723,
-    "cases": 807,
+    "tests": 724,
+    "cases": 808,
     "classes": 116,
-    "hostedTests": 694,
-    "hostedCases": 764,
+    "hostedTests": 695,
+    "hostedCases": 765,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 7,
@@ -29,8 +29,8 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 155,
-      "cases": 169,
+      "tests": 156,
+      "cases": 170,
       "unknownCases": 0,
       "classes": 56
     },
@@ -5501,8 +5501,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 189,
-        "end": 228
+        "start": 218,
+        "end": 257
       }
     },
     {
@@ -5518,8 +5518,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 658,
-        "end": 673
+        "start": 690,
+        "end": 705
       }
     },
     {
@@ -5535,8 +5535,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1092,
-        "end": 1125
+        "start": 1124,
+        "end": 1157
       }
     },
     {
@@ -5552,8 +5552,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1131,
-        "end": 1160
+        "start": 1163,
+        "end": 1192
       }
     },
     {
@@ -5570,8 +5570,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 626,
-        "end": 656
+        "start": 658,
+        "end": 688
       }
     },
     {
@@ -5593,6 +5593,24 @@
     },
     {
       "cls": "ProblemReportCheckoutApiTests",
+      "test": "Check_in_derives_plain_problem_report_narratives_from_the_typed_record",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 152,
+        "end": 179
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
       "test": "Concurrent_inline_image_uploads_cannot_overrun_the_cumulative_project_budget",
       "kind": "Fact",
       "intent": "filesystem",
@@ -5605,8 +5623,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 896,
-        "end": 941
+        "start": 928,
+        "end": 973
       }
     },
     {
@@ -5623,8 +5641,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 491,
-        "end": 526
+        "start": 523,
+        "end": 558
       }
     },
     {
@@ -5640,8 +5658,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 152,
-        "end": 187
+        "start": 181,
+        "end": 216
       }
     },
     {
@@ -5658,8 +5676,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 399,
-        "end": 429
+        "start": 428,
+        "end": 458
       }
     },
     {
@@ -5675,8 +5693,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 230,
-        "end": 269
+        "start": 259,
+        "end": 298
       }
     },
     {
@@ -5693,8 +5711,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 271,
-        "end": 397
+        "start": 300,
+        "end": 426
       }
     },
     {
@@ -5711,8 +5729,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 792,
-        "end": 815
+        "start": 824,
+        "end": 847
       }
     },
     {
@@ -5729,8 +5747,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 758,
-        "end": 790
+        "start": 790,
+        "end": 822
       }
     },
     {
@@ -5746,8 +5764,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 876,
-        "end": 894
+        "start": 908,
+        "end": 926
       }
     },
     {
@@ -5764,8 +5782,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 675,
-        "end": 756
+        "start": 707,
+        "end": 788
       }
     },
     {
@@ -5781,8 +5799,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1166,
-        "end": 1205
+        "start": 1198,
+        "end": 1237
       }
     },
     {
@@ -5799,8 +5817,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 817,
-        "end": 874
+        "start": 849,
+        "end": 906
       }
     },
     {
@@ -5817,8 +5835,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 528,
-        "end": 561
+        "start": 560,
+        "end": 593
       }
     },
     {
@@ -5835,8 +5853,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 563,
-        "end": 624
+        "start": 595,
+        "end": 656
       }
     },
     {
@@ -5853,8 +5871,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 431,
-        "end": 489
+        "start": 460,
+        "end": 521
       }
     },
     {
