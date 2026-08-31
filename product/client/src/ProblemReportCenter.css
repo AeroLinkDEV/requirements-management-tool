@@ -65,7 +65,14 @@
 .prEditorHead, .prEditorFoot { padding: 20px 28px 14px; background: #fff; }
 .prEditorHead { border-bottom: 1px solid #e4ebf3; }
 .prEditorHead h2 { margin: 6px 0 12px; }
-.prEditorBody { padding: 18px 28px 22px; overflow-y: auto; display: grid; gap: 2px; }
+.prEditorBody {
+  padding: 18px 28px 22px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.prEditorBody > * { flex: 0 0 auto; }
 .prWholeRecord .prCheckoutFoot, .prCreateWhole .prCreateFoot {
   padding: 14px 28px; border-top: 1px solid #e4ebf3; background: #f8fbfd; margin-top: 0;
 }

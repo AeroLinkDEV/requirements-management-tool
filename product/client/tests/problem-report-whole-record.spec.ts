@@ -187,7 +187,10 @@ test('resized adjacent figures share a responsive document row and guidance is n
   expect(problemEditor).not.toBeNull()
   expect(additionalEditor).not.toBeNull()
   const problemBottom = problemEditor!.y + problemEditor!.height
+  const pairBottom = Math.max(editorLeft!.y + editorLeft!.height, editorRight!.y + editorRight!.height)
   const additionalTop = additionalEditor!.y
+  expect(problemBottom).toBeGreaterThanOrEqual(pairBottom)
+  expect(additionalTop).toBeGreaterThanOrEqual(pairBottom)
   expect(additionalTop).toBeGreaterThanOrEqual(problemBottom)
 
   await editorFigures.nth(1).getByRole('button', { name: 'Add text below figure' }).click()
