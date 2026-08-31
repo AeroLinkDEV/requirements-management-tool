@@ -1,5 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 import { login } from './auth'
+
+const pngSize = (path: string) => {
+  const bytes = readFileSync(path)
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
+}
 
 /**
  * The two change request registers are one register over different artifacts.
@@ -82,9 +88,12 @@ test('requirements register preserves deep-link history, native links, and autho
   expect(routeParts).not.toBeNull()
   const projectId = routeParts![1]
   const releaseId = routeParts![2]
+  const parentId = '11111111-1111-4111-8111-111111111111'
+  const tcrId = '22222222-2222-4222-8222-222222222222'
+  const secondParentId = '33333333-3333-4333-8333-333333333333'
+  const secondTcrId = '44444444-4444-4444-8444-444444444444'
+  const grandchildId = '55555555-5555-4555-8555-555555555555'
   await page.route('**/api/change-requests/*/trace', async route => {
-    const parentId = '11111111-1111-4111-8111-111111111111'
-    const tcrId = '22222222-2222-4222-8222-222222222222'
     await route.fulfill({ json: {
       projectId, rootChangeRequestId: rootId,
       rootArtifactId: rootId, rootArtifactKind: 'ChangeRequest',
@@ -92,10 +101,16 @@ test('requirements register preserves deep-link history, native links, and autho
         { id: rootId, kind: 'ChangeRequest', projectId, buildId: releaseId, displayNumber: 'SRCR-ROOT.03', title: 'Selected root', state: 'Draft', revision: 3 },
         { id: parentId, kind: 'ChangeRequest', projectId, buildId: releaseId, displayNumber: 'SRCR-PARENT.01', title: 'Author-stated parent', state: 'Approved', revision: 1 },
         { id: tcrId, kind: 'TestChangeRequest', projectId, buildId: releaseId, displayNumber: 'SYSTPCR-ROOT.00', title: 'Assessment-derived verification impact', state: 'Draft', revision: 0 },
+        { id: secondParentId, kind: 'ChangeRequest', projectId, buildId: releaseId, displayNumber: 'HLRCR-PARENT.00', title: 'Second direct parent', state: 'InReview', revision: 0, level: 'HighLevel' },
+        { id: secondTcrId, kind: 'TestChangeRequest', projectId, buildId: releaseId, displayNumber: 'HLRTCCR-ROOT.00', title: 'High-level verification impact', state: 'Approved', revision: 0, level: 'HighLevel' },
+        { id: grandchildId, kind: 'ChangeRequest', projectId, buildId: releaseId, displayNumber: 'SRCR-GRANDCHILD.00', title: 'Indirect grandchild must stay out of inspector', state: 'Draft', revision: 0 },
       ],
       edges: [
         { fromId: rootId, fromKind: 'ChangeRequest', toId: parentId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: parentId, rationale: 'Controlled parent rationale.' }] },
         { fromId: rootId, fromKind: 'ChangeRequest', toId: tcrId, toKind: 'TestChangeRequest', relation: 'CoveredByTestChangeRequest', provenance: [{ kind: 'AssessmentDerived', sourceId: tcrId, status: 'Change required.' }] },
+        { fromId: rootId, fromKind: 'ChangeRequest', toId: secondParentId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: secondParentId, rationale: 'Second direct parent rationale.' }] },
+        { fromId: rootId, fromKind: 'ChangeRequest', toId: secondTcrId, toKind: 'TestChangeRequest', relation: 'CoveredByTestChangeRequest', provenance: [{ kind: 'AssessmentDerived', sourceId: secondTcrId, status: 'No change required.' }] },
+        { fromId: parentId, fromKind: 'ChangeRequest', toId: grandchildId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: grandchildId }] },
       ],
       state: { upstream: 'Answered', downstream: 'ChangeRequired', overall: 'ActionRequired', isTopOfLadder: false, warnings: ['Complete the downstream review before approval.'] },
     } })
@@ -112,8 +127,15 @@ test('requirements register preserves deep-link history, native links, and autho
   const inspector = page.getByRole('complementary', { name: /detail$/ })
   await expect(inspector).toContainText('Answered')
   await expect(inspector).toContainText('Selected for baseline')
-  await expect(inspector).toContainText('AssessmentDerived')
-  await expect(inspector).toContainText('AuthorStated')
+  await expect(inspector).toContainText('From downstream assessment')
+  await expect(inspector).toContainText('Author-stated relationship')
+  await expect(inspector.locator('.traceSummary')).toHaveCount(0)
+  await expect(inspector.getByRole('link', { name: 'Open Digital Thread →' })).toBeVisible()
+  await expect(inspector.getByRole('link', { name: /SRCR-PARENT\.01/ })).toHaveAttribute('href', new RegExp(`systems/change-requests/${parentId}$`))
+  await expect(inspector.getByRole('link', { name: /SYSTPCR-ROOT\.00/ })).toHaveAttribute('href', new RegExp(`system-verification/change-requests/${tcrId}\\?kind=Procedure$`))
+  await expect(inspector.getByRole('link', { name: /HLRCR-PARENT\.00/ })).toHaveAttribute('href', new RegExp(`software/change-requests/${secondParentId}$`))
+  await expect(inspector.getByRole('link', { name: /HLRTCCR-ROOT\.00/ })).toHaveAttribute('href', new RegExp(`software-verification/hlr/change-requests/${secondTcrId}$`))
+  await expect(inspector.getByRole('link', { name: /SRCR-GRANDCHILD\.00/ })).toHaveCount(0)
   await expect(inspector).toContainText('Complete the downstream review before approval.')
   await expect(inspector).toContainText(/exact revision \d+/)
   await testInfo.attach('requirements-trace-impact', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
@@ -121,6 +143,36 @@ test('requirements register preserves deep-link history, native links, and autho
   expect(afterRegister?.x).toBe(beforeRegister?.x)
   expect(afterRegister?.y).toBe(beforeRegister?.y)
   expect(afterRegister?.width).toBe(beforeRegister?.width)
+  // Preserve exact visual evidence of the one-hop inspector at each release-review width. The fixture has two
+  // direct CR parents and two direct verification impacts, so these captures prove fan-out, mixed families,
+  // human provenance, exact links, and the single Digital Thread action without relying on a DOM-only assertion.
+  for (const width of [1280, 1440, 1920]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await inspector.evaluate(element => { element.scrollTop = 0 })
+    if (width <= 1360) {
+      // The supported 1280 layout stacks the inspector below the register. Align its own top edge explicitly;
+      // scrollIntoViewIfNeeded may center an inspector taller than the viewport and clip the calm header frame.
+      await page.evaluate(() => {
+        const element = document.querySelector<HTMLElement>('.requirementInspector')
+        if (element) window.scrollTo(0, Math.max(0, element.getBoundingClientRect().top + window.scrollY - 16))
+      })
+    }
+    await expect(inspector).toBeVisible()
+    const path = testInfo.outputPath(`cr-inspector-${width}x900.png`)
+    await page.screenshot({ path, fullPage: false })
+    expect(pngSize(path)).toEqual({ width, height: 900 })
+    await testInfo.attach(`cr-inspector-${width}x900`, { path, contentType: 'image/png' })
+    // The desktop inspector is taller than one viewport once all immediate relationships are rendered. Keep a
+    // companion evidence frame scrolled to the relationship body so fan-out, provenance, and the Digital Thread
+    // action are visible without changing the product's supported scrolling behavior.
+    await inspector.evaluate(element => { element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight) })
+    const tracePath = testInfo.outputPath(`cr-inspector-${width}x900-trace.png`)
+    await page.screenshot({ path: tracePath, fullPage: false })
+    expect(pngSize(tracePath)).toEqual({ width, height: 900 })
+    await testInfo.attach(`cr-inspector-${width}x900-trace`, { path: tracePath, contentType: 'image/png' })
+  }
+  await page.setViewportSize({ width: 1600, height: 900 })
   await page.reload()
   await expect(page.getByRole('tab', { name: 'Trace & impact' })).toBeVisible({ timeout: 30_000 })
   await page.goBack()

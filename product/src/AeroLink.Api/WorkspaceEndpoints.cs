@@ -766,7 +766,7 @@ public static class WorkspaceEndpoints
             var ordered=items.OrderByDescending(x=>x.Identifier.ToLowerInvariant().Contains(q)).ThenByDescending(x=>x.UpdatedAt).ThenBy(x=>x.Identifier).Take(take).ToList();return Results.Ok(new{query,items=ordered});
         });
 
-        app.MapGet("/api/artifacts/{kind}/{id:guid}",async(string kind,Guid id,Guid? releaseId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+        app.MapGet("/api/artifacts/{kind}/{id:guid}",async(string kind,Guid id,Guid? releaseId,Guid? revisionId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
         {
             static Dictionary<string,object?> Details(params (string Key,object? Value)[] values)=>values.ToDictionary(x=>x.Key,x=>x.Value);
             var normalized=kind.Trim().ToLowerInvariant();
@@ -787,7 +787,14 @@ if(normalized is "test-procedure" or "test-case")
     if(normalized=="test-case"&&canonicalKind!="test-case")return Results.NotFound();
     var revisions=await db.TestProcedureRevisions.AsNoTracking().Where(x=>x.ProcedureId==id)
         .OrderByDescending(x=>x.Revision).ToListAsync(ct);
-    TestProcedureRevision? selected;
+    TestProcedureRevision? selected = null;
+    if (revisionId is Guid requestedRevisionId)
+    {
+        // A trace link names an immutable revision, not merely the mutable artifact. Reject a revision
+        // belonging to another procedure rather than falling back to the release-effective/latest row.
+        selected=revisions.SingleOrDefault(x=>x.Id==requestedRevisionId);
+        if(selected is null)return Results.NotFound();
+    }
     if(releaseId is Guid scopedReleaseId)
     {
         if(!await db.Releases.AsNoTracking().AnyAsync(
@@ -798,10 +805,19 @@ if(normalized is "test-procedure" or "test-case")
         if(effectivity is null
            || !effectivity.RevisionByProcedure.TryGetValue(item.Id,out var selectedRevisionId))
             return Results.NotFound();
-        selected=revisions.SingleOrDefault(x=>x.Id==selectedRevisionId);
-        if(selected is null)return Results.NotFound();
+        // When an exact revision was requested, the release context must carry that same revision. This
+        // keeps a copied trace link from presenting an older/newer revision under the wrong build.
+        if (revisionId is Guid exactRevisionId)
+        {
+            if (selectedRevisionId != exactRevisionId)return Results.NotFound();
+        }
+        else
+        {
+            selected=revisions.SingleOrDefault(x=>x.Id==selectedRevisionId);
+            if(selected is null)return Results.NotFound();
+        }
     }
-    else selected=revisions.FirstOrDefault();
+    else if (revisionId is null) selected=revisions.FirstOrDefault();
     var coverage=selected is null?0:await db.TestCoverage.CountAsync(
         x=>x.ProcedureRevisionId==selected.Id,ct);
     var projectedTitle=selected is null?item.Title:

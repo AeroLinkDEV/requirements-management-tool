@@ -15,7 +15,9 @@ type SoftwareLevel='HighLevel'|'LowLevel'
 type Scr={id:string;baseNumber:string;revision:number;displayNumber:string;title:string;state:string;deferredFromState?:string|null;authorId:string;targetReleaseId:string;requirementCount:number;hasHighLevelChanges:boolean;hasLowLevelChanges:boolean;updatedAt:string;revisionCount:number}
 type Props={
  api:string;projectId:string;releases:Release[];activeReleaseId:string;scope:Scope;
- registerHref:(id:string)=>string; initialSelectionId?:string; onSelectionChange?:(id?:string)=>void;
+  registerHref:(id:string)=>string; initialSelectionId?:string; onSelectionChange?:(id?:string)=>void;
+  traceArtifactHref?: (node: { id: string; kind: string; displayNumber?: string | null; level?: string | null; buildId?: string | null; artifactId?: string | null }) => string | undefined;
+  digitalThreadHref?: (id: string) => string | undefined;
  initialSoftwareLevel:SoftwareLevel;onSoftwareLevelChange:(level:SoftwareLevel)=>void;
  initialAssessmentId?:string;onAssessmentSelected:(id?:string)=>void;
  initialStateIntent?:HistoryStateIntent;onStateIntentChange:(intent?:HistoryStateIntent)=>void;
@@ -29,7 +31,7 @@ const stateLabels:Record<HistoryStateIntent,string>={Draft:'Draft',InReview:'In 
 const registerStateOptions=(Object.keys(stateLabels) as HistoryStateIntent[]).map(value=>({value,label:stateLabels[value]}))
 const matchesStateIntent=(state:string,intent?:HistoryStateIntent)=>!intent||(intent==='ApprovedOrSelected'?(state==='Approved'||state==='SelectedForBaseline'):state===intent)
 
-export default function HistoryExplorer({api,projectId,releases,activeReleaseId,scope,registerHref,initialSelectionId,onSelectionChange,initialSoftwareLevel,onSoftwareLevelChange,initialAssessmentId,onAssessmentSelected,initialStateIntent,onStateIntentChange,onBack,onOpenScr,onOpenRequirement,onCreateSystem,onCreateInterface,onCreateSoftware,user,ladder}:Props){
+export default function HistoryExplorer({api,projectId,releases,activeReleaseId,scope,registerHref,traceArtifactHref,digitalThreadHref,initialSelectionId,onSelectionChange,initialSoftwareLevel,onSoftwareLevelChange,initialAssessmentId,onAssessmentSelected,initialStateIntent,onStateIntentChange,onBack,onOpenScr,onOpenRequirement,onCreateSystem,onCreateInterface,onCreateSoftware,user,ladder}:Props){
  const [view,setView]=useState<'build'|'deferred'>('build')
  const defaultSoftwareLevel:SoftwareLevel=ladderAllows(ladder,'HighLevel',LadderCapability.ChangeControl)?'HighLevel':'LowLevel'
  const [query,setQuery]=useState(''),[softwareLevel,setSoftwareLevel]=useState<SoftwareLevel>(ladderAllows(ladder,initialSoftwareLevel,LadderCapability.ChangeControl)?initialSoftwareLevel:defaultSoftwareLevel),[stateIntent,setStateIntent]=useState<HistoryStateIntent|undefined>(initialStateIntent),[scrPage,setScrPage]=useState(1),[scrTotal,setScrTotal]=useState(0),[scrTotalPages,setScrTotalPages]=useState(1),[scrs,setScrs]=useState<Scr[]>([])
@@ -101,7 +103,7 @@ export default function HistoryExplorer({api,projectId,releases,activeReleaseId,
    onStateIntentChange={value=>changeStateIntent(value?value as HistoryStateIntent:undefined)}
    stateOptions={registerStateOptions}
    onOpen={onOpenScr} onSelect={onSelectionChange} selectedId={initialSelectionId}
-   registerHref={registerHref} inspector={{api,kind:'ChangeRequest',projectId,releaseId:activeReleaseId,registerType:scope}}
+    registerHref={registerHref} inspector={{api,kind:'ChangeRequest',projectId,releaseId:activeReleaseId,registerType:scope,artifactHref:traceArtifactHref,digitalThreadHref}}
    onLoadRevisions={loadRevisions}/>}
  </main>
 }

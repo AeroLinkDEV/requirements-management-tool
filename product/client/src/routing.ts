@@ -53,6 +53,9 @@ export type AppRoute = {
   releaseId?: string;
   artifactId?: string;
   artifactKind?: string;
+  /// The exact verification artifact revision a trace deep link opens. Immutable, so a procedure/case link
+  /// cannot silently fall forward to the release-effective or latest revision after later revisions exist.
+  artifactRevisionId?: string;
   /// The exact requirement revision a procedure trace deep link opens. Immutable, so a trace that names a
   /// requirement revision keeps naming it after later revisions exist.
   requirementRevisionId?: string;
@@ -219,7 +222,7 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
     const artifactKind = decoded(tail[1]);
     if (artifactKind && ["problem-report", "baseline", "build"].includes(artifactKind))
       return { ...base, view: "notFound", discipline: "system" };
-    return { ...base, view: "artifact", discipline: "system", artifactKind, artifactId: decoded(tail[2]) };
+    return { ...base, view: "artifact", discipline: "system", artifactKind, artifactId: decoded(tail[2]), artifactRevisionId: query.get("revisionId") || undefined };
   }
   return { ...base, view: "notFound", discipline: "system" };
 }
@@ -253,7 +256,7 @@ export const projectConfigurationApprovalsPath = (slug: string) =>
 export const projectConfigurationAssurancePath = (slug: string) =>
   `${projectAreaPath(slug, "projectConfiguration")}/assurance`;
 
-export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent, selectionId?: string, proposalId?: string) {
+export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent, selectionId?: string, proposalId?: string, artifactRevisionId?: string) {
   const root = `/programs/${context.programId}/projects/${context.projectId}/releases/${context.releaseId}`;
   const historyPath = (scope: "systems" | "software" | "interfaces") => {
     const path = `${root}/${scope}/change-requests`;
@@ -332,7 +335,10 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "integrations": return `${root}/integration-command-center`;
     case "admin": return `${root}/administration`;
     case "reviewWorkflows": return `${root}/review-workflows`;
-    case "artifact": return `${root}/artifacts/${artifactKind}/${artifactId}`;
+    case "artifact": {
+      const path = `${root}/artifacts/${artifactKind}/${artifactId}`;
+      return artifactRevisionId ? `${path}?revisionId=${encodeURIComponent(artifactRevisionId)}` : path;
+    }
     default: return root;
   }
 }
@@ -356,4 +362,58 @@ export function artifactPath(context: RouteContext, kind: string, id: string, di
   if (kind === "requirement") return routePath(context, "requirements", discipline === "software" ? "software" : "system", id);
   if (kind === "managed-document") return `/programs/${context.programId}/projects/${context.projectId}/documentation-center/${encodeURIComponent(id)}`;
   return routePath(context, "artifact", "system", id, kind);
+}
+
+/**
+ * Build the canonical browser address for a node returned by the server-owned Change Request trace
+ * projection. This is intentionally a presentation/router primitive: it does not infer a relationship or
+ * choose a revision. The node's exact id (and, for a requirement revision, its exact revision id) is carried
+ * through to the existing authorized surface. A missing discriminator returns undefined so callers can make
+ * a truthful non-openable value instead of inventing a route.
+ */
+export type ExactTraceArtifact = {
+  id: string
+  kind: string
+  displayNumber?: string | null
+  level?: string | null
+  buildId?: string | null
+  artifactId?: string | null
+  revisionId?: string | null
+}
+
+export function exactTraceArtifactPath(context: RouteContext, node: ExactTraceArtifact): string | undefined {
+  if (!node.id) return undefined;
+  const scoped = node.buildId ? { ...context, releaseId: node.buildId } : context;
+  const display = (node.displayNumber ?? '').toUpperCase();
+
+  if (node.kind === 'ChangeRequest') {
+    const discipline = node.level === 'HighLevel' || node.level === 'LowLevel' || display.startsWith('HLRCR-') || display.startsWith('LLRCR-')
+      ? 'software' : 'system';
+    return routePath(scoped, 'scr', discipline, node.id, node.level === 'Interface' || display.startsWith('ICDCR-') ? 'Interface' : undefined);
+  }
+
+  if (node.kind === 'TestChangeRequest') {
+    const isSystem = display.startsWith('SYSTP') || display.startsWith('SYSTCR');
+    const discipline: Discipline = isSystem ? 'systemTest' : 'softwareTest';
+    const procedure = node.level?.toLowerCase().includes('procedure') || display.startsWith('SYSTPCR-') || display.startsWith('HLRTPCR-') || display.startsWith('LLRTPCR-');
+    const level = isSystem ? (procedure ? 'Procedure' : undefined) : display.startsWith('LLR') ? (procedure ? 'LowLevelProcedure' : 'LowLevel') : (procedure ? 'HighLevelProcedure' : 'HighLevel');
+    return routePath(scoped, 'testChangeRequest', discipline, node.id, level);
+  }
+
+  if (node.kind === 'RequirementRevision') {
+    if (!node.artifactId) return undefined;
+    const discipline = node.level === 'HighLevel' || node.level === 'LowLevel' ? 'software' : 'system';
+    const path = routePath(scoped, 'requirements', discipline, node.artifactId);
+    return `${path}&requirementRevisionId=${encodeURIComponent(node.id)}`;
+  }
+
+  if (node.kind === 'TestProcedure' || node.kind === 'TestCase')
+    return routePath(scoped, 'artifact', 'system', node.id, node.kind === 'TestProcedure' ? 'test-procedure' : 'test-case', undefined, undefined, undefined, undefined, node.revisionId ?? undefined);
+  if (node.kind === 'TestExecution') return routePath(scoped, 'artifact', 'system', node.id, 'test-execution');
+  if (node.kind === 'Evidence') return routePath(scoped, 'artifact', 'system', node.id, 'evidence');
+
+  // Build and code-traceability records currently have no exact authorized
+  // artifact-record route (the build page is deliberately NotFound). Keep
+  // their identifiers intentionally non-openable; never invent an URL.
+  return undefined;
 }

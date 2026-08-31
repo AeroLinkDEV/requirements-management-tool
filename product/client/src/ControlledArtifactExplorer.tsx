@@ -51,6 +51,7 @@ export function ControlledArtifactExplorerLayout({
 export function ControlledArtifactInspector({
   artifactType,
   displayNumber,
+  ariaLabel,
   subtitle = 'Controlled current revision',
   closeLabel,
   onClose,
@@ -60,7 +61,8 @@ export function ControlledArtifactInspector({
   children,
 }: {
   artifactType: string
-  displayNumber: string
+  displayNumber: ReactNode
+  ariaLabel?: string
   subtitle?: string
   closeLabel: string
   onClose: () => void
@@ -83,7 +85,7 @@ export function ControlledArtifactInspector({
     onTab(next.id)
     requestAnimationFrame(() => tabRefs.current[next.id]?.focus())
   }
-  return <aside className="requirementInspector" aria-label={`${displayNumber} detail`}>
+  return <aside className="requirementInspector" aria-label={ariaLabel ?? `${typeof displayNumber === 'string' ? displayNumber : artifactType} detail`}>
     <div className="inspectorTop">
       <div>
         <span>{artifactType}</span>
