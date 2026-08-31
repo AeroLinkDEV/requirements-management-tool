@@ -175,17 +175,8 @@ test("a change request opens its stable-ID Digital Thread with exact chain, prov
     const path = testInfo.outputPath(name);
     await page.screenshot({ path, fullPage: false });
     expect(pngSize(path)).toEqual({ width, height });
-    if (width === 900) {
-      console.log(await page.evaluate(() => ({
-        document: { scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth },
-        elements: Array.from(document.querySelectorAll<HTMLElement>("body *")).map(element => ({
-          tag: element.tagName, className: element.className, id: element.id,
-          left: Math.round(element.getBoundingClientRect().left), right: Math.round(element.getBoundingClientRect().right),
-          width: Math.round(element.getBoundingClientRect().width), scrollWidth: element.scrollWidth, clientWidth: element.clientWidth,
-        })).filter(item => item.right > document.documentElement.clientWidth || item.left < 0).slice(-20),
-      })));
+    if (width === 900)
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-    }
   };
   await captureViewport(1440, 900, "cr-thread-1440x900.png");
   await page.screenshot({ path: testInfo.outputPath("cr-thread-full-page.png"), fullPage: true });
