@@ -107,6 +107,6 @@ public sealed class ProblemReportNarrativeTests
 
         Assert.NotEqual(before, report.CanonicalHash());
         Assert.Contains("\"rootCauseRich\"", report.CanonicalSnapshot());
-        Assert.Equal(4, ProblemReportEvidenceContract.SchemaVersion);
+        Assert.Equal(5, ProblemReportEvidenceContract.SchemaVersion);
     }
 }

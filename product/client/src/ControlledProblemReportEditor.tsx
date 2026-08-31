@@ -288,15 +288,15 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
         <div className="prEditorBody">
         {error && <div className="workspaceError" role="alert">{error}</div>}
         <label>Title<input required value={draft.title} onChange={event => set('title', event.target.value)} /></label>
-        <RichContentEditor api={api} projectId={projectId} label="Problem Description" value={draft.problemRich} onChange={value => set('problemRich', value)} />
-        <RichContentEditor api={api} projectId={projectId} label="Additional Information" value={draft.additionalInformationRich} onChange={value => set('additionalInformationRich', value)} />
+        <RichContentEditor api={api} projectId={projectId} label="Problem Description" value={draft.problemRich} documentLike onChange={value => set('problemRich', value)} />
+        <RichContentEditor api={api} projectId={projectId} label="Additional Information" value={draft.additionalInformationRich} documentLike onChange={value => set('additionalInformationRich', value)} />
         <div className="prFormGrid">
           <label>Severity<select value={draft.severity} onChange={event => set('severity', event.target.value)}>{['Critical', 'High', 'Major', 'Minor', 'Trivial'].map(x => <option key={x}>{x}</option>)}</select></label>
           <label>Priority<select value={draft.priority} onChange={event => set('priority', event.target.value)}>{['Urgent', 'High', 'Normal', 'Low'].map(x => <option key={x}>{x}</option>)}</select></label>
         </div>
         <label>Category<ProblemReportCategoryPicker api={api} value={draft.category} required onChange={value => set('category', value)} /></label>
         {NARRATIVE.map(field =>
-          <RichContentEditor key={field.key} api={api} projectId={projectId} label={field.label}
+          <RichContentEditor key={field.key} api={api} projectId={projectId} label={field.label} documentLike
             value={draft[field.key]} onChange={value => set(field.key, value)} />)}
         <fieldset className="prImpactEditor"><legend>Impact matrix</legend>{impactFields.map(([key, label]) =>
           <label key={key}>{label}<select aria-label={label} value={draft.impacts[key] ?? 'Unknown'} onChange={event => set('impacts', { ...draft.impacts, [key]: event.target.value })}>{['Unknown', 'No', 'Yes'].map(value => <option key={value}>{value}</option>)}</select></label>)}

@@ -83,6 +83,30 @@ public sealed class ProblemReportEvidenceContractTests
     }
 
     [Fact]
+    public void Pre_image_layout_schema_recomputes_byte_identically_while_new_records_use_current_schema()
+    {
+        var report = NewReport();
+        var imageId = Guid.NewGuid();
+        report.UpdateDetails("verification.engineer", report.Title, report.Problem,
+            $$"""{"blocks":[{"type":"image","attachmentId":"{{imageId}}","alt":"Bus timing","widthPercent":50}]}""",
+            report.AdditionalInformation, report.AdditionalInformationRich, report.Analysis, report.RootCause,
+            report.CorrectiveAction, report.SystemAircraftImpact, report.ImpactAssessmentJson, report.Severity,
+            report.Priority, Now.AddMinutes(1));
+        var historical = ProblemReportEvidenceContract.SerializeForSchema(report, 4);
+        var current = ProblemReportEvidenceContract.Serialize(report);
+
+        Assert.Equal(historical, ProblemReportEvidenceContract.SerializeForSchema(report, 4));
+        using var oldJson = JsonDocument.Parse(historical);
+        using var currentJson = JsonDocument.Parse(current);
+        Assert.Equal(4, oldJson.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.DoesNotContain("widthPercent", oldJson.RootElement.GetProperty("problemRich").GetString());
+        Assert.Equal(ProblemReportEvidenceContract.SchemaVersion,
+            currentJson.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Contains("\"widthPercent\":50", currentJson.RootElement.GetProperty("problemRich").GetString());
+        Assert.NotEqual(historical, current);
+    }
+
+    [Fact]
     public void Legacy_revision_evidence_keeps_its_original_json_hash_and_schema()
     {
         const string legacyJson = "{\"Id\":\"legacy\",\"Title\":\"Original evidence\"}";

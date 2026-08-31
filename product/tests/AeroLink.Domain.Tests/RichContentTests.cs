@@ -86,6 +86,29 @@ public sealed class RichContentTests
     }
 
     [Fact]
+    public void An_image_width_is_canonical_bounded_typed_data()
+    {
+        var id = Guid.NewGuid();
+        var canonical = RichContent.Canonicalize(
+            $$"""{"blocks":[{"type":"image","attachmentId":"{{id}}","alt":"Bus timing","widthPercent":50}]}""");
+
+        var image = Assert.Single(RichContent.Read(canonical));
+        Assert.Equal(50, image.WidthPercent);
+        Assert.Contains("\"widthPercent\":50", canonical);
+    }
+
+    [Theory]
+    [InlineData(24)]
+    [InlineData(101)]
+    public void An_image_width_outside_the_supported_range_is_refused(int width)
+    {
+        var authored = $$"""{"blocks":[{"type":"image","attachmentId":"{{Guid.NewGuid()}}","widthPercent":{{width}}}]}""";
+
+        var error = Assert.Throws<DomainException>(() => RichContent.Canonicalize(authored));
+        Assert.Contains("width must be between", error.Message);
+    }
+
+    [Fact]
     public void The_plain_projection_says_what_the_structure_says()
     {
         // This is what feeds search and every consumer that cannot render structure. A record whose plain

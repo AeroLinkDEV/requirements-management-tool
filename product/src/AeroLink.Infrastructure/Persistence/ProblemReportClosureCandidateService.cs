@@ -240,6 +240,7 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
     private static string ReportSnapshotForSchema(ProblemReport report, int schemaVersion) => schemaVersion switch
     {
         ProblemReportEvidenceContract.SchemaVersion => ReportSnapshot(report),
+        4 => ProblemReportEvidenceContract.SerializeForSchema(report, 4),
         1 => LegacyV1ReportSnapshot(report),
         _ => throw new InvalidOperationException($"Problem Report snapshot schema {schemaVersion} is not supported."),
     };

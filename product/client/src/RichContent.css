@@ -6,6 +6,9 @@
 .richContentView { display: grid; gap: 10px; }
 .richContentView p { margin: 0; color: var(--ink-900); line-height: var(--leading-body, 1.5); }
 .richContentView figure { margin: 0; display: grid; gap: 6px; }
+.richImageRow { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; width: 100%; }
+.richImageRow .richImageFigure { min-width: min(220px, 100%); flex: 1 1 280px; }
+.richImageFigure img { display: block; width: 100%; height: auto; }
 .richContentView figcaption { font-size: 12px; color: var(--ink-500); }
 .richContentView img { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius-sm, 6px); background: white; }
 .richContentView blockquote {
@@ -30,8 +33,13 @@
 .richError { margin: 0; color: #a4262c; font-size: 13px; }
 
 .richEditor { display: grid; gap: 10px; }
+.richEditorDocument { gap: 7px; padding: 12px 14px; border: 1px solid #dce5ee; border-radius: 10px; background: #fbfdff; }
 .richEditorHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .richEditorHead > b { font-size: 13px; color: var(--ink-900); }
+.richEditorDocument .richEditorHead { align-items: baseline; }
+.richEditorHint { flex: 1 1 240px; color: var(--ink-500); font-size: 11px; }
+.richDropHint { margin: 0; color: var(--ink-500); font-size: 11px; }
+.richEditorDocument.is-dragging { border-color: #16766f; background: #f0fbf8; box-shadow: 0 0 0 2px #16766f33; }
 .richToolbar { display: flex; gap: 6px; flex-wrap: wrap; }
 .richToolbar button {
   /* 24px is the WCAG 2.2 SC 2.5.8 floor; these clear it in both densities. */
@@ -54,6 +62,14 @@ html input.richFileInput { position: absolute; width: 1px; height: 1px; overflow
 
 .richBlocks { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .richBlocks > li { border: 1px solid var(--line); border-radius: var(--radius-sm, 6px); background: white; padding: 8px 10px; display: grid; gap: 8px; }
+.richBlocksDocument { gap: 6px; }
+.richBlocksDocument > li { border: 0; padding: 0; background: transparent; }
+.richBlocksDocument > li.richDocumentParagraph .richBlockBar { display: none; }
+.richBlocksDocument > li:has(.richImageEdit) { padding: 8px; border: 1px solid #dce5ee; border-radius: 9px; }
+.richBlocksDocument > li:has(.richImageEdit) .richBlockBar > span { font-size: 10px; }
+.richBlocksDocument > li:has(.richImageEdit) .richBlockBar > div button:first-child,
+.richBlocksDocument > li:has(.richImageEdit) .richBlockBar > div button:nth-child(2) { display: none; }
+.richEmptyParagraph { min-height: 74px; }
 .richBlockBar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .richBlockBar > span { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-500); }
 .richBlockBar > div { display: flex; gap: 4px; }
@@ -71,7 +87,11 @@ html input.richFileInput { position: absolute; width: 1px; height: 1px; overflow
 .richPair input { font: inherit; font-size: 13px; min-height: var(--control-height-sm, 36px); padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink-900); }
 
 .richImageEdit { display: grid; gap: 8px; }
-.richImageEdit img { max-width: 260px; max-height: 190px; border: 1px solid var(--line); border-radius: 6px; background: white; }
+.richImageEdit > img { display: block; max-width: 100%; max-height: 420px; object-fit: contain; object-position: left top; border: 1px solid var(--line); border-radius: 6px; background: white; }
+.richImageSize { display: grid; grid-template-columns: auto auto; align-items: center; gap: 5px 8px; max-width: 360px; color: var(--ink-500); font-size: 11px; }
+.richImageSize output { color: var(--ink-900); font-weight: 700; }
+.richImageSize input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.richInsertBelow { justify-self: start; min-height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: white; color: var(--ink-700); font-size: 11px; cursor: pointer; }
 
 .richTableEdit { display: grid; gap: 8px; }
 .richTableEdit > label { display: grid; gap: 3px; font-size: 11px; color: var(--ink-500); }

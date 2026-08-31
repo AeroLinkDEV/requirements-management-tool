@@ -1,6 +1,7 @@
 using System.Data;
 using System.Text;
 using System.Text.Json;
+using AeroLink.Domain.Content;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Common;
@@ -1003,6 +1004,24 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
             || !string.Equals(draft.ReportedBy?.Trim(), item.ReportedBy, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(draft.ResponsibleEngineerId?.Trim() ?? item.ResponsibleEngineerId, item.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("The controlled problem-report identity cannot change.");
+        // A typed image reference is still an input boundary. The browser normally receives IDs from the
+        // project-scoped upload endpoint, but a forged recovery snapshot must not import another project's
+        // image into this report or resurrect an image that was withdrawn. Verify every referenced file on
+        // check-in, immediately before the aggregate mutates and before its evidence hash is written.
+        var referencedImages = new[] { draft.ProblemRich, draft.AdditionalInformationRich, draft.AnalysisRich,
+            draft.RootCauseRich, draft.WorkaroundRich, draft.CorrectiveActionRich, draft.SystemAircraftImpactRich,
+            draft.EffectsRich, draft.ContainmentRich }
+            .SelectMany(RichContent.ReferencedAttachments).Distinct().ToArray();
+        if (referencedImages.Length > 0)
+        {
+            var validImages = await db.ControlledAttachments.AsNoTracking()
+                .Where(image => referencedImages.Contains(image.Id) && image.ProjectId == item.ProjectId
+                    && image.ArtifactType == "InlineImage" && image.State != ControlledAttachmentState.Withdrawn)
+                .Select(image => image.Id).ToListAsync(ct);
+            var missing = referencedImages.Except(validImages).ToArray();
+            if (missing.Length > 0)
+                throw new DomainException("Every inline image must belong to this Project and remain available.");
+        }
         var fromState = ProblemReportTransitionPolicy.Canonical(item.State);
         var wasAwaitingClosure = fromState == ProblemReportState.WaitingForSqaToClose;
         // The actor is whoever checked in, always. This used to substitute the responsible engineer

@@ -3,6 +3,7 @@ using System.Data.Common;
 using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Content;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
@@ -57,6 +58,19 @@ public static class ProblemReportEndpoints
         if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.TestEngineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
         if (request.ReleaseId is not null && !await db.Releases.AnyAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId, ct))
             return Results.BadRequest(new { error = "The selected build does not belong to this project." });
+        var referencedImages = new[] { request.ProblemRich, request.AdditionalInformationRich, request.AnalysisRich,
+            request.RootCauseRich, request.WorkaroundRich, request.CorrectiveActionRich, request.SystemAircraftImpactRich,
+            request.EffectsRich, request.ContainmentRich }
+            .SelectMany(RichContent.ReferencedAttachments).Distinct().ToArray();
+        if (referencedImages.Length > 0)
+        {
+            var available = await db.ControlledAttachments.AsNoTracking()
+                .Where(image => referencedImages.Contains(image.Id) && image.ProjectId == request.ProjectId
+                    && image.ArtifactType == "InlineImage" && image.State != ControlledAttachmentState.Withdrawn)
+                .Select(image => image.Id).ToListAsync(ct);
+            if (referencedImages.Except(available).Any())
+                return Results.BadRequest(new { error = "Every inline image must belong to this Project and remain available." });
+        }
         await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
         try
         {

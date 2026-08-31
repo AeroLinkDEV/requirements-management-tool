@@ -80,6 +80,7 @@ public sealed class RichContentPublisher(AeroLinkDbContext db, EvidenceFileStore
                         writer.WriteString("dataUri", uri);
                         writer.WriteString("alt", block.Alt);
                         writer.WriteString("caption", block.Caption);
+                        if (block.WidthPercent is { } width) writer.WriteNumber("widthPercent", width);
                         break;
                     case RichBlockKind.Image:
                         {

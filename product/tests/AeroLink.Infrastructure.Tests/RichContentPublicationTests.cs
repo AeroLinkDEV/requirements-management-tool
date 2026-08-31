@@ -90,6 +90,19 @@ public sealed class RichContentPublicationTests
     }
 
     [Fact]
+    public void An_authored_image_width_reaches_publication_without_becoming_markup()
+    {
+        var id = Guid.NewGuid();
+        var stored = RichContent.Canonicalize(
+            $$"""{"blocks":[{"type":"image","attachmentId":"{{id}}","alt":"Bus timing","widthPercent":50}]}""");
+        var prepared = RichContentPublisher.ForPublication(stored,
+            new Dictionary<Guid, string> { [id] = "data:image/png;base64,AAAA" });
+
+        Assert.Contains("\"widthPercent\":50", prepared);
+        Assert.DoesNotContain("<img", prepared);
+    }
+
+    [Fact]
     public void An_image_whose_file_is_gone_becomes_visible_text_not_a_silent_gap()
     {
         var stored = RichContent.Canonicalize(
