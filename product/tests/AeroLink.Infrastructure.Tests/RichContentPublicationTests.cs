@@ -353,6 +353,60 @@ public sealed class RichContentPublicationTests
         Assert.Equal(2, Count(pdf, "/Im1 Do"));
     }
 
+    public static IEnumerable<object[]> AuthoredImageRows()
+    {
+        yield return new object[] { new[] { 100, 100 }, new[] { 1, 1 } };
+        yield return new object[] { new[] { 60, 60 }, new[] { 1, 1 } };
+        yield return new object[] { new[] { 25, 25, 25, 25, 25 }, new[] { 4, 1 } };
+        yield return new object[] { new[] { 40, 60, 25 }, new[] { 2, 1 } };
+    }
+
+    [Theory]
+    [MemberData(nameof(AuthoredImageRows))]
+    public void Docx_wraps_overflowing_adjacent_figures_without_rewriting_authored_widths(
+        int[] widths, int[] expectedRowSizes)
+    {
+        var output = ProfessionalPublicationRenderer.Render(Publication(ImageBlocks(widths)), "docx", "inline-image-rows");
+        using var zip = new ZipArchive(new MemoryStream(output.Content), ZipArchiveMode.Read);
+        var document = Read(zip, "word/document.xml");
+        var xml = System.Xml.Linq.XDocument.Parse(document);
+        System.Xml.Linq.XNamespace w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        System.Xml.Linq.XNamespace wp = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
+        var imageRows = xml.Descendants(w + "tbl")
+            .Where(table => table.Descendants(w + "drawing").Any())
+            .ToList();
+
+        Assert.Equal(expectedRowSizes, imageRows.Select(row => row.Descendants(w + "drawing").Count()));
+        Assert.Equal(widths.Select(width => 9_000_000L * width / 100),
+            imageRows.SelectMany(row => row.Descendants(wp + "extent"))
+                .Select(extent => long.Parse(extent.Attribute("cx")!.Value)));
+    }
+
+    [Theory]
+    [MemberData(nameof(AuthoredImageRows))]
+    public void Pdf_wraps_overflowing_adjacent_figures_without_rewriting_authored_widths(
+        int[] widths, int[] expectedRowSizes)
+    {
+        var output = ProfessionalPublicationRenderer.Render(Publication(ImageBlocks(widths)), "pdf", "inline-image-rows");
+        var pdf = Encoding.ASCII.GetString(output.Content);
+
+        Assert.Equal(expectedRowSizes.Length, Count(pdf, "CONTROLLED INLINE IMAGE"));
+        var offset = 0;
+        var expectedOperators = new List<string>();
+        foreach (var rowSize in expectedRowSizes)
+        {
+            var available = 480d - 12d * Math.Max(0, rowSize - 1);
+            for (var index = 0; index < rowSize; index++)
+            {
+                var renderedWidth = available * widths[offset + index] / 100d;
+                expectedOperators.Add($"q {renderedWidth:0.###} 0 0");
+            }
+            offset += rowSize;
+        }
+        foreach (var expected in expectedOperators.GroupBy(value => value))
+            Assert.Equal(expected.Count(), Count(pdf, expected.Key));
+    }
+
     [Fact]
     public void Pdf_limits_total_decoded_png_pixels_and_names_the_omitted_figure()
     {
@@ -380,6 +434,13 @@ public sealed class RichContentPublicationTests
         "Controlled narrative", "PR-00001.00", "00", "Draft", "1.6", "Not yet baseline-effective", "test.engineer",
         new DateTimeOffset(2026, 8, 30, 12, 0, 0, TimeSpan.Zero), new string('a', 64), [], [], [],
         [new PublicationSection("Narrative", "", [new PublicationRecord("Problem", "Narrative", "Problem", "", [], rich)])]);
+
+    private static string ImageBlocks(IEnumerable<int> widths)
+    {
+        var uri = "data:image/png;base64," + Convert.ToBase64String(Png());
+        return "{\"blocks\":[" + string.Join(",", widths.Select((width, index) =>
+            $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"Figure {index + 1}\",\"caption\":\"Figure {index + 1}\",\"widthPercent\":{width}}}")) + "]}";
+    }
 
     private static string Read(ZipArchive zip, string name)
     {

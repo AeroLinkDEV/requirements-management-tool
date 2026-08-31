@@ -291,9 +291,8 @@ public static class ProfessionalPublicationRenderer
                         row.Add(adjacent);
                         index++;
                     }
-                    body.Append(row.Count == 1
-                        ? ImageDrawing(row[0], ++placementNumber)
-                        : ImageRow(row, ref placementNumber));
+                    foreach (var packedRow in PackImageRows(row))
+                        body.Append(ImageRow(packedRow, ref placementNumber));
                     break;
             }
         }
@@ -302,7 +301,7 @@ public static class ProfessionalPublicationRenderer
 
     private static string ImageRow(IReadOnlyList<PublicationImagePlacement> placements, ref int placementNumber)
     {
-        var widths = NormalizeWidths(placements.Select(x => x.WidthPercent).ToList());
+        var widths = placements.Select(x => x.WidthPercent).ToList();
         var cells = new StringBuilder();
         for (var i = 0; i < placements.Count; i++)
         {
@@ -312,7 +311,11 @@ public static class ProfessionalPublicationRenderer
                 .Append(ImageDrawing(placement, ++placementNumber, 9_000_000L, 9_000_000L))
                 .Append("</w:tc>");
         }
-        return $"<w:tbl><w:tblPr><w:tblW w:w=\"9360\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/><w:tblBorders><w:top w:val=\"nil\"/><w:left w:val=\"nil\"/><w:bottom w:val=\"nil\"/><w:right w:val=\"nil\"/><w:insideH w:val=\"nil\"/><w:insideV w:val=\"nil\"/></w:tblBorders></w:tblPr><w:tblGrid>{string.Join("", widths.Select(x => $"<w:gridCol w:w=\"{9360L * x / 100}\"/>"))}</w:tblGrid><w:tr>{cells}</w:tr></w:tbl>";
+        var unused = 100 - widths.Sum();
+        if (unused > 0)
+            cells.Append($"<w:tc><w:tcPr><w:tcW w:w=\"{9360L * unused / 100}\" w:type=\"dxa\"/></w:tcPr><w:p/></w:tc>");
+        var grid = widths.Concat(unused > 0 ? [unused] : []).Select(x => $"<w:gridCol w:w=\"{9360L * x / 100}\"/>");
+        return $"<w:tbl><w:tblPr><w:tblW w:w=\"9360\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/><w:tblBorders><w:top w:val=\"nil\"/><w:left w:val=\"nil\"/><w:bottom w:val=\"nil\"/><w:right w:val=\"nil\"/><w:insideH w:val=\"nil\"/><w:insideV w:val=\"nil\"/></w:tblBorders></w:tblPr><w:tblGrid>{string.Join("", grid)}</w:tblGrid><w:tr>{cells}</w:tr></w:tbl>";
     }
 
     private static string ImageDrawing(PublicationImagePlacement placement, int placementNumber,
@@ -335,14 +338,29 @@ public static class ProfessionalPublicationRenderer
             + P(placement.Caption.Length > 0 ? placement.Caption : placement.Alt, "RecordMeta");
     }
 
-    private static IReadOnlyList<int> NormalizeWidths(IReadOnlyList<int> widths)
+    /// <summary>
+    /// Packs consecutive authored figures in order. A width is controlled content: overflowing a row starts
+    /// another row instead of shrinking every figure until the total happens to fit the renderer.
+    /// </summary>
+    private static IReadOnlyList<IReadOnlyList<PublicationImagePlacement>> PackImageRows(
+        IReadOnlyList<PublicationImagePlacement> placements)
     {
-        var total = widths.Sum();
-        if (total <= 100) return widths;
-        var normalized = widths.Select(width => Math.Max(1, (int)Math.Round(width * 100d / total))).ToList();
-        var difference = 100 - normalized.Sum();
-        normalized[^1] = Math.Max(1, normalized[^1] + difference);
-        return normalized;
+        var rows = new List<IReadOnlyList<PublicationImagePlacement>>();
+        var row = new List<PublicationImagePlacement>();
+        var used = 0;
+        foreach (var placement in placements)
+        {
+            if (row.Count > 0 && used + placement.WidthPercent > 100)
+            {
+                rows.Add(row);
+                row = [];
+                used = 0;
+            }
+            row.Add(placement);
+            used += placement.WidthPercent;
+        }
+        if (row.Count > 0) rows.Add(row);
+        return rows;
     }
     private static (int Width,int Height) JpegSize(byte[] bytes)
     {for(var i=2;i+9<bytes.Length;){if(bytes[i]!=0xFF){i++;continue;}var marker=bytes[i+1];if(marker is >=0xC0 and <=0xC3 or >=0xC5 and <=0xC7 or >=0xC9 and <=0xCB or >=0xCD and <=0xCF)return((bytes[i+7]<<8)+bytes[i+8],(bytes[i+5]<<8)+bytes[i+6]);if(i+3>=bytes.Length)break;var length=(bytes[i+2]<<8)+bytes[i+3];if(length<2)break;i+=2+length;}return(640,360);}
@@ -493,7 +511,11 @@ public static class ProfessionalPublicationRenderer
                     // row now, and continue with the next block on a fresh page so no later paragraph can be
                     // reordered behind the row.
                     FlushPage();
-                    pages.Add(PdfImagePage(new PdfImageRow(row, below), p));
+                    var packedRows = PackImageRows(row);
+                    for (var rowIndex = 0; rowIndex < packedRows.Count; rowIndex++)
+                        pages.Add(PdfImagePage(new PdfImageRow(
+                            packedRows[rowIndex],
+                            rowIndex == packedRows.Count - 1 ? below : []), p));
                     continue;
                 }
 
@@ -559,7 +581,7 @@ public static class ProfessionalPublicationRenderer
     private static string PdfImagePage(PdfImageRow row, ProfessionalPublication p)
     {
         var placements = row.Placements;
-        var widths = NormalizeWidths(placements.Select(x => x.WidthPercent).ToList());
+        var widths = placements.Select(x => x.WidthPercent).ToList();
         const double left = 66;
         const double usable = 480;
         const double gap = 12;
