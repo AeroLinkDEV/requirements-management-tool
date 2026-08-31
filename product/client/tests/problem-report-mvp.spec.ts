@@ -137,10 +137,10 @@ test('an Open Problem Report is checked out, corrected, and the correction survi
   await expect(page.getByText(workaround)).toBeVisible()
   await page.getByRole('button', { name: /History/ }).click()
   const checkIn = page.locator('.prTimeline article').filter({ hasText: 'Details Checked In' })
-  // Schema 3 retired the four-kind Type for the category vocabulary and added how the value was arrived
-  // at; schema 4 added the authored companion to every narrative field. Each step makes the snapshot
-  // incomparable field for field with the one before it, which is what the version is for.
-  await expect(checkIn).toContainText('Snapshot schema 4')
+  // Schema 3 retired the four-kind Type for the category vocabulary; schema 4 added the authored
+  // companion to each narrative field; schema 5 added typed inline-image blocks. Each step makes the
+  // snapshot incomparable field for field with the one before it, which is what the version is for.
+  await expect(checkIn).toContainText('Snapshot schema 5')
   await expect(checkIn).toContainText('Category CodeNonFunctional')
   await expect(checkIn).toContainText(`Workaround ${workaround}`)
 })
