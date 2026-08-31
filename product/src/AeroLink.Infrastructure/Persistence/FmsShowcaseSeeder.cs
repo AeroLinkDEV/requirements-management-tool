@@ -82,6 +82,23 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             return await SummarizeAsync(existing.Id, ct);
         }
 
+        await UpgradeGate.WaitAsync(ct);
+        try
+        {
+            var isolation = db.Database.IsNpgsql() ? IsolationLevel.ReadCommitted : IsolationLevel.Serializable;
+            await using var transaction = await db.Database.BeginTransactionAsync(isolation, ct);
+            if (db.Database.IsNpgsql())
+                // Serialize first creation across API instances. The second creator rechecks after the lock
+                // and observes the committed Program instead of racing a duplicate or a partial dataset.
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT pg_advisory_xact_lock(hashtext('aerolink-showcase-seed'))", ct);
+            existing = await db.Programs.AsNoTracking().SingleOrDefaultAsync(x => x.Code == ProgramCode, ct);
+            if (existing is not null)
+            {
+                await transaction.CommitAsync(ct);
+                return await SummarizeAsync(existing.Id, ct);
+            }
+
         var start = new DateTimeOffset(2024, 1, 8, 14, 0, 0, TimeSpan.Zero);
         var program = new ProgramRecord("Flight Management System Live Program", ProgramCode);
         var project = new ProjectRecord(program.Id, "FMS Product Development", "Flight Management System");
@@ -100,7 +117,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var baseline15 = new CandidateBaseline("SW-01.50", 0, project.Id, release15.Id, null, "FMS 1.5 Released Software Build", "cm.fms", start.AddDays(150));
         foreach (var request in historical) baseline15.Select(request, "cm.fms", start.AddDays(150));
         baseline15.Freeze("cm.fms", start.AddDays(151)); db.CandidateBaselines.Add(baseline15); await db.SaveChangesAsync(ct);
-        await new RequirementBaselineMaterializer(db, new VerificationImpactService(db, policyResolver: resolver)).MaterializeLegacyHistoricalSeedAsync(baseline15.Id, "cm.fms", start.AddDays(152), ct);
+        await new RequirementBaselineMaterializer(db, new VerificationImpactService(db, policyResolver: resolver))
+            .MaterializeLegacyHistoricalSeedAsync(baseline15.Id, "cm.fms", start.AddDays(152), ct,
+                joinExistingTransaction: true);
 
         var currentRows = await (from member in db.BaselineRequirements.Where(x => x.BaselineId == baseline15.Id)
                                  join artifact in db.Requirements on member.ArtifactId equals artifact.Id
@@ -184,8 +203,14 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         await EnsureQualityAnalystMembershipAsync(program.Id, FreshSqaMembershipGrantedAt, ct);
         await EnsureFreshControlledActorMembershipsAsync(program.Id, FreshSqaMembershipGrantedAt, ct);
         await EnsureFreshLeadershipRosterAsync(program.Id, FreshSqaMembershipGrantedAt, ct);
-        await UpgradeAsync(program.Id, ct);
+        await ApplyUpgradeStepsAsync(program.Id, ct);
+        await transaction.CommitAsync(ct);
         return await SummarizeAsync(program.Id, ct);
+        }
+        finally
+        {
+            UpgradeGate.Release();
+        }
     }
 
     private async Task<bool> EnsureQualityAnalystMembershipAsync(Guid programId, DateTimeOffset grantedAt, CancellationToken ct)
@@ -215,17 +240,17 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     [
         ("systems.author", [ProgramRole.Engineer, ProgramRole.SystemEngineer]),
         ("software.author", [ProgramRole.Engineer, ProgramRole.SoftwareEngineer]),
-        ("systems.reviewer", [ProgramRole.Reviewer, ProgramRole.Approver]),
-        ("assurance.reviewer", [ProgramRole.Reviewer, ProgramRole.Approver]),
-        ("lead.reviewer", [ProgramRole.Reviewer, ProgramRole.Approver]),
-        ("manager.reviewer", [ProgramRole.ProgramManager, ProgramRole.Approver]),
+        ("systems.reviewer", [ProgramRole.SystemEngineer]),
+        ("assurance.reviewer", [ProgramRole.SoftwareQualityAnalyst]),
+        ("lead.reviewer", [ProgramRole.SoftwareEngineer]),
+        ("manager.reviewer", [ProgramRole.ProgramManager]),
         ("cm.fms", [ProgramRole.ConfigurationManager]),
         ("test.author", [ProgramRole.TestEngineer]),
         ("test.engineer", [ProgramRole.TestEngineer]),
         ("engineer.demo", [ProgramRole.Engineer]),
         ("release.manager", [ProgramRole.ConfigurationManager, ProgramRole.ProgramManager]),
-        ("program.manager", [ProgramRole.ProgramManager, ProgramRole.Approver]),
-        ("software.lead", [ProgramRole.Reviewer, ProgramRole.Approver, ProgramRole.SoftwareEngineeringLead]),
+        ("program.manager", [ProgramRole.ProgramManager]),
+        ("software.lead", [ProgramRole.SoftwareEngineer]),
     ];
 
     private async Task EnsureFreshControlledActorMembershipsAsync(Guid programId, DateTimeOffset grantedAt,
@@ -290,14 +315,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         ("systems.author", ProgramRole.SystemEngineer),
         ("software.author", ProgramRole.Engineer),
         ("software.author", ProgramRole.SoftwareEngineer),
-        ("systems.reviewer", ProgramRole.Reviewer),
-        ("systems.reviewer", ProgramRole.Approver),
-        ("assurance.reviewer", ProgramRole.Reviewer),
-        ("assurance.reviewer", ProgramRole.Approver),
-        ("lead.reviewer", ProgramRole.Reviewer),
-        ("lead.reviewer", ProgramRole.Approver),
+        ("systems.reviewer", ProgramRole.SystemEngineer),
+        ("assurance.reviewer", ProgramRole.SoftwareQualityAnalyst),
+        ("lead.reviewer", ProgramRole.SoftwareEngineer),
         ("manager.reviewer", ProgramRole.ProgramManager),
-        ("manager.reviewer", ProgramRole.Approver),
         ("cm.fms", ProgramRole.ConfigurationManager),
     ];
 
@@ -308,7 +329,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         ("test.engineer", ProgramRole.TestEngineer),
         ("engineer.demo", ProgramRole.Engineer),
         ("test.author", ProgramRole.TestEngineer),
-        ("systems.reviewer", ProgramRole.Reviewer),
+        ("project.lead", ProgramRole.ProjectEngineer),
     ];
 
     private async Task EnsureCurrentProgramAuthorityAsync(Guid programId, string userName, ProgramRole role,
@@ -544,51 +565,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 await db.Database.ExecuteSqlInterpolatedAsync(
                     $"SELECT pg_advisory_xact_lock(hashtext('aerolink-showcase-upgrade'), hashtext({programId.ToString("D")}))", ct);
 
-            var authority = await CheckUpgradeAuthorityAsync(programId, ct);
-            if (!authority.Ready)
-                throw new InvalidOperationException($"FMS showcase upgrade cannot proceed: {authority.Code} {authority.Detail}");
-
-            var applied = new List<string>();
-            var steps = new (string Key, Func<Guid, CancellationToken, Task<string?>> Run)[]
-            {
-                ("leadership-roster", EnsureShowcaseLeadershipRosterAsync),
-                ("release-campaign", async (id, token) => { await EnsureReleaseCampaignAsync(id, token); return "Release campaign present."; }),
-                ("product-line", async (id, token) => { await EnsureProductLineAsync(id, token); return "Product-line configuration present."; }),
-                ("verification-impact", ReconcileVerificationImpactAsync),
-                ("downstream-impact", ReconcileDownstreamImpactAsync),
-                ("test-change-reviews", EnsureTestChangeReviewsAsync),
-                ("problem-report-build-scope", ReconcileProblemReportBuildScopeAsync),
-                ("controlled-test-change-identity", ReconcileControlledTestChangeIdentityAsync),
-                ("verification-coverage-gap", async (id, token) => { await EnsureVerificationCoverageGapAsync(id, token); return "In-work suspect coverage present."; }),
-                ("approver-identity", ReconcileApproverIdentityAsync),
-                ("released-campaign", EnsureReleasedCampaignAsync),
-                ("code-traceability-demo", EnsureCodeTraceabilityAsync),
-                ("scenario-richness", EnsureScenarioRichnessAsync),
-            };
-
-            foreach (var step in steps)
-            {
-                var recorded = await db.ShowcaseUpgradeSteps
-                    .SingleOrDefaultAsync(x => x.ProgramId == programId && x.StepKey == step.Key, ct);
-                if (recorded is not null)
-                {
-                    // Scenario richness has externally visible postconditions. An older build could have
-                    // recorded its marker before the final rows/links were committed; do not let that marker
-                    // turn an incomplete showcase into a permanent no-op. Removing only the upgrade marker
-                    // makes the same atomic run retry the owned additive work.
-                    if (step.Key == "scenario-richness" && !await ScenarioRichnessCompleteAsync(programId, ct))
-                    {
-                        db.ShowcaseUpgradeSteps.Remove(recorded);
-                        await db.SaveChangesAsync(ct);
-                    }
-                    else continue;
-                }
-                var detail = await step.Run(programId, ct);
-                db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId, step.Key,
-                    detail ?? "No change required.", DateTimeOffset.UtcNow));
-                await db.SaveChangesAsync(ct);
-                applied.Add($"{step.Key}: {detail ?? "No change required."}");
-            }
+            var applied = await ApplyUpgradeStepsAsync(programId, ct);
             await transaction.CommitAsync(ct);
             return applied;
         }
@@ -596,6 +573,56 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         {
             UpgradeGate.Release();
         }
+    }
+
+    private async Task<IReadOnlyList<string>> ApplyUpgradeStepsAsync(Guid programId, CancellationToken ct)
+    {
+        var authority = await CheckUpgradeAuthorityAsync(programId, ct);
+        if (!authority.Ready)
+            throw new InvalidOperationException($"FMS showcase upgrade cannot proceed: {authority.Code} {authority.Detail}");
+
+        var applied = new List<string>();
+        var steps = new (string Key, Func<Guid, CancellationToken, Task<string?>> Run)[]
+        {
+            ("leadership-roster", EnsureShowcaseLeadershipRosterAsync),
+            ("release-campaign", async (id, token) => { await EnsureReleaseCampaignAsync(id, token); return "Release campaign present."; }),
+            ("product-line", async (id, token) => { await EnsureProductLineAsync(id, token); return "Product-line configuration present."; }),
+            ("verification-impact", ReconcileVerificationImpactAsync),
+            ("downstream-impact", ReconcileDownstreamImpactAsync),
+            ("test-change-reviews", EnsureTestChangeReviewsAsync),
+            ("problem-report-build-scope", ReconcileProblemReportBuildScopeAsync),
+            ("controlled-test-change-identity", ReconcileControlledTestChangeIdentityAsync),
+            ("verification-coverage-gap", async (id, token) => { await EnsureVerificationCoverageGapAsync(id, token); return "In-work suspect coverage present."; }),
+            ("approver-identity", ReconcileApproverIdentityAsync),
+            ("released-campaign", EnsureReleasedCampaignAsync),
+            ("code-traceability-demo", EnsureCodeTraceabilityAsync),
+            ("scenario-richness", EnsureScenarioRichnessAsync),
+        };
+
+        foreach (var step in steps)
+        {
+            var recorded = await db.ShowcaseUpgradeSteps
+                .SingleOrDefaultAsync(x => x.ProgramId == programId && x.StepKey == step.Key, ct);
+            if (recorded is not null)
+            {
+                // Scenario richness has externally visible postconditions. An older build could have
+                // recorded its marker before the final rows/links were committed; do not let that marker
+                // turn an incomplete showcase into a permanent no-op. Removing only the upgrade marker
+                // makes the same atomic run retry the owned additive work.
+                if (step.Key == "scenario-richness" && !await ScenarioRichnessCompleteAsync(programId, ct))
+                {
+                    db.ShowcaseUpgradeSteps.Remove(recorded);
+                    await db.SaveChangesAsync(ct);
+                }
+                else continue;
+            }
+            var detail = await step.Run(programId, ct);
+            db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId, step.Key,
+                detail ?? "No change required.", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync(ct);
+            applied.Add($"{step.Key}: {detail ?? "No change required."}");
+        }
+        return applied;
     }
 
     private async Task<string?> EnsureShowcaseLeadershipRosterAsync(Guid programId, CancellationToken ct)
@@ -1088,6 +1115,26 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             .SingleOrDefaultAsync(x => x.UserName == "quality.analyst", ct);
         var hasActiveSqa = sqaAccount is not null && await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == sqaAccount.Id
             && x.ProgramId == programId && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null, ct);
+        var leadership = await db.ProjectLeadershipAssignments.AsNoTracking()
+            .Where(x => x.ProgramId == programId).ToListAsync(ct);
+        var leadershipHolderIds = leadership.Select(x => x.HolderUserId).Distinct().ToArray();
+        var leadershipAccounts = await db.UserAccounts.AsNoTracking().Where(x => leadershipHolderIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, ct);
+        var leadershipMemberships = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.ProgramId == programId && leadershipHolderIds.Contains(x.UserId)).ToListAsync(ct);
+        var leadershipHealthy = ShowcaseLeadershipRoster.All(expected =>
+        {
+            var history = leadership.Where(x => x.Position == expected.Position).ToList();
+            var active = history.Where(x => x.EndedAt is null).ToList();
+            if (history.Count == 0 || active.Count > 1) return false;
+            if (active.Count == 0) return true; // An ended assignment is an attributable deliberate vacancy.
+            var holder = active[0];
+            return leadershipAccounts.TryGetValue(holder.HolderUserId, out var account)
+                && account.State == AccountState.Active
+                && leadershipMemberships.Any(x => x.UserId == holder.HolderUserId
+                    && x.Role == expected.RequiredRole && x.EndedAt == null);
+        });
+        var activeLeadershipCount = leadership.Count(x => x.EndedAt is null);
         // Ending SQA authority is itself controlled history. A new seed cannot invent a Closed record while
         // that authority is absent; an existing frozen closure remains valid and is accepted below.
         if (!hasActiveSqa)
@@ -1106,6 +1153,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 $"{approved} approved or selected change request(s) and {impacts} verification-impact item(s)."),
             new("release-campaign", campaigns >= 1, $"{campaigns} release campaign(s)."),
             new("product-line", components >= 1, $"{components} product-line component(s)."),
+            new("leadership-roster", leadershipHealthy,
+                $"{leadership.Select(x => x.Position).Distinct().Count()} of 8 positions have attributable history; {activeLeadershipCount} currently have eligible holders."),
             new("active-change-request-distribution", activeRequests.Count >= 16,
                 $"{activeRequests.Count} active-build change request(s); the showcase contributes 8 baseline scenarios and 8 Interface scenarios."),
             new("interface-scenarios", interfaceSteps.Count == 8 && interfaceRequests.Count == 8
@@ -1487,7 +1536,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (failurePairs.Count < 2)
             throw new InvalidOperationException("FMS closure scenarios require two failed Build 1.5 executions with passing retest successors.");
 
-        var actorHandles = ProblemReportOwners.Concat(["systems.reviewer", "quality.analyst"])
+        var actorHandles = ProblemReportOwners.Concat(["project.lead", "quality.analyst"])
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var actorNames = (await db.UserAccounts.AsNoTracking()
                 .Where(x => actorHandles.Contains(x.UserName)).ToListAsync(ct))
@@ -1544,22 +1593,22 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 case 3:
                     report.ReadyForSccb(owner, At(1, 10));
                     AddScenarioRevision(report, "ReadyForSccb", owner, At(1, 10), ActorName(owner), ProblemReportState.Draft, ProblemReportState.ReadyForSccb);
-                    report.OpenBySccb("systems.reviewer", At(2, 20));
-                    AddScenarioRevision(report, "OpenedBySccb", "systems.reviewer", At(2, 20), ActorName("systems.reviewer"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
+                    report.OpenBySccb("project.lead", At(2, 20));
+                    AddScenarioRevision(report, "OpenedBySccb", "project.lead", At(2, 20), ActorName("project.lead"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
                     break;
                 case 4:
                     report.ReadyForSccb(owner, At(1, 10));
                     AddScenarioRevision(report, "ReadyForSccb", owner, At(1, 10), ActorName(owner), ProblemReportState.Draft, ProblemReportState.ReadyForSccb);
-                    report.OpenBySccb("systems.reviewer", At(2, 20));
-                    AddScenarioRevision(report, "OpenedBySccb", "systems.reviewer", At(2, 20), ActorName("systems.reviewer"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
+                    report.OpenBySccb("project.lead", At(2, 20));
+                    AddScenarioRevision(report, "OpenedBySccb", "project.lead", At(2, 20), ActorName("project.lead"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
                     report.BeginImplementation(owner, At(3, 30));
                     AddScenarioRevision(report, "ImplementationStarted", owner, At(3, 30), ActorName(owner), ProblemReportState.Open, ProblemReportState.Implementing);
                     break;
                 case 5:
                     report.ReadyForSccb(owner, At(1, 10));
                     AddScenarioRevision(report, "ReadyForSccb", owner, At(1, 10), ActorName(owner), ProblemReportState.Draft, ProblemReportState.ReadyForSccb);
-                    report.OpenBySccb("systems.reviewer", At(2, 20));
-                    AddScenarioRevision(report, "OpenedBySccb", "systems.reviewer", At(2, 20), ActorName("systems.reviewer"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
+                    report.OpenBySccb("project.lead", At(2, 20));
+                    AddScenarioRevision(report, "OpenedBySccb", "project.lead", At(2, 20), ActorName("project.lead"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
                     report.BeginImplementation(owner, At(3, 30));
                     AddScenarioRevision(report, "ImplementationStarted", owner, At(3, 30), ActorName(owner), ProblemReportState.Open, ProblemReportState.Implementing);
                     report.BeginInvestigation(owner, "The implementation path and affected interface were reviewed.",
@@ -1573,8 +1622,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 case 6:
                     report.ReadyForSccb(owner, At(1, 10));
                     AddScenarioRevision(report, "ReadyForSccb", owner, At(1, 10), ActorName(owner), ProblemReportState.Draft, ProblemReportState.ReadyForSccb);
-                    report.OpenBySccb("systems.reviewer", At(2, 20));
-                    AddScenarioRevision(report, "OpenedBySccb", "systems.reviewer", At(2, 20), ActorName("systems.reviewer"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
+                    report.OpenBySccb("project.lead", At(2, 20));
+                    AddScenarioRevision(report, "OpenedBySccb", "project.lead", At(2, 20), ActorName("project.lead"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
                     report.BeginImplementation(owner, At(3, 30));
                     AddScenarioRevision(report, "ImplementationStarted", owner, At(3, 30), ActorName(owner), ProblemReportState.Open, ProblemReportState.Implementing);
                     report.BeginInvestigation(owner, "The test finding was reproduced and isolated to the seeded path.",
@@ -1588,8 +1637,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 case 7:
                     report.ReadyForSccb(owner, At(1, 10));
                     AddScenarioRevision(report, "ReadyForSccb", owner, At(1, 10), ActorName(owner), ProblemReportState.Draft, ProblemReportState.ReadyForSccb);
-                    report.OpenBySccb("systems.reviewer", At(2, 20));
-                    AddScenarioRevision(report, "OpenedBySccb", "systems.reviewer", At(2, 20), ActorName("systems.reviewer"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
+                    report.OpenBySccb("project.lead", At(2, 20));
+                    AddScenarioRevision(report, "OpenedBySccb", "project.lead", At(2, 20), ActorName("project.lead"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
                     report.BeginImplementation(owner, At(3, 30));
                     AddScenarioRevision(report, "ImplementationStarted", owner, At(3, 30), ActorName(owner), ProblemReportState.Open, ProblemReportState.Implementing);
                     report.BeginInvestigation(owner, "The correction was verified against the controlled scenario.",
@@ -1603,8 +1652,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 case 8:
                     report.ReadyForSccb(owner, At(1, 10));
                     AddScenarioRevision(report, "ReadyForSccb", owner, At(1, 10), ActorName(owner), ProblemReportState.Draft, ProblemReportState.ReadyForSccb);
-                    report.OpenBySccb("systems.reviewer", At(2, 20));
-                    AddScenarioRevision(report, "OpenedBySccb", "systems.reviewer", At(2, 20), ActorName("systems.reviewer"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
+                    report.OpenBySccb("project.lead", At(2, 20));
+                    AddScenarioRevision(report, "OpenedBySccb", "project.lead", At(2, 20), ActorName("project.lead"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
                     report.ApplyDisposition(owner, ProblemReportDisposition.CannotReproduce,
                         "The reported condition could not be reproduced in the controlled showcase setup.", null, At(3, 30));
                     AddScenarioRevision(report, "DispositionRecorded", owner, At(3, 30), ActorName(owner), ProblemReportState.Open, ProblemReportState.Rejected,

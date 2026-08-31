@@ -109,7 +109,9 @@ incomplete enrichment remains unchanged at startup and is retried only by the ex
 `POST /api/showcase/upgrade` operation after the operator has verified the target database and backup.
 
 On a fresh demo-data startup, the seeded identity directory is created before FMS controlled closure evidence
-is frozen, and the fresh FMS transaction grants the exact memberships required by its controlled scenarios.
+is frozen, and one database transaction creates the complete FMS dataset or rolls it all back. That transaction
+grants only current job/base-eligibility memberships required by its controlled scenarios; review/approval
+meaning remains on the selected workflow stages, and Project Leadership authority remains on its assignments.
 Once `FMSLIVE` exists, the normal startup and `/api/showcase/seed` identity passes leave its memberships and
 Project Leadership assignments unchanged. Controlled enrichment of an existing FMS is operator-controlled
 through `POST /api/showcase/upgrade`, after target confirmation and a verified backup; it never runs as an

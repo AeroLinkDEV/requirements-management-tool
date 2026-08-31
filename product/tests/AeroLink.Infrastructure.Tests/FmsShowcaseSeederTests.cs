@@ -111,6 +111,10 @@ public sealed class FmsShowcaseSeederTests
                 Assert.True(await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.ProgramId == summary.ProgramId
                     && x.UserId == account.Id && x.Role == expected.RequiredRole && x.EndedAt == null));
             }
+            var freshMemberships = await db.ProgramMemberships.AsNoTracking()
+                .Where(x => x.ProgramId == summary.ProgramId && x.EndedAt == null).ToListAsync();
+            Assert.DoesNotContain(freshMemberships, membership => RetiredGrantRoles.IsRetiredGrant(membership.Role));
+            Assert.DoesNotContain(freshMemberships, membership => SingularProgramRoles.IsSingular(membership.Role));
             var release15Id = await db.Releases.Where(x => x.ProjectId == summary.ProjectId && x.Version == "1.5").Select(x => x.Id).SingleAsync();
             var interfaceScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/interface/");
             var reportScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/problem-report/");
@@ -177,9 +181,9 @@ public sealed class FmsShowcaseSeederTests
                     : new[] { "ProblemReportCreatedFromFailedExecution", "ReadyForSccb", "OpenedBySccb", "ImplementationStarted", "InvestigationRecorded", "ResolutionProposed", "ResolutionVerified" };
                 Assert.Equal(expectedEvents, history.Select(x => x.EventType).ToArray());
                 var expectedActors = index == 7
-                    ? new[] { report.ResponsibleEngineerId, report.ResponsibleEngineerId, "systems.reviewer", report.ResponsibleEngineerId,
+                    ? new[] { report.ResponsibleEngineerId, report.ResponsibleEngineerId, "project.lead", report.ResponsibleEngineerId,
                         report.ResponsibleEngineerId, report.ResponsibleEngineerId, "test.engineer", "quality.analyst" }
-                    : new[] { report.ResponsibleEngineerId, report.ResponsibleEngineerId, "systems.reviewer", report.ResponsibleEngineerId,
+                    : new[] { report.ResponsibleEngineerId, report.ResponsibleEngineerId, "project.lead", report.ResponsibleEngineerId,
                         report.ResponsibleEngineerId, report.ResponsibleEngineerId, "test.engineer" };
                 Assert.Equal(expectedActors, history.Select(x => x.Actor).ToArray());
                 Assert.Equal(new[] { "", "Draft", "ReadyForSccb", "Open", "Implementing", "Implementing", "Verifying", "WaitingForSqaToClose" }
@@ -303,7 +307,7 @@ public sealed class FmsShowcaseSeederTests
 
             var leadId = await db.UserAccounts.Where(x => x.UserName == "lead.reviewer").Select(x => x.Id).SingleAsync();
             var leadMembership = await db.ProgramMemberships.SingleAsync(x => x.UserId == leadId
-                && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.Reviewer && x.EndedAt == null);
+                && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.SoftwareEngineer && x.EndedAt == null);
             leadMembership.End("admin", leadMembership.GrantedAt.AddDays(1));
             var missing = await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
                 && x.StepKey == "scenario-richness/interface/01");
@@ -320,6 +324,38 @@ public sealed class FmsShowcaseSeederTests
                 && x.StepKey == "scenario-richness/interface/01"));
         }
         finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Fresh_seed_rolls_back_every_Fms_row_when_late_actor_preflight_fails()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-showcase-atomic-fresh-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using (var db = new AeroLinkDbContext(options))
+            {
+                await db.Database.EnsureCreatedAsync();
+                await new IdentitySeeder(db).EnsureSeededAsync();
+                var lead = await db.UserAccounts.SingleAsync(x => x.UserName == "lead.reviewer");
+                lead.Disable(DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync();
+
+                var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+                    () => new FmsShowcaseSeeder(db).EnsureSeededAsync());
+                Assert.Contains("lead.reviewer", failure.Message, StringComparison.OrdinalIgnoreCase);
+            }
+
+            await using var verification = new AeroLinkDbContext(options);
+            Assert.False(await verification.Programs.AnyAsync(x => x.Code == "FMSLIVE"));
+            Assert.False(await verification.Projects.AnyAsync(x => x.Name == "FMS Product Development"));
+            Assert.Empty(await verification.ShowcaseUpgradeSteps.ToListAsync());
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (File.Exists(path)) File.Delete(path);
+        }
     }
 
     [Fact]
@@ -451,7 +487,7 @@ public sealed class FmsShowcaseSeederTests
             var requiredRoles = new Dictionary<string, ProgramRole>(StringComparer.OrdinalIgnoreCase)
             {
                 ["test.engineer"] = ProgramRole.TestEngineer,
-                ["systems.reviewer"] = ProgramRole.Reviewer,
+                ["project.lead"] = ProgramRole.ProjectEngineer,
                 ["quality.analyst"] = ProgramRole.SoftwareQualityAnalyst,
             };
             var accounts = await db.UserAccounts.AsNoTracking()
