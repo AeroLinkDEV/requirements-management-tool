@@ -48,6 +48,28 @@ underneath the detail panel, in any dock mode.
 These are the behaviours to preserve when porting. They are not a substitute for the product's own tests;
 port them into the real suite rather than depending on this file.
 
+## If you are the agent implementing this
+
+`prototype/Main.dc.html` in this repository is the canonical source. Read it here; do not depend on being
+able to reach the review canvas.
+
+The review canvas published during design review is the same content, but it is a private artifact belonging
+to one account, it can be edited after the fact, and it is not version-controlled. It exists so a person can
+*drive* the interaction. This file exists so an implementer can *read* it. If the two ever disagree, this file
+wins, because this is the one that was committed alongside the issue.
+
+There is nothing in the canvas that is not in this directory.
+
+## Typography
+
+The prototype loads Manrope and DM Sans from Google Fonts because a standalone artboard cannot use the
+product's `@fontsource` imports. **That is a prototype concession, not a design decision** — the product
+self-hosts both faces deliberately, for offline and restricted-network operation. Keep the `@fontsource`
+imports when porting.
+
+Identifiers use `ui-monospace, SFMono-Regular, Consolas, monospace`, matching `LifecycleExplorer.css`, the
+existing Digital Thread surface. AeroLink ships no monospace webfont and none should be added.
+
 ## Known limits of the prototype
 
 - Proposal content for 26 of the 31 change requests is generated from the request's own number. Five carry
@@ -56,5 +78,5 @@ port them into the real suite rather than depending on this file.
 - The record set is larger than the seeded FMS 1.6 dataset (31 change requests against the seeded 8), chosen
   so the crowding and density behaviour is visible at all.
 - Edge routing crosses when a change fans out to three or more children in one lane.
-- Identifiers follow the `PROJECT_STATE.md` grammar. `SYSTPCR` was confirmed by the product owner and is not
-  yet recorded in that document's controlled-identity table.
+- Identifiers follow the `PROJECT_STATE.md` grammar. `SYSTPCR` is confirmed correct and is being added to that
+  document's controlled-identity table by PR #877.

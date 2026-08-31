@@ -7,7 +7,7 @@
 <body>
 <x-dc>
 <helmet>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&amp;family=DM+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&amp;family=DM+Sans:wght@400;500;600;700&amp;display=swap">
   <style>
     body { margin: 0; }
     a { color: #176f68; } a:hover { color: #0f4f4a; }
@@ -27,7 +27,7 @@
     .dtCrumbs { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #7a8a9c; }
     .dtCrumbs button { border: 0; background: none; padding: 0; color: #176f68; font: 600 12px 'DM Sans', sans-serif; cursor: pointer; }
     .dtCrumbs button:hover { text-decoration: underline; }
-    .dtCrumbs b { color: #142139; font: 600 12px 'IBM Plex Mono', ui-monospace, monospace; }
+    .dtCrumbs b { color: #142139; font: 600 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
     .dtWarnChip { border: 1px solid #e6cd94; border-radius: 999px; background: #fff8e8; padding: 3px 8px; color: #8a5a00; font-size: 10px; font-weight: 600; }
 
     .dtSeg { display: flex; gap: 2px; border: 1px solid #dce3eb; border-radius: 999px; background: #eef2f6; padding: 3px; }
@@ -58,7 +58,7 @@
     .dtZoom button { min-height: 30px; min-width: 28px; border: 0; background: none; color: #4c5f75; font: 600 14px 'DM Sans', sans-serif; cursor: pointer; }
     .dtZoom button:hover { background: #eef2f6; }
     .dtZoom button:disabled { color: #c3ccd6; cursor: default; background: none; }
-    .dtZoom span { min-width: 78px; text-align: center; color: #62718a; font: 600 10px 'IBM Plex Mono', monospace; }
+    .dtZoom span { min-width: 78px; text-align: center; color: #62718a; font: 600 10px ui-monospace, SFMono-Regular, Consolas, monospace; }
     .dtZoom .dtFit { font-size: 11px; padding: 0 9px; border-left: 1px solid #e6ecf2; }
 
     /* ---- canvas -------------------------------------------------------- */
@@ -97,7 +97,7 @@
 
     .dtNodeTop { display: flex; align-items: center; gap: 7px; }
     .dtBadge { width: 20px; height: 20px; flex: 0 0 20px; display: grid; place-items: center; border-radius: 6px; font: 800 8.5px 'DM Sans', sans-serif; }
-    .dtId { font: 600 11.5px 'IBM Plex Mono', ui-monospace, monospace; color: #17324d; white-space: nowrap; }
+    .dtId { font: 600 11.5px ui-monospace, SFMono-Regular, Consolas, monospace; color: #17324d; white-space: nowrap; }
     .dtPill { margin-left: auto; border-radius: 999px; padding: 3px 8px; font: 700 9px 'DM Sans', sans-serif; letter-spacing: .04em; white-space: nowrap; }
     .dtHopTag { position: absolute; left: -7px; top: -7px; min-width: 17px; height: 17px; display: none; place-items: center; border-radius: 999px;
                 background: #2a8e83; color: #fff; font: 700 9px 'DM Sans', sans-serif; padding: 0 4px; box-shadow: 0 2px 6px rgba(16,70,68,.3); }
@@ -118,7 +118,7 @@
     .dtNode.sel .dtTitle { -webkit-line-clamp: 4; }
     .dtKv { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 10.5px; }
     .dtKv i { color: #8493a6; font-style: normal; }
-    .dtKv b { color: #26425e; font: 600 10.5px 'IBM Plex Mono', monospace; }
+    .dtKv b { color: #26425e; font: 600 10.5px ui-monospace, SFMono-Regular, Consolas, monospace; }
     .dtDiff { display: grid; gap: 4px; border-radius: 8px; background: #f7f9fb; padding: 8px; font-size: 10.5px; line-height: 1.4; }
     .dtDiff s { color: #97556a; text-decoration-color: #d3a3b0; }
     .dtDiff u { color: #1d6f5e; text-decoration: none; background: #e3f4ec; border-radius: 3px; padding: 0 2px; }
@@ -167,7 +167,7 @@
     .dtRel button:hover { border-color: #a9c9c4; background: #f2f9f8; }
     .dtRel button.far { background: #fff; border-style: dashed; }
     .dtRel small { color: #8493a6; font-size: 8.5px; letter-spacing: .04em; display: block; }
-    .dtRel span { font: 600 10px 'IBM Plex Mono', monospace; color: #17324d; display: block; overflow: hidden; text-overflow: ellipsis; }
+    .dtRel span { font: 600 10px ui-monospace, SFMono-Regular, Consolas, monospace; color: #17324d; display: block; overflow: hidden; text-overflow: ellipsis; }
     .dtRel em { margin-left: auto; color: #8493a6; font-size: 13px; font-style: normal; }
     .dtRelEmpty { color: #8fa0b2; font-size: 10.5px; padding: 4px 0; }
     .dtInspector.dock-bottom .dtActs { flex-direction: column; justify-content: flex-end; padding-top: 26px; }
