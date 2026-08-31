@@ -32,6 +32,8 @@ public sealed class ShowcaseApiFixture : IAsyncLifetime
         await using (var db = new AeroLinkDbContext(options))
         {
             await db.Database.EnsureCreatedAsync();
+            // Controlled FMS closure evidence must be attributable to the seeded SQA account.
+            await new IdentitySeeder(db).EnsureSeededAsync();
             Summary = await new FmsShowcaseSeeder(db).EnsureSeededAsync();
         }
         // Clearing pools is what guarantees the handle is released before anything copies the file. A copy taken

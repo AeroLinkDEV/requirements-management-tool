@@ -98,11 +98,18 @@ eligible synthetic engineers/test engineers; the broader identity seed includes 
 no current obligations, so Team Work can show both populated and zero-obligation people without inventing
 ownership.
 
-Interface and Problem Report scenarios carry an owned FMS marker and prefer the deterministic `86601` number
-range. If a legitimate record already occupies a preferred number, the next free number is selected; a
-user-created `ICDCR-00001` or `PR-00001` is never mistaken for a showcase row. The upgrade marker is written
-only after all scenario postconditions pass, so an interrupted or incomplete enrichment retries on the next
-startup without rewriting controlled history.
+Interface and Problem Report scenario ownership is recorded durably in one immutable
+`ShowcaseUpgradeStep` mapping per scenario key; its detail is the exact created artifact GUID. The visible FMS
+marker in narrative text is only a display breadcrumb and is never used to locate or mutate a controlled row,
+so user-authored content that happens to contain the same text is safe. Scenarios prefer the deterministic
+`86601` number range; if a legitimate record already occupies a preferred number, the next free number is
+selected. The upgrade marker is written only after all scenario postconditions pass, so an interrupted or
+incomplete enrichment retries on the next startup without rewriting controlled history.
+
+On a fresh demo-data startup, the seeded identity directory is created before FMS controlled closure evidence
+is frozen, and the existing post-Program identity pass remains in place to grant memberships to every Program
+created by the showcase seeders. This keeps the closure package attributable to the real `quality.analyst`
+account rather than an empty synthetic identity.
 
 ## Terminology
 

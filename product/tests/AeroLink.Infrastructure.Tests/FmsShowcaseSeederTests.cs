@@ -1,5 +1,6 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -9,6 +10,14 @@ namespace AeroLink.Infrastructure.Tests;
 
 public sealed class FmsShowcaseSeederTests
 {
+    private static async Task<Guid[]> OwnedScenarioIdsAsync(AeroLinkDbContext db, Guid programId, string prefix)
+    {
+        var details = await db.ShowcaseUpgradeSteps.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.StepKey.StartsWith(prefix))
+            .OrderBy(x => x.StepKey).Select(x => x.Detail).ToListAsync();
+        return details.Select(Guid.Parse).ToArray();
+    }
+
     [Fact]
     public async Task Generates_exact_released_15_baseline_and_active_16_work_without_duplicates()
     {
@@ -17,6 +26,7 @@ public sealed class FmsShowcaseSeederTests
         try
         {
             await using var db = new AeroLinkDbContext(options); await db.Database.EnsureCreatedAsync();
+            await new IdentitySeeder(db).EnsureSeededAsync();
             var seeder = new FmsShowcaseSeeder(db); var first = await seeder.EnsureSeededAsync(); var second = await seeder.EnsureSeededAsync();
             Assert.Equal(150, first.SystemRequirements); Assert.Equal(400, first.HighLevelRequirements); Assert.Equal(700, first.LowLevelRequirements);
             Assert.Equal(30, first.HistoricalScrs); Assert.Equal(75, first.HistoricalSwcrs); Assert.Equal(1100, first.TraceLinks);
@@ -58,7 +68,7 @@ public sealed class FmsShowcaseSeederTests
     }
 
     [Fact]
-    public async Task Enrichment_is_deterministic_and_covers_active_interface_and_problem_report_lifecycles()
+    public async Task Fresh_identity_ordering_freezes_real_sqa_identity_and_covers_scenario_lifecycles()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-showcase-scenarios-{Guid.NewGuid():N}.db");
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
@@ -72,12 +82,12 @@ public sealed class FmsShowcaseSeederTests
             var seeder = new FmsShowcaseSeeder(db);
             var summary = await seeder.EnsureSeededAsync();
             var release15Id = await db.Releases.Where(x => x.ProjectId == summary.ProjectId && x.Version == "1.5").Select(x => x.Id).SingleAsync();
+            var interfaceScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/interface/");
+            var reportScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/problem-report/");
             var firstInterface = await db.SystemChangeRequests.AsNoTracking()
-                .Where(x => x.ProjectId == summary.ProjectId && x.Type == ChangeRequestType.Interface
-                    && x.Analysis.Contains("[FMSLIVE showcase scenario: interface-"))
+                .Where(x => interfaceScenarioIds.Contains(x.Id))
                 .OrderBy(x => x.BaseNumber).Select(x => new { x.BaseNumber, x.Revision, x.State, x.AuthorId }).ToListAsync();
-            var firstReports = await db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == summary.ProjectId
-                    && x.AdditionalInformation.Contains("[FMSLIVE showcase scenario: problem-report-"))
+            var firstReports = await db.ProblemReports.AsNoTracking().Where(x => reportScenarioIds.Contains(x.Id))
                 .OrderBy(x => x.ReportNumber).Select(x => new { x.Id, x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId, x.ResolutionVerificationExecutionId, x.AdditionalInformation }).ToListAsync();
 
             Assert.Equal(8, firstInterface.Count);
@@ -111,7 +121,7 @@ public sealed class FmsShowcaseSeederTests
 
             foreach (var index in new[] { 6, 7 })
             {
-                var report = Assert.Single(firstReports.Where(x => x.AdditionalInformation.Contains($"problem-report-{index:D2}]")));
+                var report = Assert.Single(firstReports.Where(x => x.Id == reportScenarioIds[index - 1]));
                 Assert.NotNull(report.ResolutionVerificationExecutionId);
                 Assert.True(await db.ProblemReportLinks.AnyAsync(x => x.ProblemReportId == report.Id
                     && x.ArtifactType == "TestExecution" && x.ArtifactId == report.ResolutionVerificationExecutionId
@@ -124,18 +134,20 @@ public sealed class FmsShowcaseSeederTests
                 if (index == 7)
                 {
                     var sqaAccountId = await db.UserAccounts.Where(x => x.UserName == "quality.analyst").Select(x => x.Id).SingleAsync();
+                    Assert.True(await db.ProgramMemberships.AnyAsync(x => x.UserId == sqaAccountId
+                        && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null));
                     Assert.Equal(sqaAccountId, candidate.ApprovedByAccountId);
                     Assert.True(await db.ProblemReportRevisions.AnyAsync(x => x.ProblemReportId == report.Id && x.EventType == "ClosureApproved"));
                 }
             }
 
             await seeder.EnsureSeededAsync();
+            interfaceScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/interface/");
+            reportScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/problem-report/");
             var secondInterface = await db.SystemChangeRequests.AsNoTracking()
-                .Where(x => x.ProjectId == summary.ProjectId && x.Type == ChangeRequestType.Interface
-                    && x.Analysis.Contains("[FMSLIVE showcase scenario: interface-"))
+                .Where(x => interfaceScenarioIds.Contains(x.Id))
                 .OrderBy(x => x.BaseNumber).Select(x => new { x.BaseNumber, x.Revision, x.State, x.AuthorId }).ToListAsync();
-            var secondReports = await db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == summary.ProjectId
-                    && x.AdditionalInformation.Contains("[FMSLIVE showcase scenario: problem-report-"))
+            var secondReports = await db.ProblemReports.AsNoTracking().Where(x => reportScenarioIds.Contains(x.Id))
                 .OrderBy(x => x.ReportNumber).Select(x => new { x.Id, x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId, x.ResolutionVerificationExecutionId, x.AdditionalInformation }).ToListAsync();
             Assert.Equal(firstInterface, secondInterface);
             Assert.Equal(firstReports, secondReports);
@@ -152,32 +164,44 @@ public sealed class FmsShowcaseSeederTests
         try
         {
             await using var db = new AeroLinkDbContext(options); await db.Database.EnsureCreatedAsync();
+            await new IdentitySeeder(db).EnsureSeededAsync();
             var seeder = new FmsShowcaseSeeder(db);
             var summary = await seeder.EnsureSeededAsync();
             var foreignInterface = new SystemChangeRequest("ICDCR-00001", 0, summary.ProjectId, summary.ActiveReleaseId,
-                "Operator-owned interface change", "Existing controlled content.", "Existing controlled analysis.",
+                "Operator-owned interface change", "Existing controlled content.", "Existing controlled analysis. [FMSLIVE showcase scenario: interface-01]",
                 "Existing controlled disposition.", "engineer.demo", DateTimeOffset.UtcNow, ChangeRequestType.Interface);
             var foreignReport = new ProblemReport(summary.ProjectId, "PR-00001", "Operator-owned problem report",
                 "Existing controlled problem.", "Existing controlled analysis.", "engineer.demo", DateTimeOffset.UtcNow,
                 targetReleaseId: summary.ActiveReleaseId, responsibleEngineerId: "engineer.demo",
+                additionalInformation: "Operator-owned content. [FMSLIVE showcase scenario: problem-report-01]",
                 category: ProblemReportCategory.CodeFunctional);
             db.SystemChangeRequests.Add(foreignInterface); db.ProblemReports.Add(foreignReport); await db.SaveChangesAsync();
 
-            // Re-run the upgrade boundary. Scenario ownership is marker-based and the preferred high range
-            // is collision-safe, so these legitimate low identities remain untouched and excluded.
+            // Force the enrichment retry boundary while leaving the foreign rows' copied display breadcrumbs
+            // in place. Scenario ownership is durable-step based and the preferred high range is collision-safe,
+            // so a user-authored marker cannot be selected for the missing owned scenario or receive its links.
+            var missingInterfaceMapping = await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
+                && x.StepKey == "scenario-richness/interface/01");
+            db.ShowcaseUpgradeSteps.Remove(missingInterfaceMapping);
+            db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
+                && x.StepKey == "scenario-richness"));
+            await db.SaveChangesAsync();
             await seeder.UpgradeAsync(summary.ProgramId);
+            var interfaceScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/interface/");
+            var reportScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/problem-report/");
             var ownedInterfaces = await db.SystemChangeRequests.AsNoTracking()
-                .Where(x => x.ProjectId == summary.ProjectId && x.Type == ChangeRequestType.Interface
-                    && x.Analysis.Contains("[FMSLIVE showcase scenario: interface-"))
+                .Where(x => interfaceScenarioIds.Contains(x.Id))
                 .ToListAsync();
-            var ownedReports = await db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == summary.ProjectId
-                && x.AdditionalInformation.Contains("[FMSLIVE showcase scenario: problem-report-"))
+            var ownedReports = await db.ProblemReports.AsNoTracking().Where(x => reportScenarioIds.Contains(x.Id))
                 .ToListAsync();
             Assert.Equal(8, ownedInterfaces.Count); Assert.Equal(8, ownedReports.Count);
             Assert.DoesNotContain(ownedInterfaces, x => x.Id == foreignInterface.Id);
             Assert.DoesNotContain(ownedReports, x => x.Id == foreignReport.Id);
             Assert.Contains(await db.SystemChangeRequests.AsNoTracking().Select(x => x.BaseNumber).ToListAsync(), x => x == "ICDCR-00001");
             Assert.Contains(await db.ProblemReports.AsNoTracking().Select(x => x.ReportNumber).ToListAsync(), x => x == "PR-00001");
+            Assert.Equal("Existing controlled analysis. [FMSLIVE showcase scenario: interface-01]", foreignInterface.Analysis);
+            Assert.Equal("Operator-owned content. [FMSLIVE showcase scenario: problem-report-01]", foreignReport.AdditionalInformation);
+            Assert.Empty(await db.ProblemReportLinks.AsNoTracking().Where(x => x.ProblemReportId == foreignReport.Id).ToListAsync());
             Assert.All(ownedInterfaces, x => Assert.StartsWith("ICDCR-866", x.BaseNumber));
             Assert.All(ownedReports, x => Assert.StartsWith("PR-866", x.ReportNumber));
         }
@@ -198,6 +222,7 @@ public sealed class FmsShowcaseSeederTests
         try
         {
             await using var db = new AeroLinkDbContext(options); await db.Database.EnsureCreatedAsync();
+            await new IdentitySeeder(db).EnsureSeededAsync();
             var seeder = new FmsShowcaseSeeder(db);
             var first = await seeder.EnsureSeededAsync();
             await seeder.EnsureSeededAsync();
