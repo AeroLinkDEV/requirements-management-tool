@@ -441,9 +441,6 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             return new(false, "quality_analyst_membership_inactive",
                 "An unended SoftwareQualityAnalyst membership is required before controlled closure evidence can be upgraded.");
 
-        var leadership = await CheckLeadershipRosterAuthorityAsync(programId, ct);
-        if (leadership is not null) return leadership;
-
         var closureAt = await HistoricalClosureApprovalAtAsync(programId, memberships, ct);
         if (closureAt is null)
             return new(false, "closure_evidence_unavailable",
@@ -524,6 +521,12 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                         $"The quality.analyst membership history does not cover the controlled evidence timeline at {closureAt.Value:O}; an operator-created membership is not backdated.");
             }
         }
+
+        // Report the authority gap for a pending controlled scenario before the independent leadership
+        // roster gap. This keeps the preflight actionable without changing the fail-closed boundary: every
+        // check still completes before the serialized upgrade transaction runs its first step.
+        var leadership = await CheckLeadershipRosterAuthorityAsync(programId, ct);
+        if (leadership is not null) return leadership;
 
         return new(true, "ready", "The active quality.analyst account and current authority cover the controlled closure evidence.", closureAt);
     }
