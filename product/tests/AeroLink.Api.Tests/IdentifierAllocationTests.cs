@@ -87,9 +87,13 @@ public sealed class IdentifierAllocationTests
         using var report = await client.PostAsJsonAsync("/api/problem-reports", new { category = "CodeFunctional", projectId, title = "Attachment host", problem = "The unit resets during a route update.", analysis = "", classification = "Verification failure", severity = "High", priority = "Urgent", origin = "Test execution", affectedConfiguration = "Build 1.6.0" });
         Assert.Equal(HttpStatusCode.Created, report.StatusCode);
         var artifactId = (await report.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId, leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.Created, checkout.StatusCode);
+        var sessionId = (await checkout.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
         var logicalId = Guid.NewGuid();
 
-        using var one = await UploadAsync(client, projectId, artifactId, logicalId, "first");
+        using var one = await UploadAsync(client, projectId, artifactId, sessionId, logicalId, "first");
         Assert.Equal(HttpStatusCode.Created, one.StatusCode);
 
         // The state two overlapping uploads leave behind, written directly because two requests cannot be held
@@ -111,7 +115,7 @@ public sealed class IdentifierAllocationTests
 
         // The next upload is what reconciles it: everything but the highest version ends up superseded, so the
         // logical file has one current version again rather than two.
-        using var three = await UploadAsync(client, projectId, artifactId, logicalId, "third");
+        using var three = await UploadAsync(client, projectId, artifactId, sessionId, logicalId, "third");
         Assert.Equal(HttpStatusCode.Created, three.StatusCode);
 
         using var scope = factory.Services.CreateScope();
@@ -123,19 +127,20 @@ public sealed class IdentifierAllocationTests
         Assert.Equal(3, active[0].Version);
     }
 
-    private static Task<HttpResponseMessage> UploadAsync(HttpClient client, Guid projectId, Guid artifactId, Guid logicalId, string label)
+    private static Task<HttpResponseMessage> UploadAsync(HttpClient client, Guid projectId, Guid artifactId, Guid sessionId, Guid logicalId, string label)
     {
         var content = new MultipartFormDataContent
         {
             { new StringContent(projectId.ToString()), "projectId" },
             { new StringContent("ProblemReport"), "artifactType" },
             { new StringContent(artifactId.ToString()), "artifactId" },
+            { new StringContent(sessionId.ToString()), "editSessionId" },
             { new StringContent(logicalId.ToString()), "logicalId" },
             { new StringContent(label), "label" },
             { new StringContent("Concurrent upload"), "description" },
             { new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes($"contents of {label}")) { Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/plain") } }, "file", $"{label}.txt" },
         };
-        return client.PostAsync("/api/enterprise-hardening/attachments", content);
+        return client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={artifactId}&editSessionId={sessionId}", content);
     }
 
     [Fact]

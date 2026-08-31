@@ -59,6 +59,12 @@ public sealed class ControlledEditingCheckInEngine(
         if (session is null)
             return new(ControlledCheckInStatus.NotFound, "edit_session_not_found", "The controlled edit session was not found.");
 
+        // Supporting-file mutation takes these locks in the same order: first the exclusive edit session,
+        // then the Problem Report aggregate. Acquiring the aggregate row here, before resolving the adapter,
+        // prevents check-in from deadlocking an upload that is arbitrating the exact same report manifest.
+        if (session.ArtifactType.Equals("ProblemReport", StringComparison.OrdinalIgnoreCase))
+            await ProblemReportLock.AcquireAsync(db, session.ArtifactId, ct);
+
         if (session.State != EditSessionState.Active)
             return await RejectAsync(session, actor.UserName, now, "edit_session_inactive",
                 "This controlled edit session is no longer active.", ControlledCheckInStatus.Conflict,
@@ -111,7 +117,7 @@ public sealed class ControlledEditingCheckInEngine(
                 "The editing session changed; refresh before checking in.", ControlledCheckInStatus.Conflict,
                 adapter, artifact, transaction, ct);
 
-        var canonicalSnapshot = adapter.CanonicalSnapshot(artifact);
+        var canonicalSnapshot = await CanonicalSnapshotAsync(adapter, artifact, ct);
         var canonicalHash = Hash(canonicalSnapshot);
         if (!string.Equals(canonicalHash, session.BaseSnapshotHash, StringComparison.OrdinalIgnoreCase))
             return await RejectAsync(session, actor.UserName, now, "stale_artifact_version",
@@ -143,7 +149,7 @@ public sealed class ControlledEditingCheckInEngine(
         {
             await adapter.ApplyDraftAsync(artifact, draft.DraftJson, actor.UserName, actor.IsAdministrator, now, ct);
             var resultingVersion = artifact.Version + 1;
-            var resultingSnapshot = adapter.CanonicalSnapshot(artifact, resultingVersion);
+            var resultingSnapshot = await CanonicalSnapshotAsync(adapter, artifact, ct, resultingVersion);
             var resultingHash = Hash(resultingSnapshot);
             var evidence = Evidence(session, adapter, artifact, actor.UserName, now,
                 ControlledCheckInOutcome.Succeeded, "check_in_succeeded", draft, resultingVersion,
@@ -195,6 +201,21 @@ public sealed class ControlledEditingCheckInEngine(
             if (await authority.IsSatisfiedAsync(actor.Id, programId,
                     ProjectAuthorityRequirement.LegacyRoleDemand(role), now, ct)) return true;
         return false;
+    }
+
+    private async Task<string> CanonicalSnapshotAsync(IControlledEditingAdapter adapter,
+        ControlledEditingArtifact artifact, CancellationToken ct, long? versionOverride = null)
+    {
+        // Problem Report schema 6 includes the exact active supporting-file manifest. The shared adapter
+        // contract predates attachments and is intentionally synchronous for the other artifact families, so
+        // resolve this one manifest at the engine boundary rather than letting checkout/check-in evidence
+        // silently fall back to an empty aggregate default.
+        if (artifact.Aggregate is ProblemReport report)
+        {
+            var attachments = await ProblemReportAttachmentEvidence.ActiveAsync(db, report.ProjectId, report.Id, ct);
+            return ProblemReportEvidenceContract.Serialize(report, versionOverride, attachments);
+        }
+        return adapter.CanonicalSnapshot(artifact, versionOverride);
     }
 
     private async Task<ControlledCheckInResult> RejectAsync(ArtifactEditSession session, string actor,
@@ -1052,8 +1073,9 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
         // deliberate deferral rather than an impossibility, and it is the honest way to describe it.
         // Until then the event captures nothing and renders as the login handle, which is a missing fact
         // rather than a wrong one.
+        var evidence = await ProblemReportAttachmentEvidence.SnapshotAsync(db, item, ct);
         db.ProblemReportRevisions.Add(new ProblemReportRevision(item.Id, item.Revision, "DetailsCheckedIn",
-            actor, item.CanonicalHash(), EvidenceSnapshot(item), now,
+            actor, evidence.Hash, evidence.Json, now,
             detail: lifecycleRationale, fromState: fromState.ToString(), toState: toState.ToString(), rationale: lifecycleRationale));
         if (wasAwaitingClosure)
             await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(item, actor,

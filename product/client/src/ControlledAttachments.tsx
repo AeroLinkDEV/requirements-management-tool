@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { FormEvent } from "react";
 import { PersonName } from "./People";
 import { stateLabel } from "./presentation";
 import "./ControlledAttachments.css";
@@ -38,8 +39,12 @@ type Props = {
   artifactType: "Requirement" | "ChangeRequest" | "ProblemReport" | "TestChangeRequest";
   artifactId: string;
   revisionId?: string;
+  /** Problem Report mutations are bound to the actor's exact live exclusive checkout. */
+  editSessionId?: string;
   /** Attaching is an authoring act. A reader sees the files; they do not add to them. */
   canAttach: boolean;
+  /** Lets a containing controlled editor keep check-in disabled while a supporting-file write is active. */
+  onBusyChange?: (busy: boolean) => void;
 };
 
 export default function ControlledAttachments({
@@ -48,12 +53,16 @@ export default function ControlledAttachments({
   artifactType,
   artifactId,
   revisionId,
+  editSessionId,
   canAttach,
+  onBusyChange,
 }: Props) {
   const [items, setItems] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [removing, setRemoving] = useState<Attachment>();
+  const [removalReason, setRemovalReason] = useState("");
 
   const load = useCallback(async () => {
     const response = await fetch(
@@ -66,27 +75,49 @@ export default function ControlledAttachments({
     void load();
   }, [load]);
 
+  const uploadUrl = () => {
+    const query = new URLSearchParams({ projectId, artifactType, artifactId });
+    if (editSessionId) query.set("editSessionId", editSessionId);
+    return `${api}/api/enterprise-hardening/attachments?${query.toString()}`;
+  };
+
   const upload = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
+    const values = new FormData(form);
+    const file = values.get("file");
+    const label = String(values.get("label") || "").trim();
+    if (!(file instanceof File) || file.size === 0 || !label) {
+      setError("Choose a file and enter a label before attaching it.");
+      return;
+    }
     const body = new FormData(form);
+    body.set("label", label);
+    body.set("description", String(values.get("description") || "").trim());
+    body.set("file", file);
     body.set("projectId", projectId);
     body.set("artifactType", artifactType);
     body.set("artifactId", artifactId);
     if (revisionId) body.set("revisionId", revisionId);
-    setBusy(true);
+    if (editSessionId) body.set("editSessionId", editSessionId);
+    setBusy(true); onBusyChange?.(true);
     setError("");
     setMessage("");
-    const response = await fetch(`${api}/api/enterprise-hardening/attachments`, { method: "POST", body });
-    setBusy(false);
-    if (!response.ok) {
-      const detail = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(detail.error || "The file could not be stored.");
-      return;
+    try {
+      const response = await fetch(uploadUrl(), { method: "POST", body });
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => ({}))) as { error?: string };
+        setError(detail.error || "The file could not be stored.");
+        return;
+      }
+      form.reset();
+      setMessage("Stored, hashed, and attributed.");
+      await load();
+    } catch {
+      setError("The file could not be stored because the attachment service was unavailable.");
+    } finally {
+      setBusy(false); onBusyChange?.(false);
     }
-    form.reset();
-    setMessage("Stored, hashed, and attributed.");
-    await load();
   };
 
   const newVersion = async (item: Attachment, file: File) => {
@@ -95,19 +126,26 @@ export default function ControlledAttachments({
     body.set("artifactType", artifactType);
     body.set("artifactId", artifactId);
     if (revisionId) body.set("revisionId", revisionId);
+    if (editSessionId) body.set("editSessionId", editSessionId);
     body.set("logicalId", item.logicalId);
     body.set("label", item.label);
     body.set("description", item.description);
     body.set("file", file);
-    setError("");
-    const response = await fetch(`${api}/api/enterprise-hardening/attachments`, { method: "POST", body });
-    if (!response.ok) {
-      const detail = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(detail.error || "The new version could not be stored.");
-      return;
+    setBusy(true); onBusyChange?.(true); setError("");
+    try {
+      const response = await fetch(uploadUrl(), { method: "POST", body });
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => ({}))) as { error?: string };
+        setError(detail.error || "The new version could not be stored.");
+        return;
+      }
+      setMessage(`${item.label} advanced to the next controlled version.`);
+      await load();
+    } catch {
+      setError("The new version could not be stored because the attachment service was unavailable.");
+    } finally {
+      setBusy(false); onBusyChange?.(false);
     }
-    setMessage(`${item.label} advanced to the next controlled version.`);
-    await load();
   };
 
   const verify = async (item: Attachment) => {
@@ -121,10 +159,32 @@ export default function ControlledAttachments({
     await load();
   };
 
+  const remove = async () => {
+    if (!removing || !editSessionId || !removalReason.trim()) return;
+    setBusy(true); onBusyChange?.(true); setError(""); setMessage("");
+    try {
+      const response = await fetch(`${api}/api/enterprise-hardening/attachments/${removing.id}/withdraw`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ editSessionId, reason: removalReason.trim() }),
+      });
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => ({}))) as { error?: string };
+        setError(detail.error || "The supporting file could not be removed from the current set.");
+        return;
+      }
+      setMessage(`${removing.originalFileName} was removed from the current set; its controlled history remains available.`);
+      setRemoving(undefined); setRemovalReason(""); await load();
+    } catch {
+      setError("The supporting file could not be removed because the attachment service was unavailable.");
+    } finally {
+      setBusy(false); onBusyChange?.(false);
+    }
+  };
+
   return (
-    <div className="attachmentPanel">
+      <div className="attachmentPanel">
       {canAttach && (
-        <form className="attachmentUpload" onSubmit={upload}>
+        <form className="attachmentUpload" aria-label="Attach a supporting file" onSubmit={event => void upload(event)}>
           <label>
             Label
             <input name="label" placeholder="Supplier interface datasheet" required />
@@ -135,9 +195,9 @@ export default function ControlledAttachments({
           </label>
           <label className="attachmentFile">
             File
-            <input type="file" name="file" required />
+            <input type="file" name="file" accept=".png,.jpg,.jpeg,.pdf,.docx,.xlsx,.txt,.log,.csv" required />
           </label>
-          <button disabled={busy}>{busy ? "Checksumming…" : "Attach"}</button>
+          <button type="submit" disabled={busy}>{busy ? "Checksumming…" : "Attach"}</button>
         </form>
       )}
       {error && (
@@ -146,6 +206,14 @@ export default function ControlledAttachments({
         </p>
       )}
       {message && <p className="attachmentMessage">{message}</p>}
+      {removing && (
+        <div className="attachmentRemoval" role="group" aria-label={`Remove ${removing.originalFileName}`}>
+          <div><b>Remove from current set?</b><span>{removing.originalFileName} v{removing.version} remains in controlled history.</span></div>
+          <label>Reason<input autoFocus value={removalReason} onChange={event => setRemovalReason(event.target.value)} /></label>
+          <button type="button" className="danger" disabled={busy || !removalReason.trim()} onClick={() => void remove()}>Remove</button>
+          <button type="button" onClick={() => { setRemoving(undefined); setRemovalReason(""); }}>Cancel</button>
+        </div>
+      )}
 
       {items.length === 0 ? (
         <p className="attachmentEmpty">
@@ -161,16 +229,16 @@ export default function ControlledAttachments({
                   {item.label} <i>v{item.version}</i>
                 </b>
                 <p>
-                  {item.originalFileName} · {(item.size / 1024).toFixed(1)} KB
+                  {item.originalFileName} · {item.contentType} · {(item.size / 1024).toFixed(1)} KB
                 </p>
                 {item.description && <p className="attachmentWhy">{item.description}</p>}
-                <code>SHA-256 {item.sha256.slice(0, 24)}…</code>
+                <code>SHA-256 {item.sha256}</code>
                 <small>
-                  {stateLabel(item.state)} · <PersonName userName={item.uploadedBy} /> · {new Date(item.uploadedAt).toLocaleDateString()}
+                  {stateLabel(item.state)} · <PersonName userName={item.uploadedBy} /> · {new Date(item.uploadedAt).toLocaleString()}
                 </small>
               </div>
               <div className="attachmentActions">
-                <a href={`${api}/api/enterprise-hardening/attachments/${item.id}/download`}>Download</a>
+                <a href={`${api}/api/enterprise-hardening/attachments/${item.id}/download`} target="_blank" rel="noreferrer">Open / download</a>
                 <button type="button" onClick={() => void verify(item)}>
                   {item.integrityVerifiedAt ? "Verified ✓" : "Verify integrity"}
                 </button>
@@ -178,7 +246,8 @@ export default function ControlledAttachments({
                   <label>
                     New version
                     <input
-                      type="file"
+                      type="file" accept=".png,.jpg,.jpeg,.pdf,.docx,.xlsx,.txt,.log,.csv"
+                      disabled={busy}
                       onChange={(event) => {
                         const file = event.target.files?.[0];
                         event.target.value = "";
@@ -187,6 +256,7 @@ export default function ControlledAttachments({
                     />
                   </label>
                 )}
+                {canAttach && editSessionId && item.state === "Active" && <button type="button" onClick={() => setRemoving(item)}>Remove</button>}
               </div>
             </li>
           ))}

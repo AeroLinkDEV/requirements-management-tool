@@ -68,6 +68,8 @@ export type AppRoute = {
   testChangeRequestSelectionId?: string;
   /// The exact proposal a verification TCR page should focus after an Explorer action.
   testChangeRequestProposalId?: string;
+  /// An immutable ProblemReportRevision.Id for the read-only historical Problem Report page.
+  historicalProblemReportSnapshotId?: string;
   projectConfigurationSection?: "ladder" | "assurance" | "history" | "readiness" | "approvals";
   /** Opens the existing Explorer's authoritative coverage report, never the legacy assessment workspace. */
   coverageReport?: boolean;
@@ -199,8 +201,8 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "code") return { ...base, view: "code", discipline: "software" };
   if (path === "documentation-center") return { ...base, view: "managedDocuments", discipline: "system" };
   if (tail[0] === "documentation-center" && tail[1]) return { ...base, view: "managedDocuments", discipline: "system", artifactId: decoded(tail[1]) };
-  if (path === "problem-reports") return { ...base, view: "problemReports", discipline: "system" };
-  if (tail[0] === "problem-reports" && tail[1]) return { ...base, view: "problemReports", discipline: "system", artifactId: decoded(tail[1]) };
+  if (path === "problem-reports") return { ...base, view: "problemReports", discipline: "system", historicalProblemReportSnapshotId: query.get("snapshotId") || undefined };
+  if (tail[0] === "problem-reports" && tail[1]) return { ...base, view: "problemReports", discipline: "system", artifactId: decoded(tail[1]), historicalProblemReportSnapshotId: query.get("snapshotId") || undefined };
   if (path === "traceability") return { ...base, view: "lifecycle", discipline: "system" };
   if (tail[0] === "traceability" && tail[1] === "change-requests" && tail[2])
     return { ...base, view: "lifecycle", discipline: "system", artifactId: decoded(tail[2]), artifactKind: "change-request" };

@@ -1050,6 +1050,7 @@ function App() {
         releases={project.releases}
         user={user}
         initialReportId={selectedArtifactId||undefined}
+        initialSnapshotId={initialRoute.historicalProblemReportSnapshotId}
         onSelected={(id,targetBuild)=>{navigate("problemReports","system",id,undefined,true);if(targetBuild){const url=new URL(location.href);url.searchParams.set("targetBuild",targetBuild);history.replaceState({},"",`${url.pathname}${url.search}`)}}}
         onBack={() => navigate("dashboard")}
         onOpenVerification={(target) => navigate("testResults", target?.discipline === "software" ? "softwareTest" : "systemTest", target?.problemReportId, target?.discipline === "software" ? "HighLevel" : undefined)}

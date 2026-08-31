@@ -322,7 +322,11 @@ export default function EnterpriseControlCenter({
       "Upload failed.",
       () =>
         apiRequest<{ id: string }>(
-          `${api}/api/enterprise-hardening/attachments`,
+          `${api}/api/enterprise-hardening/attachments?${new URLSearchParams({
+            projectId,
+            artifactType: "Requirement",
+            artifactId: selected.id,
+          }).toString()}`,
           { method: "POST", body },
         ),
     );
@@ -347,7 +351,11 @@ export default function EnterpriseControlCenter({
       "The new attachment version was not stored.",
       () =>
         apiRequest<{ id: string }>(
-          `${api}/api/enterprise-hardening/attachments`,
+          `${api}/api/enterprise-hardening/attachments?${new URLSearchParams({
+            projectId,
+            artifactType: "Requirement",
+            artifactId: selectedId,
+          }).toString()}`,
           { method: "POST", body },
         ),
     );

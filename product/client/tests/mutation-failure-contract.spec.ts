@@ -53,13 +53,15 @@ test('upload, job, identity, and conflict failures stay visible without false su
     mimeType: 'text/plain',
     buffer: Buffer.from('controlled upload that must not be cleared on transport failure'),
   })
-  await page.route('**/api/enterprise-hardening/attachments', route => route.abort('connectionfailed'))
+  // The upload carries the selected project/artifact as query parameters. Match the endpoint together with
+  // that query string so this contract actually exercises the failed mutation instead of storing a real file.
+  await page.route('**/api/enterprise-hardening/attachments**', route => route.abort('connectionfailed'))
   const upload = page.getByRole('button', { name: 'Upload controlled version' })
   await upload.click()
   await expect(page.getByRole('alert')).toContainText('Your input has been preserved')
   await expect(page.getByLabel('Document label')).toHaveValue('Failure-preservation attachment')
   await expect(upload).toBeEnabled()
-  await page.unroute('**/api/enterprise-hardening/attachments')
+  await page.unroute('**/api/enterprise-hardening/attachments**')
 
 })
 

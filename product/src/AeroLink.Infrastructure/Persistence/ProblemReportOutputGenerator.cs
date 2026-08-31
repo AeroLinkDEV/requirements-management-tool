@@ -105,7 +105,13 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
             metadata,
             [],
             history,
-            [new PublicationSection("Problem Report Record", "Narrative fields retain their typed authored structure while controlled fields remain in Document Control.", records)]);
+            [
+                new PublicationSection("Problem Report Record", "Narrative fields retain their typed authored structure while controlled fields remain in Document Control.", records),
+                new PublicationSection("Supporting Attachments", "Supporting files remain separate controlled objects. This manifest records the exact file versions and SHA-256 digests that belonged to this Problem Report snapshot.",
+                    (snapshot.SupportingAttachments ?? []).Select((item, index) => new PublicationRecord(
+                        $"ATT-{index + 1:D2}", "Supporting file", item.FileName,
+                        $"{item.ContentType} · {item.Size} bytes · version {item.Version} · SHA-256 {item.Sha256}", [], "")).ToList()),
+            ]);
 
         return ProfessionalPublicationRenderer.Render(publication, format,
             SafeFileName(snapshot.DisplayNumber + "_" + snapshot.Title));
@@ -117,8 +123,9 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
     {
         if (revision is null && snapshotId is null)
         {
-            var json = ProblemReportEvidenceContract.Serialize(report);
-            return (ProblemReportEvidenceContract.Create(report), json,
+            var attachments = await ProblemReportAttachmentEvidence.ActiveAsync(db, report.ProjectId, report.Id, ct);
+            var json = ProblemReportEvidenceContract.Serialize(report, supportingAttachments: attachments);
+            return (ProblemReportEvidenceContract.Create(report, supportingAttachments: attachments), json,
                 ProblemReportEvidenceContract.Hash(json), ProblemReportEvidenceContract.SchemaVersion, false, null,
                 null, null);
         }
@@ -149,7 +156,7 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
     /// and v5 added authored image layout. Missing fields therefore render as "not recorded", never as a
     /// value borrowed from the current Problem Report.
     /// </summary>
-    internal static (ProblemReportEvidenceSnapshot Snapshot, string? LegacyType)? ReadStoredSnapshot(string json, int expectedSchema)
+    public static (ProblemReportEvidenceSnapshot Snapshot, string? LegacyType)? ReadStoredSnapshot(string json, int expectedSchema)
     {
         StoredSnapshot? stored;
         try { stored = JsonSerializer.Deserialize<StoredSnapshot>(json, SnapshotOptions); }
@@ -218,6 +225,7 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
             CreatedAt = stored.CreatedAt ?? DateTimeOffset.MinValue,
             UpdatedAt = stored.UpdatedAt ?? stored.CreatedAt ?? DateTimeOffset.MinValue,
             Version = stored.Version,
+            SupportingAttachments = expectedSchema >= 6 ? stored.SupportingAttachments ?? [] : null,
         };
         return (snapshot, type);
     }
@@ -281,6 +289,7 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
         public DateTimeOffset? CreatedAt { get; set; }
         public DateTimeOffset? UpdatedAt { get; set; }
         public long Version { get; set; }
+        public List<ProblemReportSupportingAttachmentSnapshot>? SupportingAttachments { get; set; }
     }
 
     private static PublicationRecord Record(string number, string title, string plain, string rich,

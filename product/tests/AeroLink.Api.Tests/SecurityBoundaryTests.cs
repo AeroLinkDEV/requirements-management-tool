@@ -592,6 +592,7 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     bool attachProjectLadders = true,
     bool enableEnterpriseJobWorker = false,
     Action<object>? telemetryObserver = null,
+    string? postgresConnection = null,
     [CallerFilePath] string? callerFile = null,
     [CallerMemberName] string? callerMember = null) : WebApplicationFactory<Program>
 {
@@ -603,7 +604,8 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     internal const int CommandTimeoutSeconds = 30;
     private readonly DisposableDatabase _database = NewDatabase(showcaseTemplate);
     private string DatabasePath => _database.Path;
-    public string ConnectionString => DatabaseConnectionString(DatabasePath);
+    private readonly string? _postgresConnection = postgresConnection;
+    public string ConnectionString => _postgresConnection ?? DatabaseConnectionString(DatabasePath);
 
     /// <summary>
     /// The database file, together with the one connection that must stay open while it is in use.
@@ -741,8 +743,8 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
         builder.UseContentRoot(FindApiContentRoot());
         var settings = new Dictionary<string, string?>
         {
-            ["Database:Provider"] = "Sqlite",
-            ["ConnectionStrings:AeroLink"] = $"Data Source={DatabasePath}",
+            ["Database:Provider"] = _postgresConnection is null ? "Sqlite" : "PostgreSql",
+            ["ConnectionStrings:AeroLink"] = ConnectionString,
             ["Evidence:Root"] = _evidenceRoot,
             ["Connector:DeploymentId"] = "aerolink-api-tests",
             ["Connector:SigningKeyPath"] = _connectorKeyPath,
@@ -764,11 +766,12 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
             services.RemoveAll<IDbContextOptionsConfiguration<AeroLinkDbContext>>();
             services.AddDbContext<AeroLinkDbContext>(options =>
             {
-                ConfigureSqliteOptions(
-                    options,
-                    ConnectionString,
-                    new SaveRaceInterceptor(),
-                    new TimingConnectionInterceptor(_factoryId, _callerFile, _callerMember, _telemetryObserver));
+                if (_postgresConnection is null)
+                    ConfigureSqliteOptions(options, ConnectionString, new SaveRaceInterceptor(),
+                        new TimingConnectionInterceptor(_factoryId, _callerFile, _callerMember, _telemetryObserver));
+                else
+                    options.UseNpgsql(ConnectionString).AddInterceptors(
+                        new TimingConnectionInterceptor(_factoryId, _callerFile, _callerMember, _telemetryObserver));
                 if (attachProjectLadders) options.AddInterceptors(new TestProjectLadderInterceptor());
                 if (commandInterceptor is not null) options.AddInterceptors(commandInterceptor);
             });

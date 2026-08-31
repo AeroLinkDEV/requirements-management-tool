@@ -803,8 +803,10 @@
         "ChangeRequestUpstreamTraceApiTests",
         "ControlledEditingCheckInApiTests",
         "ControlledEditingProcedureAuthorityTests",
+        "IdentifierAllocationTests",
         "ProblemReportApiTests",
         "ProblemReportCheckoutApiTests",
+        "ProblemReportPostgresQualificationTests",
         "ProblemReportVerificationApiTests",
         "RequirementProposalOptionsApiTests",
         "TestChangeRequestRegisterApiTests"
@@ -822,6 +824,7 @@
         "ControlledEditingProcedureAuthorityTests",
         "ProblemReportApiTests",
         "ProblemReportCheckoutApiTests",
+        "ProblemReportPostgresQualificationTests",
         "ProblemReportVerificationApiTests"
       ]
     },
@@ -992,14 +995,27 @@
       "file": "EditSessionEndpoints.cs",
       "coveredBy": [
         "AdministratorChangeRequestApiTests",
-        "IdentifierAllocationTests"
+        "IdentifierAllocationTests",
+        "ProblemReportCheckoutApiTests",
+        "ProblemReportPostgresQualificationTests",
+        "ProblemReportVerificationApiTests"
       ]
     },
     {
       "method": "POST",
       "path": "/api/enterprise-hardening/attachments/{id:guid}/verify",
       "file": "EditSessionEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "ProblemReportCheckoutApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-hardening/attachments/{id:guid}/withdraw",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportCheckoutApiTests"
+      ]
     },
     {
       "method": "POST",

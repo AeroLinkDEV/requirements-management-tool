@@ -96,7 +96,7 @@ public sealed class AdministratorChangeRequestApiTests
         var fileContent = new ByteArrayContent(Encoding.UTF8.GetBytes("controlled evidence"));
         fileContent.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
         file.Add(fileContent, "file", "supplier-note.txt");
-        using var attachment = await administrator.PostAsync("/api/enterprise-hardening/attachments", file);
+        using var attachment = await administrator.PostAsync($"/api/enterprise-hardening/attachments?projectId={scenario.ProjectId}&artifactType=ChangeRequest&artifactId={scenario.ReadyId}", file);
         var attachmentBody = await attachment.Content.ReadAsStringAsync();
         Assert.True(attachment.StatusCode == HttpStatusCode.Created,
             $"{(int)attachment.StatusCode}: {attachmentBody}");
@@ -133,7 +133,7 @@ public sealed class AdministratorChangeRequestApiTests
         immutableAttachment.Add(new StringContent(scenario.ReadyId.ToString()), "artifactId");
         immutableAttachment.Add(new ByteArrayContent([1, 2, 3]), "file", "late.bin");
         using var rejectedAttachment = await administrator.PostAsync(
-            "/api/enterprise-hardening/attachments", immutableAttachment);
+            $"/api/enterprise-hardening/attachments?projectId={scenario.ProjectId}&artifactType=ChangeRequest&artifactId={scenario.ReadyId}", immutableAttachment);
         Assert.Equal(HttpStatusCode.Conflict, rejectedAttachment.StatusCode);
 
         using var defer = await administrator.PostAsJsonAsync($"/api/change-requests/{scenario.ReadyId}/defer",

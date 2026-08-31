@@ -3,7 +3,9 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
+using AeroLink.Domain.Documents;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
@@ -54,7 +56,7 @@ public sealed class ProblemReportCheckoutApiTests
         return (await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}")).GetProperty("version").GetInt64();
     }
 
-    private static async Task<(Guid ProjectId, Guid ReleaseId, string SccbUserName)> SeedAsync(AeroLinkApiFactory factory, string prefix)
+    internal static async Task<(Guid ProjectId, Guid ReleaseId, string SccbUserName)> SeedAsync(AeroLinkApiFactory factory, string prefix)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -72,7 +74,7 @@ public sealed class ProblemReportCheckoutApiTests
         return (project.Id, release.Id, sccbUserName);
     }
 
-    private static async Task<Guid> RaiseAsync(HttpClient client, Guid projectId, Guid releaseId)
+    internal static async Task<Guid> RaiseAsync(HttpClient client, Guid projectId, Guid releaseId)
     {
         using var created = await client.PostAsJsonAsync("/api/problem-reports", new
         { category = "CodeFunctional",
@@ -514,10 +516,22 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.Contains(secondTitle, secondXml);
         Assert.Contains("SameRevisionFollowUp", secondXml);
 
+        using var historicalPage = await client.GetAsync($"/api/problem-reports/{reportId}/history/{firstSnapshotId}");
+        Assert.Equal(HttpStatusCode.OK, historicalPage.StatusCode);
+        var historicalBody = await historicalPage.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(historicalBody.GetProperty("historicalReadOnly").GetBoolean());
+        Assert.Equal(firstSnapshotId, historicalBody.GetProperty("snapshotId").GetGuid());
+        Assert.Equal(firstTitle, historicalBody.GetProperty("title").GetString());
+        Assert.False(historicalBody.GetProperty("capabilities").GetProperty("canApproveSqaClosure").GetBoolean());
+
         using var foreign = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&snapshotId={foreignSnapshotId}&format=docx");
         Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
         using var missing = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&snapshotId={Guid.NewGuid()}&format=docx");
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        using var foreignPage = await client.GetAsync($"/api/problem-reports/{reportId}/history/{foreignSnapshotId}");
+        Assert.Equal(HttpStatusCode.NotFound, foreignPage.StatusCode);
+        using var missingPage = await client.GetAsync($"/api/problem-reports/{reportId}/history/{Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.NotFound, missingPage.StatusCode);
     }
 
     [Fact]
@@ -590,6 +604,62 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.Contains("Snapshot schema", documentText);
         Assert.Contains("PRV4OUT", documentText);
         Assert.Equal(historicalHash, ProblemReportEvidenceContract.Hash(historicalJson));
+    }
+
+    [Fact]
+    public async Task Problem_report_output_round_trips_a_pinned_v5_snapshot_and_hash_for_docx_and_pdf()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRV5OUT");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+
+        string historicalJson;
+        string historicalHash;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var report = await db.ProblemReports.SingleAsync(x => x.Id == reportId);
+            // Pin the exact bytes before publication. The output reader must consume this v5 envelope as-is;
+            // it must not reserialize it as today's schema-6 aggregate or infer today's attachments.
+            historicalJson = ProblemReportEvidenceContract.SerializeForSchema(report, 5);
+            historicalHash = ProblemReportEvidenceContract.Hash(historicalJson);
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
+                "PinnedLegacyV5Fixture", "history.engineer", historicalHash, historicalJson,
+                DateTimeOffset.UtcNow.AddMinutes(1), snapshotSchemaVersion: 5));
+            await db.SaveChangesAsync();
+        }
+
+        foreach (var format in new[] { "docx", "pdf" })
+        {
+            using var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&format={format}");
+            Assert.Equal(HttpStatusCode.OK, output.StatusCode);
+            Assert.Equal(historicalHash, ProblemReportEvidenceContract.Hash(historicalJson));
+            if (format == "docx")
+            {
+                using var zip = new ZipArchive(new MemoryStream(await output.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
+                using var document = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
+                var text = await document.ReadToEndAsync();
+                Assert.Contains(historicalHash, text);
+                Assert.Contains(">5<", text);
+            }
+            else
+            {
+                var text = Encoding.ASCII.GetString(await output.Content.ReadAsByteArrayAsync());
+                Assert.Contains(historicalHash, text);
+                Assert.Contains("SNAPSHOT SCHEMA", text);
+            }
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var persisted = await db.ProblemReportRevisions.SingleAsync(x => x.ProblemReportId == reportId
+                && x.EventType == "PinnedLegacyV5Fixture");
+            Assert.Equal(historicalJson, persisted.SnapshotJson);
+            Assert.Equal(historicalHash, persisted.SnapshotHash);
+        }
     }
 
     [Theory]
@@ -1234,5 +1304,400 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.Equal(beforeRevision + 1, after.GetProperty("revision").GetInt32());
         Assert.True((await client.GetFromJsonAsync<JsonElement>(
             $"/api/controlled-editing/status?artifactType=ProblemReport&artifactId={id}")).GetProperty("editable").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Problem_report_supporting_files_are_allowlisted_versioned_hashed_and_retained_in_history()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRATTACH");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+
+        using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = reportId, leaseMinutes = 15 });
+        Assert.True(checkout.IsSuccessStatusCode, await checkout.Content.ReadAsStringAsync());
+        var session = await checkout.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = session.GetProperty("id").GetGuid();
+
+        var firstBytes = OfficePackage("xl/workbook.xml", "navigation analysis v1");
+        // The target is an authorization input, not a multipart form field. Missing or foreign query
+        // targets must be rejected before the request body is parsed or any storage/quota work begins.
+        using var missingQuery = await client.PostAsync("/api/enterprise-hardening/attachments",
+            SupportingFile(projectId, reportId, sessionId, "NavigationAnalysis.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", firstBytes));
+        Assert.Equal(HttpStatusCode.BadRequest, missingQuery.StatusCode);
+        using var foreignQuery = await client.PostAsync(
+            $"/api/enterprise-hardening/attachments?projectId={Guid.NewGuid()}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}",
+            SupportingFile(projectId, reportId, sessionId, "NavigationAnalysis.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", firstBytes));
+        Assert.Equal(HttpStatusCode.BadRequest, foreignQuery.StatusCode);
+        using var first = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}",
+            SupportingFile(projectId, reportId, sessionId, "NavigationAnalysis.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", firstBytes));
+        Assert.True(first.StatusCode == HttpStatusCode.Created, $"Supporting attachment upload returned {first.StatusCode}: {await first.Content.ReadAsStringAsync()}");
+        var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
+        var firstId = firstBody.GetProperty("id").GetGuid();
+        var logicalId = firstBody.GetProperty("logicalId").GetGuid();
+        Assert.Equal(1, firstBody.GetProperty("version").GetInt32());
+        Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(firstBytes)).ToLowerInvariant(),
+            firstBody.GetProperty("sha256").GetString());
+
+        // Attachment writes stay inside the same exclusive checkout. The lease is rebound to the exact
+        // schema-6 evidence hash so the subsequent check-in records the active file manifest rather than an
+        // aggregate snapshot with an implicit empty attachment list.
+        var detailAfterFirst = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
+        var firstEvidence = detailAfterFirst.GetProperty("revisions").EnumerateArray()
+            .Single(item => item.GetProperty("eventType").GetString() == "SupportingAttachmentAdded");
+        var resumedSession = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = reportId, leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.OK, resumedSession.StatusCode);
+        var resumedBody = await resumedSession.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(firstEvidence.GetProperty("snapshotHash").GetString(),
+            resumedBody.GetProperty("baseSnapshotHash").GetString());
+        using var firstCheckIn = await client.PostAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/check-in",
+            new { expectedVersion = session.GetProperty("version").GetInt64() });
+        Assert.Equal(HttpStatusCode.OK, firstCheckIn.StatusCode);
+
+        using var nextCheckout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = reportId, leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.Created, nextCheckout.StatusCode);
+        var nextSession = await nextCheckout.Content.ReadFromJsonAsync<JsonElement>();
+        var nextSessionId = nextSession.GetProperty("id").GetGuid();
+
+        using var badType = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
+            SupportingFile(projectId, reportId, nextSessionId, "notes.exe", "application/octet-stream", [1, 2, 3]));
+        Assert.Equal(HttpStatusCode.BadRequest, badType.StatusCode);
+        using var mismatchedType = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
+            SupportingFile(projectId, reportId, nextSessionId, "NavigationAnalysis.xlsx", "application/pdf", firstBytes));
+        Assert.Equal(HttpStatusCode.BadRequest, mismatchedType.StatusCode);
+        using var unsafeName = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
+            SupportingFile(projectId, reportId, nextSessionId, "../escape.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", firstBytes));
+        Assert.Equal(HttpStatusCode.BadRequest, unsafeName.StatusCode);
+        using var malformedJpeg = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
+            SupportingFile(projectId, reportId, nextSessionId, "screenshot.jpg", "image/jpeg", [0xff, 0xd8, 0xff, 0xd9]));
+        Assert.Equal(HttpStatusCode.BadRequest, malformedJpeg.StatusCode);
+        using var macroPackage = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
+            SupportingFile(projectId, reportId, nextSessionId, "macro.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                OfficePackage("xl/workbook.xml", "macro", ("xl/vbaProject.bin", "not executable here"))));
+        Assert.Equal(HttpStatusCode.BadRequest, macroPackage.StatusCode);
+        using var externalPackage = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
+            SupportingFile(projectId, reportId, nextSessionId, "external.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                OfficePackage("xl/workbook.xml", "external", ("xl/_rels/workbook.xml.rels",
+                    "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"x\" Target=\"https://example.test\" TargetMode=\"External\" /></Relationships>"))));
+        Assert.Equal(HttpStatusCode.BadRequest, externalPackage.StatusCode);
+        using var duplicatePackage = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
+            SupportingFile(projectId, reportId, nextSessionId, "duplicate.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                OfficePackage("xl/workbook.xml", "duplicate", ("xl/workbook.xml", "same path twice"))));
+        Assert.Equal(HttpStatusCode.BadRequest, duplicatePackage.StatusCode);
+        using var zipBomb = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
+            SupportingFile(projectId, reportId, nextSessionId, "bomb.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                OfficePackage("xl/workbook.xml", new string('A', 8 * 1024 * 1024))));
+        Assert.Equal(HttpStatusCode.BadRequest, zipBomb.StatusCode);
+
+        using var download = await client.GetAsync($"/api/enterprise-hardening/attachments/{firstId}/download");
+        Assert.Equal(HttpStatusCode.OK, download.StatusCode);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", download.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(firstBytes, await download.Content.ReadAsByteArrayAsync());
+        Assert.Contains("NavigationAnalysis.xlsx", download.Content.Headers.ContentDisposition?.FileNameStar ?? download.Content.Headers.ContentDisposition?.FileName ?? "");
+        using var verified = await client.PostAsync($"/api/enterprise-hardening/attachments/{firstId}/verify", content: null);
+        Assert.Equal(HttpStatusCode.OK, verified.StatusCode);
+        Assert.True((await verified.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("valid").GetBoolean());
+
+        var secondBytes = OfficePackage("xl/workbook.xml", "navigation analysis v2");
+        using var replacement = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
+            SupportingFile(projectId, reportId, nextSessionId, "NavigationAnalysis.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", secondBytes, logicalId));
+        Assert.Equal(HttpStatusCode.Created, replacement.StatusCode);
+        var secondBody = await replacement.Content.ReadFromJsonAsync<JsonElement>();
+        var secondId = secondBody.GetProperty("id").GetGuid();
+        Assert.Equal(2, secondBody.GetProperty("version").GetInt32());
+
+        var listed = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}");
+        Assert.Equal(2, listed.GetArrayLength());
+        Assert.Contains(listed.EnumerateArray(), item => item.GetProperty("id").GetGuid() == firstId
+            && item.GetProperty("state").GetString() == "Superseded");
+        Assert.Contains(listed.EnumerateArray(), item => item.GetProperty("id").GetGuid() == secondId
+            && item.GetProperty("state").GetString() == "Active");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Equal(2, await db.ManagedDocumentStorageOperations.CountAsync(item => item.ProjectId == projectId
+                && item.OperationType == "ProblemReportAttachment" && item.State == ManagedDocumentStorageOperationState.Available));
+        }
+
+        var replacementDetail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
+        var replacementRevision = replacementDetail.GetProperty("revisions").EnumerateArray()
+            .Single(item => item.GetProperty("eventType").GetString() == "SupportingAttachmentReplaced");
+        Assert.Equal(replacementRevision.GetProperty("snapshotHash").GetString(),
+            replacementDetail.GetProperty("snapshotHash").GetString());
+
+        using (var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?format=docx"))
+        {
+            Assert.Equal(HttpStatusCode.OK, output.StatusCode);
+            using var zip = new ZipArchive(new MemoryStream(await output.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
+            using var document = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
+            var text = await document.ReadToEndAsync();
+            Assert.Contains("Supporting Attachments", text);
+            Assert.Contains("NavigationAnalysis.xlsx", text);
+            Assert.Contains(secondBody.GetProperty("sha256").GetString()!, text);
+        }
+
+        using var remove = await client.PostAsJsonAsync($"/api/enterprise-hardening/attachments/{secondId}/withdraw",
+            new { editSessionId = nextSessionId, reason = "The current analysis was withdrawn pending a corrected supplier issue." });
+        Assert.Equal(HttpStatusCode.NoContent, remove.StatusCode);
+        var afterRemove = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}");
+        Assert.Contains(afterRemove.EnumerateArray(), item => item.GetProperty("id").GetGuid() == secondId
+            && item.GetProperty("state").GetString() == "Withdrawn");
+
+        // Removal changes the current manifest but never removes the immutable file or its prior evidence.
+        using var historicalBytes = await client.GetAsync($"/api/enterprise-hardening/attachments/{secondId}/download");
+        Assert.Equal(HttpStatusCode.OK, historicalBytes.StatusCode);
+        Assert.Equal(secondBytes, await historicalBytes.Content.ReadAsByteArrayAsync());
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
+        var revisions = detail.GetProperty("revisions").EnumerateArray().ToList();
+        var added = revisions.Single(item => item.GetProperty("eventType").GetString() == "SupportingAttachmentAdded");
+        var replaced = revisions.Single(item => item.GetProperty("eventType").GetString() == "SupportingAttachmentReplaced");
+        var removed = revisions.Single(item => item.GetProperty("eventType").GetString() == "SupportingAttachmentRemoved");
+        Assert.Equal(1, JsonDocument.Parse(added.GetProperty("snapshotJson").GetString()!).RootElement.GetProperty("supportingAttachments").GetArrayLength());
+        Assert.Equal(1, JsonDocument.Parse(replaced.GetProperty("snapshotJson").GetString()!).RootElement.GetProperty("supportingAttachments").GetArrayLength());
+        Assert.Equal(0, JsonDocument.Parse(removed.GetProperty("snapshotJson").GetString()!).RootElement.GetProperty("supportingAttachments").GetArrayLength());
+        Assert.NotEqual(added.GetProperty("snapshotHash").GetString(), removed.GetProperty("snapshotHash").GetString());
+        Assert.Equal(removed.GetProperty("snapshotHash").GetString(), detail.GetProperty("snapshotHash").GetString());
+
+        async Task AssertHistoricalAttachmentOutput(JsonElement revision, string expectedFileName, string expectedHash,
+            bool expectsAttachment)
+        {
+            var snapshotId = revision.GetProperty("id").GetGuid();
+            using var page = await client.GetAsync($"/api/problem-reports/{reportId}/history/{snapshotId}");
+            Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+            var pageBody = await page.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.True(pageBody.GetProperty("historicalReadOnly").GetBoolean());
+            Assert.Equal(snapshotId, pageBody.GetProperty("snapshotId").GetGuid());
+            Assert.Equal(expectsAttachment ? 1 : 0, pageBody.GetProperty("supportingAttachments").GetArrayLength());
+
+            using var docx = await client.GetAsync($"/api/problem-reports/{reportId}/download?snapshotId={snapshotId}&format=docx");
+            Assert.Equal(HttpStatusCode.OK, docx.StatusCode);
+            using (var archive = new ZipArchive(new MemoryStream(await docx.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read))
+            using (var document = new StreamReader(archive.GetEntry("word/document.xml")!.Open()))
+            {
+                var text = await document.ReadToEndAsync();
+                if (expectsAttachment)
+                {
+                    Assert.Contains(expectedFileName, text);
+                    Assert.Contains(expectedHash, text);
+                }
+                else
+                    Assert.DoesNotContain("NavigationAnalysis.xlsx", text);
+            }
+
+            using var pdf = await client.GetAsync($"/api/problem-reports/{reportId}/download?snapshotId={snapshotId}&format=pdf");
+            Assert.Equal(HttpStatusCode.OK, pdf.StatusCode);
+            var pdfText = Encoding.ASCII.GetString(await pdf.Content.ReadAsByteArrayAsync());
+            if (expectsAttachment)
+            {
+                Assert.Contains(expectedFileName, pdfText);
+                Assert.Contains(expectedHash, pdfText);
+            }
+            else
+                Assert.DoesNotContain("NavigationAnalysis.xlsx", pdfText);
+        }
+
+        await AssertHistoricalAttachmentOutput(added, "NavigationAnalysis.xlsx",
+            Convert.ToHexString(SHA256.HashData(firstBytes)).ToLowerInvariant(), expectsAttachment: true);
+        await AssertHistoricalAttachmentOutput(replaced, "NavigationAnalysis.xlsx",
+            Convert.ToHexString(SHA256.HashData(secondBytes)).ToLowerInvariant(), expectsAttachment: true);
+        await AssertHistoricalAttachmentOutput(removed, "", "", expectsAttachment: false);
+    }
+
+    [Fact]
+    public async Task Concurrent_supporting_attachment_mutations_preserve_history_and_map_quota_conflicts()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRATTACHCONC");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+        using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = reportId, leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.Created, checkout.StatusCode);
+        var session = await checkout.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = session.GetProperty("id").GetGuid();
+        var firstBytes = Encoding.UTF8.GetBytes("concurrency fixture v1\n");
+        using var first = await client.PostAsync(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}",
+            SupportingFile(projectId, reportId, sessionId, "concurrency.txt", "text/plain", firstBytes));
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
+        var logicalId = firstBody.GetProperty("logicalId").GetGuid();
+
+        // Same-report uploads are serialized by the Problem Report lock. Both may commit as immutable
+        // versions, or one may receive a deterministic 409 if its provider transaction loses the race;
+        // neither outcome may become a 5xx or overwrite the other's history.
+        var oneTask = client.PostAsync(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}",
+            SupportingFile(projectId, reportId, sessionId, "concurrency.txt", "text/plain", Encoding.UTF8.GetBytes("concurrency fixture v2a\n"), logicalId));
+        var twoTask = client.PostAsync(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}",
+            SupportingFile(projectId, reportId, sessionId, "concurrency.txt", "text/plain", Encoding.UTF8.GetBytes("concurrency fixture v2b\n"), logicalId));
+        await Task.WhenAll(oneTask, twoTask);
+        using var one = await oneTask;
+        using var two = await twoTask;
+        Assert.InRange((int)one.StatusCode, 200, 499);
+        Assert.InRange((int)two.StatusCode, 200, 499);
+        Assert.True(one.StatusCode == HttpStatusCode.Created || two.StatusCode == HttpStatusCode.Created);
+
+        var listed = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}");
+        Assert.Equal(1, listed.EnumerateArray().Count(item => item.GetProperty("state").GetString() == "Active"));
+        var activeId = listed.EnumerateArray().Single(item => item.GetProperty("state").GetString() == "Active").GetProperty("id").GetGuid();
+
+        // Removal and replacement use the same arbitration boundary. Depending on lock acquisition order,
+        // removal can win and the replacement becomes the next active version, or replacement wins and the
+        // removal correctly receives attachment_not_current for the superseded row.
+        var replacementTask = client.PostAsync(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}",
+            SupportingFile(projectId, reportId, sessionId, "concurrency.txt", "text/plain", Encoding.UTF8.GetBytes("concurrency fixture v3\n"), logicalId));
+        var removalTask = client.PostAsJsonAsync($"/api/enterprise-hardening/attachments/{activeId}/withdraw",
+            new { editSessionId = sessionId, reason = "Concurrent mutation fixture removal." });
+        await Task.WhenAll(replacementTask, removalTask);
+        using var replacement = await replacementTask;
+        using var removal = await removalTask;
+        Assert.InRange((int)replacement.StatusCode, 200, 499);
+        Assert.InRange((int)removal.StatusCode, 200, 499);
+        Assert.True(replacement.StatusCode == HttpStatusCode.Created || removal.StatusCode == HttpStatusCode.NoContent);
+        var afterMutations = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}");
+        Assert.Equal(1, afterMutations.EnumerateArray().Count(item => item.GetProperty("state").GetString() == "Active"));
+
+        // Quota rejection happens after the same row lock and before filesystem staging. A retained historical
+        // row is enough to exercise the limit without writing a 256 MB fixture or touching persistent state.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            db.ControlledAttachments.Add(new ControlledAttachment(projectId, "ProblemReport", reportId, null,
+                Guid.NewGuid(), 1, "Quota fixture", "", "quota-fixture.txt", "text/plain",
+                256L * 1024 * 1024, new string('d', 64), "test/quota-fixture.txt", null, "admin", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+        using var quota = await client.PostAsync(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}",
+            SupportingFile(projectId, reportId, sessionId, "quota.txt", "text/plain", Encoding.UTF8.GetBytes("quota request\n")));
+        Assert.Equal(HttpStatusCode.Conflict, quota.StatusCode);
+    }
+
+    [Fact]
+    public async Task Concurrent_check_in_and_supporting_attachment_mutation_never_returns_server_error_or_stale_manifest()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRATTACHRACE");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+
+        using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = reportId, leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.Created, checkout.StatusCode);
+        var session = await checkout.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = session.GetProperty("id").GetGuid();
+        var sessionVersion = session.GetProperty("version").GetInt64();
+        var draft = JsonNode.Parse(session.GetProperty("draftJson").GetString()!)!.AsObject();
+        draft["rootCause"] = "The check-in and attachment writes share one lock order.";
+        using var autosave = await client.PutAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/autosave",
+            new { expectedVersion = sessionVersion, draftJson = draft.ToJsonString(), leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.OK, autosave.StatusCode);
+        var checkInVersion = (await autosave.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        var attachmentUrl = $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}";
+
+        var uploadTask = client.PostAsync(attachmentUrl,
+            SupportingFile(projectId, reportId, sessionId, "race.txt", "text/plain", Encoding.UTF8.GetBytes("race fixture\n")));
+        var checkInTask = client.PostAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/check-in",
+            new { expectedVersion = checkInVersion });
+        await Task.WhenAll(uploadTask, checkInTask);
+        using var upload = await uploadTask;
+        using var checkIn = await checkInTask;
+
+        // One operation may validly win the shared arbitration boundary. The loser must be a truthful
+        // authorization/conflict response, never a 5xx caused by lock inversion or stale manifest state.
+        Assert.InRange((int)upload.StatusCode, 200, 499);
+        Assert.InRange((int)checkIn.StatusCode, 200, 499);
+        Assert.True(upload.StatusCode == HttpStatusCode.Created || checkIn.StatusCode == HttpStatusCode.OK,
+            $"Neither concurrent operation committed: upload={upload.StatusCode}, check-in={checkIn.StatusCode}");
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var active = await db.ControlledAttachments.AsNoTracking()
+            .Where(x => x.ProjectId == projectId && x.ArtifactType == "ProblemReport" && x.ArtifactId == reportId
+                && x.State == ControlledAttachmentState.Active)
+            .ToListAsync();
+        var checkedIn = (await db.ProblemReportRevisions.AsNoTracking()
+            .Where(x => x.ProblemReportId == reportId && x.EventType == "DetailsCheckedIn")
+            .ToListAsync())
+            .OrderByDescending(x => x.OccurredAt)
+            .FirstOrDefault();
+        if (checkIn.StatusCode == HttpStatusCode.OK)
+        {
+            Assert.NotNull(checkedIn);
+            var snapshot = JsonDocument.Parse(checkedIn!.SnapshotJson).RootElement;
+            var manifest = snapshot.GetProperty("supportingAttachments");
+            Assert.Equal(active.Count, manifest.GetArrayLength());
+            Assert.All(active, item => Assert.Contains(manifest.EnumerateArray(), entry =>
+                entry.GetProperty("sha256").GetString() == item.Sha256 && entry.GetProperty("attachmentId").GetGuid() == item.Id));
+        }
+        else
+        {
+            // If check-in lost, its controlled revision must not have been written at all. An upload winner
+            // has its own exact attachment snapshot and the still-active session remains available to retry.
+            Assert.Null(checkedIn);
+        }
+    }
+
+    [Fact]
+    public void Serialization_conflict_mapping_does_not_hide_unrelated_exceptions()
+    {
+        Assert.False(ProblemReportLock.IsSerializationConflict(new InvalidOperationException("not a provider conflict")));
+        Assert.False(ProblemReportLock.IsSerializationConflict(new DbUpdateException("not a concurrency failure")));
+    }
+
+    internal static MultipartFormDataContent SupportingFile(Guid projectId, Guid artifactId, Guid sessionId,
+        string fileName, string contentType, byte[] bytes, Guid? logicalId = null)
+    {
+        var content = new MultipartFormDataContent();
+        content.Add(new StringContent(projectId.ToString()), "projectId");
+        content.Add(new StringContent(artifactId.ToString()), "artifactId");
+        content.Add(new StringContent("ProblemReport"), "artifactType");
+        content.Add(new StringContent(sessionId.ToString()), "editSessionId");
+        if (logicalId is Guid value) content.Add(new StringContent(value.ToString()), "logicalId");
+        content.Add(new StringContent("Navigation analysis"), "label");
+        content.Add(new StringContent("Exact supplier analysis retained with the Problem Report."), "description");
+        var file = new ByteArrayContent(bytes);
+        file.Headers.ContentType = new(contentType);
+        content.Add(file, "file", fileName);
+        return content;
+    }
+
+    private static byte[] OfficePackage(string requiredPart, string content, params (string Name, string Content)[] extras)
+    {
+        using var output = new MemoryStream();
+        using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using (var types = new StreamWriter(archive.CreateEntry("[Content_Types].xml").Open(), Encoding.UTF8, 1024, leaveOpen: false))
+                types.Write("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\" />");
+            using (var part = new StreamWriter(archive.CreateEntry(requiredPart).Open(), Encoding.UTF8, 1024, leaveOpen: false))
+            {
+                var escaped = System.Security.SecurityElement.Escape(content);
+                part.Write(requiredPart.StartsWith("xl/", StringComparison.Ordinal)
+                    ? $"<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><scenario>{escaped}</scenario></workbook>"
+                    : $"<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:t>{escaped}</w:t></w:r></w:p></w:body></w:document>");
+            }
+            foreach (var extra in extras)
+            {
+                using var extraPart = new StreamWriter(archive.CreateEntry(extra.Name).Open(), Encoding.UTF8, 1024, leaveOpen: false);
+                extraPart.Write(extra.Content);
+            }
+        }
+        return output.ToArray();
     }
 }

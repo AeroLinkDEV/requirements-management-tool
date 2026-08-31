@@ -46,10 +46,11 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         var sequences = await db.ProblemReportClosureCandidates.AsNoTracking()
             .Where(item => item.ProblemReportId == report.Id && item.ReportRevision == report.Revision)
             .Select(item => item.Sequence).ToListAsync(ct);
-        var reportJson = ReportSnapshot(report);
+        var reportSnapshot = await CurrentReportSnapshotAsync(report, ct);
+        var reportJson = reportSnapshot.Json;
         var evidenceJson = VerificationEvidence(execution, SchemaVersion);
         var linksJson = await LinksManifestAsync(report.Id, resolutionLink, SchemaVersion, ct);
-        var reportHash = Hash(reportJson);
+        var reportHash = reportSnapshot.Hash;
         var evidenceHash = Hash(evidenceJson);
         var linksHash = Hash(linksJson);
         var manifestHash = Hash(JsonSerializer.Serialize(new
@@ -105,9 +106,10 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
                 .Select(account => account.DisplayName)
                 .SingleOrDefaultAsync(ct);
         }
+        var evidence = await ProblemReportAttachmentEvidence.SnapshotAsync(db, report, ct);
         db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
-            "ClosureVerificationInvalidatedByChange", actor, report.CanonicalHash(),
-            ProblemReportControlledEditingAdapter.EvidenceSnapshot(report), now,
+            "ClosureVerificationInvalidatedByChange", actor, evidence.Hash,
+            evidence.Json, now,
             detail: reason, fromState: source.ToString(), toState: target.ToString(), rationale: transitionRationale,
             actorDisplayName: capturedName));
         return candidate;
@@ -128,9 +130,9 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
             || report.ResolutionVerificationExecutionId != candidate.VerificationExecutionId)
             return ProblemReportClosureCandidateDecision.Reject("pr_closure_candidate_stale",
                 "The SQA closure candidate was invalidated by a later change. Record new verification before closure.", candidate);
+        var currentReportSnapshot = await ReportSnapshotForSchemaAsync(report, candidate.ReportSnapshotSchemaVersion, ct);
         if (candidate.ReportVersion != report.Version
-            || !string.Equals(candidate.ReportSnapshotHash,
-                Hash(ReportSnapshotForSchema(report, candidate.ReportSnapshotSchemaVersion)), StringComparison.Ordinal))
+            || !string.Equals(candidate.ReportSnapshotHash, Hash(currentReportSnapshot), StringComparison.Ordinal))
             return ProblemReportClosureCandidateDecision.Reject("pr_closure_candidate_stale",
                 "The Problem Report changed after its closure candidate was selected. Record new verification before closure.", candidate);
 
@@ -164,7 +166,15 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         var releaseWaivers = await db.ReadinessWaivers.AsNoTracking().Where(item => item.ProjectId == report.ProjectId
             && item.BlockerType == "ProblemReportReleaseBlocker" && item.BlockerId == report.Id).ToListAsync(ct);
         var activeReleaseWaiver = releaseWaivers.FirstOrDefault(item => item.IsActiveFor(report, now));
-        var finalReportJson = ReportSnapshot(report);
+        // The closure package is a second frozen boundary, so it must carry the same exact active
+        // supporting-file manifest as the candidate and current output. Never fall back to the aggregate
+        // serializer here: schema 6 without this manifest would advertise a package hash that omits files.
+        var finalReportSnapshot = await CurrentReportSnapshotAsync(report, ct);
+        if (candidate.ReportSnapshotSchemaVersion == ProblemReportEvidenceContract.SchemaVersion
+            && !string.Equals(SupportingAttachmentManifestHash(candidate.ReportSnapshotJson),
+                SupportingAttachmentManifestHash(finalReportSnapshot.Json), StringComparison.Ordinal))
+            throw new InvalidOperationException("The pending closure candidate no longer matches the active supporting-file manifest.");
+        var finalReportJson = finalReportSnapshot.Json;
         var packageJson = JsonSerializer.Serialize(new
         {
             contract = "aerolink.problem-report-closure-package",
@@ -241,24 +251,49 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         candidate.Approve(actor, actorAccountId, now, packageJson, Hash(packageJson));
     }
 
+    private async Task<(string Json, string Hash)> CurrentReportSnapshotAsync(ProblemReport report,
+        CancellationToken ct)
+        => await ProblemReportAttachmentEvidence.SnapshotAsync(db, report, ct);
+
+    private async Task<string> ReportSnapshotForSchemaAsync(ProblemReport report, int schemaVersion,
+        CancellationToken ct)
+    {
+        if (schemaVersion == ProblemReportEvidenceContract.SchemaVersion)
+            return (await CurrentReportSnapshotAsync(report, ct)).Json;
+        return ReportSnapshotForSchema(report, schemaVersion);
+    }
+
     public static string ReportSnapshot(ProblemReport report) => ProblemReportEvidenceContract.Serialize(report);
 
     /// <summary>
     /// Recreates the bytes a candidate would have committed at the time its snapshot schema was current.
     ///
-    /// This is intentionally a reader-side compatibility table. Current reports only write schema 5; an
-    /// approval of an old candidate must nevertheless compare against its original envelope rather than
-    /// quietly hashing today's richer/category-normalized shape.
+    /// This is intentionally a reader-side compatibility table. Current reports write schema 6 with the
+    /// active attachment manifest through the async path above; old candidates remain byte-compatible with
+    /// the historical aggregate contracts rather than being silently compared against today's shape.
     /// </summary>
     public static string ReportSnapshotForSchema(ProblemReport report, int schemaVersion) => schemaVersion switch
     {
         ProblemReportEvidenceContract.SchemaVersion => ReportSnapshot(report),
+        // Schema 5 is a historical complete evidence envelope. Keep its reader-side projection even after
+        // schema 6 added the active supporting-attachment manifest; revalidation must use the bytes and hash
+        // contract that the candidate originally committed, never today's richer snapshot shape.
+        5 => ProblemReportEvidenceContract.SerializeForSchema(report, 5),
         4 => ProblemReportEvidenceContract.SerializeForSchema(report, 4),
         3 => HistoricalV3ReportSnapshot(report),
         2 => HistoricalV2ReportSnapshot(report),
         1 => LegacyV1ReportSnapshot(report),
         _ => throw new InvalidOperationException($"Problem Report snapshot schema {schemaVersion} is not supported."),
     };
+
+    private static string SupportingAttachmentManifestHash(string snapshotJson)
+    {
+        using var document = JsonDocument.Parse(snapshotJson);
+        var manifest = document.RootElement.TryGetProperty("supportingAttachments", out var property)
+            ? property.GetRawText()
+            : "[]";
+        return Hash(manifest);
+    }
 
     // Reader/validator only. Existing v1 candidates keep the exact contract they were selected under; no new
     // evidence is written through this independently maintained legacy projection.
