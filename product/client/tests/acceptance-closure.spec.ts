@@ -21,6 +21,16 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(released.isReleased).toBeTruthy()
  expect(active.isReleased).toBeFalsy()
 
+ const twoStageWorkflow=[
+  {name:'Systems assessment',kind:'Review',requiredAuthority:{kind:'BaseRole',role:'SystemEngineer'}},
+  {name:'Assurance approval',kind:'Approval',requiredAuthority:{kind:'BaseRole',role:'SoftwareQualityAnalyst'}},
+ ]
+ const sequentialWorkflowResponse=await request.post(`${apiBase}/api/review-workflows`,{data:{projectId:project.id,name:'Acceptance closure sequential review',appliesTo:'Software',mode:'Sequential',stages:twoStageWorkflow}})
+ expect(sequentialWorkflowResponse.ok(),await sequentialWorkflowResponse.text()).toBeTruthy()
+ const sequentialWorkflow=await sequentialWorkflowResponse.json()
+ const sequentialActivation=await request.post(`${apiBase}/api/review-workflows/${sequentialWorkflow.id}/activate`,{data:{}})
+ expect(sequentialActivation.ok(),await sequentialActivation.text()).toBeTruthy()
+
  const systemDraftResponse=await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'System',title:'Introduce authenticated system acceptance requirement',problem:'Acceptance authority must be explicit',analysis:'A controlled System requirement is needed',solution:'Introduce the requirement through an SRCR',requirementChanges:[{level:'System',kind:'Introduce',targetSectionId:sysSection,statement:'The FMS shall retain authenticated acceptance authority.',rationale:'Supports controlled acceptance.',verificationMethod:'Inspection'}]}})
  expect(systemDraftResponse.status(),await systemDraftResponse.text()).toBe(201)
  const systemDraft=await systemDraftResponse.json()
@@ -71,6 +81,12 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(returnedDraft.state).toBe('Draft')
  expect(returnedDraft.revision).toBe(reviewDraft.revision)
 
+ const parallelWorkflowResponse=await request.post(`${apiBase}/api/review-workflows/${sequentialWorkflow.id}/revise`,{data:{name:'Acceptance closure parallel review',mode:'Parallel',stages:twoStageWorkflow}})
+ expect(parallelWorkflowResponse.ok(),await parallelWorkflowResponse.text()).toBeTruthy()
+ const parallelWorkflow=await parallelWorkflowResponse.json()
+ const parallelActivation=await request.post(`${apiBase}/api/review-workflows/${parallelWorkflow.id}/activate`,{data:{}})
+ expect(parallelActivation.ok(),await parallelActivation.text()).toBeTruthy()
+
  const parallelDraft=await (await request.post(`${apiBase}/api/change-request-drafts`,{data:{projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Parallel unanimity acceptance',problem:'Independent reviews must run concurrently',analysis:'Both signatures remain mandatory',solution:'Activate all parallel reviewers',requirementChanges:[{level:'LowLevel',kind:'Introduce',targetSectionId:llrSection,statement:'The component shall require unanimous parallel review.',rationale:'Architecture-derived independent assurance.',verificationMethod:'Inspection',impactDispositionJson:completeImpacts,isDerived:true}]}})).json()
  const parallelDraftReady=await authorNoUpstreamAnswer(request,parallelDraft.id,'This derived software change has no direct upstream change request in the acceptance fixture.')
  const parallelResponse=await request.post(`${apiBase}/api/change-requests/${parallelDraft.id}/submit`,{data:{expectedVersion:parallelDraftReady.version,mode:'Parallel',approvers:[{userId:'systems.reviewer',name:'Systems Engineer'},{userId:'assurance.reviewer',name:'Development Assurance Reviewer'}]}})
@@ -80,6 +96,12 @@ test('acceptance closure proves governed revisioning, direct review work, public
  expect(parallelQueue1.notifications.some((x:any)=>x.artifactId===parallelDraft.id)).toBeTruthy()
  expect(parallelQueue2.notifications.some((x:any)=>x.artifactId===parallelDraft.id)).toBeTruthy()
  await r1.dispose();await r2.dispose()
+
+ const singleStageWorkflowResponse=await request.post(`${apiBase}/api/review-workflows/${parallelWorkflow.id}/revise`,{data:{name:'Acceptance closure single-stage review',mode:'Sequential',stages:[twoStageWorkflow[0]]}})
+ expect(singleStageWorkflowResponse.ok(),await singleStageWorkflowResponse.text()).toBeTruthy()
+ const singleStageWorkflow=await singleStageWorkflowResponse.json()
+ const singleStageActivation=await request.post(`${apiBase}/api/review-workflows/${singleStageWorkflow.id}/activate`,{data:{}})
+ expect(singleStageActivation.ok(),await singleStageActivation.text()).toBeTruthy()
 
  const invalidDerived=await request.post(`${apiBase}/api/change-request-drafts`,{data:{
   projectId:project.id,targetReleaseId:active.id,type:'Software',title:'Invalid derived proposal',problem:'Rationale omitted',analysis:'Derived classification needs justification',solution:'Reject incomplete proposal',
@@ -174,4 +196,6 @@ test('acceptance closure proves governed revisioning, direct review work, public
  const blockedSuccessor=await request.post(`${apiBase}/api/releases`,{data:{projectId:project.id,version:'1.7',predecessorReleaseId:released.id}})
  expect(blockedSuccessor.status()).toBe(409)
  expect(await blockedSuccessor.text()).toContain('1.6 is still in work')
+ const retiredWorkflow=await request.post(`${apiBase}/api/review-workflows/${singleStageWorkflow.id}/retire`,{data:{}})
+ expect(retiredWorkflow.ok(),await retiredWorkflow.text()).toBeTruthy()
 })
