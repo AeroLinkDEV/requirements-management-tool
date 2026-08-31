@@ -357,3 +357,51 @@ export function artifactPath(context: RouteContext, kind: string, id: string, di
   if (kind === "managed-document") return `/programs/${context.programId}/projects/${context.projectId}/documentation-center/${encodeURIComponent(id)}`;
   return routePath(context, "artifact", "system", id, kind);
 }
+
+/**
+ * Build the canonical browser address for a node returned by the server-owned Change Request trace
+ * projection. This is intentionally a presentation/router primitive: it does not infer a relationship or
+ * choose a revision. The node's exact id (and, for a requirement revision, its exact revision id) is carried
+ * through to the existing authorized surface. A missing discriminator returns undefined so callers can make
+ * a truthful non-openable value instead of inventing a route.
+ */
+export type ExactTraceArtifact = {
+  id: string
+  kind: string
+  displayNumber?: string | null
+  level?: string | null
+  buildId?: string | null
+  artifactId?: string | null
+}
+
+export function exactTraceArtifactPath(context: RouteContext, node: ExactTraceArtifact): string | undefined {
+  if (!node.id) return undefined;
+  const scoped = node.buildId ? { ...context, releaseId: node.buildId } : context;
+  const display = (node.displayNumber ?? '').toUpperCase();
+
+  if (node.kind === 'ChangeRequest') {
+    const discipline = node.level === 'HighLevel' || node.level === 'LowLevel' || display.startsWith('HLRCR-') || display.startsWith('LLRCR-')
+      ? 'software' : 'system';
+    return routePath(scoped, 'scr', discipline, node.id, node.level === 'Interface' || display.startsWith('ICDCR-') ? 'Interface' : undefined);
+  }
+
+  if (node.kind === 'TestChangeRequest') {
+    const isSystem = display.startsWith('SYSTP') || display.startsWith('SYSTCR');
+    const discipline: Discipline = isSystem ? 'systemTest' : 'softwareTest';
+    const procedure = node.level?.toLowerCase().includes('procedure') || display.startsWith('SYSTPCR-') || display.startsWith('HLRTPCR-') || display.startsWith('LLRTPCR-');
+    const level = isSystem ? (procedure ? 'Procedure' : undefined) : display.startsWith('LLR') ? (procedure ? 'LowLevelProcedure' : 'LowLevel') : (procedure ? 'HighLevelProcedure' : 'HighLevel');
+    return routePath(scoped, 'testChangeRequest', discipline, node.id, level);
+  }
+
+  if (node.kind === 'RequirementRevision') {
+    if (!node.artifactId) return undefined;
+    const discipline = node.level === 'HighLevel' || node.level === 'LowLevel' ? 'software' : 'system';
+    const path = routePath(scoped, 'requirements', discipline, node.artifactId);
+    return `${path}&requirementRevisionId=${encodeURIComponent(node.id)}`;
+  }
+
+  // Code traceability currently has an inventory surface but no exact
+  // artifact-record route. Keep its identifier intentionally non-openable
+  // until that authorized target exists; never invent an /artifacts URL.
+  return undefined;
+}

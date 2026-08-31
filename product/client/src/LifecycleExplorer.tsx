@@ -4,6 +4,8 @@ import "./ControlledDownloads.css";
 import DocumentActions from "./DocumentActions";
 import { documentTypeLabel, stateLabel, verificationArtifactNoun } from "./presentation";
 import ExactLinkLifecyclePanel from "./ExactLinkLifecyclePanel";
+import ExactArtifactLink from "./ExactArtifactLink";
+import { traceKindLabel, traceProvenanceLabel, traceRelationLabel } from "./tracePresentation";
 
 type Baseline = { id: string; releaseId: string; releaseVersion: string; displayNumber: string; name: string; requirementsMaterializedAt?: string };
 type Document = { id: string; type: string; displayNumber: string; title: string; contentHash: string; artifactCount: number; release: string; baselineId: string; baseline: string; generatedAt: string };
@@ -55,18 +57,9 @@ type Props = {
   initialArtifactId?: string;
   initialArtifactKind?: string;
   requirementHref?: (artifactId: string) => string;
+  traceArtifactHref?: (node: ChangeRequestTraceNode) => string | undefined;
   onBack: () => void;
 };
-
-function provenanceLabel(kind: string) {
-  if (kind === "AssessmentDerived") return "Assessment-derived";
-  if (kind === "AuthorStated") return "Author-stated";
-  return stateLabel(kind);
-}
-
-const relationLabel = (relation: string) => relation
-  .replace(/([a-z])([A-Z])/g, "$1 $2")
-  .replace(/^./, first => first.toUpperCase());
 
 function ChangeRequestThread({
   detail,
@@ -76,6 +69,7 @@ function ChangeRequestThread({
   exactPathError,
   onRetry,
   requirementHref,
+  traceArtifactHref,
 }: {
   detail: ChangeRequestDetail;
   trace: ChangeRequestTrace;
@@ -84,18 +78,41 @@ function ChangeRequestThread({
   exactPathError?: string;
   onRetry: () => void;
   requirementHref?: (artifactId: string) => string;
+  traceArtifactHref?: (node: ChangeRequestTraceNode) => string | undefined;
 }) {
   const root = trace.nodes.find(node => node.kind === "ChangeRequest" && node.id === detail.id);
   const materialized = trace.nodes.filter(node => node.kind === "RequirementRevision"
     && Boolean(activeBaselineId) && activeBaselineId !== undefined && node.baselineMembershipIds?.includes(activeBaselineId)
     && node.artifactId && trace.edges.some(edge => edge.fromId === detail.id
       && edge.toId === node.id && edge.relation === "OwnsRequirementRevision"));
+  const nodeById = new Map(trace.nodes.map(node => [node.id, node]));
+  const [selectedNodeId, setSelectedNodeId] = useState(detail.id);
+  useEffect(() => setSelectedNodeId(detail.id), [detail.id]);
+  const selected = nodeById.get(selectedNodeId) ?? root;
+  const nodeHref = (node: ChangeRequestTraceNode) => {
+    const fallback = node.kind === "RequirementRevision" && node.artifactId && requirementHref ? requirementHref(node.artifactId) : undefined;
+    return traceArtifactHref?.(node) ?? (fallback && fallback !== "#" ? fallback : undefined);
+  };
+  const layers = [
+    { id: "change", title: "CHANGE CONTROL", kinds: new Set(["ChangeRequest", "TestChangeRequest"]) },
+    { id: "requirement", title: "REQUIREMENTS", kinds: new Set(["RequirementRevision"]) },
+    { id: "verification", title: "VERIFICATION / EVIDENCE", kinds: new Set(["CodeTraceability"]) },
+  ];
+  const assigned = new Set<string>();
+  const layerNodes = layers.map(layer => ({ ...layer, nodes: trace.nodes.filter(node => {
+    const match = layer.kinds.has(node.kind) && !assigned.has(node.id);
+    if (match) assigned.add(node.id);
+    return match;
+  }) }));
+  const otherNodes = trace.nodes.filter(node => !assigned.has(node.id));
+  if (otherNodes.length) layerNodes.push({ id: "other", title: "CONNECTED ARTIFACTS", kinds: new Set<string>(), nodes: otherNodes });
+  const selectedEdges = selected ? trace.edges.filter(edge => edge.fromId === selected.id || edge.toId === selected.id) : [];
 
   return <section className="crDigitalThread" aria-label={`Digital Thread for ${detail.displayNumber}`}>
     <header className="crDigitalThreadHeader">
       <div>
         <p className="eyebrow">CHANGE REQUEST DIGITAL THREAD</p>
-        <h2>{detail.displayNumber}</h2>
+        <h2><ExactArtifactLink href={root ? nodeHref(root) : undefined}>{root?.displayNumber ?? detail.displayNumber}</ExactArtifactLink></h2>
         <p>{detail.title}</p>
       </div>
       <dl>
@@ -106,30 +123,48 @@ function ChangeRequestThread({
     </header>
 
     <section className="crChain" aria-labelledby="cr-chain-heading">
-      <div className="crSectionHeading"><div><p className="eyebrow">SERVER COMPOSED PROJECTION</p><h3 id="cr-chain-heading">Change request chain</h3></div><span>{trace.nodes.length} exact nodes · {trace.edges.length} typed edges</span></div>
-      <div className="crNodeGrid" role="list" aria-label="Exact change request chain">
-        <article className="crNodeCard selected" role="listitem">
-          <small>SELECTED CHANGE REQUEST</small><b>{root?.displayNumber ?? detail.displayNumber}</b>
-          <span>{root?.id ?? detail.id}</span><em>{stateLabel(root?.state ?? detail.state)}</em>
-        </article>
-        {trace.nodes.filter(node => !(node.kind === "ChangeRequest" && node.id === detail.id)).map(node => <article className="crNodeCard" role="listitem" key={`${node.kind}-${node.id}`}>
-          <small>{node.kind === "TestChangeRequest" ? "TEST CHANGE REQUEST" : node.kind.replace(/([a-z])([A-Z])/g, "$1 $2").toUpperCase()}</small>
-          <b>{node.displayNumber}</b><span>{node.id}</span>
-          {node.revision !== null && node.revision !== undefined && <i>Revision {node.revision.toString().padStart(2, "0")}</i>}
-          {node.state && <em>{stateLabel(node.state)}</em>}
-        </article>)}
+      <div className="crSectionHeading"><div><p className="eyebrow">SERVER-COMPOSED PROJECTION</p><h3 id="cr-chain-heading">Connected controlled story</h3></div><span>{trace.nodes.length} exact nodes · {trace.edges.length} typed edges</span></div>
+      <div className="crGraphBoard" role="list" aria-label="Connected Digital Thread nodes">
+        {layerNodes.map(layer => <section className={`crGraphLayer crGraphLayer-${layer.id}`} key={layer.id} aria-label={layer.title}>
+          <h4>{layer.title}</h4>
+          <div className="crGraphNodeList">
+            {layer.nodes.map(node => <article className={`crGraphNode${node.id === selected?.id ? " selected" : ""}${node.kind === "RequirementRevision" && !node.baselineMembershipIds?.length ? " proposed" : ""}`} role="listitem" key={`${node.kind}-${node.id}`}>
+              <button type="button" className="crGraphNodeFocus" aria-pressed={node.id === selected?.id} aria-label={`Focus ${node.displayNumber}`} onClick={() => setSelectedNodeId(node.id)}>
+                <small>{traceKindLabel(node.kind)}</small>
+                <span>{node.title || "Exact connected artifact"}</span>
+                {node.state && <em>{stateLabel(node.state)}</em>}
+              </button>
+              <ExactArtifactLink href={nodeHref(node)}>{node.displayNumber}</ExactArtifactLink>
+              {(node.buildVersion || node.revision !== null && node.revision !== undefined) && <small className="crGraphNodeMeta">{node.revision !== null && node.revision !== undefined ? `Revision ${String(node.revision).padStart(2, "0")}` : ""}{node.buildVersion ? ` · Build ${node.buildVersion}` : ""}</small>}
+            </article>)}
+            {!layer.nodes.length && <p className="crUnavailable">No connected records in this layer.</p>}
+          </div>
+        </section>)}
       </div>
-      <div className="crEdgeList" aria-label="Trace provenance">
-        {trace.edges.length ? trace.edges.map(edge => <article key={`${edge.fromKind}-${edge.fromId}-${edge.toKind}-${edge.toId}-${edge.relation}`}>
-          <b>{relationLabel(edge.relation)}</b><span>{edge.fromId} → {edge.toId}</span>
-          <div>{edge.provenance.map(fact => <em key={`${fact.kind}-${fact.sourceId ?? "none"}`}>{provenanceLabel(fact.kind)}</em>)}</div>
-        </article>) : <p className="crUnavailable">No connected change-request edges are present in the server projection.</p>}
+      <div className="crGraphEdges" role="list" aria-label="Connected Digital Thread relationships">
+        {trace.edges.length ? trace.edges.map(edge => {
+          const from = nodeById.get(edge.fromId), to = nodeById.get(edge.toId);
+          return <article className="crGraphEdge" key={`${edge.fromKind}-${edge.fromId}-${edge.toKind}-${edge.toId}-${edge.relation}`} role="listitem">
+            <ExactArtifactLink href={from ? nodeHref(from) : undefined}>{from?.displayNumber ?? "Exact source"}</ExactArtifactLink>
+            <b aria-hidden="true">→</b>
+            <ExactArtifactLink href={to ? nodeHref(to) : undefined}>{to?.displayNumber ?? "Exact target"}</ExactArtifactLink>
+            <span>{traceRelationLabel(edge.relation)}</span>
+            <div>{edge.provenance.map(fact => <em key={`${fact.kind}-${fact.sourceId ?? "none"}`}>{traceProvenanceLabel(fact.kind)}{fact.isLive === false ? " · Historical evidence" : ""}</em>)}</div>
+          </article>;
+        }) : <p className="crUnavailable">No connected edges are present in the server projection.</p>}
       </div>
       {trace.state && <section className="crTraceState" aria-label="Authoritative trace state">
         <h4>Authoritative trace state</h4><dl><div><dt>Upstream</dt><dd>{stateLabel(trace.state.upstream)}</dd></div><div><dt>Downstream</dt><dd>{stateLabel(trace.state.downstream)}</dd></div><div><dt>Overall</dt><dd>{stateLabel(trace.state.overall)}</dd></div></dl>
         {trace.state.warnings.length > 0 && <ul>{trace.state.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>}
       </section>}
     </section>
+
+    {selected && <aside className="crSelectedNode" aria-label="Selected node details">
+      <div className="crSectionHeading"><div><p className="eyebrow">SELECTED NODE</p><h3><ExactArtifactLink href={nodeHref(selected)}>{selected.displayNumber}</ExactArtifactLink></h3></div><span>{selectedEdges.length} connected relationship{selectedEdges.length === 1 ? "" : "s"}</span></div>
+      <p>{selected.title || "No additional title is recorded for this exact node."}</p>
+      <dl><div><dt>Type</dt><dd>{traceKindLabel(selected.kind)}</dd></div><div><dt>State</dt><dd>{selected.state ? stateLabel(selected.state) : "Not stated"}</dd></div>{selected.buildVersion && <div><dt>Build</dt><dd>{selected.buildVersion}</dd></div>}{selected.revision !== null && selected.revision !== undefined && <div><dt>Revision</dt><dd>{String(selected.revision).padStart(2, "0")}</dd></div>}</dl>
+      <ExactArtifactLink href={nodeHref(selected)}>Open exact artifact →</ExactArtifactLink>
+    </aside>}
 
     <section className="crProposalLayer" aria-labelledby="cr-proposal-heading">
       <div className="crSectionHeading"><div><p className="eyebrow">IN-WORK CONTENT</p><h3 id="cr-proposal-heading">Proposed requirement changes</h3></div><span>Not baseline truth</span></div>
@@ -142,7 +177,7 @@ function ChangeRequestThread({
 
     <section className="crMaterializedLayer" aria-labelledby="cr-materialized-heading">
       <div className="crSectionHeading"><div><p className="eyebrow">BASELINE-EXACT CONTENT</p><h3 id="cr-materialized-heading">Materialized requirement revisions</h3></div></div>
-      {materialized.length && requirementHref ? <div className="crMaterializedGrid">{materialized.map(node => <article key={node.id}><b>{node.displayNumber}</b><span>{node.id}</span><a href={requirementHref(node.artifactId!)}>Open exact requirement thread →</a></article>)}</div>
+      {materialized.length && requirementHref ? <div className="crMaterializedGrid">{materialized.map(node => <article key={node.id}><ExactArtifactLink href={nodeHref(node)}>{node.displayNumber}</ExactArtifactLink><span>{node.id}</span><a href={requirementHref(node.artifactId!)}>Open exact requirement thread →</a></article>)}</div>
         : <p className="crUnavailable">No requirement revision carried by this change request is materialized in the active baseline. Proposed content remains outside the baseline-exact thread.</p>}
       {exactPathError && <div className="crUnavailable" role="alert"><span>{exactPathError}</span><button type="button" onClick={onRetry}>Retry</button></div>}
       {exactPath && <section className="crBaselinePath" aria-labelledby="cr-baseline-path-heading">
@@ -162,7 +197,7 @@ function ChangeRequestThread({
   </section>;
 }
 
-export default function LifecycleExplorer({ api, projectId, activeReleaseId, releases, initialArtifactId, initialArtifactKind, requirementHref, onBack }: Props) {
+export default function LifecycleExplorer({ api, projectId, activeReleaseId, releases, initialArtifactId, initialArtifactKind, requirementHref, traceArtifactHref, onBack }: Props) {
   const isChangeRequestRoute = initialArtifactKind === "change-request" && Boolean(initialArtifactId);
   const [tab, setTab] = useState<"thread" | "documents">("thread");
   // Released and draft documents are different kinds of thing, so the tab asks which you came for rather than
@@ -400,7 +435,7 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
 
       {tab === "thread" ? isChangeRequestRoute ? (
         changeRequest && changeRequestTrace
-          ? <ChangeRequestThread detail={changeRequest} trace={changeRequestTrace} activeBaselineId={changeRequestBaselineId} exactPath={completePath} exactPathError={changeRequestPathError} onRetry={load} requirementHref={requirementHref} />
+          ? <ChangeRequestThread detail={changeRequest} trace={changeRequestTrace} activeBaselineId={changeRequestBaselineId} exactPath={completePath} exactPathError={changeRequestPathError} onRetry={load} requirementHref={requirementHref} traceArtifactHref={traceArtifactHref} />
           : <section className="traceEmpty"><b>Change request thread unavailable</b><p>The selected controlled record could not be resolved in this Project and build.</p></section>
       ) : <>
         <section className="traceTools">

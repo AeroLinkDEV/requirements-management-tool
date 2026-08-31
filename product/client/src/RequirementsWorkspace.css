@@ -568,6 +568,22 @@ button.coverageState:hover {
 }
 .traceRequirementHead b { color: #17314f; font-size: 13px; }
 .traceRequirementHead span { color: #5c6878; font-size: 12px; }
+.exactArtifactLink {
+  color: #176e77;
+  text-decoration: underline;
+  text-decoration-color: #9ecfc7;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.exactArtifactLink:hover { color: #0d4f5a; text-decoration-color: currentColor; }
+.exactArtifactLink:focus-visible { border-radius: 3px; outline: 2px solid #2a8e83; outline-offset: 2px; }
+.exactArtifactLink.unresolved { color: #52677b; text-decoration: none; cursor: default; }
+.traceStateLine { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 7px; margin: 0 0 4px; border-bottom: 1px solid #e7edf0; padding-bottom: 10px; color: #5f7181; font-size: 12px; }
+.traceStateLine span { margin-right: 3px; color: #748496; font-weight: 700; }
+.traceStateLine b { color: #28586d; font-weight: 750; }
+.traceStateLine i { color: #8997a4; font-size: 11px; font-style: normal; }
+.traceInspector .openDigitalThread { display: block; width: 100%; min-height: 42px; margin-top: 4px; border: 0; border-radius: 8px; background: #e7f3f1; padding: 12px; color: #176f66; font-weight: 750; text-align: center; text-decoration: none; }
+.traceInspector .openDigitalThread:hover, .traceInspector .openDigitalThread:focus-visible { background: #d8eeea; color: #0d554f; }
 .inspectorBody h3 {
   font-size: 12px;
   text-transform: uppercase;

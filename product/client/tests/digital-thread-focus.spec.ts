@@ -100,13 +100,13 @@ test("a change request opens its stable-ID Digital Thread with exact chain, prov
   await digitalThreadLink.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Digital Thread · Change Request" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Change request chain" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connected controlled story" })).toBeVisible();
   await expect(page.getByText(detail.displayNumber, { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Author-stated", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Assessment-derived", { exact: true }).first()).toBeVisible();
-  const historicalEdge = page.locator(".crEdgeList article").filter({ hasText: `${upstreamId} → ${historicalId}` });
-  await expect(historicalEdge).toContainText("Author-stated");
-  await expect(historicalEdge).toContainText("Assessment-derived");
+  await expect(page.getByText("Author-stated relationship", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("From downstream assessment", { exact: true }).first()).toBeVisible();
+  const historicalEdge = page.locator(".crGraphEdge").filter({ hasText: "SRCR-999900.00" }).filter({ hasText: "SRCR-999903.00" });
+  await expect(historicalEdge).toContainText("Author-stated relationship");
+  await expect(historicalEdge).toContainText("From downstream assessment");
   await expect(page.getByText(exactRevisionId, { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Existing baseline-exact requirement path" })).toBeVisible();
   await expect(page.getByText("Authoritative result", { exact: true })).toBeVisible();
@@ -121,9 +121,9 @@ test("a change request opens its stable-ID Digital Thread with exact chain, prov
   await page.goBack();
   await expect(page.getByRole("link", { name: "Open Digital Thread →" })).toBeVisible();
   await page.goForward();
-  await expect(page.getByRole("heading", { name: "Change request chain" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connected controlled story" })).toBeVisible();
   await page.reload({ waitUntil: "load" });
-  await expect(page.getByRole("heading", { name: "Change request chain" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connected controlled story" })).toBeVisible();
 });
 
 test("a mismatched CR detail fails closed without showing unrelated Digital Thread content", async ({ page, request }) => {
@@ -141,7 +141,7 @@ test("a mismatched CR detail fails closed without showing unrelated Digital Thre
   });
   await page.goto(new URL(`/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}/traceability/change-requests/${id}`, page.url()).toString(), { waitUntil: "load" });
   await expect(page.getByRole("alert")).toContainText(/unavailable in the selected Project or build/i);
-  await expect(page.getByRole("heading", { name: "Change request chain" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Connected controlled story" })).toHaveCount(0);
 });
 
 test("an invalid baseline path response stays unavailable and exposes retry", async ({ page, request }) => {
@@ -170,7 +170,7 @@ test("an invalid baseline path response stays unavailable and exposes retry", as
     baseline: { displayNumber: "SW-INVALID.00", name: "Mismatched path fixture" }, nodes: [],
   }}));
   await page.goto(new URL(`/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}/traceability/change-requests/${candidate!.id}`, page.url()).toString(), { waitUntil: "load" });
-  await expect(page.getByRole("heading", { name: "Change request chain" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connected controlled story" })).toBeVisible();
   await expect(page.getByRole("alert")).toContainText(/did not match the selected revision/i);
   await expect(page.getByRole("alert").getByRole("button", { name: "Retry" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Existing baseline-exact requirement path" })).toHaveCount(0);

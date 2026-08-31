@@ -134,3 +134,39 @@ html .traceLinkState.closed { color: #28704f; }
 .crBaselinePath .completeThreadPath { justify-content: flex-start; padding: 18px 0 4px; }
 .crUnavailable { margin: 0; border: 1px dashed #cbd8e4; border-radius: 8px; background: #f8fbfd; padding: 12px; color: #52677b; font-size: 12px; line-height: 1.45; }
 @media(max-width:1050px){.crDigitalThreadHeader{flex-direction:column}.crDigitalThreadHeader dl{grid-template-columns:repeat(3,1fr)}.crEdgeList article{grid-template-columns:1fr}.crEdgeList div{justify-content:flex-start}.crTraceState dl{flex-wrap:wrap}}
+
+/* Change Request Digital Thread: the projection is shown as a connected map first. The edge register below
+   remains available to non-visual readers, while cards and directional relationships carry the primary visual
+   grammar of the Phase 4 design direction. */
+.crGraphBoard { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; border: 1px solid #dfe8eb; border-radius: 12px; background: #f6fafb; padding: 14px; }
+.crGraphLayer { min-width: 0; border: 1px solid #dfe7eb; border-radius: 10px; background: rgba(255,255,255,.82); padding: 10px; }
+.crGraphLayer h4 { margin: 0 0 9px; color: #637687; font-size: 10px; font-weight: 850; letter-spacing: .08em; }
+.crGraphNodeList { display: grid; gap: 8px; }
+.crGraphNode { min-width: 0; display: grid; gap: 5px; border: 1px solid #d5e2e6; border-radius: 9px; background: #fff; padding: 9px; box-shadow: 0 5px 14px rgba(16,36,57,.06); }
+.crGraphNode.selected { border-color: #42a597; background: #eff9f6; box-shadow: 0 0 0 3px rgba(58,167,151,.13), 0 8px 19px rgba(16,70,68,.1); }
+.crGraphNode.proposed { border-style: dashed; border-color: #d3a64a; background: #fffdf6; }
+.crGraphNodeFocus { min-width: 0; display: grid; gap: 4px; border: 0; background: transparent; padding: 0; color: #1d354d; text-align: left; cursor: pointer; }
+.crGraphNodeFocus:focus-visible { border-radius: 5px; outline: 2px solid #2a8e83; outline-offset: 3px; }
+.crGraphNodeFocus small { color: #6b7e8e; font-size: 10px; font-weight: 850; letter-spacing: .04em; }
+.crGraphNodeFocus span { display: -webkit-box; overflow: hidden; color: #50657a; font-size: 12px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.crGraphNodeFocus em { width: fit-content; border-radius: 999px; background: #e7effb; padding: 3px 7px; color: #3569a8; font-size: 10px; font-style: normal; font-weight: 750; }
+.crGraphNode > .exactArtifactLink { width: fit-content; font-size: 12px; font-weight: 800; }
+.crGraphNodeMeta { color: #718293; font-size: 10px; }
+.crGraphEdges { display: grid; gap: 6px; margin-top: 12px; border-top: 1px solid #e2eaed; padding-top: 11px; }
+.crGraphEdge { min-width: 0; display: grid; grid-template-columns: minmax(100px,.8fr) 18px minmax(100px,.8fr) auto; align-items: center; gap: 6px; border: 1px solid #e1e9ec; border-radius: 8px; background: #fcfefe; padding: 8px 10px; }
+.crGraphEdge > .exactArtifactLink { overflow: hidden; font-size: 11px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.crGraphEdge > b { color: #3a9b90; text-align: center; }
+.crGraphEdge > span { color: #627487; font-size: 10px; font-weight: 750; }
+.crGraphEdge > div { display: flex; justify-content: flex-end; gap: 4px; flex-wrap: wrap; }
+.crGraphEdge em { border-radius: 999px; background: #e8f4ef; padding: 3px 6px; color: #28735f; font-size: 10px; font-style: normal; font-weight: 700; }
+.crSelectedNode { border: 1px solid #cfe5df; border-radius: 12px; background: #f8fcfb; padding: 16px 20px; }
+.crSelectedNode .crSectionHeading { margin-bottom: 6px; }
+.crSelectedNode .crSectionHeading h3 { margin-top: 3px; }
+.crSelectedNode > p { margin: 0 0 9px; color: #53697b; font-size: 12px; line-height: 1.5; }
+.crSelectedNode dl { display: flex; flex-wrap: wrap; gap: 7px 18px; margin: 0 0 10px; }
+.crSelectedNode dl div { display: flex; gap: 5px; font-size: 11px; }
+.crSelectedNode dt { color: #718293; }
+.crSelectedNode dd { margin: 0; color: #2b5367; font-weight: 750; }
+.crSelectedNode > .exactArtifactLink { font-size: 12px; font-weight: 750; }
+@media(max-width:1050px){.crGraphBoard{grid-template-columns:1fr 1fr}.crGraphLayer-verification{grid-column:1/-1}.crGraphEdge{grid-template-columns:minmax(100px,1fr) 18px minmax(100px,1fr)}.crGraphEdge>span,.crGraphEdge>div{grid-column:1/-1;justify-content:flex-start}}
+@media(max-width:680px){.crGraphBoard{grid-template-columns:1fr}.crGraphLayer-verification{grid-column:auto}.crGraphEdge{grid-template-columns:minmax(90px,1fr) 18px minmax(90px,1fr)}}

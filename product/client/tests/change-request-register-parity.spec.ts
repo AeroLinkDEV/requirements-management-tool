@@ -82,9 +82,9 @@ test('requirements register preserves deep-link history, native links, and autho
   expect(routeParts).not.toBeNull()
   const projectId = routeParts![1]
   const releaseId = routeParts![2]
+  const parentId = '11111111-1111-4111-8111-111111111111'
+  const tcrId = '22222222-2222-4222-8222-222222222222'
   await page.route('**/api/change-requests/*/trace', async route => {
-    const parentId = '11111111-1111-4111-8111-111111111111'
-    const tcrId = '22222222-2222-4222-8222-222222222222'
     await route.fulfill({ json: {
       projectId, rootChangeRequestId: rootId,
       rootArtifactId: rootId, rootArtifactKind: 'ChangeRequest',
@@ -112,8 +112,12 @@ test('requirements register preserves deep-link history, native links, and autho
   const inspector = page.getByRole('complementary', { name: /detail$/ })
   await expect(inspector).toContainText('Answered')
   await expect(inspector).toContainText('Selected for baseline')
-  await expect(inspector).toContainText('AssessmentDerived')
-  await expect(inspector).toContainText('AuthorStated')
+  await expect(inspector).toContainText('From downstream assessment')
+  await expect(inspector).toContainText('Author-stated relationship')
+  await expect(inspector.locator('.traceSummary')).toHaveCount(0)
+  await expect(inspector.getByRole('link', { name: 'Open Digital Thread →' })).toBeVisible()
+  await expect(inspector.getByRole('link', { name: /SRCR-PARENT\.01/ })).toHaveAttribute('href', new RegExp(`systems/change-requests/${parentId}$`))
+  await expect(inspector.getByRole('link', { name: /SYSTPCR-ROOT\.00/ })).toHaveAttribute('href', new RegExp(`system-verification/change-requests/${tcrId}\\?kind=Procedure$`))
   await expect(inspector).toContainText('Complete the downstream review before approval.')
   await expect(inspector).toContainText(/exact revision \d+/)
   await testInfo.attach('requirements-trace-impact', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { ControlledArtifactInspector } from './ControlledArtifactExplorer'
+import ExactArtifactLink from './ExactArtifactLink'
 import { PersonName } from './People'
 import { stateLabel } from './presentation'
+import { traceProvenanceLabel } from './tracePresentation'
 import './RequirementsWorkspace.css'
 
 type TraceNode = {
@@ -14,6 +16,8 @@ type TraceNode = {
   state?: string | null
   revision?: number | null
   level?: string | null
+  buildVersion?: string | null
+  artifactId?: string | null
 }
 type Provenance = {
   kind: string
@@ -82,7 +86,7 @@ const tabs = [
 const nodeLabel = (node: TraceNode) => `${node.displayNumber}${node.revision == null ? '' : ` · revision ${node.revision}`}`
 
 export default function ChangeRequestInspector({
-  api, id, kind, projectId, releaseId, registerType, href, onClose, onOpen,
+  api, id, kind, projectId, releaseId, registerType, href, artifactHref, digitalThreadHref, onClose, onOpen,
 }: {
   api: string
   id: string
@@ -91,6 +95,8 @@ export default function ChangeRequestInspector({
   releaseId: string
   registerType?: string
   href: string
+  artifactHref?: (node: TraceNode) => string | undefined
+  digitalThreadHref?: string
   onClose: () => void
   onOpen: (id: string) => void
 }) {
@@ -194,7 +200,8 @@ export default function ChangeRequestInspector({
 
   return <ControlledArtifactInspector
     artifactType={kind === 'ChangeRequest' ? 'CHANGE REQUEST' : 'TEST CHANGE REQUEST'}
-    displayNumber={detail.displayNumber}
+    ariaLabel={`${detail.displayNumber} detail`}
+    displayNumber={<ExactArtifactLink href={href} onOpen={() => onOpen(id)}>{detail.displayNumber}</ExactArtifactLink>}
     subtitle={`${stateLabel(detail.state)} · exact revision ${detail.revision}`}
     closeLabel="Close change request inspector"
     onClose={onClose}
@@ -203,11 +210,7 @@ export default function ChangeRequestInspector({
     onTab={setTab}
   >
     {tab === 'overview' && <div className="inspectorBody">
-      <a className="impactLaunch" href={href} onClick={event => {
-        if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
-          event.preventDefault(); onOpen(id)
-        }
-      }}>Open change request →</a>
+      <ExactArtifactLink className="impactLaunch" href={href} onOpen={() => onOpen(id)}>Open change request →</ExactArtifactLink>
       <p className="changeBoundaryNote">Exact controlled revision {detail.displayNumber}. Opening the record uses its Project and build authorization.</p>
       <h3>Title</h3><div className="richRequirement">{detail.title || 'Not written up yet'}</div>
       <dl>
@@ -221,12 +224,13 @@ export default function ChangeRequestInspector({
     </div>}
 
     {tab === 'trace' && <div className="inspectorBody traceInspector">
-      {trace?.state && <div className="traceSummary"><article><b>{stateLabel(trace.state.upstream)}</b><span>upstream</span></article><article><b>{stateLabel(trace.state.downstream)}</b><span>downstream</span></article><article><b>{stateLabel(trace.state.overall)}</b><span>overall</span></article></div>}
+      {trace?.state && <p className="traceStateLine"><span>Trace status</span><b>{stateLabel(trace.state.upstream)}</b><i>upstream</i><b>{stateLabel(trace.state.downstream)}</b><i>downstream</i><b>{stateLabel(trace.state.overall)}</b><i>overall</i></p>}
       {trace?.state?.warnings?.map(warning => <p className="inspectorNote warn" key={warning}>{warning}</p>)}
       <h3>Upstream</h3>
-      {upstream.length ? upstream.map(edge => { const otherId = edge.toId === rootId ? edge.fromId : edge.toId; const otherKind = edge.toId === rootId ? edge.fromKind : edge.toKind; const node = nodeById.get(otherId); return <TraceEdgeCard key={`${edge.fromId}-${edge.toId}-${edge.relation}`} edge={edge} node={node} otherKind={otherKind} /> }) : <div className="traceEmpty"><span>No upstream change request is recorded.</span></div>}
+      {upstream.length ? upstream.map(edge => { const otherId = edge.toId === rootId ? edge.fromId : edge.toId; const otherKind = edge.toId === rootId ? edge.fromKind : edge.toKind; const node = nodeById.get(otherId); return <TraceEdgeCard key={`${edge.fromId}-${edge.toId}-${edge.relation}`} edge={edge} node={node} otherKind={otherKind} href={node ? artifactHref?.(node) : undefined} /> }) : <div className="traceEmpty"><span>No immediate upstream relationship is recorded.</span></div>}
       <h3>Downstream / verification impact</h3>
-      {downstream.length ? downstream.map(edge => { const otherId = edge.fromId === rootId ? edge.toId : edge.fromId; const otherKind = edge.fromId === rootId ? edge.toKind : edge.fromKind; const node = nodeById.get(otherId); return <TraceEdgeCard key={`${edge.fromId}-${edge.toId}-${edge.relation}`} edge={edge} node={node} otherKind={otherKind} /> }) : <div className="traceEmpty"><span>No downstream change request or verification impact is recorded.</span></div>}
+      {downstream.length ? downstream.map(edge => { const otherId = edge.fromId === rootId ? edge.toId : edge.fromId; const otherKind = edge.fromId === rootId ? edge.toKind : edge.fromKind; const node = nodeById.get(otherId); return <TraceEdgeCard key={`${edge.fromId}-${edge.toId}-${edge.relation}`} edge={edge} node={node} otherKind={otherKind} href={node ? artifactHref?.(node) : undefined} /> }) : <div className="traceEmpty"><span>No immediate downstream relationship or verification impact is recorded.</span></div>}
+      {digitalThreadHref && <ExactArtifactLink className="openDigitalThread" href={digitalThreadHref}>Open Digital Thread →</ExactArtifactLink>}
       {!trace && <p className="inspectorNote warn">The server did not expose a trace projection for this exact record. No client-side relationship has been inferred.</p>}
     </div>}
 
@@ -244,6 +248,6 @@ export default function ChangeRequestInspector({
   </ControlledArtifactInspector>
 }
 
-function TraceEdgeCard({ edge, node, otherKind }: { edge: TraceEdge; node?: TraceNode; otherKind: string }) {
-  return <article className="traceRelation"><div className="traceRequirementHead"><b>{node ? nodeLabel(node) : 'Exact connected artifact'}</b><span>{node?.kind ?? otherKind}</span></div><p>{node?.title || 'Exact connected controlled artifact'}</p>{node?.state && <small>{stateLabel(node.state)}{node.level ? ` · ${node.level}` : ''}</small>}<div className="traceProvenance">{edge.provenance.map((fact, index) => <span key={`${fact.kind}-${index}`}><b>{fact.kind === 'AssessmentDerived' ? 'AssessmentDerived' : fact.kind === 'AuthorStated' ? 'AuthorStated' : fact.kind}</b>{fact.isLive === false ? ' · historical' : ' · live'}{fact.rationale ? ` · ${fact.rationale}` : ''}{fact.status ? ` · ${fact.status}` : ''}</span>)}</div></article>
+function TraceEdgeCard({ edge, node, otherKind, href }: { edge: TraceEdge; node?: TraceNode; otherKind: string; href?: string }) {
+  return <article className="traceRelation"><div className="traceRequirementHead"><ExactArtifactLink href={href}>{node ? nodeLabel(node) : 'Exact connected artifact'}</ExactArtifactLink><span>{node?.kind ?? otherKind}</span></div><p>{node?.title || 'Exact connected controlled artifact'}</p>{node?.state && <small>{stateLabel(node.state)}{node.level ? ` · ${node.level}` : ''}{node.buildVersion ? ` · Build ${node.buildVersion}` : ''}</small>}<div className="traceProvenance">{edge.provenance.map((fact, index) => <span key={`${fact.kind}-${index}`}><b>{traceProvenanceLabel(fact.kind)}</b>{fact.isLive === false ? ' · Historical evidence' : ''}{fact.rationale ? ` · ${fact.rationale}` : ''}{fact.status ? ` · ${fact.status}` : ''}</span>)}</div></article>
 }

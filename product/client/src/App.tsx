@@ -4,7 +4,7 @@ import CommandPalette from "./CommandPalette";
 import { officialBuildName, verificationArtifactLevel, verificationArtifactRouteKey } from "./presentation";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
-import { coverageExplorerPath, projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectSlugOf, readRoute, routePath } from "./routing";
+import { coverageExplorerPath, exactTraceArtifactPath, projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectSlugOf, readRoute, routePath } from "./routing";
 import type { AppRoute, Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, View } from "./routing";
 import { usePasswordVisibilityControls } from "./PasswordVisibility";
 import {
@@ -848,6 +848,8 @@ function App() {
         }}
         onAssessmentSelected={(id)=>{setSelectedArtifactId(id??"");setHistorySelectionId("");if(context)history.pushState({},"",routePath(context,"history",discipline === "software" ? "software" : "system",id,selectedArtifactKind,historyStateIntent,historyTypeIntent))}}
         registerHref={id=>context ? routePath(context,"scr",discipline === "software" ? "software" : "system",id,historyTypeIntent === "Interface" ? "Interface" : undefined) : "#"}
+        traceArtifactHref={node=>context ? exactTraceArtifactPath(context,node) : undefined}
+        digitalThreadHref={id=>context ? routePath(context,"lifecycle","system",id,"change-request") : undefined}
         onSelectionChange={id=>{setHistorySelectionId(id??"");if(context)history.pushState({},"",routePath(context,"history",discipline === "software" ? "software" : "system",selectedArtifactId||undefined,selectedArtifactKind,historyStateIntent,historyTypeIntent,id||undefined))}}
         onStateIntentChange={(stateIntent)=>{
           setHistoryStateIntent(stateIntent);
@@ -1073,6 +1075,7 @@ function App() {
         initialArtifactId={selectedArtifactId || undefined}
         initialArtifactKind={selectedArtifactKind || undefined}
         requirementHref={id => context ? routePath(context, "lifecycle", "system", id) : "#"}
+        traceArtifactHref={node => context ? exactTraceArtifactPath(context, node) : undefined}
         onBack={() => navigate("dashboard")}
       />
     );
