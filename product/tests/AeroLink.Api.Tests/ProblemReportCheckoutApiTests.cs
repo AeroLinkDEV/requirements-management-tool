@@ -478,9 +478,12 @@ public sealed class ProblemReportCheckoutApiTests
         var firstXml = await DocumentXml(firstOutput);
         Assert.Contains(firstTitle, firstXml);
         Assert.DoesNotContain(secondTitle, firstXml);
+        Assert.DoesNotContain("SameRevisionFollowUp", firstXml);
 
         using var secondOutput = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&snapshotId={secondSnapshotId}&format=docx");
-        Assert.Contains(secondTitle, await DocumentXml(secondOutput));
+        var secondXml = await DocumentXml(secondOutput);
+        Assert.Contains(secondTitle, secondXml);
+        Assert.Contains("SameRevisionFollowUp", secondXml);
 
         using var foreign = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&snapshotId={foreignSnapshotId}&format=docx");
         Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
