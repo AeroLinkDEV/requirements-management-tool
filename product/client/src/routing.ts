@@ -400,6 +400,12 @@ export function exactTraceArtifactPath(context: RouteContext, node: ExactTraceAr
     return `${path}&requirementRevisionId=${encodeURIComponent(node.id)}`;
   }
 
+  if (node.kind === 'TestProcedure' || node.kind === 'TestCase')
+    return routePath(scoped, 'artifact', 'system', node.id, node.kind === 'TestProcedure' ? 'test-procedure' : 'test-case');
+  if (node.kind === 'TestExecution') return routePath(scoped, 'artifact', 'system', node.id, 'test-execution');
+  if (node.kind === 'Evidence') return routePath(scoped, 'artifact', 'system', node.id, 'evidence');
+  if (node.kind === 'Build') return routePath(scoped, 'artifact', 'system', node.id, 'build');
+
   // Code traceability currently has an inventory surface but no exact
   // artifact-record route. Keep its identifier intentionally non-openable
   // until that authorized target exists; never invent an /artifacts URL.

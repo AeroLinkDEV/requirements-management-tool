@@ -84,6 +84,9 @@ test('requirements register preserves deep-link history, native links, and autho
   const releaseId = routeParts![2]
   const parentId = '11111111-1111-4111-8111-111111111111'
   const tcrId = '22222222-2222-4222-8222-222222222222'
+  const secondParentId = '33333333-3333-4333-8333-333333333333'
+  const secondTcrId = '44444444-4444-4444-8444-444444444444'
+  const grandchildId = '55555555-5555-4555-8555-555555555555'
   await page.route('**/api/change-requests/*/trace', async route => {
     await route.fulfill({ json: {
       projectId, rootChangeRequestId: rootId,
@@ -92,10 +95,16 @@ test('requirements register preserves deep-link history, native links, and autho
         { id: rootId, kind: 'ChangeRequest', projectId, buildId: releaseId, displayNumber: 'SRCR-ROOT.03', title: 'Selected root', state: 'Draft', revision: 3 },
         { id: parentId, kind: 'ChangeRequest', projectId, buildId: releaseId, displayNumber: 'SRCR-PARENT.01', title: 'Author-stated parent', state: 'Approved', revision: 1 },
         { id: tcrId, kind: 'TestChangeRequest', projectId, buildId: releaseId, displayNumber: 'SYSTPCR-ROOT.00', title: 'Assessment-derived verification impact', state: 'Draft', revision: 0 },
+        { id: secondParentId, kind: 'ChangeRequest', projectId, buildId: releaseId, displayNumber: 'HLRCR-PARENT.00', title: 'Second direct parent', state: 'InReview', revision: 0, level: 'HighLevel' },
+        { id: secondTcrId, kind: 'TestChangeRequest', projectId, buildId: releaseId, displayNumber: 'HLRTCCR-ROOT.00', title: 'High-level verification impact', state: 'Approved', revision: 0, level: 'HighLevel' },
+        { id: grandchildId, kind: 'ChangeRequest', projectId, buildId: releaseId, displayNumber: 'SRCR-GRANDCHILD.00', title: 'Indirect grandchild must stay out of inspector', state: 'Draft', revision: 0 },
       ],
       edges: [
         { fromId: rootId, fromKind: 'ChangeRequest', toId: parentId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: parentId, rationale: 'Controlled parent rationale.' }] },
         { fromId: rootId, fromKind: 'ChangeRequest', toId: tcrId, toKind: 'TestChangeRequest', relation: 'CoveredByTestChangeRequest', provenance: [{ kind: 'AssessmentDerived', sourceId: tcrId, status: 'Change required.' }] },
+        { fromId: rootId, fromKind: 'ChangeRequest', toId: secondParentId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: secondParentId, rationale: 'Second direct parent rationale.' }] },
+        { fromId: rootId, fromKind: 'ChangeRequest', toId: secondTcrId, toKind: 'TestChangeRequest', relation: 'CoveredByTestChangeRequest', provenance: [{ kind: 'AssessmentDerived', sourceId: secondTcrId, status: 'No change required.' }] },
+        { fromId: parentId, fromKind: 'ChangeRequest', toId: grandchildId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: grandchildId }] },
       ],
       state: { upstream: 'Answered', downstream: 'ChangeRequired', overall: 'ActionRequired', isTopOfLadder: false, warnings: ['Complete the downstream review before approval.'] },
     } })
@@ -118,6 +127,9 @@ test('requirements register preserves deep-link history, native links, and autho
   await expect(inspector.getByRole('link', { name: 'Open Digital Thread →' })).toBeVisible()
   await expect(inspector.getByRole('link', { name: /SRCR-PARENT\.01/ })).toHaveAttribute('href', new RegExp(`systems/change-requests/${parentId}$`))
   await expect(inspector.getByRole('link', { name: /SYSTPCR-ROOT\.00/ })).toHaveAttribute('href', new RegExp(`system-verification/change-requests/${tcrId}\\?kind=Procedure$`))
+  await expect(inspector.getByRole('link', { name: /HLRCR-PARENT\.00/ })).toHaveAttribute('href', new RegExp(`software/change-requests/${secondParentId}$`))
+  await expect(inspector.getByRole('link', { name: /HLRTCCR-ROOT\.00/ })).toHaveAttribute('href', new RegExp(`software-verification/hlr/change-requests/${secondTcrId}$`))
+  await expect(inspector.getByRole('link', { name: /SRCR-GRANDCHILD\.00/ })).toHaveCount(0)
   await expect(inspector).toContainText('Complete the downstream review before approval.')
   await expect(inspector).toContainText(/exact revision \d+/)
   await testInfo.attach('requirements-trace-impact', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })

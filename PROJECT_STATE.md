@@ -153,7 +153,7 @@ AeroLink supports governed System/HLR/LLR change requests and Test Change Reques
 - preserved returned/superseded history;
 - separation between approval and actual build/release inclusion.
 
-The existing Digital Thread accepts a stable Change Request identity and renders the server-composed exact Change Request/provenance chain above the existing baseline-exact requirement → verification → result/evidence → build path. Proposed Introduce/Modify/Retire content remains visibly separate from materialized, effective-baseline, and evidence truth.
+The Digital Thread accepts a stable Change Request identity and presents the server-composed exact Change Request/provenance projection as a visual, layered node-and-edge map with branching and selectable node detail. The CR inspector is an immediate one-hop diagnostic (0..N upstream/downstream facts) and can open the exact selected CR thread. Exact routeable identifiers use native links; unavailable targets remain explicitly non-openable. The existing baseline-exact requirement → verification → result/evidence → build path remains below it, with exact revision/artifact links where authorized. Proposed Introduce/Modify/Retire content remains visibly separate from materialized, effective-baseline, and evidence truth.
 
 For a non-root requirement change request, the controlled Draft also records either exact upstream change-request
 revision link(s) or an attributable no-upstream rationale before review. Same-build direct-parent linkage from the

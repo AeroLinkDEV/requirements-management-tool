@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import "./LifecycleExplorer.css";
 import "./ControlledDownloads.css";
 import DocumentActions from "./DocumentActions";
@@ -93,10 +93,23 @@ function ChangeRequestThread({
     const fallback = node.kind === "RequirementRevision" && node.artifactId && requirementHref ? requirementHref(node.artifactId) : undefined;
     return traceArtifactHref?.(node) ?? (fallback && fallback !== "#" ? fallback : undefined);
   };
+  const exactPathNodeHref = (node: CompletePath["nodes"][number]) => traceArtifactHref?.({
+    id: node.revisionId,
+    kind: "RequirementRevision",
+    displayNumber: node.displayNumber,
+    level: node.level,
+    artifactId: node.id,
+  });
+  const exactPathArtifactHref = (kind: string, item: { id: string; displayNumber?: string; level?: string }) => traceArtifactHref?.({
+    id: item.id,
+    kind,
+    displayNumber: item.displayNumber ?? item.id,
+    level: item.level,
+  });
   const layers = [
-    { id: "change", title: "CHANGE CONTROL", kinds: new Set(["ChangeRequest", "TestChangeRequest"]) },
+    { id: "change", title: "CHANGE CONTROL", kinds: new Set(["ChangeRequest"]) },
     { id: "requirement", title: "REQUIREMENTS", kinds: new Set(["RequirementRevision"]) },
-    { id: "verification", title: "VERIFICATION / EVIDENCE", kinds: new Set(["CodeTraceability"]) },
+    { id: "verification", title: "VERIFICATION / EVIDENCE", kinds: new Set(["TestChangeRequest", "CodeTraceability"]) },
   ];
   const assigned = new Set<string>();
   const layerNodes = layers.map(layer => ({ ...layer, nodes: trace.nodes.filter(node => {
@@ -124,35 +137,7 @@ function ChangeRequestThread({
 
     <section className="crChain" aria-labelledby="cr-chain-heading">
       <div className="crSectionHeading"><div><p className="eyebrow">SERVER-COMPOSED PROJECTION</p><h3 id="cr-chain-heading">Connected controlled story</h3></div><span>{trace.nodes.length} exact nodes · {trace.edges.length} typed edges</span></div>
-      <div className="crGraphBoard" role="list" aria-label="Connected Digital Thread nodes">
-        {layerNodes.map(layer => <section className={`crGraphLayer crGraphLayer-${layer.id}`} key={layer.id} aria-label={layer.title}>
-          <h4>{layer.title}</h4>
-          <div className="crGraphNodeList">
-            {layer.nodes.map(node => <article className={`crGraphNode${node.id === selected?.id ? " selected" : ""}${node.kind === "RequirementRevision" && !node.baselineMembershipIds?.length ? " proposed" : ""}`} role="listitem" key={`${node.kind}-${node.id}`}>
-              <button type="button" className="crGraphNodeFocus" aria-pressed={node.id === selected?.id} aria-label={`Focus ${node.displayNumber}`} onClick={() => setSelectedNodeId(node.id)}>
-                <small>{traceKindLabel(node.kind)}</small>
-                <span>{node.title || "Exact connected artifact"}</span>
-                {node.state && <em>{stateLabel(node.state)}</em>}
-              </button>
-              <ExactArtifactLink href={nodeHref(node)}>{node.displayNumber}</ExactArtifactLink>
-              {(node.buildVersion || node.revision !== null && node.revision !== undefined) && <small className="crGraphNodeMeta">{node.revision !== null && node.revision !== undefined ? `Revision ${String(node.revision).padStart(2, "0")}` : ""}{node.buildVersion ? ` · Build ${node.buildVersion}` : ""}</small>}
-            </article>)}
-            {!layer.nodes.length && <p className="crUnavailable">No connected records in this layer.</p>}
-          </div>
-        </section>)}
-      </div>
-      <div className="crGraphEdges" role="list" aria-label="Connected Digital Thread relationships">
-        {trace.edges.length ? trace.edges.map(edge => {
-          const from = nodeById.get(edge.fromId), to = nodeById.get(edge.toId);
-          return <article className="crGraphEdge" key={`${edge.fromKind}-${edge.fromId}-${edge.toKind}-${edge.toId}-${edge.relation}`} role="listitem">
-            <ExactArtifactLink href={from ? nodeHref(from) : undefined}>{from?.displayNumber ?? "Exact source"}</ExactArtifactLink>
-            <b aria-hidden="true">→</b>
-            <ExactArtifactLink href={to ? nodeHref(to) : undefined}>{to?.displayNumber ?? "Exact target"}</ExactArtifactLink>
-            <span>{traceRelationLabel(edge.relation)}</span>
-            <div>{edge.provenance.map(fact => <em key={`${fact.kind}-${fact.sourceId ?? "none"}`}>{traceProvenanceLabel(fact.kind)}{fact.isLive === false ? " · Historical evidence" : ""}</em>)}</div>
-          </article>;
-        }) : <p className="crUnavailable">No connected edges are present in the server projection.</p>}
-      </div>
+      <ChangeRequestGraphMap layers={layerNodes} trace={trace} selectedId={selected?.id} onSelect={setSelectedNodeId} nodeHref={nodeHref} />
       {trace.state && <section className="crTraceState" aria-label="Authoritative trace state">
         <h4>Authoritative trace state</h4><dl><div><dt>Upstream</dt><dd>{stateLabel(trace.state.upstream)}</dd></div><div><dt>Downstream</dt><dd>{stateLabel(trace.state.downstream)}</dd></div><div><dt>Overall</dt><dd>{stateLabel(trace.state.overall)}</dd></div></dl>
         {trace.state.warnings.length > 0 && <ul>{trace.state.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>}
@@ -177,7 +162,7 @@ function ChangeRequestThread({
 
     <section className="crMaterializedLayer" aria-labelledby="cr-materialized-heading">
       <div className="crSectionHeading"><div><p className="eyebrow">BASELINE-EXACT CONTENT</p><h3 id="cr-materialized-heading">Materialized requirement revisions</h3></div></div>
-      {materialized.length && requirementHref ? <div className="crMaterializedGrid">{materialized.map(node => <article key={node.id}><ExactArtifactLink href={nodeHref(node)}>{node.displayNumber}</ExactArtifactLink><span>{node.id}</span><a href={requirementHref(node.artifactId!)}>Open exact requirement thread →</a></article>)}</div>
+      {materialized.length ? <div className="crMaterializedGrid">{materialized.map(node => <article key={node.id}><ExactArtifactLink href={nodeHref(node)}>{node.displayNumber}</ExactArtifactLink><span>{node.id}</span><ExactArtifactLink href={nodeHref(node)}>Open exact requirement thread →</ExactArtifactLink></article>)}</div>
         : <p className="crUnavailable">No requirement revision carried by this change request is materialized in the active baseline. Proposed content remains outside the baseline-exact thread.</p>}
       {exactPathError && <div className="crUnavailable" role="alert"><span>{exactPathError}</span><button type="button" onClick={onRetry}>Retry</button></div>}
       {exactPath && <section className="crBaselinePath" aria-labelledby="cr-baseline-path-heading">
@@ -185,16 +170,137 @@ function ChangeRequestThread({
         <div className="completeThreadPath" role="list" aria-label="Existing baseline-exact requirement path">
           {exactPath.nodes.map((node, index) => <div className="completeThreadStep" key={node.revisionId}>
             {index > 0 && <i className="threadConnector" aria-hidden="true">›</i>}
-            <article><small>{node.level === "System" ? "SYSTEM REQUIREMENT" : node.level === "HighLevel" ? "HLR" : "LLR"}</small><b>{node.displayNumber}</b><span>{node.statement}</span></article>
+            <article><small>{node.level === "System" ? "SYSTEM REQUIREMENT" : node.level === "HighLevel" ? "HLR" : "LLR"}</small><ExactArtifactLink href={exactPathNodeHref(node)}>{node.displayNumber}</ExactArtifactLink><span>{node.statement}</span></article>
           </div>)}
-          <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.artifact ? "missing" : ""}><small>TEST ARTIFACT</small><b>{exactPath.artifact?.displayNumber ?? "Not linked"}</b><span>{exactPath.artifact?.title ?? "Verification linkage required"}</span></article></div>
-          <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.execution ? "missing" : ""}><small>TEST RESULT</small><b>{exactPath.execution?.outcome ?? "Not executed"}</b><span>{exactPath.execution?.determination ?? "Authoritative result required"}</span></article></div>
-          <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.execution?.evidence.length ? "missing" : ""}><small>TEST EVIDENCE</small><b>{exactPath.execution?.evidence[0]?.originalFileName ?? "Not attached"}</b><span>{exactPath.execution?.evidence[0]?.sha256 ?? (exactPath.execution?.evidenceReference ? `External reference only: ${exactPath.execution.evidenceReference}` : "Checksummed evidence required")}</span></article></div>
-          <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.build ? "missing" : ""}><small>BUILD</small><b>{exactPath.build?.buildNumber ?? exactPath.baseline.displayNumber}</b><span>{exactPath.build ? `${exactPath.build.state} · ${exactPath.baseline.displayNumber}` : exactPath.baseline.name}</span></article></div>
+          <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.artifact ? "missing" : ""}><small>TEST ARTIFACT</small>{exactPath.artifact ? <ExactArtifactLink href={exactPathArtifactHref(exactPath.artifact.artifactKind === "Procedure" ? "TestProcedure" : "TestCase", exactPath.artifact)}>{exactPath.artifact.displayNumber}</ExactArtifactLink> : <b>Not linked</b>}<span>{exactPath.artifact?.title ?? "Verification linkage required"}</span></article></div>
+          <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.execution ? "missing" : ""}><small>TEST RESULT</small>{exactPath.execution ? <ExactArtifactLink href={exactPathArtifactHref("TestExecution", exactPath.execution)}>{exactPath.execution.outcome}</ExactArtifactLink> : <b>Not executed</b>}<span>{exactPath.execution?.determination ?? "Authoritative result required"}</span></article></div>
+          <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.execution?.evidence.length ? "missing" : ""}><small>TEST EVIDENCE</small>{exactPath.execution?.evidence[0] ? <ExactArtifactLink href={exactPathArtifactHref("Evidence", exactPath.execution.evidence[0])}>{exactPath.execution.evidence[0].originalFileName}</ExactArtifactLink> : <b>Not attached</b>}<span>{exactPath.execution?.evidence[0]?.sha256 ?? (exactPath.execution?.evidenceReference ? `External reference only: ${exactPath.execution.evidenceReference}` : "Checksummed evidence required")}</span></article></div>
+          <div className="completeThreadStep"><i className="threadConnector" aria-hidden="true">›</i><article className={!exactPath.build ? "missing" : ""}><small>BUILD</small>{exactPath.build ? <ExactArtifactLink href={exactPathArtifactHref("Build", exactPath.build)}>{exactPath.build.buildNumber}</ExactArtifactLink> : <b>{exactPath.baseline.displayNumber}</b>}<span>{exactPath.build ? `${exactPath.build.state} · ${exactPath.baseline.displayNumber}` : exactPath.baseline.name}</span></article></div>
         </div>
       </section>}
     </section>
   </section>;
+}
+
+type TraceGraphLayer = { id: string; title: string; nodes: ChangeRequestTraceNode[] };
+type TraceConnector = { key: string; path: string; selected: boolean; relation: string };
+
+/**
+ * Render the server-composed graph as a map, not as unrelated category lists. Cards stay in semantic layers,
+ * while the SVG connector overlay joins each exact pair using the same edge set exposed to the accessible edge
+ * register below. Coordinates are presentation-only; no client-side relationship or topology is inferred.
+ */
+function ChangeRequestGraphMap({
+  layers,
+  trace,
+  selectedId,
+  onSelect,
+  nodeHref,
+}: {
+  layers: TraceGraphLayer[];
+  trace: ChangeRequestTrace;
+  selectedId?: string;
+  onSelect: (id: string) => void;
+  nodeHref: (node: ChangeRequestTraceNode) => string | undefined;
+}) {
+  const boardRef = useRef<HTMLDivElement>(null);
+  const nodeRefs = useRef(new Map<string, HTMLElement>());
+  const [connectors, setConnectors] = useState<TraceConnector[]>([]);
+  const nodeByKey = useMemo(() => new Map(trace.nodes.map(node => [`${node.kind}:${node.id}`, node])), [trace.nodes]);
+
+  const measure = useCallback(() => {
+    const board = boardRef.current;
+    if (!board) return;
+    const boardRect = board.getBoundingClientRect();
+    const next: TraceConnector[] = [];
+    for (const edge of trace.edges) {
+      const from = nodeByKey.get(`${edge.fromKind}:${edge.fromId}`);
+      const to = nodeByKey.get(`${edge.toKind}:${edge.toId}`);
+      const fromElement = from && nodeRefs.current.get(`${from.kind}:${from.id}`);
+      const toElement = to && nodeRefs.current.get(`${to.kind}:${to.id}`);
+      if (!fromElement || !toElement) continue;
+      const fromRect = fromElement.getBoundingClientRect();
+      const toRect = toElement.getBoundingClientRect();
+      const startX = fromRect.right - boardRect.left;
+      const startY = fromRect.top + fromRect.height / 2 - boardRect.top;
+      const endX = toRect.left - boardRect.left;
+      const endY = toRect.top + toRect.height / 2 - boardRect.top;
+      const distance = Math.max(24, Math.abs(endX - startX) * 0.45);
+      const direction = endX >= startX ? 1 : -1;
+      const path = `M ${startX} ${startY} C ${startX + distance * direction} ${startY}, ${endX - distance * direction} ${endY}, ${endX} ${endY}`;
+      next.push({
+        key: `${edge.fromKind}:${edge.fromId}:${edge.toKind}:${edge.toId}:${edge.relation}`,
+        path,
+        selected: edge.fromId === selectedId || edge.toId === selectedId,
+        relation: traceRelationLabel(edge.relation),
+      });
+    }
+    setConnectors(next);
+  }, [nodeByKey, selectedId, trace.edges]);
+
+  useLayoutEffect(() => {
+    const frame = requestAnimationFrame(measure);
+    const board = boardRef.current;
+    const observer = typeof ResizeObserver === "undefined" || !board ? undefined : new ResizeObserver(measure);
+    if (observer && board) observer.observe(board);
+    window.addEventListener("resize", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [measure]);
+
+  return <>
+    <div className="crGraphBoard" ref={boardRef} role="group" aria-label="Connected Digital Thread map">
+      <svg className="crGraphConnectors" aria-hidden="true">
+        <defs>
+          <marker id="crGraphArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+            <path d="M 0 0 L 8 4 L 0 8 z" />
+          </marker>
+        </defs>
+        {connectors.map(connector => <path className={`crGraphConnector${connector.selected ? " selected" : ""}`} key={connector.key} d={connector.path} markerEnd="url(#crGraphArrow)"><title>{connector.relation}</title></path>)}
+      </svg>
+      <div className="crGraphBoardLayers" role="list" aria-label="Connected Digital Thread nodes">
+        {layers.map(layer => <section className={`crGraphLayer crGraphLayer-${layer.id}`} key={layer.id} aria-label={layer.title}>
+          <h4>{layer.title}</h4>
+          <div className="crGraphNodeList">
+            {layer.nodes.map(node => {
+              const key = `${node.kind}:${node.id}`;
+              const selected = node.id === selectedId;
+              return <article
+                className={`crGraphNode${selected ? " selected" : ""}${node.kind === "RequirementRevision" && !node.baselineMembershipIds?.length ? " proposed" : ""}`}
+                role="listitem"
+                key={key}
+                ref={element => { if (element) nodeRefs.current.set(key, element); else nodeRefs.current.delete(key); }}
+              >
+                <button type="button" className="crGraphNodeFocus" aria-pressed={selected} aria-label={`Focus ${node.displayNumber}`} onClick={() => onSelect(node.id)}>
+                  <small>{traceKindLabel(node.kind)}</small>
+                  <span>{node.title || "Exact connected artifact"}</span>
+                  {node.state && <em>{stateLabel(node.state)}</em>}
+                </button>
+                <ExactArtifactLink href={nodeHref(node)}>{node.displayNumber}</ExactArtifactLink>
+                {(node.buildVersion || node.revision !== null && node.revision !== undefined) && <small className="crGraphNodeMeta">{node.revision !== null && node.revision !== undefined ? `Revision ${String(node.revision).padStart(2, "0")}` : ""}{node.buildVersion ? ` · Build ${node.buildVersion}` : ""}</small>}
+              </article>;
+            })}
+            {!layer.nodes.length && <p className="crUnavailable">No connected records in this layer.</p>}
+          </div>
+        </section>)}
+      </div>
+    </div>
+    <div className="crGraphEdges" role="list" aria-label="Connected Digital Thread relationships">
+      {trace.edges.length ? trace.edges.map(edge => {
+        const from = nodeByKey.get(`${edge.fromKind}:${edge.fromId}`), to = nodeByKey.get(`${edge.toKind}:${edge.toId}`);
+        return <article className="crGraphEdge" key={`${edge.fromKind}-${edge.fromId}-${edge.toKind}-${edge.toId}-${edge.relation}`} role="listitem">
+          <ExactArtifactLink href={from ? nodeHref(from) : undefined}>{from?.displayNumber ?? "Exact source"}</ExactArtifactLink>
+          <b aria-hidden="true">→</b>
+          <ExactArtifactLink href={to ? nodeHref(to) : undefined}>{to?.displayNumber ?? "Exact target"}</ExactArtifactLink>
+          <span>{traceRelationLabel(edge.relation)}</span>
+          <div>{edge.provenance.map(fact => <em key={`${fact.kind}-${fact.sourceId ?? "none"}`}>{traceProvenanceLabel(fact.kind)}{fact.isLive === false ? " · Historical evidence" : ""}</em>)}</div>
+        </article>;
+      }) : <p className="crUnavailable">No connected edges are present in the server projection.</p>}
+    </div>
+  </>;
 }
 
 export default function LifecycleExplorer({ api, projectId, activeReleaseId, releases, initialArtifactId, initialArtifactKind, requirementHref, traceArtifactHref, onBack }: Props) {
