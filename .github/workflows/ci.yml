@@ -624,7 +624,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.post_merge_skip != 'true' && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     env:
       METRICS_JOB_ID: backend-core-infrastructure
       METRICS_JOB_NAME: Infrastructure test suite
@@ -661,10 +661,10 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      # Hang-budget arithmetic (#756): the outer job budget is 40 minutes. Run 33438875792 measured roughly
-      # 3 minutes of pre-test work and exactly 27 minutes 1 second in the growing suite before the former
-      # 30-minute cap cancelled it; the same exact head completed locally in 27 minutes 6 seconds. The
-      # 6-minute blame budget still leaves margin for setup, dump finalization, and failure-time upload.
+      # Hang-budget arithmetic (#756): the outer job budget is 60 minutes. Run 33442155318 measured roughly
+      # 3 minutes of pre-test work and 37 minutes 1 second of an actively progressing suite before the former
+      # 40-minute cap cancelled it; its latest completed showcase test was only 2 minutes 39 seconds earlier.
+      # The 6-minute blame budget still leaves margin for setup, dump finalization, and failure-time upload.
       # The static contract in
       # AeroLinkTestDiagnostics.Tests.ps1 asserts hang < job-timeout minus margin.
       - name: Run the infrastructure test suite
