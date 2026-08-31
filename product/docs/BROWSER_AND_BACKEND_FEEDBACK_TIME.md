@@ -338,13 +338,16 @@ This is the same growth that makes the shard-count reasoning above worth re-meas
 ### The Infrastructure job outgrew its original timeout
 
 Protected Product run 33432756016 measured about three minutes of setup and then more than 16 minutes 53
-seconds in `AeroLink.Infrastructure.Tests` before the 20-minute outer job limit cancelled the runner. The
-suite was still producing ordinary test results; the cancellation prevented final TRX publication and made
-the aggregate report a timeout instead of a complete result.
+seconds in `AeroLink.Infrastructure.Tests` before the 20-minute outer job limit cancelled the runner. After
+the deterministic failures from that run were corrected, run 33438875792 measured about three minutes of
+setup and exactly 27 minutes 1 second in the suite before the 30-minute outer limit cancelled it. The same
+exact head completed all 751 tests locally in 27 minutes 6 seconds, with 705 passed and 46 expected
+PostgreSQL-only skips.
 
-The Infrastructure job limit is therefore 30 minutes. Its six-minute per-test blame-hang budget remains
-unchanged, so a genuinely hung test still fails early enough to finalize and upload diagnostics. This change
-adds outer-job headroom for the measured suite growth; it does not weaken test selection or hang detection.
+The Infrastructure job limit is therefore 40 minutes. Its six-minute per-test blame-hang budget remains
+unchanged, so a genuinely hung test still fails early enough to finalize and upload diagnostics. This adds
+outer-job headroom for the measured suite plus setup and diagnostic finalization; it does not weaken test
+selection or hang detection.
 
 ## API startup floor, measured (563A, 2026-08-14)
 
