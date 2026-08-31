@@ -58,14 +58,19 @@
    carry without the author scrolling past three-quarters of it before they reach anything they came for.
    1080px is 50% wider; the header and footer stay put so the lease, the save state and the three controls
    are never scrolled away from the field being typed into. */
-.prModal form.prWholeRecord,
+.prModal .prWholeRecord,
 .prModal form.prCreateWhole { width: min(1080px, 96vw); max-height: 92vh; }
 /* Only the editor is a head/body/foot grid; the create form is one scrolling column. */
-.prModal form.prWholeRecord {
+.prModal .prWholeRecord {
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  box-sizing: border-box;
   padding: 0;
   overflow: hidden;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 20px 70px #0004;
 }
 .prModal form.prCreateWhole { overflow-y: auto; }
 .prEditorHead, .prEditorFoot { padding: 20px 28px 14px; background: #fff; }
@@ -93,7 +98,7 @@
 .prEditorBody .richEditor, .prCreateWhole .richEditor { margin-bottom: 4px; }
 
 @media (max-width: 900px) {
-  .prModal form.prWholeRecord, .prModal form.prCreateWhole { width: 100%; max-height: 100vh; }
+  .prModal .prWholeRecord, .prModal form.prCreateWhole { width: 100%; max-height: 100vh; }
   .prEditorHead, .prEditorBody, .prWholeRecord .prCheckoutFoot, .prCreateWhole .prCreateFoot { padding-left: 18px; padding-right: 18px; }
 }
 
