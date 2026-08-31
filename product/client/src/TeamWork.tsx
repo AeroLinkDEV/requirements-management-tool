@@ -711,35 +711,43 @@ function TeamWorkBoard({ items, group, people, onHolder, onDetails }: {
 }) {
   if (group === "lifecycle") {
     return (
-      <div className="teamWorkBoard" data-team-work-board="true">
-        {lanes.map(lane => {
-          const laneItems = items.filter(item => item.lane === lane.id);
-          return (
-            <section
-              className="teamWorkLane"
-              data-lane={lane.id}
-              aria-labelledby={`team-work-lane-${lane.id}`}
-              key={lane.id}
-            >
-              <header>
-                <div>
-                  <h2 id={`team-work-lane-${lane.id}`}>{lane.title}</h2>
-                  <p>{lane.description}</p>
+      <div className="teamWorkBoardViewport">
+        <p className="teamWorkBoardViewportHint">Scroll horizontally to see all lifecycle lanes <span aria-hidden="true">→</span></p>
+        <div
+          className="teamWorkBoard"
+          data-team-work-board="true"
+          tabIndex={0}
+          aria-label="Team Work lifecycle lanes"
+        >
+          {lanes.map(lane => {
+            const laneItems = items.filter(item => item.lane === lane.id);
+            return (
+              <section
+                className="teamWorkLane"
+                data-lane={lane.id}
+                aria-labelledby={`team-work-lane-${lane.id}`}
+                key={lane.id}
+              >
+                <header>
+                  <div>
+                    <h2 id={`team-work-lane-${lane.id}`}>{lane.title}</h2>
+                    <p>{lane.description}</p>
+                  </div>
+                  <span className="teamWorkLaneCount" aria-label={`${laneItems.length} items`}>
+                    {laneItems.length}
+                  </span>
+                </header>
+                <div className="teamWorkLaneItems">
+                  {laneItems.length
+                    ? laneItems.map(item => (
+                      <TeamWorkCard key={`${item.family}-${item.id}`} item={item} people={people} />
+                    ))
+                    : <p className="teamWorkLaneEmpty">No items in this lane.</p>}
                 </div>
-                <span className="teamWorkLaneCount" aria-label={`${laneItems.length} items`}>
-                  {laneItems.length}
-                </span>
-              </header>
-              <div className="teamWorkLaneItems">
-                {laneItems.length
-                  ? laneItems.map(item => (
-                    <TeamWorkCard key={`${item.family}-${item.id}`} item={item} people={people} />
-                  ))
-                  : <p className="teamWorkLaneEmpty">No items in this lane.</p>}
-              </div>
-            </section>
-          );
-        })}
+              </section>
+            );
+          })}
+        </div>
       </div>
     );
   }
