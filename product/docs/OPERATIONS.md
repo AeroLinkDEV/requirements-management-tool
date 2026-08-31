@@ -221,8 +221,12 @@ whenever a showcase Program already existed, so an installation created before v
 kept approved FMS 1.6 change requests alongside an empty impact queue — a state the product describes as
 impossible, and one no amount of restarting would fix.
 
-Reconciliation is now ordered, keyed and idempotent, and runs on every start. Two commands let an operator
-see and force it. Both need an administrator session and neither reseeds or replaces anything.
+Reconciliation is ordered, keyed and idempotent, but it does **not** run automatically against an existing FMS
+Program. Ordinary startup and `/api/showcase/seed` leave an existing showcase unchanged. Updating that synthetic
+showcase is an explicit administrator operation: first create and verify a supported AeroLink backup, positively
+identify the intended `FMSLIVE` Program and its 1.5/1.6 release pair, then use the two commands below. The upgrade
+adds only missing owned deterministic scenarios and durable step markers; it does not reseed the database or
+rewrite user-authored records.
 
 **Read what has been applied, and whether the invariants hold:**
 
@@ -234,15 +238,16 @@ curl -s --cookie cookies.txt http://127.0.0.1:5080/api/showcase/upgrade-state
 those steps: `healthy` false means the database is wrong regardless of what the steps claim to have done, and
 each entry names the count it expected against the count it found.
 
-**Apply anything outstanding:**
+**Apply anything outstanding only after the backup and target checks above:**
 
 ```bash
 curl -s --cookie cookies.txt -X POST http://127.0.0.1:5080/api/showcase/upgrade
 ```
 
-Safe to run repeatedly and safe to run again after an interrupted attempt: a step records itself only after
-its own work commits, so an upgrade resumes at the step it stopped on rather than repeating the ones that
-already succeeded. Records created by users are never touched.
+Safe to run repeatedly and safe to run again after an interrupted attempt: all outstanding steps commit in one
+transaction, and concurrent API processes are serialized so only one operation applies a given deterministic
+scenario. A failed operation rolls back its changes; the next explicit request starts again from the durable step
+set. Records created by users are never touched.
 
 If `healthy` is still false afterwards, read the failing invariant's detail rather than reseeding — dropping
 and recreating the database is documented below and discards everything anybody has authored locally.
