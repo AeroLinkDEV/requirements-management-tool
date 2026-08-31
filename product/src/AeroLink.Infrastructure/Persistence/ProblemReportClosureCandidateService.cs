@@ -275,6 +275,10 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
     public static string ReportSnapshotForSchema(ProblemReport report, int schemaVersion) => schemaVersion switch
     {
         ProblemReportEvidenceContract.SchemaVersion => ReportSnapshot(report),
+        // Schema 5 is a historical complete evidence envelope. Keep its reader-side projection even after
+        // schema 6 added the active supporting-attachment manifest; revalidation must use the bytes and hash
+        // contract that the candidate originally committed, never today's richer snapshot shape.
+        5 => ProblemReportEvidenceContract.SerializeForSchema(report, 5),
         4 => ProblemReportEvidenceContract.SerializeForSchema(report, 4),
         3 => HistoricalV3ReportSnapshot(report),
         2 => HistoricalV2ReportSnapshot(report),
