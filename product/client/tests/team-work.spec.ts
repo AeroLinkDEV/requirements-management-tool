@@ -632,7 +632,7 @@ test('Team Work exposes a keyboard-focusable horizontal board hint at a narrow b
 test('Team Work drawer traps focus, restores its trigger, preserves query state, and follows history', async ({ page }) => {
   await openTeamWork(page)
   await page.evaluate(() => history.replaceState({}, '', `${location.pathname}?mode=keep`))
-  const aliceDetails = page.locator('.teamWorkPersonDetails[aria-label="View details for API Alice"]')
+  const aliceDetails = page.locator('.teamWorkPeopleStrip .teamWorkPersonDetails[aria-label="View details for API Alice"]')
   await aliceDetails.click()
   let drawer = page.getByRole('dialog', { name: 'API Alice' })
   const close = drawer.getByRole('button', { name: 'Close current holder' })
