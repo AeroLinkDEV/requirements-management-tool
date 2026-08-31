@@ -4,6 +4,20 @@ import { apiBase, login } from './auth'
 const fixture = {
   generatedAt: '2026-08-30T00:00:00Z',
   totals: { items: 6, returned: 6, unheld: 3 },
+  layers: [
+    { id: 'System', label: 'System', count: 2, artifactTypes: [{ id: 'SRCR', label: 'SRCR', count: 1 }, { id: 'SYSTPCR', label: 'SYSTPCR', count: 1 }] },
+    { id: 'HighLevel', label: 'HLR', count: 2, artifactTypes: [{ id: 'HLRCR', label: 'HLRCR', count: 1 }, { id: 'Assessment', label: 'Assessment', count: 1 }] },
+    { id: 'LowLevel', label: 'LLR', count: 0, artifactTypes: [] },
+    { id: 'Interface', label: 'Interface', count: 1, artifactTypes: [{ id: 'ICDCR', label: 'ICDCR', count: 1 }] },
+  ],
+  artifactTypes: [
+    { id: 'Assessment', label: 'Assessment', count: 1 },
+    { id: 'HLRCR', label: 'HLRCR', count: 1 },
+    { id: 'ICDCR', label: 'ICDCR', count: 1 },
+    { id: 'PR', label: 'PR', count: 1 },
+    { id: 'SRCR', label: 'SRCR', count: 1 },
+    { id: 'SYSTPCR', label: 'SYSTPCR', count: 1 },
+  ],
   people: [
     { userId: '00000000-0000-0000-0000-0000000000aa', userName: 'alice', displayName: 'API Alice', isCurrentProjectMember: true, accountState: 'active', baseRoles: ['SystemEngineer'], disciplineAffinities: ['system'], holds: 1, byLane: { work: 0, review: 1, sign: 0, approved: 0 } },
     { userId: '00000000-0000-0000-0000-0000000000ab', userName: 'bob', displayName: 'API Bob', isCurrentProjectMember: true, accountState: 'active', baseRoles: ['SoftwareEngineer'], disciplineAffinities: ['software'], holds: 1, byLane: { work: 0, review: 1, sign: 0, approved: 0 } },
@@ -12,37 +26,37 @@ const fixture = {
   ],
   items: [
     {
-      id: '00000000-0000-0000-0000-000000000001', family: 'system', category: 'system', prefix: 'SRCR', number: 'SRCR-00001.00',
+      id: '00000000-0000-0000-0000-000000000001', family: 'system', layer: 'System', artifactType: 'SRCR', category: 'system', prefix: 'SRCR', number: 'SRCR-00001.00',
       title: 'Draft system change', lane: 'work', nativeState: 'Draft', nativeOutcome: null, currentHolderIds: [], holderBasis: 'author',
       raisedById: null, raisedByKind: null, release: { id: '00000000-0000-0000-0000-0000000000a1', version: '1.6', isReleased: false }, deferred: false,
       allocation: null, deferredFromState: null, activeStageObligations: [], updatedAt: '2026-08-29T12:00:00Z', openUrl: '/open/change-request/00000000-0000-0000-0000-000000000001',
     },
     {
-      id: '00000000-0000-0000-0000-000000000002', family: 'software', category: 'HLR', prefix: 'HLRCR', number: 'HLRCR-00002.00',
+      id: '00000000-0000-0000-0000-000000000002', family: 'software', layer: 'HighLevel', artifactType: 'HLRCR', category: 'HLR', prefix: 'HLRCR', number: 'HLRCR-00002.00',
       title: 'Parallel review change', lane: 'review', nativeState: 'InReview', nativeOutcome: null, currentHolderIds: ['alice', 'bob'], holderBasis: 'activeReviewStage',
       raisedById: null, raisedByKind: null, release: { id: '00000000-0000-0000-0000-0000000000a1', version: '1.6', isReleased: false }, deferred: false,
       allocation: null, deferredFromState: null, activeStageObligations: [{ holderId: 'alice', stageKind: 'review' }, { holderId: 'bob', stageKind: 'review' }], updatedAt: '2026-08-29T11:00:00Z', openUrl: '/open/change-request/00000000-0000-0000-0000-000000000002',
     },
     {
-      id: '00000000-0000-0000-0000-000000000005', family: 'interface', category: 'interface', prefix: 'ICDCR', number: 'ICDCR-00005.00',
+      id: '00000000-0000-0000-0000-000000000005', family: 'interface', layer: 'Interface', artifactType: 'ICDCR', category: 'interface', prefix: 'ICDCR', number: 'ICDCR-00005.00',
       title: 'Interface change request', lane: 'review', nativeState: 'InReview', nativeOutcome: null, currentHolderIds: ['dana'], holderBasis: 'activeReviewStage',
       raisedById: 'historical-author', raisedByKind: 'author', release: { id: '00000000-0000-0000-0000-0000000000a1', version: '1.6', isReleased: false }, deferred: false,
       allocation: null, deferredFromState: null, activeStageObligations: [{ holderId: 'dana', stageKind: 'review' }], updatedAt: '2026-08-29T10:30:00Z', openUrl: '/open/change-request/00000000-0000-0000-0000-000000000005',
     },
     {
-      id: '00000000-0000-0000-0000-000000000006', family: 'problemReport', category: null, prefix: null, number: 'PR00006.00',
+      id: '00000000-0000-0000-0000-000000000006', family: 'problemReport', layer: null, artifactType: 'PR', category: null, prefix: null, number: 'PR00006.00',
       title: 'Open problem report', lane: 'work', nativeState: 'Open', nativeOutcome: null, currentHolderIds: [], holderBasis: 'responsibleEngineer',
       raisedById: 'historical-reporter', raisedByKind: 'reportedBy', release: null, deferred: false,
       allocation: null, deferredFromState: null, activeStageObligations: [], updatedAt: '2026-08-29T10:15:00Z', openUrl: '/open/problem-report/00000000-0000-0000-0000-000000000006',
     },
     {
-      id: '00000000-0000-0000-0000-000000000003', family: 'assessment', category: 'HLR assessment', prefix: null, number: null,
+      id: '00000000-0000-0000-0000-000000000003', family: 'assessment', layer: 'HighLevel', artifactType: 'Assessment', category: 'HLR assessment', prefix: null, number: null,
       title: 'Assessment of HLRCR-00002.00', lane: 'sign', nativeState: 'InReview', nativeOutcome: 'Pending', currentHolderIds: ['charlie'], holderBasis: 'selectedAssessmentApprover',
       raisedById: 'source-change-id', raisedByKind: 'changeRequest', release: { id: '00000000-0000-0000-0000-0000000000b1', version: '1.5', isReleased: true }, deferred: false,
       allocation: null, deferredFromState: null, activeStageObligations: [], updatedAt: '2026-08-29T10:00:00Z', openUrl: '/open/downstream-assessment/00000000-0000-0000-0000-000000000003',
     },
     {
-      id: '00000000-0000-0000-0000-000000000004', family: 'verification', category: 'system', prefix: 'SYSTPCR', number: 'SYSTPCR-00004.00',
+      id: '00000000-0000-0000-0000-000000000004', family: 'verification', layer: 'System', artifactType: 'SYSTPCR', category: 'system', prefix: 'SYSTPCR', number: 'SYSTPCR-00004.00',
       title: 'Deferred test review', lane: 'approved', nativeState: 'Deferred', nativeOutcome: null, currentHolderIds: [], holderBasis: 'none',
       raisedById: null, raisedByKind: null, release: { id: '00000000-0000-0000-0000-0000000000a1', version: '1.6', isReleased: false }, deferred: true,
       allocation: { baselineId: '00000000-0000-0000-0000-0000000000c1', releaseId: '00000000-0000-0000-0000-0000000000b1', releaseVersion: '1.5', baselineNumber: 'BL-00001', baselineRevision: 0, isReleased: true },
@@ -129,7 +143,8 @@ test('Team Work is a project-wide four-lane board with API-owned card truth and 
   await expect(page.locator('main.teamWorkPage')).toContainText('Last updated')
   await expect(page.getByRole('group', { name: 'Group by' })).toBeVisible()
   await expect(page.getByRole('group', { name: 'Build' })).toBeVisible()
-  await expect(page.getByRole('group', { name: 'Record type' })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Layer' })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Artifact Type' })).toBeVisible()
   await expect(page.locator('main.teamWorkPage').getByText(/\bdrag\b|\breassign\b|\bdue date\b|\bage in state\b/i)).toHaveCount(0)
   if (process.env.AEROLINK_TEAM_WORK_SCREENSHOT)
     await page.screenshot({ path: process.env.AEROLINK_TEAM_WORK_SCREENSHOT, fullPage: true })
@@ -333,12 +348,15 @@ test('Team Work keeps a board-shaped loading skeleton while the project projecti
   await expect(page.getByRole('heading', { name: 'Team Work', exact: true })).toBeVisible()
 })
 
-test('Team Work derives builds and type counts without duplicating parallel items', async ({ page }) => {
+test('Team Work derives contextual layers and artifact types without duplicating parallel items', async ({ page }) => {
   await openTeamWork(page)
   await expect(page.getByRole('button', { name: 'Build 1.6', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Build 1.5', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Deferred', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Software \(1\)/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'System (2)', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'HLR (2)', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Interface (1)', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'SRCR (1)', exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: 'Current holder', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'No current holder', exact: true })).toBeVisible()
@@ -348,20 +366,66 @@ test('Team Work derives builds and type counts without duplicating parallel item
   await expect(page.locator('[data-team-work-card="true"]')).toHaveCount(1)
   await expect(page.getByText('Assessment of HLRCR-00002.00')).toBeVisible()
   await expect(page.getByText('Deferred test review')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Verification (0)', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'System (0)', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Deferred', exact: true }).click()
   await expect(page.getByText('Deferred test review')).toBeVisible()
   await expect(page.getByText('Assessment of HLRCR-00002.00')).toHaveCount(0)
 })
 
-test('Team Work searches people and opens a holder drawer with shared-item facts', async ({ page }) => {
+test('Team Work replaces person selection, preserves shared-holder cards, and clears without hiding the board', async ({ page }) => {
+  await openTeamWork(page)
+  const parallelCard = page.getByRole('link', { name: /Parallel review change/ })
+
+  await page.locator('.teamWorkPerson').filter({ hasText: 'API Alice' }).click()
+  await expect(page.getByRole('status')).toContainText('Showing work held by API Alice')
+  await expect(parallelCard).toBeVisible()
+  await expect(parallelCard).toContainText('API Alice')
+  await expect(parallelCard).toContainText('API Bob')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  await page.locator('.teamWorkPerson').filter({ hasText: 'API Bob' }).click()
+  await expect(page.getByRole('status')).toContainText('Showing work held by API Bob')
+  await expect(page).toHaveURL(/person=bob/)
+  await expect(parallelCard).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Clear person', exact: true }).click()
+  await expect(page.getByRole('status')).toHaveCount(0)
+  await expect(page.locator('[data-team-work-board="true"]')).toBeVisible()
+  await expect(page.locator('[data-team-work-card="true"]')).toHaveCount(6)
+  await expect(page).not.toHaveURL(/person=/)
+})
+
+test('Team Work uses initials for an unproven username prefix and does not infer a role', async ({ page }) => {
+  const person = {
+    userId: '00000000-0000-0000-0000-0000000000ff', userName: 'system.engineer.999', displayName: 'Unproven Account',
+    isCurrentProjectMember: true, accountState: 'active', baseRoles: [], disciplineAffinities: [], holds: 0,
+    byLane: { work: 0, review: 0, sign: 0, approved: 0 },
+  }
+  await openTeamWork(page, {
+    generatedAt: fixture.generatedAt,
+    totals: { items: 0, returned: 0, unheld: 0 },
+    layers: [], artifactTypes: [], people: [person], items: [],
+  })
+  const card = page.locator('.teamWorkPerson').filter({ hasText: 'Unproven Account' })
+  await expect(card.locator('img.personAvatar')).toHaveCount(0)
+  await expect(card.locator('span.personInitials')).toHaveText('UA')
+  await expect(card).not.toContainText('System Engineer')
+})
+
+test('Team Work searches people, filters by one holder, and keeps details behind an explicit affordance', async ({ page }) => {
   await openTeamWork(page)
   const search = page.getByRole('textbox', { name: 'Search' })
   await search.fill('API Alice')
-  await expect(page.getByRole('button', { name: /API Alice/ })).toBeVisible()
+  await expect(page.locator('.teamWorkPerson').filter({ hasText: 'API Alice' })).toBeVisible()
   await expect(page.locator('[data-team-work-card="true"]')).toHaveCount(1)
   await search.fill('')
-  await page.getByRole('button', { name: /API Alice/ }).click()
+  const alice = page.locator('.teamWorkPerson').filter({ hasText: 'API Alice' })
+  await alice.click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('status')).toContainText('Showing work held by API Alice')
+  await expect(page).toHaveURL(/person=alice/)
+  await page.locator('.teamWorkPersonDetails[aria-label="View details for API Alice"]').click()
   const drawer = page.getByRole('dialog', { name: 'API Alice' })
   await expect(drawer).toBeVisible()
   await expect(drawer.getByText('Currently holds').locator('..')).toContainText('1')
@@ -373,6 +437,7 @@ test('Team Work searches people and opens a holder drawer with shared-item facts
   await drawer.getByRole('button', { name: 'Close current holder' }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect(page).not.toHaveURL(/holder=/)
+  await expect(page).toHaveURL(/person=alice/)
 })
 
 test('Team Work keeps its holder drawer contained at a 320px viewport', async ({ page }) => {
@@ -408,8 +473,11 @@ test('Team Work retains zero-hold members, scopes affinity storage, and exposes 
   const body = { ...fixture, totals: { ...fixture.totals, unheld: 3 }, people: [...fixture.people, zero] }
   await page.addInitScript(() => localStorage.setItem('aerolink-teamwork-affinity', '{malformed'))
   await openTeamWork(page, body)
-  await expect(page.getByRole('button', { name: /API Erin/ })).toContainText('Account locked')
-  await page.getByRole('button', { name: /API Erin/ }).click()
+  await expect(page.locator('.teamWorkPerson').filter({ hasText: 'API Erin' })).toContainText('Account locked')
+  await page.locator('.teamWorkPerson').filter({ hasText: 'API Erin' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('status')).toContainText('Showing work held by API Erin')
+  await page.locator('.teamWorkPersonDetails[aria-label="View details for API Erin"]').click()
   const drawer = page.getByRole('dialog', { name: 'API Erin' })
   await expect(drawer.getByText('Nothing currently requires API Erin.', { exact: true })).toBeVisible()
   await expect(drawer).toBeVisible()
@@ -423,7 +491,7 @@ test('Team Work has a distinct project-empty state while still showing its membe
   const zero = { userId: '00000000-0000-0000-0000-0000000000af', userName: 'project.member', displayName: 'Project Member', isCurrentProjectMember: true, accountState: 'disabled', baseRoles: [], disciplineAffinities: [], holds: 0, byLane: { work: 0, review: 0, sign: 0, approved: 0 } }
   await openTeamWork(page, { generatedAt: fixture.generatedAt, totals: { items: 0, returned: 0, unheld: 0 }, people: [zero], items: [] })
   await expect(page.getByRole('heading', { name: 'People', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Project Member/ })).toBeVisible()
+  await expect(page.locator('.teamWorkPerson').filter({ hasText: 'Project Member' })).toBeVisible()
   await expect(page.getByText('No controlled work is recorded in this project yet.')).toBeVisible()
 })
 
@@ -469,12 +537,12 @@ test('Team Work attributes mixed frozen Review and Approval obligations to the r
     : item)
   await openTeamWork(page, { ...fixture, people, items })
 
-  await page.getByRole('button', { name: /API Alice/ }).click()
+  await page.locator('.teamWorkPersonDetails[aria-label="View details for API Alice"]').click()
   let drawer = page.getByRole('dialog', { name: 'API Alice' })
   await expect(drawer.getByText('Awaiting their signature').locator('..')).toContainText('0')
   await drawer.getByRole('button', { name: 'Close current holder' }).click()
 
-  await page.getByRole('button', { name: /API Bob/ }).click()
+  await page.locator('.teamWorkPersonDetails[aria-label="View details for API Bob"]').click()
   drawer = page.getByRole('dialog', { name: 'API Bob' })
   await expect(drawer.getByText('Awaiting their signature').locator('..')).toContainText('1')
   await expect(drawer.getByText('Also API Alice')).toBeVisible()
@@ -502,7 +570,7 @@ test('Team Work preserves one holder with simultaneous frozen Review and Approva
 
   await expect(page.getByRole('alert')).toHaveCount(0)
   await expect(page.locator('[data-lane="sign"]')).toContainText('Parallel review change')
-  await page.getByRole('button', { name: /API Alice/ }).click()
+  await page.locator('.teamWorkPersonDetails[aria-label="View details for API Alice"]').click()
   await expect(page.getByRole('dialog', { name: 'API Alice' })
     .getByText('Awaiting their signature').locator('..')).toContainText('1')
 })
@@ -511,19 +579,61 @@ test('Team Work composes filters against unique items and clear preserves holder
   await openTeamWork(page)
   await page.getByRole('button', { name: 'Current holder', exact: true }).click()
   await page.getByRole('button', { name: 'Build 1.5', exact: true }).click()
-  await page.getByRole('button', { name: 'Software (0)', exact: true }).click()
+  await page.getByRole('button', { name: 'Interface (0)', exact: true }).click()
   const empty = page.locator('.teamWorkFilteredEmpty')
-  await expect(empty).toContainText('No Software on Build 1.5')
+  await expect(empty).toContainText('No Interface on Build 1.5')
   await empty.getByRole('button', { name: 'Clear filters' }).click()
   await expect(page.getByRole('button', { name: 'Current holder', exact: true })).toHaveClass(/active/)
   await expect(page.locator('[data-team-work-card="true"]')).toHaveCount(7)
 })
 
+test('Team Work keeps holder-group Details beside the person heading and opens the right drawer', async ({ page }) => {
+  await openTeamWork(page)
+  await page.getByRole('button', { name: 'Current holder', exact: true }).click()
+
+  const group = page.locator('.teamWorkHolderGroup').filter({ hasText: 'API Alice' }).first()
+  const heading = group.locator('.teamWorkHolderHeading')
+  const details = group.getByRole('button', { name: 'View details for API Alice', exact: true })
+  await expect(heading).toBeVisible()
+  await expect(heading).toHaveAttribute('aria-pressed', 'false')
+  await expect(details).toBeVisible()
+  const headingBounds = await heading.boundingBox()
+  const detailsBounds = await details.boundingBox()
+  expect(headingBounds).not.toBeNull()
+  expect(detailsBounds).not.toBeNull()
+  expect(Math.abs(detailsBounds!.y - headingBounds!.y)).toBeLessThan(30)
+  expect(detailsBounds!.x).toBeGreaterThan(headingBounds!.x)
+
+  await heading.click()
+  await expect(heading).toHaveAttribute('aria-pressed', 'true')
+  await expect(heading).toHaveClass(/selected/)
+  await expect(page.locator('[data-team-work-board="true"]')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Clear person', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Clear person', exact: true }).click()
+  await expect(heading).toHaveAttribute('aria-pressed', 'false')
+
+  await details.click()
+  const drawer = page.getByRole('dialog', { name: 'API Alice' })
+  await expect(drawer).toBeVisible()
+  await expect(drawer.getByText('Currently holds').locator('..')).toContainText('1')
+  await drawer.getByRole('button', { name: 'Close current holder' }).click()
+  await expect(drawer).toHaveCount(0)
+})
+
+test('Team Work exposes a keyboard-focusable horizontal board hint at a narrow breakpoint', async ({ page }) => {
+  await openTeamWork(page)
+  await page.setViewportSize({ width: 900, height: 760 })
+  await expect(page.getByText('Scroll horizontally to see all lifecycle lanes', { exact: false })).toBeVisible()
+  const board = page.locator('.teamWorkBoard[data-team-work-board="true"]')
+  await board.focus()
+  await expect(board).toBeFocused()
+})
+
 test('Team Work drawer traps focus, restores its trigger, preserves query state, and follows history', async ({ page }) => {
   await openTeamWork(page)
   await page.evaluate(() => history.replaceState({}, '', `${location.pathname}?mode=keep`))
-  const alice = page.getByRole('button', { name: /API Alice/ })
-  await alice.click()
+  const aliceDetails = page.locator('.teamWorkPeopleStrip .teamWorkPersonDetails[aria-label="View details for API Alice"]')
+  await aliceDetails.click()
   let drawer = page.getByRole('dialog', { name: 'API Alice' })
   const close = drawer.getByRole('button', { name: 'Close current holder' })
   await expect(close).toBeFocused()
@@ -533,14 +643,14 @@ test('Team Work drawer traps focus, restores its trigger, preserves query state,
   await expect(close).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(drawer).toHaveCount(0)
-  await expect(alice).toBeFocused()
+  await expect(aliceDetails).toBeFocused()
   await expect(page).toHaveURL(/mode=keep/)
   await expect(page).not.toHaveURL(/holder=/)
 
-  await alice.click()
+  await aliceDetails.click()
   await page.locator('.teamWorkDrawerBackdrop').click({ position: { x: 5, y: 5 } })
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  await alice.click()
+  await aliceDetails.click()
   await page.getByRole('dialog').getByRole('button', { name: 'Close current holder' }).click()
   await page.goBack()
   await expect(page.getByRole('dialog', { name: 'API Alice' })).toBeVisible()
@@ -588,7 +698,7 @@ test('Team Work scopes deterministic modern-discipline affinity by viewer, proje
   await expect(page.getByRole('heading', { name: 'Team Work', exact: true })).toBeVisible()
   const names = await page.locator('.teamWorkPeopleStrip .teamWorkPerson strong').allTextContents()
   expect(names.slice(0, 3)).toEqual([`${me.displayName} (you)`, 'API Dana', 'API Alice'])
-  await page.getByRole('button', { name: /API Alice/ }).click()
+  await page.locator('.teamWorkPerson').filter({ hasText: 'API Alice' }).click()
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('aerolink-teamwork-affinity') || '{}'))
   expect(stored.viewers[me.id][projectId][fixture.people[0].userId]).toBe(3)
 })
@@ -614,7 +724,7 @@ test('Team Work retains a newly selected affinity when its scoped map is already
 
   await page.getByRole('link', { name: 'Team Work', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Team Work', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: /API Bob/ }).click()
+  await page.locator('.teamWorkPerson').filter({ hasText: 'API Bob' }).click()
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('aerolink-teamwork-affinity') || '{}'))
   const scoped = stored.viewers[me.id][projectId]
   expect(Object.keys(scoped)).toHaveLength(64)
@@ -752,10 +862,10 @@ test('Team Work names a known raiser without exposing their account handle', asy
   await expect(card).not.toContainText('systems.author')
 
   await page.getByRole('button', { name: 'Current holder', exact: true }).click()
-  const alice = page.getByRole('button', { name: 'API Alice', exact: true })
+  const alice = page.locator('.teamWorkPerson').filter({ hasText: 'API Alice' })
   await expect(alice).toBeVisible()
   await expect(alice).not.toContainText('alice')
-  await alice.click()
+  await page.locator('.teamWorkPeopleStrip .teamWorkPersonDetails[aria-label="View details for API Alice"]').click()
   const drawer = page.getByRole('dialog', { name: 'API Alice' })
   await expect(drawer).toBeVisible()
   await expect(drawer.getByText('alice', { exact: true })).toHaveCount(0)

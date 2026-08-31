@@ -33,10 +33,9 @@ export function demoPerson(userName: string, fallbackName?: string, fallbackRole
   const normalized = userName.trim().toLowerCase();
   const exact = people[normalized];
   if (exact) return exact;
-  if (normalized.startsWith("systems.lead")) return people["systems.lead"];
-  if (normalized.startsWith("verification.engineer")) return people["verification.engineer"];
-  if (normalized.startsWith("engineering.manager")) return people["engineering.manager"];
-  if (normalized.startsWith("configuration.specialist")) return people["cm.fms"];
+  // Only the explicit, trusted showcase identities above may contribute a portrait or role. A username
+  // prefix is not identity evidence: generated, renamed, or real accounts must retain their API-provided
+  // display name and use the initials fallback rather than inheriting somebody else's likeness or title.
   if (!fallbackName) return undefined;
   return { name: fallbackName, role: fallbackRole, portrait: "" };
 }

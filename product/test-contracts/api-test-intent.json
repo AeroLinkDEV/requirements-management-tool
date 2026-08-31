@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 708,
-    "cases": 789,
+    "tests": 709,
+    "cases": 790,
     "classes": 116,
-    "hostedTests": 679,
-    "hostedCases": 746,
+    "hostedTests": 680,
+    "hostedCases": 747,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 7,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 421,
-      "cases": 473,
+      "tests": 422,
+      "cases": 474,
       "unknownCases": 0,
       "classes": 95
     },
@@ -9628,8 +9628,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 281,
-        "end": 309
+        "start": 383,
+        "end": 411
       }
     },
     {
@@ -9645,8 +9645,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 55,
-        "end": 234
+        "start": 56,
+        "end": 265
       }
     },
     {
@@ -9662,8 +9662,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 30,
-        "end": 53
+        "start": 31,
+        "end": 54
+      }
+    },
+    {
+      "cls": "TeamWorkProjectionApiTests",
+      "test": "Project_projection_labels_a_valid_interface_downstream_assessment",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 267,
+        "end": 336
       }
     },
     {
@@ -9680,8 +9698,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 311,
-        "end": 340
+        "start": 413,
+        "end": 442
       }
     },
     {
@@ -9694,8 +9712,8 @@
       "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 236,
-        "end": 279
+        "start": 338,
+        "end": 381
       }
     },
     {
