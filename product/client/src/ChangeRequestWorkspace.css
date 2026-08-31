@@ -214,24 +214,27 @@
   outline-offset: 2px;
 }
 
-button.requirementView.artifactReferenceCard {
+.requirementView.artifactReferenceCard {
   display: block;
   width: 100%;
   background: white;
   color: inherit;
   text-align: left;
   cursor: pointer;
+  text-decoration: none;
 }
 
-button.requirementView.artifactReferenceCard:hover,
-button.requirementView.artifactReferenceCard:focus-visible {
+.requirementView.artifactReferenceCard:hover,
+.requirementView.artifactReferenceCard:focus-visible {
   border-color: #5b8fc2;
   box-shadow: 0 0 0 3px #3b75cd1f;
 }
 
 .upstreamReferences { margin: 10px 0; color: #52677c; font-size: 13px; }
 .artifactReferenceCloud { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
-.artifactReferenceCloud button { border: 1px solid #b8cedf; border-radius: 999px; background: #f1f7fb; color: #245d86; padding: 5px 9px; font-weight: 750; }
+.artifactReferenceCloud .exactArtifactLink { border: 1px solid #b8cedf; border-radius: 999px; background: #f1f7fb; color: #245d86; padding: 5px 9px; font-weight: 750; text-decoration: none; }
+.artifactReferenceCloud .exactArtifactLink:hover,
+.artifactReferenceCloud .exactArtifactLink:focus-visible { border-color: #5b8fc2; background: #e6f2fa; }
 .artifactReferenceCloud i { color: #8a5d20; font-style: normal; }
 
 .requirementView > div,

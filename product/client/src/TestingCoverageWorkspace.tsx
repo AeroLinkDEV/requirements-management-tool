@@ -12,6 +12,8 @@ import type { TestDiscipline } from './TestResultsWorkspace'
 import { LadderCapability, ladderAllows } from './projectLadder'
 import type { ProjectLadderProjection } from './projectLadder'
 import { isVerificationProcedureKind, testChangeRequestAcronym, testChangeReviewWorkflowSubject, verificationArtifactApiRoot, verificationArtifactChangeSegment, verificationArtifactNoun, verificationArtifactWord } from './presentation'
+import ExactArtifactLink from './ExactArtifactLink'
+import type { ExactTraceArtifact } from './routing'
 import './DownstreamAssessmentQueue.css'
 import './HistoryExplorer.css'
 import './TestingCoverageWorkspace.css'
@@ -25,7 +27,7 @@ type CoverageItem = {
   covered: boolean
   verified: boolean
   disposition: 'Covered' | 'Suspect' | 'Uncovered'
-  coveredBy: { artifactId: string; procedureId?: string; revisionId: string; displayNumber: string; title: string; state: string; coverageState: 'Confirmed' | 'Suspect' }[]
+  coveredBy: { artifactId: string; procedureId?: string; revisionId: string; displayNumber: string; title: string; state: string; level?: string; artifactKind?: string; coverageState: 'Confirmed' | 'Suspect' }[]
 }
 type Coverage = { total: number; covered: number; suspect: number; verified: number; uncovered: number; items: CoverageItem[] }
 type ChangeRequestCover = { id: string; number: string; title: string; originating: boolean }
@@ -87,7 +89,7 @@ type ImpactItem = {
   assignedEngineerId?: string
   outcome?: string
   resolutionRationale: string
-  resolvedArtifact?: { id:string; revisionId:string; displayNumber:string; title:string; state:string }
+  resolvedArtifact?: { id:string; revisionId:string; displayNumber:string; title:string; state:string; level?:string }
   holdsRelease?: boolean
   artifactChangeAction?: string
   procedureChangeAction?: string
@@ -152,7 +154,7 @@ const testAssessmentStatus = (request: TestChangeRequest, discipline: TestDiscip
  * Until the target build materializes its requirements there is no revision to look coverage up against;
  * that is stated rather than rendered as "no procedure", which would read as a finding.
  */
-function ExistingCoverage({ item, coverage, artifactWord }: { item: ImpactItem; coverage?: Coverage; artifactWord: string }) {
+function ExistingCoverage({ item, coverage, artifactWord, traceArtifactHref }: { item: ImpactItem; coverage?: Coverage; artifactWord: string; traceArtifactHref?: (node: ExactTraceArtifact) => string | undefined }) {
   if (!item.requirementRevisionId)
     return <span className="existingCoverage pending">Existing coverage is known once this build materializes its requirements.</span>
   const row = coverage?.items.find(x => x.revisionId === item.requirementRevisionId)
@@ -160,9 +162,14 @@ function ExistingCoverage({ item, coverage, artifactWord }: { item: ImpactItem; 
     return <span className="existingCoverage none">No approved {artifactWord} covers this requirement yet.</span>
   const suspect = row.coveredBy.filter(x => x.coverageState === 'Suspect')
   const confirmed = row.coveredBy.filter(x => x.coverageState === 'Confirmed')
+  const link = (artifact: typeof row.coveredBy[number]) => {
+    const kind = artifact.artifactKind === 'Case' ? 'TestCase' : artifact.artifactKind === 'Procedure' ? 'TestProcedure' : undefined
+    const href = kind ? traceArtifactHref?.({ id: artifact.artifactId, kind, revisionId: artifact.revisionId, displayNumber: artifact.displayNumber, level: artifact.level }) : undefined
+    return <ExactArtifactLink key={`${artifact.artifactId}-${artifact.revisionId}`} href={href}>{artifact.displayNumber}</ExactArtifactLink>
+  }
   return <span className={`existingCoverage ${suspect.length ? 'suspect' : 'covered'}`}>
-    {confirmed.length > 0 && <>Covered by {confirmed.map(x => `${x.displayNumber} (${x.state})`).join(', ')}. </>}
-    {suspect.length > 0 && <>{suspect.map(x => x.displayNumber).join(', ')} {suspect.length === 1 ? 'was' : 'were'} written against earlier wording and {suspect.length === 1 ? 'does' : 'do'} not count as coverage until reconfirmed or replaced.</>}
+    {confirmed.length > 0 && <>Covered by {confirmed.map((x, index) => <span key={`${x.artifactId}-${x.revisionId}`}>{index > 0 && ', '}{link(x)} ({x.state})</span>)}. </>}
+    {suspect.length > 0 && <>{suspect.map((x, index) => <span key={`${x.artifactId}-${x.revisionId}`}>{index > 0 && ', '}{link(x)}</span>)} {suspect.length === 1 ? 'was' : 'were'} written against earlier wording and {suspect.length === 1 ? 'does' : 'do'} not count as coverage until reconfirmed or replaced.</>}
   </span>
 }
 
@@ -178,7 +185,7 @@ function ExistingCoverage({ item, coverage, artifactWord }: { item: ImpactItem; 
  * change request is approved, so nothing goes unnoticed; an engineer can also raise one deliberately when a
  * set of changes is best tested together.
  */
-export default function TestingCoverageWorkspace({ api, projectId, releaseId, releases, discipline, buildName, readOnly, programId, user, initialReviewId, initialRegisterSelectionId, onRegisterSelectionChange, onBack, onOpenRequirementRevision, onRaiseTestChangeRequest, onOpenTestChangeRequest, registerHref, onArtifactKeyChange, ladder, artifactKind }: {
+export default function TestingCoverageWorkspace({ api, projectId, releaseId, releases, discipline, buildName, readOnly, programId, user, initialReviewId, initialRegisterSelectionId, onRegisterSelectionChange, onBack, onOpenRequirementRevision, requirementRevisionHref, traceArtifactHref, onRaiseTestChangeRequest, onOpenTestChangeRequest, registerHref, onArtifactKeyChange, ladder, artifactKind }: {
   api: string
   projectId: string
   releaseId: string
@@ -193,6 +200,8 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
   onRegisterSelectionChange?: (id?: string) => void
   onBack?: () => void
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
+  requirementRevisionHref?: (requirement: { id: string; revisionId: string; level: string }) => string | undefined
+  traceArtifactHref?: (node: ExactTraceArtifact) => string | undefined
   /// Opens the authoring page. Raising a package is a page, exactly as raising a change request is.
   onRaiseTestChangeRequest: () => void
   onOpenTestChangeRequest: (id: string) => void
@@ -749,6 +758,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
         artifactKind={artifactKind}
         onOpen={onOpenTestChangeRequest}
         registerHref={registerHref}
+        artifactHref={traceArtifactHref}
         selectedId={initialRegisterSelectionId}
         onSelect={onRegisterSelectionChange}
         embedded
@@ -849,13 +859,13 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
                         A verification engineer deciding whether a procedure must be written is answering a
                         question about the library as it stands, and asking them to hold that in their head —
                         or to leave and look it up — is how "a procedure probably exists" becomes a decision. */}
-                    {item.trigger !== 'ProcedureOrphaned' && <ExistingCoverage item={item} coverage={coverage} artifactWord={currentArtifactWord} />}
+                    {item.trigger !== 'ProcedureOrphaned' && <ExistingCoverage item={item} coverage={coverage} artifactWord={currentArtifactWord} traceArtifactHref={traceArtifactHref} />}
                     <small>
                       Author declared {item.declaredVerificationMethod || 'no method'}
                       {item.assignedEngineerId ? <> · <PersonName userName={item.assignedEngineerId} /></> : ''}
                       {item.resolutionRationale ? ` · ${item.resolutionRationale}` : ''}
                     </small>
-                    {item.resolvedArtifact&&<div className="resolvedProcedure"><b>{item.resolvedArtifact.displayNumber}</b><span>{item.resolvedArtifact.title} · {item.resolvedArtifact.state}</span></div>}
+                    {item.resolvedArtifact&&<div className="resolvedProcedure"><ExactArtifactLink href={traceArtifactHref?.({ id:item.resolvedArtifact.id, kind:'TestProcedure', revisionId:item.resolvedArtifact.revisionId, displayNumber:item.resolvedArtifact.displayNumber, level:item.resolvedArtifact.level })}>{item.resolvedArtifact.displayNumber}</ExactArtifactLink><span>{item.resolvedArtifact.title} · {item.resolvedArtifact.state}</span></div>}
                     {request.capabilities.canDecide && item.state !== 'Resolved' && (
                       <button type="button" className="quiet" disabled={busy} onClick={() => {
                         setOutcome(item.trigger === 'ProcedureOrphaned' ? 'ProcedureRetired' : 'ProcedureCoverageConfirmed')
@@ -1059,6 +1069,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
           onClose={() => setAuthoring('')}
           onChanged={() => void load()}
           onOpenRequirementRevision={onOpenRequirementRevision}
+          requirementRevisionHref={requirementRevisionHref}
           onOpenTestChangeRequest={setAuthoring}
           supersededBy={authoringSuccessor ? {
             id: authoringSuccessor.id,

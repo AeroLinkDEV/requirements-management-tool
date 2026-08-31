@@ -316,7 +316,9 @@ public static class ProblemReportEndpoints
         var links = await db.ProblemReportLinks.AsNoTracking().Where(x => x.ArtifactType == canonicalType && x.ArtifactId == artifactId).ToListAsync(ct);
         var ids = links.Select(x => x.ProblemReportId).Distinct().ToList(); var reports = await db.ProblemReports.AsNoTracking().Where(x => ids.Contains(x.Id)).ToListAsync(ct);
         var permitted = new List<ProblemReport>(); foreach (var report in reports) if (await http.HasProjectAccessAsync(db, report.ProjectId, ct)) permitted.Add(report);
-        return Results.Ok(permitted.Select(x => Summary(x)));
+        var snapshotIds = await CurrentSnapshotIdsAsync(permitted, db, ct);
+        return Results.Ok(permitted.Select(x => Summary(x,
+            snapshotId: snapshotIds.TryGetValue(x.Id, out var snapshotId) ? snapshotId : null)));
     }
 
     private static async Task<IResult> DetailAsync(Guid id, HttpContext http, AeroLinkDbContext db,
@@ -1057,10 +1059,54 @@ public static class ProblemReportEndpoints
     };
 
     private static object Summary(ProblemReport x, bool waived = false,
-        IReadOnlyDictionary<string, string>? currentNames = null)
+        IReadOnlyDictionary<string, string>? currentNames = null, Guid? snapshotId = null)
     {
         var liveNames = currentNames ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        return new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), category = CategoryResponse(x), x.Classification, x.ReportedBy, reportedByDisplayName = liveNames.Current(x.ReportedBy), x.ResponsibleEngineerId, responsibleEngineerDisplayName = liveNames.Current(x.ResponsibleEngineerId), x.TargetReleaseId, x.IsReleaseBlocker, waived, x.UpdatedAt, x.Version };
+        return new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, snapshotId, x.Title, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), category = CategoryResponse(x), x.Classification, x.ReportedBy, reportedByDisplayName = liveNames.Current(x.ReportedBy), x.ResponsibleEngineerId, responsibleEngineerDisplayName = liveNames.Current(x.ResponsibleEngineerId), x.TargetReleaseId, x.IsReleaseBlocker, waived, x.UpdatedAt, x.Version };
+    }
+
+    /// <summary>
+    /// Returns only immutable snapshots that can be served by the strict historical route. A Problem Report
+    /// display number is not enough to select a row: multiple lifecycle events may share one aggregate
+    /// revision, and a malformed or legacy row must never be advertised as an exact link.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<Guid, Guid>> CurrentSnapshotIdsAsync(
+        IEnumerable<ProblemReport> reports, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var reportRows = reports.ToList();
+        if (reportRows.Count == 0) return new Dictionary<Guid, Guid>();
+        var reportIds = reportRows.Select(report => report.Id).ToArray();
+        var rows = await db.ProblemReportRevisions.AsNoTracking()
+            .Where(row => reportIds.Contains(row.ProblemReportId))
+            .Select(row => new
+            {
+                row.Id,
+                row.ProblemReportId,
+                row.Revision,
+                row.SnapshotJson,
+                row.SnapshotHash,
+                row.SnapshotSchemaVersion,
+                row.OccurredAt,
+            }).ToListAsync(ct);
+        var exact = new Dictionary<Guid, Guid>();
+        foreach (var report in reportRows)
+        {
+            foreach (var row in rows.Where(row => row.ProblemReportId == report.Id && row.Revision == report.Revision)
+                         .OrderByDescending(row => row.OccurredAt).ThenByDescending(row => row.Id))
+            {
+                if (string.IsNullOrWhiteSpace(row.SnapshotJson)
+                    || row.SnapshotSchemaVersion is < 1 or > ProblemReportEvidenceContract.SchemaVersion
+                    || !string.Equals(ProblemReportEvidenceContract.Hash(row.SnapshotJson), row.SnapshotHash,
+                        StringComparison.OrdinalIgnoreCase)) continue;
+                var parsed = ProblemReportOutputGenerator.ReadStoredSnapshot(row.SnapshotJson, row.SnapshotSchemaVersion);
+                if (parsed is null || parsed.Value.Snapshot.Id != report.Id
+                    || parsed.Value.Snapshot.ProjectId != report.ProjectId
+                    || parsed.Value.Snapshot.Revision != report.Revision) continue;
+                exact[report.Id] = row.Id;
+                break;
+            }
+        }
+        return exact;
     }
     private static async Task<object> DetailResponseAsync(ProblemReport x, IEnumerable<ProblemReportLinkView> links,
         IEnumerable<ProblemReportRevision> revisions, AeroLinkDbContext db, CancellationToken ct,
@@ -1321,11 +1367,13 @@ public static class ProblemReportEndpoints
         // it has to be named the same way. One lookup for the set, which is already bounded by the links.
         var relatedNames = await DirectoryIdentityProjection.DisplayNamesAsync(db,
             related.Select(item => item.ReportedBy), ct);
+        var snapshotIds = await CurrentSnapshotIdsAsync(related, db, ct);
         return related
             .Select(item => (object)new
             {
                 item.Id,
                 item.DisplayNumber,
+                snapshotId = snapshotIds.TryGetValue(item.Id, out var exactSnapshotId) ? exactSnapshotId : (Guid?)null,
                 item.Title,
                 state = ProblemReportTransitionPolicy.Canonical(item.State).ToString(),
                 severity = item.Severity.ToString(),

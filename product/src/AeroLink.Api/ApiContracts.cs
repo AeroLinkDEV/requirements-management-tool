@@ -123,4 +123,4 @@ record ForceUnlockEditSessionRequest(string Reason);
 record CreateIntegrityCheckpointRequest(Guid ProjectId);
 record PerformanceSample(string Name,long TargetMs,long P95Ms,bool Passed,List<long> Timings);
 record SearchResultDto(Guid Id,string Kind,string Identifier,string Title,string State,string Discipline,DateTimeOffset? UpdatedAt,string? Level = null);
-record RelatedArtifactDto(string Kind,Guid Id,string Identifier,string Title);
+record RelatedArtifactDto(string Kind,Guid Id,string Identifier,string Title,Guid? RevisionId=null);

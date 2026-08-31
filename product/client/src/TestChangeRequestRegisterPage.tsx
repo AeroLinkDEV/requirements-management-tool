@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import ChangeRequestRegister, { type RegisterRow } from './ChangeRequestRegister'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import { isVerificationProcedureKind, testChangeRequestAcronym, verificationArtifactNoun } from './presentation'
+import type { ExactTraceArtifact } from './routing'
 import './HistoryExplorer.css'
 
 /**
@@ -55,7 +56,7 @@ const disciplineLabel = (discipline: TestDiscipline) =>
   discipline === 'System' ? 'System' : discipline === 'HighLevelSoftware' ? 'HLR' : 'LLR'
 
 export default function TestChangeRequestRegisterPage({
-  api, projectId, releases, activeReleaseId, discipline, artifactKind, registerHref, selectedId, onSelect, onBack, onOpen, onCreate, embedded = false,
+  api, projectId, releases, activeReleaseId, discipline, artifactKind, registerHref, selectedId, onSelect, onBack, onOpen, onCreate, artifactHref, embedded = false,
 }: {
   api: string
   projectId: string
@@ -69,6 +70,7 @@ export default function TestChangeRequestRegisterPage({
   onBack?: () => void
   onOpen: (id: string) => void
   onCreate?: () => void
+  artifactHref?: (node: ExactTraceArtifact) => string | undefined
   embedded?: boolean
 }) {
   const [query, setQuery] = useState('')
@@ -129,7 +131,7 @@ export default function TestChangeRequestRegisterPage({
     query={query} onQueryChange={value => { setQuery(value); setPage(1) }}
     stateIntent={stateIntent} onStateIntentChange={value => { setStateIntent(value); setPage(1) }}
     stateOptions={stateOptions}
-    onOpen={onOpen} onSelect={onSelect} selectedId={selectedId} registerHref={registerHref} inspector={{api,kind:'TestChangeRequest',projectId,releaseId:activeReleaseId,registerType:artifactKind ? (isVerificationProcedureKind(artifactKind) ? 'Procedure' : 'Case') : undefined}} onLoadRevisions={loadRevisions} />
+    onOpen={onOpen} onSelect={onSelect} selectedId={selectedId} registerHref={registerHref} inspector={{api,kind:'TestChangeRequest',projectId,releaseId:activeReleaseId,registerType:artifactKind ? (isVerificationProcedureKind(artifactKind) ? 'Procedure' : 'Case') : undefined,artifactHref}} onLoadRevisions={loadRevisions} />
 
   if (embedded) return register
 
