@@ -86,7 +86,7 @@ body:has(main.lifecyclePage) { min-width: 0; }
 .completeThreadStep article > .exactArtifactLink { width: 100%; margin: 7px 0 5px; overflow: hidden; color: #17324d; font-size: 12px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
 .completeThreadStep article > .exactArtifactLink.completeThreadExactIdentifier { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
 .completeThreadStep article.selected { border-color: #49ad9f; box-shadow: 0 0 0 3px rgba(58,167,151,.12),0 10px 23px rgba(16,70,68,.12); }
-.completeThreadStep article > .completeThreadFocus { width: auto; min-width: 0; min-height: 0; height: auto; border: 0; background: transparent; padding: 0; color: #176e77; font-size: 11px; font-weight: 750; text-align: left; cursor: pointer; box-shadow: none; }
+.completeThreadStep article > .completeThreadFocus { width: auto; min-width: 0; min-height: 0; height: auto; border: 0; background: transparent; padding: 0; color: #176e77; font-size: 12px; font-weight: 750; text-align: left; cursor: pointer; box-shadow: none; }
 .completeThreadFocus:hover { text-decoration: underline; }
 .completeThreadStep span { display: -webkit-box; overflow: hidden; color: #657284; font-size: 12px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 4; word-break: break-word; }
 
