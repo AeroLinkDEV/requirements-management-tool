@@ -720,7 +720,7 @@ public static class RequirementsEndpoints
         // writes the figure into the paragraph as they are drafting it. Uploading here stores and hashes the file
         // against the project, and the authored content then references it by identifier. The file is never
         // duplicated into the record, so one diagram used in five requirements is stored once and stays one thing.
-        app.MapPost("/api/content/images",async(HttpRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,EvidenceFileStore store,ControlledAttachmentStorageCoordinator coordinator,ILoggerFactory loggerFactory,CancellationToken ct)=>
+        app.MapPost("/api/content/images",async(HttpRequest request,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,ControlledAttachmentStorageCoordinator coordinator,ILoggerFactory loggerFactory,CancellationToken ct)=>
         {
             // Project and lease identity must be available outside the multipart body. The body can be up to
             // 12 MiB, so parsing it before authorization would let a caller with a made-up GUID make the server
@@ -730,8 +730,9 @@ public static class RequirementsEndpoints
                 return Results.BadRequest(new{error="A projectId query parameter is required."});
             var hasEditSession=Guid.TryParse(request.Query["editSessionId"],out var editSessionId);
             if(!request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data."});
-            if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
             var actor=http.UserAccount();
+            if(!await coordinator.HasCurrentUploadAuthorityAsync(projectId,actor.UserName,hasEditSession,
+                    DateTimeOffset.UtcNow,ct))return Results.Forbid();
             // A parseable session identifier is not an authorization token. Establish the exact live,
             // exclusive Problem Report lease and its owner before reading, hashing, staging, or locking
             // anything supplied by the caller. The serializable re-check below still closes the commit-time
@@ -744,8 +745,6 @@ public static class RequirementsEndpoints
                     ||requestedSession.State!=EditSessionState.Active||requestedSession.ExpiresAt<=DateTimeOffset.UtcNow
                     ||requestedSession.UserName!=actor.UserName)return Results.Forbid();
             }
-            else if(!await http.HasProjectRoleAsync(db,identity,projectId,ct,
-                        ProgramRole.Engineer,ProgramRole.TestEngineer,ProgramRole.ConfigurationManager,ProgramRole.ProgramManager))return Results.Forbid();
             var form=await request.ReadFormAsync(ct);var file=form.Files.GetFile("file");
             // Do not let a body-supplied identity replace the value already authorized above. Reject an
             // inconsistent legacy field so callers cannot accidentally associate the bytes with another Project.
@@ -794,6 +793,8 @@ public static class RequirementsEndpoints
                 // one serializable point. A concurrent discard/expiry cannot authorize bytes after the checkout
                 // closed, and a concurrent uploader cannot make either cumulative total exceed its bound.
                 await using var transaction=await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable,ct);
+                if(!await coordinator.HasCurrentUploadAuthorityAsync(projectId,actor.UserName,hasEditSession,
+                        DateTimeOffset.UtcNow,ct))return Results.Forbid();
                 // A project row is the shared quota mutex. The no-op update gives PostgreSQL a row lock and
                 // forces SQLite to acquire its writer lock before either request reads the cumulative budget.
                 await db.Projects.Where(project=>project.Id==projectId)
@@ -871,6 +872,15 @@ public static class RequirementsEndpoints
                 // Promotion is outside the database transaction. Re-acquire the checkout lock at commit time,
                 // so discard/check-in cannot win while the file is being moved.
                 await using var commitTransaction=await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable,ct);
+                if(!await coordinator.HasCurrentUploadAuthorityAsync(projectId,actor.UserName,hasEditSession,
+                        DateTimeOffset.UtcNow,ct))
+                {
+                    await commitTransaction.RollbackAsync(ct);
+                    await coordinator.RollBackAsync(storageOperation,
+                        "The image author no longer has authority to commit content in this Project.",
+                        DateTimeOffset.UtcNow,CancellationToken.None);
+                    return Results.Forbid();
+                }
                 if(hasEditSession)
                 {
                     editSession=await ArtifactEditSessionLock.AcquireAsync(db,editSessionId,ct);

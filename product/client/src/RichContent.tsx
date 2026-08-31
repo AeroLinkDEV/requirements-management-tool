@@ -193,7 +193,7 @@ export function RichContentEditor({ api, projectId, editSessionId, value, label,
             continue;
           }
           const stored = (await response.json()) as { id: string };
-          storedBlocks.push({ type: "image", attachmentId: stored.id, alt: file.name, caption: "", widthPercent: 100 });
+          storedBlocks.push({ type: "image", attachmentId: stored.id, alt: documentLike ? "" : file.name, caption: "", widthPercent: 100 });
         } catch {
           setError("The image could not be stored. Check the connection and try again.");
         }
@@ -319,7 +319,10 @@ export function RichContentEditor({ api, projectId, editSessionId, value, label,
                   : undefined
               : undefined}
             style={documentLike && block.type === "image"
-              ? { "--rich-image-width": `${Math.min(100, Math.max(25, block.widthPercent ?? 100))}%` } as CSSProperties
+              ? {
+                  "--rich-image-width": `${Math.min(100, Math.max(25, block.widthPercent ?? 100))}%`,
+                  "--rich-image-span": Math.round(Math.min(100, Math.max(25, block.widthPercent ?? 100)) / 5),
+                } as CSSProperties
               : undefined}
           >
             <div className="richBlockBar">
@@ -392,14 +395,14 @@ export function RichContentEditor({ api, projectId, editSessionId, value, label,
                   api={api}
                   attachmentId={block.attachmentId}
                   alt={block.alt || "Stored image"}
-                  style={{ width: `${Math.min(100, Math.max(25, block.widthPercent ?? 100))}%` }}
                 />
                 <div className="richPair">
                   <label>
-                    Alternative text
+                    Alternative text {documentLike ? "(required)" : ""}
                     <input
                       value={block.alt ?? ""}
                       disabled={disabled}
+                      required={documentLike}
                       placeholder="What the figure shows, for a reader who cannot see it"
                       onChange={(event) => replace(index, { ...block, alt: event.target.value })}
                     />

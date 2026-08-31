@@ -150,6 +150,35 @@ public sealed class ProblemReportCheckoutApiTests
     }
 
     [Fact]
+    public async Task Check_in_derives_plain_problem_report_narratives_from_the_typed_record()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRCANON");
+        var id = await RaiseAsync(client, projectId, releaseId);
+        const string canonical = "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Canonical controlled narrative\"}]}";
+
+        await EditUnderCheckoutAsync(client, id, draft =>
+        {
+            draft["problem"] = "Forged plain problem";
+            draft["problemRich"] = canonical;
+            draft["analysis"] = "Forged plain analysis";
+            draft["analysisRich"] = canonical;
+        });
+
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
+        Assert.Equal("Canonical controlled narrative", detail.GetProperty("problem").GetString());
+        Assert.Equal("Canonical controlled narrative", detail.GetProperty("analysis").GetString());
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var revision = await db.ProblemReportRevisions.AsNoTracking()
+            .SingleAsync(x => x.ProblemReportId == id && x.EventType == "DetailsCheckedIn");
+        Assert.Contains("Canonical controlled narrative", revision.SnapshotJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("Forged plain", revision.SnapshotJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Discarding_a_checkout_restores_the_last_checked_in_content()
     {
         using var factory = new AeroLinkApiFactory();

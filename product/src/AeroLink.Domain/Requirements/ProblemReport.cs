@@ -643,19 +643,24 @@ public sealed class ProblemReport
     private static string CanonicalRich(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return "";
-        return AeroLink.Domain.Content.RichContent.Canonicalize(value);
+        var canonical = AeroLink.Domain.Content.RichContent.Canonicalize(value);
+        if (AeroLink.Domain.Content.RichContent.Read(canonical).Any(block =>
+                block.Kind == AeroLink.Domain.Content.RichBlockKind.Image
+                && string.IsNullOrWhiteSpace(block.Alt)))
+            throw new DomainException("Every Problem Report figure needs descriptive alternative text.");
+        return canonical;
     }
 
     private static string ProjectionOrPlain(string? canonicalRich, string? plain)
     {
-        var projection = string.IsNullOrWhiteSpace(canonicalRich)
-            ? ""
-            : AeroLink.Domain.Content.RichContent.ToPlainText(canonicalRich);
-        // Keep an explicitly supplied legacy/plain projection stable. The controlled editor sends the
-        // projection derived from its typed blocks, while older callers may intentionally carry a plain
-        // summary alongside richer authored detail. Rich content fills a missing projection but does not
-        // silently rewrite an existing historical/plain value during an otherwise unrelated edit.
-        return string.IsNullOrWhiteSpace(plain) ? projection : plain.Trim();
+        var blocks = AeroLink.Domain.Content.RichContent.Read(canonicalRich);
+        // Plain-only and legacy clients remain valid, including the old spelling {"blocks":[]} alongside
+        // a populated plain field. Once any typed block exists, however, it is the authored record and the
+        // server derives the companion projection itself. A raw client must never make search, generated
+        // output and an approver's rich reader describe different controlled facts in one signed revision.
+        return blocks.Count == 0
+            ? plain?.Trim() ?? ""
+            : AeroLink.Domain.Content.RichContent.ToPlainText(blocks);
     }
     private static string Required(string? value, string error) => string.IsNullOrWhiteSpace(value) ? throw new DomainException(error) : value.Trim();
 }

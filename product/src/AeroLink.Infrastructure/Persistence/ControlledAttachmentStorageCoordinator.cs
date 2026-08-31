@@ -1,4 +1,5 @@
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -11,6 +12,39 @@ namespace AeroLink.Infrastructure.Persistence;
 public sealed class ControlledAttachmentStorageCoordinator(AeroLinkDbContext db, EvidenceFileStore files)
 {
     public static readonly TimeSpan PendingOperationLease = TimeSpan.FromMinutes(30);
+    private static readonly ProgramRole[] InlineImageAuthorRoles =
+        [ProgramRole.Engineer, ProgramRole.TestEngineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager];
+
+    /// <summary>
+    /// Re-evaluates the actor against current database authority rather than the Program list captured when
+    /// the request was authenticated. Long uploads cross a meaningful authorization window, and this helper
+    /// is shared by both live commit transactions and crash recovery so neither can adopt bytes after the
+    /// author left the Project or lost the role required for an unclaimed recovery image.
+    /// </summary>
+    public async Task<bool> HasCurrentUploadAuthorityAsync(Guid projectId, string userName,
+        bool hasEditSession, DateTimeOffset now, CancellationToken ct)
+    {
+        var actor = await db.UserAccounts.AsNoTracking()
+            .Where(x => x.UserName == userName && x.State == AccountState.Active)
+            .Select(x => new { x.Id, x.UserName })
+            .SingleOrDefaultAsync(ct);
+        if (actor is null) return false;
+        if (actor.UserName == IdentityService.SystemAdministratorUserName) return true;
+
+        var programId = await db.Projects.AsNoTracking().Where(x => x.Id == projectId)
+            .Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
+        if (programId is null) return false;
+        if (hasEditSession)
+            return await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == actor.Id
+                && x.ProgramId == programId.Value && x.EndedAt == null, ct);
+
+        var resolver = new ProjectAuthorityResolver(db);
+        foreach (var role in InlineImageAuthorRoles)
+            if (await resolver.IsSatisfiedAsync(actor.Id, programId.Value,
+                    ProjectAuthorityRequirement.LegacyRoleDemand(role), now, ct))
+                return true;
+        return false;
+    }
 
     public async Task RollBackAsync(ControlledAttachmentStorageOperation operation, string detail,
         DateTimeOffset now, CancellationToken ct)
@@ -55,6 +89,15 @@ public sealed class ControlledAttachmentStorageCoordinator(AeroLinkDbContext db,
         }
 
         await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+        if (!await HasCurrentUploadAuthorityAsync(operation.ProjectId, operation.Actor,
+                operation.EditSessionId is not null, now, ct))
+        {
+            Quarantine(operation);
+            operation.RollBack("The image author no longer has authority to commit content in this Project.", now);
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return null;
+        }
         if (operation.EditSessionId is Guid sessionId)
         {
             var session = await ArtifactEditSessionLock.AcquireAsync(db, sessionId, ct);
