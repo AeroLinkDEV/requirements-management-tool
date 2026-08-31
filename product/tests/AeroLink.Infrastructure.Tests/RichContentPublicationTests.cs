@@ -348,6 +348,29 @@ public sealed class RichContentPublicationTests
     }
 
     [Fact]
+    public void Pdf_paginates_long_narrative_after_an_image_without_writing_below_the_page()
+    {
+        var uri = "data:image/png;base64," + Convert.ToBase64String(Png());
+        var lines = Enumerable.Range(1, 30).Select(index => $"After-image line {index:D2}.").ToArray();
+        var rich = "{\"blocks\":["
+            + $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"Long narrative figure\",\"widthPercent\":100}},"
+            + $"{{\"type\":\"paragraph\",\"text\":{System.Text.Json.JsonSerializer.Serialize(string.Join("\n", lines))}}}"
+            + "]}";
+
+        var output = ProfessionalPublicationRenderer.Render(Publication(rich), "pdf", "inline-image-long-narrative");
+        var pdf = Encoding.ASCII.GetString(output.Content);
+        var placements = System.Text.RegularExpressions.Regex.Matches(
+            pdf,
+            @"1 0 0 1 66 (?<y>-?\d+) Tm \(After-image line (?<line>\d{2})\.\) Tj")
+            .Select(match => (Y: int.Parse(match.Groups["y"].Value), Line: match.Groups["line"].Value))
+            .ToArray();
+
+        Assert.Contains("INLINE IMAGE NARRATIVE - CONTINUED", pdf);
+        Assert.Equal(lines.Select((_, index) => (index + 1).ToString("D2")), placements.Select(item => item.Line));
+        Assert.All(placements, item => Assert.True(item.Y >= 52, $"Line {item.Line} was emitted below the printable page at y={item.Y}."));
+    }
+
+    [Fact]
     public void Pdf_keeps_image_rows_in_global_authored_order_with_surrounding_narrative()
     {
         var uri = "data:image/png;base64," + Convert.ToBase64String(Png());

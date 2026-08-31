@@ -513,7 +513,7 @@ public static class ProfessionalPublicationRenderer
                     FlushPage();
                     var packedRows = PackImageRows(row);
                     for (var rowIndex = 0; rowIndex < packedRows.Count; rowIndex++)
-                        pages.Add(PdfImagePage(new PdfImageRow(
+                        pages.AddRange(PdfImagePages(new PdfImageRow(
                             packedRows[rowIndex],
                             rowIndex == packedRows.Count - 1 ? below : []), p));
                     continue;
@@ -578,7 +578,7 @@ public static class ProfessionalPublicationRenderer
         }
     }
 
-    private static string PdfImagePage(PdfImageRow row, ProfessionalPublication p)
+    private static IReadOnlyList<string> PdfImagePages(PdfImageRow row, ProfessionalPublication p)
     {
         var placements = row.Placements;
         var widths = placements.Select(x => x.WidthPercent).ToList();
@@ -624,12 +624,25 @@ public static class ProfessionalPublicationRenderer
             x += item.width + gap;
         }
         var belowY = (int)Math.Max(52, geometry.Min(item => 680 - item.height) - 38);
-        foreach (var text in row.BelowText.SelectMany(value => Wrap(value, 105)))
+        var belowLines = row.BelowText.SelectMany(value => Wrap(value, 105)).ToList();
+        var visibleLineCount = belowY < 52 ? 0 : 1 + (belowY - 52) / 13;
+        foreach (var text in belowLines.Take(visibleLineCount))
         {
             Text(s, text, 66, belowY, 9, false, "25364D");
             belowY -= 13;
         }
-        return s.Append("ET").ToString();
+        var pages = new List<string> { s.Append("ET").ToString() };
+        var overflow = belowLines.Skip(visibleLineCount).ToList();
+        if (overflow.Count > 0)
+        {
+            var continuation = new List<PdfLine>
+            {
+                new("INLINE IMAGE NARRATIVE - CONTINUED", 10, true, "718096", 0, 8)
+            };
+            continuation.AddRange(overflow.Select(line => new PdfLine(line, 9, false, "25364D", 12, 4)));
+            pages.AddRange(Paginate(continuation, p, false));
+        }
+        return pages;
     }
     private static byte[] AssemblePdf(IReadOnlyList<string> streams,IReadOnlyList<(PublicationImage Image,byte[] Payload,string Filter)> images)
     {
