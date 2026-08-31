@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 709,
-    "cases": 790,
+    "tests": 724,
+    "cases": 808,
     "classes": 116,
-    "hostedTests": 680,
-    "hostedCases": 747,
+    "hostedTests": 695,
+    "hostedCases": 765,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 7,
@@ -21,26 +21,26 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 422,
-      "cases": 474,
+      "tests": 428,
+      "cases": 480,
       "unknownCases": 0,
       "classes": 95
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 153,
-      "cases": 164,
+      "tests": 156,
+      "cases": 170,
       "unknownCases": 0,
-      "classes": 55
+      "classes": 56
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 82,
-      "cases": 86,
+      "tests": 85,
+      "cases": 89,
       "unknownCases": 0,
-      "classes": 47
+      "classes": 48
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -53,10 +53,10 @@
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
       "level": "API or Infrastructure (must stay hosted)",
-      "tests": 14,
-      "cases": 14,
+      "tests": 17,
+      "cases": 17,
       "unknownCases": 0,
-      "classes": 8
+      "classes": 9
     },
     "startup-config": {
       "label": "Startup, hosting and configuration",
@@ -5501,8 +5501,25 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 185,
-        "end": 224
+        "start": 218,
+        "end": 257
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "A_non_member_cannot_download_current_or_frozen_problem_report_output",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 690,
+        "end": 705
       }
     },
     {
@@ -5518,8 +5535,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 314,
-        "end": 347
+        "start": 1124,
+        "end": 1157
       }
     },
     {
@@ -5535,8 +5552,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 353,
-        "end": 382
+        "start": 1163,
+        "end": 1192
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "A_tampered_persisted_snapshot_is_refused_by_both_output_formats",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 658,
+        "end": 688
       }
     },
     {
@@ -5552,8 +5587,62 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 104,
-        "end": 146
+        "start": 108,
+        "end": 150
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Check_in_derives_plain_problem_report_narratives_from_the_typed_record",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 152,
+        "end": 179
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Concurrent_inline_image_uploads_cannot_overrun_the_cumulative_project_budget",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 928,
+        "end": 973
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Current_and_frozen_problem_report_output_refuse_a_changed_inline_image_blob",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 523,
+        "end": 558
       }
     },
     {
@@ -5569,8 +5658,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 148,
-        "end": 183
+        "start": 181,
+        "end": 216
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Frozen_problem_report_output_never_resolves_an_inline_image_from_another_project",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 428,
+        "end": 458
       }
     },
     {
@@ -5586,8 +5693,97 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 226,
-        "end": 265
+        "start": 259,
+        "end": 298
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Inline_image_references_are_project_scoped_typed_and_withdrawal_aware",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 300,
+        "end": 426
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Inline_image_upload_enforces_an_attributable_per_actor_budget",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 824,
+        "end": 847
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Inline_image_upload_enforces_the_cumulative_project_budget_without_storing_more_bytes",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 790,
+        "end": 822
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Inline_image_upload_rejects_a_truncated_jpeg_after_the_signature_probe",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 908,
+        "end": 926
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Inline_image_upload_requires_authoring_authority_or_the_actors_live_checkout",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 707,
+        "end": 788
       }
     },
     {
@@ -5603,8 +5799,80 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 388,
-        "end": 427
+        "start": 1198,
+        "end": 1237
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Problem_report_creation_claims_recovery_images_and_expired_unclaimed_images_are_reclaimed",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 849,
+        "end": 906
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Problem_report_output_reads_a_persisted_v4_snapshot_without_rewriting_its_hash",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 560,
+        "end": 593
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Problem_report_output_reads_retained_legacy_snapshot_schemas_without_rewriting_their_hash",
+      "kind": "Theory",
+      "intent": "ef-translation",
+      "cases": 4,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 595,
+        "end": 656
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Problem_report_output_selects_the_exact_snapshot_when_numeric_revisions_repeat",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 460,
+        "end": 521
       }
     },
     {

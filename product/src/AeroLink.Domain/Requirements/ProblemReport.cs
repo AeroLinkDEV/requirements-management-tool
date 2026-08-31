@@ -214,13 +214,16 @@ public sealed class ProblemReport
         if (projectId == Guid.Empty) throw new DomainException("A problem-report project is required.");
         Id = Guid.NewGuid(); ProjectId = projectId; ReportNumber = Required(reportNumber, "A problem-report number is required.");
         NumberSequence = ProblemReportNumber.Sequence(ReportNumber);
-        Title = Required(title, "A problem-report title is required."); Problem = Required(problem, "A problem statement is required.");
+        Title = Required(title, "A problem-report title is required.");
+        ProblemRich = CanonicalRich(problemRich);
+        Problem = Required(ProjectionOrPlain(ProblemRich, problem), "A problem statement is required.");
         Analysis = analysis?.Trim() ?? ""; ReportedBy = Required(reportedBy, "A problem-report owner is required.");
         Classification = Required(classification, "A problem-report classification is required."); Severity = severity; Priority = priority;
         Origin = Required(origin, "A problem-report origin is required."); AffectedConfiguration = affectedConfiguration?.Trim() ?? "";
         TargetReleaseId = targetReleaseId; ResponsibleEngineerId = Required(responsibleEngineerId ?? reportedBy, "A responsible engineer is required.");
-        ProblemRich = problemRich?.Trim() ?? ""; AdditionalInformation = additionalInformation?.Trim() ?? "";
-        AdditionalInformationRich = additionalInformationRich?.Trim() ?? ""; SystemAircraftImpact = systemAircraftImpact?.Trim() ?? "";
+        AdditionalInformationRich = CanonicalRich(additionalInformationRich);
+        AdditionalInformation = ProjectionOrPlain(AdditionalInformationRich, additionalInformation);
+        SystemAircraftImpact = systemAircraftImpact?.Trim() ?? "";
         ImpactAssessmentJson = ValidImpactJson(impactAssessmentJson);
         // Optional here on purpose. A report is raised the moment somebody hits the problem, and demanding
         // the classification first is how a Task Driver never gets written down at all; the Draft to
@@ -329,9 +332,12 @@ public sealed class ProblemReport
         // Once somebody has answered, the record stops describing the value as derived and never goes back.
         if (category is not null) { Category = category.Value; CategoryProvenance = ProblemReportCategoryProvenance.Selected; }
         if (workaround is not null) Workaround = workaround.Trim();
-        Title = Required(title, "A problem-report title is required."); Problem = Required(problem, "A problem statement is required.");
-        ProblemRich = problemRich?.Trim() ?? ""; AdditionalInformation = additionalInformation?.Trim() ?? "";
-        AdditionalInformationRich = additionalInformationRich?.Trim() ?? ""; Analysis = analysis?.Trim() ?? "";
+        Title = Required(title, "A problem-report title is required.");
+        ProblemRich = CanonicalRich(problemRich);
+        Problem = Required(ProjectionOrPlain(ProblemRich, problem), "A problem statement is required.");
+        AdditionalInformationRich = CanonicalRich(additionalInformationRich);
+        AdditionalInformation = ProjectionOrPlain(AdditionalInformationRich, additionalInformation);
+        Analysis = analysis?.Trim() ?? "";
         RootCause = rootCause?.Trim() ?? ""; CorrectiveAction = correctiveAction?.Trim() ?? "";
         SystemAircraftImpact = systemAircraftImpact?.Trim() ?? ""; ImpactAssessmentJson = ValidImpactJson(impactAssessmentJson);
         // Effects and Containment are authored here as well as through BeginInvestigation. They are part
@@ -339,15 +345,28 @@ public sealed class ProblemReport
         // worse than one it hides.
         if (narrative is { } authored)
         {
-            AnalysisRich = authored.AnalysisRich?.Trim() ?? "";
-            RootCauseRich = authored.RootCauseRich?.Trim() ?? "";
-            WorkaroundRich = authored.WorkaroundRich?.Trim() ?? "";
-            CorrectiveActionRich = authored.CorrectiveActionRich?.Trim() ?? "";
-            SystemAircraftImpactRich = authored.SystemAircraftImpactRich?.Trim() ?? "";
+            AnalysisRich = CanonicalRich(authored.AnalysisRich);
+            Analysis = ProjectionOrPlain(AnalysisRich, Analysis);
+            RootCauseRich = CanonicalRich(authored.RootCauseRich);
+            RootCause = ProjectionOrPlain(RootCauseRich, RootCause);
+            WorkaroundRich = CanonicalRich(authored.WorkaroundRich);
+            Workaround = ProjectionOrPlain(WorkaroundRich, Workaround);
+            CorrectiveActionRich = CanonicalRich(authored.CorrectiveActionRich);
+            CorrectiveAction = ProjectionOrPlain(CorrectiveActionRich, CorrectiveAction);
+            SystemAircraftImpactRich = CanonicalRich(authored.SystemAircraftImpactRich);
+            SystemAircraftImpact = ProjectionOrPlain(SystemAircraftImpactRich, SystemAircraftImpact);
             if (authored.Effects is not null) Effects = authored.Effects.Trim();
-            if (authored.EffectsRich is not null) EffectsRich = authored.EffectsRich.Trim();
+            if (authored.EffectsRich is not null)
+            {
+                EffectsRich = CanonicalRich(authored.EffectsRich);
+                Effects = ProjectionOrPlain(EffectsRich, Effects);
+            }
             if (authored.Containment is not null) Containment = authored.Containment.Trim();
-            if (authored.ContainmentRich is not null) ContainmentRich = authored.ContainmentRich.Trim();
+            if (authored.ContainmentRich is not null)
+            {
+                ContainmentRich = CanonicalRich(authored.ContainmentRich);
+                Containment = ProjectionOrPlain(ContainmentRich, Containment);
+            }
         }
         Touch(now);
         Severity = severity; Priority = priority;
@@ -367,15 +386,28 @@ public sealed class ProblemReport
         if (rootCause is not null) RootCause = rootCause.Trim();
         if (correctiveAction is not null) CorrectiveAction = correctiveAction.Trim();
         if (workaround is not null) Workaround = workaround.Trim();
-        AnalysisRich = narrative.AnalysisRich?.Trim() ?? "";
-        RootCauseRich = narrative.RootCauseRich?.Trim() ?? "";
-        WorkaroundRich = narrative.WorkaroundRich?.Trim() ?? "";
-        CorrectiveActionRich = narrative.CorrectiveActionRich?.Trim() ?? "";
-        SystemAircraftImpactRich = narrative.SystemAircraftImpactRich?.Trim() ?? "";
+        AnalysisRich = CanonicalRich(narrative.AnalysisRich);
+        Analysis = ProjectionOrPlain(AnalysisRich, Analysis);
+        RootCauseRich = CanonicalRich(narrative.RootCauseRich);
+        RootCause = ProjectionOrPlain(RootCauseRich, RootCause);
+        WorkaroundRich = CanonicalRich(narrative.WorkaroundRich);
+        Workaround = ProjectionOrPlain(WorkaroundRich, Workaround);
+        CorrectiveActionRich = CanonicalRich(narrative.CorrectiveActionRich);
+        CorrectiveAction = ProjectionOrPlain(CorrectiveActionRich, CorrectiveAction);
+        SystemAircraftImpactRich = CanonicalRich(narrative.SystemAircraftImpactRich);
+        SystemAircraftImpact = ProjectionOrPlain(SystemAircraftImpactRich, SystemAircraftImpact);
         if (narrative.Effects is not null) Effects = narrative.Effects.Trim();
-        if (narrative.EffectsRich is not null) EffectsRich = narrative.EffectsRich.Trim();
+        if (narrative.EffectsRich is not null)
+        {
+            EffectsRich = CanonicalRich(narrative.EffectsRich);
+            Effects = ProjectionOrPlain(EffectsRich, Effects);
+        }
         if (narrative.Containment is not null) Containment = narrative.Containment.Trim();
-        if (narrative.ContainmentRich is not null) ContainmentRich = narrative.ContainmentRich.Trim();
+        if (narrative.ContainmentRich is not null)
+        {
+            ContainmentRich = CanonicalRich(narrative.ContainmentRich);
+            Containment = ProjectionOrPlain(ContainmentRich, Containment);
+        }
         Touch(now);
     }
 
@@ -607,6 +639,28 @@ public sealed class ProblemReport
             return System.Text.Json.JsonSerializer.Serialize(normalized);
         }
         catch { throw new DomainException("The problem-report impact assessment must be a JSON object."); }
+    }
+    private static string CanonicalRich(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "";
+        var canonical = AeroLink.Domain.Content.RichContent.Canonicalize(value);
+        if (AeroLink.Domain.Content.RichContent.Read(canonical).Any(block =>
+                block.Kind == AeroLink.Domain.Content.RichBlockKind.Image
+                && string.IsNullOrWhiteSpace(block.Alt)))
+            throw new DomainException("Every Problem Report figure needs descriptive alternative text.");
+        return canonical;
+    }
+
+    private static string ProjectionOrPlain(string? canonicalRich, string? plain)
+    {
+        var blocks = AeroLink.Domain.Content.RichContent.Read(canonicalRich);
+        // Plain-only and legacy clients remain valid, including the old spelling {"blocks":[]} alongside
+        // a populated plain field. Once any typed block exists, however, it is the authored record and the
+        // server derives the companion projection itself. A raw client must never make search, generated
+        // output and an approver's rich reader describe different controlled facts in one signed revision.
+        return blocks.Count == 0
+            ? plain?.Trim() ?? ""
+            : AeroLink.Domain.Content.RichContent.ToPlainText(blocks);
     }
     private static string Required(string? value, string error) => string.IsNullOrWhiteSpace(value) ? throw new DomainException(error) : value.Trim();
 }

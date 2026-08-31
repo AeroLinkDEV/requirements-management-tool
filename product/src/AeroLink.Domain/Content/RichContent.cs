@@ -48,7 +48,9 @@ public sealed record RichBlock(
     /// show emphasis — search, the plain projection, the generated Word document and PDF. That invariant
     /// is restored on read rather than trusted, so a hand-edited record cannot make the two disagree.
     /// </summary>
-    IReadOnlyList<RichRun>? Runs = null);
+    IReadOnlyList<RichRun>? Runs = null,
+    /// <summary>Optional bounded display width for an inline image, as a percentage of its narrative column.</summary>
+    int? WidthPercent = null);
 
 /// <summary>
 /// Authored rich content: an ordered list of blocks, stored as canonical JSON.
@@ -73,6 +75,8 @@ public static class RichContent
     public const int MaximumTextLength = 20_000;
     public const int MaximumTableRows = 200;
     public const int MaximumTableColumns = 20;
+    public const int MinimumImageWidthPercent = 25;
+    public const int MaximumImageWidthPercent = 100;
 
     /// <summary>
     /// A paragraph's emphasis is capped independently of its length. Runs are bounded by how often the
@@ -137,6 +141,45 @@ public static class RichContent
             if (parsed.Count > MaximumBlocks)
                 throw new DomainException($"Authored content is limited to {MaximumBlocks} blocks.");
             return Write(parsed);
+        }
+    }
+
+    /// <summary>
+    /// Removes fields introduced after an evidence contract version without changing the spelling of older
+    /// authored content that did not use them. This is intentionally narrower than <see cref="Canonicalize"/>:
+    /// recomputing a historical snapshot must not normalize old whitespace or legacy plain-text values while
+    /// it removes metadata that the older contract could not have committed.
+    /// </summary>
+    public static string ForEvidenceSchema(string? stored, int schemaVersion)
+    {
+        if (schemaVersion != 4) return stored ?? "";
+        if (string.IsNullOrWhiteSpace(stored)) return stored ?? "";
+        var trimmed = stored.Trim();
+        if (!trimmed.StartsWith('{')) return stored;
+
+        try
+        {
+            using var document = JsonDocument.Parse(trimmed);
+            if (!document.RootElement.TryGetProperty("blocks", out var blocks)
+                || blocks.ValueKind != JsonValueKind.Array
+                || !blocks.EnumerateArray().Any(block => block.ValueKind == JsonValueKind.Object
+                    && block.TryGetProperty("type", out var type)
+                    && type.ValueKind == JsonValueKind.String
+                    && string.Equals(type.GetString(), "image", StringComparison.OrdinalIgnoreCase)
+                    && block.TryGetProperty("widthPercent", out _)))
+                return stored;
+
+            // Width metadata did not exist in schema 4. The current parser has already bounded it on every
+            // write, so dropping it here is the only deliberate difference in a v4 recomputation.
+            return Write(Read(trimmed).Select(block => block.Kind == RichBlockKind.Image
+                ? block with { WidthPercent = null }
+                : block).ToList());
+        }
+        catch (JsonException)
+        {
+            // The historical contract committed this value as authored text. Preserve it exactly rather
+            // than making an old snapshot unrecomputable because a newer reader cannot parse it.
+            return stored;
         }
     }
 
@@ -257,8 +300,19 @@ public static class RichContent
                         error = "An image block must name an attachment held by this deployment.";
                         return false;
                     }
+                    int? width = null;
+                    if (element.TryGetProperty("widthPercent", out var widthElement))
+                    {
+                        if (widthElement.ValueKind != JsonValueKind.Number || !widthElement.TryGetInt32(out var parsedWidth)
+                            || parsedWidth is < MinimumImageWidthPercent or > MaximumImageWidthPercent)
+                        {
+                            error = $"An inline image width must be between {MinimumImageWidthPercent} and {MaximumImageWidthPercent} percent.";
+                            return false;
+                        }
+                        width = parsedWidth;
+                    }
                     block = new RichBlock(kind, AttachmentId: attachmentId,
-                        Alt: Cap(Text(element, "alt")), Caption: Cap(Text(element, "caption")));
+                        Alt: Cap(Text(element, "alt")), Caption: Cap(Text(element, "caption")), WidthPercent: width);
                     return true;
                 }
 
@@ -338,6 +392,7 @@ public static class RichContent
                         writer.WriteString("attachmentId", block.AttachmentId!.Value.ToString());
                         writer.WriteString("alt", block.Alt);
                         writer.WriteString("caption", block.Caption);
+                        if (block.WidthPercent is { } width) writer.WriteNumber("widthPercent", width);
                         break;
                     case RichBlockKind.Table:
                         writer.WriteString("caption", block.Caption);

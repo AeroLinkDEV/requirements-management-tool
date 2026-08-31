@@ -75,7 +75,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
                 artifactKey!.Value, document.GeneratedAt, ct);
         var isCaseDocument = artifactKey?.Kind == VerificationArtifactKind.Case;
         var records = requirementLevel is not null
-            ? await RequirementPublicationRows(document.BaselineId, requirementLevel.Value, ct)
+            ? await RequirementPublicationRows(document.BaselineId, document.ProjectId, requirementLevel.Value, ct)
             : await ProcedurePublicationRows(procedureSnapshot!, approvalProcedureLevel!.Value, isCaseDocument, ct);
         var isProcedureDocument = approvalProcedureLevel is not null;
         var verificationNoun = approvalProcedureLevel == TestProcedureLevel.System || !isCaseDocument ? "procedure" : "case";
@@ -189,7 +189,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
             .SingleOrDefault(x => x.DocumentType == type)?.Key;
     }
 
-    private async Task<List<PublicationRecord>> RequirementPublicationRows(Guid baselineId, RequirementLevel level, CancellationToken ct)
+    private async Task<List<PublicationRecord>> RequirementPublicationRows(Guid baselineId, Guid projectId, RequirementLevel level, CancellationToken ct)
     {
         var rows = await (from member in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId) join artifact in db.Requirements.AsNoTracking().Where(x => x.Level == level) on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id join scr in db.SystemChangeRequests.AsNoTracking() on revision.SourceChangeRequestId equals scr.Id orderby artifact.BaseNumber select new { RevisionId = revision.Id, artifact.BaseNumber, revision.Revision, revision.Statement, revision.Rationale, revision.VerificationMethod, revision.ParentKind, revision.DerivedRationale, revision.ParentRevisionIdsJson, Scr = scr.BaseNumber + "." + (scr.Revision < 10 ? "0" : "") + scr.Revision }).ToListAsync(ct);
 
@@ -201,7 +201,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         var authored = await db.RequirementRevisionProfiles.AsNoTracking()
             .Where(x => revisionIds.Contains(x.RevisionId))
             .ToDictionaryAsync(x => x.RevisionId, x => x.RichText, ct);
-        var images = await richContent.ResolveImagesAsync(authored.Values, ct);
+        var images = await richContent.ResolveImagesAsync(authored.Values, projectId, ct);
 
         return rows.Select(x => new PublicationRecord(x.BaseNumber + "." + x.Revision.ToString("D2"), level.ToString(), "", x.Statement,
             new[] { ("Rationale", x.Rationale), ("Verification method", x.VerificationMethod), ("Parent classification", x.ParentKind.ToString()), ("Derived rationale", x.DerivedRationale), ("Exact parent revision IDs", ExactParentIds(x.ParentRevisionIdsJson)), ("Source change request", x.Scr) },

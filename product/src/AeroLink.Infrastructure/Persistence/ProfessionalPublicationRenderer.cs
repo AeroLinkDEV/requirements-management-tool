@@ -33,6 +33,9 @@ public sealed record ProfessionalPublication(string Product, string Program, str
 
 public static class ProfessionalPublicationRenderer
 {
+    // PDFs decode PNGs to RGB before Flate-compressing them. Keep all retained decoded payloads within a
+    // bounded publication budget; Word embeds the already capped source bytes without this decode step.
+    private const long MaximumPdfDecodedPixels = 16_000_000L;
     public static GeneratedOutput Render(ProfessionalPublication publication, string format, string stem) => format.Equals("pdf", StringComparison.OrdinalIgnoreCase)
         ? new(BuildPdf(publication), "application/pdf", stem + ".pdf")
         : new(BuildDocx(publication), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", stem + ".docx");
@@ -174,10 +177,16 @@ public static class ProfessionalPublicationRenderer
     private static void Entry(ZipArchive zip, string name, string content) { var entry = zip.CreateEntry(name, CompressionLevel.Optimal);entry.LastWriteTime=DeterministicArchiveTime; using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false)); writer.Write(content); }
     private static void BinaryEntry(ZipArchive zip,string name,byte[] content){var entry=zip.CreateEntry(name,CompressionLevel.Optimal);entry.LastWriteTime=DeterministicArchiveTime;using var stream=entry.Open();stream.Write(content);}
 
-    private sealed record PublicationImage(int Index,string Key,byte[] Bytes,string Alt,string Caption,int Width,int Height,bool IsPng)
+    private sealed record PublicationImage(int Index,string Key,byte[] Bytes,int Width,int Height,bool IsPng)
     {
         public string Extension => IsPng ? "png" : "jpg";
     }
+
+    /// <summary>One authored occurrence of an image. Bytes are shared through <see cref="Asset"/>, while
+    /// alt text, caption, and width remain occurrence-specific controlled content.</summary>
+    private sealed record PublicationImagePlacement(PublicationImage Asset, string Alt, string Caption, int WidthPercent);
+    private sealed record PdfImageRow(IReadOnlyList<PublicationImagePlacement> Placements,
+        IReadOnlyList<string> BelowText);
 
     /// <summary>
     /// Decodes the images an authored record carries, once each. The same diagram referenced from three
@@ -185,7 +194,35 @@ public static class ProfessionalPublicationRenderer
     /// somebody reused a picture.
     /// </summary>
     private static List<PublicationImage> Images(ProfessionalPublication publication)
-    {var result=new List<PublicationImage>();foreach(var record in publication.Sections.SelectMany(x=>x.Records))foreach(var block in Blocks(record)){if(BlockType(block)!="image"||!block.TryGetProperty("dataUri",out var data)||data.ValueKind!=JsonValueKind.String)continue;var bytes=ImageBytes(data.GetString()??"");if(bytes is null)continue;var key=Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();if(result.Any(x=>x.Key==key))continue;var isPng=PngImage.IsPng(bytes);var size=isPng?PngImage.Size(bytes):JpegSize(bytes);result.Add(new(result.Count+1,key,bytes,Text(block,"alt","Controlled inline image"),Text(block,"caption",""),size.Width,size.Height,isPng));}return result;}
+    {
+        var result = new List<PublicationImage>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var record in publication.Sections.SelectMany(x => x.Records))
+        foreach (var block in Blocks(record))
+        {
+            if (BlockType(block) != "image" || !block.TryGetProperty("dataUri", out var data) || data.ValueKind != JsonValueKind.String) continue;
+            var bytes = ImageBytes(data.GetString() ?? "");
+            if (bytes is null) continue;
+            var key = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            if (!seen.Add(key)) continue;
+            var isPng = PngImage.IsPng(bytes);
+            var size = isPng ? PngImage.Size(bytes) : JpegSize(bytes);
+            result.Add(new(result.Count + 1, key, bytes, size.Width, size.Height, isPng));
+        }
+        return result;
+    }
+
+    private static PublicationImagePlacement? Placement(JsonElement block, IReadOnlyDictionary<string, PublicationImage> assets)
+    {
+        if (BlockType(block) != "image" || !block.TryGetProperty("dataUri", out var data) || data.ValueKind != JsonValueKind.String) return null;
+        var bytes = ImageBytes(data.GetString() ?? "");
+        if (bytes is null) return null;
+        var key = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        return assets.TryGetValue(key, out var asset)
+            ? new(asset, Text(block, "alt", "Controlled inline image"), Text(block, "caption", ""),
+                block.TryGetProperty("widthPercent", out var width) && width.TryGetInt32(out var parsed) ? Math.Clamp(parsed, 25, 100) : 100)
+            : null;
+    }
 
     /// <summary>
     /// Only the two formats every renderer here can produce, and only as data this deployment already holds.
@@ -206,10 +243,125 @@ public static class ProfessionalPublicationRenderer
     {if(string.IsNullOrWhiteSpace(record.RichContentJson))yield break;JsonDocument? document=null;try{document=JsonDocument.Parse(record.RichContentJson);var root=document.RootElement;if(root.TryGetProperty("blocks",out var blocks)&&blocks.ValueKind==JsonValueKind.Array)foreach(var block in blocks.EnumerateArray())yield return block.Clone();}finally{document?.Dispose();}}
     private static string BlockType(JsonElement block)=>Text(block,"type","").ToLowerInvariant();
     private static string Text(JsonElement block,string name,string fallback)=>block.TryGetProperty(name,out var value)&&value.ValueKind==JsonValueKind.String?value.GetString()??fallback:fallback;
-    private static string RichDocx(PublicationRecord record,IReadOnlyList<PublicationImage> images)
-    {var body=new StringBuilder();foreach(var block in Blocks(record)){switch(BlockType(block)){case "paragraph":body.Append(P(Text(block,"text",""),"Normal"));break;case "symbol":body.Append(P("Controlled symbol: "+Text(block,"value",""),"Callout"));break;case "reference":body.Append(P("Reference: "+Text(block,"label","")+" — "+Text(block,"target",""),"RecordMeta"));break;case "table":if(block.TryGetProperty("rows",out var rows)&&rows.ValueKind==JsonValueKind.Array){var values=rows.EnumerateArray().Where(x=>x.ValueKind==JsonValueKind.Array).Select(x=>(IReadOnlyList<string>)x.EnumerateArray().Select(v=>v.ToString()).ToList()).ToList();if(values.Count>0){var count=values.Max(x=>x.Count);var widths=Enumerable.Repeat(9360/Math.Max(1,count),count).ToList();body.Append(Table(values[0],values.Skip(1).ToList(),widths,false));}}break;case "image":if(block.TryGetProperty("dataUri",out var data)){var uri=data.GetString()??"";var comma=uri.IndexOf(',');if(comma>0){try{var key=Convert.ToHexString(SHA256.HashData(Convert.FromBase64String(uri[(comma+1)..]))).ToLowerInvariant();var image=images.FirstOrDefault(x=>x.Key==key);if(image is not null)body.Append(ImageDrawing(image));}catch(FormatException){body.Append(P(Text(block,"alt","Invalid controlled image"),"Callout"));}}}break;}}return body.ToString();}
-    private static string ImageDrawing(PublicationImage image)
-    {var cx=5_400_000L;var cy=Math.Clamp((long)(cx*Math.Max(1,image.Height)/(double)Math.Max(1,image.Width)),1_800_000L,4_000_000L);var alt=SecurityElement.Escape(image.Alt);return $"<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{100+image.Index}\" name=\"ControlledImage{image.Index}\" descr=\"{alt}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"{image.Index}\" name=\"image{image.Index}.{image.Extension}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rId{image.Index+3}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"+P(image.Caption.Length>0?image.Caption:image.Alt,"RecordMeta");}
+    private static string RichDocx(PublicationRecord record, IReadOnlyList<PublicationImage> images)
+    {
+        var assets = images.ToDictionary(x => x.Key, StringComparer.Ordinal);
+        var body = new StringBuilder();
+        var placementNumber = 0;
+        var blocks = Blocks(record).ToList();
+        for (var index = 0; index < blocks.Count; index++)
+        {
+            var block = blocks[index];
+            switch (BlockType(block))
+            {
+                case "paragraph":
+                    body.Append(P(Text(block, "text", ""), "Normal"));
+                    break;
+                case "symbol":
+                    body.Append(P("Controlled symbol: " + Text(block, "value", ""), "Callout"));
+                    break;
+                case "reference":
+                    body.Append(P("Reference: " + Text(block, "label", "") + " — " + Text(block, "target", ""), "RecordMeta"));
+                    break;
+                case "table":
+                    if (block.TryGetProperty("rows", out var rows) && rows.ValueKind == JsonValueKind.Array)
+                    {
+                        var values = rows.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.Array)
+                            .Select(x => (IReadOnlyList<string>)x.EnumerateArray().Select(v => v.ToString()).ToList()).ToList();
+                        if (values.Count > 0)
+                        {
+                            var count = values.Max(x => x.Count);
+                            var widths = Enumerable.Repeat(9360 / Math.Max(1, count), count).ToList();
+                            body.Append(Table(values[0], values.Skip(1).ToList(), widths, false));
+                        }
+                    }
+                    break;
+                case "image":
+                    var placement = Placement(block, assets);
+                    if (placement is null)
+                    {
+                        body.Append(P("[Image not retrieved: " + Text(block, "caption", Text(block, "alt", "image")) + "]", "Callout"));
+                        break;
+                    }
+                    var row = new List<PublicationImagePlacement> { placement };
+                    while (index + 1 < blocks.Count && BlockType(blocks[index + 1]) == "image")
+                    {
+                        var adjacent = Placement(blocks[index + 1], assets);
+                        if (adjacent is null) break;
+                        row.Add(adjacent);
+                        index++;
+                    }
+                    foreach (var packedRow in PackImageRows(row))
+                        body.Append(ImageRow(packedRow, ref placementNumber));
+                    break;
+            }
+        }
+        return body.ToString();
+    }
+
+    private static string ImageRow(IReadOnlyList<PublicationImagePlacement> placements, ref int placementNumber)
+    {
+        var widths = placements.Select(x => x.WidthPercent).ToList();
+        var cells = new StringBuilder();
+        for (var i = 0; i < placements.Count; i++)
+        {
+            var placement = placements[i] with { WidthPercent = widths[i] };
+            var cellWidth = 9360L * widths[i] / 100;
+            cells.Append($"<w:tc><w:tcPr><w:tcW w:w=\"{cellWidth}\" w:type=\"dxa\"/><w:vAlign w:val=\"top\"/></w:tcPr>")
+                .Append(ImageDrawing(placement, ++placementNumber, 9_000_000L, 9_000_000L))
+                .Append("</w:tc>");
+        }
+        var unused = 100 - widths.Sum();
+        if (unused > 0)
+            cells.Append($"<w:tc><w:tcPr><w:tcW w:w=\"{9360L * unused / 100}\" w:type=\"dxa\"/></w:tcPr><w:p/></w:tc>");
+        var grid = widths.Concat(unused > 0 ? [unused] : []).Select(x => $"<w:gridCol w:w=\"{9360L * x / 100}\"/>");
+        return $"<w:tbl><w:tblPr><w:tblW w:w=\"9360\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/><w:tblBorders><w:top w:val=\"nil\"/><w:left w:val=\"nil\"/><w:bottom w:val=\"nil\"/><w:right w:val=\"nil\"/><w:insideH w:val=\"nil\"/><w:insideV w:val=\"nil\"/></w:tblBorders></w:tblPr><w:tblGrid>{string.Join("", grid)}</w:tblGrid><w:tr>{cells}</w:tr></w:tbl>";
+    }
+
+    private static string ImageDrawing(PublicationImagePlacement placement, int placementNumber,
+        long maximumWidthEmu = 5_400_000L, long maximumHeightEmu = 4_000_000L)
+    {
+        var image = placement.Asset;
+        var cx = maximumWidthEmu * placement.WidthPercent / 100;
+        var cy = (long)(cx * Math.Max(1, image.Height) / (double)Math.Max(1, image.Width));
+        if (cy > maximumHeightEmu)
+        {
+            cx = Math.Max(1_000L, (long)(cx * maximumHeightEmu / (double)cy));
+            cy = maximumHeightEmu;
+        }
+        var alt = SecurityElement.Escape(placement.Alt);
+        // wp:docPr and pic:cNvPr IDs identify drawing *placements*, not media assets. Reusing the
+        // deduplicated asset index for a repeated image produces an invalid Open XML package because
+        // Word requires every non-visual drawing property ID to be unique in the document.
+        var drawingId = 100 + placementNumber;
+        return $"<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{drawingId}\" name=\"ControlledImage{placementNumber}\" descr=\"{alt}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"{drawingId}\" name=\"image{image.Index}.{image.Extension}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rId{image.Index + 3}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
+            + P(placement.Caption.Length > 0 ? placement.Caption : placement.Alt, "RecordMeta");
+    }
+
+    /// <summary>
+    /// Packs consecutive authored figures in order. A width is controlled content: overflowing a row starts
+    /// another row instead of shrinking every figure until the total happens to fit the renderer.
+    /// </summary>
+    private static IReadOnlyList<IReadOnlyList<PublicationImagePlacement>> PackImageRows(
+        IReadOnlyList<PublicationImagePlacement> placements)
+    {
+        var rows = new List<IReadOnlyList<PublicationImagePlacement>>();
+        var row = new List<PublicationImagePlacement>();
+        var used = 0;
+        foreach (var placement in placements)
+        {
+            if (row.Count > 0 && used + placement.WidthPercent > 100)
+            {
+                rows.Add(row);
+                row = [];
+                used = 0;
+            }
+            row.Add(placement);
+            used += placement.WidthPercent;
+        }
+        if (row.Count > 0) rows.Add(row);
+        return rows;
+    }
     private static (int Width,int Height) JpegSize(byte[] bytes)
     {for(var i=2;i+9<bytes.Length;){if(bytes[i]!=0xFF){i++;continue;}var marker=bytes[i+1];if(marker is >=0xC0 and <=0xC3 or >=0xC5 and <=0xC7 or >=0xC9 and <=0xCB or >=0xCD and <=0xCF)return((bytes[i+7]<<8)+bytes[i+8],(bytes[i+5]<<8)+bytes[i+6]);if(i+3>=bytes.Length)break;var length=(bytes[i+2]<<8)+bytes[i+3];if(length<2)break;i+=2+length;}return(640,360);}
 
@@ -224,11 +376,16 @@ public static class ProfessionalPublicationRenderer
     private static List<(PublicationImage Image, byte[] Payload, string Filter)> PdfImages(ProfessionalPublication publication)
     {
         var result = new List<(PublicationImage, byte[], string)>();
+        long decodedPixels = 0;
         foreach (var image in Images(publication))
         {
             if (!image.IsPng) { result.Add((image with { Index = result.Count + 1 }, image.Bytes, "DCTDecode")); continue; }
+            var expectedPixels = (long)image.Width * image.Height;
+            if (expectedPixels > MaximumPdfDecodedPixels - decodedPixels) continue;
             if (!PngImage.TryDecodeRgb(image.Bytes, out var width, out var height, out var rgb)) continue;
+            var pixels = (long)width * height;
             result.Add((image with { Index = result.Count + 1, Width = width, Height = height }, Deflate(rgb), "FlateDecode"));
+            decodedPixels += pixels;
         }
         return result;
     }
@@ -243,6 +400,7 @@ public static class ProfessionalPublicationRenderer
     private static byte[] BuildPdf(ProfessionalPublication p)
     {
         var images = PdfImages(p);
+        var assets = images.Select(x => x.Image).ToDictionary(x => x.Key, StringComparer.Ordinal);
         var pageStreams = new List<string> { PdfCover(p) };
         var control = new List<PdfLine> { new("DOCUMENT CONTROL", 18, true, "2E74B5", 0, 10) };
         var metadata = new List<(string Label, string Value)> { ("Document type",p.DocumentType),("Document number",p.DocumentNumber),("Revision",p.Revision),("Status",p.Status),("Release",p.Release),("Baseline",p.Baseline),("Prepared by",p.PreparedBy),("Generated",p.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm UTC")),("Manifest SHA-256",p.ManifestHash) }; metadata.AddRange(p.Metadata);
@@ -253,9 +411,8 @@ public static class ProfessionalPublicationRenderer
         pageStreams.AddRange(Paginate(control, p, true));
         foreach (var section in p.Sections)
         {
-            pageStreams.AddRange(PaginateSection(section, p));
+            pageStreams.AddRange(PaginateSection(section, p, assets));
         }
-        pageStreams.AddRange(images.Select(image => PdfImagePage(image.Image, p)));
         return AssemblePdf(pageStreams, images);
     }
     private static string PdfCover(ProfessionalPublication p)
@@ -276,19 +433,101 @@ public static class ProfessionalPublicationRenderer
         foreach (var line in lines) { var height = line.Size + line.After; if (used + height > max && current.Count > 0) { pages.Add(PdfContentPage(current, p, control)); current = []; used = 0; } current.Add(line); used += height; }
         if (current.Count > 0) pages.Add(PdfContentPage(current, p, control)); return pages;
     }
-    private static IEnumerable<string> PaginateSection(PublicationSection section, ProfessionalPublication p)
+    private static IEnumerable<string> PaginateSection(PublicationSection section, ProfessionalPublication p,
+        IReadOnlyDictionary<string, PublicationImage> assets)
     {
-        const int max = 650; var pages = new List<string>(); var current = new List<PdfLine> { new(section.Heading.ToUpperInvariant(), 18, true, "2E74B5", 0, 8) }; if (!string.IsNullOrWhiteSpace(section.Introduction)) current.AddRange(Wrap(section.Introduction, 92).Select(x => new PdfLine(x, 9, false, "526274", 0, 6))); var used = current.Sum(LineHeight);
+        const int max = 650;
+        var pages = new List<string>();
+        var current = new List<PdfLine> { new(section.Heading.ToUpperInvariant(), 18, true, "2E74B5", 0, 8) };
+        if (!string.IsNullOrWhiteSpace(section.Introduction))
+            current.AddRange(Wrap(section.Introduction, 92).Select(x => new PdfLine(x, 9, false, "526274", 0, 6)));
+        var used = current.Sum(LineHeight);
+        var continuation = false;
+        void EnsurePage()
+        {
+            if (current.Count != 0) return;
+            var heading = continuation ? section.Heading.ToUpperInvariant() + " - CONTINUED" : section.Heading.ToUpperInvariant();
+            current.Add(new PdfLine(heading, continuation ? 10 : 18, true, continuation ? "718096" : "2E74B5", 0, 8));
+            used = current.Sum(LineHeight);
+        }
+        void FlushPage()
+        {
+            if (current.Count == 0) return;
+            pages.Add(PdfContentPage(current, p, false));
+            current = [];
+            used = 0;
+            continuation = true;
+        }
+        void AddLine(PdfLine line)
+        {
+            EnsurePage();
+            var height = LineHeight(line);
+            if (used + height > max && current.Count > 1)
+            {
+                FlushPage();
+                EnsurePage();
+            }
+            current.Add(line);
+            used += height;
+        }
+
         foreach (var record in section.Records)
         {
-            var block = new List<PdfLine> { new(record.Number + " | " + record.Classification, 11, true, "2E74B5", 0, 3) }; if (!string.IsNullOrWhiteSpace(record.Title)) block.AddRange(Wrap(record.Title, 92).Select(x => new PdfLine(x, 9, true, "25364D", 0, 3)));
-            block.AddRange(Wrap(record.Body, 105).Select(x => new PdfLine(x, 8, false, "25364D", 0, 2)));
-            foreach (var rich in RichPdfLines(record)) block.Add(rich);
-            foreach (var detail in record.Details) block.AddRange(Wrap(detail.Label + ": " + detail.Value, 110).Select(x => new PdfLine(x, 7, false, "718096", 0, 2))); block.Add(new("", 5, false, "25364D", 0, 4)); var height = block.Sum(LineHeight);
-            if (used + height > max && current.Count > 0) { pages.Add(PdfContentPage(current, p, false)); current = [new(section.Heading.ToUpperInvariant() + " - CONTINUED", 10, true, "718096", 0, 8)]; used = current.Sum(LineHeight); }
-            current.AddRange(block); used += height;
+            AddLine(new(record.Number + " | " + record.Classification, 11, true, "2E74B5", 0, 3));
+            if (!string.IsNullOrWhiteSpace(record.Title))
+                foreach (var line in Wrap(record.Title, 92)) AddLine(new(line, 9, true, "25364D", 0, 3));
+            foreach (var line in Wrap(record.Body, 105)) AddLine(new(line, 8, false, "25364D", 0, 2));
+
+            var blocks = Blocks(record).ToList();
+            for (var index = 0; index < blocks.Count; index++)
+            {
+                var block = blocks[index];
+                if (BlockType(block) == "image")
+                {
+                    var placement = Placement(block, assets);
+                    if (placement is null)
+                    {
+                        AddLine(new("[Image not retrieved: " + Text(block, "caption", Text(block, "alt", "image")) + "]", 8, true, "A4262C", 12, 3));
+                        continue;
+                    }
+
+                    var row = new List<PublicationImagePlacement> { placement };
+                    while (index + 1 < blocks.Count && BlockType(blocks[index + 1]) == "image")
+                    {
+                        var adjacent = Placement(blocks[index + 1], assets);
+                        if (adjacent is null) break;
+                        row.Add(adjacent);
+                        index++;
+                    }
+                    var below = new List<string>();
+                    if (index + 1 < blocks.Count && BlockType(blocks[index + 1]) == "paragraph")
+                    {
+                        var text = Text(blocks[index + 1], "text", "");
+                        if (!string.IsNullOrWhiteSpace(text)) below.Add(text);
+                        index++;
+                    }
+
+                    // The image row is a page-level visual object. Flush authored text before it, append the
+                    // row now, and continue with the next block on a fresh page so no later paragraph can be
+                    // reordered behind the row.
+                    FlushPage();
+                    var packedRows = PackImageRows(row);
+                    for (var rowIndex = 0; rowIndex < packedRows.Count; rowIndex++)
+                        pages.AddRange(PdfImagePages(new PdfImageRow(
+                            packedRows[rowIndex],
+                            rowIndex == packedRows.Count - 1 ? below : []), p));
+                    continue;
+                }
+
+                foreach (var line in RichPdfBlockLines(block, assets)) AddLine(line);
+            }
+
+            foreach (var detail in record.Details)
+                foreach (var line in Wrap(detail.Label + ": " + detail.Value, 110)) AddLine(new(line, 7, false, "718096", 0, 2));
+            AddLine(new("", 5, false, "25364D", 0, 4));
         }
-        if (current.Count > 0) pages.Add(PdfContentPage(current, p, false)); return pages;
+        FlushPage();
+        return pages;
     }
     private static int LineHeight(PdfLine line) => line.Size + line.After;
     private static string PdfContentPage(IReadOnlyList<PdfLine> lines, ProfessionalPublication p, bool control)
@@ -319,23 +558,91 @@ public static class ProfessionalPublicationRenderer
         return s.Append("ET\n").ToString();
     }
     private static (double,double,double) Rgb(string hex) => (Convert.ToInt32(hex[..2],16)/255d,Convert.ToInt32(hex.Substring(2,2),16)/255d,Convert.ToInt32(hex.Substring(4,2),16)/255d);
-    private static IEnumerable<PdfLine> RichPdfLines(PublicationRecord record)
+    private static IEnumerable<PdfLine> RichPdfBlockLines(JsonElement block, IReadOnlyDictionary<string, PublicationImage> assets)
     {
-        foreach (var block in Blocks(record)) switch (BlockType(block))
+        switch (BlockType(block))
         {
-            case "paragraph": foreach(var line in Wrap(Text(block,"text",""),105)) yield return new(line,8,false); break;
-            case "symbol": yield return new("Controlled symbol: "+Text(block,"value",""),9,true,"168578",12,3); break;
-            case "reference": yield return new("Reference: "+Text(block,"label","")+" -> "+Text(block,"target",""),8,false,"526274",12,3); break;
-            case "image": yield return new("Inline controlled image: "+Text(block,"caption",Text(block,"alt","image")),8,true,"168578",12,3); break;
-            case "table" when block.TryGetProperty("rows",out var rows)&&rows.ValueKind==JsonValueKind.Array:
-                foreach(var row in rows.EnumerateArray().Where(x=>x.ValueKind==JsonValueKind.Array)) yield return new(string.Join(" | ",row.EnumerateArray().Select(x=>x.ToString())),8,false,"25364D",12,2);
+            case "paragraph":
+                foreach (var line in Wrap(Text(block, "text", ""), 105)) yield return new(line, 8, false);
+                break;
+            case "symbol":
+                yield return new("Controlled symbol: " + Text(block, "value", ""), 9, true, "168578", 12, 3);
+                break;
+            case "reference":
+                yield return new("Reference: " + Text(block, "label", "") + " -> " + Text(block, "target", ""), 8, false, "526274", 12, 3);
+                break;
+            case "table" when block.TryGetProperty("rows", out var rows) && rows.ValueKind == JsonValueKind.Array:
+                foreach (var row in rows.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.Array))
+                    yield return new(string.Join(" | ", row.EnumerateArray().Select(x => x.ToString())), 8, false, "25364D", 12, 2);
                 break;
         }
     }
-    private static string PdfImagePage(PublicationImage image,ProfessionalPublication p)
+
+    private static IReadOnlyList<string> PdfImagePages(PdfImageRow row, ProfessionalPublication p)
     {
-        var width=480d;var height=Math.Clamp(width*Math.Max(1,image.Height)/Math.Max(1d,image.Width),180d,540d);var y=680-height;
-        var s=new StringBuilder("0.086 0.522 0.471 RG 1.3 w 54 760 m 558 760 l S\nBT\n");Text(s,p.Product+" | CONTROLLED INLINE IMAGE",54,772,8,true,"102A43");Text(s,image.Caption.Length>0?image.Caption:image.Alt,66,730,13,true,"2E74B5");s.Append("ET\n").Append($"q {width:0.###} 0 0 {height:0.###} 66 {y:0.###} cm /Im{image.Index} Do Q\nBT\n");Text(s,image.Alt,66,(int)Math.Max(52,y-22),8,false,"526274");return s.Append("ET").ToString();
+        var placements = row.Placements;
+        var widths = placements.Select(x => x.WidthPercent).ToList();
+        const double left = 66;
+        const double usable = 480;
+        const double gap = 12;
+        var available = usable - gap * Math.Max(0, placements.Count - 1);
+        var geometry = placements.Select((placement, index) =>
+        {
+            var image = placement.Asset;
+            var width = available * widths[index] / 100d;
+            var height = width * Math.Max(1, image.Height) / Math.Max(1d, image.Width);
+            if (height > 500)
+            {
+                width *= 500 / height;
+                height = 500;
+            }
+            return (placement, image, width, height);
+        }).ToList();
+        var s = new StringBuilder("0.086 0.522 0.471 RG 1.3 w 54 760 m 558 760 l S\nBT\n");
+        Text(s, p.Product + " | CONTROLLED INLINE IMAGE", 54, 772, 8, true, "102A43");
+        var x = left;
+        foreach (var item in geometry)
+        {
+            var label = item.placement.Caption.Length > 0 ? item.placement.Caption : item.placement.Alt;
+            Text(s, label, (int)x, 730, 11, true, "2E74B5");
+            x += item.width + gap;
+        }
+        s.Append("ET\n");
+        x = left;
+        foreach (var item in geometry)
+        {
+            var y = 680 - item.height;
+            s.Append($"q {item.width:0.###} 0 0 {item.height:0.###} {x:0.###} {y:0.###} cm /Im{item.image.Index} Do Q\n");
+            x += item.width + gap;
+        }
+        s.Append("BT\n");
+        x = left;
+        foreach (var item in geometry)
+        {
+            var y = Math.Max(52, 680 - item.height - 22);
+            Text(s, item.placement.Alt, (int)x, (int)y, 8, false, "526274");
+            x += item.width + gap;
+        }
+        var belowY = (int)Math.Max(52, geometry.Min(item => 680 - item.height) - 38);
+        var belowLines = row.BelowText.SelectMany(value => Wrap(value, 105)).ToList();
+        var visibleLineCount = belowY < 52 ? 0 : 1 + (belowY - 52) / 13;
+        foreach (var text in belowLines.Take(visibleLineCount))
+        {
+            Text(s, text, 66, belowY, 9, false, "25364D");
+            belowY -= 13;
+        }
+        var pages = new List<string> { s.Append("ET").ToString() };
+        var overflow = belowLines.Skip(visibleLineCount).ToList();
+        if (overflow.Count > 0)
+        {
+            var continuation = new List<PdfLine>
+            {
+                new("INLINE IMAGE NARRATIVE - CONTINUED", 10, true, "718096", 0, 8)
+            };
+            continuation.AddRange(overflow.Select(line => new PdfLine(line, 9, false, "25364D", 12, 4)));
+            pages.AddRange(Paginate(continuation, p, false));
+        }
+        return pages;
     }
     private static byte[] AssemblePdf(IReadOnlyList<string> streams,IReadOnlyList<(PublicationImage Image,byte[] Payload,string Filter)> images)
     {
@@ -347,6 +654,29 @@ public static class ProfessionalPublicationRenderer
         for(var i=0;i<streams.Count;i++){var stream=streams[i]+$"\nBT /F1 7 Tf 0.443 0.502 0.565 rg 1 0 0 1 500 28 Tm (Page {i+1} of {streams.Count}) Tj ET";var contentNumber=pageNumbers[i]+1;objects.Add(A($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>{xobjects} >> /Contents {contentNumber} 0 R >>"));objects.Add(A($"<< /Length {Encoding.ASCII.GetByteCount(stream)} >>\nstream\n{stream}\nendstream"));}
         using var output=new MemoryStream();output.Write(A("%PDF-1.4\n%----\n"));var offsets=new List<long>{0};for(var i=0;i<objects.Count;i++){offsets.Add(output.Position);output.Write(A($"{i+1} 0 obj\n"));output.Write(objects[i]);output.Write(A("\nendobj\n"));}var xref=output.Position;output.Write(A($"xref\n0 {objects.Count+1}\n0000000000 65535 f \n"));foreach(var offset in offsets.Skip(1))output.Write(A($"{offset:D10} 00000 n \n"));output.Write(A($"trailer\n<< /Size {objects.Count+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF"));return output.ToArray();
     }
-    private static IEnumerable<string> Wrap(string text, int width) { text = text ?? ""; if (text.Length == 0) { yield return ""; yield break; } for(var start=0;start<text.Length;){var length=Math.Min(width,text.Length-start);if(start+length<text.Length){var split=text.LastIndexOf(' ',start+length-1,length);if(split>start)length=split-start;}yield return text.Substring(start,length).Trim();start+=length;while(start<text.Length&&text[start]==' ')start++;} }
+    private static IEnumerable<string> Wrap(string text, int width)
+    {
+        text = (text ?? "").Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        if (text.Length == 0) { yield return ""; yield break; }
+        // A plain projection uses line breaks to separate paragraphs, figures and table rows. PDF text
+        // operators do not interpret a newline embedded inside one string, so preserve each authored line
+        // as its own positioned text operator before applying the ordinary width wrap.
+        foreach (var authoredLine in text.Split('\n'))
+        {
+            if (authoredLine.Length == 0) { yield return ""; continue; }
+            for (var start = 0; start < authoredLine.Length;)
+            {
+                var length = Math.Min(width, authoredLine.Length - start);
+                if (start + length < authoredLine.Length)
+                {
+                    var split = authoredLine.LastIndexOf(' ', start + length - 1, length);
+                    if (split > start) length = split - start;
+                }
+                yield return authoredLine.Substring(start, length).Trim();
+                start += length;
+                while (start < authoredLine.Length && authoredLine[start] == ' ') start++;
+            }
+        }
+    }
     private static string PdfEscape(string value) => new(value.Select(c => c is '(' or ')' or '\\' ? ' ' : c > 126 ? '-' : c).ToArray());
 }

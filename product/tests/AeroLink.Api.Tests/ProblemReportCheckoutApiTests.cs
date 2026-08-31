@@ -2,10 +2,14 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.IO.Compression;
+using System.Text;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
+using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -146,6 +150,35 @@ public sealed class ProblemReportCheckoutApiTests
     }
 
     [Fact]
+    public async Task Check_in_derives_plain_problem_report_narratives_from_the_typed_record()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRCANON");
+        var id = await RaiseAsync(client, projectId, releaseId);
+        const string canonical = "{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Canonical controlled narrative\"}]}";
+
+        await EditUnderCheckoutAsync(client, id, draft =>
+        {
+            draft["problem"] = "Forged plain problem";
+            draft["problemRich"] = canonical;
+            draft["analysis"] = "Forged plain analysis";
+            draft["analysisRich"] = canonical;
+        });
+
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{id}");
+        Assert.Equal("Canonical controlled narrative", detail.GetProperty("problem").GetString());
+        Assert.Equal("Canonical controlled narrative", detail.GetProperty("analysis").GetString());
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var revision = await db.ProblemReportRevisions.AsNoTracking()
+            .SingleAsync(x => x.ProblemReportId == id && x.EventType == "DetailsCheckedIn");
+        Assert.Contains("Canonical controlled narrative", revision.SnapshotJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("Forged plain", revision.SnapshotJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Discarding_a_checkout_restores_the_last_checked_in_content()
     {
         using var factory = new AeroLinkApiFactory();
@@ -262,6 +295,783 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.Equal(before.GetProperty("reportedBy").GetString(), after.GetProperty("reportedBy").GetString());
         Assert.Equal(before.GetProperty("responsibleEngineerId").GetString(), after.GetProperty("responsibleEngineerId").GetString());
         Assert.Equal(before.GetProperty("createdAt").GetDateTimeOffset(), after.GetProperty("createdAt").GetDateTimeOffset());
+    }
+
+    [Fact]
+    public async Task Inline_image_references_are_project_scoped_typed_and_withdrawal_aware()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var first = await SeedAsync(factory, "PRIMAGES");
+        var second = await SeedAsync(factory, "PRIMAGES2");
+
+        var ownerRecoveryImage = await UploadImageAsync(client, first.ProjectId, "owner-recovery.png", problemReportRecovery: true);
+        var sameProjectMember = await SeedBystanderAsync(factory, first.ProjectId, "PRIMGDRAFT");
+        await LoginAsync(client, sameProjectMember, AeroLinkApiFactory.MemberPassword);
+        using (var foreignDraft = await client.GetAsync($"/api/content/images/{ownerRecoveryImage}"))
+            Assert.Equal(HttpStatusCode.Forbidden, foreignDraft.StatusCode);
+        using (var genericDrafts = await client.GetAsync($"/api/enterprise-hardening/attachments?projectId={first.ProjectId}&artifactType=InlineImageDraft&artifactId={first.ProjectId}"))
+        {
+            Assert.Equal(HttpStatusCode.OK, genericDrafts.StatusCode);
+            Assert.Empty((await genericDrafts.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray());
+        }
+        using (var genericDraftDownload = await client.GetAsync($"/api/enterprise-hardening/attachments/{ownerRecoveryImage}/download"))
+            Assert.Equal(HttpStatusCode.NotFound, genericDraftDownload.StatusCode);
+        await LoginAsync(client, "admin", AeroLinkApiFactory.AdministratorPassword);
+        using (var ownerPreview = await client.GetAsync($"/api/content/images/{ownerRecoveryImage}"))
+            Assert.Equal(HttpStatusCode.OK, ownerPreview.StatusCode);
+
+        var sameProjectImage = await UploadImageAsync(client, first.ProjectId, "same-project.png");
+        var allowed = await CreateWithImageAsync(client, first.ProjectId, first.ReleaseId, sameProjectImage,
+            "Same project image");
+        Assert.Equal(HttpStatusCode.Created, allowed.StatusCode);
+        var allowedBody = await allowed.Content.ReadFromJsonAsync<JsonElement>();
+        var allowedId = allowedBody.GetProperty("id").GetGuid();
+
+        var crossProjectImage = await UploadImageAsync(client, second.ProjectId, "cross-project.png");
+        using var crossProject = await CreateWithImageAsync(client, first.ProjectId, first.ReleaseId,
+            crossProjectImage, "Cross project image");
+        Assert.Equal(HttpStatusCode.BadRequest, crossProject.StatusCode);
+
+        Guid wrongType;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var item = new ControlledAttachment(first.ProjectId, "Evidence", first.ProjectId, null,
+                Guid.NewGuid(), 1, "Not an inline image", "", "evidence.bin", "application/octet-stream", 8,
+                new string('c', 64), "test/evidence.bin", null, "admin", DateTimeOffset.UtcNow);
+            db.ControlledAttachments.Add(item);
+            await db.SaveChangesAsync();
+            wrongType = item.Id;
+        }
+        using var wrongTypeResponse = await CreateWithImageAsync(client, first.ProjectId, first.ReleaseId,
+            wrongType, "Wrong type image");
+        Assert.Equal(HttpStatusCode.BadRequest, wrongTypeResponse.StatusCode);
+
+        var withdrawnImage = await UploadImageAsync(client, first.ProjectId, "withdrawn.png");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var item = await db.ControlledAttachments.SingleAsync(x => x.Id == withdrawnImage);
+            item.Withdraw();
+            await db.SaveChangesAsync();
+        }
+        using var withdrawn = await CreateWithImageAsync(client, first.ProjectId, first.ReleaseId,
+            withdrawnImage, "Withdrawn image");
+        Assert.Equal(HttpStatusCode.BadRequest, withdrawn.StatusCode);
+
+        // A recovery endpoint may retain an untrusted draft so the owner can recover it, but the controlled
+        // check-in must reject the forged reference before mutating the report or writing its evidence hash.
+        using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = allowedId, leaseMinutes = 15 });
+        Assert.True(checkout.IsSuccessStatusCode, await checkout.Content.ReadAsStringAsync());
+        var session = await checkout.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = session.GetProperty("id").GetGuid();
+        var draft = JsonNode.Parse(session.GetProperty("draftJson").GetString()!)!.AsObject();
+        draft["problemRich"] = ImageRich(crossProjectImage, "Forged cross-project image");
+        draft["problem"] = "The image reference was forged in a recovery snapshot.";
+        using var recovery = await client.PutAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/autosave",
+            new { expectedVersion = session.GetProperty("version").GetInt64(), draftJson = draft.ToJsonString(), leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.OK, recovery.StatusCode);
+        var recoveryVersion = (await recovery.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        using var forgedCheckIn = await client.PostAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/check-in",
+            new { expectedVersion = recoveryVersion });
+        Assert.Equal(HttpStatusCode.BadRequest, forgedCheckIn.StatusCode);
+
+        // Withdraw the exact image the accepted report revision references. The immutable revision must remain
+        // renderable from its frozen snapshot, while current output must truthfully identify that the live
+        // attachment is no longer available rather than silently embedding withdrawn bytes.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var item = await db.ControlledAttachments.SingleAsync(x => x.Id == sameProjectImage);
+            item.Withdraw();
+            await db.SaveChangesAsync();
+        }
+
+        // The current workspace must not keep serving withdrawn bytes simply because its authored JSON still
+        // names the attachment. The historical-output path below is deliberately separate and exact.
+        using var withdrawnCurrentImage = await client.GetAsync($"/api/content/images/{sameProjectImage}");
+        Assert.Equal(HttpStatusCode.NotFound, withdrawnCurrentImage.StatusCode);
+
+        using var historical = await client.GetAsync($"/api/problem-reports/{allowedId}/download?revision=0&format=docx");
+        Assert.Equal(HttpStatusCode.OK, historical.StatusCode);
+        var historicalBytes = await historical.Content.ReadAsByteArrayAsync();
+        using var zip = new ZipArchive(new MemoryStream(historicalBytes), ZipArchiveMode.Read);
+        var historicalMedia = Assert.Single(zip.Entries,
+            entry => entry.FullName.StartsWith("word/media/", StringComparison.Ordinal));
+        await using (var mediaStream = historicalMedia.Open())
+        using (var mediaBytes = new MemoryStream())
+        {
+            await mediaStream.CopyToAsync(mediaBytes);
+            Assert.Equal(Png(), mediaBytes.ToArray());
+        }
+        using var historicalPdf = await client.GetAsync($"/api/problem-reports/{allowedId}/download?revision=0&format=pdf");
+        Assert.Equal(HttpStatusCode.OK, historicalPdf.StatusCode);
+        var historicalPdfText = Encoding.ASCII.GetString(await historicalPdf.Content.ReadAsByteArrayAsync());
+        Assert.Contains("/Subtype /Image", historicalPdfText);
+        using var currentPdf = await client.GetAsync($"/api/problem-reports/{allowedId}/download?format=pdf");
+        Assert.Equal(HttpStatusCode.OK, currentPdf.StatusCode);
+        Assert.Equal("application/pdf", currentPdf.Content.Headers.ContentType?.MediaType);
+        var currentPdfText = Encoding.ASCII.GetString(await currentPdf.Content.ReadAsByteArrayAsync());
+        Assert.DoesNotContain("/Subtype /Image", currentPdfText);
+        Assert.Contains("Image not retrieved", currentPdfText);
+        using var currentDocx = await client.GetAsync($"/api/problem-reports/{allowedId}/download?format=docx");
+        Assert.Equal(HttpStatusCode.OK, currentDocx.StatusCode);
+        using var currentZip = new ZipArchive(new MemoryStream(await currentDocx.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
+        Assert.DoesNotContain(currentZip.Entries, entry => entry.FullName.StartsWith("word/media/", StringComparison.Ordinal));
+        using var currentDocument = new StreamReader(currentZip.GetEntry("word/document.xml")!.Open());
+        Assert.Contains("Image not retrieved", await currentDocument.ReadToEndAsync());
+    }
+
+    [Fact]
+    public async Task Frozen_problem_report_output_never_resolves_an_inline_image_from_another_project()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var first = await SeedAsync(factory, "PRFROZENONE");
+        var second = await SeedAsync(factory, "PRFROZENTWO");
+        var reportId = await RaiseAsync(client, first.ProjectId, first.ReleaseId);
+        var crossProjectImage = await UploadImageAsync(client, second.ProjectId, "other-project.png");
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var report = await db.ProblemReports.SingleAsync(x => x.Id == reportId);
+            var snapshot = JsonNode.Parse(ProblemReportEvidenceContract.Serialize(report))!.AsObject();
+            snapshot["problemRich"] = ImageRich(crossProjectImage, "Cross-project historical figure");
+            var snapshotJson = snapshot.ToJsonString();
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
+                "LegacyImported", "history.engineer", ProblemReportEvidenceContract.Hash(snapshotJson), snapshotJson,
+                DateTimeOffset.UtcNow.AddMinutes(1), snapshotSchemaVersion: ProblemReportEvidenceContract.SchemaVersion));
+            await db.SaveChangesAsync();
+        }
+
+        using var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&format=docx");
+        Assert.Equal(HttpStatusCode.OK, output.StatusCode);
+        using var zip = new ZipArchive(new MemoryStream(await output.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
+        Assert.DoesNotContain(zip.Entries, entry => entry.FullName.StartsWith("word/media/", StringComparison.Ordinal));
+        using var document = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
+        Assert.Contains("Image not retrieved: Figure", await document.ReadToEndAsync());
+    }
+
+    [Fact]
+    public async Task Problem_report_output_selects_the_exact_snapshot_when_numeric_revisions_repeat()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var seeded = await SeedAsync(factory, "PREXACTOUTPUT");
+        var reportId = await RaiseAsync(client, seeded.ProjectId, seeded.ReleaseId);
+        var otherReportId = await RaiseAsync(client, seeded.ProjectId, seeded.ReleaseId);
+
+        Guid firstSnapshotId;
+        Guid secondSnapshotId;
+        Guid foreignSnapshotId;
+        string firstTitle;
+        const string secondTitle = "The second lifecycle event at the same numeric revision";
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var first = (await db.ProblemReportRevisions.AsNoTracking()
+                    .Where(x => x.ProblemReportId == reportId && x.Revision == 0).ToListAsync())
+                .OrderBy(x => x.OccurredAt).ThenBy(x => x.Id).First();
+            firstSnapshotId = first.Id;
+            using (var firstDocument = JsonDocument.Parse(first.SnapshotJson))
+                firstTitle = firstDocument.RootElement.GetProperty("title").GetString()!;
+
+            var secondJson = JsonNode.Parse(first.SnapshotJson)!.AsObject();
+            secondJson["title"] = secondTitle;
+            var serializedSecond = secondJson.ToJsonString();
+            var second = new ProblemReportRevision(reportId, 0, "SameRevisionFollowUp", "history.engineer",
+                ProblemReportEvidenceContract.Hash(serializedSecond), serializedSecond,
+                first.OccurredAt.AddSeconds(1), first.SnapshotSchemaVersion);
+            db.ProblemReportRevisions.Add(second);
+            await db.SaveChangesAsync();
+            secondSnapshotId = second.Id;
+            foreignSnapshotId = await db.ProblemReportRevisions.AsNoTracking()
+                .Where(x => x.ProblemReportId == otherReportId).Select(x => x.Id).FirstAsync();
+        }
+
+        static async Task<string> DocumentXml(HttpResponseMessage response)
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var zip = new ZipArchive(new MemoryStream(await response.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
+            using var reader = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
+            return await reader.ReadToEndAsync();
+        }
+
+        using var firstOutput = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&snapshotId={firstSnapshotId}&format=docx");
+        var firstXml = await DocumentXml(firstOutput);
+        Assert.Contains(firstTitle, firstXml);
+        Assert.DoesNotContain(secondTitle, firstXml);
+        Assert.DoesNotContain("SameRevisionFollowUp", firstXml);
+
+        using var secondOutput = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&snapshotId={secondSnapshotId}&format=docx");
+        var secondXml = await DocumentXml(secondOutput);
+        Assert.Contains(secondTitle, secondXml);
+        Assert.Contains("SameRevisionFollowUp", secondXml);
+
+        using var foreign = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&snapshotId={foreignSnapshotId}&format=docx");
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+        using var missing = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&snapshotId={Guid.NewGuid()}&format=docx");
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+    }
+
+    [Fact]
+    public async Task Current_and_frozen_problem_report_output_refuse_a_changed_inline_image_blob()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var seeded = await SeedAsync(factory, "PRIMAGEHASH");
+        var imageId = await UploadImageAsync(client, seeded.ProjectId, "controlled-image.png");
+        using var created = await CreateWithImageAsync(client, seeded.ProjectId, seeded.ReleaseId, imageId,
+            "Image integrity report");
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var reportId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var store = scope.ServiceProvider.GetRequiredService<EvidenceFileStore>();
+            var attachment = await db.ControlledAttachments.SingleAsync(x => x.Id == imageId);
+            var altered = Png();
+            altered[^1] ^= 0x01;
+            await File.WriteAllBytesAsync(Path.Combine(store.RootPath,
+                attachment.StorageKey.Replace('/', Path.DirectorySeparatorChar)), altered);
+        }
+
+        using var direct = await client.GetAsync($"/api/content/images/{imageId}");
+        Assert.Equal(HttpStatusCode.NotFound, direct.StatusCode);
+        foreach (var revision in new[] { "", "&revision=0" })
+        {
+            using var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?format=docx{revision}");
+            Assert.Equal(HttpStatusCode.OK, output.StatusCode);
+            using var zip = new ZipArchive(new MemoryStream(await output.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
+            Assert.DoesNotContain(zip.Entries, entry => entry.FullName.StartsWith("word/media/", StringComparison.Ordinal));
+            using var document = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
+            Assert.Contains("Image not retrieved", await document.ReadToEndAsync());
+        }
+    }
+
+    [Fact]
+    public async Task Problem_report_output_reads_a_persisted_v4_snapshot_without_rewriting_its_hash()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRV4OUT");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+
+        string historicalJson;
+        string historicalHash;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var report = await db.ProblemReports.SingleAsync(x => x.Id == reportId);
+            historicalJson = ProblemReportEvidenceContract.SerializeForSchema(report, 4);
+            historicalHash = ProblemReportEvidenceContract.Hash(historicalJson);
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
+                "LegacyV4Fixture", "history.engineer", historicalHash, historicalJson,
+                DateTimeOffset.UtcNow.AddMinutes(1), snapshotSchemaVersion: 4));
+            await db.SaveChangesAsync();
+        }
+
+        using var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&format=docx");
+        Assert.Equal(HttpStatusCode.OK, output.StatusCode);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            output.Content.Headers.ContentType?.MediaType);
+        using var zip = new ZipArchive(new MemoryStream(await output.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
+        using var document = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
+        var documentText = await document.ReadToEndAsync();
+        Assert.Contains("Snapshot schema", documentText);
+        Assert.Contains("PRV4OUT", documentText);
+        Assert.Equal(historicalHash, ProblemReportEvidenceContract.Hash(historicalJson));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(5)]
+    public async Task Problem_report_output_reads_retained_legacy_snapshot_schemas_without_rewriting_their_hash(int schema)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, $"PRLEGACY{schema}");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+
+        string historicalJson;
+        string historicalHash;
+        int historicalRevision;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var report = await db.ProblemReports.SingleAsync(x => x.Id == reportId);
+            historicalRevision = report.Revision;
+            historicalJson = PinnedHistoricalSnapshot(report, projectId, schema);
+            using (var pinnedDocument = JsonDocument.Parse(historicalJson))
+            {
+                Assert.Equal(report.Id, pinnedDocument.RootElement.GetProperty("id").GetGuid());
+                Assert.Equal(projectId, pinnedDocument.RootElement.GetProperty("projectId").GetGuid());
+                Assert.Equal(report.Revision, pinnedDocument.RootElement.GetProperty("revision").GetInt32());
+            }
+            historicalHash = ProblemReportEvidenceContract.Hash(historicalJson);
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
+                $"LegacyV{schema}Fixture", "history.engineer", historicalHash, historicalJson,
+                DateTimeOffset.UtcNow.AddMinutes(1), snapshotSchemaVersion: schema));
+            await db.SaveChangesAsync();
+            var persisted = await db.ProblemReportRevisions.AsNoTracking()
+                .Where(item => item.ProblemReportId == report.Id && item.Revision == report.Revision)
+                .ToListAsync();
+            persisted = persisted.OrderByDescending(item => item.OccurredAt).ToList();
+            var latestPersisted = persisted.First();
+            Assert.Equal(historicalHash, latestPersisted.SnapshotHash);
+            Assert.Equal(historicalJson, latestPersisted.SnapshotJson);
+            Assert.Equal(schema, latestPersisted.SnapshotSchemaVersion);
+        }
+
+        using var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision={historicalRevision}&format=docx");
+        Assert.True(output.StatusCode == HttpStatusCode.OK,
+            $"Historical output failed for schema {schema}: {output.StatusCode} {await output.Content.ReadAsStringAsync()}");
+        using var zip = new ZipArchive(new MemoryStream(await output.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
+        using var document = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
+        var documentText = await document.ReadToEndAsync();
+        Assert.Contains($"Snapshot schema", documentText);
+        Assert.Contains($">{schema}<", documentText);
+        Assert.Contains("Pinned historical report", documentText);
+        Assert.Equal(historicalHash, ProblemReportEvidenceContract.Hash(historicalJson));
+        if (schema is 1 or 2)
+            Assert.Contains("Legacy type", documentText);
+
+        using var pdfOutput = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision={historicalRevision}&format=pdf");
+        Assert.Equal(HttpStatusCode.OK, pdfOutput.StatusCode);
+        var pdfText = Encoding.ASCII.GetString(await pdfOutput.Content.ReadAsByteArrayAsync());
+        Assert.Contains("Pinned historical report", pdfText);
+        Assert.Contains("PR-HIST-001", pdfText);
+    }
+
+    [Fact]
+    public async Task A_tampered_persisted_snapshot_is_refused_by_both_output_formats()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRTAMPER");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var report = await db.ProblemReports.SingleAsync(x => x.Id == reportId);
+            var source = ProblemReportEvidenceContract.Serialize(report);
+            var tampered = JsonNode.Parse(source)!.AsObject();
+            tampered["title"] = "Changed outside controlled history";
+            var tamperedJson = tampered.ToJsonString();
+            // Retain the authentic hash while changing the bytes. The generator must fail closed before it
+            // can publish a document that claims to be the committed revision.
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
+                "TamperedFixture", "history.engineer", ProblemReportEvidenceContract.Hash(source), tamperedJson,
+                DateTimeOffset.UtcNow.AddMinutes(1), snapshotSchemaVersion: ProblemReportEvidenceContract.SchemaVersion));
+            await db.SaveChangesAsync();
+        }
+
+        foreach (var format in new[] { "docx", "pdf" })
+        {
+            using var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&format={format}");
+            Assert.Equal(HttpStatusCode.NotFound, output.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task A_non_member_cannot_download_current_or_frozen_problem_report_output()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRAUTHOUT");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+        var nonMember = await SeedNonMemberAsync(factory, "PRAUTHOUT");
+        await LoginAsync(client, nonMember, AeroLinkApiFactory.MemberPassword);
+
+        using var current = await client.GetAsync($"/api/problem-reports/{reportId}/download?format=docx");
+        Assert.Equal(HttpStatusCode.Forbidden, current.StatusCode);
+        using var frozen = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&format=pdf");
+        Assert.Equal(HttpStatusCode.Forbidden, frozen.StatusCode);
+    }
+
+    [Fact]
+    public async Task Inline_image_upload_requires_authoring_authority_or_the_actors_live_checkout()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, sccbUserName) = await SeedAsync(factory, "PRIMGINTENT");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+        await OpenAsync(client, reportId, sccbUserName);
+        await VerifyingAsync(client, reportId);
+        var bystander = await SeedBystanderAsync(factory, projectId, "PRIMGINTENT");
+        await LoginAsync(client, bystander, AeroLinkApiFactory.MemberPassword);
+
+        using (var unbound = await client.PostAsync(ImageUploadPath(projectId),
+                   ImageUpload(projectId, "unbound.png")))
+            Assert.Equal(HttpStatusCode.Forbidden, unbound.StatusCode);
+
+        string imageRoot;
+        int stagedBefore;
+        using (var storageScope = factory.Services.CreateScope())
+        {
+            var store = storageScope.ServiceProvider.GetRequiredService<EvidenceFileStore>();
+            imageRoot = store.RootPath;
+            stagedBefore = Directory.Exists(imageRoot)
+                ? Directory.EnumerateFiles(imageRoot, "*", SearchOption.AllDirectories).Count()
+                : 0;
+        }
+        var fakeSessionId = Guid.NewGuid();
+        // This deliberately malformed multipart body would make ReadFormAsync fail if the endpoint parsed it.
+        // A 403 proves the exact fake-session preflight happens before multipart parsing or file access.
+        using var malformed = new StringContent("not a multipart body");
+        malformed.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("multipart/form-data");
+        malformed.Headers.ContentType.Parameters.Add(new System.Net.Http.Headers.NameValueHeaderValue("boundary", "unread"));
+        using var fakeRequest = new HttpRequestMessage(HttpMethod.Post, ImageUploadPath(projectId, fakeSessionId))
+        {
+            Content = malformed
+        };
+        using (var fakeSession = await client.SendAsync(fakeRequest))
+            Assert.Equal(HttpStatusCode.Forbidden, fakeSession.StatusCode);
+        var stagedAfter = Directory.Exists(imageRoot)
+            ? Directory.EnumerateFiles(imageRoot, "*", SearchOption.AllDirectories).Count()
+            : 0;
+        Assert.Equal(stagedBefore, stagedAfter);
+
+        Guid unrelatedSessionId;
+        using (var unrelatedScope = factory.Services.CreateScope())
+        {
+            var unrelatedDb = unrelatedScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var unrelated = new ArtifactEditSession(projectId, "Requirement", Guid.NewGuid(), null,
+                new string('c', 64), "{}", bystander, DateTimeOffset.UtcNow, exclusive: false);
+            unrelatedDb.ArtifactEditSessions.Add(unrelated);
+            await unrelatedDb.SaveChangesAsync();
+            unrelatedSessionId = unrelated.Id;
+        }
+        using (var unrelated = await client.PostAsync(ImageUploadPath(projectId, unrelatedSessionId),
+                   ImageUpload(projectId, "unrelated-session.png", unrelatedSessionId)))
+            Assert.Equal(HttpStatusCode.Forbidden, unrelated.StatusCode);
+
+        using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = reportId, leaseMinutes = 15 });
+        Assert.True(checkout.IsSuccessStatusCode, await checkout.Content.ReadAsStringAsync());
+        var checkedOut = await checkout.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = checkedOut.GetProperty("id").GetGuid();
+        var sessionVersion = checkedOut.GetProperty("version").GetInt64();
+        using var bound = await client.PostAsync(ImageUploadPath(projectId, sessionId),
+            ImageUpload(projectId, "checked-out.png", sessionId));
+        Assert.Equal(HttpStatusCode.Created, bound.StatusCode);
+        var imageId = (await bound.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var stored = await db.ControlledAttachments.AsNoTracking().SingleAsync(x => x.Id == imageId);
+        Assert.Equal(reportId, stored.ArtifactId);
+        Assert.Equal(bystander, stored.UploadedBy);
+
+        using var discard = await client.PostAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/discard",
+            new { expectedVersion = sessionVersion, reason = "Intent-bound upload test complete." });
+        Assert.Equal(HttpStatusCode.NoContent, discard.StatusCode);
+        using var abandoned = await client.PostAsync(ImageUploadPath(projectId, sessionId),
+            ImageUpload(projectId, "abandoned-session.png", sessionId));
+        Assert.Equal(HttpStatusCode.Forbidden, abandoned.StatusCode);
+    }
+
+    [Fact]
+    public async Task Inline_image_upload_enforces_the_cumulative_project_budget_without_storing_more_bytes()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var seeded = await SeedAsync(factory, "PRIMGQUOTA");
+        string root;
+        int filesBefore;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var store = scope.ServiceProvider.GetRequiredService<EvidenceFileStore>();
+            root = store.RootPath;
+            filesBefore = Directory.Exists(root)
+                ? Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Count()
+                : 0;
+            db.ControlledAttachments.Add(new ControlledAttachment(seeded.ProjectId, "InlineImage", seeded.ProjectId,
+                null, Guid.NewGuid(), 1, "Existing controlled image budget", "", "existing.png", "image/png",
+                RequirementsEndpoints.MaximumInlineImageBytesPerProject, new string('a', 64), "test/quota-existing.png",
+                null, "test.setup", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        using var response = await client.PostAsync(ImageUploadPath(seeded.ProjectId), ImageUpload(seeded.ProjectId, "over-budget.png"));
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("inline_image_project_quota", body.GetProperty("code").GetString());
+        var filesAfter = Directory.Exists(root)
+            ? Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Count()
+            : 0;
+        Assert.Equal(filesBefore, filesAfter);
+    }
+
+    [Fact]
+    public async Task Inline_image_upload_enforces_an_attributable_per_actor_budget()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var seeded = await SeedAsync(factory, "PRIMGACTOR");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            db.ControlledAttachments.Add(new ControlledAttachment(seeded.ProjectId, "InlineImage", seeded.ProjectId,
+                null, Guid.NewGuid(), 1, "Actor recovery-image budget", "", "existing.png", "image/png",
+                RequirementsEndpoints.MaximumInlineImageBytesPerActorPerProject, new string('d', 64),
+                "test/actor-quota-existing.png", null, "admin", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        using var response = await client.PostAsync(ImageUploadPath(seeded.ProjectId), ImageUpload(seeded.ProjectId, "actor-over-budget.png"));
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("inline_image_actor_quota", body.GetProperty("code").GetString());
+        Assert.Equal(RequirementsEndpoints.MaximumInlineImageBytesPerActorPerProject,
+            body.GetProperty("limitBytes").GetInt64());
+    }
+
+    [Fact]
+    public async Task Problem_report_creation_claims_recovery_images_and_expired_unclaimed_images_are_reclaimed()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var seeded = await SeedAsync(factory, "PRIMGRECOVERY");
+
+        using var upload = await client.PostAsync(ImageUploadPath(seeded.ProjectId),
+            ImageUpload(seeded.ProjectId, "recovery.png", problemReportRecovery: true));
+        Assert.Equal(HttpStatusCode.Created, upload.StatusCode);
+        var recoveryId = (await upload.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var preview = await client.GetAsync($"/api/content/images/{recoveryId}");
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+
+        using var created = await CreateWithImageAsync(client, seeded.ProjectId, seeded.ReleaseId, recoveryId,
+            "Claimed recovery image");
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var reportId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        Guid expiredId;
+        string expiredStorageKey;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var store = scope.ServiceProvider.GetRequiredService<EvidenceFileStore>();
+            var claimed = await db.ControlledAttachments.SingleAsync(x => x.Id == recoveryId);
+            Assert.Equal("InlineImage", claimed.ArtifactType);
+            Assert.Equal(reportId, claimed.ArtifactId);
+
+            var stored = await store.StoreAsync(new MemoryStream(Png()), "expired.png", "image/png", CancellationToken.None);
+            var expired = new ControlledAttachment(seeded.ProjectId, "InlineImageDraft", seeded.ProjectId, null,
+                Guid.NewGuid(), 1, "Expired browser recovery image", "", stored.OriginalFileName, stored.ContentType,
+                stored.Size, stored.Sha256, stored.StorageKey, null, "admin", DateTimeOffset.UtcNow.AddDays(-31));
+            db.ControlledAttachments.Add(expired);
+            await db.SaveChangesAsync();
+            expiredId = expired.Id;
+            expiredStorageKey = stored.StorageKey;
+            Assert.True(store.Exists(expiredStorageKey));
+        }
+
+        using var expiredClaim = await CreateWithImageAsync(client, seeded.ProjectId, seeded.ReleaseId, expiredId,
+            "Expired recovery claim");
+        Assert.Equal(HttpStatusCode.BadRequest, expiredClaim.StatusCode);
+        var expiredClaimBody = await expiredClaim.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("inline_image_recovery_expired", expiredClaimBody.GetProperty("code").GetString());
+
+        using var replacement = await client.PostAsync(ImageUploadPath(seeded.ProjectId),
+            ImageUpload(seeded.ProjectId, "current-recovery.png", problemReportRecovery: true));
+        Assert.Equal(HttpStatusCode.Created, replacement.StatusCode);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var store = scope.ServiceProvider.GetRequiredService<EvidenceFileStore>();
+            Assert.False(await db.ControlledAttachments.AnyAsync(x => x.Id == expiredId));
+            Assert.False(store.Exists(expiredStorageKey));
+        }
+    }
+
+    [Fact]
+    public async Task Inline_image_upload_rejects_a_truncated_jpeg_after_the_signature_probe()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var seeded = await SeedAsync(factory, "PRJPEGTRUNC");
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(seeded.ProjectId.ToString()), "projectId");
+        form.Add(new StringContent("ProblemReport"), "authoringContext");
+        var jpeg = new ByteArrayContent([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x02, 0x00, 0x00]);
+        jpeg.Headers.ContentType = new("image/jpeg");
+        form.Add(jpeg, "file", "truncated.jpg");
+
+        using var response = await client.PostAsync(ImageUploadPath(seeded.ProjectId), form);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("not the image type", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Concurrent_inline_image_uploads_cannot_overrun_the_cumulative_project_budget()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var seeded = await SeedAsync(factory, "PRIMGCONCURRENT");
+        var imageBytes = Png();
+        string root;
+        int filesBefore;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var store = scope.ServiceProvider.GetRequiredService<EvidenceFileStore>();
+            root = store.RootPath;
+            filesBefore = Directory.Exists(root)
+                ? Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Count()
+                : 0;
+            db.ControlledAttachments.Add(new ControlledAttachment(seeded.ProjectId, "InlineImage", seeded.ProjectId,
+                null, Guid.NewGuid(), 1, "Nearly full controlled image budget", "", "existing.png", "image/png",
+                RequirementsEndpoints.MaximumInlineImageBytesPerProject - imageBytes.LongLength,
+                new string('b', 64), "test/quota-nearly-full.png", null, "test.setup", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        var first = client.PostAsync(ImageUploadPath(seeded.ProjectId), ImageUpload(seeded.ProjectId, "first.png"));
+        var second = client.PostAsync(ImageUploadPath(seeded.ProjectId), ImageUpload(seeded.ProjectId, "second.png"));
+        var responses = await Task.WhenAll(first, second);
+        try
+        {
+            Assert.Single(responses, response => response.StatusCode == HttpStatusCode.Created);
+            Assert.Single(responses, response => response.StatusCode == HttpStatusCode.Conflict);
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var total = await db.ControlledAttachments.AsNoTracking()
+                .Where(x => x.ProjectId == seeded.ProjectId && x.ArtifactType == "InlineImage")
+                .SumAsync(x => x.Size);
+            Assert.Equal(RequirementsEndpoints.MaximumInlineImageBytesPerProject, total);
+            Assert.Equal(filesBefore + 1,
+                Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Count());
+        }
+        finally
+        {
+            foreach (var response in responses) response.Dispose();
+        }
+    }
+
+    private static async Task<Guid> UploadImageAsync(HttpClient client, Guid projectId, string fileName,
+        bool problemReportRecovery = false)
+    {
+        using var content = ImageUpload(projectId, fileName, problemReportRecovery: problemReportRecovery);
+        using var response = await client.PostAsync(ImageUploadPath(projectId), content);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+    }
+
+    private static MultipartFormDataContent ImageUpload(Guid projectId, string fileName, Guid? editSessionId = null,
+        bool problemReportRecovery = false)
+    {
+        var content = new MultipartFormDataContent();
+        content.Add(new StringContent(projectId.ToString()), "projectId");
+        if (editSessionId is Guid sessionId)
+            content.Add(new StringContent(sessionId.ToString()), "editSessionId");
+        if (problemReportRecovery)
+            content.Add(new StringContent("ProblemReport"), "authoringContext");
+        content.Add(new StringContent("A controlled test figure"), "alt");
+        var image = new ByteArrayContent(Png());
+        image.Headers.ContentType = new("image/png");
+        content.Add(image, "file", fileName);
+        return content;
+    }
+
+    private static string ImageUploadPath(Guid projectId, Guid? editSessionId = null) =>
+        editSessionId is Guid sessionId
+            ? $"/api/content/images?projectId={projectId:D}&editSessionId={sessionId:D}"
+            : $"/api/content/images?projectId={projectId:D}";
+
+    private static string PinnedHistoricalSnapshot(ProblemReport report, Guid projectId, int schema)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Fixtures", "ProblemReportSnapshots", $"v{schema}.json");
+        // EF's required snapshot string is trimmed on write; keep the fixture file's terminal newline pinned
+        // for its raw-byte hash test, but use the exact envelope bytes the historical row stores here.
+        var json = File.ReadAllText(path, Encoding.UTF8).TrimEnd('\r', '\n');
+        return json
+            .Replace("10000000-0000-0000-0000-000000000001", report.Id.ToString(), StringComparison.OrdinalIgnoreCase)
+            .Replace("20000000-0000-0000-0000-000000000002", projectId.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<string> SeedNonMemberAsync(AeroLinkApiFactory factory, string prefix)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var userName = $"{prefix.ToLowerInvariant()}.external.{Guid.NewGuid():N}";
+        db.UserAccounts.Add(new UserAccount(userName, "External reviewer", $"{userName}@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow));
+        await db.SaveChangesAsync();
+        return userName;
+    }
+
+    private static Task<HttpResponseMessage> CreateWithImageAsync(HttpClient client, Guid projectId, Guid releaseId,
+        Guid imageId, string title) => client.PostAsJsonAsync("/api/problem-reports", new
+        {
+            category = "CodeFunctional", projectId, releaseId, title,
+            problem = "The controlled record includes an inline figure.",
+            problemRich = ImageRich(imageId, title),
+            additionalInformation = "", additionalInformationRich = "{\"blocks\":[]}",
+            classification = "Engineering anomaly", severity = "Major", priority = "Normal",
+            origin = "Manual report", impactAssessmentJson = "{}",
+        });
+
+    private static string ImageRich(Guid id, string alt) =>
+        $"{{\"blocks\":[{{\"type\":\"paragraph\",\"text\":\"Figure context.\"}},{{\"type\":\"image\",\"attachmentId\":\"{id}\",\"alt\":\"{alt}\",\"caption\":\"Figure\",\"widthPercent\":60}}]}}";
+
+    private static byte[] Png()
+    {
+        // Two RGB scanlines: one filter byte followed by six pixel bytes each. Keep the fixture
+        // structurally valid so it exercises publication rather than relying on a tolerant PNG decoder.
+        var raw = new byte[] { 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 255 };
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionLevel.Optimal, true)) zlib.Write(raw);
+        using var output = new MemoryStream();
+        output.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        Chunk(output, "IHDR", [0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0]);
+        Chunk(output, "IDAT", compressed.ToArray()); Chunk(output, "IEND", []);
+        return output.ToArray();
+        static void Chunk(Stream target, string type, byte[] data)
+        {
+            Span<byte> length = stackalloc byte[4];
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(length, (uint)data.Length);
+            target.Write(length);
+            var body = Encoding.ASCII.GetBytes(type).Concat(data).ToArray();
+            target.Write(body);
+            Span<byte> crc = stackalloc byte[4];
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(crc, Crc32(body));
+            target.Write(crc);
+        }
+        static uint Crc32(byte[] bytes)
+        {
+            var crc = 0xFFFFFFFFu;
+            foreach (var input in bytes)
+            {
+                crc ^= input;
+                for (var bit = 0; bit < 8; bit++)
+                    crc = (crc & 1) == 0 ? crc >> 1 : (crc >> 1) ^ 0xEDB88320u;
+            }
+            return ~crc;
+        }
     }
 
     /// <summary>

@@ -23,37 +23,65 @@ public sealed class RichContentPublisher(AeroLinkDbContext db, EvidenceFileStore
 {
     /// <summary>A single inline image beyond this size is a scan, not a diagram, and would bloat every copy.</summary>
     private const long MaximumInlineBytes = 12 * 1024 * 1024;
+    // A record can contain several narrative fields, each of which permits several figures. Bound the
+    // publication aggregate as well as each file so a deliberately dense but otherwise valid record cannot
+    // allocate gigabytes while its DOCX/PDF is generated. Unresolved figures remain visible placeholders.
+    private const int MaximumResolvedImages = 64;
+    private const long MaximumResolvedBytes = 48 * 1024 * 1024;
 
     public async Task<IReadOnlyDictionary<Guid, string>> ResolveImagesAsync(
-        IEnumerable<string?> contents, CancellationToken ct)
+        IEnumerable<string?> contents, Guid projectId, CancellationToken ct, bool includeWithdrawn = false)
     {
         var wanted = contents.SelectMany(RichContent.ReferencedAttachments).Distinct().ToList();
         if (wanted.Count == 0) return new Dictionary<Guid, string>();
 
         var attachments = await db.ControlledAttachments.AsNoTracking()
-            .Where(x => wanted.Contains(x.Id) && x.State != ControlledAttachmentState.Withdrawn)
-            .ToListAsync(ct);
+            .Where(x => wanted.Contains(x.Id) && x.ProjectId == projectId
+                && x.ArtifactType == "InlineImage"
+                && (includeWithdrawn || x.State != ControlledAttachmentState.Withdrawn))
+            .ToDictionaryAsync(x => x.Id, ct);
 
+        // The authored block order is the controlled selection order. Query ordering is not an authority;
+        // without this, an over-cap report could render a different subset from the same signed snapshot.
+        var selected = SelectForPublication(wanted, attachments.ToDictionary(x => x.Key, x => x.Value.Size));
         var resolved = new Dictionary<Guid, string>();
-        foreach (var attachment in attachments)
+        foreach (var id in selected)
         {
+            var attachment = attachments[id];
             var mediaType = attachment.ContentType.ToLowerInvariant();
             if (mediaType is not ("image/png" or "image/jpeg")) continue;
-            if (attachment.Size > MaximumInlineBytes || !store.Exists(attachment.StorageKey)) continue;
             try
             {
-                await using var source = store.OpenRead(attachment.StorageKey);
+                await using var source = await store.OpenVerifiedReadAsync(
+                    attachment.StorageKey, attachment.Size, attachment.Sha256, ct);
                 using var buffer = new MemoryStream();
                 await source.CopyToAsync(buffer, ct);
                 resolved[attachment.Id] = $"data:{mediaType};base64,{Convert.ToBase64String(buffer.ToArray())}";
             }
-            catch (IOException)
+            catch (EvidenceIntegrityException)
             {
-                // A file the store cannot read is reported by its absence from this map, which the rewrite
-                // below turns into visible text rather than a silently missing figure.
+                // A missing or altered file is reported by its absence from this map, which the rewrite below
+                // turns into visible text rather than silently publishing bytes that no longer match evidence.
             }
         }
         return resolved;
+    }
+
+    internal static IReadOnlyList<Guid> SelectForPublication(
+        IEnumerable<Guid> authoredOrder, IReadOnlyDictionary<Guid, long> attachmentSizes)
+    {
+        var selected = new List<Guid>();
+        long selectedBytes = 0;
+        foreach (var id in authoredOrder)
+        {
+            if (!attachmentSizes.TryGetValue(id, out var size)
+                || size <= 0 || size > MaximumInlineBytes
+                || selected.Count >= MaximumResolvedImages
+                || size > MaximumResolvedBytes - selectedBytes) continue;
+            selected.Add(id);
+            selectedBytes += size;
+        }
+        return selected;
     }
 
     /// <summary>
@@ -80,6 +108,7 @@ public sealed class RichContentPublisher(AeroLinkDbContext db, EvidenceFileStore
                         writer.WriteString("dataUri", uri);
                         writer.WriteString("alt", block.Alt);
                         writer.WriteString("caption", block.Caption);
+                        if (block.WidthPercent is { } width) writer.WriteNumber("widthPercent", width);
                         break;
                     case RichBlockKind.Image:
                         {

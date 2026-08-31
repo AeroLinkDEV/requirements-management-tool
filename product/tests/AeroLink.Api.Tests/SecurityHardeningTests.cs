@@ -87,7 +87,7 @@ public sealed class SecurityHardeningTests
         payload.Headers.ContentType = new MediaTypeHeaderValue("image/png");
         content.Add(payload, "file", "diagram.png");
 
-        using var response = await client.PostAsync("/api/content/images", content);
+        using var response = await client.PostAsync($"/api/content/images?projectId={projectId:D}", content);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("not the image type it claims to be", await response.Content.ReadAsStringAsync());
@@ -106,7 +106,7 @@ public sealed class SecurityHardeningTests
         payload.Headers.ContentType = new MediaTypeHeaderValue("image/png");
         content.Add(payload, "file", "diagram.png");
 
-        using var response = await client.PostAsync("/api/content/images", content);
+        using var response = await client.PostAsync($"/api/content/images?projectId={projectId:D}", content);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }

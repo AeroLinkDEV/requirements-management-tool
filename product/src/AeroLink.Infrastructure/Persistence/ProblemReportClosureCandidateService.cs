@@ -26,6 +26,12 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
     public const int SchemaVersion = 2;
     public const int ClosurePackageSchemaVersion = 4;
 
+    private static readonly JsonSerializerOptions HistoricalSnapshotJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false,
+    };
+
     public async Task<ProblemReportClosureCandidate> CreateAsync(ProblemReport report,
         TestExecution execution, ProblemReportLink resolutionLink, string actor, DateTimeOffset now,
         CancellationToken ct)
@@ -237,9 +243,19 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
 
     public static string ReportSnapshot(ProblemReport report) => ProblemReportEvidenceContract.Serialize(report);
 
-    private static string ReportSnapshotForSchema(ProblemReport report, int schemaVersion) => schemaVersion switch
+    /// <summary>
+    /// Recreates the bytes a candidate would have committed at the time its snapshot schema was current.
+    ///
+    /// This is intentionally a reader-side compatibility table. Current reports only write schema 5; an
+    /// approval of an old candidate must nevertheless compare against its original envelope rather than
+    /// quietly hashing today's richer/category-normalized shape.
+    /// </summary>
+    public static string ReportSnapshotForSchema(ProblemReport report, int schemaVersion) => schemaVersion switch
     {
         ProblemReportEvidenceContract.SchemaVersion => ReportSnapshot(report),
+        4 => ProblemReportEvidenceContract.SerializeForSchema(report, 4),
+        3 => HistoricalV3ReportSnapshot(report),
+        2 => HistoricalV2ReportSnapshot(report),
         1 => LegacyV1ReportSnapshot(report),
         _ => throw new InvalidOperationException($"Problem Report snapshot schema {schemaVersion} is not supported."),
     };
@@ -264,8 +280,7 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         report.ReportedBy,
         report.ResponsibleEngineerId,
         report.TargetReleaseId,
-        category = report.Category?.ToString(),
-        categoryProvenance = report.CategoryProvenance?.ToString(),
+        type = LegacyProblemReportType(report.Category),
         report.Workaround,
         report.Classification,
         severity = report.Severity.ToString(),
@@ -286,11 +301,123 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         report.WaiverRationale,
         report.WaivedBy,
         report.WaivedAt,
-        state = report.State.ToString(),
+        state = LegacyAwaitingState(report.State),
         report.CreatedAt,
         report.UpdatedAt,
         report.Version,
     });
+
+    private static string HistoricalV2ReportSnapshot(ProblemReport report) =>
+        JsonSerializer.Serialize(new
+        {
+            contract = ProblemReportEvidenceContract.Contract,
+            schemaVersion = 2,
+            report.Id,
+            report.ProjectId,
+            report.ReportNumber,
+            report.Revision,
+            report.DisplayNumber,
+            report.Title,
+            report.Problem,
+            report.Analysis,
+            report.ReportedBy,
+            report.ResponsibleEngineerId,
+            report.TargetReleaseId,
+            report.ProblemRich,
+            report.AdditionalInformation,
+            report.AdditionalInformationRich,
+            report.SystemAircraftImpact,
+            type = LegacyProblemReportType(report.Category),
+            report.Workaround,
+            report.ImpactAssessmentJson,
+            report.Classification,
+            severity = report.Severity.ToString(),
+            priority = report.Priority.ToString(),
+            report.Origin,
+            report.AffectedConfiguration,
+            report.RootCause,
+            report.Effects,
+            report.Containment,
+            report.CorrectiveAction,
+            disposition = report.Disposition?.ToString(),
+            report.DispositionRationale,
+            report.ResolutionVerificationExecutionId,
+            report.ClosureApprovedBy,
+            report.ClosureApprovedByName,
+            report.ClosureApprovedAt,
+            report.IsReleaseBlocker,
+            report.ReleaseBlockerVersion,
+            report.WaiverRationale,
+            report.WaivedBy,
+            report.WaivedAt,
+            state = LegacyAwaitingState(report.State),
+            report.CreatedAt,
+            report.UpdatedAt,
+            report.Version,
+        }, HistoricalSnapshotJsonOptions);
+
+    private static string HistoricalV3ReportSnapshot(ProblemReport report) =>
+        JsonSerializer.Serialize(new
+        {
+            contract = ProblemReportEvidenceContract.Contract,
+            schemaVersion = 3,
+            report.Id,
+            report.ProjectId,
+            report.ReportNumber,
+            report.Revision,
+            report.DisplayNumber,
+            report.Title,
+            report.Problem,
+            report.Analysis,
+            report.ReportedBy,
+            report.ResponsibleEngineerId,
+            report.TargetReleaseId,
+            report.ProblemRich,
+            report.AdditionalInformation,
+            report.AdditionalInformationRich,
+            report.SystemAircraftImpact,
+            category = report.Category?.ToString(),
+            categoryProvenance = report.CategoryProvenance?.ToString(),
+            report.Workaround,
+            report.ImpactAssessmentJson,
+            report.Classification,
+            severity = report.Severity.ToString(),
+            priority = report.Priority.ToString(),
+            report.Origin,
+            report.AffectedConfiguration,
+            report.RootCause,
+            report.Effects,
+            report.Containment,
+            report.CorrectiveAction,
+            disposition = report.Disposition?.ToString(),
+            report.DispositionRationale,
+            report.ResolutionVerificationExecutionId,
+            report.ClosureApprovedBy,
+            report.ClosureApprovedByName,
+            report.ClosureApprovedAt,
+            report.IsReleaseBlocker,
+            report.ReleaseBlockerVersion,
+            report.WaiverRationale,
+            report.WaivedBy,
+            report.WaivedAt,
+            state = ProblemReportTransitionPolicy.Canonical(report.State).ToString(),
+            report.CreatedAt,
+            report.UpdatedAt,
+            report.Version,
+        }, HistoricalSnapshotJsonOptions);
+
+    private static string LegacyProblemReportType(ProblemReportCategory? category) => category switch
+    {
+        ProblemReportCategory.RequirementsDocumentation => "Documentation",
+        ProblemReportCategory.CodeFunctional or ProblemReportCategory.CodeNonFunctional => "Code",
+        ProblemReportCategory.TestBlocking or ProblemReportCategory.TestNonBlocking => "Test",
+        _ => "Other",
+    };
+
+    private static string LegacyAwaitingState(ProblemReportState state) =>
+        ProblemReportTransitionPolicy.Canonical(state) == ProblemReportState.WaitingForSqaToClose
+            ? "AwaitingSqaClosure"
+            : ProblemReportTransitionPolicy.Canonical(state).ToString();
 
     private async Task<string> LinksManifestAsync(Guid reportId, ProblemReportLink? additionalLink,
         int schemaVersion, CancellationToken ct)

@@ -43,6 +43,10 @@ public static class EditSessionEndpoints
         app.MapGet("/api/enterprise-hardening/attachments",async(Guid projectId,string artifactType,Guid artifactId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
         {
             if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
+            // Browser-recovery images are private, transient authoring state, not controlled attachment-vault
+            // records. Never enumerate them through this project-scoped generic surface; the dedicated image
+            // endpoint applies the uploader/session boundary when an editor needs to preview one.
+            if(artifactType.Equals("InlineImageDraft",StringComparison.OrdinalIgnoreCase))return Results.Ok(Array.Empty<object>());
             var rows=await db.ControlledAttachments.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.ArtifactType==artifactType&&x.ArtifactId==artifactId).OrderBy(x=>x.LogicalId).ThenByDescending(x=>x.Version).ToListAsync(ct);
             return Results.Ok(rows.Select(x=>new{x.Id,x.LogicalId,x.Version,x.RevisionId,x.Label,x.Description,x.OriginalFileName,x.ContentType,x.Size,x.Sha256,state=x.State.ToString(),x.UploadedBy,x.UploadedAt,x.IntegrityVerifiedAt,x.SupersedesId}));
         });
@@ -95,7 +99,7 @@ public static class EditSessionEndpoints
         // duplicated into the record, so one diagram used in five requirements is stored once and stays one thing.
 
         app.MapGet("/api/enterprise-hardening/attachments/{id:guid}/download",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
-        {var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();return Results.File(store.OpenRead(item.StorageKey),item.ContentType,item.OriginalFileName,enableRangeProcessing:true);});
+        {var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(item.ArtifactType=="InlineImageDraft")return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();return Results.File(store.OpenRead(item.StorageKey),item.ContentType,item.OriginalFileName,enableRangeProcessing:true);});
 
         app.MapPost("/api/enterprise-hardening/attachments/{id:guid}/verify",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
         {var item=await db.ControlledAttachments.SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var actual=await store.ComputeSha256Async(item.StorageKey,ct);var valid=CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actual),Convert.FromHexString(item.Sha256));if(valid){item.RecordIntegrityVerification(DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);}return Results.Ok(new{valid,expected=item.Sha256,actual,verifiedAt=item.IntegrityVerifiedAt});});
@@ -138,10 +142,48 @@ public static class EditSessionEndpoints
         {var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==id&&x.IsExclusive,ct);if(session is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,session.ProjectId,ct)||session.UserName!=http.UserAccount().UserName)return Results.Forbid();try{session.Heartbeat(request.ExpectedVersion,DateTimeOffset.UtcNow,request.LeaseMinutes??15);await db.SaveChangesAsync(ct);return Results.Ok(new{session.Id,session.Version,session.UpdatedAt,session.ExpiresAt});}catch(DomainException ex){return Results.Conflict(new{error=ex.Message});}});
 
         app.MapPost("/api/edit-sessions/{id:guid}/discard",async(Guid id,CloseEditSessionRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
-        {var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==id&&x.IsExclusive,ct);if(session is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,session.ProjectId,ct)||session.UserName!=http.UserAccount().UserName)return Results.Forbid();try{var now=DateTimeOffset.UtcNow;session.Close(EditSessionState.Abandoned,request.ExpectedVersion,now,http.UserAccount().UserName,string.IsNullOrWhiteSpace(request.Reason)?"Draft checkout discarded.":request.Reason);db.AuditEvents.Add(new(session.ArtifactId,"EditSessionDiscarded",http.UserAccount().UserName,session.ClosedReason??"Draft checkout discarded.",now));await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.Conflict(new{error=ex.Message});}});
+        {
+            await using var transaction=await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable,ct);
+            try
+            {
+                var session=await ArtifactEditSessionLock.AcquireAsync(db,id,ct);
+                if(session is null||!session.IsExclusive)return Results.NotFound();
+                if(!await http.HasProjectAccessAsync(db,session.ProjectId,ct)||session.UserName!=http.UserAccount().UserName)return Results.Forbid();
+                var now=DateTimeOffset.UtcNow;
+                session.Close(EditSessionState.Abandoned,request.ExpectedVersion,now,http.UserAccount().UserName,
+                    string.IsNullOrWhiteSpace(request.Reason)?"Draft checkout discarded.":request.Reason);
+                db.AuditEvents.Add(new(session.ArtifactId,"EditSessionDiscarded",http.UserAccount().UserName,
+                    session.ClosedReason??"Draft checkout discarded.",now));
+                await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);return Results.NoContent();
+            }
+            catch(DomainException ex)
+            {
+                await transaction.RollbackAsync(ct);return Results.Conflict(new{error=ex.Message});
+            }
+            catch(DbUpdateException)
+            {
+                await transaction.RollbackAsync(ct);return Results.Conflict(new{error="The editing session changed; refresh before discarding.",code="edit_session_conflict"});
+            }
+        });
 
         app.MapPost("/api/edit-sessions/{id:guid}/force-unlock",async(Guid id,ForceUnlockEditSessionRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
-        {var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==id&&x.IsExclusive,ct);if(session is null)return Results.NotFound();var actor=http.UserAccount();if(!await http.HasProjectAccessAsync(db,session.ProjectId,ct))return Results.Forbid();if(!actor.IsAdministrator&&!await http.HasProjectRoleAsync(db,identity,session.ProjectId,ct,ProgramRole.ConfigurationManager))return Results.Forbid();try{var now=DateTimeOffset.UtcNow;session.ForceUnlock(actor.UserName,request.Reason,now);db.AuditEvents.Add(new(session.ArtifactId,"EditSessionForceUnlocked",actor.UserName,$"Force-unlocked {session.ArtifactType} held by {session.UserName}. Reason: {request.Reason}",now));db.SecurityAuditEvents.Add(new("ForcedUnlock",actor.UserName,$"{session.ArtifactType}:{session.ArtifactId}","Success",request.Reason,http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}});
+        {
+            await using var transaction=await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable,ct);
+            try
+            {
+                var session=await ArtifactEditSessionLock.AcquireAsync(db,id,ct);
+                if(session is null||!session.IsExclusive)return Results.NotFound();
+                var actor=http.UserAccount();
+                if(!await http.HasProjectAccessAsync(db,session.ProjectId,ct))return Results.Forbid();
+                if(!actor.IsAdministrator&&!await http.HasProjectRoleAsync(db,identity,session.ProjectId,ct,ProgramRole.ConfigurationManager))return Results.Forbid();
+                var now=DateTimeOffset.UtcNow;session.ForceUnlock(actor.UserName,request.Reason,now);
+                db.AuditEvents.Add(new(session.ArtifactId,"EditSessionForceUnlocked",actor.UserName,$"Force-unlocked {session.ArtifactType} held by {session.UserName}. Reason: {request.Reason}",now));
+                db.SecurityAuditEvents.Add(new("ForcedUnlock",actor.UserName,$"{session.ArtifactType}:{session.ArtifactId}","Success",request.Reason,http.Connection.RemoteIpAddress?.ToString()??"local",now));
+                await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);return Results.NoContent();
+            }
+            catch(DomainException ex){await transaction.RollbackAsync(ct);return Results.BadRequest(new{error=ex.Message});}
+            catch(DbUpdateException){await transaction.RollbackAsync(ct);return Results.Conflict(new{error="The editing session changed; refresh before unlocking.",code="edit_session_conflict"});}
+        });
 
         app.MapPost("/api/enterprise-hardening/edit-sessions",async(OpenEditSessionRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
         {

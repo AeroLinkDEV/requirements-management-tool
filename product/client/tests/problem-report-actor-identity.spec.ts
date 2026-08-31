@@ -29,8 +29,6 @@ test('a Problem Report history names an actor the demo registry does not contain
   const dialog = page.getByRole('dialog', { name: 'Record a problem' })
   const title = `Navigation source disagreement annunciation ${Date.now()}`
   await dialog.getByLabel('Title').fill(title)
-  await dialog.getByRole('group', { name: 'Add content to Problem Description' })
-    .getByRole('button', { name: 'Paragraph' }).click()
   await dialog.getByRole('textbox', { name: 'Problem Description paragraph 1' })
     .fill('The disagreement alert clears while the source mismatch is still present.')
   await writeRichField(dialog, 'System / aircraft impact',

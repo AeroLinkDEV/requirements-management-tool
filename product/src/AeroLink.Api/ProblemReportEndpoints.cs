@@ -3,6 +3,7 @@ using System.Data.Common;
 using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Content;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
@@ -23,6 +24,7 @@ public static class ProblemReportEndpoints
         group.MapPost("", CreateAsync);
         group.MapPost("/from-test-execution/{executionId:guid}", CreateFromFailureAsync);
         group.MapGet("/{id:guid}", DetailAsync);
+        group.MapGet("/{id:guid}/download", DownloadAsync);
         group.MapGet("/{id:guid}/corrective-action", CorrectiveActionAsync);
         // Details are edited under the universal controlled-editing lease, not here. A second write path to
         // the same fields was the whole defect: it let two people save over each other with nothing but an
@@ -57,10 +59,27 @@ public static class ProblemReportEndpoints
         if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.TestEngineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
         if (request.ReleaseId is not null && !await db.Releases.AnyAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId, ct))
             return Results.BadRequest(new { error = "The selected build does not belong to this project." });
+        var actor = http.UserAccount();
+        var recoveryCutoff = DateTimeOffset.UtcNow.AddDays(-30);
+        var referencedImages = new[] { request.ProblemRich, request.AdditionalInformationRich, request.AnalysisRich,
+            request.RootCauseRich, request.WorkaroundRich, request.CorrectiveActionRich, request.SystemAircraftImpactRich,
+            request.EffectsRich, request.ContainmentRich }
+            .SelectMany(RichContent.ReferencedAttachments).Distinct().ToArray();
+        if (referencedImages.Length > 0)
+        {
+            var available = await db.ControlledAttachments.AsNoTracking()
+                .Where(image => referencedImages.Contains(image.Id) && image.ProjectId == request.ProjectId
+                    && (image.ArtifactType == "InlineImage"
+                        || (image.ArtifactType == "InlineImageDraft" && image.UploadedBy == actor.UserName))
+                    && image.State != ControlledAttachmentState.Withdrawn)
+                .Select(image => image.Id).ToListAsync(ct);
+            if (referencedImages.Except(available).Any())
+                return Results.BadRequest(new { error = "Every inline image must belong to this Project and remain available." });
+        }
         await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
         try
         {
-            var now = DateTimeOffset.UtcNow; var actor = http.UserAccount();
+            var now = DateTimeOffset.UtcNow;
             var item = new ProblemReport(request.ProjectId, await IdentifierAllocator.NextProblemReportAsync(db, ct), request.Title, request.Problem, request.Analysis ?? "", actor.UserName, now,
                 request.Classification ?? "Software anomaly", request.Severity ?? ProblemReportSeverity.Major, request.Priority ?? ProblemReportPriority.Normal, request.Origin ?? "Manual report", request.AffectedConfiguration ?? "",
                 request.ReleaseId, actor.UserName, request.ProblemRich ?? "", request.AdditionalInformation ?? "", request.AdditionalInformationRich ?? "", request.SystemAircraftImpact ?? "", request.ImpactAssessmentJson ?? "{}",
@@ -72,6 +91,26 @@ public static class ProblemReportEndpoints
                 request.CorrectiveActionRich, request.SystemAircraftImpactRich,
                 request.Effects, request.EffectsRich, request.Containment, request.ContainmentRich),
                 request.RootCause, request.CorrectiveAction, request.Workaround, now);
+            if (referencedImages.Length > 0)
+            {
+                var commitImages = await db.ControlledAttachments
+                    .Where(image => referencedImages.Contains(image.Id) && image.ProjectId == request.ProjectId
+                        && (image.ArtifactType == "InlineImage" || image.ArtifactType == "InlineImageDraft")
+                        && image.State != ControlledAttachmentState.Withdrawn)
+                    .ToListAsync(ct);
+                if (commitImages.Any(image => image.ArtifactType == "InlineImageDraft"
+                        && image.UploadedAt < recoveryCutoff))
+                    return Results.BadRequest(new
+                    {
+                        error = "One or more browser-recovery images expired after 30 days; upload them again before saving the Problem Report.",
+                        code = "inline_image_recovery_expired",
+                    });
+                if (referencedImages.Except(commitImages.Select(image => image.Id)).Any()
+                    || commitImages.Any(image => image.ArtifactType == "InlineImageDraft" && image.UploadedBy != actor.UserName))
+                    return Results.BadRequest(new { error = "Every inline image must belong to this Project and remain available." });
+                foreach (var image in commitImages.Where(image => image.ArtifactType == "InlineImageDraft"))
+                    image.ClaimInlineImage(item.Id, null);
+            }
             db.ProblemReports.Add(item);
             if (request.ReleaseId is not null)
                 db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(item.Id, "Release", request.ReleaseId.Value,
@@ -340,6 +379,20 @@ public static class ProblemReportEndpoints
                 canReassignOwner = string.Equals(actor.UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase) || canRecoverOwner,
                 canRecoverOwner,
             }, waivers, duplicateDiagnostic, currentNames));
+    }
+
+    private static async Task<IResult> DownloadAsync(Guid id, int? revision, Guid? snapshotId, string? format, HttpContext http,
+        AeroLinkDbContext db, ProblemReportOutputGenerator generator, CancellationToken ct)
+    {
+        var projectId = await db.ProblemReports.AsNoTracking().Where(x => x.Id == id)
+            .Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+        if (projectId is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
+        var requestedFormat = string.IsNullOrWhiteSpace(format) ? "docx" : format.Trim().ToLowerInvariant();
+        if (requestedFormat is not ("docx" or "pdf"))
+            return Results.BadRequest(new { error = "Problem Report output format must be docx or pdf." });
+        var output = await generator.GenerateAsync(id, revision, snapshotId, requestedFormat, ct);
+        return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
     }
 
     private static async Task<IResult> ReassignAsync(Guid id, ReassignRequest request, HttpContext http,

@@ -48,10 +48,10 @@ public sealed class ProblemReportNarrativeTests
 
         Assert.Equal(Authored, report.AnalysisRich);
         Assert.Equal(Authored, report.ContainmentRich);
-        Assert.Equal("Annunciator queue", report.RootCause);
-        Assert.Equal("Crew loses the cue.", report.Effects);
-        Assert.Equal("Brief the crews.", report.Containment);
-        Assert.Equal("Use the redundant channel", report.Workaround);
+        Assert.Equal("Queued behind the annunciator.", report.RootCause);
+        Assert.Equal("Queued behind the annunciator.", report.Effects);
+        Assert.Equal("Queued behind the annunciator.", report.Containment);
+        Assert.Equal("Queued behind the annunciator.", report.Workaround);
     }
 
     /// <summary>
@@ -107,6 +107,54 @@ public sealed class ProblemReportNarrativeTests
 
         Assert.NotEqual(before, report.CanonicalHash());
         Assert.Contains("\"rootCauseRich\"", report.CanonicalSnapshot());
-        Assert.Equal(4, ProblemReportEvidenceContract.SchemaVersion);
+        Assert.Equal(5, ProblemReportEvidenceContract.SchemaVersion);
+    }
+
+    [Fact]
+    public void Typed_narrative_is_authoritative_over_a_conflicting_caller_projection()
+    {
+        var report = new ProblemReport(Guid.NewGuid(), "PR-00002", "Disconnect tone is late",
+            "A forged plain problem", "", "verification.engineer", Now,
+            problemRich: Authored, additionalInformation: "A forged plain note",
+            additionalInformationRich: Authored, category: ProblemReportCategory.CodeFunctional);
+
+        report.UpdateDetails("verification.engineer", report.Title, "A second forged problem", Authored,
+            "A second forged note", Authored, "A forged analysis", "A forged cause",
+            "A forged correction", "A forged impact", "{}", report.Severity, report.Priority,
+            Now.AddMinutes(1), narrative: new ProblemReportNarrative(
+                AnalysisRich: Authored, RootCauseRich: Authored, CorrectiveActionRich: Authored,
+                SystemAircraftImpactRich: Authored));
+
+        Assert.Equal("Queued behind the annunciator.", report.Problem);
+        Assert.Equal("Queued behind the annunciator.", report.AdditionalInformation);
+        Assert.Equal("Queued behind the annunciator.", report.Analysis);
+        Assert.Equal("Queued behind the annunciator.", report.RootCause);
+        Assert.Equal("Queued behind the annunciator.", report.CorrectiveAction);
+        Assert.Equal("Queued behind the annunciator.", report.SystemAircraftImpact);
+    }
+
+    [Fact]
+    public void Plain_only_and_empty_block_legacy_callers_keep_their_authored_text()
+    {
+        var report = new ProblemReport(Guid.NewGuid(), "PR-00003", "Disconnect tone is late",
+            "Plain problem", "", "verification.engineer", Now,
+            problemRich: "{\"blocks\":[]}", additionalInformation: "Plain note",
+            additionalInformationRich: "{\"blocks\":[]}", category: ProblemReportCategory.CodeFunctional);
+
+        Assert.Equal("Plain problem", report.Problem);
+        Assert.Equal("Plain note", report.AdditionalInformation);
+    }
+
+    [Fact]
+    public void A_problem_report_figure_requires_descriptive_alternative_text()
+    {
+        var image = $$"""{"blocks":[{"type":"image","attachmentId":"{{Guid.NewGuid()}}","alt":""}]}""";
+
+        var error = Assert.Throws<AeroLink.Domain.Common.DomainException>(() =>
+            new ProblemReport(Guid.NewGuid(), "PR-00004", "Disconnect tone is late", "Plain problem", "",
+                "verification.engineer", Now, problemRich: image,
+                category: ProblemReportCategory.CodeFunctional));
+
+        Assert.Contains("descriptive alternative text", error.Message);
     }
 }

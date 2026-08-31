@@ -12,7 +12,6 @@ test('an engineer creates a structured Draft PR and advances it through the SCCB
   const dialog = page.getByRole('dialog', { name: 'Record a problem' })
   const title = `Position-source alert clears early ${Date.now()}`
   await dialog.getByLabel('Title').fill(title)
-  await dialog.getByRole('group', { name: 'Add content to Problem Description' }).getByRole('button', { name: 'Paragraph' }).click()
   await dialog.getByRole('textbox', { name: 'Problem Description paragraph 1' }).fill('The disagreement alert clears while the source mismatch is still present.')
   await writeRichField(dialog, 'System / aircraft impact', 'The flight crew can lose annunciation of a persistent navigation-source disagreement.')
   await dialog.getByLabel('System requirements').selectOption('Yes')
@@ -80,7 +79,6 @@ test('an Open Problem Report is checked out, corrected, and the correction survi
   const dialog = page.getByRole('dialog', { name: 'Record a problem' })
   const stamp = Date.now()
   await dialog.getByLabel('Title').fill(`Autopilot disconnect tone lags ${stamp}`)
-  await dialog.getByRole('group', { name: 'Add content to Problem Description' }).getByRole('button', { name: 'Paragraph' }).click()
   await dialog.getByRole('textbox', { name: 'Problem Description paragraph 1' }).fill('The tone follows the disconnect by about a second.')
   // A Draft may be unclassified, but it cannot reach the SCCB that way.
   await chooseCategory(dialog, 'Code Issue — Functional Impact')
@@ -139,10 +137,10 @@ test('an Open Problem Report is checked out, corrected, and the correction survi
   await expect(page.getByText(workaround)).toBeVisible()
   await page.getByRole('button', { name: /History/ }).click()
   const checkIn = page.locator('.prTimeline article').filter({ hasText: 'Details Checked In' })
-  // Schema 3 retired the four-kind Type for the category vocabulary and added how the value was arrived
-  // at; schema 4 added the authored companion to every narrative field. Each step makes the snapshot
-  // incomparable field for field with the one before it, which is what the version is for.
-  await expect(checkIn).toContainText('Snapshot schema 4')
+  // Schema 3 retired the four-kind Type for the category vocabulary; schema 4 added the authored
+  // companion to each narrative field; schema 5 added typed inline-image blocks. Each step makes the
+  // snapshot incomparable field for field with the one before it, which is what the version is for.
+  await expect(checkIn).toContainText('Snapshot schema 5')
   await expect(checkIn).toContainText('Category CodeNonFunctional')
   await expect(checkIn).toContainText(`Workaround ${workaround}`)
 })

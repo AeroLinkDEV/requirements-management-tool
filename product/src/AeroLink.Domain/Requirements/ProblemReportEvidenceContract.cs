@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AeroLink.Domain.Content;
 
 namespace AeroLink.Domain.Requirements;
 
@@ -77,7 +78,9 @@ public static class ProblemReportEvidenceContract
     // so a schema-2 snapshot and a schema-3 snapshot of the same report are not comparable field for field.
     // Version 4 adds the authored companion to every narrative field. A schema-3 snapshot committed only
     // the plain projection of an analysis or a root cause, so the two are not comparable field for field.
-    public const int SchemaVersion = 4;
+    // Version 5 adds the bounded authored image width to the typed rich-content contract. Historical v4
+    // snapshots remain reproducible by selecting their original outer schema version during verification.
+    public const int SchemaVersion = 5;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -85,7 +88,8 @@ public static class ProblemReportEvidenceContract
         WriteIndented = false,
     };
 
-    public static ProblemReportEvidenceSnapshot Create(ProblemReport report, long? versionOverride = null) => new()
+    public static ProblemReportEvidenceSnapshot Create(ProblemReport report, long? versionOverride = null,
+        int? schemaVersion = null) => new()
     {
         Id = report.Id,
         ProjectId = report.ProjectId,
@@ -95,19 +99,19 @@ public static class ProblemReportEvidenceContract
         Title = report.Title,
         Problem = report.Problem,
         Analysis = report.Analysis,
-        AnalysisRich = report.AnalysisRich,
+        AnalysisRich = RichForSchema(report.AnalysisRich, schemaVersion),
         ReportedBy = report.ReportedBy,
         ResponsibleEngineerId = report.ResponsibleEngineerId,
         TargetReleaseId = report.TargetReleaseId,
-        ProblemRich = report.ProblemRich,
+        ProblemRich = RichForSchema(report.ProblemRich, schemaVersion),
         AdditionalInformation = report.AdditionalInformation,
-        AdditionalInformationRich = report.AdditionalInformationRich,
+        AdditionalInformationRich = RichForSchema(report.AdditionalInformationRich, schemaVersion),
         SystemAircraftImpact = report.SystemAircraftImpact,
-        SystemAircraftImpactRich = report.SystemAircraftImpactRich,
+        SystemAircraftImpactRich = RichForSchema(report.SystemAircraftImpactRich, schemaVersion),
         Category = report.Category?.ToString(),
         CategoryProvenance = report.CategoryProvenance?.ToString(),
         Workaround = report.Workaround,
-        WorkaroundRich = report.WorkaroundRich,
+        WorkaroundRich = RichForSchema(report.WorkaroundRich, schemaVersion),
         ImpactAssessmentJson = report.ImpactAssessmentJson,
         Classification = report.Classification,
         Severity = report.Severity.ToString(),
@@ -115,13 +119,13 @@ public static class ProblemReportEvidenceContract
         Origin = report.Origin,
         AffectedConfiguration = report.AffectedConfiguration,
         RootCause = report.RootCause,
-        RootCauseRich = report.RootCauseRich,
+        RootCauseRich = RichForSchema(report.RootCauseRich, schemaVersion),
         Effects = report.Effects,
-        EffectsRich = report.EffectsRich,
+        EffectsRich = RichForSchema(report.EffectsRich, schemaVersion),
         Containment = report.Containment,
-        ContainmentRich = report.ContainmentRich,
+        ContainmentRich = RichForSchema(report.ContainmentRich, schemaVersion),
         CorrectiveAction = report.CorrectiveAction,
-        CorrectiveActionRich = report.CorrectiveActionRich,
+        CorrectiveActionRich = RichForSchema(report.CorrectiveActionRich, schemaVersion),
         Disposition = report.Disposition?.ToString(),
         DispositionRationale = report.DispositionRationale,
         ResolutionVerificationExecutionId = report.ResolutionVerificationExecutionId,
@@ -137,10 +141,24 @@ public static class ProblemReportEvidenceContract
         CreatedAt = report.CreatedAt,
         UpdatedAt = report.UpdatedAt,
         Version = versionOverride ?? report.Version,
+        SchemaVersion = schemaVersion ?? SchemaVersion,
     };
 
     public static string Serialize(ProblemReport report, long? versionOverride = null) =>
         Serialize(Create(report, versionOverride));
+
+    /// <summary>
+    /// Recreates an older complete evidence envelope without rewriting the report or its current hash. Rich
+    /// image layout metadata is removed when selecting v4 because that contract could not have committed it;
+    /// all older authored text and structure retains its original spelling.
+    /// </summary>
+    public static string SerializeForSchema(ProblemReport report, int schemaVersion, long? versionOverride = null) =>
+        schemaVersion is 4 or SchemaVersion
+            ? Serialize(Create(report, versionOverride, schemaVersion))
+            : throw new InvalidOperationException($"Problem Report snapshot schema {schemaVersion} is not supported.");
+
+    private static string RichForSchema(string value, int? schemaVersion) =>
+        schemaVersion == 4 ? RichContent.ForEvidenceSchema(value, 4) : value;
 
     public static string Serialize(ProblemReportEvidenceSnapshot snapshot) =>
         JsonSerializer.Serialize(snapshot, JsonOptions);

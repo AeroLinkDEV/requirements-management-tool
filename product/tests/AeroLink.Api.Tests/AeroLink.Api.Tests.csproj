@@ -26,4 +26,10 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\AeroLink.Infrastructure.Tests\Fixtures\ProblemReportSnapshots\*.json"
+          Link="Fixtures\ProblemReportSnapshots\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

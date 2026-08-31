@@ -597,6 +597,49 @@ public sealed class ControlledEditingCheckInEngineTests
     }
 
     [Fact]
+    public async Task Problem_report_check_in_commits_rich_image_layout_in_current_schema_history()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var report = new ProblemReport(scenario.Project.Id, "PR-00002", "Image-backed report",
+            "The unit reset during recovery load.", "Initial analysis", scenario.Actor.UserName, scenario.Now,
+            category: ProblemReportCategory.CodeFunctional);
+        var attachment = new ControlledAttachment(scenario.Project.Id, "InlineImage", report.Id, null,
+            Guid.NewGuid(), 1, "Recovery screenshot", "", "recovery.png", "image/png", 12,
+            new string('b', 64), "test/recovery.png", null, scenario.Actor.UserName, scenario.Now);
+        scenario.Db.AddRange(report, attachment);
+        await scenario.Db.SaveChangesAsync();
+
+        var rich = JsonSerializer.Serialize(new
+        {
+            blocks = new object[]
+            {
+                new { type = "paragraph", text = "Observed recovery reset." },
+                new { type = "image", attachmentId = attachment.Id, alt = "Recovery trace", caption = "Figure 1", widthPercent = 60 },
+            },
+        });
+        var draft = JsonSerializer.Serialize(new
+        {
+            report.Id, report.ProjectId, report.ReportNumber, title = report.Title,
+            problem = report.Problem, problemRich = rich, analysis = report.Analysis,
+            report.ReportedBy, responsibleEngineerId = report.ResponsibleEngineerId,
+            state = report.State.ToString(), version = report.Version,
+            category = ProblemReportCategory.CodeFunctional.ToString(), severity = report.Severity.ToString(),
+            priority = report.Priority.ToString(), impactAssessmentJson = report.ImpactAssessmentJson,
+        });
+
+        var result = await CheckInAsync(scenario, new ProblemReportControlledEditingAdapter(scenario.Db),
+            "ProblemReport", report.Id, draft);
+
+        Assert.True(result.Success, result.Error);
+        scenario.Db.ChangeTracker.Clear();
+        var checkedIn = await scenario.Db.ProblemReportRevisions.SingleAsync(x => x.ProblemReportId == report.Id && x.EventType == "DetailsCheckedIn");
+        Assert.Equal(ProblemReportEvidenceContract.SchemaVersion, checkedIn.SnapshotSchemaVersion);
+        Assert.Equal(ProblemReportEvidenceContract.Hash(checkedIn.SnapshotJson), checkedIn.SnapshotHash);
+        using var snapshot = JsonDocument.Parse(checkedIn.SnapshotJson);
+        Assert.Contains("\"widthPercent\":60", snapshot.RootElement.GetProperty("problemRich").GetString());
+    }
+
+    [Fact]
     public async Task Configuration_change_set_check_in_creates_immutable_universal_evidence()
     {
         await using var scenario = await Scenario.CreateAsync();

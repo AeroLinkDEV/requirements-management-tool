@@ -18,30 +18,224 @@ namespace AeroLink.Infrastructure.Persistence;
 /// </summary>
 public static class PngImage
 {
+    // A 4K capture is about eight million pixels. Allow that normal engineering artifact, but reject larger
+    // images before either the filtered scanlines or the RGB PDF payload can make a publication worker spend
+    // hundreds of megabytes on one figure.
+    private const long MaximumDecodedPixels = 10_000_000L;
     /// <summary>
     /// Whether these bytes really are the image they claim to be.
     ///
     /// The content type on an upload is chosen by whoever sent it, so it is a claim and not a fact. A file
     /// that says PNG and contains markup would be stored, referenced from an approved requirement, and then
-    /// streamed back to an approver from this deployment's own origin. Checking the signature is what makes
-    /// the stored type true rather than asserted.
+    /// streamed back to an approver from this deployment's own origin. A signature alone is not enough: walk
+    /// the bounded chunk stream and decode exactly the declared scanlines before accepting the bytes.
     /// </summary>
     public static bool IsDeclaredImage(byte[] bytes, string contentType) => contentType.ToLowerInvariant() switch
     {
         "image/png" => IsPng(bytes),
-        // JPEG begins with the start-of-image marker and ends with end-of-image.
-        "image/jpeg" => bytes.Length > 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF,
+        "image/jpeg" => IsJpeg(bytes),
         _ => false,
     };
 
     private static ReadOnlySpan<byte> Signature => [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
-    public static bool IsPng(byte[] bytes) => bytes.Length >= 8 && bytes.AsSpan(0, 8).SequenceEqual(Signature);
+    /// <summary>Runs the full bounded decoder so a valid signature cannot be mistaken for a valid PNG.</summary>
+    public static bool IsPng(byte[] bytes) => TryDecodeRgb(bytes, out _, out _, out _);
+
+    private static bool HasSignature(byte[] bytes) => bytes.Length >= 8 && bytes.AsSpan(0, 8).SequenceEqual(Signature);
+
+    private static bool ValidChunkType(ReadOnlySpan<byte> type) => type.Length == 4
+        && type.ToArray().All(value => value is >= (byte)'A' and <= (byte)'Z'
+            or >= (byte)'a' and <= (byte)'z');
+
+    /// <summary>
+    /// Validates the bounded JPEG container without decoding pixels. A SOI prefix alone is not an image: it
+    /// accepts truncated uploads, arbitrary bytes, and payloads which the publication path cannot read. Walk
+    /// every marker and length, validate frame/scan structure, consume stuffed entropy bytes, and require a
+    /// terminal EOI with no trailing data. This deliberately remains a structural gate; the publication
+    /// renderer owns the supported JPEG decode profile.
+    /// </summary>
+    public static bool IsJpeg(byte[] bytes)
+    {
+        if (bytes.Length < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8) return false;
+
+        var offset = 2;
+        var hasFrame = false;
+        var hasScan = false;
+        var hasEntropyData = false;
+        var inEntropy = false;
+        var progressive = false;
+        var quantTables = new bool[4];
+        var dcTables = new bool[4];
+        var acTables = new bool[4];
+        var frameComponents = new Dictionary<byte, byte>();
+        const long maximumPixels = 100_000_000L;
+        const int maximumDimension = 32_768;
+
+        while (offset < bytes.Length)
+        {
+            if (inEntropy)
+            {
+                if (bytes[offset] != 0xFF)
+                {
+                    hasEntropyData = true;
+                    offset++;
+                    continue;
+                }
+                var markerStart = offset;
+                offset++;
+                while (offset < bytes.Length && bytes[offset] == 0xFF) offset++;
+                if (offset >= bytes.Length) return false;
+                var entropyMarker = bytes[offset++];
+                if (entropyMarker == 0x00 || entropyMarker is >= 0xD0 and <= 0xD7) continue;
+                // A non-restart marker terminates this scan. Rewind to its prefix so the normal marker
+                // parser validates its segment; this also supports valid multi-scan JPEGs.
+                inEntropy = false;
+                offset = markerStart;
+                continue;
+            }
+
+            if (bytes[offset++] != 0xFF) return false;
+            while (offset < bytes.Length && bytes[offset] == 0xFF) offset++;
+            if (offset >= bytes.Length) return false;
+            var marker = bytes[offset++];
+            if (marker == 0x00) return false;
+            if (marker == 0xD9) return hasFrame && hasScan && hasEntropyData && offset == bytes.Length;
+            if (marker == 0xD8 || marker is >= 0xD0 and <= 0xD7) return false;
+            if (marker == 0x01) continue; // TEM is the only standalone non-restart marker.
+
+            if (offset + 2 > bytes.Length) return false;
+            var segmentLength = BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(offset, 2));
+            if (segmentLength < 2 || segmentLength > bytes.Length - offset) return false;
+            var payloadStart = offset + 2;
+            var payloadLength = segmentLength - 2;
+            var payload = bytes.AsSpan(payloadStart, payloadLength);
+            var segmentEnd = payloadStart + payloadLength;
+
+            switch (marker)
+            {
+                case 0xDB: // Define Quantization Table(s).
+                    if (!ReadQuantizationTables(payload, quantTables)) return false;
+                    break;
+                case 0xC4: // Define Huffman Table(s).
+                    if (!ReadHuffmanTables(payload, dcTables, acTables)) return false;
+                    break;
+                case >= 0xC0 and <= 0xC3:
+                case >= 0xC5 and <= 0xC7:
+                case >= 0xC9 and <= 0xCB:
+                case >= 0xCD and <= 0xCF:
+                    progressive = marker is 0xC2 or 0xC6 or 0xCA or 0xCE;
+                    if (!ReadFrame(payload, quantTables, frameComponents,
+                        progressive,
+                        maximumDimension, maximumPixels)) return false;
+                    hasFrame = true;
+                    break;
+                case 0xDA: // Start of Scan.
+                    if (!hasFrame || !ReadScan(payload, frameComponents, dcTables, acTables, progressive)) return false;
+                    hasScan = true;
+                    inEntropy = true;
+                    break;
+            }
+            offset = segmentEnd;
+        }
+        return false;
+    }
+
+    private static bool ReadQuantizationTables(ReadOnlySpan<byte> payload, bool[] tables)
+    {
+        var offset = 0;
+        while (offset < payload.Length)
+        {
+            var info = payload[offset++];
+            var precision = info >> 4;
+            var id = info & 0x0F;
+            if (precision > 1 || id > 3) return false;
+            var tableBytes = precision == 0 ? 64 : 128;
+            if (offset + tableBytes > payload.Length) return false;
+            tables[id] = true;
+            offset += tableBytes;
+        }
+        return offset == payload.Length;
+    }
+
+    private static bool ReadHuffmanTables(ReadOnlySpan<byte> payload, bool[] dcTables, bool[] acTables)
+    {
+        var offset = 0;
+        while (offset < payload.Length)
+        {
+            if (payload.Length - offset < 17) return false;
+            var info = payload[offset++];
+            var tableClass = info >> 4;
+            var tableId = info & 0x0F;
+            if (tableClass > 1 || tableId > 3) return false;
+            var symbolCount = 0;
+            for (var i = 0; i < 16; i++) symbolCount += payload[offset + i];
+            offset += 16;
+            if (offset + symbolCount > payload.Length) return false;
+            if (tableClass == 0) dcTables[tableId] = true;
+            else acTables[tableId] = true;
+            offset += symbolCount;
+        }
+        return offset == payload.Length;
+    }
+
+    private static bool ReadFrame(ReadOnlySpan<byte> payload, bool[] quantTables,
+        Dictionary<byte, byte> components, bool progressive, int maximumDimension, long maximumPixels)
+    {
+        components.Clear();
+        // SOF segment length is 8 + 3*N, therefore its payload is exactly 6 + 3*N.
+        if (payload.Length < 9 || payload[0] != 8) return false;
+        var height = BinaryPrimitives.ReadUInt16BigEndian(payload[1..3]);
+        var width = BinaryPrimitives.ReadUInt16BigEndian(payload[3..5]);
+        var count = payload[5];
+        if (width == 0 || height == 0 || width > maximumDimension || height > maximumDimension
+            || (long)width * height > maximumPixels || count is < 1 or > 4
+            || payload.Length != 6 + 3 * count) return false;
+
+        for (var i = 0; i < count; i++)
+        {
+            var at = 6 + 3 * i;
+            var id = payload[at];
+            var quant = payload[at + 2];
+            if (components.ContainsKey(id) || quant > 3 || !quantTables[quant]) return false;
+            components.Add(id, quant);
+        }
+        return true;
+    }
+
+    private static bool ReadScan(ReadOnlySpan<byte> payload, IReadOnlyDictionary<byte, byte> components,
+        bool[] dcTables, bool[] acTables, bool progressive)
+    {
+        // SOS segment length is 6 + 2*N, hence payload is 4 + 2*N.
+        if (payload.Length < 6) return false;
+        var count = payload[0];
+        if (count is < 1 or > 4 || payload.Length != 4 + 2 * count) return false;
+        var seen = new HashSet<byte>();
+        for (var i = 0; i < count; i++)
+        {
+            var at = 1 + 2 * i;
+            var component = payload[at];
+            var selectors = payload[at + 1];
+            var dc = selectors >> 4;
+            var ac = selectors & 0x0F;
+            if (!components.ContainsKey(component) || !seen.Add(component) || dc > 3 || ac > 3
+                || !dcTables[dc] || !acTables[ac]) return false;
+        }
+
+        var spectralStart = payload[^3];
+        var spectralEnd = payload[^2];
+        var successive = payload[^1];
+        if (spectralStart > spectralEnd || spectralEnd > 63 || (successive >> 4) > 13 || (successive & 0x0F) > 13)
+            return false;
+        // Baseline scans must carry the complete 0..63 band with no successive approximation. Progressive
+        // scans use the spectral/successive fields to split that band across multiple scans.
+        return progressive || (spectralStart == 0 && spectralEnd == 63 && successive == 0);
+    }
 
     /// <summary>Reads the dimensions from IHDR alone, without decoding pixels.</summary>
     public static (int Width, int Height) Size(byte[] bytes)
     {
-        if (!IsPng(bytes) || bytes.Length < 24) return (640, 360);
+        if (!HasSignature(bytes) || bytes.Length < 24) return (640, 360);
         var width = (int)BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(16, 4));
         var height = (int)BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(20, 4));
         return (Math.Max(1, width), Math.Max(1, height));
@@ -54,9 +248,9 @@ public static class PngImage
     public static bool TryDecodeRgb(byte[] bytes, out int width, out int height, out byte[] rgb)
     {
         width = 0; height = 0; rgb = [];
-        if (!IsPng(bytes)) return false;
+        if (!HasSignature(bytes)) return false;
         try { return Decode(bytes, out width, out height, out rgb); }
-        catch (Exception ex) when (ex is InvalidDataException or IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
+        catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException or IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException or IOException)
         {
             return false;
         }
@@ -67,55 +261,98 @@ public static class PngImage
         width = 0; height = 0; rgb = [];
         int bitDepth = 0, colorType = 0;
         byte[]? palette = null;
-        var compressed = new MemoryStream();
-
+        using var compressed = new MemoryStream();
+        var sawHeader = false;
+        var sawData = false;
+        var closedData = false;
+        var sawEnd = false;
         var offset = 8;
-        while (offset + 8 <= bytes.Length)
+        while (offset < bytes.Length)
         {
-            var length = (int)BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(offset, 4));
-            var type = System.Text.Encoding.ASCII.GetString(bytes, offset + 4, 4);
+            // Every chunk is length + type + payload + CRC. The complete bounded envelope and each checksum
+            // are mandatory before these bytes can become controlled content.
+            if (bytes.Length - offset < 12) return false;
+            var lengthValue = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(offset, 4));
+            if (lengthValue > int.MaxValue) return false;
+            var length = (int)lengthValue;
             var data = offset + 8;
-            if (length < 0 || data + length > bytes.Length) return false;
+            if (length > bytes.Length - data - 4) return false;
+            var typeBytes = bytes.AsSpan(offset + 4, 4);
+            if (!ValidChunkType(typeBytes)) return false;
+            var declaredCrc = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(data + length, 4));
+            if (PngCrc(typeBytes, bytes.AsSpan(data, length)) != declaredCrc) return false;
+            var type = System.Text.Encoding.ASCII.GetString(typeBytes);
+            if (sawEnd) return false;
+            if (!sawHeader && type != "IHDR") return false;
             switch (type)
             {
                 case "IHDR":
-                    if (length < 13) return false;
-                    width = (int)BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(data, 4));
-                    height = (int)BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(data + 4, 4));
+                    if (sawHeader || offset != 8 || length != 13) return false;
+                    var widthValue = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(data, 4));
+                    var heightValue = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(data + 4, 4));
                     bitDepth = bytes[data + 8];
                     colorType = bytes[data + 9];
                     // Interlaced images arrive as seven interleaved passes. A capture tool does not produce
                     // them, and half-implementing the reassembly would render a scrambled picture.
-                    if (bytes[data + 12] != 0) return false;
+                    if (widthValue == 0 || heightValue == 0 || widthValue > 32_768 || heightValue > 32_768
+                        || widthValue > int.MaxValue || heightValue > int.MaxValue || bitDepth != 8
+                        || bytes[data + 10] != 0 || bytes[data + 11] != 0 || bytes[data + 12] != 0)
+                        return false;
+                    width = (int)widthValue;
+                    height = (int)heightValue;
+                    var channelsForHeader = colorType switch { 0 => 1, 2 => 3, 3 => 1, 4 => 2, 6 => 4, _ => 0 };
+                    if (channelsForHeader == 0 || (long)width * height > MaximumDecodedPixels) return false;
+                    sawHeader = true;
                     break;
                 case "PLTE":
+                    if (!sawHeader || sawData || length == 0 || length % 3 != 0 || length > 256 * 3) return false;
                     palette = bytes.AsSpan(data, length).ToArray();
                     break;
                 case "IDAT":
+                    if (!sawHeader || closedData) return false;
                     compressed.Write(bytes, data, length);
+                    sawData = true;
                     break;
                 case "IEND":
-                    offset = bytes.Length;
-                    continue;
+                    if (!sawHeader || !sawData || length != 0) return false;
+                    sawEnd = true;
+                    // A valid PNG ends at IEND. Bytes after it are not metadata; they are an unvalidated
+                    // payload attached to an otherwise valid signature and must not be stored.
+                    if (data + 4 != bytes.Length) return false;
+                    break;
+                default:
+                    // Unknown ancillary chunks are safe to skip; an unknown critical chunk is not a format
+                    // this bounded decoder can claim to understand.
+                    if (typeBytes[0] is >= (byte)'A' and <= (byte)'Z') return false;
+                    break;
             }
+            if (type != "IDAT" && sawData) closedData = true;
             offset = data + length + 4;
         }
 
-        if (width <= 0 || height <= 0 || bitDepth != 8 || compressed.Length == 0) return false;
+        if (!sawHeader || !sawData || !sawEnd || width <= 0 || height <= 0 || compressed.Length == 0) return false;
         var channels = colorType switch { 0 => 1, 2 => 3, 3 => 1, 4 => 2, 6 => 4, _ => 0 };
         if (channels == 0) return false;
         if (colorType == 3 && palette is null) return false;
         // A very large capture would decode into hundreds of megabytes. The document is better served by the
         // alt text than by exhausting the server that generates it.
-        if ((long)width * height > 40_000_000L) return false;
+        if ((long)width * height > MaximumDecodedPixels) return false;
 
         compressed.Position = 0;
         using var inflate = new ZLibStream(compressed, CompressionMode.Decompress);
-        using var raw = new MemoryStream();
-        inflate.CopyTo(raw);
-        var scanline = width * channels;
-        var pixels = raw.ToArray();
-        if (pixels.Length < (long)(scanline + 1) * height) return false;
+        var scanline = checked(width * channels);
+        var expected = checked((long)(scanline + 1) * height);
+        // Never CopyTo an attacker-controlled deflate stream. Decode only the exact number of scanline bytes
+        // the validated IHDR permits, then require EOF so trailing decompressed data cannot become a bomb.
+        var pixels = new byte[checked((int)expected)];
+        var read = 0;
+        while (read < pixels.Length)
+        {
+            var count = inflate.Read(pixels, read, pixels.Length - read);
+            if (count == 0) return false;
+            read += count;
+        }
+        if (inflate.ReadByte() != -1) return false;
 
         var output = new byte[(long)width * height * 3];
         var previous = new byte[scanline];
@@ -126,7 +363,7 @@ public static class PngImage
             var filter = pixels[source++];
             Buffer.BlockCopy(pixels, source, current, 0, scanline);
             source += scanline;
-            Unfilter(filter, current, previous, channels);
+            if (!Unfilter(filter, current, previous, channels)) return false;
 
             var target = (long)row * width * 3;
             for (var x = 0; x < width; x++)
@@ -170,9 +407,26 @@ public static class PngImage
         return true;
     }
 
-    /// <summary>Reverses the per-scanline filter PNG applies before compression.</summary>
-    private static void Unfilter(byte filter, byte[] current, byte[] previous, int channels)
+    private static uint PngCrc(ReadOnlySpan<byte> type, ReadOnlySpan<byte> data)
     {
+        var crc = 0xFFFFFFFFu;
+        foreach (var value in type) crc = CrcByte(crc, value);
+        foreach (var value in data) crc = CrcByte(crc, value);
+        return ~crc;
+
+        static uint CrcByte(uint value, byte input)
+        {
+            value ^= input;
+            for (var bit = 0; bit < 8; bit++)
+                value = (value & 1) == 0 ? value >> 1 : (value >> 1) ^ 0xEDB88320u;
+            return value;
+        }
+    }
+
+    /// <summary>Reverses the per-scanline filter PNG applies before compression.</summary>
+    private static bool Unfilter(byte filter, byte[] current, byte[] previous, int channels)
+    {
+        if (filter > 4) return false;
         for (var i = 0; i < current.Length; i++)
         {
             byte left = i >= channels ? current[i - channels] : (byte)0;
@@ -188,6 +442,7 @@ public static class PngImage
                 _ => current[i],
             };
         }
+        return true;
     }
 
     private static byte Paeth(byte a, byte b, byte c)

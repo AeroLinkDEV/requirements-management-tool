@@ -167,6 +167,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<CodeTraceabilityRecord> CodeTraceabilityRecords => Set<CodeTraceabilityRecord>();
     public DbSet<ConfigurationChangeSet> ConfigurationChangeSets => Set<ConfigurationChangeSet>();
     public DbSet<ControlledAttachment> ControlledAttachments => Set<ControlledAttachment>();
+    public DbSet<ControlledAttachmentStorageOperation> ControlledAttachmentStorageOperations => Set<ControlledAttachmentStorageOperation>();
     public DbSet<ArtifactEditSession> ArtifactEditSessions => Set<ArtifactEditSession>();
     public DbSet<ArtifactDraftSnapshot> ArtifactDraftSnapshots => Set<ArtifactDraftSnapshot>();
     public DbSet<ControlledArtifactCheckInEvidence> ControlledArtifactCheckInEvidence => Set<ControlledArtifactCheckInEvidence>();
@@ -1730,6 +1731,17 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<ControlledAttachment>(b =>
         {
             b.ToTable("controlled_attachments");b.HasKey(x=>x.Id);b.Property(x=>x.ArtifactType).HasMaxLength(60).IsRequired();b.Property(x=>x.Label).HasMaxLength(300).IsRequired();b.Property(x=>x.Description).HasMaxLength(4000);b.Property(x=>x.OriginalFileName).HasMaxLength(260).IsRequired();b.Property(x=>x.ContentType).HasMaxLength(200).IsRequired();b.Property(x=>x.Sha256).HasMaxLength(64).IsRequired();b.Property(x=>x.StorageKey).HasMaxLength(500).IsRequired();b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30);b.Property(x=>x.UploadedBy).HasMaxLength(100).IsRequired();b.Property(x=>x.ValidationProfile).HasMaxLength(100);b.Property(x=>x.ValidationResult).HasMaxLength(100);b.HasIndex(x=>new{x.ProjectId,x.ArtifactType,x.ArtifactId,x.State});b.HasIndex(x=>new{x.RevisionId,x.LogicalId,x.Version});b.HasIndex(x=>new{x.LogicalId,x.Version}).IsUnique();b.HasIndex(x=>new{x.ProjectId,x.Sha256});b.HasOne<ControlledAttachment>().WithMany().HasForeignKey(x=>x.SupersedesId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ControlledAttachmentStorageOperation>(b =>
+        {
+            b.ToTable("controlled_attachment_storage_operations"); b.HasKey(x => x.Id);
+            b.Property(x => x.ArtifactType).HasMaxLength(60).IsRequired(); b.Property(x => x.Label).HasMaxLength(300).IsRequired();
+            b.Property(x => x.OriginalFileName).HasMaxLength(260).IsRequired(); b.Property(x => x.ContentType).HasMaxLength(200).IsRequired();
+            b.Property(x => x.Sha256).HasMaxLength(64).IsRequired(); b.Property(x => x.StagingKey).HasMaxLength(500).IsRequired();
+            b.Property(x => x.StorageKey).HasMaxLength(500).IsRequired(); b.Property(x => x.Actor).HasMaxLength(100).IsRequired();
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.Detail).HasMaxLength(4000).IsRequired();
+            b.HasIndex(x => new { x.ProjectId, x.State, x.UpdatedAt }); b.HasIndex(x => x.StorageKey).IsUnique(); b.HasIndex(x => x.EditSessionId);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ArtifactEditSession>(b =>
         {

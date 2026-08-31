@@ -36,7 +36,7 @@ export type RichBlock =
    */
   | { type: "paragraph"; text: string; runs?: RichRun[] }
   | { type: "table"; caption?: string; rows: string[][] }
-  | { type: "image"; attachmentId: string; alt?: string; caption?: string }
+  | { type: "image"; attachmentId: string; alt?: string; caption?: string; widthPercent?: number }
   | { type: "symbol"; value: string }
   | { type: "reference"; label: string; target: string };
 

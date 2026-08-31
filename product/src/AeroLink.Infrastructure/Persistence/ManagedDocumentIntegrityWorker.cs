@@ -27,10 +27,19 @@ public sealed class ManagedDocumentIntegrityWorker(
                     .Where(x => x.State == AeroLink.Domain.Documents.ManagedDocumentStorageOperationState.Pending
                         || x.State == AeroLink.Domain.Documents.ManagedDocumentStorageOperationState.RepairRequired)
                     .Select(x => x.ProjectId);
-                var projectIds = await documentProjectIds.Union(interruptedProjectIds).ToListAsync(stoppingToken);
+                var interruptedAttachmentProjectIds = db.ControlledAttachmentStorageOperations.AsNoTracking()
+                    .Where(x => x.State == AeroLink.Domain.Requirements.ControlledAttachmentStorageOperationState.Pending
+                        || x.State == AeroLink.Domain.Requirements.ControlledAttachmentStorageOperationState.RepairRequired)
+                    .Select(x => x.ProjectId);
+                var projectIds = await documentProjectIds.Union(interruptedProjectIds)
+                    .Union(interruptedAttachmentProjectIds).ToListAsync(stoppingToken);
                 var reconciliation = scope.ServiceProvider.GetRequiredService<ManagedDocumentStorageCoordinator>();
+                var attachmentReconciliation = scope.ServiceProvider.GetRequiredService<ControlledAttachmentStorageCoordinator>();
                 foreach (var projectId in projectIds)
+                {
                     await reconciliation.ReconcileProjectAsync(projectId, "system.integrity", DateTimeOffset.UtcNow, stoppingToken);
+                    await attachmentReconciliation.ReconcileProjectAsync(projectId, "system.integrity", DateTimeOffset.UtcNow, stoppingToken);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception ex) { logger.LogError(ex, "The periodic managed-document integrity scan failed."); }

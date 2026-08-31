@@ -215,12 +215,13 @@ function replaceRange(runs: RichRun[], start: number, end: number, text: string)
   return [...before, marks, ...after];
 }
 
-export function RichParagraphEditor({ block, label, disabled, placeholder, onChange }: {
+export function RichParagraphEditor({ block, label, disabled, placeholder, onChange, onSplit }: {
   block: Extract<RichBlock, { type: "paragraph" }>;
   label: string;
   disabled?: boolean;
   placeholder?: string;
   onChange: (block: RichBlock) => void;
+  onSplit?: (before: Extract<RichBlock, { type: "paragraph" }>, after: Extract<RichBlock, { type: "paragraph" }>) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   // What this editor last emitted. Writing the DOM back on every render would move the caret to the start
@@ -278,6 +279,27 @@ export function RichParagraphEditor({ block, label, disabled, placeholder, onCha
   const onBlurToolbar = () => { setActive([]); setSelecting(false); };
 
   const onKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === "Enter" && !event.shiftKey && onSplit) {
+      event.preventDefault();
+      const root = host.current;
+      if (!root) return;
+      const runs = readRuns(root);
+      const endOfText = runs.reduce((total, run) => total + run.text.length, 0);
+      const at = readSelection(root) ?? { start: endOfText, end: endOfText };
+      const start = Math.min(at.start, at.end);
+      const end = Math.max(at.start, at.end);
+      const left: RichRun[] = [];
+      const right: RichRun[] = [];
+      let seen = 0;
+      for (const run of runs) {
+        const finish = seen + run.text.length;
+        if (start > seen) left.push({ ...run, text: run.text.slice(0, Math.min(start, finish) - seen) });
+        if (end < finish) right.push({ ...run, text: run.text.slice(Math.max(end, seen) - seen) });
+        seen = finish;
+      }
+      onSplit(paragraphOf(left), paragraphOf(right));
+      return;
+    }
     if (!(event.ctrlKey || event.metaKey)) return;
     const mark = MARKS.find((candidate) => candidate.shortcut === event.key.toLowerCase());
     if (!mark) return;
@@ -323,11 +345,34 @@ export function RichParagraphEditor({ block, label, disabled, placeholder, onCha
         onSelect={refreshActive}
         onBlur={onBlurToolbar}
         onPaste={(event) => {
+          // Image paste is owned by the document composer above this paragraph. Let the event bubble so it
+          // can store the controlled file and place it next to this paragraph; treating it as an empty text
+          // paste here would swallow the figure before the composer saw it.
+          if (Array.from(event.clipboardData.files).some(file => file.type === "image/png" || file.type === "image/jpeg")) return;
           // Read as text. Foreign markup never enters the document, so the tree walk never has to have
           // been the only thing standing between a paste and the record.
           event.preventDefault();
           const root = host.current;
           const text = event.clipboardData.getData("text/plain");
+          if (!root || !text) return;
+          const at = readSelection(root) ?? { start: 0, end: 0 };
+          const next = replaceRange(readRuns(root), at.start, at.end, text);
+          writeRuns(root, next);
+          restoreSelection(root, { start: at.start + text.length, end: at.start + text.length });
+          emit(next);
+        }}
+        onDragOver={(event) => {
+          // The document composer owns image drops. Plain text drops are still handled here as text so a
+          // browser never inserts foreign markup directly into this contenteditable surface.
+          if (Array.from(event.dataTransfer.items).some(item => item.type === "image/png" || item.type === "image/jpeg")) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(event) => {
+          if (Array.from(event.dataTransfer.files).some(file => file.type === "image/png" || file.type === "image/jpeg")) return;
+          event.preventDefault();
+          const root = host.current;
+          const text = event.dataTransfer.getData("text/plain");
           if (!root || !text) return;
           const at = readSelection(root) ?? { start: 0, end: 0 };
           const next = replaceRange(readRuns(root), at.start, at.end, text);

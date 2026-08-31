@@ -20,10 +20,8 @@ const NARRATIVE = [
   'System / aircraft impact',
 ]
 
-/** Types into a rich field's first paragraph, adding one if the field is empty. */
+/** Types into a document-like field's first paragraph; the block primitive is intentionally hidden. */
 async function writeField(scope: import('@playwright/test').Locator, label: string, text: string) {
-  const group = scope.getByRole('group', { name: `Add content to ${label}` })
-  await group.getByRole('button', { name: 'Paragraph', exact: true }).click()
   await scope.getByRole('textbox', { name: `${label} paragraph 1` }).fill(text)
 }
 
@@ -112,4 +110,188 @@ test('the checkout editor shows the whole record and its three closing controls'
   // One editing session is one entry in History, however many times Save was pressed.
   await page.getByRole('button', { name: /^History/ }).click()
   await expect(page.locator('.prTimeline article').filter({ hasText: 'Details Checked In' })).toHaveCount(1)
+})
+
+test('a delayed inline image upload keeps create save behind the pending upload', async ({ page }) => {
+  test.setTimeout(240_000)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+  await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: 'load' })
+  await page.getByRole('button', { name: '+ Record problem' }).click()
+  const raise = page.getByRole('dialog', { name: 'Record a problem' })
+  await raise.getByLabel('Title').fill(`Delayed image upload ${Date.now()}`)
+  await writeField(raise, 'Problem Description', 'The screenshot is still being stored.')
+
+  let uploadStarted = () => {}
+  const started = new Promise<void>(resolve => { uploadStarted = resolve })
+  let releaseUpload = () => {}
+  const gate = new Promise<void>(resolve => { releaseUpload = resolve })
+  await page.route('**/api/content/images**', async route => {
+    uploadStarted()
+    await gate
+    await route.continue()
+  })
+  const imageInput = raise.locator('.richEditor').first().locator('input[type=file]')
+  await imageInput.setInputFiles({
+    name: 'recovery.png',
+    mimeType: 'image/png',
+    // A valid 1x1 PNG keeps this a real upload while the route is held in-flight.
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+  })
+  await started
+  const save = raise.getByRole('button', { name: /Save Draft PR|Waiting for image/ })
+  await expect(save).toBeDisabled()
+  await expect(raise.getByText(/Storing .*inline image/)).toBeVisible()
+
+  releaseUpload()
+  await expect(raise.getByRole('button', { name: /^Save Draft PR/ })).toBeEnabled({ timeout: 30_000 })
+  await page.unroute('**/api/content/images**')
+})
+
+test('resized adjacent figures share a responsive document row and guidance is not repeated per narrative field', async ({ page }) => {
+  test.setTimeout(300_000)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+  await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: 'load' })
+  await page.getByRole('button', { name: '+ Record problem' }).click()
+  const raise = page.getByRole('dialog', { name: 'Record a problem' })
+  await raise.getByLabel('Title').fill(`Adjacent inline figures ${Date.now()}`)
+  await writeField(raise, 'Problem Description', 'Text above the paired figures.')
+  await expect(raise.getByText(/Write naturally · paste or drop/)).toHaveCount(1)
+  await expect(raise.getByText('Figures stay controlled and appear at the current paragraph.')).toHaveCount(0)
+
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+  await raise.locator('.richEditor').first().locator('input[type=file]').setInputFiles([
+    { name: 'left-recovery.png', mimeType: 'image/png', buffer: png },
+    { name: 'right-recovery.png', mimeType: 'image/png', buffer: png },
+  ])
+  const sizes = raise.getByRole('slider', { name: /Problem Description figure .* size/ })
+  await expect(sizes).toHaveCount(2, { timeout: 30_000 })
+  const alternatives = raise.getByLabel('Alternative text (required)')
+  await alternatives.nth(0).fill('Left FMS bus timing trace')
+  await alternatives.nth(1).fill('Right FMS bus timing trace')
+  await sizes.nth(0).fill('50')
+  await sizes.nth(1).fill('50')
+
+  const editorFigures = raise.locator('.richEditor').first().locator('.richDocumentImage')
+  const editorLeft = await editorFigures.nth(0).boundingBox()
+  const editorRight = await editorFigures.nth(1).boundingBox()
+  expect(editorLeft).not.toBeNull()
+  expect(editorRight).not.toBeNull()
+  expect(Math.abs(editorLeft!.y - editorRight!.y)).toBeLessThan(2)
+  const problemEditor = await raise.locator('.richEditor').first().boundingBox()
+  const additionalEditor = await raise.locator('.richEditor').nth(1).boundingBox()
+  expect(problemEditor).not.toBeNull()
+  expect(additionalEditor).not.toBeNull()
+  const problemBottom = problemEditor!.y + problemEditor!.height
+  const pairBottom = Math.max(editorLeft!.y + editorLeft!.height, editorRight!.y + editorRight!.height)
+  const additionalTop = additionalEditor!.y
+  expect(problemBottom).toBeGreaterThanOrEqual(pairBottom)
+  expect(additionalTop).toBeGreaterThanOrEqual(pairBottom)
+  expect(additionalTop).toBeGreaterThanOrEqual(problemBottom)
+
+  await editorFigures.nth(1).getByRole('button', { name: 'Add text below figure' }).click()
+  await raise.getByRole('textbox', { name: 'Problem Description paragraph 4' }).fill('Text below the paired figures.')
+  await chooseCategory(raise, 'Code Issue — Functional Impact')
+  await raise.getByRole('button', { name: 'Save Draft PR' }).click()
+
+  // At narrower product widths the reader intentionally stacks authored figures. Prove the authored
+  // 50/50 layout is retained when the reading surface has enough room to honor it side by side.
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  const imageArticle = page.locator('.prNarrative article').filter({ has: page.locator('.richImageRow') })
+  await expect(imageArticle).toContainText('Text below the paired figures.', { timeout: 30_000 })
+  const readerFigures = imageArticle.locator('.richImageFigure')
+  await expect(readerFigures).toHaveCount(2)
+  const readerLeft = await readerFigures.nth(0).boundingBox()
+  const readerRight = await readerFigures.nth(1).boundingBox()
+  expect(readerLeft).not.toBeNull()
+  expect(readerRight).not.toBeNull()
+  expect(Math.abs(readerLeft!.y - readerRight!.y)).toBeLessThan(2)
+})
+
+test('a delayed inline image upload keeps checkout save and check-in behind the pending upload', async ({ page }) => {
+  test.setTimeout(300_000)
+  const stamp = Date.now()
+  const title = `Checkout image upload ${stamp}`
+
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+  await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: 'load' })
+
+  await page.getByRole('button', { name: '+ Record problem' }).click()
+  const raise = page.getByRole('dialog', { name: 'Record a problem' })
+  await raise.getByLabel('Title').fill(title)
+  await writeField(raise, 'Problem Description', 'The checked-out screenshot is still being stored.')
+  await chooseCategory(raise, 'Code Issue — Functional Impact')
+  await raise.getByRole('button', { name: 'Save Draft PR' }).click()
+  await expect(page.getByRole('heading', { name: title })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: 'Check out & edit' }).click()
+  const editor = page.getByRole('dialog', { name: /^Edit PR-/ })
+  await expect(editor).toBeVisible({ timeout: 30_000 })
+
+  let uploadStarted = () => {}
+  const started = new Promise<void>(resolve => { uploadStarted = resolve })
+  let released = false
+  let releaseUpload = () => {}
+  const release = () => {
+    if (released) return
+    released = true
+    releaseUpload()
+  }
+  const gate = new Promise<void>(resolve => { releaseUpload = resolve })
+  await page.route('**/api/content/images**', async route => {
+    uploadStarted()
+    await gate
+    await route.continue()
+  })
+  try {
+    const imageInput = editor.locator('.richEditor').first().locator('input[type=file]')
+    await imageInput.setInputFiles({
+      name: 'checkout-recovery.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+    })
+    await started
+    await expect(editor.locator('.workspaceNotice')).toHaveText(/Storing 1 inline image/)
+    await expect(editor.locator('.prCheckoutFoot').getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    await expect(editor.locator('.prCheckoutFoot').getByRole('button', { name: 'Save and check in' })).toHaveCount(0)
+
+    release()
+    await expect(editor.locator('.prCheckoutFoot').getByRole('button', { name: 'Save and check in' })).toBeEnabled({ timeout: 30_000 })
+    await expect(editor.locator('.workspaceNotice')).toHaveCount(0)
+  } finally {
+    release()
+    await page.unroute('**/api/content/images**')
+  }
+})
+
+test('Problem Report output links distinguish the current record from its exact historical revision', async ({ page }) => {
+  test.setTimeout(240_000)
+  const title = `Output identity ${Date.now()}`
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+  await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: 'load' })
+  await page.getByRole('button', { name: '+ Record problem' }).click()
+  const raise = page.getByRole('dialog', { name: 'Record a problem' })
+  await raise.getByLabel('Title').fill(title)
+  await writeField(raise, 'Problem Description', 'The rendered output must retain its exact record identity.')
+  await chooseCategory(raise, 'Code Issue — Functional Impact')
+  await raise.getByRole('button', { name: 'Save Draft PR' }).click()
+  await expect(page.getByRole('heading', { name: title })).toBeVisible({ timeout: 30_000 })
+
+  await expect(page.getByRole('link', { name: 'Download DOCX' }))
+    .toHaveAttribute('href', /\/api\/problem-reports\/[0-9a-f-]{36}\/download\?format=docx$/)
+  await expect(page.getByRole('link', { name: 'Download PDF' }))
+    .toHaveAttribute('href', /\/api\/problem-reports\/[0-9a-f-]{36}\/download\?format=pdf$/)
+
+  await page.getByRole('button', { name: /^History/ }).click()
+  await expect(page.getByRole('link', { name: 'DOCX · rev 00' }))
+    .toHaveAttribute('href', /\/api\/problem-reports\/[0-9a-f-]{36}\/download\?format=docx&revision=0&snapshotId=[0-9a-f-]{36}$/)
+  await expect(page.getByRole('link', { name: 'PDF · rev 00' }))
+    .toHaveAttribute('href', /\/api\/problem-reports\/[0-9a-f-]{36}\/download\?format=pdf&revision=0&snapshotId=[0-9a-f-]{36}$/)
 })
