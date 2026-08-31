@@ -537,4 +537,88 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
         }
         finally { await DropDatabaseAsync(server, database); }
     }
+
+    /// <summary>
+    /// The refusal a work-laptop installation actually hit: a legacy standing backup whose holder never had
+    /// the base role the position now requires.
+    ///
+    /// The old model let anyone with any current membership stand as a backup; #816 made the position's own
+    /// base role the requirement. A designation that was valid when it was named therefore becomes ineligible
+    /// without anybody touching it, and v2 is the first thing to notice. It must refuse rather than pick
+    /// between granting authority nobody authorised and deleting a designation somebody deliberately made.
+    ///
+    /// Two programs, because the property under test is that the refusal writes nothing anywhere: the
+    /// repairable program must come out exactly as it went in.
+    /// </summary>
+    [Fact]
+    public async Task V2_refuses_a_legacy_backup_whose_holder_lacks_the_required_base_role()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            await using (var migrate = new AeroLinkDbContext(Options(connection)))
+                await migrate.Database.MigrateAsync();
+
+            var now = DateTimeOffset.UtcNow;
+            var repairable = new ProgramRecord("V2 Eligible Backup", $"V2H{Guid.NewGuid():N}"[..12]);
+            var conflicted = new ProgramRecord("V2 Ineligible Backup", $"V2I{Guid.NewGuid():N}"[..12]);
+            var eligibleBackup = Account("v2.eligible.backup", now);
+            var lead = Account("v2.software.lead", now);
+            var ineligibleBackup = Account("v2.ineligible.backup", now);
+            await using (var seed = new AeroLinkDbContext(Options(connection)))
+            {
+                seed.AddRange(repairable, conflicted, eligibleBackup, lead, ineligibleBackup,
+                    // A program v2 could repair on its own, so a partial write would be visible.
+                    new ProgramMembership(eligibleBackup.Id, repairable.Id, ProgramRole.SystemEngineer, "legacy", now),
+                    new ProjectRoleBackup(repairable.Id, ProgramRole.SystemEngineeringLead,
+                        eligibleBackup.Id, "legacy", now),
+                    // The conflict. The lead membership and its assignment agree, so this program's only
+                    // problem is the backup: the holder has a membership, just not the required one.
+                    new ProgramMembership(lead.Id, conflicted.Id, ProgramRole.SoftwareEngineeringLead, "legacy", now),
+                    new ProgramMembership(lead.Id, conflicted.Id, ProgramRole.SoftwareEngineer, "legacy", now),
+                    new ProjectLeadershipAssignment(conflicted.Id,
+                        ProjectLeadershipPosition.SoftwareEngineeringLead, lead.Id, "operator", now),
+                    new ProgramMembership(ineligibleBackup.Id, conflicted.Id, ProgramRole.Engineer, "legacy", now),
+                    new ProjectRoleBackup(conflicted.Id, ProgramRole.SoftwareEngineeringLead,
+                        ineligibleBackup.Id, "legacy", now));
+                await seed.SaveChangesAsync();
+            }
+
+            await using var v2 = new AeroLinkDbContext(Options(connection));
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => new ProjectLeadershipReconciliationAuthority(v2).EnsureCompletedAsync());
+
+            // The operator has to be able to act on this without reading the source: which program, which
+            // position, and which role is missing.
+            Assert.Contains("V2 Ineligible Backup", failure.Message);
+            Assert.Contains("SoftwareEngineeringLead", failure.Message);
+            Assert.Contains("SoftwareEngineer base role", failure.Message);
+
+            // The ineligible designation survives. Deleting it would discard a decision somebody made.
+            Assert.True(await v2.ProjectRoleBackups.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == conflicted.Id && x.BackupUserId == ineligibleBackup.Id && x.RemovedAt == null));
+            // And no authority was invented for the holder in passing.
+            Assert.False(await v2.ProgramMemberships.AsNoTracking().AnyAsync(x =>
+                x.UserId == ineligibleBackup.Id && x.Role == ProgramRole.SoftwareEngineer && x.EndedAt == null));
+            Assert.False(await v2.ProjectLeadershipBackups.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == conflicted.Id && x.RemovedAt == null));
+
+            // Nothing was written in the program v2 could have repaired, and the otherwise-valid legacy
+            // leadership membership in the conflicted program is still active.
+            Assert.True(await v2.ProjectRoleBackups.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == repairable.Id && x.BackupUserId == eligibleBackup.Id && x.RemovedAt == null));
+            Assert.False(await v2.ProjectLeadershipBackups.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == repairable.Id && x.RemovedAt == null));
+            Assert.True(await v2.ProgramMemberships.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == conflicted.Id && x.UserId == lead.Id
+                && x.Role == ProgramRole.SoftwareEngineeringLead && x.EndedAt == null));
+
+            Assert.False(await v2.SecurityAuditEvents.AsNoTracking().AnyAsync(
+                x => x.EventType == ProjectLeadershipReconciliationAuthority.MigrationMarker + ".Completed"));
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
 }
