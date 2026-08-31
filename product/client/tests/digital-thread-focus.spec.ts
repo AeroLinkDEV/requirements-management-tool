@@ -119,6 +119,7 @@ test("a change request opens its stable-ID Digital Thread with exact chain, prov
   // rather than the old right-to-left path that disappeared behind opaque cards.
   await expect(graphMap.locator('.crGraphConnector[data-route="same-layer-vertical"]')).not.toHaveCount(0);
   await expect(graphMap.locator('.crGraphConnector[data-route="same-layer-rail"]')).not.toHaveCount(0);
+  await expect(graphMap.locator('.crGraphConnector[data-route="cross-layer-offset"]')).not.toHaveCount(0);
   const historicalEdge = page.locator(".crGraphEdge").filter({ hasText: "SRCR-999900.00" }).filter({ hasText: "SRCR-999903.00" });
   await expect(historicalEdge).toContainText("Author-stated relationship");
   await expect(historicalEdge).toContainText("From downstream assessment");

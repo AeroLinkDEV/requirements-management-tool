@@ -1,5 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 import { login } from './auth'
+
+const pngSize = (path: string) => {
+  const bytes = readFileSync(path)
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
+}
 
 /**
  * The two change request registers are one register over different artifacts.
@@ -137,6 +143,29 @@ test('requirements register preserves deep-link history, native links, and autho
   expect(afterRegister?.x).toBe(beforeRegister?.x)
   expect(afterRegister?.y).toBe(beforeRegister?.y)
   expect(afterRegister?.width).toBe(beforeRegister?.width)
+  // Preserve exact visual evidence of the one-hop inspector at each release-review width. The fixture has two
+  // direct CR parents and two direct verification impacts, so these captures prove fan-out, mixed families,
+  // human provenance, exact links, and the single Digital Thread action without relying on a DOM-only assertion.
+  for (const width of [1280, 1440, 1920]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await inspector.evaluate(element => { element.scrollTop = 0 })
+    if (width <= 1360) await inspector.scrollIntoViewIfNeeded()
+    await expect(inspector).toBeVisible()
+    const path = testInfo.outputPath(`cr-inspector-${width}x900.png`)
+    await page.screenshot({ path, fullPage: false })
+    expect(pngSize(path)).toEqual({ width, height: 900 })
+    await testInfo.attach(`cr-inspector-${width}x900`, { path, contentType: 'image/png' })
+    // The desktop inspector is taller than one viewport once all immediate relationships are rendered. Keep a
+    // companion evidence frame scrolled to the relationship body so fan-out, provenance, and the Digital Thread
+    // action are visible without changing the product's supported scrolling behavior.
+    await inspector.evaluate(element => { element.scrollTop = Math.min(260, element.scrollHeight) })
+    const tracePath = testInfo.outputPath(`cr-inspector-${width}x900-trace.png`)
+    await page.screenshot({ path: tracePath, fullPage: false })
+    expect(pngSize(tracePath)).toEqual({ width, height: 900 })
+    await testInfo.attach(`cr-inspector-${width}x900-trace`, { path: tracePath, contentType: 'image/png' })
+  }
+  await page.setViewportSize({ width: 1600, height: 900 })
   await page.reload()
   await expect(page.getByRole('tab', { name: 'Trace & impact' })).toBeVisible({ timeout: 30_000 })
   await page.goBack()

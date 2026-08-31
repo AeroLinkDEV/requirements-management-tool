@@ -188,7 +188,7 @@ type TraceConnector = {
   path: string;
   selected: boolean;
   relation: string;
-  route: "cross-layer" | "same-layer-horizontal" | "same-layer-vertical" | "same-layer-rail";
+  route: "cross-layer" | "cross-layer-offset" | "same-layer-horizontal" | "same-layer-vertical" | "same-layer-rail";
 };
 
 /**
@@ -237,10 +237,31 @@ function ChangeRequestGraphMap({
       const toCenterX = toRect.left + toRect.width / 2 - boardRect.left;
       const fromCenterY = fromRect.top + fromRect.height / 2 - boardRect.top;
       const toCenterY = toRect.top + toRect.height / 2 - boardRect.top;
+      const directChangeVerification = !sameLayer
+        && ((from.kind === "ChangeRequest" && to.kind === "TestChangeRequest")
+          || (from.kind === "TestChangeRequest" && to.kind === "ChangeRequest"));
       let route: TraceConnector["route"] = "cross-layer";
       let path: string;
 
-      if (sameLayer && Math.abs(toCenterY - fromCenterY) > 8) {
+      if (directChangeVerification) {
+        // A direct CR-to-TCR edge can span the Requirements layer. A normal midpoint-to-midpoint curve would
+        // disappear below that intervening card and falsely read as CR -> Requirement -> TCR. Take an offset
+        // route above the cards, then descend along the verification layer's outside edge before entering the
+        // exact target. This is presentation-only geometry; the server-composed edge remains the authority.
+        route = "cross-layer-offset";
+        const side = edgeIndex % 2 === 0 ? 1 : -1;
+        const targetLayerRect = toLayer?.getBoundingClientRect();
+        const targetRailX = targetLayerRect
+          ? (side > 0 ? targetLayerRect.right : targetLayerRect.left) - boardRect.left + side * 5
+          : (side > 0 ? boardRect.width - 6 : 6);
+        const startX = fromCenterX;
+        const startY = fromRect.top - boardRect.top;
+        const endX = toCenterX;
+        const endY = toRect.top - boardRect.top;
+        const railY = Math.max(8, Math.min(startY, endY) - 10);
+        const sourceBend = Math.max(12, (startY - railY) * 0.45);
+        path = `M ${startX} ${startY} C ${startX} ${startY - sourceBend}, ${startX} ${railY}, ${startX} ${railY} L ${targetRailX} ${railY} L ${targetRailX} ${endY} C ${targetRailX} ${endY}, ${endX} ${endY}, ${endX} ${endY}`;
+      } else if (sameLayer && Math.abs(toCenterY - fromCenterY) > 8) {
         // A layer can contain a root CR plus multiple upstream/downstream CRs. A left/right route between
         // their cards is hidden by the cards themselves, so same-layer edges use the truthful direction of
         // the stacked nodes: bottom-to-top when travelling down, top-to-bottom when travelling up. If a
@@ -318,7 +339,7 @@ function ChangeRequestGraphMap({
             <path d="M 0 0 L 8 4 L 0 8 z" />
           </marker>
         </defs>
-        {connectors.map(connector => <path className={`crGraphConnector${connector.selected ? " selected" : ""}`} key={connector.key} d={connector.path} data-route={connector.route} markerEnd="url(#crGraphArrow)"><title>{connector.relation}</title></path>)}
+        {connectors.map(connector => <path className={`crGraphConnector${connector.selected ? " selected" : ""}`} key={connector.key} d={connector.path} data-route={connector.route} data-edge-key={connector.key} markerEnd="url(#crGraphArrow)"><title>{connector.relation}</title></path>)}
       </svg>
       <div className="crGraphBoardLayers" role="list" aria-label="Connected Digital Thread nodes">
         {layers.map(layer => <section className={`crGraphLayer crGraphLayer-${layer.id}`} key={layer.id} aria-label={layer.title}>
