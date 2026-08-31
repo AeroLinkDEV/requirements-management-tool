@@ -138,7 +138,25 @@ public static class EditSessionEndpoints
         {var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==id&&x.IsExclusive,ct);if(session is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,session.ProjectId,ct)||session.UserName!=http.UserAccount().UserName)return Results.Forbid();try{session.Heartbeat(request.ExpectedVersion,DateTimeOffset.UtcNow,request.LeaseMinutes??15);await db.SaveChangesAsync(ct);return Results.Ok(new{session.Id,session.Version,session.UpdatedAt,session.ExpiresAt});}catch(DomainException ex){return Results.Conflict(new{error=ex.Message});}});
 
         app.MapPost("/api/edit-sessions/{id:guid}/discard",async(Guid id,CloseEditSessionRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
-        {var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==id&&x.IsExclusive,ct);if(session is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,session.ProjectId,ct)||session.UserName!=http.UserAccount().UserName)return Results.Forbid();try{var now=DateTimeOffset.UtcNow;session.Close(EditSessionState.Abandoned,request.ExpectedVersion,now,http.UserAccount().UserName,string.IsNullOrWhiteSpace(request.Reason)?"Draft checkout discarded.":request.Reason);db.AuditEvents.Add(new(session.ArtifactId,"EditSessionDiscarded",http.UserAccount().UserName,session.ClosedReason??"Draft checkout discarded.",now));await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.Conflict(new{error=ex.Message});}});
+        {
+            await using var transaction=await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable,ct);
+            var session=await ArtifactEditSessionLock.AcquireAsync(db,id,ct);
+            if(session is null||!session.IsExclusive)return Results.NotFound();
+            if(!await http.HasProjectAccessAsync(db,session.ProjectId,ct)||session.UserName!=http.UserAccount().UserName)return Results.Forbid();
+            try
+            {
+                var now=DateTimeOffset.UtcNow;
+                session.Close(EditSessionState.Abandoned,request.ExpectedVersion,now,http.UserAccount().UserName,
+                    string.IsNullOrWhiteSpace(request.Reason)?"Draft checkout discarded.":request.Reason);
+                db.AuditEvents.Add(new(session.ArtifactId,"EditSessionDiscarded",http.UserAccount().UserName,
+                    session.ClosedReason??"Draft checkout discarded.",now));
+                await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);return Results.NoContent();
+            }
+            catch(DomainException ex)
+            {
+                await transaction.RollbackAsync(ct);return Results.Conflict(new{error=ex.Message});
+            }
+        });
 
         app.MapPost("/api/edit-sessions/{id:guid}/force-unlock",async(Guid id,ForceUnlockEditSessionRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
         {var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==id&&x.IsExclusive,ct);if(session is null)return Results.NotFound();var actor=http.UserAccount();if(!await http.HasProjectAccessAsync(db,session.ProjectId,ct))return Results.Forbid();if(!actor.IsAdministrator&&!await http.HasProjectRoleAsync(db,identity,session.ProjectId,ct,ProgramRole.ConfigurationManager))return Results.Forbid();try{var now=DateTimeOffset.UtcNow;session.ForceUnlock(actor.UserName,request.Reason,now);db.AuditEvents.Add(new(session.ArtifactId,"EditSessionForceUnlocked",actor.UserName,$"Force-unlocked {session.ArtifactType} held by {session.UserName}. Reason: {request.Reason}",now));db.SecurityAuditEvents.Add(new("ForcedUnlock",actor.UserName,$"{session.ArtifactType}:{session.ArtifactId}","Success",request.Reason,http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}});

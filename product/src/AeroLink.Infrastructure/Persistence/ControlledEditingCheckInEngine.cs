@@ -50,7 +50,12 @@ public sealed class ControlledEditingCheckInEngine(
         AuthenticatedUser actor, DateTimeOffset now, CancellationToken ct)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        var session = await db.ArtifactEditSessions.SingleOrDefaultAsync(x => x.Id == sessionId && x.IsExclusive, ct);
+        // The checkout/upload/discard race is decided by this same database lock. A plain SELECT under a
+        // serializable transaction is not enough on either provider: PostgreSQL permits another writer until
+        // commit, while SQLite defers its writer lock until the first mutation.
+        var session = await ArtifactEditSessionLock.AcquireAsync(db, sessionId, ct);
+        if (session is not null && !session.IsExclusive)
+            session = null;
         if (session is null)
             return new(ControlledCheckInStatus.NotFound, "edit_session_not_found", "The controlled edit session was not found.");
 

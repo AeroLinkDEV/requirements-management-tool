@@ -3,6 +3,7 @@ using AeroLink.Domain.Common;
 namespace AeroLink.Domain.Requirements;
 
 public enum ControlledAttachmentState { Active, Superseded, Withdrawn }
+public enum ControlledAttachmentStorageOperationState { Pending, Available, RolledBack, RepairRequired }
 public enum EditSessionState { Active, Committed, Abandoned, Conflict, Expired, ForceUnlocked }
 public enum IntegrityCheckpointState { Healthy, Attention, Failed }
 
@@ -61,6 +62,82 @@ public sealed class ControlledAttachment
     }
     public void RecordIntegrityVerification(DateTimeOffset now) => IntegrityVerifiedAt = now;
     private static string Required(string value) => string.IsNullOrWhiteSpace(value) ? throw new DomainException("A required attachment value is missing.") : value.Trim();
+}
+
+/// <summary>
+/// Durable intent for an inline-image filesystem operation. The attachment row and promoted object are
+/// committed separately because the filesystem cannot participate in the database transaction; this row is
+/// the recovery fact that lets reconciliation distinguish a crash window from an unowned object.
+/// </summary>
+public sealed class ControlledAttachmentStorageOperation
+{
+    private ControlledAttachmentStorageOperation() { }
+
+    public ControlledAttachmentStorageOperation(Guid id, Guid projectId, string artifactType, Guid artifactId,
+        Guid? revisionId, Guid logicalId, int version, string label, string originalFileName, string contentType,
+        long size, string sha256, string stagingKey, string storageKey, string actor, DateTimeOffset now,
+        Guid? editSessionId = null)
+    {
+        if (id == Guid.Empty || projectId == Guid.Empty || logicalId == Guid.Empty)
+            throw new DomainException("An inline-image storage operation requires stable identifiers.");
+        if (size <= 0 || version < 1) throw new DomainException("An inline-image storage operation requires valid file metadata.");
+        Id = id; ProjectId = projectId; ArtifactType = Required(artifactType); ArtifactId = artifactId;
+        RevisionId = revisionId; EditSessionId = editSessionId; LogicalId = logicalId; Version = version; Label = Required(label);
+        OriginalFileName = Required(originalFileName); ContentType = Required(contentType); Size = size;
+        Sha256 = Required(sha256).ToLowerInvariant(); StagingKey = Required(stagingKey); StorageKey = Required(storageKey);
+        Actor = Required(actor).ToLowerInvariant(); State = ControlledAttachmentStorageOperationState.Pending;
+        CreatedAt = UpdatedAt = now; Detail = "Inline-image object is staged and awaiting controlled metadata commit.";
+    }
+
+    public Guid Id { get; private set; }
+    public Guid ProjectId { get; private set; }
+    public string ArtifactType { get; private set; } = "";
+    public Guid ArtifactId { get; private set; }
+    public Guid? RevisionId { get; private set; }
+    public Guid? EditSessionId { get; private set; }
+    public Guid LogicalId { get; private set; }
+    public int Version { get; private set; }
+    public string Label { get; private set; } = "";
+    public string OriginalFileName { get; private set; } = "";
+    public string ContentType { get; private set; } = "";
+    public long Size { get; private set; }
+    public string Sha256 { get; private set; } = "";
+    public string StagingKey { get; private set; } = "";
+    public string StorageKey { get; private set; } = "";
+    public string Actor { get; private set; } = "";
+    public ControlledAttachmentStorageOperationState State { get; private set; }
+    public Guid? AttachmentId { get; private set; }
+    public string Detail { get; private set; } = "";
+    public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset UpdatedAt { get; private set; }
+    public DateTimeOffset? CompletedAt { get; private set; }
+
+    public void Complete(Guid attachmentId, DateTimeOffset now)
+    {
+        if (attachmentId == Guid.Empty) throw new DomainException("A completed inline-image operation requires its attachment.");
+        if (State is ControlledAttachmentStorageOperationState.RolledBack)
+            throw new DomainException("A rolled-back inline-image operation cannot be completed.");
+        AttachmentId = attachmentId; State = ControlledAttachmentStorageOperationState.Available;
+        Detail = "The inline-image object and its controlled metadata are available.";
+        UpdatedAt = now; CompletedAt = now;
+    }
+
+    public void RequireRepair(string detail, DateTimeOffset now)
+    {
+        if (State == ControlledAttachmentStorageOperationState.Available) return;
+        State = ControlledAttachmentStorageOperationState.RepairRequired; Detail = Required(detail);
+        UpdatedAt = now; CompletedAt = null;
+    }
+
+    public void RollBack(string detail, DateTimeOffset now)
+    {
+        if (State == ControlledAttachmentStorageOperationState.Available) return;
+        State = ControlledAttachmentStorageOperationState.RolledBack; Detail = Required(detail);
+        UpdatedAt = now; CompletedAt = now;
+    }
+
+    private static string Required(string? value) => string.IsNullOrWhiteSpace(value)
+        ? throw new DomainException("An inline-image storage operation value is required.") : value.Trim();
 }
 
 public sealed class ArtifactEditSession

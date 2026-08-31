@@ -60,6 +60,7 @@ public static class ProblemReportEndpoints
         if (request.ReleaseId is not null && !await db.Releases.AnyAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId, ct))
             return Results.BadRequest(new { error = "The selected build does not belong to this project." });
         var actor = http.UserAccount();
+        var recoveryCutoff = DateTimeOffset.UtcNow.AddDays(-30);
         var referencedImages = new[] { request.ProblemRich, request.AdditionalInformationRich, request.AnalysisRich,
             request.RootCauseRich, request.WorkaroundRich, request.CorrectiveActionRich, request.SystemAircraftImpactRich,
             request.EffectsRich, request.ContainmentRich }
@@ -97,6 +98,13 @@ public static class ProblemReportEndpoints
                         && (image.ArtifactType == "InlineImage" || image.ArtifactType == "InlineImageDraft")
                         && image.State != ControlledAttachmentState.Withdrawn)
                     .ToListAsync(ct);
+                if (commitImages.Any(image => image.ArtifactType == "InlineImageDraft"
+                        && image.UploadedAt < recoveryCutoff))
+                    return Results.BadRequest(new
+                    {
+                        error = "One or more browser-recovery images expired after 30 days; upload them again before saving the Problem Report.",
+                        code = "inline_image_recovery_expired",
+                    });
                 if (referencedImages.Except(commitImages.Select(image => image.Id)).Any()
                     || commitImages.Any(image => image.ArtifactType == "InlineImageDraft" && image.UploadedBy != actor.UserName))
                     return Results.BadRequest(new { error = "Every inline image must belong to this Project and remain available." });

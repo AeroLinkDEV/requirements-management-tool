@@ -33,14 +33,91 @@ public static class PngImage
     public static bool IsDeclaredImage(byte[] bytes, string contentType) => contentType.ToLowerInvariant() switch
     {
         "image/png" => IsPng(bytes),
-        // JPEG begins with the start-of-image marker and ends with end-of-image.
-        "image/jpeg" => bytes.Length > 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF,
+        "image/jpeg" => IsJpeg(bytes),
         _ => false,
     };
 
     private static ReadOnlySpan<byte> Signature => [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
     public static bool IsPng(byte[] bytes) => bytes.Length >= 8 && bytes.AsSpan(0, 8).SequenceEqual(Signature);
+
+    /// <summary>
+    /// Validates the bounded JPEG container without decoding pixels. A SOI prefix alone is not an image: it
+    /// accepts truncated uploads, arbitrary bytes, and payloads which the publication path cannot read. Walk
+    /// every marker and length, validate frame/scan structure, consume stuffed entropy bytes, and require a
+    /// terminal EOI with no trailing data. This deliberately remains a structural gate; the publication
+    /// renderer owns the supported JPEG decode profile.
+    /// </summary>
+    public static bool IsJpeg(byte[] bytes)
+    {
+        if (bytes.Length < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8) return false;
+
+        var offset = 2;
+        var hasFrame = false;
+        var hasScan = false;
+        var hasEntropyData = false;
+        var inEntropy = false;
+        while (offset < bytes.Length)
+        {
+            if (inEntropy)
+            {
+                if (bytes[offset] != 0xFF)
+                {
+                    hasEntropyData = true;
+                    offset++;
+                    continue;
+                }
+                var markerStart = offset;
+                offset++;
+                while (offset < bytes.Length && bytes[offset] == 0xFF) offset++;
+                if (offset >= bytes.Length) return false;
+                var entropyMarker = bytes[offset++];
+                if (entropyMarker == 0x00 || entropyMarker is >= 0xD0 and <= 0xD7) continue;
+                // A non-restart marker terminates this scan. Rewind to its prefix so the normal marker
+                // parser validates its segment; this also supports valid multi-scan JPEGs.
+                inEntropy = false;
+                offset = markerStart;
+                continue;
+            }
+
+            if (bytes[offset++] != 0xFF) return false;
+            while (offset < bytes.Length && bytes[offset] == 0xFF) offset++;
+            if (offset >= bytes.Length) return false;
+            var marker = bytes[offset++];
+            if (marker == 0x00) return false;
+            if (marker == 0xD9) return hasFrame && hasScan && hasEntropyData && offset == bytes.Length;
+            if (marker == 0xD8 || marker is >= 0xD0 and <= 0xD7) return false;
+            if (marker == 0x01) continue; // TEM is the only standalone non-restart marker.
+
+            if (offset + 2 > bytes.Length) return false;
+            var segmentLength = BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(offset, 2));
+            if (segmentLength < 2 || segmentLength > bytes.Length - offset) return false;
+            var segmentEnd = offset + segmentLength;
+
+            if (marker is >= 0xC0 and <= 0xC3 or >= 0xC5 and <= 0xC7 or >= 0xC9 and <= 0xCB or >= 0xCD and <= 0xCF)
+            {
+                // SOF payload: precision, height, width, component count. Require non-zero dimensions and
+                // at least one component so an otherwise well-framed marker cannot stand in for an image.
+                if (segmentLength < 8) return false;
+                var height = BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(offset + 3, 2));
+                var width = BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(offset + 5, 2));
+                if (bytes[offset + 2] == 0 || width == 0 || height == 0 || bytes[offset + 7] == 0) return false;
+                hasFrame = true;
+            }
+
+            if (marker == 0xDA)
+            {
+                // SOS has a header followed by entropy-coded data. The component count and spectral fields
+                // make the minimum legal baseline header six bytes plus the two-byte length itself.
+                if (segmentLength < 6) return false;
+                hasScan = true;
+                hasEntropyData = false;
+                inEntropy = true;
+            }
+            offset = segmentEnd;
+        }
+        return false;
+    }
 
     /// <summary>Reads the dimensions from IHDR alone, without decoding pixels.</summary>
     public static (int Width, int Height) Size(byte[] bytes)

@@ -720,7 +720,7 @@ public static class RequirementsEndpoints
         // writes the figure into the paragraph as they are drafting it. Uploading here stores and hashes the file
         // against the project, and the authored content then references it by identifier. The file is never
         // duplicated into the record, so one diagram used in five requirements is stored once and stays one thing.
-        app.MapPost("/api/content/images",async(HttpRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,EvidenceFileStore store,ILoggerFactory loggerFactory,CancellationToken ct)=>
+        app.MapPost("/api/content/images",async(HttpRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,EvidenceFileStore store,ControlledAttachmentStorageCoordinator coordinator,ILoggerFactory loggerFactory,CancellationToken ct)=>
         {
             if(!request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data."});
             var form=await request.ReadFormAsync(ct);var file=form.Files.GetFile("file");
@@ -740,25 +740,43 @@ public static class RequirementsEndpoints
             // from this deployment's own origin, so the claim has to be checked against the bytes: a file that says
             // PNG and contains markup would otherwise be stored, referenced from a requirement, and served to an
             // approver by us.
-            var signature=new byte[8];
-            await using(var probe=file.OpenReadStream())
+            // JPEG validity depends on the complete bounded payload (including its terminal EOI marker),
+            // not just the first eight bytes. Read exactly the already-enforced 12 MiB maximum once, then
+            // validate and stage the same bytes so validation cannot be bypassed by a second stream read.
+            var imageBytes=new byte[checked((int)file.Length)];
+            await using(var source=file.OpenReadStream())
             {
-                var read=await probe.ReadAtLeastAsync(signature,signature.Length,throwOnEndOfStream:false,ct);
-                if(read<signature.Length||!PngImage.IsDeclaredImage(signature,contentType))
+                var read=0;
+                while(read<imageBytes.Length)
+                {
+                    var count=await source.ReadAsync(imageBytes.AsMemory(read),ct);
+                    if(count==0)break;
+                    read+=count;
+                }
+                if(read!=imageBytes.Length||!PngImage.IsDeclaredImage(imageBytes,contentType))
                     return Results.BadRequest(new{error="That file is not the image type it claims to be."});
             }
-            StoredEvidence? stored=null;
+            StagedEvidence? staged=null;
+            ControlledAttachmentStorageOperation? storageOperation=null;
+            var operationId=Guid.NewGuid();
+            var expiredKeys=Array.Empty<string>();
             var committed=false;
             try
             {
+                await using(var imageStream=new MemoryStream(imageBytes,false))
+                    staged=await store.StageAsync(imageStream,operationId,"inline-image",file.FileName,contentType,ct);
                 // The exact checkout, recovery cleanup, both quota predicates and the new metadata row share
                 // one serializable point. A concurrent discard/expiry cannot authorize bytes after the checkout
                 // closed, and a concurrent uploader cannot make either cumulative total exceed its bound.
                 await using var transaction=await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable,ct);
+                // A project row is the shared quota mutex. The no-op update gives PostgreSQL a row lock and
+                // forces SQLite to acquire its writer lock before either request reads the cumulative budget.
+                await db.Projects.Where(project=>project.Id==projectId)
+                    .ExecuteUpdateAsync(setters=>setters.SetProperty(project=>project.Name,project=>project.Name),ct);
                 ArtifactEditSession? editSession=null;
                 if(hasEditSession)
                 {
-                    editSession=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==editSessionId,ct);
+                    editSession=await ArtifactEditSessionLock.AcquireAsync(db,editSessionId,ct);
                     if(editSession is null||editSession.ProjectId!=projectId||!editSession.IsExclusive
                         ||!editSession.ArtifactType.Equals("ProblemReport",StringComparison.OrdinalIgnoreCase)
                         ||editSession.State!=EditSessionState.Active||editSession.ExpiresAt<=DateTimeOffset.UtcNow
@@ -775,29 +793,70 @@ public static class RequirementsEndpoints
                 var expiredRecovery=db.Database.IsSqlite()
                     ?(await recoveryQuery.ToListAsync(ct)).Where(x=>x.UploadedAt<recoveryCutoff).ToList()
                     :await recoveryQuery.Where(x=>x.UploadedAt<recoveryCutoff).ToListAsync(ct);
-                var expiredKeys=expiredRecovery.Select(x=>x.StorageKey).ToArray();
+                expiredKeys=expiredRecovery.Select(x=>x.StorageKey).ToArray();
                 if(expiredRecovery.Count>0){db.ControlledAttachments.RemoveRange(expiredRecovery);await db.SaveChangesAsync(ct);}
 
                 var used=await db.ControlledAttachments.AsNoTracking()
                     .Where(x=>x.ProjectId==projectId&&(x.ArtifactType=="InlineImage"||x.ArtifactType=="InlineImageDraft"))
+                    .SumAsync(x=>(long?)x.Size,ct)??0;
+                // A staged operation is a quota reservation even before its attachment row exists. Counting
+                // pending reservations closes the interval between the intent commit and final metadata commit.
+                used+=await db.ControlledAttachmentStorageOperations.AsNoTracking()
+                    .Where(x=>x.ProjectId==projectId&&x.State==ControlledAttachmentStorageOperationState.Pending)
                     .SumAsync(x=>(long?)x.Size,ct)??0;
                 if(used>=MaximumInlineImageBytesPerProject||file.Length>MaximumInlineImageBytesPerProject-used)
                     return Results.Conflict(new{error="This Project has reached its controlled inline-image storage limit.",code="inline_image_project_quota",limitBytes=MaximumInlineImageBytesPerProject});
                 var actorUsed=await db.ControlledAttachments.AsNoTracking()
                     .Where(x=>x.ProjectId==projectId&&(x.ArtifactType=="InlineImage"||x.ArtifactType=="InlineImageDraft")&&x.UploadedBy==actor.UserName)
                     .SumAsync(x=>(long?)x.Size,ct)??0;
+                actorUsed+=await db.ControlledAttachmentStorageOperations.AsNoTracking()
+                    .Where(x=>x.ProjectId==projectId&&x.State==ControlledAttachmentStorageOperationState.Pending&&x.Actor==actor.UserName)
+                    .SumAsync(x=>(long?)x.Size,ct)??0;
                 if(actorUsed>=MaximumInlineImageBytesPerActorPerProject||file.Length>MaximumInlineImageBytesPerActorPerProject-actorUsed)
                     return Results.Conflict(new{error="You have reached your controlled inline-image storage limit for this Project.",code="inline_image_actor_quota",limitBytes=MaximumInlineImageBytesPerActorPerProject});
 
-                stored=await store.StoreAsync(file.OpenReadStream(),file.FileName,contentType,ct);
-                // A checked-out record owns its images immediately. New-record authors do not have an artifact
-                // identifier yet, so their role-authorized figures remain project-bound until the record is saved.
+                // Commit durable intent before promotion. If the process stops between these facts, the
+                // integrity worker can adopt or quarantine the object without guessing what it represented.
                 var recovery=form["authoringContext"]=="ProblemReport"&&editSession is null;
-                var attachment=new ControlledAttachment(projectId,recovery?"InlineImageDraft":"InlineImage",editSession?.ArtifactId??projectId,editSession?.RevisionId,Guid.NewGuid(),1,
-                    string.IsNullOrWhiteSpace(form["alt"])?stored.OriginalFileName:form["alt"].ToString(),"",
-                    stored.OriginalFileName,stored.ContentType,stored.Size,stored.Sha256,stored.StorageKey,null,
-                    actor.UserName,DateTimeOffset.UtcNow);
-                db.ControlledAttachments.Add(attachment);await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);committed=true;
+                var now=DateTimeOffset.UtcNow;
+                var logicalId=Guid.NewGuid();
+                storageOperation=new ControlledAttachmentStorageOperation(operationId,projectId,
+                    recovery?"InlineImageDraft":"InlineImage",editSession?.ArtifactId??projectId,editSession?.RevisionId,
+                    logicalId,1,string.IsNullOrWhiteSpace(form["alt"])?staged.OriginalFileName:form["alt"].ToString(),
+                    staged.OriginalFileName,staged.ContentType,staged.Size,staged.Sha256,staged.StagingKey,staged.StorageKey,
+                    actor.UserName,now,editSession?.Id);
+                db.ControlledAttachmentStorageOperations.Add(storageOperation);
+                await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);
+                await store.PromoteAsync(staged,ct);
+
+                // Promotion is outside the database transaction. Re-acquire the checkout lock at commit time,
+                // so discard/check-in cannot win while the file is being moved.
+                await using var commitTransaction=await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable,ct);
+                if(hasEditSession)
+                {
+                    editSession=await ArtifactEditSessionLock.AcquireAsync(db,editSessionId,ct);
+                    if(editSession is null||editSession.ProjectId!=projectId||!editSession.IsExclusive
+                        ||!editSession.ArtifactType.Equals("ProblemReport",StringComparison.OrdinalIgnoreCase)
+                        ||editSession.State!=EditSessionState.Active||editSession.ExpiresAt<=DateTimeOffset.UtcNow
+                        ||editSession.UserName!=actor.UserName)
+                    {
+                        await commitTransaction.RollbackAsync(ct);
+                        await coordinator.RollBackAsync(storageOperation,
+                            "The Problem Report checkout changed while the image was being stored.",
+                            DateTimeOffset.UtcNow, CancellationToken.None);
+                        return Results.Conflict(new
+                        {
+                            error="The Problem Report checkout changed while the image was being stored.",
+                            code="edit_session_changed",
+                        });
+                    }
+                }
+                var attachment=new ControlledAttachment(projectId,storageOperation.ArtifactType,storageOperation.ArtifactId,
+                    storageOperation.RevisionId,storageOperation.LogicalId,storageOperation.Version,storageOperation.Label,"",
+                    storageOperation.OriginalFileName,storageOperation.ContentType,storageOperation.Size,storageOperation.Sha256,
+                    storageOperation.StorageKey,null,actor.UserName,now);
+                db.ControlledAttachments.Add(attachment);storageOperation.Complete(attachment.Id,DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync(ct);await commitTransaction.CommitAsync(ct);committed=true;
                 foreach(var key in expiredKeys)
                 {
                     try{store.Delete(key);}
@@ -810,10 +869,31 @@ public static class RequirementsEndpoints
             }
             catch(Exception ex) when(IsInlineImageConcurrencyConflict(ex))
             {
-                if(!committed&&stored is not null)store.Delete(stored.StorageKey);
+                if(!committed&&storageOperation is not null)
+                {
+                    try { await coordinator.RollBackAsync(storageOperation,"The inline-image transaction conflicted and the object was quarantined.",DateTimeOffset.UtcNow,CancellationToken.None); }
+                    catch { /* the durable operation remains for the integrity worker */ }
+                }
+                else if(!committed&&staged is not null)store.Delete(staged.StagingKey);
                 return Results.Conflict(new{error="Another inline image changed this Project's storage budget. Retry the upload.",code="inline_image_quota_changed"});
             }
-            catch{if(!committed&&stored is not null)store.Delete(stored.StorageKey);throw;}
+            catch
+            {
+                if(!committed&&storageOperation is not null)
+                {
+                    try { await coordinator.RollBackAsync(storageOperation,"The inline-image request failed; the object was quarantined.",DateTimeOffset.UtcNow,CancellationToken.None); }
+                    catch { /* the durable operation remains for the integrity worker */ }
+                }
+                else if(!committed&&staged is not null)store.Delete(staged.StagingKey);
+                throw;
+            }
+            finally
+            {
+                // Validation/quota exits happen after staging but before the durable operation exists.
+                // Never leave an unowned stage behind on those normal responses.
+                if(!committed&&storageOperation is null&&staged is not null)
+                    store.Delete(staged.StagingKey);
+            }
         }).DisableAntiforgery();
 
         app.MapGet("/api/content/images/{id:guid}",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>

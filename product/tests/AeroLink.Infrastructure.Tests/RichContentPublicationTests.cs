@@ -82,6 +82,18 @@ public sealed class RichContentPublicationTests
     }
 
     [Fact]
+    public void A_jpeg_requires_a_structural_frame_scan_and_terminal_eoi()
+    {
+        var jpeg = Convert.FromBase64String(
+            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/AX//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/AX//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/Aqf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/Iqf/2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8Qf//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8Qf//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8Qf//Z");
+
+        Assert.True(PngImage.IsDeclaredImage(jpeg, "image/jpeg"));
+        Assert.False(PngImage.IsDeclaredImage(jpeg[..^2], "image/jpeg"));
+        Assert.False(PngImage.IsDeclaredImage([.. jpeg, (byte)0x00], "image/jpeg"));
+        Assert.False(PngImage.IsDeclaredImage([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10], "image/jpeg"));
+    }
+
+    [Fact]
     public void A_png_deflate_bomb_is_refused_before_the_compressed_stream_can_expand_unboundedly()
     {
         // IHDR permits exactly four decompressed bytes (filter + RGB). The tiny ZIP representation expands to

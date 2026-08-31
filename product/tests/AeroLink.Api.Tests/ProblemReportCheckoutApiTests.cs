@@ -727,6 +727,12 @@ public sealed class ProblemReportCheckoutApiTests
             Assert.True(store.Exists(expiredStorageKey));
         }
 
+        using var expiredClaim = await CreateWithImageAsync(client, seeded.ProjectId, seeded.ReleaseId, expiredId,
+            "Expired recovery claim");
+        Assert.Equal(HttpStatusCode.BadRequest, expiredClaim.StatusCode);
+        var expiredClaimBody = await expiredClaim.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("inline_image_recovery_expired", expiredClaimBody.GetProperty("code").GetString());
+
         using var replacement = await client.PostAsync("/api/content/images",
             ImageUpload(seeded.ProjectId, "current-recovery.png", problemReportRecovery: true));
         Assert.Equal(HttpStatusCode.Created, replacement.StatusCode);
@@ -737,6 +743,26 @@ public sealed class ProblemReportCheckoutApiTests
             Assert.False(await db.ControlledAttachments.AnyAsync(x => x.Id == expiredId));
             Assert.False(store.Exists(expiredStorageKey));
         }
+    }
+
+    [Fact]
+    public async Task Inline_image_upload_rejects_a_truncated_jpeg_after_the_signature_probe()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var seeded = await SeedAsync(factory, "PRJPEGTRUNC");
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(seeded.ProjectId.ToString()), "projectId");
+        form.Add(new StringContent("ProblemReport"), "authoringContext");
+        var jpeg = new ByteArrayContent([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x02, 0x00, 0x00]);
+        jpeg.Headers.ContentType = new("image/jpeg");
+        form.Add(jpeg, "file", "truncated.jpg");
+
+        using var response = await client.PostAsync("/api/content/images", form);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("not the image type", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
