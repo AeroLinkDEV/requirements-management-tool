@@ -98,7 +98,9 @@ test('released Build 1.5 is a durable read-only workspace and exits explicitly',
   // Opening a procedure named on a requirement's trace lands in the Test Procedure Explorer, which is where a
   // procedure is read. It used to open a record dialog on the coverage page, which carried a procedure
   // library; the library moved and the link followed it rather than being left pointing at nothing.
-  await page.getByRole('button', { name: /SYSTP-000001\.00.*Open procedure/ }).click()
+  const exactProcedure = page.getByRole('link', { name: /SYSTP-000001\.00.*Open procedure/ })
+  await expect(exactProcedure).toHaveAttribute('href', /revisionId=[0-9a-f-]{36}$/)
+  await exactProcedure.click()
   await expect(page.getByRole('heading', { name: 'Test Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
   const inspector = page.locator('.requirementInspector')
   await expect(inspector).toBeVisible({ timeout: 30_000 })
