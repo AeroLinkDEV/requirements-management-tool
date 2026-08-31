@@ -244,7 +244,8 @@ public static class WorkspaceEndpoints
                 lowLevelRequirements = await requirements.CountAsync(x => x.Level == RequirementLevel.LowLevel, ct),
                 historicalScrs = await requests.CountAsync(x => x.Type == ChangeRequestType.System, ct),
                 historicalSwcrs = await requests.CountAsync(x => x.Type == ChangeRequestType.Software, ct),
-                activeRequests = await requests.CountAsync(x => x.State != ChangeRequestState.Deferred, ct),
+                activeRequests = await requests.CountAsync(x => x.State != ChangeRequestState.Deferred
+                    && x.State != ChangeRequestState.Withdrawn, ct),
                 traceLinks = await db.RequirementTraces.CountAsync(x => revisionIds.Contains(x.SourceRevisionId) && revisionIds.Contains(x.TargetRevisionId), ct),
                 testArtifacts = testArtifactCount,
                 testProcedures = testArtifactCount, // compatibility alias

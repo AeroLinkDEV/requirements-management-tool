@@ -335,6 +335,17 @@ browser.
 
 This is the same growth that makes the shard-count reasoning above worth re-measuring rather than inheriting.
 
+### The Infrastructure job outgrew its original timeout
+
+Protected Product run 33432756016 measured about three minutes of setup and then more than 16 minutes 53
+seconds in `AeroLink.Infrastructure.Tests` before the 20-minute outer job limit cancelled the runner. The
+suite was still producing ordinary test results; the cancellation prevented final TRX publication and made
+the aggregate report a timeout instead of a complete result.
+
+The Infrastructure job limit is therefore 30 minutes. Its six-minute per-test blame-hang budget remains
+unchanged, so a genuinely hung test still fails early enough to finalize and upload diagnostics. This change
+adds outer-job headroom for the measured suite growth; it does not weaken test selection or hang detection.
+
 ## API startup floor, measured (563A, 2026-08-14)
 
 Per-shard telemetry (schema `aerolink-api-telemetry/v2`) splits each hosted API test's wall time into

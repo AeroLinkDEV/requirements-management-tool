@@ -28,11 +28,16 @@ public sealed class ShowcaseSeedApiTests
         Assert.Equal(400, summary.GetProperty("highLevelRequirements").GetInt32());
         Assert.Equal(700, summary.GetProperty("lowLevelRequirements").GetInt32());
         Assert.Equal(520, summary.GetProperty("testExecutions").GetInt32());
+        var programId = summary.GetProperty("programId").GetGuid();
+        var projectId = summary.GetProperty("projectId").GetGuid();
+        var activeReleaseId = summary.GetProperty("activeReleaseId").GetGuid();
+        var overview = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/showcase/overview?projectId={projectId}&releaseId={activeReleaseId}");
+        Assert.Equal(13, overview.GetProperty("activeRequests").GetInt32());
 
         // The endpoint is the operator-facing retry boundary. A second request must reuse the durable
         // ownership rows and preserve the exact controlled summary on the same disposable database. Remove
         // the SQA row first to prove this existing-FMS path does not recreate authority as a side effect.
-        var programId = summary.GetProperty("programId").GetGuid();
         Guid sqaId;
         int scenarioRows;
         using (var scope = factory.Services.CreateScope())

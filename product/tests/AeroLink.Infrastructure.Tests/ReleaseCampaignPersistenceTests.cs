@@ -26,7 +26,7 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
             await using var db = showcase.Context(); var summary = showcaseFixture.Summary;
             var campaign = await db.ReleaseCampaigns.SingleAsync(x => x.ProjectId == summary.ProjectId && x.ReleaseId == summary.ActiveReleaseId); Assert.Equal(ReleaseCampaignState.Verification, campaign.State);
             Assert.Equal(32, await db.ImpactDispositions.CountAsync(x => x.CampaignId == campaign.Id)); Assert.Equal(8, await db.ImpactDispositions.CountAsync(x => x.CampaignId == campaign.Id && x.State == ImpactDispositionState.Addressed));
-            var readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default); Assert.False(readiness.ReadyForRelease); Assert.Contains(readiness.Gates, x => x.Code == "change_control" && x.Completed == 2 && x.Total == 7);
+            var readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default); Assert.False(readiness.ReadyForRelease); Assert.Contains(readiness.Gates, x => x.Code == "change_control" && x.Completed == 3 && x.Total == 13);
             var blocker = new ProblemReport(summary.ProjectId, "PR-00001", "Unresolved release-impacting failure", "A failed verification result remains unresolved.", "", "verification.engineer", DateTimeOffset.UtcNow);
             blocker.SetReleaseBlocker("verification.engineer", true, DateTimeOffset.UtcNow); db.ProblemReports.Add(blocker); await db.SaveChangesAsync(); db.ChangeTracker.Clear();
             readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default);
@@ -59,14 +59,12 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
                 var part = archive.GetEntry("word/document.xml"); Assert.NotNull(part); using var reader = new StreamReader(part!.Open()); var xml = await reader.ReadToEndAsync();
                 Assert.Contains("Document Control", xml); Assert.Contains("Approval Register", xml); Assert.Contains("Development Assurance Reviewer", xml); Assert.Contains("Manifest SHA-256", xml);
             }
-            var historical = await db.SystemChangeRequests.Where(x => x.ProjectId == summary.ProjectId)
-                .Select(x => new { x.Id, x.AuthorId }).FirstAsync();
-            const string historicalDisplayName = "Named Historical Author";
-            db.UserAccounts.Add(new AeroLink.Domain.Identity.UserAccount(historical.AuthorId, historicalDisplayName,
-                "historical.author@example.invalid", "not-used", DateTimeOffset.UtcNow));
-            await db.SaveChangesAsync();
+            var historical = await (from request in db.SystemChangeRequests
+                join account in db.UserAccounts on request.AuthorId equals account.UserName
+                where request.ProjectId == summary.ProjectId
+                select new { request.Id, request.AuthorId, account.DisplayName }).FirstAsync();
             var scrOutput = await new ChangeRequestOutputGenerator(db).GenerateAsync(historical.Id, "docx", default); Assert.NotNull(scrOutput);
-            using (var archive = new ZipArchive(new MemoryStream(scrOutput!.Content), ZipArchiveMode.Read)) { using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open()); var xml = await reader.ReadToEndAsync(); Assert.Contains("APPROVALS RECORDED FOR THIS PUBLICATION", xml); Assert.Contains("Change Request Definition", xml); Assert.Contains("Audit History", xml); Assert.Contains(historicalDisplayName, xml); Assert.DoesNotContain($">{historical.AuthorId}<", xml); }
+            using (var archive = new ZipArchive(new MemoryStream(scrOutput!.Content), ZipArchiveMode.Read)) { using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open()); var xml = await reader.ReadToEndAsync(); Assert.Contains("APPROVALS RECORDED FOR THIS PUBLICATION", xml); Assert.Contains("Change Request Definition", xml); Assert.Contains("Audit History", xml); Assert.Contains(historical.DisplayName, xml); Assert.DoesNotContain($">{historical.AuthorId}<", xml); }
             var procedureDocumentId = await db.ControlledDocuments.Where(x => x.BaselineId == summary.ReleasedBaselineId && x.Type == AeroLink.Domain.Traceability.ControlledDocumentType.SystemTestProcedures).Select(x => x.Id).SingleAsync();
             var procedureOutput = await generator.GenerateAsync(procedureDocumentId, "docx", default); Assert.NotNull(procedureOutput);
             string procedureXml;
@@ -96,7 +94,9 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
             var baseline = await db.CandidateBaselines.Include(x => x.Selections).Include(x => x.Events).SingleAsync(x => x.Id == campaign.BaselineId);
             var requests = await db.SystemChangeRequests.Include(x => x.RequirementChanges).Include(x => x.ReviewCycles).ThenInclude(x => x.Steps).Where(x => x.TargetReleaseId == campaign.ReleaseId).ToListAsync();
             var now = new DateTimeOffset(2025, 1, 10, 14, 0, 0, TimeSpan.Zero);
-            foreach (var request in requests.Where(x => x.State != ChangeRequestState.Deferred && x.State != ChangeRequestState.SelectedForBaseline))
+            foreach (var request in requests.Where(x => x.State != ChangeRequestState.Deferred
+                && x.State != ChangeRequestState.Withdrawn
+                && x.State != ChangeRequestState.SelectedForBaseline))
             {
                 // The copied showcase contains a small number of pre-#738 approved/in-review v1 packages.
                 // Re-enter those packages through their ordinary lifecycle before making the author's new
@@ -133,7 +133,7 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
                 baseline.Select(request, "cm.test", now); await db.SaveChangesAsync();
             }
             baseline.Freeze("cm.test", now); await db.SaveChangesAsync();
-            var materialized = await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(baseline.Id, "cm.test", now, default); Assert.Equal(1251, materialized.ActiveRequirementCount);
+            var materialized = await new RequirementBaselineMaterializer(db, new VerificationImpactService(db)).MaterializeAsync(baseline.Id, "cm.test", now, default); Assert.Equal(1257, materialized.ActiveRequirementCount);
             var service = new ReleaseExecutionService(db, new EvidenceFileStore(evidenceRoot)); var reconciled = await service.ReconcileAsync(campaign.Id, "assurance.test", now, default);
             Assert.Equal(0, reconciled.TraceLinksCreated);
             // Exact trace carry-forward is atomic with requirement materialisation and marked suspect where the

@@ -60,7 +60,9 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
             .ToArray();
         var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == campaign.BaselineId, ct);
         var requests = await db.SystemChangeRequests.AsNoTracking()
-            .Where(x => x.TargetReleaseId == campaign.ReleaseId && x.State != ChangeRequestState.Deferred
+            .Where(x => x.TargetReleaseId == campaign.ReleaseId
+                && x.State != ChangeRequestState.Deferred
+                && x.State != ChangeRequestState.Withdrawn
                 && (x.Type == ChangeRequestType.System
                     ? systemChangeConfigured
                     : x.Type == ChangeRequestType.Interface
@@ -221,7 +223,7 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
         var baselineMaterialized = baseline.RequirementsMaterializedAt is not null;
         var gates = new List<ReadinessGate>
         {
-            new("change_control","Change requests integrated",!changeControlConfigured || (requests.Count > 0 && integrated == requests.Count),integrated,requests.Count,$"{requests.Count-integrated} non-deferred change request records remain outside the candidate baseline.","Approve and select every included change, or formally defer it."),
+            new("change_control","Change requests integrated",!changeControlConfigured || (requests.Count > 0 && integrated == requests.Count),integrated,requests.Count,$"{requests.Count-integrated} active change request records remain outside the candidate baseline.","Approve and select every included change, or formally defer it."),
             assurance.Requires(AssurancePolicyLever.ChangeImpactDispositionBeforeRelease)
                 ? new("impact_disposition","Impact analysis dispositioned",!changeControlConfigured || (impacts.Count > 0 && disposed == impacts.Count),disposed,impacts.Count,$"{impacts.Count-disposed} impact findings remain pending.","Disposition requirement, trace, verification, and document impacts.")
                 : RelaxedByPolicy("impact_disposition", "Impact analysis dispositioned",
