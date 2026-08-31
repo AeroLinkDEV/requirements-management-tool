@@ -11,9 +11,9 @@ type Baseline = { id: string; releaseId: string; releaseVersion: string; display
 type Document = { id: string; type: string; displayNumber: string; title: string; contentHash: string; artifactCount: number; release: string; baselineId: string; baseline: string; generatedAt: string };
 type TraceEvidence = { id: string; originalFileName: string; sha256: string; size: number; uploadedAt: string };
 type TraceExecution = { id: string; outcome: string; executedBy: string; executedAt: string; determination: string; evidenceReference: string; evidence: TraceEvidence[] };
-type TraceTest = { artifactId: string; procedureId?: string; artifactRevisionId: string; revisionId?: string; displayNumber: string; title: string; level: string; artifactState: string; state?: string; isSuspect: boolean; coverageState: "Confirmed" | "Suspect"; executions: TraceExecution[] };
+type TraceTest = { artifactId: string; procedureId?: string; artifactRevisionId: string; revisionId?: string; artifactKind?: string; displayNumber: string; title: string; level: string; artifactState: string; state?: string; isSuspect: boolean; coverageState: "Confirmed" | "Suspect"; executions: TraceExecution[] };
 type TraceLifecycle = { state: string; causeKind: string; causeRequirementRevisionId?: string; causeBaselineImportId?: string; outcome?: string; events: { type: string; actorId: string; occurredAt: string; rationale: string; outcome?: string }[] };
-type TraceRelation = { id: string; linkId: string; displayNumber: string; level: string; type: string; lifecycle?: TraceLifecycle | null };
+type TraceRelation = { id: string; revisionId?: string; artifactId?: string; linkId: string; displayNumber: string; level: string; type: string; lifecycle?: TraceLifecycle | null };
 type Trace = { id: string; revisionId: string; displayNumber: string; level: string; statement: string; testCount: number; suspectTestCount: number; parents: TraceRelation[]; children: TraceRelation[]; tests: TraceTest[] };
 type CompletePath = {
   baselineId: string;
@@ -425,6 +425,23 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
     displayNumber: item.displayNumber,
     level: item.level,
   });
+  const globalRequirementHref = (item: { id: string; revisionId?: string; artifactId?: string; displayNumber: string; level: string }) => {
+    const revisionId = item.revisionId ?? item.id;
+    // The global projection carries the aggregate id and its exact baseline revision separately. A relation
+    // without both identities is intentionally not openable: routing it through the aggregate would silently
+    // resolve whatever revision is current today.
+    const artifactId = item.artifactId ?? (item.revisionId ? undefined : item.id);
+    return artifactId
+      ? traceArtifactHref?.({ id: revisionId, kind: "RequirementRevision", artifactId, displayNumber: item.displayNumber, level: item.level })
+      : undefined;
+  };
+  const globalTestHref = (item: TraceTest) => traceArtifactHref?.({
+    id: item.artifactId,
+    kind: item.artifactKind === "Case" ? "TestCase" : "TestProcedure",
+    revisionId: item.artifactRevisionId ?? item.revisionId,
+    displayNumber: item.displayNumber,
+    level: item.level,
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -691,10 +708,10 @@ export default function LifecycleExplorer({ api, projectId, activeReleaseId, rel
           </aside>
         </section> : <section className="traceEmpty"><b>No matching digital thread</b><p>Broaden the identifier search or choose another controlled baseline.</p></section> :
         <section className="traceList">{traces.map((item) => <article key={item.revisionId} className={item.revisionId === focusId ? "focused" : ""}>
-          <div className="traceIdentity"><button onClick={() => { setFocusId(item.revisionId); setThreadMode("map"); }}>{item.displayNumber}</button><i>{item.level}</i><span>{item.testCount} confirmed{item.suspectTestCount ? ` · ${item.suspectTestCount} suspect` : ""}</span></div><p>{item.statement}</p>
+          <div className="traceIdentity"><ExactArtifactLink href={globalRequirementHref({ ...item, artifactId: item.id })}>{item.displayNumber}</ExactArtifactLink><button type="button" onClick={() => { setFocusId(item.revisionId); setThreadMode("map"); }}>Focus exact requirement</button><i>{item.level}</i><span>{item.testCount} confirmed{item.suspectTestCount ? ` · ${item.suspectTestCount} suspect` : ""}</span></div><p>{item.statement}</p>
           <details className="traceDetails" open={query.trim() !== "" && traces.length === 1 ? true : undefined}><summary><span>Explore relationships and evidence</span><small>{item.parents.length} parent{item.parents.length === 1 ? "" : "s"} · {item.children.length} child{item.children.length === 1 ? "" : "ren"} · {item.tests.length} {verificationArtifactNoun(item.level).toLowerCase()}{item.tests.length === 1 ? "" : "s"}</small></summary>
-            <div className="traceRelations"><div><small>PARENT / DERIVED FROM</small>{item.parents.map((parent) => <div key={parent.linkId}><button onClick={() => traverse(parent)}>{parent.displayNumber} · {parent.level}{parent.lifecycle && <i className={`traceLinkState ${parent.lifecycle.state.toLowerCase()}`}>{parent.lifecycle.state}</i>}</button>{parent.lifecycle && <ExactLinkLifecyclePanel api={api} routeRoot="trace-links" linkId={parent.linkId} initialLifecycle={{ ...parent.lifecycle, linkId: parent.linkId }} onChanged={load} />}</div>)}{!item.parents.length && <em>Top-level requirement</em>}</div><div><small>CHILDREN / SATISFIED BY</small>{item.children.slice(0, 8).map((child) => <div key={child.linkId}><button onClick={() => traverse(child)}>{child.displayNumber} · {child.level}{child.lifecycle && <i className={`traceLinkState ${child.lifecycle.state.toLowerCase()}`}>{child.lifecycle.state}</i>}</button>{child.lifecycle && <ExactLinkLifecyclePanel api={api} routeRoot="trace-links" linkId={child.linkId} initialLifecycle={{ ...child.lifecycle, linkId: child.linkId }} onChanged={load} />}</div>)}{item.children.length > 8 && <em>+ {item.children.length - 8} additional children</em>}{!item.children.length && <em>Leaf-level requirement</em>}</div></div>
-            {item.tests.length > 0 && <div className="traceVerification"><small>VERIFICATION / RESULTS / EVIDENCE</small>{item.tests.map((test) => <section className={test.isSuspect ? "suspect" : ""} key={test.artifactRevisionId}><div><b>{test.displayNumber}</b><span>{test.title} · {test.isSuspect ? "Suspect applicability — not coverage" : "Confirmed applicability"}</span></div>{!test.isSuspect && test.executions.map((run) => <article key={run.id}><i className={run.outcome.toLowerCase()}>{run.outcome}</i><p>{run.determination}</p><small>{run.executedBy} · {new Date(run.executedAt).toLocaleString()}</small>{run.evidence.map((file) => <a key={file.id} href={`${api}/api/evidence/${file.id}`}><b>{file.originalFileName}</b><code>{file.sha256}</code></a>)}</article>)}{test.isSuspect ? <em>Resolve this applicability in Verification change impact.</em> : !test.executions.length && <em>Approved {verificationArtifactNoun(test.level).toLowerCase()} awaiting execution</em>}</section>)}</div>}
+            <div className="traceRelations"><div><small>PARENT / DERIVED FROM</small>{item.parents.map((parent) => <div key={parent.linkId}><div className="traceRelationTarget"><ExactArtifactLink href={globalRequirementHref(parent)}>{parent.displayNumber} · {parent.level}</ExactArtifactLink><button type="button" onClick={() => traverse(parent)}>Focus exact requirement</button>{parent.lifecycle && <i className={`traceLinkState ${parent.lifecycle.state.toLowerCase()}`}>{parent.lifecycle.state}</i>}</div>{parent.lifecycle && <ExactLinkLifecyclePanel api={api} routeRoot="trace-links" linkId={parent.linkId} initialLifecycle={{ ...parent.lifecycle, linkId: parent.linkId }} onChanged={load} />}</div>)}{!item.parents.length && <em>Top-level requirement</em>}</div><div><small>CHILDREN / SATISFIED BY</small>{item.children.slice(0, 8).map((child) => <div key={child.linkId}><div className="traceRelationTarget"><ExactArtifactLink href={globalRequirementHref(child)}>{child.displayNumber} · {child.level}</ExactArtifactLink><button type="button" onClick={() => traverse(child)}>Focus exact requirement</button>{child.lifecycle && <i className={`traceLinkState ${child.lifecycle.state.toLowerCase()}`}>{child.lifecycle.state}</i>}</div>{child.lifecycle && <ExactLinkLifecyclePanel api={api} routeRoot="trace-links" linkId={child.linkId} initialLifecycle={{ ...child.lifecycle, linkId: child.linkId }} onChanged={load} />}</div>)}{item.children.length > 8 && <em>+ {item.children.length - 8} additional children</em>}{!item.children.length && <em>Leaf-level requirement</em>}</div></div>
+            {item.tests.length > 0 && <div className="traceVerification"><small>VERIFICATION / RESULTS / EVIDENCE</small>{item.tests.map((test) => <section className={test.isSuspect ? "suspect" : ""} key={test.artifactRevisionId}><div><ExactArtifactLink href={globalTestHref(test)}>{test.displayNumber}</ExactArtifactLink><span>{test.title} · {test.isSuspect ? "Suspect applicability — not coverage" : "Confirmed applicability"}</span></div>{!test.isSuspect && test.executions.map((run) => <article key={run.id}><i className={run.outcome.toLowerCase()}>{run.outcome}</i><p>{run.determination}</p><small>{run.executedBy} · {new Date(run.executedAt).toLocaleString()}</small>{run.evidence.map((file) => <a key={file.id} href={`${api}/api/evidence/${file.id}`}><b>{file.originalFileName}</b><code>{file.sha256}</code></a>)}</article>)}{test.isSuspect ? <em>Resolve this applicability in Verification change impact.</em> : !test.executions.length && <em>Approved {verificationArtifactNoun(test.level).toLowerCase()} awaiting execution</em>}</section>)}</div>}
           </details>
         </article>)}</section>}
       </> : <>

@@ -143,6 +143,56 @@ public sealed class AuthoringTracedImpactTests
     }
 
     [Fact]
+    public async Task Requirement_impact_and_global_traceability_carry_exact_related_revision_identity()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var (projectId, parentNumber, childNumber, _) = await SeedAsync(factory);
+        await SignInAsync(client);
+
+        Guid parentArtifactId, parentRevisionId, childArtifactId, childRevisionId, baselineId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var rows = await (from artifact in db.Requirements
+                              join revision in db.RequirementRevisions on artifact.Id equals revision.ArtifactId
+                              where artifact.ProjectId == projectId
+                                  && (artifact.BaseNumber == parentNumber || artifact.BaseNumber == childNumber)
+                              select new { artifact.BaseNumber, ArtifactId = artifact.Id, RevisionId = revision.Id })
+                .ToListAsync();
+            parentArtifactId = rows.Single(x => x.BaseNumber == parentNumber).ArtifactId;
+            parentRevisionId = rows.Single(x => x.BaseNumber == parentNumber).RevisionId;
+            childArtifactId = rows.Single(x => x.BaseNumber == childNumber).ArtifactId;
+            childRevisionId = rows.Single(x => x.BaseNumber == childNumber).RevisionId;
+            baselineId = await db.CandidateBaselines.Where(x => x.ProjectId == projectId).Select(x => x.Id).SingleAsync();
+        }
+
+        using var impactResponse = await client.GetAsync($"/api/enterprise-requirements/{parentArtifactId}/impact");
+        Assert.Equal(HttpStatusCode.OK, impactResponse.StatusCode);
+        var impact = await impactResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var child = impact.GetProperty("children").EnumerateArray()
+            .First(row => row.GetProperty("id").GetGuid() == childArtifactId);
+        Assert.Equal(childArtifactId, child.GetProperty("id").GetGuid());
+        Assert.Equal(childRevisionId, child.GetProperty("revisionId").GetGuid());
+        Assert.Equal($"{childNumber}.00", child.GetProperty("displayNumber").GetString());
+
+        using var traceResponse = await client.GetAsync(
+            $"/api/traceability?projectId={projectId}&baselineId={baselineId}&page=1&pageSize=25");
+        Assert.Equal(HttpStatusCode.OK, traceResponse.StatusCode);
+        var trace = await traceResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var childRow = trace.GetProperty("items").EnumerateArray()
+            .First(row => row.GetProperty("id").GetGuid() == childArtifactId);
+        var parents = childRow.GetProperty("parents").EnumerateArray().ToList();
+        Assert.NotEmpty(parents);
+        Assert.All(parents, parent =>
+        {
+            Assert.Equal(parentArtifactId, parent.GetProperty("artifactId").GetGuid());
+            Assert.Equal(parentRevisionId, parent.GetProperty("revisionId").GetGuid());
+            Assert.Equal($"{parentNumber}.00", parent.GetProperty("displayNumber").GetString());
+        });
+    }
+
+    [Fact]
     public async Task Trace_mutation_accepts_both_relation_types_and_refuses_invalid_duplicate_self_project_and_frozen_history_operations()
     {
         using var factory = new AeroLinkApiFactory();
