@@ -395,9 +395,6 @@ public static class ProfessionalPublicationRenderer
         {
             pageStreams.AddRange(PaginateSection(section, p, assets));
         }
-        // Keep adjacent authored figures together. A separate page per image made a 40/60 or 50/50
-        // narrative row look like two unrelated figures and could split a figure from the text that follows.
-        pageStreams.AddRange(PdfImageRows(p, assets).Select(row => PdfImagePage(row, p)));
         return AssemblePdf(pageStreams, images);
     }
     private static string PdfCover(ProfessionalPublication p)
@@ -421,17 +418,94 @@ public static class ProfessionalPublicationRenderer
     private static IEnumerable<string> PaginateSection(PublicationSection section, ProfessionalPublication p,
         IReadOnlyDictionary<string, PublicationImage> assets)
     {
-        const int max = 650; var pages = new List<string>(); var current = new List<PdfLine> { new(section.Heading.ToUpperInvariant(), 18, true, "2E74B5", 0, 8) }; if (!string.IsNullOrWhiteSpace(section.Introduction)) current.AddRange(Wrap(section.Introduction, 92).Select(x => new PdfLine(x, 9, false, "526274", 0, 6))); var used = current.Sum(LineHeight);
+        const int max = 650;
+        var pages = new List<string>();
+        var current = new List<PdfLine> { new(section.Heading.ToUpperInvariant(), 18, true, "2E74B5", 0, 8) };
+        if (!string.IsNullOrWhiteSpace(section.Introduction))
+            current.AddRange(Wrap(section.Introduction, 92).Select(x => new PdfLine(x, 9, false, "526274", 0, 6)));
+        var used = current.Sum(LineHeight);
+        var continuation = false;
+        void EnsurePage()
+        {
+            if (current.Count != 0) return;
+            var heading = continuation ? section.Heading.ToUpperInvariant() + " - CONTINUED" : section.Heading.ToUpperInvariant();
+            current.Add(new PdfLine(heading, continuation ? 10 : 18, true, continuation ? "718096" : "2E74B5", 0, 8));
+            used = current.Sum(LineHeight);
+        }
+        void FlushPage()
+        {
+            if (current.Count == 0) return;
+            pages.Add(PdfContentPage(current, p, false));
+            current = [];
+            used = 0;
+            continuation = true;
+        }
+        void AddLine(PdfLine line)
+        {
+            EnsurePage();
+            var height = LineHeight(line);
+            if (used + height > max && current.Count > 1)
+            {
+                FlushPage();
+                EnsurePage();
+            }
+            current.Add(line);
+            used += height;
+        }
+
         foreach (var record in section.Records)
         {
-            var block = new List<PdfLine> { new(record.Number + " | " + record.Classification, 11, true, "2E74B5", 0, 3) }; if (!string.IsNullOrWhiteSpace(record.Title)) block.AddRange(Wrap(record.Title, 92).Select(x => new PdfLine(x, 9, true, "25364D", 0, 3)));
-            block.AddRange(Wrap(record.Body, 105).Select(x => new PdfLine(x, 8, false, "25364D", 0, 2)));
-            foreach (var rich in RichPdfLines(record, assets)) block.Add(rich);
-            foreach (var detail in record.Details) block.AddRange(Wrap(detail.Label + ": " + detail.Value, 110).Select(x => new PdfLine(x, 7, false, "718096", 0, 2))); block.Add(new("", 5, false, "25364D", 0, 4)); var height = block.Sum(LineHeight);
-            if (used + height > max && current.Count > 0) { pages.Add(PdfContentPage(current, p, false)); current = [new(section.Heading.ToUpperInvariant() + " - CONTINUED", 10, true, "718096", 0, 8)]; used = current.Sum(LineHeight); }
-            current.AddRange(block); used += height;
+            AddLine(new(record.Number + " | " + record.Classification, 11, true, "2E74B5", 0, 3));
+            if (!string.IsNullOrWhiteSpace(record.Title))
+                foreach (var line in Wrap(record.Title, 92)) AddLine(new(line, 9, true, "25364D", 0, 3));
+            foreach (var line in Wrap(record.Body, 105)) AddLine(new(line, 8, false, "25364D", 0, 2));
+
+            var blocks = Blocks(record).ToList();
+            for (var index = 0; index < blocks.Count; index++)
+            {
+                var block = blocks[index];
+                if (BlockType(block) == "image")
+                {
+                    var placement = Placement(block, assets);
+                    if (placement is null)
+                    {
+                        AddLine(new("[Image not retrieved: " + Text(block, "caption", Text(block, "alt", "image")) + "]", 8, true, "A4262C", 12, 3));
+                        continue;
+                    }
+
+                    var row = new List<PublicationImagePlacement> { placement };
+                    while (index + 1 < blocks.Count && BlockType(blocks[index + 1]) == "image")
+                    {
+                        var adjacent = Placement(blocks[index + 1], assets);
+                        if (adjacent is null) break;
+                        row.Add(adjacent);
+                        index++;
+                    }
+                    var below = new List<string>();
+                    if (index + 1 < blocks.Count && BlockType(blocks[index + 1]) == "paragraph")
+                    {
+                        var text = Text(blocks[index + 1], "text", "");
+                        if (!string.IsNullOrWhiteSpace(text)) below.Add(text);
+                        index++;
+                    }
+
+                    // The image row is a page-level visual object. Flush authored text before it, append the
+                    // row now, and continue with the next block on a fresh page so no later paragraph can be
+                    // reordered behind the row.
+                    FlushPage();
+                    pages.Add(PdfImagePage(new PdfImageRow(row, below), p));
+                    continue;
+                }
+
+                foreach (var line in RichPdfBlockLines(block, assets)) AddLine(line);
+            }
+
+            foreach (var detail in record.Details)
+                foreach (var line in Wrap(detail.Label + ": " + detail.Value, 110)) AddLine(new(line, 7, false, "718096", 0, 2));
+            AddLine(new("", 5, false, "25364D", 0, 4));
         }
-        if (current.Count > 0) pages.Add(PdfContentPage(current, p, false)); return pages;
+        FlushPage();
+        return pages;
     }
     private static int LineHeight(PdfLine line) => line.Size + line.After;
     private static string PdfContentPage(IReadOnlyList<PdfLine> lines, ProfessionalPublication p, bool control)
@@ -462,79 +536,23 @@ public static class ProfessionalPublicationRenderer
         return s.Append("ET\n").ToString();
     }
     private static (double,double,double) Rgb(string hex) => (Convert.ToInt32(hex[..2],16)/255d,Convert.ToInt32(hex.Substring(2,2),16)/255d,Convert.ToInt32(hex.Substring(4,2),16)/255d);
-    private static IEnumerable<PdfLine> RichPdfLines(PublicationRecord record, IReadOnlyDictionary<string, PublicationImage> assets)
+    private static IEnumerable<PdfLine> RichPdfBlockLines(JsonElement block, IReadOnlyDictionary<string, PublicationImage> assets)
     {
-        // A valid adjacent image run is rendered on its own row page below. Consume the
-        // first paragraph after that run there too, so explanatory text stays after the
-        // figures instead of being duplicated before the row on the record page.
-        var blocks = Blocks(record).ToList();
-        var imageRun = false;
-        foreach (var block in blocks)
+        switch (BlockType(block))
         {
-            var type = BlockType(block);
-            if (type == "paragraph" && imageRun)
-            {
-                imageRun = false;
-                continue;
-            }
-
-            if (type == "image")
-            {
-                var label = Text(block, "caption", Text(block, "alt", "image"));
-                var placement = Placement(block, assets);
-                imageRun = placement is not null;
-                yield return placement is null
-                    ? new("[Image not retrieved: " + label + "]", 8, true, "A4262C", 12, 3)
-                    : new("Inline controlled image: " + label, 8, true, "168578", 12, 3);
-                continue;
-            }
-
-            imageRun = false;
-            switch (type)
-            {
-                case "paragraph":
-                    foreach (var line in Wrap(Text(block, "text", ""), 105)) yield return new(line, 8, false);
-                    break;
-                case "symbol":
-                    yield return new("Controlled symbol: " + Text(block, "value", ""), 9, true, "168578", 12, 3);
-                    break;
-                case "reference":
-                    yield return new("Reference: " + Text(block, "label", "") + " -> " + Text(block, "target", ""), 8, false, "526274", 12, 3);
-                    break;
-                case "table" when block.TryGetProperty("rows", out var rows) && rows.ValueKind == JsonValueKind.Array:
-                    foreach (var row in rows.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.Array))
-                        yield return new(string.Join(" | ", row.EnumerateArray().Select(x => x.ToString())), 8, false, "25364D", 12, 2);
-                    break;
-            }
-        }
-    }
-    private static IEnumerable<PdfImageRow> PdfImageRows(ProfessionalPublication publication,
-        IReadOnlyDictionary<string, PublicationImage> assets)
-    {
-        foreach (var record in publication.Sections.SelectMany(x => x.Records))
-        {
-            var blocks = Blocks(record).ToList();
-            for (var index = 0; index < blocks.Count; index++)
-            {
-                var placement = Placement(blocks[index], assets);
-                if (placement is null) continue;
-                var row = new List<PublicationImagePlacement> { placement };
-                while (index + 1 < blocks.Count && BlockType(blocks[index + 1]) == "image")
-                {
-                    var adjacent = Placement(blocks[index + 1], assets);
-                    if (adjacent is null) break;
-                    row.Add(adjacent);
-                    index++;
-                }
-                var below = new List<string>();
-                if (index + 1 < blocks.Count && BlockType(blocks[index + 1]) == "paragraph")
-                {
-                    var text = Text(blocks[index + 1], "text", "");
-                    if (!string.IsNullOrWhiteSpace(text)) below.Add(text);
-                    index++;
-                }
-                yield return new PdfImageRow(row, below);
-            }
+            case "paragraph":
+                foreach (var line in Wrap(Text(block, "text", ""), 105)) yield return new(line, 8, false);
+                break;
+            case "symbol":
+                yield return new("Controlled symbol: " + Text(block, "value", ""), 9, true, "168578", 12, 3);
+                break;
+            case "reference":
+                yield return new("Reference: " + Text(block, "label", "") + " -> " + Text(block, "target", ""), 8, false, "526274", 12, 3);
+                break;
+            case "table" when block.TryGetProperty("rows", out var rows) && rows.ValueKind == JsonValueKind.Array:
+                foreach (var row in rows.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.Array))
+                    yield return new(string.Join(" | ", row.EnumerateArray().Select(x => x.ToString())), 8, false, "25364D", 12, 2);
+                break;
         }
     }
 

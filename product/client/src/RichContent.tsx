@@ -181,7 +181,9 @@ export function RichContentEditor({ api, projectId, editSessionId, value, label,
         body.set("file", file);
         body.set("alt", file.name);
         try {
-          const response = await fetch(`${api}/api/content/images`, { method: "POST", body });
+          const query = new URLSearchParams({ projectId });
+          if (editSessionId) query.set("editSessionId", editSessionId);
+          const response = await fetch(`${api}/api/content/images?${query.toString()}`, { method: "POST", body });
           if (!response.ok) {
             const detail = (await response.json().catch(() => ({}))) as { error?: string };
             setError(detail.error || "The image could not be stored.");

@@ -2,10 +2,10 @@
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
     "tests": 722,
-    "cases": 805,
+    "cases": 806,
     "classes": 116,
     "hostedTests": 693,
-    "hostedCases": 762,
+    "hostedCases": 763,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 7,
@@ -21,24 +21,24 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 430,
-      "cases": 484,
+      "tests": 428,
+      "cases": 480,
       "unknownCases": 0,
       "classes": 95
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 153,
-      "cases": 164,
+      "tests": 154,
+      "cases": 168,
       "unknownCases": 0,
-      "classes": 55
+      "classes": 56
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 84,
-      "cases": 88,
+      "tests": 85,
+      "cases": 89,
       "unknownCases": 0,
       "classes": 48
     },
@@ -5518,8 +5518,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 557,
-        "end": 572
+        "start": 598,
+        "end": 613
       }
     },
     {
@@ -5535,8 +5535,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 953,
-        "end": 986
+        "start": 1032,
+        "end": 1065
       }
     },
     {
@@ -5552,8 +5552,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 992,
-        "end": 1021
+        "start": 1071,
+        "end": 1100
       }
     },
     {
@@ -5570,8 +5570,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 525,
-        "end": 555
+        "start": 566,
+        "end": 596
       }
     },
     {
@@ -5605,8 +5605,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 768,
-        "end": 813
+        "start": 836,
+        "end": 881
       }
     },
     {
@@ -5623,8 +5623,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 415,
-        "end": 450
+        "start": 431,
+        "end": 466
       }
     },
     {
@@ -5658,8 +5658,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 383,
-        "end": 413
+        "start": 399,
+        "end": 429
       }
     },
     {
@@ -5683,7 +5683,7 @@
       "cls": "ProblemReportCheckoutApiTests",
       "test": "Inline_image_references_are_project_scoped_typed_and_withdrawal_aware",
       "kind": "Fact",
-      "intent": "http-boundary",
+      "intent": "auth-policy",
       "cases": 1,
       "caseEvidence": "Fact",
       "hosted": "hosted",
@@ -5694,7 +5694,7 @@
       ],
       "sourceLines": {
         "start": 271,
-        "end": 381
+        "end": 397
       }
     },
     {
@@ -5711,8 +5711,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 664,
-        "end": 687
+        "start": 732,
+        "end": 755
       }
     },
     {
@@ -5729,8 +5729,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 630,
-        "end": 662
+        "start": 698,
+        "end": 730
       }
     },
     {
@@ -5746,8 +5746,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 748,
-        "end": 766
+        "start": 816,
+        "end": 834
       }
     },
     {
@@ -5764,8 +5764,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 574,
-        "end": 628
+        "start": 615,
+        "end": 696
       }
     },
     {
@@ -5781,8 +5781,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1027,
-        "end": 1066
+        "start": 1106,
+        "end": 1145
       }
     },
     {
@@ -5799,8 +5799,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 689,
-        "end": 746
+        "start": 757,
+        "end": 814
       }
     },
     {
@@ -5817,16 +5817,16 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 452,
-        "end": 485
+        "start": 468,
+        "end": 501
       }
     },
     {
       "cls": "ProblemReportCheckoutApiTests",
       "test": "Problem_report_output_reads_retained_legacy_snapshot_schemas_without_rewriting_their_hash",
       "kind": "Theory",
-      "intent": "http-boundary",
-      "cases": 3,
+      "intent": "ef-translation",
+      "cases": 4,
       "caseEvidence": "InlineData",
       "hosted": "hosted",
       "hostEvidence": [
@@ -5835,8 +5835,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 487,
-        "end": 523
+        "start": 503,
+        "end": 564
       }
     },
     {

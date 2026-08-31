@@ -277,6 +277,22 @@ public sealed class ProblemReportCheckoutApiTests
         var first = await SeedAsync(factory, "PRIMAGES");
         var second = await SeedAsync(factory, "PRIMAGES2");
 
+        var ownerRecoveryImage = await UploadImageAsync(client, first.ProjectId, "owner-recovery.png", problemReportRecovery: true);
+        var sameProjectMember = await SeedBystanderAsync(factory, first.ProjectId, "PRIMGDRAFT");
+        await LoginAsync(client, sameProjectMember, AeroLinkApiFactory.MemberPassword);
+        using (var foreignDraft = await client.GetAsync($"/api/content/images/{ownerRecoveryImage}"))
+            Assert.Equal(HttpStatusCode.Forbidden, foreignDraft.StatusCode);
+        using (var genericDrafts = await client.GetAsync($"/api/enterprise-hardening/attachments?projectId={first.ProjectId}&artifactType=InlineImageDraft&artifactId={first.ProjectId}"))
+        {
+            Assert.Equal(HttpStatusCode.OK, genericDrafts.StatusCode);
+            Assert.Empty((await genericDrafts.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray());
+        }
+        using (var genericDraftDownload = await client.GetAsync($"/api/enterprise-hardening/attachments/{ownerRecoveryImage}/download"))
+            Assert.Equal(HttpStatusCode.NotFound, genericDraftDownload.StatusCode);
+        await LoginAsync(client, "admin", AeroLinkApiFactory.AdministratorPassword);
+        using (var ownerPreview = await client.GetAsync($"/api/content/images/{ownerRecoveryImage}"))
+            Assert.Equal(HttpStatusCode.OK, ownerPreview.StatusCode);
+
         var sameProjectImage = await UploadImageAsync(client, first.ProjectId, "same-project.png");
         var allowed = await CreateWithImageAsync(client, first.ProjectId, first.ReleaseId, sameProjectImage,
             "Same project image");
@@ -488,6 +504,7 @@ public sealed class ProblemReportCheckoutApiTests
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(3)]
+    [InlineData(5)]
     public async Task Problem_report_output_reads_retained_legacy_snapshot_schemas_without_rewriting_their_hash(int schema)
     {
         using var factory = new AeroLinkApiFactory();
@@ -498,28 +515,52 @@ public sealed class ProblemReportCheckoutApiTests
 
         string historicalJson;
         string historicalHash;
+        int historicalRevision;
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var report = await db.ProblemReports.SingleAsync(x => x.Id == reportId);
-            historicalJson = LegacyOutputSnapshot(report, schema);
+            historicalRevision = report.Revision;
+            historicalJson = PinnedHistoricalSnapshot(report, projectId, schema);
+            using (var pinnedDocument = JsonDocument.Parse(historicalJson))
+            {
+                Assert.Equal(report.Id, pinnedDocument.RootElement.GetProperty("id").GetGuid());
+                Assert.Equal(projectId, pinnedDocument.RootElement.GetProperty("projectId").GetGuid());
+                Assert.Equal(report.Revision, pinnedDocument.RootElement.GetProperty("revision").GetInt32());
+            }
             historicalHash = ProblemReportEvidenceContract.Hash(historicalJson);
             db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
                 $"LegacyV{schema}Fixture", "history.engineer", historicalHash, historicalJson,
                 DateTimeOffset.UtcNow.AddMinutes(1), snapshotSchemaVersion: schema));
             await db.SaveChangesAsync();
+            var persisted = await db.ProblemReportRevisions.AsNoTracking()
+                .Where(item => item.ProblemReportId == report.Id && item.Revision == report.Revision)
+                .ToListAsync();
+            persisted = persisted.OrderByDescending(item => item.OccurredAt).ToList();
+            var latestPersisted = persisted.First();
+            Assert.Equal(historicalHash, latestPersisted.SnapshotHash);
+            Assert.Equal(historicalJson, latestPersisted.SnapshotJson);
+            Assert.Equal(schema, latestPersisted.SnapshotSchemaVersion);
         }
 
-        using var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&format=docx");
-        Assert.Equal(HttpStatusCode.OK, output.StatusCode);
+        using var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision={historicalRevision}&format=docx");
+        Assert.True(output.StatusCode == HttpStatusCode.OK,
+            $"Historical output failed for schema {schema}: {output.StatusCode} {await output.Content.ReadAsStringAsync()}");
         using var zip = new ZipArchive(new MemoryStream(await output.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
         using var document = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
         var documentText = await document.ReadToEndAsync();
         Assert.Contains($"Snapshot schema", documentText);
         Assert.Contains($">{schema}<", documentText);
+        Assert.Contains("Pinned historical report", documentText);
         Assert.Equal(historicalHash, ProblemReportEvidenceContract.Hash(historicalJson));
-        if (schema == 2)
+        if (schema is 1 or 2)
             Assert.Contains("Legacy type", documentText);
+
+        using var pdfOutput = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision={historicalRevision}&format=pdf");
+        Assert.Equal(HttpStatusCode.OK, pdfOutput.StatusCode);
+        var pdfText = Encoding.ASCII.GetString(await pdfOutput.Content.ReadAsByteArrayAsync());
+        Assert.Contains("Pinned historical report", pdfText);
+        Assert.Contains("PR-HIST-001", pdfText);
     }
 
     [Fact]
@@ -584,9 +625,36 @@ public sealed class ProblemReportCheckoutApiTests
         var bystander = await SeedBystanderAsync(factory, projectId, "PRIMGINTENT");
         await LoginAsync(client, bystander, AeroLinkApiFactory.MemberPassword);
 
-        using (var unbound = await client.PostAsync("/api/content/images",
+        using (var unbound = await client.PostAsync(ImageUploadPath(projectId),
                    ImageUpload(projectId, "unbound.png")))
             Assert.Equal(HttpStatusCode.Forbidden, unbound.StatusCode);
+
+        string imageRoot;
+        int stagedBefore;
+        using (var storageScope = factory.Services.CreateScope())
+        {
+            var store = storageScope.ServiceProvider.GetRequiredService<EvidenceFileStore>();
+            imageRoot = store.RootPath;
+            stagedBefore = Directory.Exists(imageRoot)
+                ? Directory.EnumerateFiles(imageRoot, "*", SearchOption.AllDirectories).Count()
+                : 0;
+        }
+        var fakeSessionId = Guid.NewGuid();
+        // This deliberately malformed multipart body would make ReadFormAsync fail if the endpoint parsed it.
+        // A 403 proves the exact fake-session preflight happens before multipart parsing or file access.
+        using var malformed = new StringContent("not a multipart body");
+        malformed.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("multipart/form-data");
+        malformed.Headers.ContentType.Parameters.Add(new System.Net.Http.Headers.NameValueHeaderValue("boundary", "unread"));
+        using var fakeRequest = new HttpRequestMessage(HttpMethod.Post, ImageUploadPath(projectId, fakeSessionId))
+        {
+            Content = malformed
+        };
+        using (var fakeSession = await client.SendAsync(fakeRequest))
+            Assert.Equal(HttpStatusCode.Forbidden, fakeSession.StatusCode);
+        var stagedAfter = Directory.Exists(imageRoot)
+            ? Directory.EnumerateFiles(imageRoot, "*", SearchOption.AllDirectories).Count()
+            : 0;
+        Assert.Equal(stagedBefore, stagedAfter);
 
         Guid unrelatedSessionId;
         using (var unrelatedScope = factory.Services.CreateScope())
@@ -598,7 +666,7 @@ public sealed class ProblemReportCheckoutApiTests
             await unrelatedDb.SaveChangesAsync();
             unrelatedSessionId = unrelated.Id;
         }
-        using (var unrelated = await client.PostAsync("/api/content/images",
+        using (var unrelated = await client.PostAsync(ImageUploadPath(projectId, unrelatedSessionId),
                    ImageUpload(projectId, "unrelated-session.png", unrelatedSessionId)))
             Assert.Equal(HttpStatusCode.Forbidden, unrelated.StatusCode);
 
@@ -608,7 +676,7 @@ public sealed class ProblemReportCheckoutApiTests
         var checkedOut = await checkout.Content.ReadFromJsonAsync<JsonElement>();
         var sessionId = checkedOut.GetProperty("id").GetGuid();
         var sessionVersion = checkedOut.GetProperty("version").GetInt64();
-        using var bound = await client.PostAsync("/api/content/images",
+        using var bound = await client.PostAsync(ImageUploadPath(projectId, sessionId),
             ImageUpload(projectId, "checked-out.png", sessionId));
         Assert.Equal(HttpStatusCode.Created, bound.StatusCode);
         var imageId = (await bound.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
@@ -622,7 +690,7 @@ public sealed class ProblemReportCheckoutApiTests
         using var discard = await client.PostAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/discard",
             new { expectedVersion = sessionVersion, reason = "Intent-bound upload test complete." });
         Assert.Equal(HttpStatusCode.NoContent, discard.StatusCode);
-        using var abandoned = await client.PostAsync("/api/content/images",
+        using var abandoned = await client.PostAsync(ImageUploadPath(projectId, sessionId),
             ImageUpload(projectId, "abandoned-session.png", sessionId));
         Assert.Equal(HttpStatusCode.Forbidden, abandoned.StatusCode);
     }
@@ -651,7 +719,7 @@ public sealed class ProblemReportCheckoutApiTests
             await db.SaveChangesAsync();
         }
 
-        using var response = await client.PostAsync("/api/content/images", ImageUpload(seeded.ProjectId, "over-budget.png"));
+        using var response = await client.PostAsync(ImageUploadPath(seeded.ProjectId), ImageUpload(seeded.ProjectId, "over-budget.png"));
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("inline_image_project_quota", body.GetProperty("code").GetString());
@@ -678,7 +746,7 @@ public sealed class ProblemReportCheckoutApiTests
             await db.SaveChangesAsync();
         }
 
-        using var response = await client.PostAsync("/api/content/images", ImageUpload(seeded.ProjectId, "actor-over-budget.png"));
+        using var response = await client.PostAsync(ImageUploadPath(seeded.ProjectId), ImageUpload(seeded.ProjectId, "actor-over-budget.png"));
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("inline_image_actor_quota", body.GetProperty("code").GetString());
@@ -694,7 +762,7 @@ public sealed class ProblemReportCheckoutApiTests
         await ProblemReportApiTests.BootstrapAndLoginAsync(client);
         var seeded = await SeedAsync(factory, "PRIMGRECOVERY");
 
-        using var upload = await client.PostAsync("/api/content/images",
+        using var upload = await client.PostAsync(ImageUploadPath(seeded.ProjectId),
             ImageUpload(seeded.ProjectId, "recovery.png", problemReportRecovery: true));
         Assert.Equal(HttpStatusCode.Created, upload.StatusCode);
         var recoveryId = (await upload.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
@@ -733,7 +801,7 @@ public sealed class ProblemReportCheckoutApiTests
         var expiredClaimBody = await expiredClaim.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("inline_image_recovery_expired", expiredClaimBody.GetProperty("code").GetString());
 
-        using var replacement = await client.PostAsync("/api/content/images",
+        using var replacement = await client.PostAsync(ImageUploadPath(seeded.ProjectId),
             ImageUpload(seeded.ProjectId, "current-recovery.png", problemReportRecovery: true));
         Assert.Equal(HttpStatusCode.Created, replacement.StatusCode);
         using (var scope = factory.Services.CreateScope())
@@ -759,7 +827,7 @@ public sealed class ProblemReportCheckoutApiTests
         jpeg.Headers.ContentType = new("image/jpeg");
         form.Add(jpeg, "file", "truncated.jpg");
 
-        using var response = await client.PostAsync("/api/content/images", form);
+        using var response = await client.PostAsync(ImageUploadPath(seeded.ProjectId), form);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("not the image type", await response.Content.ReadAsStringAsync());
@@ -790,8 +858,8 @@ public sealed class ProblemReportCheckoutApiTests
             await db.SaveChangesAsync();
         }
 
-        var first = client.PostAsync("/api/content/images", ImageUpload(seeded.ProjectId, "first.png"));
-        var second = client.PostAsync("/api/content/images", ImageUpload(seeded.ProjectId, "second.png"));
+        var first = client.PostAsync(ImageUploadPath(seeded.ProjectId), ImageUpload(seeded.ProjectId, "first.png"));
+        var second = client.PostAsync(ImageUploadPath(seeded.ProjectId), ImageUpload(seeded.ProjectId, "second.png"));
         var responses = await Task.WhenAll(first, second);
         try
         {
@@ -812,10 +880,11 @@ public sealed class ProblemReportCheckoutApiTests
         }
     }
 
-    private static async Task<Guid> UploadImageAsync(HttpClient client, Guid projectId, string fileName)
+    private static async Task<Guid> UploadImageAsync(HttpClient client, Guid projectId, string fileName,
+        bool problemReportRecovery = false)
     {
-        using var content = ImageUpload(projectId, fileName);
-        using var response = await client.PostAsync("/api/content/images", content);
+        using var content = ImageUpload(projectId, fileName, problemReportRecovery: problemReportRecovery);
+        using var response = await client.PostAsync(ImageUploadPath(projectId), content);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
     }
@@ -836,26 +905,20 @@ public sealed class ProblemReportCheckoutApiTests
         return content;
     }
 
-    private static string LegacyOutputSnapshot(ProblemReport report, int schema)
-    {
-        var snapshot = JsonNode.Parse(ProblemReportEvidenceContract.Serialize(report))!.AsObject();
-        snapshot["schemaVersion"] = schema;
-        if (schema == 1)
-            snapshot["contract"] = "aerolink.problem-report-closure-review";
-        if (schema <= 2)
-        {
-            snapshot["type"] = "Code";
-            snapshot.Remove("category");
-            snapshot.Remove("categoryProvenance");
-        }
+    private static string ImageUploadPath(Guid projectId, Guid? editSessionId = null) =>
+        editSessionId is Guid sessionId
+            ? $"/api/content/images?projectId={projectId:D}&editSessionId={sessionId:D}"
+            : $"/api/content/images?projectId={projectId:D}";
 
-        // These fields were added after the legacy envelopes. Leaving them absent proves the reader falls
-        // back to the exact plain value recorded by the old schema instead of borrowing today's rich content.
-        if (schema <= 3)
-            foreach (var field in new[] { "analysisRich", "problemRich", "additionalInformationRich", "systemAircraftImpactRich",
-                                          "workaroundRich", "rootCauseRich", "effectsRich", "containmentRich", "correctiveActionRich" })
-                snapshot.Remove(field);
-        return snapshot.ToJsonString();
+    private static string PinnedHistoricalSnapshot(ProblemReport report, Guid projectId, int schema)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Fixtures", "ProblemReportSnapshots", $"v{schema}.json");
+        // EF's required snapshot string is trimmed on write; keep the fixture file's terminal newline pinned
+        // for its raw-byte hash test, but use the exact envelope bytes the historical row stores here.
+        var json = File.ReadAllText(path, Encoding.UTF8).TrimEnd('\r', '\n');
+        return json
+            .Replace("10000000-0000-0000-0000-000000000001", report.Id.ToString(), StringComparison.OrdinalIgnoreCase)
+            .Replace("20000000-0000-0000-0000-000000000002", projectId.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<string> SeedNonMemberAsync(AeroLinkApiFactory factory, string prefix)
@@ -899,7 +962,23 @@ public sealed class ProblemReportCheckoutApiTests
         {
             Span<byte> length = stackalloc byte[4];
             System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(length, (uint)data.Length);
-            target.Write(length); target.Write(Encoding.ASCII.GetBytes(type)); target.Write(data); target.Write(new byte[4]);
+            target.Write(length);
+            var body = Encoding.ASCII.GetBytes(type).Concat(data).ToArray();
+            target.Write(body);
+            Span<byte> crc = stackalloc byte[4];
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(crc, Crc32(body));
+            target.Write(crc);
+        }
+        static uint Crc32(byte[] bytes)
+        {
+            var crc = 0xFFFFFFFFu;
+            foreach (var input in bytes)
+            {
+                crc ^= input;
+                for (var bit = 0; bit < 8; bit++)
+                    crc = (crc & 1) == 0 ? crc >> 1 : (crc >> 1) ^ 0xEDB88320u;
+            }
+            return ~crc;
         }
     }
 

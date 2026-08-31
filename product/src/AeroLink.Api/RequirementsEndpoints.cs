@@ -722,15 +722,40 @@ public static class RequirementsEndpoints
         // duplicated into the record, so one diagram used in five requirements is stored once and stays one thing.
         app.MapPost("/api/content/images",async(HttpRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,EvidenceFileStore store,ControlledAttachmentStorageCoordinator coordinator,ILoggerFactory loggerFactory,CancellationToken ct)=>
         {
+            // Project and lease identity must be available outside the multipart body. The body can be up to
+            // 12 MiB, so parsing it before authorization would let a caller with a made-up GUID make the server
+            // buffer, hash, stage, and lock resources before being rejected. Clients must put these values in the
+            // query string; matching form fields are accepted only as a legacy consistency check below.
+            if(!Guid.TryParse(request.Query["projectId"],out var projectId))
+                return Results.BadRequest(new{error="A projectId query parameter is required."});
+            var hasEditSession=Guid.TryParse(request.Query["editSessionId"],out var editSessionId);
             if(!request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data."});
-            var form=await request.ReadFormAsync(ct);var file=form.Files.GetFile("file");
-            if(file is null||file.Length==0)return Results.BadRequest(new{error="Select a non-empty image."});
-            if(!Guid.TryParse(form["projectId"],out var projectId))return Results.BadRequest(new{error="A project identifier is required."});
             if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
             var actor=http.UserAccount();
-            var hasEditSession=Guid.TryParse(form["editSessionId"],out var editSessionId);
-            if(!hasEditSession&&!await http.HasProjectRoleAsync(db,identity,projectId,ct,
+            // A parseable session identifier is not an authorization token. Establish the exact live,
+            // exclusive Problem Report lease and its owner before reading, hashing, staging, or locking
+            // anything supplied by the caller. The serializable re-check below still closes the commit-time
+            // race; this preflight closes the resource-amplification path for fake or foreign identifiers.
+            if(hasEditSession)
+            {
+                var requestedSession=await db.ArtifactEditSessions.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==editSessionId,ct);
+                if(requestedSession is null||requestedSession.ProjectId!=projectId||!requestedSession.IsExclusive
+                    ||!requestedSession.ArtifactType.Equals("ProblemReport",StringComparison.OrdinalIgnoreCase)
+                    ||requestedSession.State!=EditSessionState.Active||requestedSession.ExpiresAt<=DateTimeOffset.UtcNow
+                    ||requestedSession.UserName!=actor.UserName)return Results.Forbid();
+            }
+            else if(!await http.HasProjectRoleAsync(db,identity,projectId,ct,
                         ProgramRole.Engineer,ProgramRole.TestEngineer,ProgramRole.ConfigurationManager,ProgramRole.ProgramManager))return Results.Forbid();
+            var form=await request.ReadFormAsync(ct);var file=form.Files.GetFile("file");
+            // Do not let a body-supplied identity replace the value already authorized above. Reject an
+            // inconsistent legacy field so callers cannot accidentally associate the bytes with another Project.
+            if(form.TryGetValue("projectId",out var formProjectId)&&formProjectId.Count>0&&
+                (!Guid.TryParse(formProjectId[0],out var suppliedProjectId)||suppliedProjectId!=projectId))
+                return Results.BadRequest(new{error="The form projectId must match the authorized query projectId."});
+            if(form.TryGetValue("editSessionId",out var formEditSessionId)&&formEditSessionId.Count>0&&
+                (!Guid.TryParse(formEditSessionId[0],out var suppliedEditSession)||!hasEditSession||suppliedEditSession!=editSessionId))
+                return Results.BadRequest(new{error="The form editSessionId must match the authorized query editSessionId."});
+            if(file is null||file.Length==0)return Results.BadRequest(new{error="Select a non-empty image."});
             // Only formats every renderer here can produce. An image the workspace shows but the generated Word
             // document cannot would make a controlled document disagree with the record it came from.
             var contentType=(file.ContentType??"").ToLowerInvariant();
@@ -921,6 +946,9 @@ public static class RequirementsEndpoints
         {
             var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id&&(x.ArtifactType=="InlineImage"||x.ArtifactType=="InlineImageDraft"),ct);
             if(item is null)return Results.NotFound();
+            // Recovery bytes are a private browser draft until the owner claims them. Project membership alone
+            // is enough for a claimed controlled image, never for somebody else's still-unclaimed draft.
+            if(item.ArtifactType=="InlineImageDraft"&&!string.Equals(item.UploadedBy,http.UserAccount().UserName,StringComparison.OrdinalIgnoreCase))return Results.Forbid();
             if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();
             // Current authored content must not continue to show an image that was withdrawn. Historical
             // Problem Report output has its own internal, exact-snapshot path for withdrawn evidence.

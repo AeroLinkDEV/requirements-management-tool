@@ -42,7 +42,21 @@ public sealed class RichContentPublicationTests
             target.Write(length);
             var body = Encoding.ASCII.GetBytes(type).Concat(data).ToArray();
             target.Write(body);
-            target.Write(new byte[4]); // The decoder does not verify CRCs; a wrong one would not be read.
+            Span<byte> crc = stackalloc byte[4];
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(crc, Crc32(body));
+            target.Write(crc);
+        }
+
+        static uint Crc32(byte[] bytes)
+        {
+            var crc = 0xFFFFFFFFu;
+            foreach (var input in bytes)
+            {
+                crc ^= input;
+                for (var bit = 0; bit < 8; bit++)
+                    crc = (crc & 1) == 0 ? crc >> 1 : (crc >> 1) ^ 0xEDB88320u;
+            }
+            return ~crc;
         }
     }
 
@@ -77,8 +91,38 @@ public sealed class RichContentPublicationTests
     public void A_truncated_png_is_refused_rather_than_half_decoded()
     {
         var truncated = Png()[..30];
-        Assert.True(PngImage.IsPng(truncated));
+        Assert.False(PngImage.IsPng(truncated));
         Assert.False(PngImage.TryDecodeRgb(truncated, out _, out _, out _));
+    }
+
+    [Fact]
+    public void A_png_requires_a_complete_bounded_chunk_stream_and_decoder_profile()
+    {
+        byte[] trailing = [.. Png(), (byte)0x7F];
+        Assert.False(PngImage.IsDeclaredImage(trailing, "image/png"));
+
+        var missingEnd = Png()[..^12];
+        Assert.False(PngImage.IsDeclaredImage(missingEnd, "image/png"));
+
+        var malformedLength = Png();
+        // IHDR is the first chunk at byte 8. Claiming more bytes than the bounded payload contains must fail.
+        malformedLength[11] = 0x7F;
+        Assert.False(PngImage.IsDeclaredImage(malformedLength, "image/png"));
+
+        var badCrc = Png();
+        badCrc[29] ^= 0x01; // IHDR CRC; valid bytes must carry a matching chunk checksum.
+        Assert.False(PngImage.IsDeclaredImage(badCrc, "image/png"));
+
+        var invalidFilter = Png();
+        // The tiny fixture's compressed scanlines begin in the IDAT payload; change the first filter byte to
+        // an undefined value after rebuilding the bounded zlib stream so this reaches the decoder gate.
+        var invalidFilterRaw = new byte[] { 5, 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 255 };
+        invalidFilter = Png(2, 2, invalidFilterRaw);
+        Assert.False(PngImage.IsDeclaredImage(invalidFilter, "image/png"));
+
+        var hugeDimensions = Png();
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(hugeDimensions.AsSpan(16, 4), 32_769);
+        Assert.False(PngImage.IsDeclaredImage(hugeDimensions, "image/png"));
     }
 
     [Fact]
@@ -282,6 +326,31 @@ public sealed class RichContentPublicationTests
         Assert.True(pdf.IndexOf("First caption", StringComparison.Ordinal) < pdf.IndexOf("Second caption", StringComparison.Ordinal));
         Assert.True(pdf.IndexOf("First alt", StringComparison.Ordinal) < pdf.IndexOf("Second alt", StringComparison.Ordinal));
         Assert.True(pdf.IndexOf("Second alt", StringComparison.Ordinal) < pdf.IndexOf("Text below figures.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Pdf_keeps_image_rows_in_global_authored_order_with_surrounding_narrative()
+    {
+        var uri = "data:image/png;base64," + Convert.ToBase64String(Png());
+        var rich = "{\"blocks\":["
+            + "{\"type\":\"paragraph\",\"text\":\"Before figures marker.\"},"
+            + $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"First ordered alt\",\"caption\":\"First ordered caption\",\"widthPercent\":40}},"
+            + $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"Second ordered alt\",\"caption\":\"Second ordered caption\",\"widthPercent\":60}},"
+            + "{\"type\":\"paragraph\",\"text\":\"Immediately below figures marker.\"},"
+            + "{\"type\":\"paragraph\",\"text\":\"After figures marker.\"}]}";
+
+        var output = ProfessionalPublicationRenderer.Render(Publication(rich), "pdf", "inline-images-global-order");
+        var pdf = Encoding.ASCII.GetString(output.Content);
+        var before = pdf.IndexOf("Before figures marker.", StringComparison.Ordinal);
+        var first = pdf.IndexOf("First ordered caption", StringComparison.Ordinal);
+        var second = pdf.IndexOf("Second ordered caption", StringComparison.Ordinal);
+        var below = pdf.IndexOf("Immediately below figures marker.", StringComparison.Ordinal);
+        var after = pdf.IndexOf("After figures marker.", StringComparison.Ordinal);
+
+        Assert.True(before >= 0 && first > before && second > first && below > second && after > below,
+            $"Expected authored narrative/image-row order; positions were before={before}, first={first}, second={second}, below={below}, after={after}.");
+        Assert.Equal(1, Count(pdf, "/Subtype /Image"));
+        Assert.Equal(2, Count(pdf, "/Im1 Do"));
     }
 
     [Fact]

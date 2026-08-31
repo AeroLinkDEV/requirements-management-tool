@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
 
@@ -97,6 +99,42 @@ public sealed class ProblemReportHistoricalSnapshotTests
             Assert.Equal(schema, root.GetProperty("schemaVersion").GetInt32());
             Assert.Equal(schema is 1 or 2 ? "AwaitingSqaClosure" : "WaitingForSqaToClose",
                 root.GetProperty("state").GetString());
+            if (schema is 1 or 2)
+                Assert.Equal("Code", root.GetProperty("type").GetString());
+            else
+                Assert.Equal("CodeFunctional", root.GetProperty("category").GetString());
+        }
+    }
+
+    [Fact]
+    public void Pinned_historical_envelopes_are_verified_as_raw_utf8_bytes()
+    {
+        var expectedHashes = new Dictionary<int, string>
+        {
+            [1] = "8cc4b27d3626c3aa4a4427f95a0072b250d8d6c075006c225b0ace972c10a9f9",
+            [2] = "0e96550f1f2c120889f306a3175dc9f4c0eaaf265081c0406d0f14da7a79c3c3",
+            [3] = "4eed2f138161d0114447208f34ef2290bd690f06b9e11613222221369014559f",
+            [5] = "805b487a269b34bc2854bf46fbdb821a1650d3a5e0ed8c23905abb1b16990419",
+        };
+
+        foreach (var (schema, expectedHash) in expectedHashes)
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "Fixtures", "ProblemReportSnapshots", $"v{schema}.json");
+            var bytes = File.ReadAllBytes(path);
+            var json = Encoding.UTF8.GetString(bytes);
+            Assert.Equal(expectedHash, Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
+            Assert.Equal(expectedHash, ProblemReportClosureCandidateService.Hash(json));
+            Assert.Equal((byte)'\n', bytes[^1]); // The newline is part of the immutable fixture bytes and hash.
+
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            Assert.Equal(schema, root.GetProperty("schemaVersion").GetInt32());
+            var parsed = ProblemReportOutputGenerator.ReadStoredSnapshot(json, schema);
+            Assert.True(parsed is not null, $"The pinned schema {schema} envelope was not accepted by the historical reader.");
+            Assert.Equal(Guid.Parse("10000000-0000-0000-0000-000000000001"), parsed.Value.Snapshot.Id);
+            Assert.Equal(schema is 1 or 2
+                ? "AwaitingSqaClosure"
+                : "WaitingForSqaToClose", root.GetProperty("state").GetString());
             if (schema is 1 or 2)
                 Assert.Equal("Code", root.GetProperty("type").GetString());
             else

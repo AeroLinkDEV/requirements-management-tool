@@ -43,6 +43,10 @@ public static class EditSessionEndpoints
         app.MapGet("/api/enterprise-hardening/attachments",async(Guid projectId,string artifactType,Guid artifactId,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
         {
             if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
+            // Browser-recovery images are private, transient authoring state, not controlled attachment-vault
+            // records. Never enumerate them through this project-scoped generic surface; the dedicated image
+            // endpoint applies the uploader/session boundary when an editor needs to preview one.
+            if(artifactType.Equals("InlineImageDraft",StringComparison.OrdinalIgnoreCase))return Results.Ok(Array.Empty<object>());
             var rows=await db.ControlledAttachments.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.ArtifactType==artifactType&&x.ArtifactId==artifactId).OrderBy(x=>x.LogicalId).ThenByDescending(x=>x.Version).ToListAsync(ct);
             return Results.Ok(rows.Select(x=>new{x.Id,x.LogicalId,x.Version,x.RevisionId,x.Label,x.Description,x.OriginalFileName,x.ContentType,x.Size,x.Sha256,state=x.State.ToString(),x.UploadedBy,x.UploadedAt,x.IntegrityVerifiedAt,x.SupersedesId}));
         });
@@ -95,7 +99,7 @@ public static class EditSessionEndpoints
         // duplicated into the record, so one diagram used in five requirements is stored once and stays one thing.
 
         app.MapGet("/api/enterprise-hardening/attachments/{id:guid}/download",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
-        {var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();return Results.File(store.OpenRead(item.StorageKey),item.ContentType,item.OriginalFileName,enableRangeProcessing:true);});
+        {var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(item.ArtifactType=="InlineImageDraft")return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();return Results.File(store.OpenRead(item.StorageKey),item.ContentType,item.OriginalFileName,enableRangeProcessing:true);});
 
         app.MapPost("/api/enterprise-hardening/attachments/{id:guid}/verify",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
         {var item=await db.ControlledAttachments.SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var actual=await store.ComputeSha256Async(item.StorageKey,ct);var valid=CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actual),Convert.FromHexString(item.Sha256));if(valid){item.RecordIntegrityVerification(DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);}return Results.Ok(new{valid,expected=item.Sha256,actual,verifiedAt=item.IntegrityVerifiedAt});});

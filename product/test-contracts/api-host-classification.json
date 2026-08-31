@@ -3,7 +3,7 @@
   "totals": {
     "classes": 116,
     "tests": 722,
-    "knownCases": 805,
+    "knownCases": 806,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -16,7 +16,7 @@
     "fresh-host": {
       "classes": 44,
       "tests": 281,
-      "knownCases": 312,
+      "knownCases": 313,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -393,12 +393,13 @@
     {
       "cls": "ProblemReportCheckoutApiTests",
       "tests": 20,
-      "knownCases": 22,
+      "knownCases": 23,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
         "auth-policy",
+        "ef-translation",
         "filesystem",
         "http-boundary"
       ]

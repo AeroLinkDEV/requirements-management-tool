@@ -127,7 +127,7 @@ test('a delayed inline image upload keeps create save behind the pending upload'
   const started = new Promise<void>(resolve => { uploadStarted = resolve })
   let releaseUpload = () => {}
   const gate = new Promise<void>(resolve => { releaseUpload = resolve })
-  await page.route('**/api/content/images', async route => {
+  await page.route('**/api/content/images**', async route => {
     uploadStarted()
     await gate
     await route.continue()
@@ -146,7 +146,7 @@ test('a delayed inline image upload keeps create save behind the pending upload'
 
   releaseUpload()
   await expect(raise.getByRole('button', { name: 'Save Draft PR', exact: true })).toBeEnabled({ timeout: 30_000 })
-  await page.unroute('**/api/content/images')
+  await page.unroute('**/api/content/images**')
 })
 
 test('a delayed inline image upload keeps checkout save and check-in behind the pending upload', async ({ page }) => {
@@ -180,7 +180,7 @@ test('a delayed inline image upload keeps checkout save and check-in behind the 
     releaseUpload()
   }
   const gate = new Promise<void>(resolve => { releaseUpload = resolve })
-  await page.route('**/api/content/images', async route => {
+  await page.route('**/api/content/images**', async route => {
     uploadStarted()
     await gate
     await route.continue()
@@ -202,7 +202,7 @@ test('a delayed inline image upload keeps checkout save and check-in behind the 
     await expect(editor.locator('.workspaceNotice')).toHaveCount(0)
   } finally {
     release()
-    await page.unroute('**/api/content/images')
+    await page.unroute('**/api/content/images**')
   }
 })
 
