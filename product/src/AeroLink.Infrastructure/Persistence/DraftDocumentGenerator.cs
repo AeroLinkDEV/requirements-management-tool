@@ -61,7 +61,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             .Where(x => revisionIds.Contains(x.RevisionId)).ToDictionaryAsync(x => x.RevisionId, x => x.RichText, ct);
         var proposed = effective.Where(x => x.RevisionId is null && !string.IsNullOrWhiteSpace(x.RichText))
             .Select(x => x.RichText).ToList();
-        var images = await richContent.ResolveImagesAsync(authored.Values.Concat(proposed), ct);
+        var images = await richContent.ResolveImagesAsync(authored.Values.Concat(proposed), release.ProjectId, ct);
 
         var records = effective.Select(x => new PublicationRecord(
             $"{x.BaseNumber}.{x.Revision:D2}", level.Value.ToString(), x.Origin, x.Statement,

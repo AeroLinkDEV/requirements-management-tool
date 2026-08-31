@@ -755,8 +755,15 @@ public static class RequirementsEndpoints
             var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id&&x.ArtifactType=="InlineImage",ct);
             if(item is null)return Results.NotFound();
             if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();
-            if(!store.Exists(item.StorageKey))return Results.NotFound();
-            return Results.File(store.OpenRead(item.StorageKey),item.ContentType,enableRangeProcessing:true);
+            // Current authored content must not continue to show an image that was withdrawn. Historical
+            // Problem Report output has its own internal, exact-snapshot path for withdrawn evidence.
+            if(item.State==ControlledAttachmentState.Withdrawn)return Results.NotFound();
+            try
+            {
+                var source=await store.OpenVerifiedReadAsync(item.StorageKey,item.Size,item.Sha256,ct);
+                return Results.File(source,item.ContentType,enableRangeProcessing:true);
+            }
+            catch(EvidenceIntegrityException){return Results.NotFound();}
         });
     }
 

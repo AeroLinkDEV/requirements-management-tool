@@ -207,3 +207,30 @@ test('a delayed inline image upload keeps checkout save and check-in behind the 
     await page.unroute('**/api/content/images')
   }
 })
+
+test('Problem Report output links distinguish the current record from its exact historical revision', async ({ page }) => {
+  test.setTimeout(240_000)
+  const title = `Output identity ${Date.now()}`
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+  await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: 'load' })
+  await page.getByRole('button', { name: '+ Record problem' }).click()
+  const raise = page.getByRole('dialog', { name: 'Record a problem' })
+  await raise.getByLabel('Title').fill(title)
+  await writeField(raise, 'Problem Description', 'The rendered output must retain its exact record identity.')
+  await chooseCategory(raise, 'Code Issue — Functional Impact')
+  await raise.getByRole('button', { name: 'Save Draft PR' }).click()
+  await expect(page.getByRole('heading', { name: title })).toBeVisible({ timeout: 30_000 })
+
+  await expect(page.getByRole('link', { name: 'Download DOCX' }))
+    .toHaveAttribute('href', /\/api\/problem-reports\/[0-9a-f-]{36}\/download\?format=docx$/)
+  await expect(page.getByRole('link', { name: 'Download PDF' }))
+    .toHaveAttribute('href', /\/api\/problem-reports\/[0-9a-f-]{36}\/download\?format=pdf$/)
+
+  await page.getByRole('button', { name: /^History/ }).click()
+  await expect(page.getByRole('link', { name: 'DOCX · rev 00' }))
+    .toHaveAttribute('href', /\/api\/problem-reports\/[0-9a-f-]{36}\/download\?format=docx&revision=0$/)
+  await expect(page.getByRole('link', { name: 'PDF · rev 00' }))
+    .toHaveAttribute('href', /\/api\/problem-reports\/[0-9a-f-]{36}\/download\?format=pdf&revision=0$/)
+})

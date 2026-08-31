@@ -43,7 +43,7 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
         // A frozen snapshot is allowed to read the immutable bytes of an attachment that was subsequently
         // withdrawn. Current output retains the normal withdrawn guard; a future attachment-removal workflow
         // therefore cannot make already-checked-in PR output drift.
-        var images = await richContent.ResolveImagesAsync(richValues, ct, includeWithdrawn: frozen);
+        var images = await richContent.ResolveImagesAsync(richValues, snapshot.ProjectId, ct, includeWithdrawn: frozen);
         string Published(string value) => RichContentPublisher.ForPublication(value, images);
         var records = new List<PublicationRecord>
         {

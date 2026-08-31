@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from "react";
 import {
   fromPlainText,
   hasStructure,
@@ -40,7 +40,11 @@ export function RichContentView({ api, value, empty }: { api: string; value: str
               <figure className="richImageFigure" key={`${image.attachmentId}-${imageIndex}`} style={{ width: `${widthPercent}%`, flex: `0 1 calc(${widthPercent}% - 6px)` }}>
                 {/* The image resolves inside this deployment. There is no path by which authored content can
                     reach out to somewhere else. */}
-                <img src={`${api}/api/content/images/${image.attachmentId}`} alt={image.alt || "Controlled inline image"} />
+                <ControlledInlineImage
+                  api={api}
+                  attachmentId={image.attachmentId}
+                  alt={image.alt || "Controlled inline image"}
+                />
                 {(image.caption || image.alt) && <figcaption>{image.caption || image.alt}</figcaption>}
               </figure>
             );
@@ -360,8 +364,9 @@ export function RichContentEditor({ api, projectId, value, label, placeholder, d
 
             {block.type === "image" && (
               <div className="richImageEdit">
-                <img
-                  src={`${api}/api/content/images/${block.attachmentId}`}
+                <ControlledInlineImage
+                  api={api}
+                  attachmentId={block.attachmentId}
                   alt={block.alt || "Stored image"}
                   style={{ width: `${Math.min(100, Math.max(25, block.widthPercent ?? 100))}%` }}
                 />
@@ -413,6 +418,34 @@ export function RichContentEditor({ api, projectId, value, label, placeholder, d
         ))}
       </ol>
     </div>
+  );
+}
+
+/**
+ * An image endpoint can reject a withdrawn or integrity-mismatched controlled attachment. Keep that failure
+ * visible in the authored record rather than presenting a broken-image icon as if the figure never existed.
+ */
+function ControlledInlineImage({
+  api,
+  attachmentId,
+  alt,
+  style,
+}: {
+  api: string;
+  attachmentId: string;
+  alt: string;
+  style?: CSSProperties;
+}) {
+  const [unavailable, setUnavailable] = useState(false);
+  if (unavailable)
+    return <p className="richImageUnavailable" role="status" style={style}>Image unavailable in the current record: {alt}</p>;
+  return (
+    <img
+      src={`${api}/api/content/images/${attachmentId}`}
+      alt={alt}
+      style={style}
+      onError={() => setUnavailable(true)}
+    />
   );
 }
 

@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 709,
-    "cases": 790,
+    "tests": 715,
+    "cases": 798,
     "classes": 116,
-    "hostedTests": 680,
-    "hostedCases": 747,
+    "hostedTests": 686,
+    "hostedCases": 755,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 7,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 422,
-      "cases": 474,
+      "tests": 426,
+      "cases": 480,
       "unknownCases": 0,
       "classes": 95
     },
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 82,
-      "cases": 86,
+      "tests": 83,
+      "cases": 87,
       "unknownCases": 0,
-      "classes": 47
+      "classes": 48
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -53,10 +53,10 @@
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
       "level": "API or Infrastructure (must stay hosted)",
-      "tests": 14,
-      "cases": 14,
+      "tests": 15,
+      "cases": 15,
       "unknownCases": 0,
-      "classes": 8
+      "classes": 9
     },
     "startup-config": {
       "label": "Startup, hosting and configuration",
@@ -5507,6 +5507,23 @@
     },
     {
       "cls": "ProblemReportCheckoutApiTests",
+      "test": "A_non_member_cannot_download_current_or_frozen_problem_report_output",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 557,
+        "end": 572
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
       "test": "A_project_member_who_does_not_own_the_report_can_correct_it_in_Verifying",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -5518,8 +5535,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 441,
-        "end": 474
+        "start": 699,
+        "end": 732
       }
     },
     {
@@ -5535,8 +5552,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 480,
-        "end": 509
+        "start": 738,
+        "end": 767
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "A_tampered_persisted_snapshot_is_refused_by_both_output_formats",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 525,
+        "end": 555
       }
     },
     {
@@ -5558,6 +5593,24 @@
     },
     {
       "cls": "ProblemReportCheckoutApiTests",
+      "test": "Current_and_frozen_problem_report_output_refuse_a_changed_inline_image_blob",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 415,
+        "end": 450
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
       "test": "Discarding_a_checkout_restores_the_last_checked_in_content",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -5571,6 +5624,24 @@
       "sourceLines": {
         "start": 152,
         "end": 187
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Frozen_problem_report_output_never_resolves_an_inline_image_from_another_project",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 383,
+        "end": 413
       }
     },
     {
@@ -5605,7 +5676,7 @@
       ],
       "sourceLines": {
         "start": 271,
-        "end": 347
+        "end": 381
       }
     },
     {
@@ -5621,8 +5692,44 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 515,
-        "end": 554
+        "start": 773,
+        "end": 812
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Problem_report_output_reads_a_persisted_v4_snapshot_without_rewriting_its_hash",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 452,
+        "end": 485
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Problem_report_output_reads_retained_legacy_snapshot_schemas_without_rewriting_their_hash",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 3,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 487,
+        "end": 523
       }
     },
     {

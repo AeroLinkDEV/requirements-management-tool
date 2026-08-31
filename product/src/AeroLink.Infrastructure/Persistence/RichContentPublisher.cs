@@ -23,34 +23,46 @@ public sealed class RichContentPublisher(AeroLinkDbContext db, EvidenceFileStore
 {
     /// <summary>A single inline image beyond this size is a scan, not a diagram, and would bloat every copy.</summary>
     private const long MaximumInlineBytes = 12 * 1024 * 1024;
+    // A record can contain several narrative fields, each of which permits several figures. Bound the
+    // publication aggregate as well as each file so a deliberately dense but otherwise valid record cannot
+    // allocate gigabytes while its DOCX/PDF is generated. Unresolved figures remain visible placeholders.
+    private const int MaximumResolvedImages = 64;
+    private const long MaximumResolvedBytes = 48 * 1024 * 1024;
 
     public async Task<IReadOnlyDictionary<Guid, string>> ResolveImagesAsync(
-        IEnumerable<string?> contents, CancellationToken ct, bool includeWithdrawn = false)
+        IEnumerable<string?> contents, Guid projectId, CancellationToken ct, bool includeWithdrawn = false)
     {
         var wanted = contents.SelectMany(RichContent.ReferencedAttachments).Distinct().ToList();
         if (wanted.Count == 0) return new Dictionary<Guid, string>();
 
         var attachments = await db.ControlledAttachments.AsNoTracking()
-            .Where(x => wanted.Contains(x.Id) && (includeWithdrawn || x.State != ControlledAttachmentState.Withdrawn))
+            .Where(x => wanted.Contains(x.Id) && x.ProjectId == projectId
+                && x.ArtifactType == "InlineImage"
+                && (includeWithdrawn || x.State != ControlledAttachmentState.Withdrawn))
             .ToListAsync(ct);
 
         var resolved = new Dictionary<Guid, string>();
+        long resolvedBytes = 0;
         foreach (var attachment in attachments)
         {
             var mediaType = attachment.ContentType.ToLowerInvariant();
             if (mediaType is not ("image/png" or "image/jpeg")) continue;
-            if (attachment.Size > MaximumInlineBytes || !store.Exists(attachment.StorageKey)) continue;
+            if (attachment.Size > MaximumInlineBytes || attachment.Size <= 0
+                || resolved.Count >= MaximumResolvedImages
+                || attachment.Size > MaximumResolvedBytes - resolvedBytes) continue;
             try
             {
-                await using var source = store.OpenRead(attachment.StorageKey);
+                await using var source = await store.OpenVerifiedReadAsync(
+                    attachment.StorageKey, attachment.Size, attachment.Sha256, ct);
                 using var buffer = new MemoryStream();
                 await source.CopyToAsync(buffer, ct);
                 resolved[attachment.Id] = $"data:{mediaType};base64,{Convert.ToBase64String(buffer.ToArray())}";
+                resolvedBytes += attachment.Size;
             }
-            catch (IOException)
+            catch (EvidenceIntegrityException)
             {
-                // A file the store cannot read is reported by its absence from this map, which the rewrite
-                // below turns into visible text rather than a silently missing figure.
+                // A missing or altered file is reported by its absence from this map, which the rewrite below
+                // turns into visible text rather than silently publishing bytes that no longer match evidence.
             }
         }
         return resolved;
