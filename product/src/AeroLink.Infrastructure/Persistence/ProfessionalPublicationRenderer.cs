@@ -174,10 +174,14 @@ public static class ProfessionalPublicationRenderer
     private static void Entry(ZipArchive zip, string name, string content) { var entry = zip.CreateEntry(name, CompressionLevel.Optimal);entry.LastWriteTime=DeterministicArchiveTime; using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false)); writer.Write(content); }
     private static void BinaryEntry(ZipArchive zip,string name,byte[] content){var entry=zip.CreateEntry(name,CompressionLevel.Optimal);entry.LastWriteTime=DeterministicArchiveTime;using var stream=entry.Open();stream.Write(content);}
 
-    private sealed record PublicationImage(int Index,string Key,byte[] Bytes,string Alt,string Caption,int Width,int Height,bool IsPng,int WidthPercent = 100)
+    private sealed record PublicationImage(int Index,string Key,byte[] Bytes,int Width,int Height,bool IsPng)
     {
         public string Extension => IsPng ? "png" : "jpg";
     }
+
+    /// <summary>One authored occurrence of an image. Bytes are shared through <see cref="Asset"/>, while
+    /// alt text, caption, and width remain occurrence-specific controlled content.</summary>
+    private sealed record PublicationImagePlacement(PublicationImage Asset, string Alt, string Caption, int WidthPercent);
 
     /// <summary>
     /// Decodes the images an authored record carries, once each. The same diagram referenced from three
@@ -185,7 +189,35 @@ public static class ProfessionalPublicationRenderer
     /// somebody reused a picture.
     /// </summary>
     private static List<PublicationImage> Images(ProfessionalPublication publication)
-    {var result=new List<PublicationImage>();foreach(var record in publication.Sections.SelectMany(x=>x.Records))foreach(var block in Blocks(record)){if(BlockType(block)!="image"||!block.TryGetProperty("dataUri",out var data)||data.ValueKind!=JsonValueKind.String)continue;var bytes=ImageBytes(data.GetString()??"");if(bytes is null)continue;var key=Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();if(result.Any(x=>x.Key==key))continue;var isPng=PngImage.IsPng(bytes);var size=isPng?PngImage.Size(bytes):JpegSize(bytes);var widthPercent=block.TryGetProperty("widthPercent",out var width)&&width.TryGetInt32(out var parsed)?Math.Clamp(parsed,25,100):100;result.Add(new(result.Count+1,key,bytes,Text(block,"alt","Controlled inline image"),Text(block,"caption",""),size.Width,size.Height,isPng,widthPercent));}return result;}
+    {
+        var result = new List<PublicationImage>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var record in publication.Sections.SelectMany(x => x.Records))
+        foreach (var block in Blocks(record))
+        {
+            if (BlockType(block) != "image" || !block.TryGetProperty("dataUri", out var data) || data.ValueKind != JsonValueKind.String) continue;
+            var bytes = ImageBytes(data.GetString() ?? "");
+            if (bytes is null) continue;
+            var key = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            if (!seen.Add(key)) continue;
+            var isPng = PngImage.IsPng(bytes);
+            var size = isPng ? PngImage.Size(bytes) : JpegSize(bytes);
+            result.Add(new(result.Count + 1, key, bytes, size.Width, size.Height, isPng));
+        }
+        return result;
+    }
+
+    private static PublicationImagePlacement? Placement(JsonElement block, IReadOnlyDictionary<string, PublicationImage> assets)
+    {
+        if (BlockType(block) != "image" || !block.TryGetProperty("dataUri", out var data) || data.ValueKind != JsonValueKind.String) return null;
+        var bytes = ImageBytes(data.GetString() ?? "");
+        if (bytes is null) return null;
+        var key = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        return assets.TryGetValue(key, out var asset)
+            ? new(asset, Text(block, "alt", "Controlled inline image"), Text(block, "caption", ""),
+                block.TryGetProperty("widthPercent", out var width) && width.TryGetInt32(out var parsed) ? Math.Clamp(parsed, 25, 100) : 100)
+            : null;
+    }
 
     /// <summary>
     /// Only the two formats every renderer here can produce, and only as data this deployment already holds.
@@ -206,10 +238,55 @@ public static class ProfessionalPublicationRenderer
     {if(string.IsNullOrWhiteSpace(record.RichContentJson))yield break;JsonDocument? document=null;try{document=JsonDocument.Parse(record.RichContentJson);var root=document.RootElement;if(root.TryGetProperty("blocks",out var blocks)&&blocks.ValueKind==JsonValueKind.Array)foreach(var block in blocks.EnumerateArray())yield return block.Clone();}finally{document?.Dispose();}}
     private static string BlockType(JsonElement block)=>Text(block,"type","").ToLowerInvariant();
     private static string Text(JsonElement block,string name,string fallback)=>block.TryGetProperty(name,out var value)&&value.ValueKind==JsonValueKind.String?value.GetString()??fallback:fallback;
-    private static string RichDocx(PublicationRecord record,IReadOnlyList<PublicationImage> images)
-    {var body=new StringBuilder();foreach(var block in Blocks(record)){switch(BlockType(block)){case "paragraph":body.Append(P(Text(block,"text",""),"Normal"));break;case "symbol":body.Append(P("Controlled symbol: "+Text(block,"value",""),"Callout"));break;case "reference":body.Append(P("Reference: "+Text(block,"label","")+" — "+Text(block,"target",""),"RecordMeta"));break;case "table":if(block.TryGetProperty("rows",out var rows)&&rows.ValueKind==JsonValueKind.Array){var values=rows.EnumerateArray().Where(x=>x.ValueKind==JsonValueKind.Array).Select(x=>(IReadOnlyList<string>)x.EnumerateArray().Select(v=>v.ToString()).ToList()).ToList();if(values.Count>0){var count=values.Max(x=>x.Count);var widths=Enumerable.Repeat(9360/Math.Max(1,count),count).ToList();body.Append(Table(values[0],values.Skip(1).ToList(),widths,false));}}break;case "image":if(block.TryGetProperty("dataUri",out var data)){var uri=data.GetString()??"";var comma=uri.IndexOf(',');if(comma>0){try{var key=Convert.ToHexString(SHA256.HashData(Convert.FromBase64String(uri[(comma+1)..]))).ToLowerInvariant();var image=images.FirstOrDefault(x=>x.Key==key);if(image is not null)body.Append(ImageDrawing(image));}catch(FormatException){body.Append(P(Text(block,"alt","Invalid controlled image"),"Callout"));}}}break;}}return body.ToString();}
-    private static string ImageDrawing(PublicationImage image)
-    {var cx=5_400_000L*image.WidthPercent/100;var cy=Math.Clamp((long)(cx*Math.Max(1,image.Height)/(double)Math.Max(1,image.Width)),1_800_000L,4_000_000L);var alt=SecurityElement.Escape(image.Alt);return $"<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{100+image.Index}\" name=\"ControlledImage{image.Index}\" descr=\"{alt}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"{image.Index}\" name=\"image{image.Index}.{image.Extension}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rId{image.Index+3}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"+P(image.Caption.Length>0?image.Caption:image.Alt,"RecordMeta");}
+    private static string RichDocx(PublicationRecord record, IReadOnlyList<PublicationImage> images)
+    {
+        var assets = images.ToDictionary(x => x.Key, StringComparer.Ordinal);
+        var body = new StringBuilder();
+        foreach (var block in Blocks(record))
+        {
+            switch (BlockType(block))
+            {
+                case "paragraph":
+                    body.Append(P(Text(block, "text", ""), "Normal"));
+                    break;
+                case "symbol":
+                    body.Append(P("Controlled symbol: " + Text(block, "value", ""), "Callout"));
+                    break;
+                case "reference":
+                    body.Append(P("Reference: " + Text(block, "label", "") + " — " + Text(block, "target", ""), "RecordMeta"));
+                    break;
+                case "table":
+                    if (block.TryGetProperty("rows", out var rows) && rows.ValueKind == JsonValueKind.Array)
+                    {
+                        var values = rows.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.Array)
+                            .Select(x => (IReadOnlyList<string>)x.EnumerateArray().Select(v => v.ToString()).ToList()).ToList();
+                        if (values.Count > 0)
+                        {
+                            var count = values.Max(x => x.Count);
+                            var widths = Enumerable.Repeat(9360 / Math.Max(1, count), count).ToList();
+                            body.Append(Table(values[0], values.Skip(1).ToList(), widths, false));
+                        }
+                    }
+                    break;
+                case "image":
+                    var placement = Placement(block, assets);
+                    if (placement is not null) body.Append(ImageDrawing(placement));
+                    else body.Append(P(Text(block, "alt", "Invalid controlled image"), "Callout"));
+                    break;
+            }
+        }
+        return body.ToString();
+    }
+
+    private static string ImageDrawing(PublicationImagePlacement placement)
+    {
+        var image = placement.Asset;
+        var cx = 5_400_000L * placement.WidthPercent / 100;
+        var cy = Math.Clamp((long)(cx * Math.Max(1, image.Height) / (double)Math.Max(1, image.Width)), 1_800_000L, 4_000_000L);
+        var alt = SecurityElement.Escape(placement.Alt);
+        return $"<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{100 + image.Index}\" name=\"ControlledImage{image.Index}\" descr=\"{alt}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"{image.Index}\" name=\"image{image.Index}.{image.Extension}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rId{image.Index + 3}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
+            + P(placement.Caption.Length > 0 ? placement.Caption : placement.Alt, "RecordMeta");
+    }
     private static (int Width,int Height) JpegSize(byte[] bytes)
     {for(var i=2;i+9<bytes.Length;){if(bytes[i]!=0xFF){i++;continue;}var marker=bytes[i+1];if(marker is >=0xC0 and <=0xC3 or >=0xC5 and <=0xC7 or >=0xC9 and <=0xCB or >=0xCD and <=0xCF)return((bytes[i+7]<<8)+bytes[i+8],(bytes[i+5]<<8)+bytes[i+6]);if(i+3>=bytes.Length)break;var length=(bytes[i+2]<<8)+bytes[i+3];if(length<2)break;i+=2+length;}return(640,360);}
 
@@ -243,6 +320,7 @@ public static class ProfessionalPublicationRenderer
     private static byte[] BuildPdf(ProfessionalPublication p)
     {
         var images = PdfImages(p);
+        var assets = images.Select(x => x.Image).ToDictionary(x => x.Key, StringComparer.Ordinal);
         var pageStreams = new List<string> { PdfCover(p) };
         var control = new List<PdfLine> { new("DOCUMENT CONTROL", 18, true, "2E74B5", 0, 10) };
         var metadata = new List<(string Label, string Value)> { ("Document type",p.DocumentType),("Document number",p.DocumentNumber),("Revision",p.Revision),("Status",p.Status),("Release",p.Release),("Baseline",p.Baseline),("Prepared by",p.PreparedBy),("Generated",p.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm UTC")),("Manifest SHA-256",p.ManifestHash) }; metadata.AddRange(p.Metadata);
@@ -255,7 +333,12 @@ public static class ProfessionalPublicationRenderer
         {
             pageStreams.AddRange(PaginateSection(section, p));
         }
-        pageStreams.AddRange(images.Select(image => PdfImagePage(image.Image, p)));
+        var placements = p.Sections.SelectMany(x => x.Records)
+            .SelectMany(Blocks)
+            .Select(block => Placement(block, assets))
+            .Where(x => x is not null)
+            .Cast<PublicationImagePlacement>();
+        pageStreams.AddRange(placements.Select(placement => PdfImagePage(placement, p)));
         return AssemblePdf(pageStreams, images);
     }
     private static string PdfCover(ProfessionalPublication p)
@@ -332,10 +415,10 @@ public static class ProfessionalPublicationRenderer
                 break;
         }
     }
-    private static string PdfImagePage(PublicationImage image,ProfessionalPublication p)
+    private static string PdfImagePage(PublicationImagePlacement placement,ProfessionalPublication p)
     {
-        var width=480d*image.WidthPercent/100d;var height=Math.Clamp(width*Math.Max(1,image.Height)/Math.Max(1d,image.Width),180d,540d);var y=680-height;
-        var s=new StringBuilder("0.086 0.522 0.471 RG 1.3 w 54 760 m 558 760 l S\nBT\n");Text(s,p.Product+" | CONTROLLED INLINE IMAGE",54,772,8,true,"102A43");Text(s,image.Caption.Length>0?image.Caption:image.Alt,66,730,13,true,"2E74B5");s.Append("ET\n").Append($"q {width:0.###} 0 0 {height:0.###} 66 {y:0.###} cm /Im{image.Index} Do Q\nBT\n");Text(s,image.Alt,66,(int)Math.Max(52,y-22),8,false,"526274");return s.Append("ET").ToString();
+        var image=placement.Asset;var width=480d*placement.WidthPercent/100d;var height=Math.Clamp(width*Math.Max(1,image.Height)/Math.Max(1d,image.Width),180d,540d);var y=680-height;
+        var s=new StringBuilder("0.086 0.522 0.471 RG 1.3 w 54 760 m 558 760 l S\nBT\n");Text(s,p.Product+" | CONTROLLED INLINE IMAGE",54,772,8,true,"102A43");Text(s,placement.Caption.Length>0?placement.Caption:placement.Alt,66,730,13,true,"2E74B5");s.Append("ET\n").Append($"q {width:0.###} 0 0 {height:0.###} 66 {y:0.###} cm /Im{image.Index} Do Q\nBT\n");Text(s,placement.Alt,66,(int)Math.Max(52,y-22),8,false,"526274");return s.Append("ET").ToString();
     }
     private static byte[] AssemblePdf(IReadOnlyList<string> streams,IReadOnlyList<(PublicationImage Image,byte[] Payload,string Filter)> images)
     {

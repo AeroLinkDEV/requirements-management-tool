@@ -780,6 +780,7 @@
       "path": "/api/content/images",
       "file": "RequirementsEndpoints.cs",
       "coveredBy": [
+        "ProblemReportCheckoutApiTests",
         "SecurityHardeningTests"
       ]
     },

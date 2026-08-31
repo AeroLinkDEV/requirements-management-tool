@@ -2,10 +2,14 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.IO.Compression;
+using System.Text;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
+using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -262,6 +266,129 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.Equal(before.GetProperty("reportedBy").GetString(), after.GetProperty("reportedBy").GetString());
         Assert.Equal(before.GetProperty("responsibleEngineerId").GetString(), after.GetProperty("responsibleEngineerId").GetString());
         Assert.Equal(before.GetProperty("createdAt").GetDateTimeOffset(), after.GetProperty("createdAt").GetDateTimeOffset());
+    }
+
+    [Fact]
+    public async Task Inline_image_references_are_project_scoped_typed_and_withdrawal_aware()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var first = await SeedAsync(factory, "PRIMAGES");
+        var second = await SeedAsync(factory, "PRIMAGES2");
+
+        var sameProjectImage = await UploadImageAsync(client, first.ProjectId, "same-project.png");
+        var allowed = await CreateWithImageAsync(client, first.ProjectId, first.ReleaseId, sameProjectImage,
+            "Same project image");
+        Assert.Equal(HttpStatusCode.Created, allowed.StatusCode);
+        var allowedBody = await allowed.Content.ReadFromJsonAsync<JsonElement>();
+        var allowedId = allowedBody.GetProperty("id").GetGuid();
+
+        var crossProjectImage = await UploadImageAsync(client, second.ProjectId, "cross-project.png");
+        using var crossProject = await CreateWithImageAsync(client, first.ProjectId, first.ReleaseId,
+            crossProjectImage, "Cross project image");
+        Assert.Equal(HttpStatusCode.BadRequest, crossProject.StatusCode);
+
+        Guid wrongType;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var item = new ControlledAttachment(first.ProjectId, "Evidence", first.ProjectId, null,
+                Guid.NewGuid(), 1, "Not an inline image", "", "evidence.bin", "application/octet-stream", 8,
+                new string('c', 64), "test/evidence.bin", null, "admin", DateTimeOffset.UtcNow);
+            db.ControlledAttachments.Add(item);
+            await db.SaveChangesAsync();
+            wrongType = item.Id;
+        }
+        using var wrongTypeResponse = await CreateWithImageAsync(client, first.ProjectId, first.ReleaseId,
+            wrongType, "Wrong type image");
+        Assert.Equal(HttpStatusCode.BadRequest, wrongTypeResponse.StatusCode);
+
+        var withdrawnImage = await UploadImageAsync(client, first.ProjectId, "withdrawn.png");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var item = await db.ControlledAttachments.SingleAsync(x => x.Id == withdrawnImage);
+            item.Withdraw();
+            await db.SaveChangesAsync();
+        }
+        using var withdrawn = await CreateWithImageAsync(client, first.ProjectId, first.ReleaseId,
+            withdrawnImage, "Withdrawn image");
+        Assert.Equal(HttpStatusCode.BadRequest, withdrawn.StatusCode);
+
+        // A recovery endpoint may retain an untrusted draft so the owner can recover it, but the controlled
+        // check-in must reject the forged reference before mutating the report or writing its evidence hash.
+        using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = allowedId, leaseMinutes = 15 });
+        Assert.True(checkout.IsSuccessStatusCode, await checkout.Content.ReadAsStringAsync());
+        var session = await checkout.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = session.GetProperty("id").GetGuid();
+        var draft = JsonNode.Parse(session.GetProperty("draftJson").GetString()!)!.AsObject();
+        draft["problemRich"] = ImageRich(crossProjectImage, "Forged cross-project image");
+        draft["problem"] = "The image reference was forged in a recovery snapshot.";
+        using var recovery = await client.PutAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/autosave",
+            new { expectedVersion = session.GetProperty("version").GetInt64(), draftJson = draft.ToJsonString(), leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.OK, recovery.StatusCode);
+        var recoveryVersion = (await recovery.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        using var forgedCheckIn = await client.PostAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/check-in",
+            new { expectedVersion = recoveryVersion });
+        Assert.Equal(HttpStatusCode.BadRequest, forgedCheckIn.StatusCode);
+
+        // The immutable revision made at creation remains renderable from its exact snapshot even after the
+        // current image catalog row is withdrawn. A historical PR must not become a blank document.
+        using var historical = await client.GetAsync($"/api/problem-reports/{allowedId}/download?revision=0&format=docx");
+        Assert.Equal(HttpStatusCode.OK, historical.StatusCode);
+        var historicalBytes = await historical.Content.ReadAsByteArrayAsync();
+        using var zip = new ZipArchive(new MemoryStream(historicalBytes), ZipArchiveMode.Read);
+        Assert.Contains(zip.Entries, entry => entry.FullName.StartsWith("word/media/", StringComparison.Ordinal));
+        using var currentPdf = await client.GetAsync($"/api/problem-reports/{allowedId}/download?format=pdf");
+        Assert.Equal(HttpStatusCode.OK, currentPdf.StatusCode);
+        Assert.Equal("application/pdf", currentPdf.Content.Headers.ContentType?.MediaType);
+    }
+
+    private static async Task<Guid> UploadImageAsync(HttpClient client, Guid projectId, string fileName)
+    {
+        using var content = new MultipartFormDataContent();
+        content.Add(new StringContent(projectId.ToString()), "projectId");
+        content.Add(new StringContent("A controlled test figure"), "alt");
+        var image = new ByteArrayContent(Png());
+        image.Headers.ContentType = new("image/png");
+        content.Add(image, "file", fileName);
+        using var response = await client.PostAsync("/api/content/images", content);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+    }
+
+    private static Task<HttpResponseMessage> CreateWithImageAsync(HttpClient client, Guid projectId, Guid releaseId,
+        Guid imageId, string title) => client.PostAsJsonAsync("/api/problem-reports", new
+        {
+            category = "CodeFunctional", projectId, releaseId, title,
+            problem = "The controlled record includes an inline figure.",
+            problemRich = ImageRich(imageId, title),
+            additionalInformation = "", additionalInformationRich = "{\"blocks\":[]}",
+            classification = "Engineering anomaly", severity = "Major", priority = "Normal",
+            origin = "Manual report", impactAssessmentJson = "{}",
+        });
+
+    private static string ImageRich(Guid id, string alt) =>
+        $"{{\"blocks\":[{{\"type\":\"paragraph\",\"text\":\"Figure context.\"}},{{\"type\":\"image\",\"attachmentId\":\"{id}\",\"alt\":\"{alt}\",\"caption\":\"Figure\",\"widthPercent\":60}}]}}";
+
+    private static byte[] Png()
+    {
+        var raw = new byte[] { 0, 255, 0, 0, 0, 255, 0, 0, 0, 0, 255, 255, 255, 255, 255 };
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionLevel.Optimal, true)) zlib.Write(raw);
+        using var output = new MemoryStream();
+        output.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        Chunk(output, "IHDR", [0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0]);
+        Chunk(output, "IDAT", compressed.ToArray()); Chunk(output, "IEND", []);
+        return output.ToArray();
+        static void Chunk(Stream target, string type, byte[] data)
+        {
+            Span<byte> length = stackalloc byte[4];
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(length, (uint)data.Length);
+            target.Write(length); target.Write(Encoding.ASCII.GetBytes(type)); target.Write(data); target.Write(new byte[4]);
+        }
     }
 
     /// <summary>

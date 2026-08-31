@@ -113,3 +113,40 @@ test('the checkout editor shows the whole record and its three closing controls'
   await page.getByRole('button', { name: /^History/ }).click()
   await expect(page.locator('.prTimeline article').filter({ hasText: 'Details Checked In' })).toHaveCount(1)
 })
+
+test('a delayed inline image upload keeps create save behind the pending upload', async ({ page }) => {
+  test.setTimeout(240_000)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+  await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: 'load' })
+  await page.getByRole('button', { name: '+ Record problem' }).click()
+  const raise = page.getByRole('dialog', { name: 'Record a problem' })
+  await raise.getByLabel('Title').fill(`Delayed image upload ${Date.now()}`)
+  await writeField(raise, 'Problem Description', 'The screenshot is still being stored.')
+
+  let uploadStarted = () => {}
+  const started = new Promise<void>(resolve => { uploadStarted = resolve })
+  let releaseUpload = () => {}
+  const gate = new Promise<void>(resolve => { releaseUpload = resolve })
+  await page.route('**/api/content/images', async route => {
+    uploadStarted()
+    await gate
+    await route.continue()
+  })
+  const imageInput = raise.locator('.richEditor').first().locator('input[type=file]')
+  await imageInput.setInputFiles({
+    name: 'recovery.png',
+    mimeType: 'image/png',
+    // A valid 1x1 PNG keeps this a real upload while the route is held in-flight.
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+  })
+  await started
+  const save = raise.getByRole('button', { name: /Save Draft PR|Waiting for image/ })
+  await expect(save).toBeDisabled()
+  await expect(raise.getByText(/Storing .*inline image/)).toBeVisible()
+
+  releaseUpload()
+  await expect(raise.getByRole('button', { name: 'Save Draft PR', exact: true })).toBeEnabled({ timeout: 30_000 })
+  await page.unroute('**/api/content/images')
+})

@@ -167,6 +167,7 @@ public static class DependencyInjection
         services.AddScoped<VariantPublicationGenerator>();
         services.AddScoped<ChangeRequestOutputGenerator>();
         services.AddScoped<TestChangeRequestOutputGenerator>();
+        services.AddScoped<ProblemReportOutputGenerator>();
         services.AddScoped<ReleaseExecutionService>();
         services.AddScoped<VerificationImpactService>();
         services.AddScoped<ProblemReportLinkService>();

@@ -101,17 +101,22 @@ type EditorProps = {
   /** Use document-like narrative controls for Problem Report fields. Other authored surfaces retain the
    * explicit block editor because tables/symbols/references are first-class there. */
   documentLike?: boolean;
+  /** Parents use this to keep controlled Save/check-in behind an in-flight image upload. */
+  onUploadingChange?: (uploading: boolean) => void;
   onChange: (value: string) => void;
 };
 
-export function RichContentEditor({ api, projectId, value, label, placeholder, disabled, documentLike = false, onChange }: EditorProps) {
+export function RichContentEditor({ api, projectId, value, label, placeholder, disabled, documentLike = false, onUploadingChange, onChange }: EditorProps) {
   const blocks = useMemo(() => readBlocks(value), [value]);
+  const blocksRef = useRef(blocks);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
   const [focusBlockIndex, setFocusBlockIndex] = useState<number>();
   const editorRoot = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { blocksRef.current = blocks; }, [blocks]);
 
   useEffect(() => {
     if (focusBlockIndex === undefined) return;
@@ -124,7 +129,7 @@ export function RichContentEditor({ api, projectId, value, label, placeholder, d
     }
   }, [blocks, focusBlockIndex]);
 
-  const commit = (next: RichBlock[]) => onChange(writeBlocks(next));
+  const commit = (next: RichBlock[]) => { blocksRef.current = next; onChange(writeBlocks(next)); };
   const replace = (index: number, block: RichBlock) =>
     commit(blocks.map((existing, i) => (i === index ? block : existing)));
   const insert = (index: number, block: RichBlock) => {
@@ -155,34 +160,41 @@ export function RichContentEditor({ api, projectId, value, label, placeholder, d
   const uploadFiles = async (files: File[], at = blocks.length) => {
     if (disabled || !files.length) return;
     setUploading(true);
+    onUploadingChange?.(true);
     setError("");
-    const storedBlocks: Extract<RichBlock, { type: "image" }>[] = [];
-    for (const file of files) {
-      // The server repeats this allowlist and byte-signature check. Rejecting here gives paste/drop the same
-      // useful feedback as the file picker and ensures an HTML/SVG drop is never treated as authored content.
-      if (file.type !== "image/png" && file.type !== "image/jpeg") continue;
-      const body = new FormData();
-      body.set("projectId", projectId);
-      body.set("file", file);
-      body.set("alt", file.name);
-      try {
-        const response = await fetch(`${api}/api/content/images`, { method: "POST", body });
-        if (!response.ok) {
-          const detail = (await response.json().catch(() => ({}))) as { error?: string };
-          setError(detail.error || "The image could not be stored.");
-          continue;
+    try {
+      const storedBlocks: Extract<RichBlock, { type: "image" }>[] = [];
+      for (const file of files) {
+        // The server repeats this allowlist and byte-signature check. Rejecting here gives paste/drop the same
+        // useful feedback as the file picker and ensures an HTML/SVG drop is never treated as authored content.
+        if (file.type !== "image/png" && file.type !== "image/jpeg") continue;
+        const body = new FormData();
+        body.set("projectId", projectId);
+        body.set("file", file);
+        body.set("alt", file.name);
+        try {
+          const response = await fetch(`${api}/api/content/images`, { method: "POST", body });
+          if (!response.ok) {
+            const detail = (await response.json().catch(() => ({}))) as { error?: string };
+            setError(detail.error || "The image could not be stored.");
+            continue;
+          }
+          const stored = (await response.json()) as { id: string };
+          storedBlocks.push({ type: "image", attachmentId: stored.id, alt: file.name, caption: "", widthPercent: 100 });
+        } catch {
+          setError("The image could not be stored. Check the connection and try again.");
         }
-        const stored = (await response.json()) as { id: string };
-        storedBlocks.push({ type: "image", attachmentId: stored.id, alt: file.name, caption: "", widthPercent: 100 });
-      } catch {
-        setError("The image could not be stored. Check the connection and try again.");
       }
-    }
-    setUploading(false);
-    if (storedBlocks.length) {
-      const next = [...blocks];
-      next.splice(Math.max(0, Math.min(at, next.length)), 0, ...storedBlocks);
-      commit(next);
+      if (storedBlocks.length) {
+        // Text edits can arrive while the upload is in flight. Merge into the latest model instead of
+        // restoring the array captured when the drop started and silently erasing those edits.
+        const next = [...blocksRef.current];
+        next.splice(Math.max(0, Math.min(at, next.length)), 0, ...storedBlocks);
+        commit(next);
+      }
+    } finally {
+      setUploading(false);
+      onUploadingChange?.(false);
     }
   };
 

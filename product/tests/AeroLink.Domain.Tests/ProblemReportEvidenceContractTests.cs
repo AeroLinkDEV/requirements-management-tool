@@ -86,7 +86,7 @@ public sealed class ProblemReportEvidenceContractTests
     public void Pre_image_layout_schema_recomputes_byte_identically_while_new_records_use_current_schema()
     {
         var report = NewReport();
-        var imageId = Guid.NewGuid();
+        var imageId = Guid.Parse("22222222-2222-2222-2222-222222222222");
         report.UpdateDetails("verification.engineer", report.Title, report.Problem,
             $$"""{"blocks":[{"type":"image","attachmentId":"{{imageId}}","alt":"Bus timing","widthPercent":50}]}""",
             report.AdditionalInformation, report.AdditionalInformationRich, report.Analysis, report.RootCause,
@@ -104,6 +104,26 @@ public sealed class ProblemReportEvidenceContractTests
             currentJson.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Contains("\"widthPercent\":50", currentJson.RootElement.GetProperty("problemRich").GetString());
         Assert.NotEqual(historical, current);
+    }
+
+    [Fact]
+    public void Persisted_v4_fixture_keeps_hash_and_reader_path_after_the_current_contract_advanced()
+    {
+        // This is a byte-for-byte envelope captured before image width was added. It is intentionally not
+        // rebuilt from today's aggregate: a historical reader must prove that its stored bytes still parse
+        // and hash under their own schema, rather than trusting the current serializer to recreate them.
+        const string persistedV4 = "{\"contract\":\"aerolink.problem-report-evidence\",\"schemaVersion\":4,\"id\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\",\"projectId\":\"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\",\"reportNumber\":\"PR-000099\",\"revision\":2,\"displayNumber\":\"PR-000099.02\",\"title\":\"Historical image report\",\"problem\":\"Observed reset.\",\"analysis\":\"Historical analysis\",\"analysisRich\":\"\",\"reportedBy\":\"history.engineer\",\"responsibleEngineerId\":\"history.engineer\",\"targetReleaseId\":null,\"problemRich\":\"{\\u0022blocks\\u0022:[{\\u0022type\\u0022:\\u0022paragraph\\u0022,\\u0022text\\u0022:\\u0022Observed reset.\\u0022}]}\",\"additionalInformation\":\"\",\"additionalInformationRich\":\"\",\"systemAircraftImpact\":\"\",\"systemAircraftImpactRich\":\"\",\"category\":\"CodeFunctional\",\"categoryProvenance\":\"Selected\",\"workaround\":\"\",\"workaroundRich\":\"\",\"impactAssessmentJson\":\"{}\",\"classification\":\"Software anomaly\",\"severity\":\"Major\",\"priority\":\"Normal\",\"origin\":\"Test execution\",\"affectedConfiguration\":\"FMS 1.5\",\"rootCause\":\"\",\"rootCauseRich\":\"\",\"effects\":\"\",\"effectsRich\":\"\",\"containment\":\"\",\"containmentRich\":\"\",\"correctiveAction\":\"\",\"correctiveActionRich\":\"\",\"disposition\":null,\"dispositionRationale\":\"\",\"resolutionVerificationExecutionId\":null,\"closureApprovedBy\":null,\"closureApprovedByName\":\"\",\"closureApprovedAt\":null,\"isReleaseBlocker\":false,\"releaseBlockerVersion\":0,\"waiverRationale\":\"\",\"waivedBy\":\"\",\"waivedAt\":null,\"state\":\"Closed\",\"createdAt\":\"2026-01-02T03:04:05+00:00\",\"updatedAt\":\"2026-02-03T04:05:06+00:00\",\"version\":7}";
+        Assert.Equal("ab4f09997353f1829c9e56323dbc244c37a1bf169f24aeaef36a00da5f26e823",
+            ProblemReportEvidenceContract.Hash(persistedV4));
+
+        var snapshot = JsonSerializer.Deserialize<ProblemReportEvidenceSnapshot>(persistedV4,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        Assert.NotNull(snapshot);
+        Assert.Equal(4, snapshot!.SchemaVersion);
+        Assert.Equal("PR-000099.02", snapshot.DisplayNumber);
+        Assert.Equal("CodeFunctional", snapshot.Category);
+        Assert.DoesNotContain("widthPercent", snapshot.ProblemRich);
+        Assert.Equal(persistedV4, ProblemReportEvidenceContract.Serialize(snapshot));
     }
 
     [Fact]

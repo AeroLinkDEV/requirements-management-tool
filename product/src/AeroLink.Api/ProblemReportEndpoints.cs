@@ -24,6 +24,7 @@ public static class ProblemReportEndpoints
         group.MapPost("", CreateAsync);
         group.MapPost("/from-test-execution/{executionId:guid}", CreateFromFailureAsync);
         group.MapGet("/{id:guid}", DetailAsync);
+        group.MapGet("/{id:guid}/download", DownloadAsync);
         group.MapGet("/{id:guid}/corrective-action", CorrectiveActionAsync);
         // Details are edited under the universal controlled-editing lease, not here. A second write path to
         // the same fields was the whole defect: it let two people save over each other with nothing but an
@@ -354,6 +355,20 @@ public static class ProblemReportEndpoints
                 canReassignOwner = string.Equals(actor.UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase) || canRecoverOwner,
                 canRecoverOwner,
             }, waivers, duplicateDiagnostic, currentNames));
+    }
+
+    private static async Task<IResult> DownloadAsync(Guid id, int? revision, string? format, HttpContext http,
+        AeroLinkDbContext db, ProblemReportOutputGenerator generator, CancellationToken ct)
+    {
+        var projectId = await db.ProblemReports.AsNoTracking().Where(x => x.Id == id)
+            .Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+        if (projectId is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
+        var requestedFormat = string.IsNullOrWhiteSpace(format) ? "docx" : format.Trim().ToLowerInvariant();
+        if (requestedFormat is not ("docx" or "pdf"))
+            return Results.BadRequest(new { error = "Problem Report output format must be docx or pdf." });
+        var output = await generator.GenerateAsync(id, revision, requestedFormat, ct);
+        return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
     }
 
     private static async Task<IResult> ReassignAsync(Guid id, ReassignRequest request, HttpContext http,

@@ -90,6 +90,7 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [savedAt, setSavedAt] = useState('')
+  const [uploadsPending, setUploadsPending] = useState(0)
   // The working copy exactly as the checkout returned it. This is what "changed" is measured against.
   const baseline = useRef<string>('')
   // The working copy as of the last recovery snapshot. Deliberately separate from the baseline: these are
@@ -104,6 +105,14 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
   const draftRef = useRef('')
   const lastSavedRef = useRef('')
   const savingRef = useRef(false)
+  const uploadsPendingRef = useRef(0)
+
+  const onUploadingChange = useCallback((uploading: boolean) => {
+    uploadsPendingRef.current = Math.max(0, uploadsPendingRef.current + (uploading ? 1 : -1))
+    setUploadsPending(uploadsPendingRef.current)
+    if (uploading) setStatus('Storing inline image…')
+    else setStatus(current => current === 'Storing inline image…' ? 'Checked out' : current)
+  }, [])
 
   const serialize = useCallback((value: Editable) => JSON.stringify({
     ...workingCopy.current,
@@ -169,6 +178,10 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
   const autosave = useCallback(async (): Promise<Session | undefined> => {
     const current = sessionRef.current
     const latest = draftRef.current
+    if (uploadsPendingRef.current > 0) {
+      setStatus('Waiting for inline image upload…')
+      return undefined
+    }
     if (!current || savingRef.current || !latest || latest === lastSavedRef.current) return current
     savingRef.current = true; setStatus('Saving recovery snapshot…')
     try {
@@ -232,6 +245,11 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
     if (!draft.title.trim() || !toPlainText(draft.problemRich).trim()) {
       setError('Title and Problem Description cannot be blank.'); return
     }
+    if (uploadsPendingRef.current > 0) {
+      setError('Wait for inline image uploads to finish before saving or checking in.');
+      setStatus('Image upload in progress')
+      return
+    }
     setBusy(true); setError('')
     while (savingRef.current) await new Promise(resolve => window.setTimeout(resolve, 25))
     const current = await autosave()
@@ -260,6 +278,11 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
 
   /** Writes the recovery snapshot now. The controlled record is untouched until check-in. */
   const saveOnly = async () => {
+    if (uploadsPendingRef.current > 0) {
+      setError('Wait for inline image uploads to finish before saving or checking in.')
+      setStatus('Image upload in progress')
+      return
+    }
     const pending = serialized
     setBusy(true); setError('')
     const saved = await autosave()
@@ -287,16 +310,17 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
         </header>
         <div className="prEditorBody">
         {error && <div className="workspaceError" role="alert">{error}</div>}
+        {uploadsPending > 0 && <div className="workspaceNotice" role="status" aria-live="polite">Storing {uploadsPending} inline image{uploadsPending === 1 ? '' : 's'}… Save and check in will be enabled when the upload finishes.</div>}
         <label>Title<input required value={draft.title} onChange={event => set('title', event.target.value)} /></label>
-        <RichContentEditor api={api} projectId={projectId} label="Problem Description" value={draft.problemRich} documentLike onChange={value => set('problemRich', value)} />
-        <RichContentEditor api={api} projectId={projectId} label="Additional Information" value={draft.additionalInformationRich} documentLike onChange={value => set('additionalInformationRich', value)} />
+        <RichContentEditor api={api} projectId={projectId} label="Problem Description" value={draft.problemRich} documentLike onUploadingChange={onUploadingChange} onChange={value => set('problemRich', value)} />
+        <RichContentEditor api={api} projectId={projectId} label="Additional Information" value={draft.additionalInformationRich} documentLike onUploadingChange={onUploadingChange} onChange={value => set('additionalInformationRich', value)} />
         <div className="prFormGrid">
           <label>Severity<select value={draft.severity} onChange={event => set('severity', event.target.value)}>{['Critical', 'High', 'Major', 'Minor', 'Trivial'].map(x => <option key={x}>{x}</option>)}</select></label>
           <label>Priority<select value={draft.priority} onChange={event => set('priority', event.target.value)}>{['Urgent', 'High', 'Normal', 'Low'].map(x => <option key={x}>{x}</option>)}</select></label>
         </div>
         <label>Category<ProblemReportCategoryPicker api={api} value={draft.category} required onChange={value => set('category', value)} /></label>
         {NARRATIVE.map(field =>
-          <RichContentEditor key={field.key} api={api} projectId={projectId} label={field.label} documentLike
+          <RichContentEditor key={field.key} api={api} projectId={projectId} label={field.label} documentLike onUploadingChange={onUploadingChange}
             value={draft[field.key]} onChange={value => set(field.key, value)} />)}
         <fieldset className="prImpactEditor"><legend>Impact matrix</legend>{impactFields.map(([key, label]) =>
           <label key={key}>{label}<select aria-label={label} value={draft.impacts[key] ?? 'Unknown'} onChange={event => set('impacts', { ...draft.impacts, [key]: event.target.value })}>{['Unknown', 'No', 'Yes'].map(value => <option key={value}>{value}</option>)}</select></label>)}
@@ -314,9 +338,9 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
           {unsaved
             ? <span className="prDirty">● Unsaved changes</span>
             : savedAt && <span className="prSaved">✓ Saved {savedAt}</span>}
-          <button type="button" className="quiet" disabled={busy || !unsaved} onClick={() => void saveOnly()}>Save</button>
+          <button type="button" className="quiet" disabled={busy || uploadsPending > 0 || !unsaved} onClick={() => void saveOnly()}>Save</button>
           {dirty
-            ? <button className="primaryAction" disabled={busy}>{busy ? 'Checking in…' : 'Save and check in'}</button>
+            ? <button className="primaryAction" disabled={busy || uploadsPending > 0}>{busy ? 'Checking in…' : uploadsPending > 0 ? 'Waiting for image…' : 'Save and check in'}</button>
             : <button type="button" className="quiet" disabled={busy} onClick={() => void discard()}>Close</button>}
         </footer>
       </form>}

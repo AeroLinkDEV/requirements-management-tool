@@ -131,4 +131,61 @@ public sealed class RichContentPublicationTests
     {
         Assert.Equal(RichContent.Empty, RichContentPublisher.ForPublication(null, new Dictionary<Guid, string>()));
     }
+
+    [Fact]
+    public void Docx_preserves_each_adjacent_image_occurrence_while_deduplicating_bytes()
+    {
+        var uri = "data:image/png;base64," + Convert.ToBase64String(Png());
+        var rich = "{\"blocks\":["
+            + $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"First alt\",\"caption\":\"First caption\",\"widthPercent\":40}},"
+            + $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"Second alt\",\"caption\":\"Second caption\",\"widthPercent\":80}}]}}";
+        var output = ProfessionalPublicationRenderer.Render(Publication(rich), "docx", "inline-images");
+
+        using var zip = new ZipArchive(new MemoryStream(output.Content), ZipArchiveMode.Read);
+        var document = Read(zip, "word/document.xml");
+        var relationships = Read(zip, "word/_rels/document.xml.rels");
+        var media = zip.Entries.Count(entry => entry.FullName.StartsWith("word/media/", StringComparison.Ordinal));
+
+        Assert.Equal(1, media); // identical bytes are one package asset, not one asset per occurrence
+        Assert.Equal(1, relationships.Split("Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\"").Length - 1);
+        Assert.Contains("cx=\"2160000\"", document); // 40% of the document width
+        Assert.Contains("cx=\"4320000\"", document); // 80% of the document width
+        Assert.True(document.IndexOf("descr=\"First alt\"", StringComparison.Ordinal) < document.IndexOf("First caption", StringComparison.Ordinal));
+        Assert.True(document.IndexOf("First caption", StringComparison.Ordinal) < document.IndexOf("descr=\"Second alt\"", StringComparison.Ordinal));
+        Assert.Contains("Second caption", document);
+    }
+
+    [Fact]
+    public void Pdf_preserves_each_adjacent_image_occurrence_metadata_and_order()
+    {
+        var uri = "data:image/png;base64," + Convert.ToBase64String(Png());
+        var rich = "{\"blocks\":["
+            + $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"First alt\",\"caption\":\"First caption\",\"widthPercent\":40}},"
+            + $"{{\"type\":\"image\",\"dataUri\":\"{uri}\",\"alt\":\"Second alt\",\"caption\":\"Second caption\",\"widthPercent\":80}}]}}";
+        var output = ProfessionalPublicationRenderer.Render(Publication(rich), "pdf", "inline-images");
+        var pdf = Encoding.ASCII.GetString(output.Content);
+
+        Assert.Equal(1, Count(pdf, "/Subtype /Image"));
+        Assert.Equal(2, Count(pdf, "/Im1 Do"));
+        Assert.Contains("192 0 0 192", pdf); // 40% occurrence
+        Assert.Contains("384 0 0 384", pdf); // 80% occurrence
+        Assert.True(pdf.IndexOf("First caption", StringComparison.Ordinal) < pdf.IndexOf("Second caption", StringComparison.Ordinal));
+        Assert.True(pdf.IndexOf("First alt", StringComparison.Ordinal) < pdf.IndexOf("Second alt", StringComparison.Ordinal));
+    }
+
+    private static ProfessionalPublication Publication(string rich) => new(
+        "FMS", "Flight Management System (FMS)", "FMS Showcase", "Problem Report", "Inline image test",
+        "Controlled narrative", "PR-00001.00", "00", "Draft", "1.6", "Not yet baseline-effective", "test.engineer",
+        new DateTimeOffset(2026, 8, 30, 12, 0, 0, TimeSpan.Zero), new string('a', 64), [], [], [],
+        [new PublicationSection("Narrative", "", [new PublicationRecord("Problem", "Narrative", "Problem", "", [], rich)])]);
+
+    private static string Read(ZipArchive zip, string name)
+    {
+        using var stream = zip.GetEntry(name)!.Open();
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        return reader.ReadToEnd();
+    }
+
+    private static int Count(string value, string token) =>
+        value.Split(token, StringSplitOptions.None).Length - 1;
 }

@@ -25,13 +25,13 @@ public sealed class RichContentPublisher(AeroLinkDbContext db, EvidenceFileStore
     private const long MaximumInlineBytes = 12 * 1024 * 1024;
 
     public async Task<IReadOnlyDictionary<Guid, string>> ResolveImagesAsync(
-        IEnumerable<string?> contents, CancellationToken ct)
+        IEnumerable<string?> contents, CancellationToken ct, bool includeWithdrawn = false)
     {
         var wanted = contents.SelectMany(RichContent.ReferencedAttachments).Distinct().ToList();
         if (wanted.Count == 0) return new Dictionary<Guid, string>();
 
         var attachments = await db.ControlledAttachments.AsNoTracking()
-            .Where(x => wanted.Contains(x.Id) && x.State != ControlledAttachmentState.Withdrawn)
+            .Where(x => wanted.Contains(x.Id) && (includeWithdrawn || x.State != ControlledAttachmentState.Withdrawn))
             .ToListAsync(ct);
 
         var resolved = new Dictionary<Guid, string>();

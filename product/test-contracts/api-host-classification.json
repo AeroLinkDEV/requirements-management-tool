@@ -446,6 +446,17 @@
       ]
     },
     {
+      "cls": "ProblemReportCheckoutApiTests",
+      "tests": 8,
+      "knownCases": 8,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ProblemReportHistoricalIdentityApiTests",
       "tests": 8,
       "knownCases": 8,
@@ -492,17 +503,6 @@
       "intents": [
         "auth-policy",
         "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ProblemReportCheckoutApiTests",
-      "tests": 7,
-      "knownCases": 7,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
-      "intents": [
         "http-boundary"
       ]
     },

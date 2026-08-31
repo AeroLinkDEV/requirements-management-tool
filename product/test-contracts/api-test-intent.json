@@ -5501,8 +5501,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 185,
-        "end": 224
+        "start": 189,
+        "end": 228
       }
     },
     {
@@ -5518,8 +5518,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 314,
-        "end": 347
+        "start": 441,
+        "end": 474
       }
     },
     {
@@ -5535,8 +5535,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 353,
-        "end": 382
+        "start": 480,
+        "end": 509
       }
     },
     {
@@ -5552,8 +5552,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 104,
-        "end": 146
+        "start": 108,
+        "end": 150
       }
     },
     {
@@ -5569,8 +5569,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 148,
-        "end": 183
+        "start": 152,
+        "end": 187
       }
     },
     {
@@ -5586,8 +5586,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 226,
-        "end": 265
+        "start": 230,
+        "end": 269
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Inline_image_references_are_project_scoped_typed_and_withdrawal_aware",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 271,
+        "end": 347
       }
     },
     {
@@ -5603,8 +5621,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 388,
-        "end": 427
+        "start": 515,
+        "end": 554
       }
     },
     {
