@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Http.Json;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -53,6 +55,18 @@ public sealed class ShowcaseApiFixture : IAsyncLifetime
     /// <summary>A factory whose database begins as a copy of the seeded showcase.</summary>
     internal AeroLinkApiFactory CreateFactory(bool enableEnterpriseJobWorker = false) =>
         new(showcaseTemplate: _templatePath, enableEnterpriseJobWorker: enableEnterpriseJobWorker);
+
+    /// <summary>Signs in through the identity that already belongs to the copied showcase.</summary>
+    internal static async Task LoginAdministratorAsync(HttpClient client)
+    {
+        using var login = await client.PostAsJsonAsync("/api/auth/login", new
+        {
+            userName = IdentityService.SystemAdministratorUserName,
+            password = IdentitySeeder.DemoPassword,
+        });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
+    }
 }
 
 /// <summary>

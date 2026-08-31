@@ -26,7 +26,7 @@ public sealed class ProcedureDiscussionApiTests(ShowcaseApiFixture showcase)
     {
         using var factory = showcase.CreateFactory();
         using var client = factory.CreateClient();
-        await BootstrapAsync(client);
+        await ShowcaseApiFixture.LoginAdministratorAsync(client);
 
         Guid caseId;
         Guid caseRevisionId;
@@ -69,7 +69,7 @@ public sealed class ProcedureDiscussionApiTests(ShowcaseApiFixture showcase)
     {
         using var factory = showcase.CreateFactory();
         using var client = factory.CreateClient();
-        await BootstrapAsync(client);
+        await ShowcaseApiFixture.LoginAdministratorAsync(client);
 
         using var posted = await client.PostAsJsonAsync($"/api/test-procedures/{Guid.NewGuid()}/comments",
             new { body = "Into the void." });
@@ -217,7 +217,7 @@ public sealed class ProcedureDiscussionApiTests(ShowcaseApiFixture showcase)
         // disables Procedure discussion mutations and must not emit notifications.
         using var factory = showcase.CreateFactory();
         using var client = factory.CreateClient();
-        await BootstrapAsync(client);
+        await ShowcaseApiFixture.LoginAdministratorAsync(client);
 
         using var created = await client.PostAsJsonAsync("/api/test-procedures/drafts", new
         {

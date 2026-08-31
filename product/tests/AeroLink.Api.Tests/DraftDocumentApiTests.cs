@@ -25,7 +25,7 @@ public sealed class DraftDocumentApiTests(ShowcaseApiFixture showcase)
     {
         using var factory = showcase.CreateFactory();
         using var client = factory.CreateClient();
-        await BootstrapAsync(client);
+        await ShowcaseApiFixture.LoginAdministratorAsync(client);
 
         Guid releaseId;
         string retiredNumber, modifiedNumber, introducedNumber = "SYSR-900001";
@@ -108,7 +108,7 @@ public sealed class DraftDocumentApiTests(ShowcaseApiFixture showcase)
     {
         using var factory = showcase.CreateFactory();
         using var client = factory.CreateClient();
-        await BootstrapAsync(client);
+        await ShowcaseApiFixture.LoginAdministratorAsync(client);
         var releaseId = showcase.Summary.ActiveReleaseId;
 
         // Test-procedure documents now live in Assurance. The in-work build exposes their latest approved
@@ -168,20 +168,6 @@ public sealed class DraftDocumentApiTests(ShowcaseApiFixture showcase)
         var now = DateTimeOffset.UtcNow;
         scr.SubmitForReview("admin", [new ApproverSelection("reviewer", "Reviewer")], now);
         scr.ApproveActiveStage("reviewer", now);
-    }
-
-    private static async Task BootstrapAsync(HttpClient client)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/setup/bootstrap")
-        {
-            Content = JsonContent.Create(new { displayName = "Administrator", email = "admin@example.test", password = AeroLinkApiFactory.AdministratorPassword }),
-        };
-        request.Headers.Add("X-AeroLink-Bootstrap-Secret", AeroLinkApiFactory.BootstrapSecret);
-        using var created = await client.SendAsync(request);
-        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-        using var login = await client.PostAsJsonAsync("/api/auth/login", new { userName = "admin", password = AeroLinkApiFactory.AdministratorPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 
     private static async Task<string> ReadPartAsync(ZipArchive archive, string name)
