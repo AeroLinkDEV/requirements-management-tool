@@ -1052,8 +1052,9 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
         // deliberate deferral rather than an impossibility, and it is the honest way to describe it.
         // Until then the event captures nothing and renders as the login handle, which is a missing fact
         // rather than a wrong one.
+        var evidence = await ProblemReportAttachmentEvidence.SnapshotAsync(db, item, ct);
         db.ProblemReportRevisions.Add(new ProblemReportRevision(item.Id, item.Revision, "DetailsCheckedIn",
-            actor, item.CanonicalHash(), EvidenceSnapshot(item), now,
+            actor, evidence.Hash, evidence.Json, now,
             detail: lifecycleRationale, fromState: fromState.ToString(), toState: toState.ToString(), rationale: lifecycleRationale));
         if (wasAwaitingClosure)
             await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(item, actor,

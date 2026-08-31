@@ -21,7 +21,6 @@
     "POST /api/edit-sessions/{}/discard",
     "POST /api/edit-sessions/{}/force-unlock",
     "POST /api/edit-sessions/{}/heartbeat",
-    "POST /api/enterprise-hardening/attachments/{}/verify",
     "POST /api/enterprise-hardening/conflicts/{}/resolve",
     "POST /api/enterprise-hardening/edit-sessions",
     "POST /api/enterprise-hardening/jobs",

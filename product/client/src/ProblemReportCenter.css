@@ -5,6 +5,11 @@
 .prNarrative article:has(.richImageRow) { grid-column: 1 / -1; }
 .prFlow .draftState { align-self: start; }
 .problemReportsPage[data-read-only="true"] .prFlow{display:none}
+.prSupportingFiles{margin:23px 0;padding:17px;border:1px solid #dfe7ee;border-radius:12px;background:#f9fbfd}
+.prSupportingFiles .prSectionHeading{display:flex;align-items:baseline;justify-content:space-between;gap:14px;margin-bottom:12px}
+.prSupportingFiles .prSectionHeading h3{margin:0;color:#1c3044;font-size:16px}
+.prSupportingFiles .prSectionHeading p{margin:0;color:#6c7b8e;font-size:12px}
+@media(max-width:760px){.prSupportingFiles .prSectionHeading{display:block}.prSupportingFiles .prSectionHeading p{margin-top:4px}}
 .prClosureInvalidated{flex:1 1 100%;display:flex;flex-direction:column;gap:3px;padding:12px 14px;border:1px solid #d8a93b;border-radius:10px;background:#fff8e8;color:#6d4d05}.prClosureInvalidated span{font-size:.86rem}
 .prClosurePackages{display:grid;gap:8px;padding:12px;border:1px solid #bed5c7;border-radius:10px;background:#f5fbf7}.prClosurePackages h4{margin:0;color:#245a3b}.prClosurePackages article{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px;background:#fff;border-radius:8px}.prClosurePackages article div{display:flex;flex-direction:column;gap:2px}.prClosurePackages article a{grid-column:2/-1;color:#176b43;font-size:.82rem;font-weight:750}.prClosurePackages article em{font-size:.78rem;color:#8a5b16}
 

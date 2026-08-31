@@ -115,7 +115,7 @@ public static class ProblemReportEndpoints
             if (request.ReleaseId is not null)
                 db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(item.Id, "Release", request.ReleaseId.Value,
                     ProblemReportRelationshipPolicy.BuildScope, ProblemReportRelationshipProducer.TargetBuildWorkflow, actor.UserName, now));
-            AddRevision(db, item, "ProblemReportCreated", actor.UserName, now, actorDisplayName: actor.DisplayName);
+            await AddRevisionAsync(db, item, "ProblemReportCreated", actor.UserName, now, ct, actorDisplayName: actor.DisplayName);
             await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
             return Results.Created($"/api/problem-reports/{item.Id}", Detail(item, [], []));
         }
@@ -152,7 +152,7 @@ public static class ProblemReportEndpoints
             if (releaseId is not null)
                 db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(item.Id, "Release", releaseId.Value,
                     ProblemReportRelationshipPolicy.BuildScope, ProblemReportRelationshipProducer.TargetBuildWorkflow, actor.UserName, now));
-            AddRevision(db, item, "ProblemReportCreatedFromFailedExecution", actor.UserName, now, actorDisplayName: actor.DisplayName);
+            await AddRevisionAsync(db, item, "ProblemReportCreatedFromFailedExecution", actor.UserName, now, ct, actorDisplayName: actor.DisplayName);
             await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
             var identifier = await ResolveLinkIdentifierAsync("TestExecution", execution.Id, db, ct);
             return Results.Created($"/api/problem-reports/{item.Id}", Detail(item, [new ProblemReportLinkView("TestExecution", execution.Id, identifier, ProblemReportRelationshipPolicy.OriginatingFailure, actor.UserName, now, false)], []));
@@ -459,7 +459,7 @@ public static class ProblemReportEndpoints
             var relationshipRationale = wasAwaitingClosure
                 ? "Target build correction invalidated the prior closure evidence."
                 : null;
-            AddRevision(db, report, "TargetBuildChanged", actor.UserName, now,
+            await AddRevisionAsync(db, report, "TargetBuildChanged", actor.UserName, now, ct,
                 fromState: fromState, toState: targetState, rationale: relationshipRationale, actorDisplayName: actor.DisplayName);
             if (wasAwaitingClosure)
                 await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
@@ -721,7 +721,7 @@ public static class ProblemReportEndpoints
                 var rationale = invalidated
                     ? "Relating another Problem Report invalidated the prior closure evidence."
                     : null;
-                AddRevision(db, subject, "RelatedProblemReportLinked", actor.UserName, now,
+                await AddRevisionAsync(db, subject, "RelatedProblemReportLinked", actor.UserName, now, ct,
                     detail: $"Related to {other.DisplayNumber}.",
                     fromState: fromState, toState: toState, rationale: rationale, actorDisplayName: actor.DisplayName);
                 if (invalidated)
@@ -768,7 +768,7 @@ public static class ProblemReportEndpoints
                 var rationale = invalidated
                     ? "Removing a related Problem Report invalidated the prior closure evidence."
                     : null;
-                AddRevision(db, subject, "RelatedProblemReportUnlinked", actor.UserName, now,
+                await AddRevisionAsync(db, subject, "RelatedProblemReportUnlinked", actor.UserName, now, ct,
                     detail: $"No longer related to {other.DisplayNumber}.",
                     fromState: fromState, toState: toState, rationale: rationale, actorDisplayName: actor.DisplayName);
                 if (invalidated)
@@ -806,7 +806,7 @@ public static class ProblemReportEndpoints
             var relationshipRationale = wasAwaitingClosure
                 ? "Contextual relationship change invalidated the prior closure evidence."
                 : null;
-            AddRevision(db, report, "ContextArtifactLinked", actor.UserName, now,
+            await AddRevisionAsync(db, report, "ContextArtifactLinked", actor.UserName, now, ct,
                 fromState: fromState, toState: targetState, rationale: relationshipRationale, actorDisplayName: actor.DisplayName);
             if (wasAwaitingClosure)
                 await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
@@ -876,7 +876,7 @@ public static class ProblemReportEndpoints
             if (link is not null) { createdLink = link(actor, now); db.ProblemReportLinks.Add(createdLink); }
             var toState = ProblemReportTransitionPolicy.Canonical(report.State);
             var transitionRationale = LifecycleTransitionRationale(eventType, fromState, toState, rationale ?? detail);
-            var revision = AddRevision(db, report, eventType, actor.UserName, now, detail,
+            var revision = await AddRevisionAsync(db, report, eventType, actor.UserName, now, ct, detail,
                 fromState, toState, transitionRationale, actorDisplayName: actor.DisplayName);
             if (wasAwaitingClosure && report.ResolutionVerificationExecutionId is null)
                 await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
@@ -891,13 +891,13 @@ public static class ProblemReportEndpoints
     // `actorDisplayName` is resolved server-side from the authenticated session, never from the request body.
     // It is captured here so the event keeps the name that was true when it happened; see
     // ProblemReportRevision.ActorDisplayName for why it is not resolved at read time instead.
-    private static ProblemReportRevision AddRevision(AeroLinkDbContext db, ProblemReport report, string eventType, string actor, DateTimeOffset now, string? detail = null,
+    private static async Task<ProblemReportRevision> AddRevisionAsync(AeroLinkDbContext db, ProblemReport report, string eventType, string actor, DateTimeOffset now, CancellationToken ct, string? detail = null,
         ProblemReportState? fromState = null, ProblemReportState? toState = null, string? rationale = null,
         string? actorDisplayName = null)
     {
         // One evidence shape for every change, whether it arrives here or through a controlled checkout.
-        var snapshot = ProblemReportControlledEditingAdapter.EvidenceSnapshot(report);
-        var revision = new ProblemReportRevision(report.Id, report.Revision, eventType, actor, report.CanonicalHash(), snapshot, now, detail: detail,
+        var evidence = await ProblemReportAttachmentEvidence.SnapshotAsync(db, report, ct);
+        var revision = new ProblemReportRevision(report.Id, report.Revision, eventType, actor, evidence.Hash, evidence.Json, now, detail: detail,
             fromState: fromState?.ToString(), toState: toState?.ToString(), rationale: rationale,
             actorDisplayName: actorDisplayName);
         db.ProblemReportRevisions.Add(revision); return revision;

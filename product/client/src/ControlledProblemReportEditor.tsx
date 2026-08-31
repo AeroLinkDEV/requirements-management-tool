@@ -5,6 +5,7 @@ import { RichContentEditor } from './RichContent'
 import { emptyRichContent, fromPlainText, toPlainText } from './richContentModel'
 import ProblemReportCategoryPicker from './ProblemReportCategoryPicker'
 import { PROBLEM_REPORT_NARRATIVE as NARRATIVE } from './problemReportFields'
+import ControlledAttachments from './ControlledAttachments'
 
 type Session = { id: string; version: number; expiresAt: string; draftJson: string }
 type Report = { id: string; displayNumber: string }
@@ -322,6 +323,11 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
         {NARRATIVE.map(field =>
           <RichContentEditor key={field.key} api={api} projectId={projectId} editSessionId={session?.id} label={field.label} documentLike onUploadingChange={onUploadingChange}
             value={draft[field.key]} onChange={value => set(field.key, value)} />)}
+        <section className="prSupportingFiles" aria-label="Problem Report supporting files">
+          <div className="prSectionHeading"><h3>Supporting files</h3><p>Controlled files stay beside the narrative and are versioned independently.</p></div>
+          {session && <ControlledAttachments api={api} projectId={projectId} artifactType="ProblemReport" artifactId={report.id}
+            editSessionId={session.id} canAttach />}
+        </section>
         <fieldset className="prImpactEditor"><legend>Impact matrix</legend>{impactFields.map(([key, label]) =>
           <label key={key}>{label}<select aria-label={label} value={draft.impacts[key] ?? 'Unknown'} onChange={event => set('impacts', { ...draft.impacts, [key]: event.target.value })}>{['Unknown', 'No', 'Yes'].map(value => <option key={value}>{value}</option>)}</select></label>)}
         </fieldset>

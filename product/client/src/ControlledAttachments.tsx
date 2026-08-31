@@ -38,6 +38,8 @@ type Props = {
   artifactType: "Requirement" | "ChangeRequest" | "ProblemReport" | "TestChangeRequest";
   artifactId: string;
   revisionId?: string;
+  /** Problem Report mutations are bound to the actor's exact live exclusive checkout. */
+  editSessionId?: string;
   /** Attaching is an authoring act. A reader sees the files; they do not add to them. */
   canAttach: boolean;
 };
@@ -48,12 +50,15 @@ export default function ControlledAttachments({
   artifactType,
   artifactId,
   revisionId,
+  editSessionId,
   canAttach,
 }: Props) {
   const [items, setItems] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [removing, setRemoving] = useState<Attachment>();
+  const [removalReason, setRemovalReason] = useState("");
 
   const load = useCallback(async () => {
     const response = await fetch(
@@ -74,6 +79,7 @@ export default function ControlledAttachments({
     body.set("artifactType", artifactType);
     body.set("artifactId", artifactId);
     if (revisionId) body.set("revisionId", revisionId);
+    if (editSessionId) body.set("editSessionId", editSessionId);
     setBusy(true);
     setError("");
     setMessage("");
@@ -95,6 +101,7 @@ export default function ControlledAttachments({
     body.set("artifactType", artifactType);
     body.set("artifactId", artifactId);
     if (revisionId) body.set("revisionId", revisionId);
+    if (editSessionId) body.set("editSessionId", editSessionId);
     body.set("logicalId", item.logicalId);
     body.set("label", item.label);
     body.set("description", item.description);
@@ -121,6 +128,23 @@ export default function ControlledAttachments({
     await load();
   };
 
+  const remove = async () => {
+    if (!removing || !editSessionId || !removalReason.trim()) return;
+    setBusy(true); setError(""); setMessage("");
+    const response = await fetch(`${api}/api/enterprise-hardening/attachments/${removing.id}/withdraw`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ editSessionId, reason: removalReason.trim() }),
+    });
+    setBusy(false);
+    if (!response.ok) {
+      const detail = (await response.json().catch(() => ({}))) as { error?: string };
+      setError(detail.error || "The supporting file could not be removed from the current set.");
+      return;
+    }
+    setMessage(`${removing.originalFileName} was removed from the current set; its controlled history remains available.`);
+    setRemoving(undefined); setRemovalReason(""); await load();
+  };
+
   return (
     <div className="attachmentPanel">
       {canAttach && (
@@ -135,7 +159,7 @@ export default function ControlledAttachments({
           </label>
           <label className="attachmentFile">
             File
-            <input type="file" name="file" required />
+            <input type="file" name="file" accept=".png,.jpg,.jpeg,.pdf,.docx,.xlsx,.txt,.log,.csv" required />
           </label>
           <button disabled={busy}>{busy ? "Checksumming…" : "Attach"}</button>
         </form>
@@ -146,6 +170,14 @@ export default function ControlledAttachments({
         </p>
       )}
       {message && <p className="attachmentMessage">{message}</p>}
+      {removing && (
+        <div className="attachmentRemoval" role="group" aria-label={`Remove ${removing.originalFileName}`}>
+          <div><b>Remove from current set?</b><span>{removing.originalFileName} v{removing.version} remains in controlled history.</span></div>
+          <label>Reason<input autoFocus value={removalReason} onChange={event => setRemovalReason(event.target.value)} /></label>
+          <button type="button" className="danger" disabled={busy || !removalReason.trim()} onClick={() => void remove()}>Remove</button>
+          <button type="button" onClick={() => { setRemoving(undefined); setRemovalReason(""); }}>Cancel</button>
+        </div>
+      )}
 
       {items.length === 0 ? (
         <p className="attachmentEmpty">
@@ -161,16 +193,16 @@ export default function ControlledAttachments({
                   {item.label} <i>v{item.version}</i>
                 </b>
                 <p>
-                  {item.originalFileName} · {(item.size / 1024).toFixed(1)} KB
+                  {item.originalFileName} · {item.contentType} · {(item.size / 1024).toFixed(1)} KB
                 </p>
                 {item.description && <p className="attachmentWhy">{item.description}</p>}
-                <code>SHA-256 {item.sha256.slice(0, 24)}…</code>
+                <code>SHA-256 {item.sha256}</code>
                 <small>
-                  {stateLabel(item.state)} · <PersonName userName={item.uploadedBy} /> · {new Date(item.uploadedAt).toLocaleDateString()}
+                  {stateLabel(item.state)} · <PersonName userName={item.uploadedBy} /> · {new Date(item.uploadedAt).toLocaleString()}
                 </small>
               </div>
               <div className="attachmentActions">
-                <a href={`${api}/api/enterprise-hardening/attachments/${item.id}/download`}>Download</a>
+                <a href={`${api}/api/enterprise-hardening/attachments/${item.id}/download`} target="_blank" rel="noreferrer">Open / download</a>
                 <button type="button" onClick={() => void verify(item)}>
                   {item.integrityVerifiedAt ? "Verified ✓" : "Verify integrity"}
                 </button>
@@ -178,7 +210,7 @@ export default function ControlledAttachments({
                   <label>
                     New version
                     <input
-                      type="file"
+                      type="file" accept=".png,.jpg,.jpeg,.pdf,.docx,.xlsx,.txt,.log,.csv"
                       onChange={(event) => {
                         const file = event.target.files?.[0];
                         event.target.value = "";
@@ -187,6 +219,7 @@ export default function ControlledAttachments({
                     />
                   </label>
                 )}
+                {canAttach && editSessionId && item.state === "Active" && <button type="button" onClick={() => setRemoving(item)}>Remove</button>}
               </div>
             </li>
           ))}

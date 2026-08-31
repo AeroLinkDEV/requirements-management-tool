@@ -18,8 +18,10 @@ public sealed class ProblemReportEvidenceContractTests
             .Select(property => property.Name).Order(StringComparer.Ordinal).ToArray();
         var derivedIndexFields = new[] { nameof(ProblemReport.NumberSequence) };
 
-        Assert.Equal(aggregateFields, evidenceFields.Concat(derivedIndexFields)
+        var derivedContractFields = new[] { nameof(ProblemReportEvidenceSnapshot.SupportingAttachments) };
+        Assert.Equal(aggregateFields, evidenceFields.Except(derivedContractFields).Concat(derivedIndexFields)
             .Order(StringComparer.Ordinal).ToArray());
+        Assert.Contains(nameof(ProblemReportEvidenceSnapshot.SupportingAttachments), evidenceFields);
 
         using var json = JsonDocument.Parse(ProblemReportEvidenceContract.Serialize(NewReport()));
         Assert.Equal(ProblemReportEvidenceContract.Contract, json.RootElement.GetProperty("contract").GetString());
@@ -64,6 +66,29 @@ public sealed class ProblemReportEvidenceContractTests
 
         Assert.NotEqual(ProblemReportEvidenceContract.Hash(derived), ProblemReportEvidenceContract.Hash(selected));
         Assert.Contains("\"categoryProvenance\":\"MigrationDerived\"", ProblemReportEvidenceContract.Serialize(derived));
+    }
+
+    [Fact]
+    public void Supporting_attachment_manifest_is_sorted_and_historical_schemas_omit_it()
+    {
+        var report = NewReport();
+        var logical = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var first = new ProblemReportSupportingAttachmentSnapshot
+        {
+            AttachmentId = Guid.Parse("44444444-4444-4444-4444-444444444444"), LogicalId = logical, Version = 2,
+            FileName = "analysis.xlsx", ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            Size = 42, Sha256 = new string('a', 64), UploadedBy = "engineer", UploadedAt = Now.AddMinutes(2)
+        };
+        var second = first with { Version = 1, FileName = "analysis-v1.xlsx", AttachmentId = Guid.Parse("55555555-5555-5555-5555-555555555555") };
+        var current = ProblemReportEvidenceContract.Serialize(report, supportingAttachments: [first, second]);
+        using var parsed = JsonDocument.Parse(current);
+        var manifest = parsed.RootElement.GetProperty("supportingAttachments").EnumerateArray().ToArray();
+        Assert.Equal(1, manifest[0].GetProperty("version").GetInt32());
+        Assert.Equal(2, manifest[1].GetProperty("version").GetInt32());
+
+        var historical = ProblemReportEvidenceContract.SerializeForSchema(report, 5);
+        using var old = JsonDocument.Parse(historical);
+        Assert.False(old.RootElement.TryGetProperty("supportingAttachments", out _));
     }
 
     [Fact]

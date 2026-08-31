@@ -992,14 +992,25 @@
       "file": "EditSessionEndpoints.cs",
       "coveredBy": [
         "AdministratorChangeRequestApiTests",
-        "IdentifierAllocationTests"
+        "IdentifierAllocationTests",
+        "ProblemReportCheckoutApiTests"
       ]
     },
     {
       "method": "POST",
       "path": "/api/enterprise-hardening/attachments/{id:guid}/verify",
       "file": "EditSessionEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "ProblemReportCheckoutApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/enterprise-hardening/attachments/{id:guid}/withdraw",
+      "file": "EditSessionEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportCheckoutApiTests"
+      ]
     },
     {
       "method": "POST",

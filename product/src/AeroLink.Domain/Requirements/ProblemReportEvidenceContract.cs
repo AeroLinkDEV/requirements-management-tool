@@ -66,6 +66,22 @@ public sealed record ProblemReportEvidenceSnapshot
     public required DateTimeOffset CreatedAt { get; init; }
     public required DateTimeOffset UpdatedAt { get; init; }
     public required long Version { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ProblemReportSupportingAttachmentSnapshot>? SupportingAttachments { get; init; }
+}
+
+/// <summary>The immutable supporting-file identity committed into a schema-6 Problem Report snapshot.</summary>
+public sealed record ProblemReportSupportingAttachmentSnapshot
+{
+    public required Guid AttachmentId { get; init; }
+    public required Guid LogicalId { get; init; }
+    public required int Version { get; init; }
+    public required string FileName { get; init; }
+    public required string ContentType { get; init; }
+    public required long Size { get; init; }
+    public required string Sha256 { get; init; }
+    public required string UploadedBy { get; init; }
+    public required DateTimeOffset UploadedAt { get; init; }
 }
 
 public static class ProblemReportEvidenceContract
@@ -78,9 +94,10 @@ public static class ProblemReportEvidenceContract
     // so a schema-2 snapshot and a schema-3 snapshot of the same report are not comparable field for field.
     // Version 4 adds the authored companion to every narrative field. A schema-3 snapshot committed only
     // the plain projection of an analysis or a root cause, so the two are not comparable field for field.
-    // Version 5 adds the bounded authored image width to the typed rich-content contract. Historical v4
-    // snapshots remain reproducible by selecting their original outer schema version during verification.
-    public const int SchemaVersion = 5;
+    // Version 5 adds the bounded authored image width to the typed rich-content contract. Version 6 commits
+    // the exact active supporting-attachment manifest. Historical v4/v5 snapshots remain byte-reproducible:
+    // the manifest property is absent, rather than populated from files that happen to exist today.
+    public const int SchemaVersion = 6;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -89,7 +106,7 @@ public static class ProblemReportEvidenceContract
     };
 
     public static ProblemReportEvidenceSnapshot Create(ProblemReport report, long? versionOverride = null,
-        int? schemaVersion = null) => new()
+        int? schemaVersion = null, IReadOnlyList<ProblemReportSupportingAttachmentSnapshot>? supportingAttachments = null) => new()
     {
         Id = report.Id,
         ProjectId = report.ProjectId,
@@ -142,10 +159,14 @@ public static class ProblemReportEvidenceContract
         UpdatedAt = report.UpdatedAt,
         Version = versionOverride ?? report.Version,
         SchemaVersion = schemaVersion ?? SchemaVersion,
+        SupportingAttachments = (schemaVersion ?? SchemaVersion) >= 6
+            ? (supportingAttachments ?? []).OrderBy(x => x.LogicalId).ThenBy(x => x.Version).ToArray()
+            : null,
     };
 
-    public static string Serialize(ProblemReport report, long? versionOverride = null) =>
-        Serialize(Create(report, versionOverride));
+    public static string Serialize(ProblemReport report, long? versionOverride = null,
+        IReadOnlyList<ProblemReportSupportingAttachmentSnapshot>? supportingAttachments = null) =>
+        Serialize(Create(report, versionOverride, supportingAttachments: supportingAttachments));
 
     /// <summary>
     /// Recreates an older complete evidence envelope without rewriting the report or its current hash. Rich
@@ -153,7 +174,7 @@ public static class ProblemReportEvidenceContract
     /// all older authored text and structure retains its original spelling.
     /// </summary>
     public static string SerializeForSchema(ProblemReport report, int schemaVersion, long? versionOverride = null) =>
-        schemaVersion is 4 or SchemaVersion
+        schemaVersion is 4 or 5 or SchemaVersion
             ? Serialize(Create(report, versionOverride, schemaVersion))
             : throw new InvalidOperationException($"Problem Report snapshot schema {schemaVersion} is not supported.");
 

@@ -1,5 +1,6 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Documents;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
@@ -51,44 +52,11 @@ public static class EditSessionEndpoints
             return Results.Ok(rows.Select(x=>new{x.Id,x.LogicalId,x.Version,x.RevisionId,x.Label,x.Description,x.OriginalFileName,x.ContentType,x.Size,x.Sha256,state=x.State.ToString(),x.UploadedBy,x.UploadedAt,x.IntegrityVerifiedAt,x.SupersedesId}));
         });
 
-        app.MapPost("/api/enterprise-hardening/attachments",async(HttpRequest request,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
-        {
-            if(!request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data."});var form=await request.ReadFormAsync(ct);var file=form.Files.GetFile("file");
-            if(file is null||file.Length==0)return Results.BadRequest(new{error="Select a non-empty file."});if(!Guid.TryParse(form["projectId"],out var projectId)||!Guid.TryParse(form["artifactId"],out var artifactId))return Results.BadRequest(new{error="Project and artifact identifiers are required."});
-            if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();var artifactType=string.IsNullOrWhiteSpace(form["artifactType"])?"Requirement":form["artifactType"].ToString();
-            // A diagram belongs beside whatever it explains. Restricting attachments to requirements meant the
-            // supplier datasheet that justifies a change request had nowhere to live except somebody's email.
-            var artifactExists=artifactType switch
-            {
-                "Requirement"=>await db.Requirements.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
-                "ChangeRequest"=>await db.SystemChangeRequests.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
-                "ProblemReport"=>await db.ProblemReports.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
-                _=>false,
-            };
-            if(!artifactExists)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
-            if(artifactType=="ChangeRequest")
-            {
-                var changeRequest=await db.SystemChangeRequests.AsNoTracking().SingleAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct);
-                var actor=http.UserAccount();
-                if(!actor.IsAdministrator&&!string.Equals(changeRequest.AuthorId,actor.UserName,StringComparison.OrdinalIgnoreCase))return Results.Forbid();
-                if(changeRequest.State!=ChangeRequestState.Draft)return Results.Conflict(new{error="Supporting files can be added only while the change request is a Draft.",code="artifact_not_editable"});
-            }
-            Guid? revisionId=Guid.TryParse(form["revisionId"],out var parsedRevision)?parsedRevision:null;if(revisionId is not null&&artifactType=="Requirement"&&!await db.RequirementRevisions.AnyAsync(x=>x.Id==revisionId&&x.ArtifactId==artifactId,ct))return Results.BadRequest(new{error="The selected revision does not belong to this requirement."});
-            var logicalId=Guid.TryParse(form["logicalId"],out var parsedLogical)?parsedLogical:Guid.NewGuid();var previous=await db.ControlledAttachments.Where(x=>x.ProjectId==projectId&&x.ArtifactId==artifactId&&x.LogicalId==logicalId&&x.State==ControlledAttachmentState.Active).OrderByDescending(x=>x.Version).FirstOrDefaultAsync(ct);
-            // The next version is claimed from a sequence, not derived from `previous`. Two people uploading a
-            // new revision of the same logical file at once would otherwise both compute the same version and
-            // one would lose on the unique index, failing an upload whose bytes are already stored.
-            var version=await IdentifierAllocator.ClaimAsync(db,"ATTACHMENT-"+logicalId.ToString("N"),
-                async()=>(await db.ControlledAttachments.AsNoTracking().Where(x=>x.LogicalId==logicalId).Select(x=>x.Version).ToListAsync(ct)).DefaultIfEmpty(0).Max()+1,ct);
-            var stored=await store.StoreAsync(file.OpenReadStream(),file.FileName,file.ContentType,ct);try{previous?.Supersede();var attachment=new ControlledAttachment(projectId,artifactType,artifactId,revisionId,logicalId,version,form["label"].ToString(),form["description"].ToString(),stored.OriginalFileName,stored.ContentType,stored.Size,stored.Sha256,stored.StorageKey,previous?.Id,http.UserAccount().UserName,DateTimeOffset.UtcNow);db.ControlledAttachments.Add(attachment);await db.SaveChangesAsync(ct);
-            // Superseding only the row this upload read is not enough: a concurrent upload read the same one,
-            // so both would commit an Active row and the logical file would have two current versions. Deciding
-            // it after the write instead — everything but the highest version is superseded — reaches the same
-            // answer whichever upload commits last, because it is a statement about the rows that now exist
-            // rather than about the row this request happened to see.
-            await SupersedeAllButNewestAsync(db,projectId,artifactId,logicalId,ct);
-            return Results.Created($"/api/enterprise-hardening/attachments/{attachment.Id}",new{attachment.Id,attachment.LogicalId,attachment.Version,attachment.Sha256});}catch{store.Delete(stored.StorageKey);throw;}
-        }).DisableAntiforgery();
+        app.MapPost("/api/enterprise-hardening/attachments",(HttpRequest request,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,ManagedDocumentStorageCoordinator storage,CancellationToken ct)=>
+            UploadAttachmentAsync(request,http,db,store,storage,ct)).DisableAntiforgery();
+
+        app.MapPost("/api/enterprise-hardening/attachments/{id:guid}/withdraw",(Guid id,WithdrawSupportingAttachmentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
+            WithdrawProblemReportAttachmentAsync(id,request,http,db,ct));
 
         // Inline images are their own surface rather than a use of the attachment vault.
         //
@@ -99,7 +67,14 @@ public static class EditSessionEndpoints
         // duplicated into the record, so one diagram used in five requirements is stored once and stays one thing.
 
         app.MapGet("/api/enterprise-hardening/attachments/{id:guid}/download",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
-        {var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(item.ArtifactType=="InlineImageDraft")return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();return Results.File(store.OpenRead(item.StorageKey),item.ContentType,item.OriginalFileName,enableRangeProcessing:true);});
+        {
+            var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);
+            if(item is null)return Results.NotFound();
+            if(item.ArtifactType=="InlineImageDraft")return Results.NotFound();
+            if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();
+            try{return Results.File(await store.OpenVerifiedReadAsync(item.StorageKey,item.Size,item.Sha256,ct),item.ContentType,item.OriginalFileName,enableRangeProcessing:true);}
+            catch(EvidenceIntegrityException){return Results.NotFound();}
+        });
 
         app.MapPost("/api/enterprise-hardening/attachments/{id:guid}/verify",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
         {var item=await db.ControlledAttachments.SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var actual=await store.ComputeSha256Async(item.StorageKey,ct);var valid=CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actual),Convert.FromHexString(item.Sha256));if(valid){item.RecordIntegrityVerification(DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);}return Results.Ok(new{valid,expected=item.Sha256,actual,verifiedAt=item.IntegrityVerifiedAt});});
@@ -233,6 +208,284 @@ public static class EditSessionEndpoints
         });
     }
 
+    private const long MaximumProblemReportAttachmentBytes = 25L * 1024 * 1024;
+    private const long MaximumProblemReportAttachmentBytesPerReport = 256L * 1024 * 1024;
+    private const long MaximumProblemReportAttachmentBytesPerProject = 2L * 1024 * 1024 * 1024;
+
+    private static async Task<IResult> UploadAttachmentAsync(HttpRequest request,HttpContext http,
+        AeroLinkDbContext db,EvidenceFileStore store,ManagedDocumentStorageCoordinator storage,CancellationToken ct)
+    {
+        if(!request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data."});
+        var form=await request.ReadFormAsync(ct);var file=form.Files.GetFile("file");
+        if(file is null||file.Length==0)return Results.BadRequest(new{error="Select a non-empty file."});
+        if(!Guid.TryParse(form["projectId"],out var projectId)||!Guid.TryParse(form["artifactId"],out var artifactId))
+            return Results.BadRequest(new{error="Project and artifact identifiers are required."});
+        if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
+        var artifactType=string.IsNullOrWhiteSpace(form["artifactType"])?"Requirement":form["artifactType"].ToString();
+        var label=form["label"].ToString().Trim();var description=form["description"].ToString().Trim();
+        if(string.IsNullOrWhiteSpace(label)||label.Length>300||description.Length>4000)
+            return Results.BadRequest(new{error="A label is required and attachment text must stay within its controlled limits."});
+
+        var contentType=file.ContentType;
+        if(artifactType=="ProblemReport")
+        {
+            if(file.Length>MaximumProblemReportAttachmentBytes)
+                return Results.BadRequest(new{error="Problem Report supporting files are limited to 25 MB.",code="attachment_too_large"});
+            var validation=await ValidateProblemReportFileAsync(file,ct);
+            if(validation.Error is not null)return Results.BadRequest(new{error=validation.Error,code="attachment_type_denied"});
+            contentType=validation.ContentType!;
+        }
+
+        StoredEvidence? stored=null;StagedEvidence? staged=null;ManagedDocumentStorageOperation? storageOperation=null;
+        var committed=false;var commitAttempted=false;
+        try
+        {
+            await using var transaction=await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable,ct);
+            ProblemReport? report=null;
+            if(artifactType=="ProblemReport")
+            {
+                report=await db.ProblemReports.SingleOrDefaultAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct);
+                if(report is null)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
+                if(report.State is ProblemReportState.Closed or ProblemReportState.Rejected)
+                    return Results.Conflict(new{error="Finished Problem Reports cannot accept supporting-file changes.",code="artifact_not_editable"});
+                if(!Guid.TryParse(form["editSessionId"],out var editSessionId))return Results.Forbid();
+                var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==editSessionId,ct);
+                if(!ValidProblemReportSession(session,projectId,artifactId,http.UserAccount().UserName))return Results.Forbid();
+                var reportBytes=await db.ControlledAttachments.AsNoTracking()
+                    .Where(x=>x.ProjectId==projectId&&x.ArtifactType=="ProblemReport"&&x.ArtifactId==artifactId)
+                    .SumAsync(x=>(long?)x.Size,ct)??0;
+                if(reportBytes>MaximumProblemReportAttachmentBytesPerReport-file.Length)
+                    return Results.Conflict(new{error="This Problem Report has reached its retained supporting-file limit.",code="attachment_report_quota"});
+                var projectBytes=await db.ControlledAttachments.AsNoTracking()
+                    .Where(x=>x.ProjectId==projectId&&x.ArtifactType=="ProblemReport")
+                    .SumAsync(x=>(long?)x.Size,ct)??0;
+                if(projectBytes>MaximumProblemReportAttachmentBytesPerProject-file.Length)
+                    return Results.Conflict(new{error="This Project has reached its retained Problem Report supporting-file limit.",code="attachment_project_quota"});
+            }
+            else
+            {
+                var artifactExists=artifactType switch
+                {
+                    "Requirement"=>await db.Requirements.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
+                    "ChangeRequest"=>await db.SystemChangeRequests.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
+                    "TestChangeRequest"=>await db.TestChangeReviews.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
+                    _=>false,
+                };
+                if(!artifactExists)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
+                if(artifactType=="ChangeRequest")
+                {
+                    var changeRequest=await db.SystemChangeRequests.AsNoTracking().SingleAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct);
+                    var actor=http.UserAccount();
+                    if(!actor.IsAdministrator&&!string.Equals(changeRequest.AuthorId,actor.UserName,StringComparison.OrdinalIgnoreCase))return Results.Forbid();
+                    if(changeRequest.State!=ChangeRequestState.Draft)return Results.Conflict(new{error="Supporting files can be added only while the change request is a Draft.",code="artifact_not_editable"});
+                }
+            }
+
+            Guid? revisionId=Guid.TryParse(form["revisionId"],out var parsedRevision)?parsedRevision:null;
+            if(revisionId is not null&&artifactType=="Requirement"&&!await db.RequirementRevisions.AnyAsync(x=>x.Id==revisionId&&x.ArtifactId==artifactId,ct))
+                return Results.BadRequest(new{error="The selected revision does not belong to this requirement."});
+            var logicalId=Guid.TryParse(form["logicalId"],out var parsedLogical)?parsedLogical:Guid.NewGuid();
+            var logicalRows=await db.ControlledAttachments.Where(x=>x.LogicalId==logicalId).ToListAsync(ct);
+            if(logicalRows.Any(x=>x.ProjectId!=projectId||x.ArtifactId!=artifactId||x.ArtifactType!=artifactType))
+                return Results.BadRequest(new{error="The selected attachment identity belongs to another controlled artifact."});
+            var previous=logicalRows.Where(x=>x.State==ControlledAttachmentState.Active).OrderByDescending(x=>x.Version).FirstOrDefault();
+            var version=await IdentifierAllocator.ClaimAsync(db,"ATTACHMENT-"+logicalId.ToString("N"),
+                ()=>Task.FromResult(logicalRows.Select(x=>x.Version).DefaultIfEmpty(0).Max()+1),ct);
+            var now=DateTimeOffset.UtcNow;var actorNow=http.UserAccount();
+            if (report is not null)
+            {
+                // Supporting files use the existing managed-document storage-operation journal. The PR id is
+                // carried in DocumentId only because this operation table is deliberately artifact-neutral at
+                // the persistence boundary; the operation type and object manifest make the ownership explicit.
+                var operationKey=$"problem-report-attachment:{report.Id:N}:{Guid.NewGuid():N}";
+                var payloadHash=EnterpriseRequirementsService.Hash(Encoding.UTF8.GetBytes(
+                    $"{projectId:N}|{report.Id:N}|{file.FileName}|{file.Length}|{contentType}|{operationKey}"));
+                var started=await storage.BeginAsync(projectId,report.Id,revisionId??Guid.Empty,
+                    "ProblemReportAttachment",operationKey,payloadHash,actorNow.UserName,now,ct);
+                storageOperation=started.Operation;
+                if (started.ExistingResult is not null)
+                    throw new ManagedDocumentStorageConflictException("operation_reused", "The supporting-file storage operation was already completed.");
+                staged=await store.StageAsync(file.OpenReadStream(),storageOperation.Id,"supporting-attachment",file.FileName,contentType,ct);
+                stored=new(staged.OriginalFileName,staged.ContentType,staged.Size,staged.Sha256,staged.StorageKey);
+            }
+            else
+                stored=await store.StoreAsync(file.OpenReadStream(),file.FileName,contentType,ct);
+            previous?.Supersede();
+            var attachment=new ControlledAttachment(projectId,artifactType,artifactId,revisionId,logicalId,version,label,description,
+                stored.OriginalFileName,stored.ContentType,stored.Size,stored.Sha256,stored.StorageKey,previous?.Id,actorNow.UserName,now);
+            if (storageOperation is not null && staged is not null)
+            {
+                var planned=JsonSerializer.Serialize(new { attachmentId=attachment.Id, artifactType, artifactId,
+                    storageKey=staged.StorageKey, size=staged.Size, sha256=staged.Sha256 });
+                await storage.RecordPlanAsync(storageOperation,
+                    [new ManagedDocumentStagedObject("supporting-attachment",attachment.Id,staged.StagingKey,
+                        staged.StorageKey,staged.Size,staged.Sha256)],planned,now,ct);
+                await storage.PromoteAsync(storageOperation,[staged],ct);
+            }
+            db.ControlledAttachments.Add(attachment);await db.SaveChangesAsync(ct);
+            await SupersedeAllButNewestAsync(db,projectId,artifactId,logicalId,ct);
+            if(report is not null)
+            {
+                var evidence=await ProblemReportAttachmentEvidence.SnapshotAsync(db,report,ct);
+                var detail=previous is null
+                    ?$"Attached {attachment.OriginalFileName} v{attachment.Version}; SHA-256 {attachment.Sha256}."
+                    :$"Replaced {previous.OriginalFileName} v{previous.Version} with {attachment.OriginalFileName} v{attachment.Version}; SHA-256 {attachment.Sha256}.";
+                db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id,report.Revision,
+                    previous is null?"SupportingAttachmentAdded":"SupportingAttachmentReplaced",actorNow.UserName,
+                    evidence.Hash,evidence.Json,now,detail:detail,actorDisplayName:actorNow.DisplayName));
+                await db.SaveChangesAsync(ct);
+            }
+            // Match the managed-document coordinator's commit order: metadata and the promoted bytes are
+            // committed first, then the durable operation is marked Available. If the process stops between
+            // those two writes, reconciliation sees the attachment row through the pending manifest and can
+            // verify it rather than treating a successful controlled write as an orphan.
+            commitAttempted=true;await transaction.CommitAsync(ct);committed=true;
+            if (storageOperation is not null)
+                await storage.CompleteAsync(storageOperation,now,ct);
+            return Results.Created($"/api/enterprise-hardening/attachments/{attachment.Id}",new{attachment.Id,attachment.LogicalId,attachment.Version,attachment.Sha256});
+        }
+        catch(DbUpdateException)
+        {
+            CleanupFailedUpload(store,stored,staged,committed,commitAttempted);
+            return Results.Conflict(new{error="The supporting file changed concurrently. Refresh and retry.",code="attachment_concurrency"});
+        }
+        catch{CleanupFailedUpload(store,stored,staged,committed,commitAttempted);throw;}
+    }
+
+    private static void CleanupFailedUpload(EvidenceFileStore store,StoredEvidence? stored,StagedEvidence? staged,
+        bool committed,bool commitAttempted)
+    {
+        // Before CommitAsync is attempted, the database transaction will remove the operation journal and no
+        // request can legitimately reference these bytes. Once commit is attempted, retain them: the process
+        // may have lost the response after PostgreSQL committed, and deleting them could orphan a controlled row.
+        if(committed||commitAttempted)return;
+        if(staged is not null)store.Delete(staged.StagingKey);
+        if(stored is not null)store.Delete(stored.StorageKey);
+    }
+
+    private static async Task<IResult> WithdrawProblemReportAttachmentAsync(Guid id,
+        WithdrawSupportingAttachmentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)
+    {
+        await using var transaction=await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable,ct);
+        var item=await db.ControlledAttachments.SingleOrDefaultAsync(x=>x.Id==id&&x.ArtifactType=="ProblemReport",ct);
+        if(item is null)return Results.NotFound();
+        if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();
+        var report=await db.ProblemReports.SingleOrDefaultAsync(x=>x.Id==item.ArtifactId&&x.ProjectId==item.ProjectId,ct);
+        if(report is null)return Results.NotFound();
+        var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==request.EditSessionId,ct);
+        if(!ValidProblemReportSession(session,item.ProjectId,item.ArtifactId,http.UserAccount().UserName))return Results.Forbid();
+        if(report.State is ProblemReportState.Closed or ProblemReportState.Rejected)
+            return Results.Conflict(new{error="Finished Problem Reports cannot remove supporting files.",code="artifact_not_editable"});
+        if(item.State!=ControlledAttachmentState.Active)
+            return Results.Conflict(new{error="Only the current supporting-file version can be removed.",code="attachment_not_current"});
+        var reason=request.Reason?.Trim()??"";
+        if(reason.Length is 0 or > 1000)return Results.BadRequest(new{error="A concise removal reason is required."});
+        item.Withdraw();await db.SaveChangesAsync(ct);
+        var evidence=await ProblemReportAttachmentEvidence.SnapshotAsync(db,report,ct);var actor=http.UserAccount();var now=DateTimeOffset.UtcNow;
+        db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id,report.Revision,"SupportingAttachmentRemoved",actor.UserName,
+            evidence.Hash,evidence.Json,now,detail:$"Removed {item.OriginalFileName} v{item.Version}; SHA-256 {item.Sha256}. Reason: {reason}",
+            rationale:reason,actorDisplayName:actor.DisplayName));
+        await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);
+        return Results.NoContent();
+    }
+
+    private static bool ValidProblemReportSession(ArtifactEditSession? session,Guid projectId,Guid artifactId,string actor) =>
+        session is not null&&session.ProjectId==projectId&&session.ArtifactId==artifactId&&session.IsExclusive
+        &&session.ArtifactType.Equals("ProblemReport",StringComparison.OrdinalIgnoreCase)
+        &&session.State==EditSessionState.Active&&session.ExpiresAt>DateTimeOffset.UtcNow
+        &&string.Equals(session.UserName,actor,StringComparison.OrdinalIgnoreCase);
+
+    private static async Task<(string? ContentType,string? Error)> ValidateProblemReportFileAsync(IFormFile file,CancellationToken ct)
+    {
+        var name=file.FileName;var safeName=Path.GetFileName(name);
+        if(string.IsNullOrWhiteSpace(safeName)||safeName.Length>180||safeName!=name
+            ||safeName.Any(character=>char.IsControl(character)||Path.GetInvalidFileNameChars().Contains(character)))
+            return (null,"The supporting-file name is not safe.");
+        var extension=Path.GetExtension(safeName).ToLowerInvariant();
+        var expected=extension switch
+        {
+            ".png"=>"image/png",
+            ".jpg" or ".jpeg"=>"image/jpeg",
+            ".pdf"=>"application/pdf",
+            ".docx"=>"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xlsx"=>"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".txt" or ".log"=>"text/plain",
+            ".csv"=>"text/csv",
+            _=>null,
+        };
+        if(expected is null)return (null,"That supporting-file type is not allowed.");
+        if(!string.Equals(file.ContentType,expected,StringComparison.OrdinalIgnoreCase))
+            return (null,"The filename extension and declared media type do not match.");
+        await using var stream=file.OpenReadStream();var header=new byte[12];var read=await stream.ReadAsync(header,ct);stream.Position=0;
+        var signatureOk=extension switch
+        {
+            ".png"=>read>=8&&header.AsSpan(0,8).SequenceEqual(new byte[]{137,80,78,71,13,10,26,10}),
+            ".jpg" or ".jpeg"=>await ValidJpegAsync(stream,ct),
+            ".pdf"=>read>=5&&Encoding.ASCII.GetString(header,0,5)=="%PDF-",
+            ".docx"=>ValidOfficePackage(stream,"word/document.xml"),
+            ".xlsx"=>ValidOfficePackage(stream,"xl/workbook.xml"),
+            _=>!header.AsSpan(0,read).Contains((byte)0),
+        };
+        return signatureOk?(expected,null):(null,"The file bytes do not match the allowed supporting-file type.");
+    }
+
+    private static async Task<bool> ValidJpegAsync(Stream stream,CancellationToken ct)
+    {
+        // A three-byte SOI prefix is not enough: malformed or truncated JPEGs otherwise reach the renderer
+        // and can make a generated publication fail after the attachment was already accepted. JPEGs are
+        // bounded by the endpoint before this check, so parsing a bounded copy is deterministic and safe.
+        using var buffer=new MemoryStream();await stream.CopyToAsync(buffer,ct);var bytes=buffer.ToArray();
+        if(bytes.Length<4||bytes[0]!=0xff||bytes[1]!=0xd8)return false;
+        var position=2;var sawFrame=false;
+        while(position<bytes.Length)
+        {
+            if(bytes[position++]!=0xff)return false;
+            while(position<bytes.Length&&bytes[position]==0xff)position++;
+            if(position>=bytes.Length)return false;
+            var marker=bytes[position++];
+            if(marker==0xd9)return sawFrame;
+            if(marker==0x00)return false;
+            if(marker is 0xd8 or 0xd9 or 0x01 or >=0xd0 and <=0xd7)continue;
+            if(position+2>bytes.Length)return false;
+            var length=(bytes[position]<<8)|bytes[position+1];
+            if(length<2||position+length>bytes.Length)return false;
+            var frame=marker is >=0xc0 and <=0xc3 or >=0xc5 and <=0xc7 or >=0xc9 and <=0xcb or >=0xcd and <=0xcf;
+            if(frame)
+            {
+                if(length<7)return false;
+                var height=(bytes[position+3]<<8)|bytes[position+4];var width=(bytes[position+5]<<8)|bytes[position+6];
+                if(width==0||height==0)return false;sawFrame=true;
+            }
+            position+=length;
+            if(marker==0xda)
+            {
+                // Entropy-coded scan data uses FF 00 byte stuffing and restart markers. Continue until a
+                // real marker appears; EOI is accepted only after a valid frame has been seen.
+                while(position<bytes.Length)
+                {
+                    if(bytes[position++]!=0xff)continue;
+                    while(position<bytes.Length&&bytes[position]==0xff)position++;
+                    if(position>=bytes.Length)return false;
+                    var scanMarker=bytes[position++];
+                    if(scanMarker==0x00||scanMarker is >=0xd0 and <=0xd7)continue;
+                    if(scanMarker==0xd9)return sawFrame;
+                    position-=2;break;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static bool ValidOfficePackage(Stream stream,string requiredPart)
+    {
+        try
+        {
+            using var archive=new System.IO.Compression.ZipArchive(stream,System.IO.Compression.ZipArchiveMode.Read,leaveOpen:true);
+            return archive.Entries.Count<=10_000&&archive.GetEntry("[Content_Types].xml") is not null&&archive.GetEntry(requiredPart) is not null;
+        }
+        catch(InvalidDataException){return false;}
+    }
+
     static string ControlledScrDraft(SystemChangeRequest scr)=>JsonSerializer.Serialize(new{scrVersion=scr.Version,title=scr.Title,problem=scr.Problem,analysis=scr.Analysis,solution=scr.Solution,requirementChanges=scr.RequirementChanges.Select(x=>new{baseNumber=x.BaseNumber,revision=x.Revision,level=x.Level.ToString(),kind=x.Kind.ToString(),statement=x.Statement,rationale=x.Rationale,verificationMethod=x.VerificationMethod,richText=x.RichText,attributesJson=x.AttributesJson,impactDispositionJson=x.ImpactDispositionJson,targetSectionId=x.TargetSectionId})});
 
     static object EditSessionMap(ArtifactEditSession session,string draftJson,bool resumed)=>new{session.Id,session.ArtifactType,session.ArtifactId,session.Version,session.UserName,session.OpenedAt,lastActivityAt=session.UpdatedAt,session.ExpiresAt,session.BaseSnapshotHash,draftJson,resumed,readOnly=false,status="Saved"};
@@ -250,3 +503,5 @@ public static class EditSessionEndpoints
         await db.SaveChangesAsync(ct);
     }
 }
+
+public sealed record WithdrawSupportingAttachmentRequest(Guid EditSessionId,string Reason);

@@ -105,9 +105,10 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
                 .Select(account => account.DisplayName)
                 .SingleOrDefaultAsync(ct);
         }
+        var evidence = await ProblemReportAttachmentEvidence.SnapshotAsync(db, report, ct);
         db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
-            "ClosureVerificationInvalidatedByChange", actor, report.CanonicalHash(),
-            ProblemReportControlledEditingAdapter.EvidenceSnapshot(report), now,
+            "ClosureVerificationInvalidatedByChange", actor, evidence.Hash,
+            evidence.Json, now,
             detail: reason, fromState: source.ToString(), toState: target.ToString(), rationale: transitionRationale,
             actorDisplayName: capturedName));
         return candidate;

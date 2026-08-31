@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.IO.Compression;
 using System.Text;
+using AeroLink.Domain.Documents;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
@@ -1234,5 +1235,140 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.Equal(beforeRevision + 1, after.GetProperty("revision").GetInt32());
         Assert.True((await client.GetFromJsonAsync<JsonElement>(
             $"/api/controlled-editing/status?artifactType=ProblemReport&artifactId={id}")).GetProperty("editable").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Problem_report_supporting_files_are_allowlisted_versioned_hashed_and_retained_in_history()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRATTACH");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+
+        using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = reportId, leaseMinutes = 15 });
+        Assert.True(checkout.IsSuccessStatusCode, await checkout.Content.ReadAsStringAsync());
+        var session = await checkout.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = session.GetProperty("id").GetGuid();
+
+        var firstBytes = OfficePackage("xl/workbook.xml", "navigation analysis v1");
+        using var first = await client.PostAsync("/api/enterprise-hardening/attachments",
+            SupportingFile(projectId, reportId, sessionId, "NavigationAnalysis.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", firstBytes));
+        Assert.True(first.StatusCode == HttpStatusCode.Created, $"Supporting attachment upload returned {first.StatusCode}: {await first.Content.ReadAsStringAsync()}");
+        var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
+        var firstId = firstBody.GetProperty("id").GetGuid();
+        var logicalId = firstBody.GetProperty("logicalId").GetGuid();
+        Assert.Equal(1, firstBody.GetProperty("version").GetInt32());
+        Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(firstBytes)).ToLowerInvariant(),
+            firstBody.GetProperty("sha256").GetString());
+
+        using var badType = await client.PostAsync("/api/enterprise-hardening/attachments",
+            SupportingFile(projectId, reportId, sessionId, "notes.exe", "application/octet-stream", [1, 2, 3]));
+        Assert.Equal(HttpStatusCode.BadRequest, badType.StatusCode);
+        using var mismatchedType = await client.PostAsync("/api/enterprise-hardening/attachments",
+            SupportingFile(projectId, reportId, sessionId, "NavigationAnalysis.xlsx", "application/pdf", firstBytes));
+        Assert.Equal(HttpStatusCode.BadRequest, mismatchedType.StatusCode);
+        using var unsafeName = await client.PostAsync("/api/enterprise-hardening/attachments",
+            SupportingFile(projectId, reportId, sessionId, "../escape.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", firstBytes));
+        Assert.Equal(HttpStatusCode.BadRequest, unsafeName.StatusCode);
+        using var malformedJpeg = await client.PostAsync("/api/enterprise-hardening/attachments",
+            SupportingFile(projectId, reportId, sessionId, "screenshot.jpg", "image/jpeg", [0xff, 0xd8, 0xff, 0xd9]));
+        Assert.Equal(HttpStatusCode.BadRequest, malformedJpeg.StatusCode);
+
+        using var download = await client.GetAsync($"/api/enterprise-hardening/attachments/{firstId}/download");
+        Assert.Equal(HttpStatusCode.OK, download.StatusCode);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", download.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(firstBytes, await download.Content.ReadAsByteArrayAsync());
+        Assert.Contains("NavigationAnalysis.xlsx", download.Content.Headers.ContentDisposition?.FileNameStar ?? download.Content.Headers.ContentDisposition?.FileName ?? "");
+        using var verified = await client.PostAsync($"/api/enterprise-hardening/attachments/{firstId}/verify", content: null);
+        Assert.Equal(HttpStatusCode.OK, verified.StatusCode);
+        Assert.True((await verified.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("valid").GetBoolean());
+
+        var secondBytes = OfficePackage("xl/workbook.xml", "navigation analysis v2");
+        using var replacement = await client.PostAsync("/api/enterprise-hardening/attachments",
+            SupportingFile(projectId, reportId, sessionId, "NavigationAnalysis.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", secondBytes, logicalId));
+        Assert.Equal(HttpStatusCode.Created, replacement.StatusCode);
+        var secondBody = await replacement.Content.ReadFromJsonAsync<JsonElement>();
+        var secondId = secondBody.GetProperty("id").GetGuid();
+        Assert.Equal(2, secondBody.GetProperty("version").GetInt32());
+
+        var listed = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}");
+        Assert.Equal(2, listed.GetArrayLength());
+        Assert.Contains(listed.EnumerateArray(), item => item.GetProperty("id").GetGuid() == firstId
+            && item.GetProperty("state").GetString() == "Superseded");
+        Assert.Contains(listed.EnumerateArray(), item => item.GetProperty("id").GetGuid() == secondId
+            && item.GetProperty("state").GetString() == "Active");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Equal(2, await db.ManagedDocumentStorageOperations.CountAsync(item => item.ProjectId == projectId
+                && item.OperationType == "ProblemReportAttachment" && item.State == ManagedDocumentStorageOperationState.Available));
+        }
+
+        using (var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?format=docx"))
+        {
+            Assert.Equal(HttpStatusCode.OK, output.StatusCode);
+            using var zip = new ZipArchive(new MemoryStream(await output.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
+            using var document = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
+            var text = await document.ReadToEndAsync();
+            Assert.Contains("Supporting Attachments", text);
+            Assert.Contains("NavigationAnalysis.xlsx", text);
+            Assert.Contains(secondBody.GetProperty("sha256").GetString()!, text);
+        }
+
+        using var remove = await client.PostAsJsonAsync($"/api/enterprise-hardening/attachments/{secondId}/withdraw",
+            new { editSessionId = sessionId, reason = "The current analysis was withdrawn pending a corrected supplier issue." });
+        Assert.Equal(HttpStatusCode.NoContent, remove.StatusCode);
+        var afterRemove = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}");
+        Assert.Contains(afterRemove.EnumerateArray(), item => item.GetProperty("id").GetGuid() == secondId
+            && item.GetProperty("state").GetString() == "Withdrawn");
+
+        // Removal changes the current manifest but never removes the immutable file or its prior evidence.
+        using var historicalBytes = await client.GetAsync($"/api/enterprise-hardening/attachments/{secondId}/download");
+        Assert.Equal(HttpStatusCode.OK, historicalBytes.StatusCode);
+        Assert.Equal(secondBytes, await historicalBytes.Content.ReadAsByteArrayAsync());
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
+        var revisions = detail.GetProperty("revisions").EnumerateArray().ToList();
+        var added = revisions.Single(item => item.GetProperty("eventType").GetString() == "SupportingAttachmentAdded");
+        var replaced = revisions.Single(item => item.GetProperty("eventType").GetString() == "SupportingAttachmentReplaced");
+        var removed = revisions.Single(item => item.GetProperty("eventType").GetString() == "SupportingAttachmentRemoved");
+        Assert.Equal(1, JsonDocument.Parse(added.GetProperty("snapshotJson").GetString()!).RootElement.GetProperty("supportingAttachments").GetArrayLength());
+        Assert.Equal(1, JsonDocument.Parse(replaced.GetProperty("snapshotJson").GetString()!).RootElement.GetProperty("supportingAttachments").GetArrayLength());
+        Assert.Equal(0, JsonDocument.Parse(removed.GetProperty("snapshotJson").GetString()!).RootElement.GetProperty("supportingAttachments").GetArrayLength());
+        Assert.NotEqual(added.GetProperty("snapshotHash").GetString(), removed.GetProperty("snapshotHash").GetString());
+    }
+
+    private static MultipartFormDataContent SupportingFile(Guid projectId, Guid artifactId, Guid sessionId,
+        string fileName, string contentType, byte[] bytes, Guid? logicalId = null)
+    {
+        var content = new MultipartFormDataContent();
+        content.Add(new StringContent(projectId.ToString()), "projectId");
+        content.Add(new StringContent(artifactId.ToString()), "artifactId");
+        content.Add(new StringContent("ProblemReport"), "artifactType");
+        content.Add(new StringContent(sessionId.ToString()), "editSessionId");
+        if (logicalId is Guid value) content.Add(new StringContent(value.ToString()), "logicalId");
+        content.Add(new StringContent("Navigation analysis"), "label");
+        content.Add(new StringContent("Exact supplier analysis retained with the Problem Report."), "description");
+        var file = new ByteArrayContent(bytes);
+        file.Headers.ContentType = new(contentType);
+        content.Add(file, "file", fileName);
+        return content;
+    }
+
+    private static byte[] OfficePackage(string requiredPart, string content)
+    {
+        using var output = new MemoryStream();
+        using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using (var types = new StreamWriter(archive.CreateEntry("[Content_Types].xml").Open(), Encoding.UTF8, 1024, leaveOpen: false))
+                types.Write("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\" />");
+            using (var part = new StreamWriter(archive.CreateEntry(requiredPart).Open(), Encoding.UTF8, 1024, leaveOpen: false))
+                part.Write(content);
+        }
+        return output.ToArray();
     }
 }
