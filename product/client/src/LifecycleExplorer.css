@@ -90,7 +90,7 @@ body:has(main.lifecyclePage) { min-width: 0; }
 .completeThreadFocus:hover { text-decoration: underline; }
 .completeThreadStep span { display: -webkit-box; overflow: hidden; color: #657284; font-size: 12px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 4; word-break: break-word; }
 
-.crDigitalThread { display: grid; gap: 14px; }
+.crDigitalThread { display: grid; gap: 14px; min-width: 0; }
 .crDigitalThreadHeader,.crChain,.crProposalLayer,.crMaterializedLayer { border: 1px solid var(--line); border-radius: 12px; background: white; box-shadow: 0 9px 28px rgb(16 42 68 / 5%); }
 .crDigitalThreadHeader { display: flex; justify-content: space-between; gap: 24px; padding: 22px; }
 .crDigitalThreadHeader h2 { margin: 4px 0; color: #17324d; font: 700 21px/1.25 var(--font-display); }
@@ -101,6 +101,7 @@ body:has(main.lifecyclePage) { min-width: 0; }
 .crDigitalThreadHeader dd { max-width: 150px; margin: 4px 0 0; overflow-wrap: anywhere; color: #26425e; font-size: 12px; }
 .crChain,.crProposalLayer,.crMaterializedLayer { padding: 20px; }
 .crChain { min-width: 0; }
+.crMaterializedLayer { min-width: 0; }
 .crSectionHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
 .crSectionHeading h3 { margin: 3px 0 0; color: #17324d; font: 700 17px/1.3 var(--font-display); }
 .crSectionHeading .eyebrow { margin: 0; }
