@@ -92,6 +92,9 @@ test('released Build 1.5 is a durable read-only workspace and exits explicitly',
   await page.getByLabel('Search requirements').fill('SYSR-000001')
   await page.getByRole('link', { name: /SYSR-000001\.00/ }).first().click()
   await page.getByRole('tab', { name: 'Trace & impact' }).click()
+  const exactDownstreamRequirement = page.locator('.requirementInspector').getByRole('link', { name: /HLR-\d+\.\d{2}/ }).first()
+  await expect(exactDownstreamRequirement).toBeVisible()
+  await expect(exactDownstreamRequirement).toHaveAttribute('href', /requirementRevisionId=[0-9a-f-]{36}$/)
   // Opening a procedure named on a requirement's trace lands in the Test Procedure Explorer, which is where a
   // procedure is read. It used to open a record dialog on the coverage page, which carried a procedure
   // library; the library moved and the link followed it rather than being left pointing at nothing.

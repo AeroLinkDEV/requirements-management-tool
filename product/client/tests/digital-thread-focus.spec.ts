@@ -119,6 +119,22 @@ test("a change request opens its stable-ID Digital Thread with exact chain, prov
       related: [],
     }});
   });
+  await page.route("**/api/artifacts/test-execution/*", route => route.fulfill({ json: {
+    kind: "test-execution",
+    id: "77777777-7777-4777-8777-777777777777",
+    identifier: "HLRTP-999901.00",
+    title: "Exact verification artifact result",
+    state: "Pass",
+    subtitle: "Immutable attributable verification determination",
+    details: { determination: "Authoritative result" },
+    related: [{
+      kind: "test-case",
+      id: "55555555-5555-4555-8555-555555555555",
+      identifier: "HLRTP-999901.00",
+      title: "Exact verification artifact",
+      revisionId: exactArtifactRevisionId,
+    }],
+  }}));
   await page.goto(new URL(`/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}/systems/change-requests/${candidate!.id}`, page.url()).toString(), { waitUntil: "load" });
   const digitalThreadLink = page.getByRole("link", { name: "Open Digital Thread →" });
   await expect(digitalThreadLink).toHaveAttribute("href", new RegExp(`/traceability/change-requests/${candidate!.id}$`));
@@ -191,6 +207,12 @@ test("a change request opens its stable-ID Digital Thread with exact chain, prov
   await page.goForward();
   await expect(page.getByRole("heading", { name: "Connected controlled story" })).toBeVisible();
   await page.reload({ waitUntil: "load" });
+  await expect(page.getByRole("heading", { name: "Connected controlled story" })).toBeVisible();
+  await page.locator(".crBaselinePath").getByRole("link", { name: "Pass", exact: true }).click();
+  await expect(page).toHaveURL(/\/artifacts\/test-execution\/77777777-7777-4777-8777-777777777777$/);
+  const exactRelatedProcedure = page.getByRole("link", { name: /HLRTP-999901\.00/ });
+  await expect(exactRelatedProcedure).toHaveAttribute("href", new RegExp(`/artifacts/test-case/55555555-5555-4555-8555-555555555555\\?revisionId=${exactArtifactRevisionId}$`));
+  await page.goBack();
   await expect(page.getByRole("heading", { name: "Connected controlled story" })).toBeVisible();
   await page.locator(".crBaselinePath").getByRole("link", { name: "HLRTP-999901.00" }).click();
   await expect(page).toHaveURL(new RegExp(`/artifacts/test-case/55555555-5555-4555-8555-555555555555\\?revisionId=${exactArtifactRevisionId}$`));

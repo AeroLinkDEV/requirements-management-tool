@@ -750,7 +750,11 @@ function App() {
    );
    if (!viewAllowed)
      return inShell(<main className="artifactState"><div><span>!</span><h1>Workspace unavailable</h1><p>This level or capability is not present in the active project ladder.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
-  if(view==="artifact"&&selectedArtifactId&&selectedArtifactKind)return inShell(<ArtifactRecordPage api={API} kind={selectedArtifactKind} id={selectedArtifactId} revisionId={selectedArtifactRevisionId||undefined} releaseId={release?.id??""} onBack={()=>navigate("dashboard")} onOpen={(kind,id)=>{if(kind==="change-request")navigate("scr","system",id);else if(kind==="requirement")navigate("requirements","system",id);else navigate("artifact","system",id,kind)}}/>);
+  if(view==="artifact"&&selectedArtifactId&&selectedArtifactKind)return inShell(<ArtifactRecordPage api={API} kind={selectedArtifactKind} id={selectedArtifactId} revisionId={selectedArtifactRevisionId||undefined} releaseId={release?.id??""} onBack={()=>navigate("dashboard")} relatedHref={item=>{
+    if(!context)return undefined;
+    if((item.kind==="test-procedure"||item.kind==="test-case")&&!item.revisionId)return undefined;
+    return routePath(context,"artifact","system",item.id,item.kind,undefined,undefined,undefined,undefined,item.revisionId);
+  }}/>);
   // A released build is closed, so this says so instead of opening an editor whose save the server will refuse.
   // The action stays visible on the navigation rather than disappearing: somebody looking for how to raise a
   // change needs to be told where to raise it, and a menu item that vanishes when you switch build teaches
@@ -901,6 +905,13 @@ function App() {
         onProposeChange={(id, level) => navigate(discipline === "software" ? "createSoftwareChange" : "createSystemScr", discipline, id, level)}
         onOpenRequirement={(id) => navigate("requirements",discipline,id)}
         requirementHref={id => context ? routePath(context, "requirements", discipline, id) : "#"}
+        onOpenRequirementRevision={openRequirementRevision}
+        requirementRevisionHref={requirement => context ? exactTraceArtifactPath(context, {
+          id: requirement.revisionId,
+          kind: "RequirementRevision",
+          artifactId: requirement.id,
+          level: requirement.level,
+        }) : undefined}
         onCloseRequirement={() => navigate("requirements", discipline, undefined, undefined, true)}
          onOpenTraceability={(artifactId) => navigate("lifecycle", discipline, artifactId, artifactId ? "requirement" : undefined)}
          verificationArtifactHref={artifact => {
