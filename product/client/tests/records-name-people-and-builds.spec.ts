@@ -1,5 +1,43 @@
 import { expect, test } from '@playwright/test'
+import type { APIRequestContext } from '@playwright/test'
 import { apiBase, apiLogin, firstSectionId, login, openNavigationGroup, selectProgram, showcaseSeed } from './auth'
+
+async function activateSystemReviewWorkflow(request: APIRequestContext, projectId: string, name: string) {
+  const workflowResponse = await request.post(`${apiBase}/api/review-workflows`, { data: {
+    projectId,
+    name,
+    appliesTo: 'System',
+    mode: 'Sequential',
+    stages: [
+      { name: 'Technical review', kind: 'Review', requiredAuthority: { kind: 'BaseRole', role: 'SoftwareEngineer' } },
+      { name: 'Program approval', kind: 'Approval', requiredAuthority: { kind: 'BaseRole', role: 'ProgramManager' } },
+    ],
+  } })
+  expect(workflowResponse.ok(), await workflowResponse.text()).toBeTruthy()
+  const workflow = await workflowResponse.json() as { id: string }
+  const activated = await request.post(`${apiBase}/api/review-workflows/${workflow.id}/activate`, { data: {} })
+  expect(activated.ok(), await activated.text()).toBeTruthy()
+  return workflow.id
+}
+
+async function activateSingleStageSystemReviewWorkflow(request: APIRequestContext, projectId: string, name: string) {
+  const workflowResponse = await request.post(`${apiBase}/api/review-workflows`, { data: {
+    projectId,
+    name,
+    appliesTo: 'System',
+    mode: 'Sequential',
+    stages: [{
+      name: 'System review',
+      kind: 'Review',
+      requiredAuthority: { kind: 'BaseRole', role: 'SystemEngineer' },
+    }],
+  } })
+  expect(workflowResponse.ok(), await workflowResponse.text()).toBeTruthy()
+  const workflow = await workflowResponse.json() as { id: string }
+  const activated = await request.post(`${apiBase}/api/review-workflows/${workflow.id}/activate`, { data: {} })
+  expect(activated.ok(), await activated.text()).toBeTruthy()
+  return workflow.id
+}
 
 /**
  * Surfaces that describe people, history and builds have to do it in the words a colleague would use.
@@ -32,6 +70,9 @@ test('a review cycle names the person waiting, their role, and whose turn it is'
   test.setTimeout(180_000)
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
+  const workflowId = await activateSystemReviewWorkflow(
+    request, showcase.projectId, `Review legibility fixture ${Date.now()}`,
+  )
 
   // Built here rather than found, so the queue wording is exercised against a review that is genuinely
   // mid-flight with somebody second in line.
@@ -64,6 +105,9 @@ test('a review cycle names the person waiting, their role, and whose turn it is'
   // Whose move it is. "Pending" was given to second-in-line and sixth-in-line alike, so it told nobody.
   await expect(review).toContainText('Awaiting approval')
   await expect(review).toContainText('Next in line for approval')
+
+  const retired = await request.post(`${apiBase}/api/review-workflows/${workflowId}/retire`, { data: {} })
+  expect(retired.ok(), await retired.text()).toBeTruthy()
 })
 
 test('audit history reads as events, in the product\'s own abbreviation', async ({ page, request }) => {
@@ -113,6 +157,9 @@ test('the approver search answers on the first letter and never shows an account
   test.setTimeout(180_000)
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
+  const workflowId = await activateSingleStageSystemReviewWorkflow(
+    request, showcase.projectId, `Approver search fixture ${Date.now()}`,
+  )
   const created = await request.post(`${apiBase}/api/change-request-drafts`,
     { data: draftBody(showcase.projectId, showcase.activeReleaseId, `Approver search ${Date.now()}`) })
   expect(created.ok(), await created.text()).toBeTruthy()
@@ -124,8 +171,8 @@ test('the approver search answers on the first letter and never shows an account
   await page.goto(new URL(`${root}/systems/change-requests/${draft.id}`, page.url()).toString(), { waitUntil: 'load' })
 
   await page.getByRole('button', { name: 'Configure & Submit Review' }).click()
-  await page.getByRole('button', { name: '+ Add approver' }).click()
-  const search = page.getByLabel('Approver 1 search')
+  await page.getByRole('button', { name: '+ Add extra signer' }).click()
+  const search = page.getByLabel('Approver 2 search')
   await expect(search).toBeVisible({ timeout: 30_000 })
   // One letter. Two meant typing "A" for Alex and being shown nothing, which reads as "no such person".
   await search.fill('a')
@@ -133,4 +180,7 @@ test('the approver search answers on the first letter and never shows an account
   await expect(suggestions.first()).toBeVisible({ timeout: 30_000 })
   // `software.engineer.044` is how the database refers to somebody, not how anybody else does.
   await expect(suggestions.first()).not.toContainText(/\.[a-z]+\.\d{3}|@/)
+
+  const retired = await request.post(`${apiBase}/api/review-workflows/${workflowId}/retire`, { data: {} })
+  expect(retired.ok(), await retired.text()).toBeTruthy()
 })

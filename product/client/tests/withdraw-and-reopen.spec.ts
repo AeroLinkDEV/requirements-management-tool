@@ -78,11 +78,30 @@ test('a frozen build refuses a withdrawal, says what reopening costs, and the wo
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
 
+  // System change review is governed by the active review procedure. The retired generic Approver role is
+  // intentionally not part of the FMS showcase, so establish the same BaseRole authority the product now
+  // enforces and retire this test-local procedure once the journey has completed.
+  const suffix = Date.now().toString().slice(-6)
+  const workflowResponse = await request.post(`${apiBase}/api/review-workflows`, { data: {
+    projectId: showcase.projectId,
+    name: `Withdraw and reopen fixture ${suffix}`,
+    appliesTo: 'System',
+    mode: 'Sequential',
+    stages: [{
+      name: 'Systems assessment',
+      kind: 'Review',
+      requiredAuthority: { kind: 'BaseRole', role: 'SystemEngineer' },
+    }],
+  } })
+  expect(workflowResponse.ok(), await workflowResponse.text()).toBeTruthy()
+  const workflow = await workflowResponse.json()
+  const activated = await request.post(`${apiBase}/api/review-workflows/${workflow.id}/activate`, { data: {} })
+  expect(activated.ok(), await activated.text()).toBeTruthy()
+
   // Before this journey authors anything of its own: the build has to be open. Established through the
   // governed reopen rather than assumed, so an earlier journey that froze it cannot decide this one.
   const candidateBaseline = await draftCandidateBaselineAsync(request, showcase)
 
-  const suffix = Date.now().toString().slice(-6)
   // A new requirement cannot be sent for review without a place in the document. Which section is not what
   // this journey is about, so it takes the first one.
   const section = await firstSectionId(request, showcase.projectId, 'System')
@@ -228,4 +247,7 @@ test('a frozen build refuses a withdrawal, says what reopening costs, and the wo
   // approval that closed it are both still on the page.
   await expect(page.getByRole('heading', { name: 'Review cycle 1' })).toBeVisible()
   await expect(page.getByText('Approved review cycle 1 stage.')).toBeVisible()
+
+  const retired = await request.post(`${apiBase}/api/review-workflows/${workflow.id}/retire`, { data: {} })
+  expect(retired.ok(), await retired.text()).toBeTruthy()
 })

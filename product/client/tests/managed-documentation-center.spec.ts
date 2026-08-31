@@ -240,9 +240,9 @@ test('author builds and persists an ordered named document review route', async 
   await steps.nth(2).getByLabel('Stage name').fill('Independent release approval')
 
   const assignments = [
-    ['Step 1 assigned person search', 'Systems', 'systems.reviewer'],
+    ['Step 1 assigned person search', 'Systems', 'systems.lead'],
     ['Step 2 assigned person search', 'Rina', 'software.lead'],
-    ['Step 3 assigned person search', 'Maya', 'lead.reviewer'],
+    ['Step 3 assigned person search', 'Marcus', 'quality.analyst'],
   ] as const
   for (const [label, query, userName] of assignments) {
     const picker = dialog.getByLabel(label)

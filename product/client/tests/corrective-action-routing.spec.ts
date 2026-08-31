@@ -243,12 +243,14 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await secondRecord.getByRole('button', { name: 'Record determination' }).click()
   await expect(page.getByText(/selected as PR closure evidence/)).toBeVisible({ timeout: 30_000 })
 
-  // ProgramManager membership is eligibility only; the seeded accountable position belongs to engineering.manager.
+  // Release-waiver authority follows the current accountable Program Manager position. The deterministic
+  // showcase assigns that position to program.manager; engineering.manager holds a different position and
+  // therefore remains ineligible even though both accounts carry management-shaped base memberships.
   for (const [userName, expectedWaiverActions] of [
     ['systems.reviewer', 0],
     ['cm.fms', 1],
-    ['program.manager', 0],
-    ['engineering.manager', 1],
+    ['program.manager', 1],
+    ['engineering.manager', 0],
   ] as const) {
     await page.context().clearCookies()
     await login(page, userName, { openProject: false })

@@ -1,5 +1,30 @@
 import { expect, test } from '@playwright/test'
+import type { APIRequestContext } from '@playwright/test'
 import { apiBase, apiLogin, firstSectionId, login, selectProgram, showcaseSeed } from './auth'
+
+async function activateSystemReviewWorkflow(
+  request: APIRequestContext,
+  projectId: string,
+  role: 'SystemEngineer' | 'SoftwareEngineer',
+  name: string,
+) {
+  const workflowResponse = await request.post(`${apiBase}/api/review-workflows`, { data: {
+    projectId,
+    name,
+    appliesTo: 'System',
+    mode: 'Sequential',
+    stages: [{
+      name: 'Configured system review',
+      kind: 'Review',
+      requiredAuthority: { kind: 'BaseRole', role },
+    }],
+  } })
+  expect(workflowResponse.ok(), await workflowResponse.text()).toBeTruthy()
+  const workflow = await workflowResponse.json() as { id: string }
+  const activated = await request.post(`${apiBase}/api/review-workflows/${workflow.id}/activate`, { data: {} })
+  expect(activated.ok(), await activated.text()).toBeTruthy()
+  return workflow.id
+}
 
 /**
  * Stopping a review that should not be running.
@@ -12,6 +37,9 @@ test('an author stops a review they should not have started, and the history say
   test.setTimeout(180_000)
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
+  const workflowId = await activateSystemReviewWorkflow(
+    request, showcase.projectId, 'SoftwareEngineer', `Cancelled review fixture ${Date.now()}`,
+  )
 
   const created = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
     projectId: showcase.projectId,
@@ -67,12 +95,18 @@ test('an author stops a review they should not have started, and the history say
 
   // Back in Draft at the same revision, and submittable again — the work continues.
   await expect(page.getByRole('button', { name: 'Configure & Submit Review' })).toBeVisible({ timeout: 30_000 })
+
+  const retired = await request.post(`${apiBase}/api/review-workflows/${workflowId}/retire`, { data: {} })
+  expect(retired.ok(), await retired.text()).toBeTruthy()
 })
 
 test('somebody with no part in a review is not offered the control', async ({ page, request }) => {
   test.setTimeout(180_000)
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
+  const workflowId = await activateSystemReviewWorkflow(
+    request, showcase.projectId, 'SystemEngineer', `Bystander review fixture ${Date.now()}`,
+  )
 
   const created = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
     projectId: showcase.projectId,
@@ -95,7 +129,7 @@ test('somebody with no part in a review is not offered the control', async ({ pa
   await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, { data: {
     expectedVersion: draft.version,
     mode: 'Sequential',
-    approvers: [{ userId: 'lead.reviewer', name: 'Maya Patel' }],
+    approvers: [{ userId: 'systems.reviewer', name: 'Systems Engineer' }],
   } })
 
   // An engineer in the Program who neither wrote this nor is being waited on. "Anyone can cancel" would let
@@ -107,4 +141,7 @@ test('somebody with no part in a review is not offered the control', async ({ pa
 
   await expect(page.locator('[data-state="InReview"]').first()).toBeVisible({ timeout: 30_000 })
   await expect(page.getByRole('button', { name: 'Cancel review' })).toHaveCount(0)
+
+  const retired = await request.post(`${apiBase}/api/review-workflows/${workflowId}/retire`, { data: {} })
+  expect(retired.ok(), await retired.text()).toBeTruthy()
 })

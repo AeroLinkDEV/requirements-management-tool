@@ -1,5 +1,25 @@
 import { expect, test } from '@playwright/test'
+import type { APIRequestContext } from '@playwright/test'
 import { apiBase, apiLogin, firstSectionId, login, selectProgram, showcaseSeed } from './auth'
+
+async function activateSystemReviewWorkflow(request: APIRequestContext, projectId: string, name: string) {
+  const workflowResponse = await request.post(`${apiBase}/api/review-workflows`, { data: {
+    projectId,
+    name,
+    appliesTo: 'System',
+    mode: 'Sequential',
+    stages: [{
+      name: 'Technical review',
+      kind: 'Review',
+      requiredAuthority: { kind: 'BaseRole', role: 'SoftwareEngineer' },
+    }],
+  } })
+  expect(workflowResponse.ok(), await workflowResponse.text()).toBeTruthy()
+  const workflow = await workflowResponse.json() as { id: string }
+  const activated = await request.post(`${apiBase}/api/review-workflows/${workflow.id}/activate`, { data: {} })
+  expect(activated.ok(), await activated.text()).toBeTruthy()
+  return workflow.id
+}
 
 /**
  * A reviewer saying which requirement is wrong, on the page where they decide.
@@ -12,6 +32,9 @@ test('a reviewer comments on a requirement, and the author sees it only once the
   test.setTimeout(180_000)
   const showcase = await showcaseSeed(request)
   await apiLogin(request)
+  const workflowId = await activateSystemReviewWorkflow(
+    request, showcase.projectId, `Commented review fixture ${Date.now()}`,
+  )
 
   const created = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
     projectId: showcase.projectId,
@@ -88,4 +111,7 @@ test('a reviewer comments on a requirement, and the author sees it only once the
     .toContainText('Settle the tolerance')
 
   await authorPage.close()
+
+  const retired = await request.post(`${apiBase}/api/review-workflows/${workflowId}/retire`, { data: {} })
+  expect(retired.ok(), await retired.text()).toBeTruthy()
 })
