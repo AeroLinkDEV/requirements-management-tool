@@ -1,0 +1,1232 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&amp;family=DM+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #176f68; } a:hover { color: #0f4f4a; }
+    .dt * { box-sizing: border-box; }
+    .dt { position: relative; width: 1280px; height: 800px; overflow: hidden; background: #f3f6f9;
+          font-family: 'DM Sans', system-ui, sans-serif; color: #142139; -webkit-font-smoothing: antialiased; }
+
+    /* ---- chrome -------------------------------------------------------- */
+    .dtTop { height: 56px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; background: #08162b; color: #fff; }
+    .dtBrand { display: flex; align-items: center; gap: 10px; font: 700 18px 'Manrope', sans-serif; }
+    .dtBrand span { color: #70d8c9; font-size: 20px; transform: skewX(-10deg); }
+    .dtBrand em { font-style: normal; color: #8fa8c0; font-weight: 500; font-size: 14px; margin-left: 4px; }
+    .dtTopRight { display: flex; align-items: center; gap: 9px; font-size: 12px; color: #9fb0c6; }
+    .dtChipDark { border: 1px solid #2b415d; border-radius: 999px; padding: 5px 11px; background: rgba(255,255,255,.04); }
+
+    .dtBar { height: 52px; display: flex; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid #e0e7ee; background: #fff; }
+    .dtCrumbs { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #7a8a9c; }
+    .dtCrumbs button { border: 0; background: none; padding: 0; color: #176f68; font: 600 12px 'DM Sans', sans-serif; cursor: pointer; }
+    .dtCrumbs button:hover { text-decoration: underline; }
+    .dtCrumbs b { color: #142139; font: 600 12px 'IBM Plex Mono', ui-monospace, monospace; }
+    .dtWarnChip { border: 1px solid #e6cd94; border-radius: 999px; background: #fff8e8; padding: 3px 8px; color: #8a5a00; font-size: 10px; font-weight: 600; }
+
+    .dtSeg { display: flex; gap: 2px; border: 1px solid #dce3eb; border-radius: 999px; background: #eef2f6; padding: 3px; }
+    .dtSeg button { min-height: 28px; border: 0; border-radius: 999px; background: transparent; padding: 4px 12px; color: #5d6d82;
+                    font: 600 12px 'DM Sans', sans-serif; cursor: pointer; transition: background .14s ease, color .14s ease; white-space: nowrap; }
+    .dtSeg button:hover { color: #2b3d54; }
+    .dtSeg button.on { background: #fff; color: #176f68; font-weight: 700; box-shadow: 0 2px 7px rgba(20,45,70,.13); }
+    .dtSeg.dtTypeSeg { background: #f2f6f4; }
+    .dtSeg.dtTypeSeg button { padding: 4px 9px; font-size: 11px; }
+    .dtTypeWrap { display: none; align-items: center; gap: 7px; }
+    .dtTypeWrap.on { display: flex; }
+    .dtTypeWrap > small { color: #8493a6; font: 700 9px 'DM Sans', sans-serif; letter-spacing: .1em; }
+
+    .dtSearch { position: relative; margin-left: auto; }
+    .dtSearch input { width: 168px; min-height: 32px; border: 1px solid #dce3eb; border-radius: 8px; background: #f8fafc;
+                      padding: 6px 10px 6px 28px; color: #2b3d54; font: 400 12px 'DM Sans', sans-serif; }
+    .dtSearch input:focus { outline: 3px solid rgba(35,135,125,.28); outline-offset: 1px; border-color: #a9c9c4; background: #fff; }
+    .dtSearch svg { position: absolute; left: 9px; top: 9px; }
+
+    .dtFilters { display: flex; gap: 4px; }
+    .dtFilters button { min-height: 28px; border: 1px solid #dce3eb; border-radius: 999px; background: #fff; padding: 4px 9px; color: #5d6d82;
+                        font: 600 11px 'DM Sans', sans-serif; cursor: pointer; transition: all .14s ease; }
+    .dtFilters button:hover { border-color: #a9bccd; }
+    .dtFilters button.on { border-color: #176f68; background: #176f68; color: #fff; }
+    .dtFilters button.on.warn { border-color: #b58024; background: #b58024; }
+
+    .dtZoom { display: flex; align-items: center; gap: 2px; border: 1px solid #dce3eb; border-radius: 8px; background: #fff; }
+    .dtZoom button { min-height: 30px; min-width: 28px; border: 0; background: none; color: #4c5f75; font: 600 14px 'DM Sans', sans-serif; cursor: pointer; }
+    .dtZoom button:hover { background: #eef2f6; }
+    .dtZoom button:disabled { color: #c3ccd6; cursor: default; background: none; }
+    .dtZoom span { min-width: 78px; text-align: center; color: #62718a; font: 600 10px 'IBM Plex Mono', monospace; }
+    .dtZoom .dtFit { font-size: 11px; padding: 0 9px; border-left: 1px solid #e6ecf2; }
+
+    /* ---- canvas -------------------------------------------------------- */
+    .dtViewport { position: absolute; inset: 108px 0 0 0; overflow: hidden; cursor: grab;
+                  background-color: #f3f6f9; background-image: radial-gradient(#d8e1e9 1px, transparent 1px); background-size: 24px 24px; }
+    .dtViewport.grabbing { cursor: grabbing; }
+    .dtViewport.scrubbing { cursor: ns-resize; }
+    .dtScene { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+    .dtScene.ease { transition: transform .4s cubic-bezier(.22,.61,.36,1); }
+
+    .dtBand { position: absolute; border-radius: 16px; background: rgba(255,255,255,.6); border: 1px solid rgba(212,225,235,.9); overflow: hidden; }
+    .dtBand.hot { background: rgba(255,255,255,.94); border-color: #b6d6d0; }
+    .dtBand i { position: absolute; left: 0; right: 0; height: 24px; display: block; pointer-events: none; }
+    .dtBand i.t { top: 0; background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(255,255,255,0)); }
+    .dtBand i.b { bottom: 0; background: linear-gradient(0deg, rgba(255,255,255,.96), rgba(255,255,255,0)); }
+    .dtBand u { position: absolute; right: 5px; width: 3px; border-radius: 999px; background: #bcd2cf; opacity: 0; transition: opacity .2s ease; }
+    .dtBand.scrollable u { opacity: .5; }
+    .dtBand.hot u { opacity: .95; }
+    .dtLaneHead { position: absolute; display: flex; align-items: center; gap: 7px; font: 800 10px 'DM Sans', sans-serif; letter-spacing: .13em; color: #7a8a9c; white-space: nowrap; }
+    .dtLaneHead em { border-radius: 999px; background: #e6ecf2; padding: 2px 7px; color: #62718a; font-size: 9px; font-style: normal; letter-spacing: .02em; }
+    .dtEdges { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+
+    .dtNode { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; gap: 6px; border: 1px solid #dce3eb; border-radius: 12px;
+              background: #fff; padding: 10px 12px; box-shadow: 0 6px 16px rgba(16,36,57,.07); cursor: pointer;
+              transition: box-shadow .18s ease, border-color .18s ease, opacity .2s ease, padding .18s ease; }
+    .dtNode:hover { border-color: #8ec3bb; box-shadow: 0 12px 26px rgba(16,36,57,.13); }
+    .dtNode.sel { border-color: #2a8e83; box-shadow: 0 0 0 3px rgba(42,142,131,.15), 0 18px 38px rgba(16,70,68,.18); z-index: 60; }
+    .dtNode.focusCR { border-color: #2a8e83; background: #f6fcfb; }
+    .dtNode.dim { opacity: .2; }
+    .dtNode.fade { opacity: .17; }
+    .dtNode.web { z-index: 30; }
+    .dtNode.off { opacity: 0; pointer-events: none; }
+    .dtNode.suspect { border-color: #e0c17e; background: #fffdf6; }
+    .dtNode.retire { border-style: dashed; background: #fbfcfd; }
+    .dtNode.ghost { border-style: dashed; background: #f9fbfc; box-shadow: none; }
+
+    .dtNodeTop { display: flex; align-items: center; gap: 7px; }
+    .dtBadge { width: 20px; height: 20px; flex: 0 0 20px; display: grid; place-items: center; border-radius: 6px; font: 800 8.5px 'DM Sans', sans-serif; }
+    .dtId { font: 600 11.5px 'IBM Plex Mono', ui-monospace, monospace; color: #17324d; white-space: nowrap; }
+    .dtPill { margin-left: auto; border-radius: 999px; padding: 3px 8px; font: 700 9px 'DM Sans', sans-serif; letter-spacing: .04em; white-space: nowrap; }
+    .dtHopTag { position: absolute; left: -7px; top: -7px; min-width: 17px; height: 17px; display: none; place-items: center; border-radius: 999px;
+                background: #2a8e83; color: #fff; font: 700 9px 'DM Sans', sans-serif; padding: 0 4px; box-shadow: 0 2px 6px rgba(16,70,68,.3); }
+    .dtNode.web .dtHopTag { display: grid; }
+    .dtNode.sel .dtHopTag { display: none; }
+    .dtTitle { display: -webkit-box; overflow: hidden; color: #56677c; font-size: 11.5px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .dtMeta { display: flex; gap: 10px; color: #8493a6; font-size: 10px; }
+
+    .lod1 .dtNode:not(.sel) { padding: 9px 11px; }
+    .lod1 .dtNode:not(.sel) .dtMeta { display: none; }
+    .lod0 .dtNode:not(.sel) { padding: 7px 10px; }
+    .lod0 .dtNode:not(.sel) .dtMeta, .lod0 .dtNode:not(.sel) .dtTitle { display: none; }
+    .lod0 .dtNode:not(.sel) .dtPill { padding: 2px 0 2px 6px; background: none !important; font-size: 0; }
+    .lod0 .dtNode:not(.sel) .dtPill::before { content: ''; width: 7px; height: 7px; border-radius: 999px; display: inline-block; background: currentColor; }
+
+    .dtBody { display: none; flex-direction: column; gap: 9px; margin-top: 2px; border-top: 1px solid #edf1f5; padding-top: 9px; }
+    .dtNode.sel .dtBody { display: flex; }
+    .dtNode.sel .dtTitle { -webkit-line-clamp: 4; }
+    .dtKv { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 10.5px; }
+    .dtKv i { color: #8493a6; font-style: normal; }
+    .dtKv b { color: #26425e; font: 600 10.5px 'IBM Plex Mono', monospace; }
+    .dtDiff { display: grid; gap: 4px; border-radius: 8px; background: #f7f9fb; padding: 8px; font-size: 10.5px; line-height: 1.4; }
+    .dtDiff s { color: #97556a; text-decoration-color: #d3a3b0; }
+    .dtDiff u { color: #1d6f5e; text-decoration: none; background: #e3f4ec; border-radius: 3px; padding: 0 2px; }
+    .dtNote { border-left: 3px solid #d6a33b; border-radius: 8px; background: #fff8e8; padding: 8px 9px; color: #765313; font-size: 10.5px; line-height: 1.4; }
+    .dtActs { display: flex; gap: 6px; }
+    .dtActs button { flex: 1; min-height: 30px; border: 1px solid #cfe0e5; border-radius: 8px; background: #fff; padding: 6px 8px; color: #176f68;
+                     font: 700 10.5px 'DM Sans', sans-serif; cursor: pointer; white-space: nowrap; }
+    .dtActs button.primary { border-color: #176f68; background: #176f68; color: #fff; }
+    .dtActs button:hover { border-color: #176f68; }
+    .dtActs button.primary:hover { background: #0f5751; }
+
+    .dtHint { position: absolute; left: 18px; bottom: 14px; display: flex; align-items: center; gap: 14px; border: 1px solid #e0e7ee; border-radius: 999px;
+              background: rgba(255,255,255,.93); padding: 7px 15px; font-size: 11px; color: #62718a; box-shadow: 0 6px 18px rgba(16,36,57,.08); }
+    .dtHint b { color: #2b3d54; font-weight: 600; }
+    .dtHint i { width: 20px; height: 3px; border-radius: 999px; display: inline-block; font-style: normal; vertical-align: middle; margin-right: 6px; }
+
+    /* ---- inspector ------------------------------------------------------ */
+    .dtInspector { position: absolute; border: 1px solid #dce3eb; border-radius: 14px; background: #fff;
+                   box-shadow: 0 18px 44px rgba(15,35,58,.16); opacity: 0; pointer-events: none;
+                   transition: transform .32s cubic-bezier(.22,.61,.36,1), opacity .2s ease; }
+    .dtInspector.on { opacity: 1; pointer-events: auto; }
+    .dtInspector.dock-right  { right: 16px; top: 124px; width: 300px; max-height: calc(100% - 156px); overflow: auto; padding: 15px 16px; transform: translateX(26px); }
+    .dtInspector.dock-left   { left: 16px;  top: 124px; width: 300px; max-height: calc(100% - 156px); overflow: auto; padding: 15px 16px; transform: translateX(-26px); }
+    .dtInspector.dock-bottom { left: 16px; right: 16px; bottom: 62px; height: 150px; overflow: hidden; padding: 12px 16px; transform: translateY(26px); }
+    .dtInspector.on.dock-right, .dtInspector.on.dock-left { transform: translateX(0); }
+    .dtInspector.on.dock-bottom { transform: translateY(0); }
+
+    .dtPanelTools { position: absolute; right: 10px; top: 10px; display: flex; gap: 3px; z-index: 5; }
+    .dtPanelTools button { width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid #e4eaf0; border-radius: 6px;
+                           background: #fff; color: #8493a6; cursor: pointer; padding: 0; font-size: 12px; }
+    .dtPanelTools button:hover { border-color: #a9c9c4; color: #176f68; }
+    .dtPanelTools button.on { border-color: #176f68; background: #eff9f6; color: #176f68; }
+
+    .dtEyebrow { font: 800 9px 'DM Sans', sans-serif; letter-spacing: .13em; color: #23877d; }
+    .dtPanelGrid { display: flex; flex-direction: column; gap: 13px; }
+    .dtInspector.dock-bottom .dtPanelGrid { display: grid; grid-template-columns: 286px minmax(0,1fr) minmax(0,1fr) 158px; gap: 18px; align-items: stretch; height: 100%; }
+    .dtPanelHead h3 { margin: 5px 0 0; font: 600 14px 'Manrope', sans-serif; line-height: 1.3; color: #142139; }
+    .dtPanelCol { min-width: 0; display: flex; flex-direction: column; }
+    .dtRelHead { display: flex; align-items: baseline; gap: 6px; margin-bottom: 5px; }
+    .dtRelHead span { color: #8fa0b2; font-size: 9.5px; font-weight: 600; }
+    .dtRel { display: grid; gap: 4px; overflow-y: auto; }
+    .dtInspector.dock-bottom .dtRel { max-height: 96px; grid-template-columns: 1fr 1fr; align-content: start; padding-right: 3px; }
+    .dtInspector.dock-right .dtRel, .dtInspector.dock-left .dtRel { max-height: 152px; }
+    .dtRel button { display: flex; align-items: center; gap: 7px; width: 100%; border: 1px solid #e7edf2; border-radius: 7px; background: #fafcfd;
+                    padding: 5px 8px; text-align: left; cursor: pointer; min-width: 0; }
+    .dtRel button:hover { border-color: #a9c9c4; background: #f2f9f8; }
+    .dtRel button.far { background: #fff; border-style: dashed; }
+    .dtRel small { color: #8493a6; font-size: 8.5px; letter-spacing: .04em; display: block; }
+    .dtRel span { font: 600 10px 'IBM Plex Mono', monospace; color: #17324d; display: block; overflow: hidden; text-overflow: ellipsis; }
+    .dtRel em { margin-left: auto; color: #8493a6; font-size: 13px; font-style: normal; }
+    .dtRelEmpty { color: #8fa0b2; font-size: 10.5px; padding: 4px 0; }
+    .dtInspector.dock-bottom .dtActs { flex-direction: column; justify-content: flex-end; padding-top: 26px; }
+    .dtInspector.dock-bottom .dtActs button { flex: 0 0 auto; }
+
+    @media (prefers-reduced-motion: reduce) { .dtScene.ease, .dtInspector, .dtNode { transition: none; } }
+  </style>
+</helmet>
+<div class="dt" id="dtRoot"></div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  componentDidMount() {
+    if (this._built) return;
+    const root = document.getElementById('dtRoot');
+    if (!root) return;
+    this._built = true;
+    this.build(root);
+  }
+  componentWillUnmount() {
+    if (this._off) this._off();
+    if (this._ro) this._ro.disconnect();
+    if (this._refit && typeof window !== 'undefined') window.removeEventListener('resize', this._refit);
+  }
+  renderVals() { return {}; }
+
+  /* ==== data ============================================================ */
+  data() {
+    const T = {
+      pr: { bg: '#eef1f6', fg: '#566579' }, sys: { bg: '#dff3ee', fg: '#176f68' },
+      soft: { bg: '#e7effb', fg: '#3569a8' }, ver: { bg: '#e8f4ef', fg: '#28735f' },
+      warn: { bg: '#fdefcf', fg: '#8a5a00' }, mute: { bg: '#eef1f6', fg: '#5f7080' }
+    };
+    const st = s => s === 'Approved' || s === 'Pass' || s === 'Selected' ? ['#e8f4ef', '#28735f']
+      : s === 'In review' ? ['#e7effb', '#3569a8'] : s === 'Suspect' ? ['#fdefcf', '#8a5a00']
+      : s === 'Released' || s === 'Effective' ? ['#dff3ee', '#176f68']
+      : s === 'Deferred' ? ['#f3ebe2', '#8a6a4a'] : ['#eef1f5', '#5f7080'];
+
+    const L = [
+      ['PR-00003.00', 0, T.pr, 'PR', 'Open', 'Route discontinuity remains after waypoint deletion'],
+      ['PR-00005.00', 0, T.pr, 'PR', 'Open', 'Crossfill repeats an advisory after rapid reconnect'],
+      ['PR-00007.00', 0, T.pr, 'PR', 'Open', 'Hold-page sequencing shows stale leg information'],
+      ['PR-00008.00', 0, T.pr, 'PR', 'Triaged', 'Invalid database record blocks route activation'],
+      ['PR-00010.00', 0, T.pr, 'PR', 'Triaged', 'Sequence state lost across a mode transition'],
+      ['PR-00012.00', 0, T.pr, 'PR', 'Open', 'Waypoint skip corrupts the computed leg distance'],
+
+      ['SRCR-00039.00', 1, T.sys, 'SYS', 'Approved', 'Oceanic round-robin routing'],
+      ['SRCR-00040.00', 1, T.sys, 'SYS', 'Approved', 'Route discontinuity handling on deletion'],
+      ['SRCR-00041.00', 1, T.sys, 'SYS', 'In review', 'Hold-page leg display correction'],
+      ['SRCR-00042.00', 1, T.sys, 'SYS', 'In review', 'Database record rejection behaviour'],
+      ['SRCR-00043.00', 1, T.sys, 'SYS', 'Draft', 'Sequence state retention across modes'],
+      ['SRCR-00044.00', 1, T.sys, 'SYS', 'Draft', 'Leg distance recomputation'],
+      ['SRCR-00045.00', 1, T.sys, 'SYS', 'Draft', 'Crew annunciation of the sequencing mode'],
+      ['SRCR-00046.00', 1, T.sys, 'SYS', 'Deferred', 'Oceanic track offset entry'],
+
+      ['HLRCR-00127.00', 2, T.soft, 'HLR', 'In review', 'Waypoint sequencing rework'],
+      ['HLRCR-00128.00', 2, T.soft, 'HLR', 'Approved', 'Round-robin state presentation'],
+      ['HLRCR-00129.00', 2, T.soft, 'HLR', 'Approved', 'Discontinuity resolution on deletion'],
+      ['HLRCR-00130.00', 2, T.soft, 'HLR', 'In review', 'Route activation rejection messages'],
+      ['HLRCR-00131.00', 2, T.soft, 'HLR', 'Draft', 'Hold-page leg refresh'],
+      ['HLRCR-00132.00', 2, T.soft, 'HLR', 'Draft', 'Sequence state persistence'],
+      ['HLRCR-00133.00', 2, T.soft, 'HLR', 'Draft', 'Leg distance recomputation trigger'],
+      ['HLRCR-00134.00', 2, T.soft, 'HLR', 'Approved', 'Sequencing mode annunciation'],
+      ['HLRCR-00136.00', 2, T.soft, 'HLR', 'Deferred', 'Track offset entry page'],
+
+      ['LLRCR-00061.00', 3, T.soft, 'LLR', 'Draft', 'Crossfill advisory de-duplication'],
+      ['LLRCR-00062.00', 3, T.soft, 'LLR', 'Draft', 'Leg cache invalidation'],
+      ['LLRCR-00063.00', 3, T.soft, 'LLR', 'Approved', 'Discontinuity repair routine'],
+      ['LLRCR-00064.00', 3, T.soft, 'LLR', 'In review', 'Activation guard on an invalid record'],
+      ['LLRCR-00065.00', 3, T.soft, 'LLR', 'Draft', 'Sequence index persistence'],
+      ['LLRCR-00066.00', 3, T.soft, 'LLR', 'Draft', 'Distance recompute on skip'],
+      ['LLRCR-00067.00', 3, T.soft, 'LLR', 'In review', 'Mode annunciation state machine'],
+
+      ['SYSTPCR-000014.00', 4, T.ver, 'TCR', 'Approved', 'System sequencing procedure update'],
+      ['SYSTPCR-000015.00', 4, T.warn, 'TCR', 'In review', 'Hold-page sequencing procedure'],
+      ['HLRTCCR-000003.00', 4, T.ver, 'TCR', 'Approved', 'HLR case coverage refresh'],
+      ['HLRTPCR-000007.00', 4, T.ver, 'TCR', 'Approved', 'HLR procedure re-baseline'],
+      ['HLRTPCR-000008.00', 4, T.ver, 'TCR', 'Draft', 'Mode-transition procedure'],
+      ['LLRTCCR-000005.00', 4, T.ver, 'TCR', 'In review', 'Advisory case addition'],
+      ['LLRTPCR-000009.00', 4, T.warn, 'TCR', 'In review', 'Advisory regression procedure']
+    ];
+    const LEVEL = ['Problem report', 'System change', 'Software HLR change', 'Software LLR change', 'Verification change'];
+    const CR = {}, rows = [0, 0, 0, 0, 0];
+    L.forEach(r => { CR[r[0]] = { lane: r[1], row: rows[r[1]]++, tone: r[2], badge: r[3], state: r[4], title: r[5], level: LEVEL[r[1]] }; });
+
+    const CR_EDGES = [
+      ['PR-00003.00', 'SRCR-00040.00', 'resolved by'], ['PR-00005.00', 'LLRCR-00061.00', 'resolved by'],
+      ['PR-00007.00', 'SRCR-00041.00', 'resolved by'], ['PR-00008.00', 'SRCR-00042.00', 'resolved by'],
+      ['PR-00010.00', 'SRCR-00043.00', 'resolved by'], ['PR-00012.00', 'SRCR-00044.00', 'resolved by'],
+      ['SRCR-00039.00', 'HLRCR-00127.00', 'allocates to'], ['SRCR-00039.00', 'HLRCR-00128.00', 'allocates to'],
+      ['SRCR-00039.00', 'SYSTPCR-000014.00', 'verified by'],
+      ['SRCR-00040.00', 'HLRCR-00129.00', 'allocates to'], ['SRCR-00040.00', 'SYSTPCR-000014.00', 'verified by'],
+      ['SRCR-00041.00', 'HLRCR-00131.00', 'allocates to'], ['SRCR-00041.00', 'SYSTPCR-000015.00', 'verified by', 'suspect'],
+      ['SRCR-00042.00', 'HLRCR-00130.00', 'allocates to'],
+      ['SRCR-00043.00', 'HLRCR-00132.00', 'allocates to'], ['SRCR-00043.00', 'SYSTPCR-000015.00', 'verified by'],
+      ['SRCR-00044.00', 'HLRCR-00133.00', 'allocates to'], ['SRCR-00045.00', 'HLRCR-00134.00', 'allocates to'],
+      ['SRCR-00046.00', 'HLRCR-00136.00', 'allocates to'],
+      ['HLRCR-00127.00', 'LLRCR-00061.00', 'allocates to'], ['HLRCR-00127.00', 'HLRTCCR-000003.00', 'verified by'],
+      ['HLRCR-00128.00', 'HLRTCCR-000003.00', 'verified by'],
+      ['HLRCR-00129.00', 'LLRCR-00063.00', 'allocates to'], ['HLRCR-00129.00', 'HLRTPCR-000007.00', 'verified by'],
+      ['HLRCR-00130.00', 'LLRCR-00064.00', 'allocates to'], ['HLRCR-00131.00', 'LLRCR-00062.00', 'allocates to'],
+      ['HLRCR-00132.00', 'LLRCR-00065.00', 'allocates to'], ['HLRCR-00132.00', 'HLRTPCR-000008.00', 'verified by'],
+      ['HLRCR-00133.00', 'LLRCR-00066.00', 'allocates to'], ['HLRCR-00134.00', 'LLRCR-00067.00', 'allocates to'],
+      ['HLRCR-00134.00', 'HLRTPCR-000007.00', 'verified by'],
+      ['LLRCR-00061.00', 'LLRTPCR-000009.00', 'verified by'], ['LLRCR-00062.00', 'LLRTPCR-000009.00', 'verified by', 'suspect'],
+      ['LLRCR-00063.00', 'LLRTCCR-000005.00', 'verified by'], ['LLRCR-00064.00', 'LLRTCCR-000005.00', 'verified by'],
+      ['LLRCR-00067.00', 'LLRTCCR-000005.00', 'verified by']
+    ];
+
+    const INSIDE = {
+      'SRCR-00039.00': {
+        labels: ['PROPOSED SYSTEM REQUIREMENTS', 'ALLOCATED HLRs', 'SYSTEM PROCEDURES'],
+        items: [
+          ['+', 'SYSR-000148.00', 'Provide selectable round-robin route sequencing', ['HLR-000076.00'], null],
+          ['+', 'SYSR-000149.00', 'Advance to the next eligible waypoint after the configured trigger', ['HLR-000077.00'], null],
+          ['~', 'SYSR-000100.01', 'Sequence oceanic waypoints in round-robin order', ['HLR-000075.02'],
+            { before: 'the system shall sequence oceanic waypoints in the order entered',
+              after: 'the system shall sequence oceanic waypoints in round-robin order when Round Robin is selected' }],
+          ['~', 'SYSR-000112.01', 'Display the active sequencing mode to the crew', ['HLR-000041.01'],
+            { before: 'display the active route', after: 'display the active route and the active sequencing mode' }],
+          ['-', 'SYSR-000087.02', 'Fixed-order oceanic waypoint sequencing', ['HLR-000030.01'], null]
+        ],
+        down: [
+          ['HLR-000076.00', '+', 'Round-robin selection available on the route page', ['SYSTP-000063.00']],
+          ['HLR-000077.00', '+', 'Advance on the configured trigger', ['SYSTP-000063.00']],
+          ['HLR-000075.02', '~', 'Advance to next eligible waypoint on trigger', ['SYSTP-000040.00']],
+          ['HLR-000041.01', '~', 'Present the active sequencing mode', ['SYSTP-000040.00']],
+          ['HLR-000030.01', '-', 'Fixed-order sequencing behaviour', []]
+        ],
+        ver: [['SYSTP-000040.00', 'Suspect', 'Oceanic sequencing — system test procedure'],
+              ['SYSTP-000063.00', 'Approved', 'Round-robin selection and advance']],
+        eff: [['FMS-1.6 candidate', 'Selected', 'Candidate baseline · 2 of 8 changes selected'],
+              ['FMS-1.5.0-RELEASE', 'Released', 'Predecessor baseline · unchanged']]
+      },
+      'SRCR-00041.00': {
+        labels: ['PROPOSED SYSTEM REQUIREMENTS', 'ALLOCATED HLRs', 'SYSTEM PROCEDURES'],
+        items: [
+          ['~', 'SYSR-000133.01', 'Refresh hold-page leg information on activation', ['HLR-000112.01'],
+            { before: 'display the hold leg', after: 'display the hold leg, refreshed on every activation' }],
+          ['+', 'SYSR-000151.00', 'Reject a stale leg record rather than displaying it', ['HLR-000113.00'], null]
+        ],
+        down: [['HLR-000112.01', '~', 'Hold-page leg refresh on activation', ['SYSTP-000051.00']],
+               ['HLR-000113.00', '+', 'Stale leg rejection', []]],
+        ver: [['SYSTP-000051.00', 'In review', 'Hold-page sequencing procedure']],
+        eff: [['FMS-1.6 candidate', 'Not selected', 'In review — cannot be selected yet']]
+      },
+      'HLRCR-00127.00': {
+        labels: ['PROPOSED HLRs', 'ALLOCATED LLRs', 'HLR CASES AND PROCEDURES'],
+        items: [
+          ['~', 'HLR-000075.02', 'Advance to next eligible waypoint on trigger', ['LLR-000220.00'],
+            { before: 'advance to the next waypoint', after: 'advance to the next eligible waypoint, skipping unavailable entries' }],
+          ['+', 'HLR-000079.00', 'Reject an advance while the route is being edited', ['LLR-000221.00'], null],
+          ['~', 'HLR-000080.01', 'Restore sequence state across mode transitions', ['LLR-000222.00'], null]
+        ],
+        down: [['LLR-000220.00', '~', 'Skip an ineligible waypoint without corrupting state', ['LLRTC-000209.00']],
+               ['LLR-000221.00', '+', 'Guard the advance during a route edit', ['LLRTC-000210.00']],
+               ['LLR-000222.00', '~', 'Persist the sequence index across a mode change', ['LLRTC-000211.00']]],
+        ver: [['HLRTC-000118.00', 'Approved', 'Round-robin advance — functional case'],
+              ['HLRTP-000120.00', 'Approved', 'Mandatory Build 1.6 pre-release procedure']],
+        eff: [['FMS-1.6 candidate', 'Not selected', 'Awaiting review completion']]
+      },
+      'LLRCR-00061.00': {
+        labels: ['PROPOSED LLRs', 'IMPLEMENTATION', 'LLR CASES AND PROCEDURES'],
+        items: [['+', 'LLR-000241.00', 'Discard a duplicate advisory within the reconnect window', ['MR-4471'], null],
+                ['~', 'LLR-000242.01', 'Key advisories by source and sequence number', ['MR-4471'], null]],
+        down: [['MR-4471', '+', 'GitLab merge request — crossfill advisory guard', []]],
+        ver: [['LLRTP-000221.00', 'Draft', 'Advisory de-duplication regression']],
+        eff: [['FMS-1.6 candidate', 'Not selected', 'Draft — no review started']]
+      },
+      'HLRTCCR-000003.00': {
+        labels: ['PROPOSED CASES AND PROCEDURES', 'REQUIREMENTS COVERED', 'EXECUTIONS'],
+        items: [['+', 'HLRTC-000118.00', 'Round-robin advance — functional case', ['HLR-000075.02'], null],
+                ['~', 'HLRTP-000120.00', 'Mandatory Build 1.6 pre-release procedure', ['HLR-000075.02'], null],
+                ['+', 'HLRTC-000119.00', 'Sequence restore after a mode change', ['HLR-000080.01'], null]],
+        down: [['HLR-000075.02', '~', 'Advance to next eligible waypoint on trigger', []],
+               ['HLR-000080.01', '~', 'Restore sequence state across mode transitions', []]],
+        ver: [['EXE-004821', 'Pass', 'Executed 2026-08-14 · evidence hashed']],
+        eff: [['FMS-1.6 candidate', 'Selected', 'Approved and selected']]
+      }
+    };
+
+    const THREAD = {
+      lanes: ['PROBLEM REPORT', 'CHANGE REQUEST', 'REQUIREMENT', 'TEST CASE', 'PROCEDURE', 'RESULT · BUILD'],
+      nodes: [
+        ['PR-00003.00', 0, T.pr, 'PR', 'Open', 'Route discontinuity remains after waypoint deletion'],
+        ['PR-00007.00', 0, T.pr, 'PR', 'Open', 'Hold-page sequencing shows stale leg information'],
+        ['SRCR-00039.00', 1, T.sys, 'SYS', 'Approved', 'Oceanic round-robin routing'],
+        ['HLRCR-00127.00', 1, T.soft, 'HLR', 'In review', 'Waypoint sequencing rework'],
+        ['LLRCR-00061.00', 1, T.soft, 'LLR', 'Draft', 'Crossfill advisory de-duplication'],
+        ['SYSR-000100.01', 2, T.warn, 'SYS', 'Suspect', 'Sequence oceanic waypoints in round-robin order'],
+        ['HLR-000075.02', 2, T.soft, 'HLR', 'Effective', 'Advance to next eligible waypoint on trigger'],
+        ['LLR-000220.00', 2, T.soft, 'LLR', 'Effective', 'Skip an ineligible waypoint without corrupting state'],
+        ['HLRTC-000118.00', 3, T.ver, 'TC', 'Approved', 'Round-robin advance — functional case'],
+        ['LLRTC-000209.00', 3, T.ver, 'TC', 'Approved', 'Ineligible waypoint — robustness case'],
+        ['SYSTP-000040.00', 4, T.warn, 'TP', 'Suspect', 'Revision .01 in flight — coverage unsettled'],
+        ['HLRTP-000120.00', 4, T.ver, 'TP', 'Approved', 'Mandatory Build 1.6 pre-release procedure'],
+        ['LLRTP-000220.00', 4, T.ver, 'TP', 'Approved', 'Waypoint skip regression'],
+        ['EXE-004821', 5, T.ver, 'EX', 'Pass', 'Executed 2026-08-14 · evidence hashed'],
+        ['FMS-1.5.0', 5, T.sys, 'BLD', 'Released', 'Released baseline · SHA-256 manifest']
+      ],
+      edges: [
+        ['PR-00003.00', 'SRCR-00039.00', 'resolved by'], ['PR-00007.00', 'HLRCR-00127.00', 'resolved by'],
+        ['SRCR-00039.00', 'SYSR-000100.01', 'modifies'], ['HLRCR-00127.00', 'HLR-000075.02', 'modifies'],
+        ['LLRCR-00061.00', 'LLR-000220.00', 'modifies'],
+        ['SYSR-000100.01', 'SYSTP-000040.00', 'covered by', 'suspect'],
+        ['HLR-000075.02', 'HLRTC-000118.00', 'covered by'], ['LLR-000220.00', 'LLRTC-000209.00', 'covered by'],
+        ['HLRTC-000118.00', 'HLRTP-000120.00', 'executed by'], ['LLRTC-000209.00', 'LLRTP-000220.00', 'executed by'],
+        ['HLRTP-000120.00', 'EXE-004821', 'produced'], ['LLRTP-000220.00', 'EXE-004821', 'produced'],
+        ['EXE-004821', 'FMS-1.5.0', 'evidence for']
+      ]
+    };
+    return { T, st, CR, CR_EDGES, INSIDE, THREAD };
+  }
+
+  synth(id) {
+    const c = this.D.CR[id], n = parseInt((id.match(/(\d+)\.\d+$/) || [0, '0'])[1], 10);
+    const pad = v => ('00000' + v).slice(-6);
+    const A = { 1: ['SYSR', 'HLR', 'SYSTP'], 2: ['HLR', 'LLR', 'HLRTP'], 3: ['LLR', 'MR', 'LLRTP'], 4: ['HLRTP', 'HLR', 'EXE'] }[c.lane] || ['REQ', 'REQ', 'TP'];
+    const base = 100 + (n % 90);
+    return {
+      labels: ['PROPOSED CONTENT', 'DOWNSTREAM', 'VERIFICATION'], synthetic: true,
+      items: [
+        ['+', A[0] + '-' + pad(base + 40) + '.00', 'Introduced by ' + c.title.toLowerCase(), [A[1] + '-' + pad(base + 5) + '.00'], null],
+        ['~', A[0] + '-' + pad(base) + '.01', 'Modified by ' + c.title.toLowerCase(), [A[1] + '-' + pad(base + 6) + '.00'], null]
+      ],
+      down: [[A[1] + '-' + pad(base + 5) + '.00', '+', 'Allocated from the introduced item', []],
+             [A[1] + '-' + pad(base + 6) + '.00', '~', 'Allocated from the modified item', []]],
+      ver: [[A[2] + '-' + pad(base + 20) + '.00', c.state === 'Approved' ? 'Approved' : 'Draft', 'Covering ' + A[1] + ' content']],
+      eff: [['FMS-1.6 candidate', c.state === 'Approved' ? 'Selected' : 'Not selected',
+             c.state + ' — ' + (c.state === 'Approved' ? 'eligible for the candidate baseline' : 'not eligible yet')]]
+    };
+  }
+
+  /* ==== shell =========================================================== */
+  build(root) {
+    this.D = this.data();
+    root.innerHTML = [
+      '<div class="dtTop"><div class="dtBrand"><span>&#9670;</span>AeroLink<em>Digital Thread</em></div>',
+      '  <div class="dtTopRight"><span class="dtChipDark">FMS Product Development</span>',
+      '    <span class="dtChipDark">Build 1.6 &middot; in work</span>',
+      '    <span class="dtChipDark" style="border-color:#2c6a63;background:rgba(23,111,104,.3);color:#8fe3d4">2 suspect links</span></div></div>',
+      '<div class="dtBar">',
+      '  <div class="dtCrumbs" id="dtCrumbs"></div>',
+      '  <div class="dtTypeWrap" id="dtTypeWrap"><small>SHOW</small><div class="dtSeg dtTypeSeg" id="dtCrType">',
+      '    <button data-t="all">All</button><button data-t="sys">SYS</button><button data-t="hlr">HLR</button>',
+      '    <button data-t="llr">LLR</button><button data-t="ver">TEST</button></div></div>',
+      '  <div class="dtSeg" id="dtSeg" style="margin-left:auto"><button data-mode="network">Change network</button>',
+      '    <button data-mode="inside">Inside a change</button><button data-mode="thread">Artifact thread</button></div>',
+      '  <div class="dtSearch"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#8493a6" stroke-width="1.6">',
+      '    <circle cx="7" cy="7" r="4.6"></circle><path d="M10.4 10.4 L14 14" stroke-linecap="round"></path></svg>',
+      '    <input id="dtSearch" type="text" placeholder="Find an identifier"></div>',
+      '  <div class="dtFilters" id="dtFilters"><button data-f="sys">System</button><button data-f="hlr">HLR</button>',
+      '    <button data-f="llr">LLR</button><button data-f="ver">Test</button><button data-f="suspect" class="warn">Suspect</button></div>',
+      '  <div class="dtZoom"><button id="dtOut">&minus;</button><span id="dtPct">100%</span><button id="dtIn">+</button>',
+      '    <button class="dtFit" id="dtFitBtn">Fit</button></div>',
+      '</div>',
+      '<div class="dtViewport" id="dtVp"><div class="dtScene" id="dtScene">',
+      '  <div id="dtBands"></div><svg class="dtEdges" id="dtEdges"></svg><div id="dtNodes"></div></div></div>',
+      '<div class="dtHint" id="dtHint"></div>',
+      '<div class="dtInspector dock-bottom" id="dtInsp"></div>'
+    ].join('');
+
+    this.root = root;
+    this.vp = root.querySelector('#dtVp');
+    this.scene = root.querySelector('#dtScene');
+    this.bandLayer = root.querySelector('#dtBands');
+    this.svg = root.querySelector('#dtEdges');
+    this.layer = root.querySelector('#dtNodes');
+    this.insp = root.querySelector('#dtInsp');
+    this.crumbs = root.querySelector('#dtCrumbs');
+    this.hint = root.querySelector('#dtHint');
+    this.pct = root.querySelector('#dtPct');
+    this.typeWrap = root.querySelector('#dtTypeWrap');
+    this.outBtn = root.querySelector('#dtOut');
+
+    this.k = 1; this.tx = 0; this.ty = 0; this.lod = 2;
+    this.sel = null; this.hover = null; this.filters = new Set(); this.q = '';
+    this.crFocus = 'SRCR-00039.00'; this.crType = 'all';
+    this.dockPref = 'bottom'; this.dock = 'bottom';
+    this.laneOff = []; this.laneTarget = [];
+
+    this.wire();
+    this.setMode('network');
+
+    /* Lay out again once the frame has actually settled, and on any later
+       resize — the lane window is derived from the viewport, so a stale rect
+       would leave the board wrongly zoomed and clumped in a corner. */
+    const refit = () => {
+      const r = this.vp.getBoundingClientRect();
+      if (!r || r.width < 100) return;
+      const sig = Math.round(r.width) + 'x' + Math.round(r.height);
+      if (sig === this._sig) return;
+      this._sig = sig;
+      if (this.sel) { this.layout(); this.place(); } else this.fit(false);
+    };
+    this._refit = refit;
+    if (typeof ResizeObserver === 'function') {
+      this._ro = new ResizeObserver(() => refit());
+      this._ro.observe(this.vp);
+    }
+    window.addEventListener('resize', refit);
+    setTimeout(refit, 50);
+    setTimeout(refit, 350);
+  }
+
+  /* ==== geometry ======================================================== */
+  geoFor(l) {
+    const RP = l === 2 ? 112 : l === 1 ? 86 : 54;
+    const CH = l === 2 ? 82 : l === 1 ? 62 : 38;
+    return { LW: 236, PITCH: 296, RP, CH, AN: Math.round(CH / 2), PAD: 12 };
+  }
+  lodFor(k) { return k >= 0.86 ? 2 : k >= 0.62 ? 1 : 0; }
+  laneHAt(l) {
+    const g = this.geoFor(l);
+    return (this.laneCounts || []).map(c => (c ? (c - 1) * g.RP + g.CH + g.PAD * 2 : g.CH));
+  }
+  maxLaneHAt(l) { const h = this.laneHAt(l); return h.length ? Math.max.apply(null, h) : 100; }
+
+  /* the visible height of a lane, in scene units — it grows as you zoom out,
+     so pulling back fills the freed space with records instead of white */
+  windowScene(k) { const f = this.free(); return Math.max(180, (f.h - 74) / (k || this.k)); }
+
+  /* the zoom at which everything that can legibly be shown, is shown */
+  minK() {
+    const f = this.free();
+    const fits = k => (this.sceneW * k <= f.w - 56) && (this.maxLaneHAt(this.lodFor(k)) <= (f.h - 74) / k);
+    if (fits(2.2)) return 2.2;
+    let lo = 0.58, hi = 2.2;
+    for (let i = 0; i < 22; i++) { const m = (lo + hi) / 2; if (fits(m)) lo = m; else hi = m; }
+    return Math.max(0.58, lo);
+  }
+
+  layout() {
+    const g = this.geoFor(this.lod);
+    this.g = g;
+    this.laneH = this.laneHAt(this.lod);
+    const maxH = Math.max.apply(null, this.laneH);
+    this.bandH = Math.min(this.windowScene(), maxH);
+    this.laneMin = this.laneH.map(h => Math.min(0, this.bandH - h));
+    while (this.laneOff.length < this.lanes.length) this.laneOff.push(0);
+    this.laneOff = this.laneOff.map((o, i) => Math.max(this.laneMin[i] || 0, Math.min(0, o || 0)));
+    if (this.laneTarget.length !== this.laneOff.length) this.laneTarget = this.laneOff.slice();
+    this.sceneW = (this.lanes.length - 1) * g.PITCH + g.LW;
+    this.bounds = { x: -26, y: -56, w: this.sceneW + 52, h: this.bandH + 82 };
+
+    (this.bandEls || []).forEach((el, i) => {
+      el.style.height = this.bandH + 'px';
+      el.style.left = (i * g.PITCH - 14) + 'px';
+      el.style.width = (g.LW + 28) + 'px';
+      el.classList.toggle('scrollable', this.laneMin[i] < -1);
+      const bar = this.barEls[i];
+      if (bar) {
+        const frac = this.laneH[i] > 0 ? Math.min(1, this.bandH / this.laneH[i]) : 1;
+        const h = Math.max(24, this.bandH * frac);
+        const t = this.laneH[i] > this.bandH ? (-this.laneOff[i] / (this.laneH[i] - this.bandH)) * (this.bandH - h) : 0;
+        bar.style.height = h + 'px'; bar.style.top = t + 'px';
+      }
+    });
+    (this.headEls || []).forEach((el, i) => { el.style.left = (i * g.PITCH) + 'px'; el.style.top = '-30px'; });
+  }
+
+  nodeXY(n) { return { x: n.lane * this.g.PITCH, y: n.row * this.g.RP + this.g.PAD + (this.laneOff[n.lane] || 0) }; }
+
+  /* ==== render ========================================================== */
+  render() {
+    const used = new Set(this.nodes.map(n => n.lane));
+    if (used.size < this.lanes.length) {
+      const map = {}; let k = 0;
+      this.lanes.forEach((l, i) => { if (used.has(i)) map[i] = k++; });
+      this.nodes.forEach(n => { n.lane = map[n.lane]; });
+      this.lanes = this.lanes.filter((l, i) => used.has(i));
+      this.laneOff = []; this.laneTarget = [];
+    }
+    this.laneCounts = this.lanes.map((l, i) => this.nodes.filter(n => n.lane === i).length);
+
+    this.bandLayer.innerHTML = '';
+    this.bandEls = []; this.barEls = []; this.headEls = [];
+    this.lanes.forEach((l, i) => {
+      const band = document.createElement('div');
+      band.className = 'dtBand'; band.dataset.lane = i; band.style.top = '0px';
+      band.innerHTML = '<i class="t"></i><i class="b"></i><u></u>';
+      this.bandLayer.appendChild(band);
+      this.bandEls.push(band);
+      this.barEls.push(band.querySelector('u'));
+      const head = document.createElement('div');
+      head.className = 'dtLaneHead';
+      head.innerHTML = l + (this.laneCounts[i] > 1 ? '<em>' + this.laneCounts[i] + '</em>' : '');
+      this.bandLayer.appendChild(head);
+      this.headEls.push(head);
+    });
+
+    this.layer.innerHTML = '';
+    this.cardEls = {};
+    const g = this.geoFor(this.lod);
+    this.nodes.forEach(n => {
+      const el = document.createElement('div');
+      el.className = 'dtNode ' + (n.cls || '');
+      el.dataset.id = n.id; el.dataset.group = n.group;
+      el.style.width = g.LW + 'px';
+      el.innerHTML = this.cardInner(n);
+      this.layer.appendChild(el);
+      this.cardEls[n.id] = el;
+    });
+
+    this.buildEdges();
+    this.layout();
+    this.place();
+    this.applyDim();
+  }
+
+  cardInner(n) {
+    const pill = this.D.st(n.state);
+    const acts = (n.acts || []).map(a => '<button class="' + (a[1] ? 'primary' : '') + '"' + (a[2] ? ' data-go="' + a[2] + '"' : '') + '>' + a[0] + '</button>').join('');
+    const kv = (n.kv || []).map(r => '<div class="dtKv"><i>' + r[0] + '</i><b>' + r[1] + '</b></div>').join('');
+    const diff = n.diff ? '<div class="dtDiff"><div><s>' + n.diff.before + '</s></div><div><u>' + n.diff.after + '</u></div></div>' : '';
+    const note = n.note ? '<div class="dtNote">' + n.note + '</div>' : '';
+    return '<span class="dtHopTag"></span><div class="dtNodeTop"><span class="dtBadge" style="background:' + n.tone.bg + ';color:' + n.tone.fg + '">' + n.badge + '</span>' +
+      '<span class="dtId">' + n.id + '</span><span class="dtPill" style="background:' + pill[0] + ';color:' + pill[1] + '">' + n.state.toUpperCase() + '</span></div>' +
+      '<div class="dtTitle">' + n.title + '</div><div class="dtMeta">' + (n.meta || []).map(m => '<span>' + m + '</span>').join('') + '</div>' +
+      '<div class="dtBody">' + kv + diff + note + '<div class="dtActs">' + acts + '</div></div>';
+  }
+
+  buildEdges() {
+    const b = this.bounds || { x: 0, y: 0, w: 100, h: 100 };
+    this.svg.innerHTML = '';
+    const NS = 'http://www.w3.org/2000/svg';
+    this.edgeEls = this.edges.map(e => {
+      const sus = e.kind === 'suspect', ret = e.kind === 'retire';
+      const p = document.createElementNS(NS, 'path');
+      p.setAttribute('fill', 'none');
+      p.setAttribute('stroke', sus ? '#d6a33b' : ret ? '#a9b8c7' : '#9dc2c9');
+      p.setAttribute('stroke-width', sus ? 2 : 1.5);
+      p.setAttribute('stroke-linecap', 'round');
+      if (sus || ret) p.setAttribute('stroke-dasharray', '6 6');
+      const dot = document.createElementNS(NS, 'circle');
+      dot.setAttribute('r', 3); dot.setAttribute('fill', sus ? '#d6a33b' : '#7fb3ab');
+      const t = document.createElementNS(NS, 'text');
+      t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-family', 'DM Sans, sans-serif');
+      t.setAttribute('font-size', '9.5'); t.setAttribute('font-weight', '600');
+      t.setAttribute('fill', sus ? '#8a5a00' : '#5f7b8c');
+      t.setAttribute('stroke', '#f3f6f9'); t.setAttribute('stroke-width', '3.5'); t.setAttribute('paint-order', 'stroke');
+      t.textContent = e.label;
+      t.style.opacity = 0;
+      this.svg.appendChild(p); this.svg.appendChild(dot); this.svg.appendChild(t);
+      return { e, p, dot, t, sus, ret, hot: false };
+    });
+  }
+
+  place() {
+    const g = this.g, pos = {}, b = this.bounds;
+    this.svg.setAttribute('width', b.w); this.svg.setAttribute('height', b.h);
+    this.svg.setAttribute('viewBox', b.x + ' ' + b.y + ' ' + b.w + ' ' + b.h);
+    this.svg.style.left = b.x + 'px'; this.svg.style.top = b.y + 'px';
+    this.scene.style.width = this.sceneW + 'px';
+    this.scene.style.height = this.bandH + 'px';
+
+    this.nodes.forEach(n => {
+      const p = this.nodeXY(n);
+      pos[n.id] = p;
+      const el = this.cardEls[n.id];
+      if (!el) return;
+      el.style.transform = 'translate(' + p.x + 'px,' + p.y + 'px)';
+      el.style.width = g.LW + 'px';
+      const vis = p.y > -g.CH + 6 && p.y < this.bandH - 12;
+      el.classList.toggle('off', !vis && this.sel !== n.id);
+    });
+    this.pos = pos;
+
+    const showLabels = this.k >= 1.05;
+    (this.edgeEls || []).forEach(o => {
+      const a = pos[o.e.a], bb = pos[o.e.b];
+      if (!a || !bb) return;
+      const back = bb.x <= a.x;
+      const x1 = back ? a.x : a.x + g.LW, y1 = a.y + g.AN;
+      const x2 = back ? bb.x + g.LW : bb.x, y2 = bb.y + g.AN;
+      const dx = Math.max(30, Math.abs(x2 - x1) * 0.42) * (back ? -1 : 1);
+      o.p.setAttribute('d', 'M' + x1 + ' ' + y1 + ' C' + (x1 + dx) + ' ' + y1 + ',' + (x2 - dx) + ' ' + y2 + ',' + x2 + ' ' + y2);
+      o.dot.setAttribute('cx', x2); o.dot.setAttribute('cy', y2);
+      o.t.setAttribute('x', (x1 + x2) / 2); o.t.setAttribute('y', (y1 + y2) / 2 - 6);
+      const on = y1 > -20 && y1 < this.bandH + 20 && y2 > -20 && y2 < this.bandH + 20;
+      o.vis = on;
+      if (!o.hot) {
+        o.p.style.opacity = on ? (this.focusId ? 0.1 : 1) : 0.06;
+        o.dot.style.opacity = o.p.style.opacity;
+        o.t.style.opacity = showLabels && on && !this.focusId ? 0.9 : 0;
+      }
+    });
+  }
+
+  /* ==== transitive trace ================================================ */
+  web(id) {
+    const hop = {}, edges = new Set();
+    hop[id] = 0;
+    const walk = dir => {
+      let frontier = [id];
+      const seen = new Set([id]);
+      while (frontier.length) {
+        const next = [];
+        frontier.forEach(cur => {
+          this.edges.forEach(e => {
+            const from = dir === 'down' ? e.a : e.b, to = dir === 'down' ? e.b : e.a;
+            if (from !== cur) return;
+            edges.add(e.a + '>' + e.b);
+            if (seen.has(to)) return;
+            seen.add(to);
+            hop[to] = (hop[cur] || 0) + 1;
+            if (dir === 'down') { hop[to] = hop[to]; }
+            next.push(to);
+          });
+        });
+        frontier = next;
+      }
+      return seen;
+    };
+    const down = walk('down'), up = walk('up');
+    down.delete(id); up.delete(id);
+    const nodes = new Set([id]);
+    down.forEach(x => nodes.add(x)); up.forEach(x => nodes.add(x));
+    return { nodes, edges, hop, down, up };
+  }
+
+  /* ==== lane scrolling and cross-lane sync ============================== */
+  laneAt(sceneX) {
+    const g = this.g, i = Math.round(sceneX / g.PITCH);
+    if (i < 0 || i >= this.lanes.length) return -1;
+    const left = i * g.PITCH - 14;
+    return (sceneX >= left && sceneX <= left + g.LW + 28) ? i : -1;
+  }
+  syncFrom(anchorId, exceptLane) {
+    const g = this.g, anchor = this.nodes.find(n => n.id === anchorId);
+    if (!anchor) return;
+    const ay = anchor.row * g.RP + (this.laneOff[anchor.lane] || 0);
+    this.lanes.forEach((l, i) => {
+      if (i === exceptLane || i === anchor.lane) { this.laneTarget[i] = this.laneOff[i]; return; }
+      const linked = this.nodes.filter(n => n.lane === i && this.edges.some(e =>
+        (e.a === anchorId && e.b === n.id) || (e.b === anchorId && e.a === n.id)));
+      if (!linked.length) { this.laneTarget[i] = this.laneOff[i]; return; }
+      const avg = linked.reduce((s, n) => s + n.row, 0) / linked.length;
+      this.laneTarget[i] = Math.max(this.laneMin[i], Math.min(0, ay - avg * g.RP));
+    });
+    this.startTick();
+  }
+  nearestInLane(lane) {
+    const g = this.g, mid = this.bandH / 2;
+    let best = null, bd = 1e9;
+    this.nodes.forEach(n => {
+      if (n.lane !== lane) return;
+      const d = Math.abs(n.row * g.RP + g.PAD + (this.laneOff[lane] || 0) + g.AN - mid);
+      if (d < bd) { bd = d; best = n; }
+    });
+    return best;
+  }
+  startTick() {
+    if (this._tick) return;
+    const step = () => {
+      let moving = false;
+      this.laneTarget.forEach((t, i) => {
+        const d = t - this.laneOff[i];
+        if (Math.abs(d) > 0.4) { this.laneOff[i] += d * 0.18; moving = true; } else this.laneOff[i] = t;
+      });
+      this.layout(); this.place();
+      if (moving || this._scrub) this._tick = requestAnimationFrame(step); else this._tick = null;
+    };
+    this._tick = requestAnimationFrame(step);
+  }
+
+  /* ==== interaction ===================================================== */
+  wire() {
+    const root = this.root, vp = this.vp;
+    root.querySelector('#dtSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) this.setMode(b.dataset.mode); });
+    root.querySelector('#dtCrType').addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      this.crType = b.dataset.t;
+      this.setMode('inside', this.crFocus);
+    });
+    root.querySelector('#dtFilters').addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      const f = b.dataset.f;
+      if (this.filters.has(f)) this.filters.delete(f); else this.filters.add(f);
+      b.classList.toggle('on'); this.applyDim();
+    });
+    root.querySelector('#dtSearch').addEventListener('input', e => { this.q = e.target.value.trim().toLowerCase(); this.applyDim(); });
+    root.querySelector('#dtIn').addEventListener('click', () => this.zoomBy(1.24));
+    root.querySelector('#dtOut').addEventListener('click', () => this.zoomBy(0.81));
+    root.querySelector('#dtFitBtn').addEventListener('click', () => this.fit(true));
+
+    vp.addEventListener('wheel', e => {
+      e.preventDefault();
+      if (e.shiftKey) { this.tx -= e.deltaY; this.apply(); return; }
+      const r = vp.getBoundingClientRect();
+      this.zoomAt(e.clientX - r.left, e.clientY - r.top, Math.pow(0.9988, e.deltaY));
+    }, { passive: false });
+
+    let down = null;
+    vp.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      const card = e.target.closest('.dtNode');
+      const r = vp.getBoundingClientRect();
+      const sx = (e.clientX - r.left - this.tx) / this.k, sy = (e.clientY - r.top - this.ty) / this.k;
+      const lane = card ? -1 : (sy >= -10 && sy <= this.bandH + 10 ? this.laneAt(sx) : -1);
+      down = { x: e.clientX, y: e.clientY, tx: this.tx, ty: this.ty, moved: false, card, lane, off: lane >= 0 ? this.laneOff[lane] : 0 };
+      this.scene.classList.remove('ease');
+      if (!card) vp.classList.add(lane >= 0 && this.laneMin[lane] < -1 ? 'scrubbing' : 'grabbing');
+      if (lane >= 0 && this.bandEls[lane]) this.bandEls[lane].classList.add('hot');
+    });
+    const move = e => {
+      if (!down) return;
+      const dx = e.clientX - down.x, dy = e.clientY - down.y;
+      if (!down.moved && Math.abs(dx) + Math.abs(dy) > 4) down.moved = true;
+      if (!down.moved) return;
+      if (down.lane >= 0 && this.laneMin[down.lane] < -1) {
+        this._scrub = true;
+        this.laneOff[down.lane] = Math.max(this.laneMin[down.lane], Math.min(0, down.off + dy / this.k));
+        this.laneTarget[down.lane] = this.laneOff[down.lane];
+        const anchor = this.nearestInLane(down.lane);
+        if (anchor) this.syncFrom(anchor.id, down.lane);
+        this.startTick();
+      } else { this.tx = down.tx + dx; this.ty = down.ty + dy; this.apply(); }
+    };
+    const up = e => {
+      if (!down) return;
+      vp.classList.remove('grabbing', 'scrubbing');
+      (this.bandEls || []).forEach(b => b.classList.remove('hot'));
+      this._scrub = false;
+      if (!down.moved) {
+        const card = e.target && e.target.closest ? e.target.closest('.dtNode') : null;
+        this.select(card ? card.dataset.id : null);
+      }
+      down = null;
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    vp.addEventListener('dblclick', e => { if (!e.target.closest('.dtNode')) this.fit(true); });
+
+    this.layer.addEventListener('mouseover', e => {
+      const c = e.target.closest('.dtNode');
+      if (c && !this.sel) { this.hover = c.dataset.id; this.highlight(this.hover); }
+    });
+    this.layer.addEventListener('mouseout', e => {
+      const c = e.target.closest('.dtNode');
+      if (c && !this.sel) { this.hover = null; this.highlight(null); }
+    });
+    this.layer.addEventListener('click', e => {
+      const a = e.target.closest('[data-go]'); if (!a) return;
+      e.stopPropagation();
+      const p = a.dataset.go.split('|'); this.setMode(p[0], p[1]);
+    });
+
+    const keys = e => {
+      if (e.key === 'Escape') this.select(null);
+      else if (e.key === '+' || e.key === '=') this.zoomBy(1.24);
+      else if (e.key === '-') this.zoomBy(0.81);
+      else if (e.key === '0') this.fit(true);
+    };
+    window.addEventListener('keydown', keys);
+    this._off = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      window.removeEventListener('keydown', keys);
+      if (this._tick) cancelAnimationFrame(this._tick);
+    };
+  }
+
+  /* Move to the density tier the current zoom calls for, keeping each lane at
+     the same relative scroll position. Must run before anything measures node
+     positions, because it changes the row pitch. */
+  applyLod() {
+    const lod = this.lodFor(this.k);
+    if (lod === this.lod) return false;
+    const frac = this.laneOff.map((o, i) => (this.laneH[i] > this.bandH ? o / (this.laneH[i] - this.bandH) : 0));
+    this.lod = lod;
+    this.scene.classList.remove('lod0', 'lod1', 'lod2');
+    this.scene.classList.add('lod' + lod);
+    this.layout();
+    this.laneOff = frac.map((f, i) => Math.max(this.laneMin[i], Math.min(0, f * (this.laneH[i] - this.bandH))));
+    this.laneTarget = this.laneOff.slice();
+    return true;
+  }
+
+  apply() {
+    const min = this.minK();
+    if (this.k < min) this.k = min;
+    this.scene.style.transform = 'translate(' + this.tx + 'px,' + this.ty + 'px) scale(' + this.k + ')';
+    this.pct.textContent = Math.round(this.k * 100) + '% · ' + (this.lodFor(this.k) === 2 ? 'detailed' : this.lodFor(this.k) === 1 ? 'compact' : 'dense');
+    if (this.outBtn) this.outBtn.disabled = this.k <= min + 0.004;
+    this.applyLod();
+    this.layout();
+    this.place();
+  }
+  zoomAt(px, py, f) {
+    const k2 = Math.max(this.minK(), Math.min(2.2, this.k * f));
+    if (Math.abs(k2 - this.k) < 1e-4) return;
+    this.tx = px - (px - this.tx) * (k2 / this.k);
+    this.ty = py - (py - this.ty) * (k2 / this.k);
+    this.k = k2; this.apply();
+  }
+  zoomBy(f) { this.scene.classList.add('ease'); const r = this.vpRect(); this.zoomAt(r.width / 2, r.height / 2, f); }
+
+  /* The artboard can be measured before its frame has settled — inside a
+     preview iframe the first rect can be a fraction of the real size. Every
+     geometry decision goes through this, and a nonsense rect falls back to the
+     artboard's declared size rather than laying the whole board out wrong. */
+  vpRect() {
+    const r = this.vp.getBoundingClientRect();
+    if (r && r.width > 320 && r.height > 240) return r;
+    return { width: 1280, height: 692, left: 0, top: 0 };
+  }
+
+  free() {
+    const r = this.vpRect();
+    if (!this.sel) return { x: 0, y: 0, w: r.width, h: r.height - 54 };
+    if (this.dock === 'bottom') return { x: 0, y: 0, w: r.width, h: r.height - 226 };
+    if (this.dock === 'left') return { x: 330, y: 0, w: r.width - 348, h: r.height - 54 };
+    return { x: 0, y: 0, w: r.width - 330, h: r.height - 54 };
+  }
+  /* Frame a set of records. Changing the zoom changes the lane window, which
+     re-clamps the lane offsets and moves the records — so the box is measured
+     again after the zoom settles, then the camera is centred on that. */
+  frameNodes(ids, animate, maxK) {
+    /* `want` leaves room under the selected card for its expanded body;
+       `core` is the cards as they actually are. The zoom is chosen from want,
+       the pan is then clamped so no card in core can sit outside the free
+       area — the expanded body may overflow, a real record never does. */
+    const measure = room => {
+      const g = this.g;
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      ids.forEach(nid => {
+        const n = this.nodes.find(z => z.id === nid); if (!n) return;
+        const p = this.nodeXY(n);
+        x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x + g.LW);
+        y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y + g.CH + (room && nid === this.sel ? 132 : 0));
+      });
+      return x0 > x1 ? null : { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    };
+    let want = measure(true);
+    if (!want) return;
+    const f = this.free(), pad = 46, M = 12;
+    const k = Math.max(this.minK(), Math.min(maxK || 1.05,
+      Math.min((f.w - pad * 2) / (want.w + 52), (f.h - pad * 2) / (want.h + 52))));
+    this.k = k;
+    this.applyLod();
+    this.layout();
+    want = measure(true);
+    const core = measure(false);
+    if (!want || !core) return;
+    this.scene.classList.toggle('ease', !!animate);
+    this.tx = f.x + (f.w - (want.w + 52) * k) / 2 - (want.x - 26) * k;
+    this.ty = f.y + (f.h - (want.h + 52) * k) / 2 - (want.y - 26) * k;
+
+    const clamp = (lo, hi, axis) => {
+      const a = axis === 'x' ? core.x : core.y, len = (axis === 'x' ? core.w : core.h) * k;
+      const t = axis === 'x' ? this.tx : this.ty;
+      let d = 0;
+      const p0 = a * k + t, p1 = p0 + len;
+      if (len <= (hi - lo) - M * 2) {
+        if (p0 < lo + M) d = (lo + M) - p0;
+        else if (p1 > hi - M) d = -(p1 - (hi - M));
+      } else d = (lo + M) - p0;
+      if (axis === 'x') this.tx += d; else this.ty += d;
+    };
+    clamp(f.y, f.y + f.h, 'y');
+    clamp(f.x, f.x + f.w, 'x');
+    this.apply();
+  }
+  /* Fit reads the width; the vertical is a rolling window, so it does not try
+     to squeeze a 31-record lane onto one screen. */
+  fit(animate) {
+    const f = this.free();
+    const k = Math.max(this.minK(), Math.min(1.05, (f.w - 56) / this.sceneW));
+    this.scene.classList.toggle('ease', !!animate);
+    this.k = k;
+    this.applyLod();
+    this.layout();
+    this.tx = f.x + (f.w - this.sceneW * k) / 2;
+    this.ty = f.y + Math.max(34, (f.h - this.bandH * k) / 2);
+    this.apply();
+  }
+
+  /* ==== modes =========================================================== */
+  setMode(mode, focus) {
+    this.mode = mode;
+    if (mode === 'inside' && focus) this.crFocus = focus;
+    this.root.querySelectorAll('#dtSeg button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+    this.root.querySelectorAll('#dtCrType button').forEach(b => b.classList.toggle('on', b.dataset.t === this.crType));
+    this.typeWrap.classList.toggle('on', mode === 'inside');
+    this.sel = null; this.hover = null; this.focusId = null; this.laneOff = []; this.laneTarget = [];
+    if (mode === 'network') this.buildNetwork();
+    else if (mode === 'inside') this.buildInside(this.crFocus);
+    else this.buildThread();
+    this.paintCrumbs(); this.paintHint();
+    this.render();
+    this.fit(true);
+    if (mode === 'inside') {
+      const f = this.nodes.find(n => n.lane === 0 && n.id === this.crFocus);
+      if (f) {
+        this.laneOff[0] = Math.max(this.laneMin[0], Math.min(0, -(f.row * this.g.RP) + this.g.RP));
+        this.laneTarget[0] = this.laneOff[0];
+        this.layout(); this.place();
+      }
+    }
+    this.select(null);
+  }
+
+  paintCrumbs() {
+    const parts = ['<span>FMS Product Development</span><span>&rsaquo;</span><button data-crumb="network">Build 1.6</button>'];
+    if (this.mode === 'inside') {
+      parts.push('<span>&rsaquo;</span><b>' + this.crFocus + '</b>');
+      if (this._synthetic) parts.push('<span class="dtWarnChip">illustrative content</span>');
+    }
+    if (this.mode === 'thread') parts.push('<span>&rsaquo;</span><b>SYSR-000100.01</b>');
+    this.crumbs.innerHTML = parts.join('');
+    const b = this.crumbs.querySelector('[data-crumb]');
+    if (b) b.onclick = () => this.setMode('network');
+  }
+  paintHint() {
+    const rows = this.mode === 'thread'
+      ? '<span><b>Drag</b> to pan</span><span><b>Scroll</b> to zoom</span>'
+      : '<span><b>Drag inside a lane</b> to roll through it</span><span><b>Scroll</b> to zoom &mdash; more records per lane as you pull back</span>';
+    this.hint.innerHTML = rows + '<span><b>Hover or click</b> to trace the full web</span>' +
+      '<span style="border-left:1px solid #e0e7ee;padding-left:14px"><i style="background:#2a8e83"></i>traced</span>' +
+      '<span><i style="background:repeating-linear-gradient(90deg,#d6a33b 0 5px,transparent 5px 10px)"></i>suspect</span>';
+  }
+
+  opCounts(ops) {
+    const c = { '+': 0, '~': 0, '-': 0 };
+    ops.forEach(o => { if (c[o] !== undefined) c[o]++; });
+    const p = [];
+    if (c['+']) p.push(c['+'] + ' added');
+    if (c['~']) p.push(c['~'] + ' modified');
+    if (c['-']) p.push(c['-'] + ' retired');
+    return p.join(' · ') || 'no content yet';
+  }
+  groupOf(lane) { return ['pr', 'sys', 'hlr', 'llr', 'ver'][lane] || 'sys'; }
+  typeMatch(id) {
+    const lane = this.D.CR[id].lane;
+    if (lane === 0) return false;
+    return this.crType === 'all' || { sys: 1, hlr: 2, llr: 3, ver: 4 }[this.crType] === lane;
+  }
+
+  crNode(id, lane, row) {
+    const c = this.D.CR[id];
+    const rich = this.D.INSIDE[id];
+    const items = rich ? rich.items : (c.lane === 0 ? [] : this.synth(id).items);
+    return {
+      id, lane, row, tone: c.tone, badge: c.badge, state: c.state, title: c.title,
+      cls: c.state === 'Suspect' ? 'suspect' : '', group: this.groupOf(c.lane),
+      meta: c.lane === 0 ? [c.level] : [items.length + ' proposed', this.opCounts(items.map(i => i[0]))],
+      kv: [['Level', c.level], ['State', c.state], ['Target build', 'FMS 1.6']],
+      acts: c.lane === 0 ? [['Open problem report', 1]] : [['Open this change', 1, 'inside|' + id], ['Open record', 0]]
+    };
+  }
+
+  buildNetwork() {
+    this._synthetic = false;
+    this.lanes = ['PROBLEM REPORT', 'SYSTEM CHANGE', 'SOFTWARE HLR CHANGE', 'SOFTWARE LLR CHANGE', 'VERIFICATION CHANGE'];
+    this.nodes = Object.keys(this.D.CR).map(id => { const c = this.D.CR[id]; return this.crNode(id, c.lane, c.row); });
+    this.edges = this.D.CR_EDGES.map(e => ({ a: e[0], b: e[1], label: e[2], kind: e[3] || '' }));
+  }
+
+  buildInside(crId) {
+    const D = this.D, c = D.CR[crId];
+    const rich = D.INSIDE[crId] || this.synth(crId);
+    this._synthetic = !D.INSIDE[crId];
+    const opTone = { '+': D.T.ver, '~': D.T.soft, '-': D.T.mute };
+    const opWord = { '+': 'Introduce', '~': 'Modify', '-': 'Retire' };
+    const typeName = { all: '', sys: ' · SYSTEM', hlr: ' · HLR', llr: ' · LLR', ver: ' · TEST' }[this.crType];
+    this.lanes = ['CHANGE REQUEST' + typeName, rich.labels[0], rich.labels[1], rich.labels[2], 'EFFECT ON THE BUILD'];
+
+    const nodes = [], edges = [];
+    /* lane 0 is the full, rollable register of change requests — the same
+       records, scroll rules and zoom rules as the network view */
+    let row = 0;
+    Object.keys(D.CR).forEach(id => {
+      if (!this.typeMatch(id)) return;
+      const n = this.crNode(id, 0, row++);
+      if (id === crId) { n.cls = (n.cls + ' focusCR').trim(); n.acts = [['Open record', 1], ['Back to the network', 0, 'network|']]; }
+      nodes.push(n);
+    });
+    if (!nodes.some(n => n.id === crId)) nodes.unshift(this.crNode(crId, 0, -1));
+
+    rich.items.forEach((it, i) => {
+      const op = it[0], id = it[1];
+      nodes.push({
+        id, lane: 1, row: i, tone: opTone[op], badge: op === '+' ? 'NEW' : op === '~' ? 'MOD' : 'RET',
+        state: opWord[op], title: it[2], cls: op === '-' ? 'retire' : '', group: this.groupOf(c.lane),
+        meta: [opWord[op] + ' in ' + crId],
+        kv: [['Operation', opWord[op]], ['Proposed revision', id.slice(-3)], ['Review snapshot', 'frozen']],
+        diff: it[4],
+        acts: [['Open artifact thread', 1, 'thread|' + id], ['Compare revisions', 0]]
+      });
+      edges.push({ a: crId, b: id, label: opWord[op].toLowerCase(), kind: op === '-' ? 'retire' : '' });
+      (it[3] || []).forEach(d => edges.push({ a: id, b: d, label: op === '-' ? 'retire cascade' : 'allocates to', kind: op === '-' ? 'retire' : '' }));
+    });
+    (rich.down || []).forEach((d, i) => {
+      const id = d[0], op = d[1];
+      nodes.push({
+        id, lane: 2, row: i, tone: opTone[op], badge: op === '+' ? 'NEW' : op === '~' ? 'MOD' : 'RET',
+        state: opWord[op], title: d[2], cls: op === '-' ? 'retire' : '',
+        group: id.indexOf('HLR') === 0 ? 'hlr' : id.indexOf('LLR') === 0 ? 'llr' : id.indexOf('SYS') === 0 ? 'sys' : 'llr',
+        meta: ['downstream of ' + crId],
+        kv: [['Operation', opWord[op]], ['Assessment', op === '-' ? 'retire cascade' : 'derived, build-scoped']],
+        acts: [['Open artifact thread', 1, 'thread|' + id], ['Open assessment', 0]]
+      });
+      (d[3] || []).forEach(v => edges.push({ a: id, b: v, label: 'covered by', kind: v === 'SYSTP-000040.00' ? 'suspect' : '' }));
+    });
+    (rich.ver || []).forEach((v, i) => {
+      const id = v[0], state = v[1];
+      nodes.push({
+        id, lane: 3, row: i + 0.4, tone: state === 'Suspect' ? D.T.warn : D.T.ver, badge: 'TP', state, title: v[2],
+        cls: state === 'Suspect' ? 'suspect' : '', group: 'ver',
+        meta: [state === 'Suspect' ? 'coverage unsettled' : 'coverage settled'],
+        kv: [['State', state], ['Level', id.indexOf('SYSTP') === 0 ? 'System' : 'Software']],
+        note: state === 'Suspect' ? 'Coverage settles only when the named procedure has no revision in flight. Two system requirements read Suspect until .01 is approved.' : null,
+        acts: [['Open artifact thread', 1, 'thread|' + id], ['Coverage review', 0]]
+      });
+      (rich.eff || []).forEach(ef => edges.push({ a: id, b: ef[0], label: 'evidence for', kind: state === 'Suspect' ? 'suspect' : '' }));
+    });
+    (rich.eff || []).forEach((e, i) => {
+      const id = e[0], state = e[1];
+      nodes.push({
+        id, lane: 4, row: i + 0.9, tone: state === 'Released' ? D.T.sys : state === 'Selected' ? D.T.ver : D.T.mute,
+        badge: 'BLD', state, title: e[2], cls: state === 'Not selected' ? 'ghost' : '', group: 'sys',
+        meta: [state], kv: [['Selection', state], ['Approval', state === 'Selected' ? 'complete' : 'separate from selection']],
+        acts: [['Open baseline', 1]]
+      });
+    });
+    const ids = new Set(nodes.map(n => n.id));
+    this.nodes = nodes;
+    this.edges = edges.filter(e => ids.has(e.a) && ids.has(e.b));
+  }
+
+  buildThread() {
+    const TH = this.D.THREAD;
+    this._synthetic = false;
+    this.lanes = TH.lanes.slice();
+    const rows = [0, 0, 0, 0, 0, 0];
+    this.nodes = TH.nodes.map(n => ({
+      id: n[0], lane: n[1], row: rows[n[1]]++, tone: n[2], badge: n[3], state: n[4], title: n[5],
+      cls: n[4] === 'Suspect' ? 'suspect' : '',
+      group: n[3] === 'PR' ? 'pr' : n[3] === 'SYS' || n[3] === 'BLD' ? 'sys' : n[3] === 'HLR' ? 'hlr' : n[3] === 'LLR' ? 'llr' : 'ver',
+      meta: [n[4] === 'Suspect' ? 'coverage unsettled' : 'exact revision carried by Build 1.6'],
+      kv: [['State', n[4]], ['Revision', n[0].slice(-3)], ['In build', 'FMS 1.6']],
+      note: n[4] === 'Suspect' ? 'Revision .01 is in flight, so coverage does not settle and this link reads Suspect.' : null,
+      acts: n[0].indexOf('CR-') > 0 ? [['Open this change', 1, 'inside|' + n[0]], ['Open record', 0]] : [['Open record', 1], ['Show impact', 0]]
+    }));
+    this.edges = TH.edges.map(e => ({ a: e[0], b: e[1], label: e[2], kind: e[3] || '' }));
+  }
+
+  /* ==== selection and tracing =========================================== */
+  select(id) {
+    if (id && this.mode === 'inside') {
+      const n = this.nodes.find(x => x.id === id);
+      if (n && n.lane === 0 && id !== this.crFocus) { this.setMode('inside', id); return; }
+    }
+    this.sel = id;
+    Object.keys(this.cardEls).forEach(kk => this.cardEls[kk].classList.toggle('sel', kk === id));
+    this.highlight(id);
+    if (!id) { this.insp.classList.remove('on'); this.layout(); this.place(); return; }
+
+    this.syncFrom(id, -1);
+    const direct = this.edges.filter(e => e.a === id || e.b === id).map(e => (e.a === id ? e.b : e.a));
+    const me = this.nodes.find(n => n.id === id);
+    if (this.dockPref === 'auto') {
+      const right = direct.filter(x => { const n = this.nodes.find(y => y.id === x); return n && n.lane > me.lane; }).length;
+      const left = direct.filter(x => { const n = this.nodes.find(y => y.id === x); return n && n.lane < me.lane; }).length;
+      this.dock = right >= left ? 'left' : 'right';
+    } else this.dock = this.dockPref;
+    this.insp.className = 'dtInspector dock-' + this.dock;
+    this.paintInspector(id);
+    this.insp.classList.add('on');
+
+    setTimeout(() => this.frameNodes(direct.concat([id]), true, 1.12), 50);
+  }
+
+  /* Highlight the whole directed trace — every hop down and every hop up —
+     and push everything else back rather than hiding it. */
+  highlight(id) {
+    this.focusId = id;
+    const W = id ? this.web(id) : null;
+    this.wcache = W;
+    Object.keys(this.cardEls).forEach(nid => {
+      const el = this.cardEls[nid];
+      const inWeb = !!W && W.nodes.has(nid);
+      el.classList.toggle('fade', !!W && !inWeb);
+      el.classList.toggle('web', !!W && inWeb && nid !== id);
+      const tag = el.querySelector ? el.querySelector('.dtHopTag') : null;
+      if (tag && W && inWeb && nid !== id) tag.textContent = W.hop[nid];
+    });
+    const showLabels = this.k >= 1.05;
+    (this.edgeEls || []).forEach(o => {
+      const hot = !!W && W.edges.has(o.e.a + '>' + o.e.b);
+      o.hot = hot;
+      if (!o.sus && !o.ret) {
+        o.p.setAttribute('stroke', hot ? '#2a8e83' : '#9dc2c9');
+        o.p.setAttribute('stroke-width', hot ? 2.6 : 1.5);
+      } else o.p.setAttribute('stroke-width', hot ? (o.sus ? 2.8 : 2.2) : (o.sus ? 2 : 1.5));
+      const base = !W ? (o.vis === false ? 0.06 : 1) : (hot ? 1 : 0.1);
+      o.p.style.opacity = base; o.dot.style.opacity = base;
+      o.t.style.opacity = hot ? 1 : (showLabels && !W ? 0.9 : 0);
+    });
+  }
+
+  applyDim() {
+    const f = this.filters, q = this.q;
+    this.nodes.forEach(n => {
+      const el = this.cardEls[n.id]; if (!el) return;
+      let ok = true;
+      if (f.size) {
+        const only = f.size === 1 && f.has('suspect');
+        ok = only ? n.state === 'Suspect' : (f.has(n.group) || (f.has('suspect') && n.state === 'Suspect'));
+      }
+      if (ok && q) ok = (n.id + ' ' + n.title).toLowerCase().indexOf(q) >= 0;
+      el.classList.toggle('dim', !ok);
+    });
+  }
+
+  paintInspector(id) {
+    const n = this.nodes.find(x => x.id === id);
+    if (!n) return;
+    const W = this.web(id);
+    const direct = {};
+    this.edges.forEach(e => { if (e.a === id) direct[e.b] = e.label; else if (e.b === id) direct[e.a] = e.label; });
+
+    const list = set => {
+      const arr = Array.from(set).map(x => ({ id: x, hop: W.hop[x] || 1 })).sort((a, b) => a.hop - b.hop || (a.id < b.id ? -1 : 1));
+      if (!arr.length) return '<div class="dtRelEmpty">None recorded</div>';
+      return arr.map(r => '<button data-jump="' + r.id + '" class="' + (r.hop > 1 ? 'far' : '') + '">' +
+        '<span style="min-width:0"><small>' + (r.hop === 1 ? (direct[r.id] || 'LINKED').toUpperCase() : r.hop + ' HOPS') + '</small>' +
+        '<span>' + r.id + '</span></span><em>&rsaquo;</em></button>').join('');
+    };
+    const dockBtn = (v, path, t) => '<button data-dock="' + v + '" title="' + t + '" class="' + (this.dockPref === v ? 'on' : '') + '">' +
+      '<svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4">' + path + '</svg></button>';
+
+    this.insp.innerHTML = [
+      '<div class="dtPanelTools">',
+      dockBtn('bottom', '<rect x="1.5" y="2.5" width="11" height="9" rx="1.5"></rect><path d="M1.5 8.5h11"></path>', 'Flatten to the bottom'),
+      dockBtn('right', '<rect x="1.5" y="2.5" width="11" height="9" rx="1.5"></rect><path d="M8.5 2.5v9"></path>', 'Dock right'),
+      dockBtn('auto', '<path d="M7 2v10M2 7h10"></path>', 'Place it automatically'),
+      '<button data-close="1" title="Close">&times;</button></div>',
+      '<div class="dtPanelGrid">',
+      '  <div class="dtPanelHead"><div class="dtEyebrow">SELECTED RECORD</div>',
+      '    <div style="display:flex;align-items:center;gap:8px;margin-top:7px"><span class="dtId" style="font-size:13px">' + n.id + '</span>',
+      '    <span class="dtPill" style="margin-left:0;background:' + this.D.st(n.state)[0] + ';color:' + this.D.st(n.state)[1] + '">' + n.state.toUpperCase() + '</span></div>',
+      '    <h3>' + n.title + '</h3></div>',
+      '  <div class="dtPanelCol"><div class="dtRelHead"><div class="dtEyebrow">UPSTREAM</div><span>' + W.up.size + ' records, all hops</span></div>',
+      '    <div class="dtRel">' + list(W.up) + '</div></div>',
+      '  <div class="dtPanelCol"><div class="dtRelHead"><div class="dtEyebrow">DOWNSTREAM</div><span>' + W.down.size + ' records, all hops</span></div>',
+      '    <div class="dtRel">' + list(W.down) + '</div></div>',
+      '  <div class="dtActs">' + (n.acts || []).map(a =>
+        '<button class="' + (a[1] ? 'primary' : '') + '"' + (a[2] ? ' data-go="' + a[2] + '"' : '') + '>' + a[0] + '</button>').join('') + '</div>',
+      '</div>'
+    ].join('');
+
+    this.insp.querySelector('[data-close]').onclick = () => this.select(null);
+    this.insp.querySelectorAll('[data-dock]').forEach(b => { b.onclick = () => { this.dockPref = b.dataset.dock; this.select(this.sel); }; });
+    this.insp.querySelectorAll('[data-jump]').forEach(b => { b.onclick = () => this.select(b.dataset.jump); });
+    this.insp.querySelectorAll('[data-go]').forEach(b => { b.onclick = () => { const p = b.dataset.go.split('|'); this.setMode(p[0], p[1]); }; });
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,200 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&amp;family=DM+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #176f68; } a:hover { color: #0f4f4a; }
+    .dirB-card { position: absolute; width: 124px; height: 66px; box-sizing: border-box; display: flex; flex-direction: column; gap: 5px; border: 1px solid #dce3eb; border-radius: 12px; background: #ffffff; padding: 8px 9px; box-shadow: 0 7px 19px rgba(16,36,57,.08); z-index: 2; }
+    .dirB-card.is-focus { border-color: #49ad9f; box-shadow: 0 0 0 3px rgba(58,167,151,.16), 0 12px 26px rgba(16,70,68,.14); }
+    .dirB-card.is-suspect { border-color: #d6a33b; background: #fff8e8; }
+    .dirB-row { display: flex; align-items: center; gap: 6px; }
+    .dirB-badge { width: 17px; height: 17px; flex: 0 0 17px; display: grid; place-items: center; border-radius: 6px; background: #dff3ee; color: #176f68; font: 800 8px 'DM Sans', sans-serif; letter-spacing: .02em; }
+    .dirB-badge.b-blue { background: #e7effb; color: #3569a8; }
+    .dirB-badge.b-amber { background: #fdefcf; color: #8a5a00; }
+    .dirB-badge.b-slate { background: #eef1f6; color: #566579; }
+    .dirB-id { font: 600 10px 'IBM Plex Mono', ui-monospace, monospace; color: #17324d; letter-spacing: -.01em; white-space: nowrap; }
+    .dirB-pill { margin-left: auto; border-radius: 999px; padding: 2px 6px; font: 700 8px 'DM Sans', sans-serif; letter-spacing: .03em; white-space: nowrap; }
+    .dirB-title { display: -webkit-box; overflow: hidden; color: #5b6b7e; font-size: 10px; line-height: 1.32; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .dirB-laneHead { position: absolute; width: 124px; font: 800 9px 'DM Sans', sans-serif; letter-spacing: .12em; color: #7a8a9c; }
+    .dirB-flow { stroke-dasharray: 4 10; animation: dirB-flow 2.8s linear infinite; }
+    @keyframes dirB-flow { to { stroke-dashoffset: -28; } }
+    .dirB-pulse { animation: dirB-pulse 3.2s ease-in-out infinite; }
+    @keyframes dirB-pulse { 0%,100% { opacity: .45; } 50% { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .dirB-flow, .dirB-pulse { animation: none; } }
+  </style>
+</helmet>
+<div style="position: relative; width: 900px; height: 620px; overflow: hidden; background: linear-gradient(180deg, #ffffff 0%, #f3f6f9 22%, #eef3f7 100%); font-family: 'DM Sans', system-ui, sans-serif; color: #142139;">
+
+  <div style="position: absolute; inset: 76px 0 150px 0; background-image: radial-gradient(#d9e2ea 1px, transparent 1px); background-size: 22px 22px; opacity: .8;"></div>
+
+  <svg viewBox="0 0 900 620" width="900" height="620" style="position: absolute; top: 0; left: 0;" aria-hidden="true">
+    <g fill="none" stroke="#23877d" stroke-opacity=".11" stroke-width="13" stroke-linecap="round">
+      <path d="M150 233 C160 233, 161 233, 171 233"></path>
+      <path d="M295 233 C315 233, 296 275, 316 275"></path>
+      <path d="M440 275 C452 275, 450 191, 461 191"></path>
+      <path d="M585 191 C597 191, 595 275, 606 275"></path>
+      <path d="M730 275 C742 275, 740 233, 751 233"></path>
+    </g>
+
+    <g fill="none" stroke="#9dc2c9" stroke-width="1.5" stroke-linecap="round">
+      <path d="M150 149 C160 149, 161 149, 171 149"></path>
+      <path d="M295 149 C325 149, 286 191, 316 191"></path>
+      <path d="M295 317 C325 317, 286 359, 316 359"></path>
+      <path d="M295 401 C360 401, 400 191, 461 191"></path>
+      <path d="M440 359 C452 359, 450 275, 461 275"></path>
+      <path d="M585 275 C597 275, 595 359, 606 359"></path>
+      <path d="M730 359 C742 359, 740 233, 751 233"></path>
+    </g>
+
+    <g fill="none" stroke="#2a8e83" stroke-width="2" stroke-linecap="round">
+      <path d="M150 233 C160 233, 161 233, 171 233"></path>
+      <path d="M295 233 C315 233, 296 275, 316 275"></path>
+      <path d="M440 275 C452 275, 450 191, 461 191"></path>
+      <path d="M585 191 C597 191, 595 275, 606 275"></path>
+      <path d="M730 275 C742 275, 740 233, 751 233"></path>
+      <path d="M813 266 L813 284"></path>
+    </g>
+    <g fill="none" stroke="#a8ece1" stroke-width="1.6" stroke-linecap="round" class="dirB-flow">
+      <path d="M150 233 C160 233, 161 233, 171 233"></path>
+      <path d="M295 233 C315 233, 296 275, 316 275"></path>
+      <path d="M440 275 C452 275, 450 191, 461 191"></path>
+      <path d="M585 191 C597 191, 595 275, 606 275"></path>
+      <path d="M730 275 C742 275, 740 233, 751 233"></path>
+    </g>
+
+    <path d="M440 191 C500 191, 546 191, 606 191" fill="none" stroke="#d6a33b" stroke-width="2" stroke-dasharray="6 6" class="dirB-pulse"></path>
+    <text x="470" y="184" font-family="'DM Sans', sans-serif" font-size="9" font-weight="700" fill="#8a5a00" letter-spacing=".04em">SUSPECT · SKIPS CASE LAYER (SYSTEM IS ONE-TIER)</text>
+
+    <g fill="#2a8e83">
+      <path d="M171 233 l-6 -3.4 v6.8 z"></path>
+      <path d="M316 275 l-6 -3.4 v6.8 z"></path>
+      <path d="M461 191 l-6 -3.4 v6.8 z"></path>
+      <path d="M606 275 l-6 -3.4 v6.8 z"></path>
+      <path d="M751 233 l-6 -3.4 v6.8 z"></path>
+    </g>
+  </svg>
+
+  <div class="dirB-laneHead" style="left: 26px;  top: 86px;">PROBLEM REPORT</div>
+  <div class="dirB-laneHead" style="left: 171px; top: 86px;">CHANGE REQUEST</div>
+  <div class="dirB-laneHead" style="left: 316px; top: 86px;">REQUIREMENT</div>
+  <div class="dirB-laneHead" style="left: 461px; top: 86px;">TEST CASE</div>
+  <div class="dirB-laneHead" style="left: 606px; top: 86px;">PROCEDURE</div>
+  <div class="dirB-laneHead" style="left: 751px; top: 86px;">RESULT · BUILD</div>
+
+  <div class="dirB-card" style="left: 26px; top: 116px;">
+    <div class="dirB-row"><span class="dirB-badge b-slate">PR</span><span class="dirB-id">PR-00003.00</span></div>
+    <div class="dirB-title">Route discontinuity remains after waypoint deletion</div>
+  </div>
+  <div class="dirB-card" style="left: 26px; top: 200px;">
+    <div class="dirB-row"><span class="dirB-badge b-slate">PR</span><span class="dirB-id">PR-00007.00</span></div>
+    <div class="dirB-title">Hold-page sequencing shows stale leg information</div>
+  </div>
+
+  <div class="dirB-card" style="left: 171px; top: 116px;">
+    <div class="dirB-row"><span class="dirB-badge">SYS</span><span class="dirB-id">SRCR-00039.00</span></div>
+    <div class="dirB-title">Oceanic round-robin routing</div>
+    <span class="dirB-pill" style="position: absolute; right: 9px; top: 8px; background: #e8f4ef; color: #28735f;">APPROVED</span>
+  </div>
+  <div class="dirB-card" style="left: 171px; top: 200px;">
+    <div class="dirB-row"><span class="dirB-badge b-blue">HLR</span><span class="dirB-id">HLRCR-00127.00</span></div>
+    <div class="dirB-title">Waypoint sequencing rework</div>
+    <span class="dirB-pill" style="position: absolute; right: 9px; top: 8px; background: #e7effb; color: #3569a8;">IN REVIEW</span>
+  </div>
+  <div class="dirB-card" style="left: 171px; top: 284px;">
+    <div class="dirB-row"><span class="dirB-badge b-blue">LLR</span><span class="dirB-id">LLRCR-00061.00</span></div>
+    <div class="dirB-title">Crossfill advisory de-duplication</div>
+    <span class="dirB-pill" style="position: absolute; right: 9px; top: 8px; background: #eef1f5; color: #5f7080;">DRAFT</span>
+  </div>
+  <div class="dirB-card" style="left: 171px; top: 368px;">
+    <div class="dirB-row"><span class="dirB-badge b-amber">TCR</span><span class="dirB-id">HLRTCR-000002.00</span></div>
+    <div class="dirB-title">HLR case coverage refresh</div>
+    <span class="dirB-pill" style="position: absolute; right: 9px; top: 8px; background: #e8f4ef; color: #28735f;">APPROVED</span>
+  </div>
+
+  <div class="dirB-card is-suspect" style="left: 316px; top: 158px;">
+    <div class="dirB-row"><span class="dirB-badge b-amber">SYS</span><span class="dirB-id">SYSR-000100.01</span></div>
+    <div class="dirB-title">Sequence oceanic waypoints in round-robin order</div>
+  </div>
+  <div class="dirB-card is-focus" style="left: 316px; top: 242px;">
+    <div class="dirB-row"><span class="dirB-badge b-blue">HLR</span><span class="dirB-id">HLR-000075.02</span></div>
+    <div class="dirB-title">Advance to next eligible waypoint on trigger</div>
+  </div>
+  <div class="dirB-card" style="left: 316px; top: 326px;">
+    <div class="dirB-row"><span class="dirB-badge b-blue">LLR</span><span class="dirB-id">LLR-000220.00</span></div>
+    <div class="dirB-title">Skip ineligible waypoint without corrupting state</div>
+  </div>
+
+  <div class="dirB-card" style="left: 461px; top: 158px;">
+    <div class="dirB-row"><span class="dirB-badge">TC</span><span class="dirB-id">HLRTC-000118.00</span></div>
+    <div class="dirB-title">Round-robin advance — functional</div>
+  </div>
+  <div class="dirB-card" style="left: 461px; top: 242px;">
+    <div class="dirB-row"><span class="dirB-badge">TC</span><span class="dirB-id">LLRTC-000209.00</span></div>
+    <div class="dirB-title">Ineligible waypoint — robustness</div>
+  </div>
+
+  <div class="dirB-card is-suspect" style="left: 606px; top: 158px;">
+    <div class="dirB-row"><span class="dirB-badge b-amber">TP</span><span class="dirB-id">SYSTP-000040.00</span></div>
+    <div class="dirB-title">Revision in flight — coverage unsettled</div>
+    <span class="dirB-pill" style="position: absolute; right: 9px; top: 8px; background: #fdefcf; color: #8a5a00;">SUSPECT</span>
+  </div>
+  <div class="dirB-card" style="left: 606px; top: 242px;">
+    <div class="dirB-row"><span class="dirB-badge">TP</span><span class="dirB-id">HLRTP-000120.00</span></div>
+    <div class="dirB-title">Mandatory Build 1.6 pre-release procedure</div>
+  </div>
+  <div class="dirB-card" style="left: 606px; top: 326px;">
+    <div class="dirB-row"><span class="dirB-badge">TP</span><span class="dirB-id">LLRTP-000220.00</span></div>
+    <div class="dirB-title">Waypoint skip regression</div>
+  </div>
+
+  <div class="dirB-card" style="left: 751px; top: 200px;">
+    <div class="dirB-row"><span class="dirB-badge">EX</span><span class="dirB-id">EXE-004821</span></div>
+    <div class="dirB-title">Executed 2026-08-14 · evidence hashed</div>
+    <span class="dirB-pill" style="position: absolute; right: 9px; top: 8px; background: #e8f4ef; color: #28735f;">PASS</span>
+  </div>
+  <div class="dirB-card" style="left: 751px; top: 284px;">
+    <div class="dirB-row"><span class="dirB-badge">BLD</span><span class="dirB-id">FMS-1.5.0</span></div>
+    <div class="dirB-title">Released baseline · SHA-256 manifest</div>
+    <span class="dirB-pill" style="position: absolute; right: 9px; top: 8px; background: #dff3ee; color: #176f68;">RELEASED</span>
+  </div>
+
+  <div style="position: absolute; top: 0; left: 0; right: 0; height: 76px; display: flex; align-items: center; justify-content: space-between; padding: 0 26px; border-bottom: 1px solid #e3e9ee; background: #ffffff; box-sizing: border-box;">
+    <div style="display: flex; align-items: baseline; gap: 12px;">
+      <span style="font: 800 10px 'DM Sans', sans-serif; letter-spacing: .16em; color: #23877d;">DIRECTION B</span>
+      <span style="font: 700 23px 'Manrope', sans-serif; letter-spacing: -.01em; color: #142139;">Certified Flow</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 9px; font-size: 11px; color: #606c7e;">
+      <span style="border: 1px solid #dce3eb; border-radius: 999px; padding: 5px 11px; background: #f6f8fb;">Build 1.6 · in work</span>
+      <span style="border: 1px solid #dce3eb; border-radius: 999px; padding: 5px 11px; background: #f6f8fb;">Thread from PR-00007.00</span>
+      <span style="border: 1px solid #cfe5df; border-radius: 999px; padding: 5px 11px; background: #eff9f6; color: #176f68; font-weight: 600;">Chain complete · 7 hops</span>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 26px; right: 26px; top: 496px; display: flex; align-items: center; gap: 18px; font-size: 10.5px; color: #62718a;">
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 22px; height: 3px; border-radius: 999px; background: #2a8e83; display: inline-block;"></i>Selected thread</span>
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 22px; height: 3px; border-radius: 999px; background: #9dc2c9; display: inline-block;"></i>Other exact links</span>
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 22px; height: 3px; border-radius: 999px; background: repeating-linear-gradient(90deg,#d6a33b 0 5px,transparent 5px 10px); display: inline-block;"></i>Suspect</span>
+    <span style="margin-left: auto; color: #7c8b9e;">Drag the canvas sideways · click any card to open the exact revision</span>
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 82px; display: grid; grid-template-columns: 1fr 1fr; gap: 26px; padding: 16px 26px; border-top: 1px solid #e3e9ee; background: #ffffff; box-sizing: border-box;">
+    <div>
+      <div style="font: 800 9.5px 'DM Sans', sans-serif; letter-spacing: .14em; color: #23877d; margin-bottom: 5px;">BEST AT</div>
+      <div style="font-size: 12px; line-height: 1.45; color: #42526a;">Reading one exact chain end to end — the shape a certification reviewer already thinks in, with revisions visible at every hop.</div>
+    </div>
+    <div>
+      <div style="font: 800 9.5px 'DM Sans', sans-serif; letter-spacing: .14em; color: #8a5a00; margin-bottom: 5px;">TRADEOFF</div>
+      <div style="font-size: 12px; line-height: 1.45; color: #42526a;">Least novel of the four, and 1,250 requirements will not fit these lanes — it needs filtering rather than free roaming.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

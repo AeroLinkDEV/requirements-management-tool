@@ -1,0 +1,205 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&amp;family=DM+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #176f68; } a:hover { color: #0f4f4a; }
+    .dirC-tile { position: absolute; width: 264px; height: 140px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; border: 1px solid #dce3eb; border-radius: 14px; background: #ffffff; padding: 14px 15px; box-shadow: 0 10px 28px rgba(16,36,57,.07); }
+    .dirC-tile.is-lead { border-color: #b6ddd4; box-shadow: 0 0 0 3px rgba(58,167,151,.10), 0 14px 34px rgba(16,70,68,.11); }
+    .dirC-tile.is-suspect { border-color: #e6cd94; }
+    .dirC-tileTop { display: flex; align-items: center; gap: 8px; }
+    .dirC-id { font: 600 11.5px 'IBM Plex Mono', ui-monospace, monospace; color: #17324d; }
+    .dirC-pill { margin-left: auto; border-radius: 999px; padding: 3px 8px; font: 700 9px 'DM Sans', sans-serif; letter-spacing: .04em; }
+    .dirC-name { font: 600 14px 'Manrope', sans-serif; color: #142139; line-height: 1.25; }
+    .dirC-spark { display: flex; align-items: flex-end; gap: 3px; height: 26px; }
+    .dirC-spark i { width: 5px; border-radius: 2px; display: block; }
+    .dirC-meta { display: flex; align-items: center; gap: 10px; font-size: 10.5px; color: #6c7c90; }
+    .dirC-meta b { font-weight: 600; color: #42526a; }
+    .dirC-seg { min-height: 30px; display: flex; align-items: center; gap: 2px; border: 1px solid #dce3eb; border-radius: 999px; background: #eef2f6; padding: 3px; }
+    .dirC-seg span { border-radius: 999px; padding: 5px 14px; font: 600 11px 'DM Sans', sans-serif; color: #62718a; }
+    .dirC-seg span.on { background: #ffffff; color: #176f68; box-shadow: 0 2px 7px rgba(20,45,70,.13); font-weight: 700; }
+    .dirC-breathe { animation: dirC-breathe 4.6s ease-in-out infinite; }
+    @keyframes dirC-breathe { 0%,100% { transform: scaleY(1); } 50% { transform: scaleY(.72); } }
+    .dirC-glow { animation: dirC-glow 3.4s ease-in-out infinite; }
+    @keyframes dirC-glow { 0%,100% { box-shadow: 0 0 0 0 rgba(214,163,59,.36); } 50% { box-shadow: 0 0 0 7px rgba(214,163,59,0); } }
+    @media (prefers-reduced-motion: reduce) { .dirC-breathe, .dirC-glow { animation: none; } }
+  </style>
+</helmet>
+<div style="position: relative; width: 900px; height: 620px; overflow: hidden; background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 26%, #e9eff5 100%); font-family: 'DM Sans', system-ui, sans-serif; color: #142139;">
+
+  <div style="position: absolute; inset: 76px 0 150px 0; background-image: radial-gradient(#d9e2ea 1px, transparent 1px); background-size: 26px 26px; opacity: .75;"></div>
+  <div style="position: absolute; left: 430px; top: 120px; width: 620px; height: 420px; border-radius: 50%; background: radial-gradient(closest-side, rgba(35,135,125,.10), rgba(35,135,125,0));"></div>
+
+  <div class="dirC-tile is-lead" style="left: 24px; top: 132px;">
+    <div class="dirC-tileTop"><span class="dirC-id">SRCR-00039.00</span><span class="dirC-pill" style="background: #e8f4ef; color: #28735f;">APPROVED</span></div>
+    <div class="dirC-name">Oceanic round-robin routing</div>
+    <div class="dirC-spark">
+      <i class="dirC-breathe" style="height: 22px; background: #2a8e83;"></i>
+      <i class="dirC-breathe" style="height: 15px; background: #2a8e83; animation-delay: .3s;"></i>
+      <i style="height: 19px; background: #4aa79c;"></i>
+      <i style="height: 11px; background: #4aa79c;"></i>
+      <i style="height: 24px; background: #6bb9d8;"></i>
+      <i style="height: 14px; background: #6bb9d8;"></i>
+      <i style="height: 9px; background: #6bb9d8;"></i>
+      <i style="height: 17px; background: #8fd0b4;"></i>
+      <i style="height: 12px; background: #8fd0b4;"></i>
+      <i style="height: 20px; background: #8fd0b4;"></i>
+      <i style="height: 8px; background: #cfdae5;"></i>
+      <i style="height: 13px; background: #cfdae5;"></i>
+    </div>
+    <div class="dirC-meta"><span><b>6</b> requirements</span><span><b>4</b> procedures</span><span><b>9</b> results</span></div>
+  </div>
+
+  <div class="dirC-tile" style="left: 318px; top: 132px;">
+    <div class="dirC-tileTop"><span class="dirC-id">HLRCR-00127.00</span><span class="dirC-pill" style="background: #e7effb; color: #3569a8;">IN REVIEW</span></div>
+    <div class="dirC-name">Waypoint sequencing rework</div>
+    <div class="dirC-spark">
+      <i style="height: 16px; background: #4f8fd0;"></i>
+      <i style="height: 23px; background: #4f8fd0;"></i>
+      <i style="height: 10px; background: #4f8fd0;"></i>
+      <i style="height: 18px; background: #6bb9d8;"></i>
+      <i style="height: 13px; background: #6bb9d8;"></i>
+      <i style="height: 21px; background: #6bb9d8;"></i>
+      <i style="height: 9px; background: #8fd0b4;"></i>
+      <i style="height: 15px; background: #8fd0b4;"></i>
+      <i style="height: 7px; background: #cfdae5;"></i>
+      <i style="height: 11px; background: #cfdae5;"></i>
+      <i style="height: 6px; background: #cfdae5;"></i>
+      <i style="height: 9px; background: #cfdae5;"></i>
+    </div>
+    <div class="dirC-meta"><span><b>12</b> requirements</span><span><b>5</b> procedures</span><span>2 holders</span></div>
+  </div>
+
+  <div class="dirC-tile is-suspect dirC-glow" style="left: 612px; top: 132px;">
+    <div class="dirC-tileTop"><span class="dirC-id">SRCR-00041.00</span><span class="dirC-pill" style="background: #fdefcf; color: #8a5a00;">2 SUSPECT</span></div>
+    <div class="dirC-name">Hold-page leg display</div>
+    <div class="dirC-spark">
+      <i style="height: 14px; background: #d6a33b;"></i>
+      <i style="height: 20px; background: #d6a33b;"></i>
+      <i style="height: 11px; background: #e0bd75;"></i>
+      <i style="height: 17px; background: #6bb9d8;"></i>
+      <i style="height: 8px; background: #6bb9d8;"></i>
+      <i style="height: 13px; background: #8fd0b4;"></i>
+      <i style="height: 19px; background: #8fd0b4;"></i>
+      <i style="height: 7px; background: #cfdae5;"></i>
+      <i style="height: 10px; background: #cfdae5;"></i>
+      <i style="height: 6px; background: #cfdae5;"></i>
+      <i style="height: 12px; background: #cfdae5;"></i>
+      <i style="height: 8px; background: #cfdae5;"></i>
+    </div>
+    <div class="dirC-meta"><span><b>4</b> requirements</span><span><b>3</b> procedures</span><span style="color: #8a5a00; font-weight: 600;">coverage unsettled</span></div>
+  </div>
+
+  <div class="dirC-tile" style="left: 24px; top: 294px;">
+    <div class="dirC-tileTop"><span class="dirC-id">LLRCR-00061.00</span><span class="dirC-pill" style="background: #eef1f5; color: #5f7080;">DRAFT</span></div>
+    <div class="dirC-name">Crossfill advisory de-duplication</div>
+    <div class="dirC-spark">
+      <i style="height: 12px; background: #92a6bd;"></i>
+      <i style="height: 18px; background: #92a6bd;"></i>
+      <i style="height: 8px; background: #92a6bd;"></i>
+      <i style="height: 14px; background: #b9c7d6;"></i>
+      <i style="height: 10px; background: #b9c7d6;"></i>
+      <i style="height: 6px; background: #cfdae5;"></i>
+      <i style="height: 9px; background: #cfdae5;"></i>
+      <i style="height: 5px; background: #cfdae5;"></i>
+      <i style="height: 7px; background: #cfdae5;"></i>
+      <i style="height: 4px; background: #cfdae5;"></i>
+      <i style="height: 6px; background: #cfdae5;"></i>
+      <i style="height: 5px; background: #cfdae5;"></i>
+    </div>
+    <div class="dirC-meta"><span><b>3</b> requirements</span><span>no procedures yet</span></div>
+  </div>
+
+  <div class="dirC-tile" style="left: 318px; top: 294px;">
+    <div class="dirC-tileTop"><span class="dirC-id">HLRTCR-000002.00</span><span class="dirC-pill" style="background: #e8f4ef; color: #28735f;">APPROVED</span></div>
+    <div class="dirC-name">HLR case coverage refresh</div>
+    <div class="dirC-spark">
+      <i style="height: 20px; background: #3f9c7e;"></i>
+      <i style="height: 14px; background: #3f9c7e;"></i>
+      <i style="height: 22px; background: #3f9c7e;"></i>
+      <i style="height: 11px; background: #8fd0b4;"></i>
+      <i style="height: 17px; background: #8fd0b4;"></i>
+      <i style="height: 9px; background: #8fd0b4;"></i>
+      <i style="height: 15px; background: #8fd0b4;"></i>
+      <i style="height: 12px; background: #cfdae5;"></i>
+      <i style="height: 7px; background: #cfdae5;"></i>
+      <i style="height: 10px; background: #cfdae5;"></i>
+      <i style="height: 6px; background: #cfdae5;"></i>
+      <i style="height: 8px; background: #cfdae5;"></i>
+    </div>
+    <div class="dirC-meta"><span><b>18</b> cases</span><span><b>18</b> procedures</span><span>0 gaps</span></div>
+  </div>
+
+  <div class="dirC-tile" style="left: 612px; top: 294px;">
+    <div class="dirC-tileTop"><span class="dirC-id">PR-00003 · 00007 · 00010</span></div>
+    <div class="dirC-name">3 open problem reports</div>
+    <div class="dirC-meta"><span>feeding this build</span></div>
+  </div>
+
+  <div style="position: absolute; left: 612px; top: 192px; width: 216px; height: 216px; border-radius: 50%; overflow: hidden; border: 3px solid #ffffff; background: #f9fbfc; background-image: radial-gradient(#dbe4ea 1px, transparent 1px); background-size: 14px 14px; box-shadow: 0 0 0 1px rgba(35,135,125,.30), 0 26px 56px rgba(13,40,64,.26);">
+    <div style="position: absolute; left: 22px; top: 26px; font: 800 9px 'DM Sans', sans-serif; letter-spacing: .14em; color: #7f93a6;">ARTIFACT LEVEL</div>
+    <svg viewBox="0 0 216 216" width="216" height="216" style="position: absolute; inset: 0;" aria-hidden="true">
+      <path d="M52 70 L52 112" stroke="#d6a33b" stroke-width="2" stroke-dasharray="5 5" fill="none"></path>
+      <path d="M52 112 L52 154" stroke="#b7c8d4" stroke-width="2" fill="none"></path>
+      <circle cx="52" cy="70" r="7" fill="#2a8e83" stroke="#ffffff" stroke-width="2"></circle>
+      <circle cx="52" cy="112" r="7" fill="#d6a33b" stroke="#ffffff" stroke-width="2"></circle>
+      <circle cx="52" cy="154" r="7" fill="#b7c8d4" stroke="#ffffff" stroke-width="2"></circle>
+    </svg>
+    <div style="position: absolute; left: 68px; top: 62px; font: 600 10px 'IBM Plex Mono', monospace; color: #17324d;">SYSR-000100.01</div>
+    <div style="position: absolute; left: 68px; top: 104px; font: 600 10px 'IBM Plex Mono', monospace; color: #8a5a00;">SYSTP-000040.00</div>
+    <div style="position: absolute; left: 68px; top: 117px; font-size: 10px; color: #96693a;">revision in flight</div>
+    <div style="position: absolute; left: 68px; top: 146px; font: 600 10px 'IBM Plex Mono', monospace; color: #5f7080;">Execution — none</div>
+  </div>
+
+  <div style="position: absolute; left: 596px; top: 418px; display: flex; align-items: center; gap: 8px; border: 1px solid #cfe0e5; border-radius: 999px; background: #ffffff; padding: 6px 13px; box-shadow: 0 6px 16px rgba(16,36,57,.10);">
+    <span style="width: 7px; height: 7px; border-radius: 999px; background: #23877d; display: inline-block;"></span>
+    <span style="font-size: 11px; color: #42526a;">Past 240% the tile dissolves into its own artifacts</span>
+  </div>
+
+  <div style="position: absolute; top: 0; left: 0; right: 0; height: 76px; display: flex; align-items: center; justify-content: space-between; padding: 0 26px; border-bottom: 1px solid #e3e9ee; background: #ffffff; box-sizing: border-box;">
+    <div style="display: flex; align-items: baseline; gap: 12px;">
+      <span style="font: 800 10px 'DM Sans', sans-serif; letter-spacing: .16em; color: #23877d;">DIRECTION C</span>
+      <span style="font: 700 23px 'Manrope', sans-serif; letter-spacing: -.01em; color: #142139;">Altitude</span>
+      <span style="border: 1px solid #cfe5df; border-radius: 999px; padding: 4px 10px; background: #eff9f6; color: #176f68; font: 700 10px 'DM Sans', sans-serif; letter-spacing: .04em;">LEADING CANDIDATE</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 9px; font-size: 11px; color: #606c7e;">
+      <span style="border: 1px solid #dce3eb; border-radius: 999px; padding: 5px 11px; background: #f6f8fb;">FMS · Build 1.6</span>
+      <span style="border: 1px solid #dce3eb; border-radius: 999px; padding: 5px 11px; background: #f6f8fb;">8 change requests</span>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 24px; right: 24px; top: 88px; display: flex; align-items: center; gap: 14px;">
+    <div class="dirC-seg"><span>Build</span><span class="on">Change</span><span>Artifact</span></div>
+    <span style="font: 600 11px 'IBM Plex Mono', monospace; color: #62718a;">180%</span>
+    <span style="margin-left: auto; font-size: 11px; color: #7c8b9e;">One surface · scroll to change altitude · drag to pan · nothing switches view</span>
+  </div>
+
+  <div style="position: absolute; left: 26px; right: 26px; top: 460px; display: flex; align-items: center; gap: 18px; font-size: 10.5px; color: #62718a;">
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 9px; height: 9px; border-radius: 2px; background: #2a8e83; display: inline-block;"></i>Requirements</span>
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 9px; height: 9px; border-radius: 2px; background: #6bb9d8; display: inline-block;"></i>Cases</span>
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 9px; height: 9px; border-radius: 2px; background: #8fd0b4; display: inline-block;"></i>Procedures</span>
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 9px; height: 9px; border-radius: 2px; background: #d6a33b; display: inline-block;"></i>Suspect</span>
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 9px; height: 9px; border-radius: 2px; background: #cfdae5; display: inline-block;"></i>Not yet covered</span>
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 82px; display: grid; grid-template-columns: 1fr 1fr; gap: 26px; padding: 16px 26px; border-top: 1px solid #e3e9ee; background: #ffffff; box-sizing: border-box;">
+    <div>
+      <div style="font: 800 9.5px 'DM Sans', sans-serif; letter-spacing: .14em; color: #23877d; margin-bottom: 5px;">BEST AT</div>
+      <div style="font-size: 12px; line-height: 1.45; color: #42526a;">One continuous gesture from “what is in Build 1.6” down to “which procedure covers SYSR-000100.01”. No view switch, no lost place.</div>
+    </div>
+    <div>
+      <div style="font: 800 9.5px 'DM Sans', sans-serif; letter-spacing: .14em; color: #8a5a00; margin-bottom: 5px;">TRADEOFF</div>
+      <div style="font-size: 12px; line-height: 1.45; color: #42526a;">Needs a real content model per altitude. Get the thresholds wrong and artifacts feel like they vanish rather than resolve.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

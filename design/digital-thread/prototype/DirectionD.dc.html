@@ -1,0 +1,183 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&amp;family=DM+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #176f68; } a:hover { color: #0f4f4a; }
+    .dirD-sweep { transform-origin: 290px 300px; animation: dirD-sweep 16s linear infinite; }
+    @keyframes dirD-sweep { to { transform: rotate(360deg); } }
+    .dirD-ping { animation: dirD-ping 3.2s ease-out infinite; }
+    @keyframes dirD-ping { 0% { r: 8; opacity: .6; } 100% { r: 26; opacity: 0; } }
+    .dirD-kv { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; border-bottom: 1px solid #eef2f6; padding: 7px 0; }
+    .dirD-kv dt { color: #7a8a9c; font-size: 10.5px; }
+    .dirD-kv dd { margin: 0; color: #26425e; font: 600 10.5px 'IBM Plex Mono', ui-monospace, monospace; }
+    @media (prefers-reduced-motion: reduce) { .dirD-sweep, .dirD-ping { animation: none; } }
+  </style>
+</helmet>
+<div style="position: relative; width: 900px; height: 620px; overflow: hidden; background: linear-gradient(180deg, #ffffff 0%, #f2f6f9 24%, #eaf0f5 100%); font-family: 'DM Sans', system-ui, sans-serif; color: #142139;">
+
+  <svg viewBox="0 0 900 520" width="900" height="520" style="position: absolute; top: 0; left: 0;" aria-hidden="true">
+    <defs>
+      <radialGradient id="dirD-core" cx="38%" cy="30%">
+        <stop offset="0%" stop-color="#1c4a6b"></stop>
+        <stop offset="100%" stop-color="#0c1b34"></stop>
+      </radialGradient>
+      <linearGradient id="dirD-sweepGrad" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="#23877d" stop-opacity=".18"></stop>
+        <stop offset="100%" stop-color="#23877d" stop-opacity="0"></stop>
+      </linearGradient>
+    </defs>
+
+    <circle cx="290" cy="300" r="194" fill="#ffffff" fill-opacity=".55"></circle>
+    <path class="dirD-sweep" d="M290 300 L484 300 A194 194 0 0 0 428 163 Z" fill="url(#dirD-sweepGrad)"></path>
+
+    <g fill="none" stroke="#c4d3de" stroke-dasharray="3 7">
+      <circle cx="290" cy="300" r="82"></circle>
+      <circle cx="290" cy="300" r="138"></circle>
+      <circle cx="290" cy="300" r="194"></circle>
+    </g>
+    <path d="M290 106 L290 494" stroke="#dbe4ec" stroke-width="1"></path>
+
+    <g stroke="#9dc2c9" stroke-width="1.5" fill="none">
+      <path d="M208 300 L238 300"></path>
+      <path d="M162 352 L252 322"></path>
+      <path d="M162 248 L252 278"></path>
+      <path d="M126 403 L162 352"></path>
+      <path d="M126 197 L162 248"></path>
+    </g>
+    <g stroke="#2a8e83" stroke-width="1.7" fill="none">
+      <path d="M342 300 L372 300"></path>
+      <path d="M372 300 L412 235"></path>
+      <path d="M412 235 L425 160"></path>
+      <path d="M372 300 L482 327"></path>
+      <path d="M412 365 L425 440"></path>
+    </g>
+    <path d="M330 322 L412 365" stroke="#d6a33b" stroke-width="2" stroke-dasharray="6 6" fill="none"></path>
+
+    <g fill="#8ea6ba">
+      <circle cx="208" cy="300" r="8" stroke="#ffffff" stroke-width="2"></circle>
+      <circle cx="162" cy="352" r="8" stroke="#ffffff" stroke-width="2" fill="#2a8e83"></circle>
+      <circle cx="162" cy="248" r="8" stroke="#ffffff" stroke-width="2" fill="#4f8fd0"></circle>
+      <circle cx="126" cy="403" r="7" stroke="#ffffff" stroke-width="2" fill="#3f9c7e"></circle>
+      <circle cx="126" cy="197" r="7" stroke="#ffffff" stroke-width="2"></circle>
+    </g>
+    <g fill="#4f8fd0">
+      <circle cx="372" cy="300" r="8" stroke="#ffffff" stroke-width="2"></circle>
+      <circle cx="412" cy="235" r="8" stroke="#ffffff" stroke-width="2" fill="#6bb9d8"></circle>
+      <circle cx="482" cy="327" r="7" stroke="#ffffff" stroke-width="2"></circle>
+      <circle cx="425" cy="160" r="7" stroke="#ffffff" stroke-width="2" fill="#8fd0b4"></circle>
+      <circle cx="425" cy="440" r="7" stroke="#ffffff" stroke-width="2" fill="#8fd0b4"></circle>
+    </g>
+    <circle class="dirD-ping" cx="412" cy="365" r="8" fill="none" stroke="#d6a33b" stroke-width="1.6"></circle>
+    <circle cx="412" cy="365" r="8" fill="#d6a33b" stroke="#ffffff" stroke-width="2"></circle>
+
+    <circle cx="290" cy="300" r="52" fill="url(#dirD-core)"></circle>
+    <circle cx="290" cy="300" r="52" fill="none" stroke="#70d8c9" stroke-opacity=".55" stroke-width="1.5"></circle>
+    <text x="290" y="296" text-anchor="middle" font-family="'IBM Plex Mono', monospace" font-size="10.5" font-weight="600" fill="#e8f5f2">SYSR-000100.01</text>
+    <text x="290" y="313" text-anchor="middle" font-family="'DM Sans', sans-serif" font-size="9.5" fill="#7fc6bb" letter-spacing=".1em">SELECTED</text>
+
+    <g font-family="'IBM Plex Mono', monospace" font-size="10" font-weight="600" fill="#17324d" text-anchor="end">
+      <text x="196" y="303">PR-00007.00</text>
+      <text x="150" y="355">SRCR-00039.00</text>
+      <text x="150" y="251">HLRCR-00127.00</text>
+      <text x="114" y="406">FMS-1.5.0-RELEASE</text>
+      <text x="114" y="200">PR-00003.00</text>
+    </g>
+    <g font-family="'IBM Plex Mono', monospace" font-size="10" font-weight="600" fill="#17324d">
+      <text x="384" y="303">HLR-000075.02</text>
+      <text x="424" y="238">HLRTC-000118.00</text>
+      <text x="494" y="330">LLR-000220.00</text>
+      <text x="437" y="163">HLRTP-000120.00</text>
+      <text x="437" y="443">EXE-004821 · Pass</text>
+      <text x="424" y="368" fill="#8a5a00">SYSTP-000040.00</text>
+      <text x="424" y="381" font-family="'DM Sans', sans-serif" font-weight="400" fill="#96693a">suspect · in flight</text>
+    </g>
+
+    <g font-family="'DM Sans', sans-serif" font-size="9" font-weight="800" letter-spacing=".13em" fill="#9aabbd" text-anchor="middle">
+      <text x="290" y="378">1 HOP</text>
+      <text x="290" y="434">2 HOPS</text>
+      <text x="290" y="490">3 HOPS</text>
+    </g>
+    <g font-family="'DM Sans', sans-serif" font-size="10" font-weight="800" letter-spacing=".14em" fill="#7a8a9c">
+      <text x="60" y="102">UPSTREAM — WHAT DROVE THIS</text>
+      <text x="330" y="102">DOWNSTREAM — WHAT THIS TOUCHES</text>
+    </g>
+  </svg>
+
+  <div style="position: absolute; left: 610px; top: 96px; width: 266px; box-sizing: border-box; border: 1px solid #dce3eb; border-radius: 14px; background: #ffffff; padding: 16px; box-shadow: 0 16px 40px rgba(15,35,58,.12);">
+    <div style="font: 800 9px 'DM Sans', sans-serif; letter-spacing: .14em; color: #23877d;">EXPANDED ARTIFACT</div>
+    <div style="display: flex; align-items: center; gap: 8px; margin-top: 9px;">
+      <span style="font: 600 12.5px 'IBM Plex Mono', monospace; color: #17324d;">SYSTP-000040.00</span>
+      <span style="margin-left: auto; border-radius: 999px; background: #fdefcf; padding: 3px 8px; font: 700 9px 'DM Sans', sans-serif; letter-spacing: .04em; color: #8a5a00;">SUSPECT</span>
+    </div>
+    <div style="margin-top: 6px; font: 600 13px 'Manrope', sans-serif; line-height: 1.3; color: #142139;">Oceanic sequencing — system test procedure</div>
+
+    <dl style="margin: 12px 0 0;">
+      <div class="dirD-kv"><dt>Level</dt><dd>System</dd></div>
+      <div class="dirD-kv"><dt>Approved revision</dt><dd>.00</dd></div>
+      <div class="dirD-kv"><dt>Draft in flight</dt><dd>.01 (Build 1.6)</dd></div>
+      <div class="dirD-kv"><dt>Covers</dt><dd>2 requirements</dd></div>
+      <div class="dirD-kv"><dt>In build</dt><dd>FMS-1.5.0</dd></div>
+    </dl>
+
+    <div style="margin-top: 13px; border-left: 3px solid #d6a33b; border-radius: 8px; background: #fff8e8; padding: 10px 11px;">
+      <div style="font: 700 10px 'DM Sans', sans-serif; color: #8a5a00; letter-spacing: .03em;">WHY SUSPECT</div>
+      <div style="margin-top: 4px; font-size: 11px; line-height: 1.45; color: #765313;">Coverage settles only when the named procedure has no revision in flight. Two system requirements read Suspect until .01 is approved.</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 13px;">
+      <div style="border: 1px solid #e1e7ec; border-radius: 8px; background: #f8fafb; padding: 9px;">
+        <div style="font-size: 10px; color: #7a8a9c;">Upstream</div>
+        <div style="font: 700 15px 'Manrope', sans-serif; color: #17324d;">3</div>
+      </div>
+      <div style="border: 1px solid #e1e7ec; border-radius: 8px; background: #f8fafb; padding: 9px;">
+        <div style="font-size: 10px; color: #7a8a9c;">Downstream</div>
+        <div style="font: 700 15px 'Manrope', sans-serif; color: #17324d;">5</div>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 8px; margin-top: 13px;">
+      <a href="#" style="flex: 1; border-radius: 8px; background: #176f68; padding: 9px 10px; color: #ffffff; font: 700 11px 'DM Sans', sans-serif; text-align: center; text-decoration: none;">Open procedure</a>
+      <a href="#" style="flex: 1; border: 1px solid #cfe0e5; border-radius: 8px; background: #ffffff; padding: 9px 10px; color: #176f68; font: 700 11px 'DM Sans', sans-serif; text-align: center; text-decoration: none;">Coverage review</a>
+    </div>
+  </div>
+
+  <div style="position: absolute; top: 0; left: 0; right: 0; height: 76px; display: flex; align-items: center; justify-content: space-between; padding: 0 26px; border-bottom: 1px solid #e3e9ee; background: #ffffff; box-sizing: border-box;">
+    <div style="display: flex; align-items: baseline; gap: 12px;">
+      <span style="font: 800 10px 'DM Sans', sans-serif; letter-spacing: .16em; color: #23877d;">DIRECTION D</span>
+      <span style="font: 700 23px 'Manrope', sans-serif; letter-spacing: -.01em; color: #142139;">Impact Orbit</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 9px; font-size: 11px; color: #606c7e;">
+      <span style="border: 1px solid #dce3eb; border-radius: 999px; padding: 5px 11px; background: #f6f8fb;">Build 1.6</span>
+      <span style="border: 1px solid #e6cd94; border-radius: 999px; padding: 5px 11px; background: #fff8e8; color: #8a5a00; font-weight: 600;">1 suspect within 2 hops</span>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 26px; right: 26px; top: 504px; display: flex; align-items: center; gap: 18px; font-size: 10.5px; color: #62718a;">
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 22px; height: 3px; border-radius: 999px; background: #9dc2c9; display: inline-block;"></i>Upstream link</span>
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 22px; height: 3px; border-radius: 999px; background: #2a8e83; display: inline-block;"></i>Downstream link</span>
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 22px; height: 3px; border-radius: 999px; background: repeating-linear-gradient(90deg,#d6a33b 0 5px,transparent 5px 10px); display: inline-block;"></i>Suspect</span>
+    <span style="margin-left: auto; color: #7c8b9e;">Click any orbiting artifact to re-centre the map on it</span>
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 82px; display: grid; grid-template-columns: 1fr 1fr; gap: 26px; padding: 16px 26px; border-top: 1px solid #e3e9ee; background: #ffffff; box-sizing: border-box;">
+    <div>
+      <div style="font: 800 9.5px 'DM Sans', sans-serif; letter-spacing: .14em; color: #23877d; margin-bottom: 5px;">BEST AT</div>
+      <div style="font-size: 12px; line-height: 1.45; color: #42526a;">“If I change this, what breaks.” Impact radius and suspect exposure in one glance, with the expanded record right there.</div>
+    </div>
+    <div>
+      <div style="font: 800 9.5px 'DM Sans', sans-serif; letter-spacing: .14em; color: #8a5a00; margin-bottom: 5px;">TRADEOFF</div>
+      <div style="font-size: 12px; line-height: 1.45; color: #42526a;">Always relative to one selection. It gives no build-wide overview, so it complements a map rather than replacing one.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

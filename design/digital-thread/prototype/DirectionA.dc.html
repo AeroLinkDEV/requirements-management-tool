@@ -1,0 +1,164 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&amp;family=DM+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #70d8c9; } a:hover { color: #a8ece1; }
+    .dirA-drift { animation: dirA-drift 11s ease-in-out infinite alternate; }
+    .dirA-drift2 { animation: dirA-drift 14s ease-in-out infinite alternate-reverse; }
+    @keyframes dirA-drift { from { transform: translate(0,0); } to { transform: translate(4px,-5px); } }
+    .dirA-flow { stroke-dasharray: 5 13; animation: dirA-flow 3.4s linear infinite; }
+    @keyframes dirA-flow { to { stroke-dashoffset: -36; } }
+    .dirA-halo { animation: dirA-halo 3.6s ease-out infinite; }
+    @keyframes dirA-halo { 0% { r: 12; opacity: .55; } 100% { r: 34; opacity: 0; } }
+    .dirA-twinkle { animation: dirA-twinkle 5s ease-in-out infinite alternate; }
+    @keyframes dirA-twinkle { from { opacity: .28; } to { opacity: .85; } }
+    @media (prefers-reduced-motion: reduce) {
+      .dirA-drift, .dirA-drift2, .dirA-flow, .dirA-halo, .dirA-twinkle { animation: none; }
+    }
+  </style>
+</helmet>
+<div style="position: relative; width: 900px; height: 620px; overflow: hidden; background: radial-gradient(120% 90% at 26% 14%, #17385a 0%, #0c2140 38%, #08162b 72%, #050e1c 100%); font-family: 'DM Sans', system-ui, sans-serif; color: #e8f1f6;">
+
+  <svg viewBox="0 0 900 520" width="900" height="520" style="position: absolute; top: 0; left: 0;" aria-hidden="true">
+    <defs>
+      <radialGradient id="dirA-glowTeal" cx="50%" cy="50%">
+        <stop offset="0%" stop-color="#7ef0dc" stop-opacity=".85"></stop>
+        <stop offset="100%" stop-color="#7ef0dc" stop-opacity="0"></stop>
+      </radialGradient>
+      <radialGradient id="dirA-glowAmber" cx="50%" cy="50%">
+        <stop offset="0%" stop-color="#ffc66b" stop-opacity=".9"></stop>
+        <stop offset="100%" stop-color="#ffc66b" stop-opacity="0"></stop>
+      </radialGradient>
+      <radialGradient id="dirA-aurora" cx="50%" cy="50%">
+        <stop offset="0%" stop-color="#2f8f96" stop-opacity=".30"></stop>
+        <stop offset="100%" stop-color="#2f8f96" stop-opacity="0"></stop>
+      </radialGradient>
+    </defs>
+
+    <ellipse cx="330" cy="270" rx="330" ry="230" fill="url(#dirA-aurora)"></ellipse>
+    <ellipse cx="690" cy="330" rx="250" ry="190" fill="url(#dirA-aurora)" opacity=".7"></ellipse>
+
+    <g fill="#9fd8ea">
+      <circle class="dirA-twinkle" cx="86" cy="146" r="1.3"></circle>
+      <circle class="dirA-twinkle" cx="812" cy="140" r="1.1" style="animation-delay: 1.2s"></circle>
+      <circle class="dirA-twinkle" cx="700" cy="480" r="1.2" style="animation-delay: .6s"></circle>
+      <circle class="dirA-twinkle" cx="180" cy="470" r="1" style="animation-delay: 2.1s"></circle>
+      <circle class="dirA-twinkle" cx="540" cy="452" r="1.2" style="animation-delay: 1.7s"></circle>
+      <circle class="dirA-twinkle" cx="852" cy="262" r="1.1" style="animation-delay: 2.6s"></circle>
+      <circle class="dirA-twinkle" cx="60" cy="404" r="1.2" style="animation-delay: .3s"></circle>
+    </g>
+
+    <g stroke="#3d8f94" stroke-opacity=".34" stroke-width="1" fill="none">
+      <path d="M232 214 L196 180"></path><path d="M232 214 L214 246"></path><path d="M232 214 L262 186"></path>
+      <path d="M232 214 L270 242"></path><path d="M232 214 L188 222"></path><path d="M232 214 L246 168"></path>
+      <path d="M466 158 L432 132"></path><path d="M466 158 L498 130"></path><path d="M466 158 L508 186"></path>
+      <path d="M466 158 L438 190"></path><path d="M466 158 L472 110"></path>
+      <path d="M612 268 L580 240"></path><path d="M612 268 L646 244"></path><path d="M612 268 L652 300"></path><path d="M612 268 L586 300"></path>
+      <path d="M378 366 L344 340"></path><path d="M378 366 L410 338"></path><path d="M378 366 L416 396"></path><path d="M378 366 L350 398"></path>
+      <path d="M128 330 L100 300"></path><path d="M128 330 L104 362"></path><path d="M128 330 L158 364"></path>
+      <path d="M300 300 L272 332"></path><path d="M300 300 L330 336"></path><path d="M300 300 L268 272"></path>
+      <path d="M742 400 L710 372"></path><path d="M742 400 L774 374"></path><path d="M742 400 L712 428"></path><path d="M742 400 L776 430"></path>
+    </g>
+
+    <g fill="none" stroke-linecap="round">
+      <path d="M128 330 C168 296, 190 250, 232 214" stroke="#4fb9ae" stroke-opacity=".55" stroke-width="1.6"></path>
+      <path d="M232 214 C310 176, 396 168, 466 158" stroke="#5fd0c2" stroke-opacity=".72" stroke-width="2"></path>
+      <path class="dirA-flow" d="M232 214 C310 176, 396 168, 466 158" stroke="#a8f0e3" stroke-opacity=".95" stroke-width="1.6"></path>
+      <path d="M466 158 C522 196, 566 230, 612 268" stroke="#5aa8e0" stroke-opacity=".6" stroke-width="1.8"></path>
+      <path class="dirA-flow" d="M466 158 C522 196, 566 230, 612 268" stroke="#bcdcff" stroke-opacity=".8" stroke-width="1.4" style="animation-delay: 1.1s"></path>
+      <path d="M612 268 C672 306, 706 356, 742 400" stroke="#4fb9ae" stroke-opacity=".5" stroke-width="1.6"></path>
+      <path d="M378 366 C398 300, 430 220, 466 158" stroke="#8aa6e8" stroke-opacity=".45" stroke-width="1.5"></path>
+      <path d="M232 214 C266 268, 330 322, 378 366" stroke="#4fb9ae" stroke-opacity=".4" stroke-width="1.4"></path>
+      <path d="M232 214 C252 244, 274 274, 300 300" stroke="#e6a94a" stroke-opacity=".9" stroke-width="2" stroke-dasharray="6 6"></path>
+      <path d="M300 300 C324 320, 352 344, 378 366" stroke="#e6a94a" stroke-opacity=".5" stroke-width="1.5" stroke-dasharray="4 6"></path>
+    </g>
+
+    <g class="dirA-drift" fill="#cfe6ee" fill-opacity=".62">
+      <circle cx="196" cy="180" r="3.4"></circle><circle cx="214" cy="246" r="4"></circle><circle cx="262" cy="186" r="3"></circle>
+      <circle cx="270" cy="242" r="3.6"></circle><circle cx="188" cy="222" r="2.8"></circle><circle cx="246" cy="168" r="3.2"></circle>
+      <circle cx="100" cy="300" r="3"></circle><circle cx="104" cy="362" r="3.4"></circle><circle cx="158" cy="364" r="2.8"></circle>
+    </g>
+    <g class="dirA-drift2" fill="#bfd8f4" fill-opacity=".6">
+      <circle cx="432" cy="132" r="3.2"></circle><circle cx="498" cy="130" r="3.8"></circle><circle cx="508" cy="186" r="3"></circle>
+      <circle cx="438" cy="190" r="3.4"></circle><circle cx="472" cy="110" r="2.8"></circle>
+      <circle cx="580" cy="240" r="3.2"></circle><circle cx="646" cy="244" r="3"></circle><circle cx="652" cy="300" r="3.6"></circle><circle cx="586" cy="300" r="3"></circle>
+    </g>
+    <g class="dirA-drift" fill="#a9dfc4" fill-opacity=".62" style="animation-delay: 2s">
+      <circle cx="344" cy="340" r="3.2"></circle><circle cx="410" cy="338" r="3.6"></circle><circle cx="416" cy="396" r="3"></circle><circle cx="350" cy="398" r="3.4"></circle>
+      <circle cx="710" cy="372" r="3.2"></circle><circle cx="774" cy="374" r="3"></circle><circle cx="712" cy="428" r="3.4"></circle><circle cx="776" cy="430" r="3"></circle>
+      <circle cx="272" cy="332" r="3"></circle><circle cx="330" cy="336" r="3.4"></circle><circle cx="268" cy="272" r="2.8"></circle>
+    </g>
+
+    <circle cx="232" cy="214" r="30" fill="url(#dirA-glowTeal)"></circle>
+    <circle cx="300" cy="300" r="30" fill="url(#dirA-glowAmber)"></circle>
+    <circle class="dirA-halo" cx="300" cy="300" r="12" fill="none" stroke="#ffc66b" stroke-width="1.4"></circle>
+
+    <g>
+      <circle cx="232" cy="214" r="13" fill="#6fe3d0" stroke="#0b2033" stroke-width="2"></circle>
+      <circle cx="466" cy="158" r="11" fill="#79b6f2" stroke="#0b2033" stroke-width="2"></circle>
+      <circle cx="612" cy="268" r="10" fill="#79b6f2" stroke="#0b2033" stroke-width="2"></circle>
+      <circle cx="378" cy="366" r="10" fill="#8fd6a8" stroke="#0b2033" stroke-width="2"></circle>
+      <circle cx="128" cy="330" r="9" fill="#dbe7ef" stroke="#0b2033" stroke-width="2"></circle>
+      <circle cx="300" cy="300" r="11" fill="#f0b95a" stroke="#0b2033" stroke-width="2"></circle>
+      <circle cx="742" cy="400" r="12" fill="#4fc39c" stroke="#0b2033" stroke-width="2"></circle>
+    </g>
+
+    <g font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="11" fill="#dceaf2">
+      <text x="252" y="211">SRCR-00039.00</text>
+      <text x="252" y="226" font-family="'DM Sans', sans-serif" font-size="10.5" fill="#8fb2c4">System change · Approved · 6 requirements</text>
+      <text x="484" y="155">HLRCR-00127.00</text>
+      <text x="484" y="170" font-family="'DM Sans', sans-serif" font-size="10.5" fill="#8fb2c4">Software HLR change · In review</text>
+      <text x="628" y="265">LLRCR-00061.00</text>
+      <text x="628" y="280" font-family="'DM Sans', sans-serif" font-size="10.5" fill="#8fb2c4">Software LLR change · Draft</text>
+      <text x="396" y="363">HLRTCR-000002.00</text>
+      <text x="396" y="378" font-family="'DM Sans', sans-serif" font-size="10.5" fill="#8fb2c4">Test change · Approved</text>
+      <text x="52" y="356" fill="#cfe0ea">PR-00003.00</text>
+      <text x="318" y="297" fill="#ffd79a">SYSTP-000040.00</text>
+      <text x="318" y="312" font-family="'DM Sans', sans-serif" font-size="10.5" fill="#e0ab5e">Suspect · revision in flight</text>
+      <text x="656" y="404" fill="#b9ecd6">FMS-1.5.0-RELEASE</text>
+    </g>
+  </svg>
+
+  <div style="position: absolute; top: 0; left: 0; right: 0; height: 76px; display: flex; align-items: center; justify-content: space-between; padding: 0 26px; background: linear-gradient(180deg, rgba(5,14,28,.92) 0%, rgba(5,14,28,0) 100%);">
+    <div style="display: flex; align-items: baseline; gap: 12px;">
+      <span style="font: 800 10px 'DM Sans', sans-serif; letter-spacing: .16em; color: #5fb9ad;">DIRECTION A</span>
+      <span style="font: 700 23px 'Manrope', sans-serif; letter-spacing: -.01em; color: #f2f8fb;">Constellation</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; font-size: 11px; color: #8fb2c4;">
+      <span style="border: 1px solid #24475f; border-radius: 999px; padding: 5px 11px; background: rgba(12,33,64,.6);">FMS Product Development</span>
+      <span style="border: 1px solid #24475f; border-radius: 999px; padding: 5px 11px; background: rgba(12,33,64,.6);">Build 1.6 · in work</span>
+      <span style="border: 1px solid #2c6a63; border-radius: 999px; padding: 5px 11px; background: rgba(23,111,104,.28); color: #8fe3d4;">41 records in view</span>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 26px; right: 26px; top: 500px; display: flex; align-items: center; gap: 20px; font-size: 10.5px; color: #93b3c5;">
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 9px; height: 9px; border-radius: 999px; background: #6fe3d0; display: inline-block;"></i>System change</span>
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 9px; height: 9px; border-radius: 999px; background: #79b6f2; display: inline-block;"></i>Software change</span>
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 9px; height: 9px; border-radius: 999px; background: #8fd6a8; display: inline-block;"></i>Verification</span>
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 9px; height: 9px; border-radius: 999px; background: #f0b95a; display: inline-block;"></i>Suspect</span>
+    <span style="display: flex; align-items: center; gap: 7px;"><i style="width: 9px; height: 9px; border-radius: 999px; background: #4fc39c; display: inline-block;"></i>Released build</span>
+    <span style="margin-left: auto; color: #6f92a6;">Scroll to zoom · drag to pan · click a node to bloom its neighbours</span>
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 82px; display: grid; grid-template-columns: 1fr 1fr; gap: 26px; padding: 16px 26px; border-top: 1px solid rgba(112,216,201,.16); background: rgba(4,12,24,.72); box-sizing: border-box;">
+    <div>
+      <div style="font: 800 9.5px 'DM Sans', sans-serif; letter-spacing: .14em; color: #5fb9ad; margin-bottom: 5px;">BEST AT</div>
+      <div style="font-size: 12px; line-height: 1.45; color: #c8dbe6;">Seeing the whole build at once — where work is dense, what sits isolated, and which cluster is pulling on which.</div>
+    </div>
+    <div>
+      <div style="font: 800 9.5px 'DM Sans', sans-serif; letter-spacing: .14em; color: #c9974a; margin-bottom: 5px;">TRADEOFF</div>
+      <div style="font-size: 12px; line-height: 1.45; color: #c8dbe6;">Organic layout throws away level order. A reviewer cannot read System → HLR → LLR → evidence off it without selecting first.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

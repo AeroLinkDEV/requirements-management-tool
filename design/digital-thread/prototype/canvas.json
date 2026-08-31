@@ -1,0 +1,64 @@
+{
+  "pages": [
+    { "id": "page-1", "name": "Prototype" },
+    { "id": "page-2", "name": "Earlier directions" }
+  ],
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1280, "h": 800, "title": "Digital Thread — Certified Flow", "page": "page-1", "is_interactive": true },
+    { "file": "DirectionA.dc.html", "x": 0, "y": 0, "w": 900, "h": 620, "title": "A — Constellation", "page": "page-2" },
+    { "file": "DirectionB.dc.html", "x": 1000, "y": 0, "w": 900, "h": 620, "title": "B — Certified Flow (chosen)", "page": "page-2" },
+    { "file": "DirectionC.dc.html", "x": 0, "y": 760, "w": 900, "h": 620, "title": "C — Altitude", "page": "page-2" },
+    { "file": "DirectionD.dc.html", "x": 1000, "y": 760, "w": 900, "h": 620, "title": "D — Impact Orbit", "page": "page-2" }
+  ],
+  "annotations": [
+    {
+      "id": "how-to-drive",
+      "x": -440,
+      "y": 0,
+      "w": 400,
+      "page": "page-1",
+      "text": "Drive it\n\nExpand the artboard so the mouse reaches the canvas.\n\n• Hover or click any record to trace its whole web — every hop up and every hop down. Untraced records recede rather than disappear.\n• Drag inside a lane (on the pale band, not on a card) to roll through it. The other lanes follow.\n• Scroll to zoom. Pulling back fills the freed space with more records, and stops once everything is on screen.\n• Click a card to expand it; the flattened panel lists every traced record, at every hop.\n• Keys: + − 0, Esc."
+    },
+    {
+      "id": "v2-panel",
+      "x": -440,
+      "y": 330,
+      "w": 400,
+      "page": "page-1",
+      "text": "The bottom panel, rebuilt\n\nNow the default, and 150px instead of 190 with the padding pulled in — the four columns fill it rather than floating in the top third. The dock buttons no longer sit on top of the action buttons.\n\nUpstream and downstream are their own scrolling columns, two records wide, listing the full trace rather than only the first hop. Direct links show the relation word; anything further shows its hop count. Every row is clickable and re-centres the board on that record.\n\nDock right and auto are still in the corner buttons."
+    },
+    {
+      "id": "v2-zoom",
+      "x": 1360,
+      "y": 0,
+      "w": 410,
+      "page": "page-1",
+      "text": "White space is now filled, not just scaled\n\nA lane's visible window used to be a fixed height in canvas units, so pulling back shrank the whole board and grew the margins. The window is now derived from the viewport: zoom out and it grows in canvas terms, so the space is filled with more records instead of more background.\n\nZooming out stops at the point where everything that can legibly be shown is shown — about 73% for the change network. The minus button greys out there, so you can feel the floor rather than hunting for it.\n\nThe readout names the tier: detailed / compact / dense."
+    },
+    {
+      "id": "v2-trace",
+      "x": 1360,
+      "y": 330,
+      "w": 410,
+      "page": "page-1",
+      "text": "The full web, not one hop\n\nHover or click and the trace walks every hop downstream and every hop upstream. It follows direction, so it will not leak sideways into a sibling change that merely shares a procedure.\n\nTraced records carry a small hop badge. Everything untraced drops to about 17% opacity — still legible as context, clearly out of focus. Clicking still enlarges the card, which you said you liked.\n\nSelecting LLRTPCR-000009.00 traces 8 records upstream, four hops deep, back through two LLR changes and two HLR changes to SRCR-00039 and SRCR-00041.\n\nThe camera still frames the immediate neighbours, per your answer, so green lines run off the edge and invite a pan."
+    },
+    {
+      "id": "v2-inside",
+      "x": 1360,
+      "y": 700,
+      "w": 410,
+      "page": "page-1",
+      "text": "Inside a change now lists every change\n\nThe left lane holds the full register of 31 change requests, with the one you are inside ringed in teal. Same roll, same zoom, same density rules as the change network — click any other one to drop straight into it.\n\nThe type selector sits in the top bar (All / SYS / HLR / LLR / TEST) and the lane header echoes what is filtered. I put it there rather than on the lane so it stays legible at every zoom — say the word and I will move it onto the lane itself."
+    },
+    {
+      "id": "next",
+      "x": 0,
+      "y": 890,
+      "w": 1280,
+      "page": "page-1",
+      "text": "Still open\n\n• Proposal content for 26 of the 31 change requests is generated from the request's own number — the breadcrumb says \"illustrative content\" when you are inside one. Five carry authored detail: SRCR-00039, SRCR-00041, HLRCR-00127, LLRCR-00061, HLRTCCR-000003.\n• Edge routing still crosses when a change fans out to three or more children in one lane.\n• A lane you can pin so it stops following the sync, and a minimap, are both easy adds.\n• At 150% only three records fit a lane. If that feels too tight for reading detail, I can make the detailed tier a little denser."
+    }
+  ],
+  "launch": { "view": "focused", "file": "Main.dc.html" }
+}
