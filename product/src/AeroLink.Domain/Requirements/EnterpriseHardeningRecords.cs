@@ -179,6 +179,15 @@ public sealed class ArtifactEditSession
     public string? ClosedReason { get; private set; }
     public long Version { get; private set; }
     public void Save(string draftJson, long expectedVersion, DateTimeOffset now,int leaseMinutes=15) { EnsureActive(expectedVersion,now); DraftJson = draftJson; UpdatedAt = now;ExpiresAt=now.AddMinutes(leaseMinutes); Version++; }
+    // A Problem Report supporting-file mutation is part of the same exclusive checkout. Rebind the lease's
+    // evidence boundary without advancing the editor token: the actor may continue autosaving the same draft,
+    // while EF's Version concurrency token still rejects a simultaneous session mutation.
+    public void RebindBaseSnapshot(string baseSnapshotHash, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(baseSnapshotHash)) throw new DomainException("A controlled base snapshot hash is required.");
+        if (State != EditSessionState.Active || ExpiresAt <= now) throw new DomainException("This editing session is no longer active.");
+        BaseSnapshotHash = baseSnapshotHash.Trim().ToLowerInvariant(); UpdatedAt = now;
+    }
     // Lease renewal deliberately does not advance the finalize token. The EF concurrency check on Version
     // still prevents a heartbeat from updating a session after a concurrent close wins.
     public void Heartbeat(long expectedVersion,DateTimeOffset now,int leaseMinutes=15){EnsureActive(expectedVersion,now);UpdatedAt=now;ExpiresAt=now.AddMinutes(leaseMinutes);}

@@ -111,7 +111,7 @@ public sealed class ControlledEditingCheckInEngine(
                 "The editing session changed; refresh before checking in.", ControlledCheckInStatus.Conflict,
                 adapter, artifact, transaction, ct);
 
-        var canonicalSnapshot = adapter.CanonicalSnapshot(artifact);
+        var canonicalSnapshot = await CanonicalSnapshotAsync(adapter, artifact, ct);
         var canonicalHash = Hash(canonicalSnapshot);
         if (!string.Equals(canonicalHash, session.BaseSnapshotHash, StringComparison.OrdinalIgnoreCase))
             return await RejectAsync(session, actor.UserName, now, "stale_artifact_version",
@@ -143,7 +143,7 @@ public sealed class ControlledEditingCheckInEngine(
         {
             await adapter.ApplyDraftAsync(artifact, draft.DraftJson, actor.UserName, actor.IsAdministrator, now, ct);
             var resultingVersion = artifact.Version + 1;
-            var resultingSnapshot = adapter.CanonicalSnapshot(artifact, resultingVersion);
+            var resultingSnapshot = await CanonicalSnapshotAsync(adapter, artifact, ct, resultingVersion);
             var resultingHash = Hash(resultingSnapshot);
             var evidence = Evidence(session, adapter, artifact, actor.UserName, now,
                 ControlledCheckInOutcome.Succeeded, "check_in_succeeded", draft, resultingVersion,
@@ -195,6 +195,21 @@ public sealed class ControlledEditingCheckInEngine(
             if (await authority.IsSatisfiedAsync(actor.Id, programId,
                     ProjectAuthorityRequirement.LegacyRoleDemand(role), now, ct)) return true;
         return false;
+    }
+
+    private async Task<string> CanonicalSnapshotAsync(IControlledEditingAdapter adapter,
+        ControlledEditingArtifact artifact, CancellationToken ct, long? versionOverride = null)
+    {
+        // Problem Report schema 6 includes the exact active supporting-file manifest. The shared adapter
+        // contract predates attachments and is intentionally synchronous for the other artifact families, so
+        // resolve this one manifest at the engine boundary rather than letting checkout/check-in evidence
+        // silently fall back to an empty aggregate default.
+        if (artifact.Aggregate is ProblemReport report)
+        {
+            var attachments = await ProblemReportAttachmentEvidence.ActiveAsync(db, report.ProjectId, report.Id, ct);
+            return ProblemReportEvidenceContract.Serialize(report, versionOverride, attachments);
+        }
+        return adapter.CanonicalSnapshot(artifact, versionOverride);
     }
 
     private async Task<ControlledCheckInResult> RejectAsync(ArtifactEditSession session, string actor,

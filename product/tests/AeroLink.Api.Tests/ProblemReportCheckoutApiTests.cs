@@ -593,6 +593,62 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.Equal(historicalHash, ProblemReportEvidenceContract.Hash(historicalJson));
     }
 
+    [Fact]
+    public async Task Problem_report_output_round_trips_a_pinned_v5_snapshot_and_hash_for_docx_and_pdf()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRV5OUT");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+
+        string historicalJson;
+        string historicalHash;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var report = await db.ProblemReports.SingleAsync(x => x.Id == reportId);
+            // Pin the exact bytes before publication. The output reader must consume this v5 envelope as-is;
+            // it must not reserialize it as today's schema-6 aggregate or infer today's attachments.
+            historicalJson = ProblemReportEvidenceContract.SerializeForSchema(report, 5);
+            historicalHash = ProblemReportEvidenceContract.Hash(historicalJson);
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision,
+                "PinnedLegacyV5Fixture", "history.engineer", historicalHash, historicalJson,
+                DateTimeOffset.UtcNow.AddMinutes(1), snapshotSchemaVersion: 5));
+            await db.SaveChangesAsync();
+        }
+
+        foreach (var format in new[] { "docx", "pdf" })
+        {
+            using var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&format={format}");
+            Assert.Equal(HttpStatusCode.OK, output.StatusCode);
+            Assert.Equal(historicalHash, ProblemReportEvidenceContract.Hash(historicalJson));
+            if (format == "docx")
+            {
+                using var zip = new ZipArchive(new MemoryStream(await output.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read);
+                using var document = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
+                var text = await document.ReadToEndAsync();
+                Assert.Contains(historicalHash, text);
+                Assert.Contains(">5<", text);
+            }
+            else
+            {
+                var text = Encoding.ASCII.GetString(await output.Content.ReadAsByteArrayAsync());
+                Assert.Contains(historicalHash, text);
+                Assert.Contains("SNAPSHOT SCHEMA", text);
+            }
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var persisted = await db.ProblemReportRevisions.SingleAsync(x => x.ProblemReportId == reportId
+                && x.EventType == "PinnedLegacyV5Fixture");
+            Assert.Equal(historicalJson, persisted.SnapshotJson);
+            Assert.Equal(historicalHash, persisted.SnapshotHash);
+        }
+    }
+
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
@@ -1263,18 +1319,40 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(firstBytes)).ToLowerInvariant(),
             firstBody.GetProperty("sha256").GetString());
 
+        // Attachment writes stay inside the same exclusive checkout. The lease is rebound to the exact
+        // schema-6 evidence hash so the subsequent check-in records the active file manifest rather than an
+        // aggregate snapshot with an implicit empty attachment list.
+        var detailAfterFirst = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
+        var firstEvidence = detailAfterFirst.GetProperty("revisions").EnumerateArray()
+            .Single(item => item.GetProperty("eventType").GetString() == "SupportingAttachmentAdded");
+        var resumedSession = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = reportId, leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.OK, resumedSession.StatusCode);
+        var resumedBody = await resumedSession.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(firstEvidence.GetProperty("snapshotHash").GetString(),
+            resumedBody.GetProperty("baseSnapshotHash").GetString());
+        using var firstCheckIn = await client.PostAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/check-in",
+            new { expectedVersion = session.GetProperty("version").GetInt64() });
+        Assert.Equal(HttpStatusCode.OK, firstCheckIn.StatusCode);
+
+        using var nextCheckout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = reportId, leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.Created, nextCheckout.StatusCode);
+        var nextSession = await nextCheckout.Content.ReadFromJsonAsync<JsonElement>();
+        var nextSessionId = nextSession.GetProperty("id").GetGuid();
+
         using var badType = await client.PostAsync("/api/enterprise-hardening/attachments",
-            SupportingFile(projectId, reportId, sessionId, "notes.exe", "application/octet-stream", [1, 2, 3]));
+            SupportingFile(projectId, reportId, nextSessionId, "notes.exe", "application/octet-stream", [1, 2, 3]));
         Assert.Equal(HttpStatusCode.BadRequest, badType.StatusCode);
         using var mismatchedType = await client.PostAsync("/api/enterprise-hardening/attachments",
-            SupportingFile(projectId, reportId, sessionId, "NavigationAnalysis.xlsx", "application/pdf", firstBytes));
+            SupportingFile(projectId, reportId, nextSessionId, "NavigationAnalysis.xlsx", "application/pdf", firstBytes));
         Assert.Equal(HttpStatusCode.BadRequest, mismatchedType.StatusCode);
         using var unsafeName = await client.PostAsync("/api/enterprise-hardening/attachments",
-            SupportingFile(projectId, reportId, sessionId, "../escape.xlsx",
+            SupportingFile(projectId, reportId, nextSessionId, "../escape.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", firstBytes));
         Assert.Equal(HttpStatusCode.BadRequest, unsafeName.StatusCode);
         using var malformedJpeg = await client.PostAsync("/api/enterprise-hardening/attachments",
-            SupportingFile(projectId, reportId, sessionId, "screenshot.jpg", "image/jpeg", [0xff, 0xd8, 0xff, 0xd9]));
+            SupportingFile(projectId, reportId, nextSessionId, "screenshot.jpg", "image/jpeg", [0xff, 0xd8, 0xff, 0xd9]));
         Assert.Equal(HttpStatusCode.BadRequest, malformedJpeg.StatusCode);
 
         using var download = await client.GetAsync($"/api/enterprise-hardening/attachments/{firstId}/download");
@@ -1288,7 +1366,7 @@ public sealed class ProblemReportCheckoutApiTests
 
         var secondBytes = OfficePackage("xl/workbook.xml", "navigation analysis v2");
         using var replacement = await client.PostAsync("/api/enterprise-hardening/attachments",
-            SupportingFile(projectId, reportId, sessionId, "NavigationAnalysis.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", secondBytes, logicalId));
+            SupportingFile(projectId, reportId, nextSessionId, "NavigationAnalysis.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", secondBytes, logicalId));
         Assert.Equal(HttpStatusCode.Created, replacement.StatusCode);
         var secondBody = await replacement.Content.ReadFromJsonAsync<JsonElement>();
         var secondId = secondBody.GetProperty("id").GetGuid();
@@ -1308,6 +1386,12 @@ public sealed class ProblemReportCheckoutApiTests
                 && item.OperationType == "ProblemReportAttachment" && item.State == ManagedDocumentStorageOperationState.Available));
         }
 
+        var replacementDetail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
+        var replacementRevision = replacementDetail.GetProperty("revisions").EnumerateArray()
+            .Single(item => item.GetProperty("eventType").GetString() == "SupportingAttachmentReplaced");
+        Assert.Equal(replacementRevision.GetProperty("snapshotHash").GetString(),
+            replacementDetail.GetProperty("snapshotHash").GetString());
+
         using (var output = await client.GetAsync($"/api/problem-reports/{reportId}/download?format=docx"))
         {
             Assert.Equal(HttpStatusCode.OK, output.StatusCode);
@@ -1320,7 +1404,7 @@ public sealed class ProblemReportCheckoutApiTests
         }
 
         using var remove = await client.PostAsJsonAsync($"/api/enterprise-hardening/attachments/{secondId}/withdraw",
-            new { editSessionId = sessionId, reason = "The current analysis was withdrawn pending a corrected supplier issue." });
+            new { editSessionId = nextSessionId, reason = "The current analysis was withdrawn pending a corrected supplier issue." });
         Assert.Equal(HttpStatusCode.NoContent, remove.StatusCode);
         var afterRemove = await client.GetFromJsonAsync<JsonElement>(
             $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}");
@@ -1340,6 +1424,7 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.Equal(1, JsonDocument.Parse(replaced.GetProperty("snapshotJson").GetString()!).RootElement.GetProperty("supportingAttachments").GetArrayLength());
         Assert.Equal(0, JsonDocument.Parse(removed.GetProperty("snapshotJson").GetString()!).RootElement.GetProperty("supportingAttachments").GetArrayLength());
         Assert.NotEqual(added.GetProperty("snapshotHash").GetString(), removed.GetProperty("snapshotHash").GetString());
+        Assert.Equal(removed.GetProperty("snapshotHash").GetString(), detail.GetProperty("snapshotHash").GetString());
     }
 
     private static MultipartFormDataContent SupportingFile(Guid projectId, Guid artifactId, Guid sessionId,

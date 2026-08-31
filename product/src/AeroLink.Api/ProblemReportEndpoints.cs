@@ -117,7 +117,7 @@ public static class ProblemReportEndpoints
                     ProblemReportRelationshipPolicy.BuildScope, ProblemReportRelationshipProducer.TargetBuildWorkflow, actor.UserName, now));
             await AddRevisionAsync(db, item, "ProblemReportCreated", actor.UserName, now, ct, actorDisplayName: actor.DisplayName);
             await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
-            return Results.Created($"/api/problem-reports/{item.Id}", Detail(item, [], []));
+            return Results.Created($"/api/problem-reports/{item.Id}", await DetailResponseAsync(item, [], [], db, ct));
         }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         catch (DbUpdateException) { return Results.Conflict(new { error = "A problem report number was allocated concurrently. Retry the create request.", code = "number_allocation_conflict" }); }
@@ -155,7 +155,8 @@ public static class ProblemReportEndpoints
             await AddRevisionAsync(db, item, "ProblemReportCreatedFromFailedExecution", actor.UserName, now, ct, actorDisplayName: actor.DisplayName);
             await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
             var identifier = await ResolveLinkIdentifierAsync("TestExecution", execution.Id, db, ct);
-            return Results.Created($"/api/problem-reports/{item.Id}", Detail(item, [new ProblemReportLinkView("TestExecution", execution.Id, identifier, ProblemReportRelationshipPolicy.OriginatingFailure, actor.UserName, now, false)], []));
+            return Results.Created($"/api/problem-reports/{item.Id}", await DetailResponseAsync(item,
+                [new ProblemReportLinkView("TestExecution", execution.Id, identifier, ProblemReportRelationshipPolicy.OriginatingFailure, actor.UserName, now, false)], [], db, ct));
         }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         catch (DbUpdateException) { return Results.Conflict(new { error = "A problem report number was allocated concurrently. Retry the create request.", code = "number_allocation_conflict" }); }
@@ -362,7 +363,7 @@ public static class ProblemReportEndpoints
         // immutable events below are NOT resolved here — each carries the name captured when it happened.
         var currentNames = await DirectoryIdentityProjection.DisplayNamesAsync(
             db, [report.ReportedBy, report.ResponsibleEngineerId], ct);
-        return Results.Ok(Detail(report, await LinkViewsAsync(report, links, db, ct), revisions,
+        return Results.Ok(await DetailResponseAsync(report, await LinkViewsAsync(report, links, db, ct), revisions, db, ct,
             candidates.OrderByDescending(x => x.ReportRevision).ThenByDescending(x => x.Sequence),
             impactAreas: impactAreas,
             relatedReports: relatedReports,
@@ -465,7 +466,8 @@ public static class ProblemReportEndpoints
                 await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
                     "TargetBuildChanged", now, ct, fromState, targetState, relationshipRationale, actorDisplayName: actor.DisplayName);
             await db.SaveChangesAsync(ct);
-            return Results.Ok(new { id = report.Id, displayNumber = report.DisplayNumber, state = ProblemReportTransitionPolicy.Canonical(report.State).ToString(), version = report.Version, snapshotHash = report.CanonicalHash() });
+            var snapshot = await ProblemReportAttachmentEvidence.SnapshotAsync(db, report, ct);
+            return Results.Ok(new { id = report.Id, displayNumber = report.DisplayNumber, state = ProblemReportTransitionPolicy.Canonical(report.State).ToString(), version = report.Version, snapshotHash = snapshot.Hash });
         }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "This problem report was updated concurrently. Refresh before continuing.", code = "stale_version" }); }
@@ -509,7 +511,11 @@ public static class ProblemReportEndpoints
         ProblemReportClosureCandidate? candidate = null;
         if (target == ProblemReportState.Closed)
         {
+            if (request.ExpectedVersion is not null && request.ExpectedVersion != report.Version)
+                return Results.Conflict(new { error = "This problem report changed after it was opened. Refresh before continuing.", code = "stale_version", currentVersion = report.Version });
             var candidateDecision = await new ProblemReportClosureCandidateService(db).ValidateForApprovalAsync(report, ct);
+            if (!candidateDecision.Accepted && candidateDecision.Candidate is not null)
+                return Results.Conflict(new { error = candidateDecision.Error, code = candidateDecision.Code });
             candidate = candidateDecision.Accepted ? candidateDecision.Candidate : null;
         }
         var acceptedRationale = ProblemReportTransitionPolicy.RequiresRationale(report.State, target)
@@ -566,7 +572,11 @@ public static class ProblemReportEndpoints
         // Closure remains intentionally ungated by evidence: a legacy or manually reviewed report may
         // have no valid candidate. When a current candidate is valid, preserve its truthful frozen package
         // instead of leaving an approved verification cycle stranded as merely Pending.
+        if (request.ExpectedVersion is not null && request.ExpectedVersion != report.Version)
+            return Results.Conflict(new { error = "This problem report changed after it was opened. Refresh before continuing.", code = "stale_version", currentVersion = report.Version });
         var candidateDecision = await new ProblemReportClosureCandidateService(db).ValidateForApprovalAsync(report, ct);
+        if (!candidateDecision.Accepted && candidateDecision.Candidate is not null)
+            return Results.Conflict(new { error = candidateDecision.Error, code = candidateDecision.Code });
         var candidate = candidateDecision.Accepted ? candidateDecision.Candidate : null;
         return await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "ClosureApproved",
             (item, user, now) => item.ApproveClosure(user.UserName, user.Id, now),
@@ -882,7 +892,9 @@ public static class ProblemReportEndpoints
                 await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
                     eventType, now, ct, fromState, toState, transitionRationale, actorDisplayName: actor.DisplayName);
             if (afterMutation is not null) await afterMutation(report, actor, now, createdLink, revision, ct);
-            await db.SaveChangesAsync(ct); return Results.Ok(new { id = report.Id, displayNumber = report.DisplayNumber, state = ProblemReportTransitionPolicy.Canonical(report.State).ToString(), version = report.Version, snapshotHash = report.CanonicalHash() });
+            await db.SaveChangesAsync(ct);
+            var snapshot = await ProblemReportAttachmentEvidence.SnapshotAsync(db, report, ct);
+            return Results.Ok(new { id = report.Id, displayNumber = report.DisplayNumber, state = ProblemReportTransitionPolicy.Canonical(report.State).ToString(), version = report.Version, snapshotHash = snapshot.Hash });
         }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "This problem report was updated concurrently. Refresh before continuing.", code = "stale_version" }); }
@@ -957,8 +969,8 @@ public static class ProblemReportEndpoints
         var liveNames = currentNames ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         return new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), category = CategoryResponse(x), x.Classification, x.ReportedBy, reportedByDisplayName = liveNames.Current(x.ReportedBy), x.ResponsibleEngineerId, responsibleEngineerDisplayName = liveNames.Current(x.ResponsibleEngineerId), x.TargetReleaseId, x.IsReleaseBlocker, waived, x.UpdatedAt, x.Version };
     }
-    private static object Detail(ProblemReport x, IEnumerable<ProblemReportLinkView> links,
-        IEnumerable<ProblemReportRevision> revisions,
+    private static async Task<object> DetailResponseAsync(ProblemReport x, IEnumerable<ProblemReportLinkView> links,
+        IEnumerable<ProblemReportRevision> revisions, AeroLinkDbContext db, CancellationToken ct,
         IEnumerable<ProblemReportClosureCandidate>? closureCandidates = null,
         IReadOnlyList<ProblemReportImpactArea>? impactAreas = null,
         IReadOnlyList<object>? relatedReports = null,
@@ -967,6 +979,7 @@ public static class ProblemReportEndpoints
         ProblemReportDuplicateDiagnostic? duplicateDiagnostic = null,
         IReadOnlyDictionary<string, string>? currentNames = null)
     {
+        var currentSnapshot = await ProblemReportAttachmentEvidence.SnapshotAsync(db, x, ct);
         // Current directory names for the live assignment fields only. Historical events below read their own
         // captured name instead, so a rename cannot rewrite them. See DirectoryIdentityProjection.
         var liveNames = currentNames ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -977,7 +990,7 @@ public static class ProblemReportEndpoints
             && link.ArtifactId == x.ResolutionVerificationExecutionId).Select(LinkResponse).ToList();
         var now = DateTimeOffset.UtcNow; var waiverHistory = (releaseWaivers ?? []).ToList();
         var activeWaiver = waiverHistory.FirstOrDefault(item => item.IsActiveFor(x, now));
-        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, reportedByDisplayName = liveNames.Current(x.ReportedBy), x.ResponsibleEngineerId, responsibleEngineerDisplayName = liveNames.Current(x.ResponsibleEngineerId), x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.RootCauseRich, x.Effects, x.EffectsRich, x.Containment, x.ContainmentRich, x.CorrectiveAction, x.CorrectiveActionRich, x.Workaround, x.WorkaroundRich, x.AnalysisRich, category = CategoryResponse(x), x.SystemAircraftImpact, x.SystemAircraftImpactRich, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = x.CanonicalHash(), snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion, capabilities, duplicateDiagnostic,
+        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, reportedByDisplayName = liveNames.Current(x.ReportedBy), x.ResponsibleEngineerId, responsibleEngineerDisplayName = liveNames.Current(x.ResponsibleEngineerId), x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.RootCauseRich, x.Effects, x.EffectsRich, x.Containment, x.ContainmentRich, x.CorrectiveAction, x.CorrectiveActionRich, x.Workaround, x.WorkaroundRich, x.AnalysisRich, category = CategoryResponse(x), x.SystemAircraftImpact, x.SystemAircraftImpactRich, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = currentSnapshot.Hash, snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion, capabilities, duplicateDiagnostic,
             // Each slot arrives complete — identifier, live state and target build. A response carrying only
             // ids would force the browser into a follow-up call per artifact, and the states it showed
             // would then be read at different instants from one another.
@@ -1002,6 +1015,7 @@ public static class ProblemReportEndpoints
         candidate.ReportVersion,
         candidate.VerificationExecutionId,
         candidate.ManifestHash,
+        candidate.ReportSnapshotHash,
         candidate.SelectedBy,
         candidate.SelectedAt,
         state = candidate.State.ToString(),

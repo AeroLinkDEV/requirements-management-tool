@@ -444,8 +444,13 @@ public static class ControlledEditingEndpoints
                 // No audit aggregate: AuditEvent.AggregateId is a foreign key to a change request, and a
                 // Problem Report's controlled history is that same revision chain, which the adapter
                 // writes on check-in.
-                return item is null ? null : new(item.ProjectId, item.State.ToString(), null,
-                    ProblemReportControlledEditingAdapter.Snapshot(item), "ProblemReport");
+                if (item is null) return null;
+                // Schema 6 commits the exact active supporting-file manifest. Checkout must bind the lease
+                // to that same evidence boundary so a check-in cannot silently use an aggregate hash that
+                // omits attachments.
+                var snapshot = await ProblemReportAttachmentEvidence.SnapshotAsync(db, item, ct);
+                return new(item.ProjectId, item.State.ToString(), null,
+                    snapshot.Json, "ProblemReport");
             }
             case ControlledArtifactFamily.ConfigurationChangeSet:
             {

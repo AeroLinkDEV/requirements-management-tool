@@ -993,7 +993,8 @@
       "coveredBy": [
         "AdministratorChangeRequestApiTests",
         "IdentifierAllocationTests",
-        "ProblemReportCheckoutApiTests"
+        "ProblemReportCheckoutApiTests",
+        "ProblemReportVerificationApiTests"
       ]
     },
     {

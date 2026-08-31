@@ -242,6 +242,7 @@ public static class EditSessionEndpoints
         {
             await using var transaction=await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable,ct);
             ProblemReport? report=null;
+            ArtifactEditSession? reportSession=null;
             if(artifactType=="ProblemReport")
             {
                 report=await db.ProblemReports.SingleOrDefaultAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct);
@@ -249,8 +250,8 @@ public static class EditSessionEndpoints
                 if(report.State is ProblemReportState.Closed or ProblemReportState.Rejected)
                     return Results.Conflict(new{error="Finished Problem Reports cannot accept supporting-file changes.",code="artifact_not_editable"});
                 if(!Guid.TryParse(form["editSessionId"],out var editSessionId))return Results.Forbid();
-                var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==editSessionId,ct);
-                if(!ValidProblemReportSession(session,projectId,artifactId,http.UserAccount().UserName))return Results.Forbid();
+                reportSession=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==editSessionId,ct);
+                if(!ValidProblemReportSession(reportSession,projectId,artifactId,http.UserAccount().UserName))return Results.Forbid();
                 var reportBytes=await db.ControlledAttachments.AsNoTracking()
                     .Where(x=>x.ProjectId==projectId&&x.ArtifactType=="ProblemReport"&&x.ArtifactId==artifactId)
                     .SumAsync(x=>(long?)x.Size,ct)??0;
@@ -333,6 +334,14 @@ public static class EditSessionEndpoints
                 db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id,report.Revision,
                     previous is null?"SupportingAttachmentAdded":"SupportingAttachmentReplaced",actorNow.UserName,
                     evidence.Hash,evidence.Json,now,detail:detail,actorDisplayName:actorNow.DisplayName));
+                // A pending SQA closure candidate names the exact report evidence, including its active
+                // supporting-file manifest. Any attachment change therefore invalidates that candidate in
+                // this same serializable transaction; approving a candidate against an older file set must
+                // never be possible, even when the editor and SQA act close together.
+                await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actorNow.UserName,
+                    previous is null ? "SupportingAttachmentAdded" : "SupportingAttachmentReplaced", now, ct,
+                    actorDisplayName: actorNow.DisplayName);
+                reportSession!.RebindBaseSnapshot(evidence.Hash, now);
                 await db.SaveChangesAsync(ct);
             }
             // Match the managed-document coordinator's commit order: metadata and the promoted bytes are
@@ -373,7 +382,7 @@ public static class EditSessionEndpoints
         var report=await db.ProblemReports.SingleOrDefaultAsync(x=>x.Id==item.ArtifactId&&x.ProjectId==item.ProjectId,ct);
         if(report is null)return Results.NotFound();
         var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==request.EditSessionId,ct);
-        if(!ValidProblemReportSession(session,item.ProjectId,item.ArtifactId,http.UserAccount().UserName))return Results.Forbid();
+        if(session is null||!ValidProblemReportSession(session,item.ProjectId,item.ArtifactId,http.UserAccount().UserName))return Results.Forbid();
         if(report.State is ProblemReportState.Closed or ProblemReportState.Rejected)
             return Results.Conflict(new{error="Finished Problem Reports cannot remove supporting files.",code="artifact_not_editable"});
         if(item.State!=ControlledAttachmentState.Active)
@@ -385,6 +394,9 @@ public static class EditSessionEndpoints
         db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id,report.Revision,"SupportingAttachmentRemoved",actor.UserName,
             evidence.Hash,evidence.Json,now,detail:$"Removed {item.OriginalFileName} v{item.Version}; SHA-256 {item.Sha256}. Reason: {reason}",
             rationale:reason,actorDisplayName:actor.DisplayName));
+        await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
+            "SupportingAttachmentRemoved", now, ct, rationale: reason, actorDisplayName: actor.DisplayName);
+        session.RebindBaseSnapshot(evidence.Hash, now);
         await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);
         return Results.NoContent();
     }

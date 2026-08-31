@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AeroLink.Domain.Baselines;
@@ -516,6 +517,113 @@ public sealed class ProblemReportVerificationApiTests
         Assert.Equal("Approved", frozen.GetProperty("state").GetString());
         Assert.Equal("FrozenAtApproval", frozen.GetProperty("packageProvenance").GetString());
         Assert.Equal(64, frozen.GetProperty("closurePackageHash").GetString()!.Length);
+    }
+
+    [Fact]
+    public async Task Closure_candidate_and_frozen_package_commit_the_exact_supporting_attachment_manifest()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var engineer = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(engineer);
+        var fixture = await SeedAsync(factory);
+
+        using var checkout = await engineer.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = fixture.ReportId, leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.Created, checkout.StatusCode);
+        var session = await checkout.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = session.GetProperty("id").GetGuid();
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(fixture.ProjectId.ToString()), "projectId");
+        form.Add(new StringContent(fixture.ReportId.ToString()), "artifactId");
+        form.Add(new StringContent("ProblemReport"), "artifactType");
+        form.Add(new StringContent(sessionId.ToString()), "editSessionId");
+        form.Add(new StringContent("Closure test evidence"), "label");
+        form.Add(new StringContent("The exact file set used by the closure candidate."), "description");
+        var file = new ByteArrayContent(Encoding.UTF8.GetBytes("closure evidence v1\n"));
+        file.Headers.ContentType = new("text/plain");
+        form.Add(file, "file", "closure-evidence.txt");
+        using var uploaded = await engineer.PostAsync("/api/enterprise-hardening/attachments", form);
+        Assert.Equal(HttpStatusCode.Created, uploaded.StatusCode);
+
+        using var checkedIn = await engineer.PostAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/check-in",
+            new { expectedVersion = session.GetProperty("version").GetInt64() });
+        Assert.Equal(HttpStatusCode.OK, checkedIn.StatusCode);
+        var candidate = await SelectCandidateAsync(engineer, fixture, fixture.TargetBuildId, targetReleaseId: null);
+        using var quality = factory.CreateClient();
+        await LoginAsync(quality, "closure.quality");
+        using var closed = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
+            new { expectedVersion = candidate.ReportVersion });
+        Assert.Equal(HttpStatusCode.OK, closed.StatusCode);
+
+        var detail = await engineer.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
+        var approved = Assert.Single(detail.GetProperty("closureCandidates").EnumerateArray(),
+            item => item.GetProperty("state").GetString() == "Approved");
+        using var packageResponse = await engineer.GetAsync($"/api/problem-reports/{fixture.ReportId}/closure-package");
+        Assert.Equal(HttpStatusCode.OK, packageResponse.StatusCode);
+        var package = await packageResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var packageBody = package.GetProperty("package");
+        var candidateJson = packageBody.GetProperty("candidate").GetProperty("reportSnapshotJson").GetString()!;
+        var closureJson = packageBody.GetProperty("closure").GetProperty("reportSnapshotJson").GetString()!;
+        var candidateManifest = JsonDocument.Parse(candidateJson).RootElement.GetProperty("supportingAttachments");
+        var closureManifest = JsonDocument.Parse(closureJson).RootElement.GetProperty("supportingAttachments");
+        var manifestEntry = Assert.Single(candidateManifest.EnumerateArray());
+        Assert.Equal(manifestEntry.GetProperty("attachmentId").GetGuid(),
+            Assert.Single(closureManifest.EnumerateArray()).GetProperty("attachmentId").GetGuid());
+        Assert.Equal(manifestEntry.GetProperty("sha256").GetString(),
+            Assert.Single(closureManifest.EnumerateArray()).GetProperty("sha256").GetString());
+        Assert.Equal(ProblemReportEvidenceContract.Hash(candidateJson),
+            packageBody.GetProperty("candidate").GetProperty("reportSnapshotHash").GetString());
+        Assert.Equal(ProblemReportEvidenceContract.Hash(closureJson),
+            packageBody.GetProperty("closure").GetProperty("reportSnapshotHash").GetString());
+        Assert.Equal(approved.GetProperty("reportSnapshotHash").GetString(),
+            packageBody.GetProperty("candidate").GetProperty("reportSnapshotHash").GetString());
+    }
+
+    [Fact]
+    public async Task Supporting_attachment_add_invalidates_a_pending_closure_candidate_and_refuses_stale_approval()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var engineer = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(engineer);
+        var fixture = await SeedAsync(factory);
+        var candidate = await SelectCandidateAsync(engineer, fixture, fixture.TargetBuildId, targetReleaseId: null);
+
+        using var checkout = await engineer.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = fixture.ReportId, leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.Created, checkout.StatusCode);
+        var session = await checkout.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = session.GetProperty("id").GetGuid();
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(fixture.ProjectId.ToString()), "projectId");
+        form.Add(new StringContent(fixture.ReportId.ToString()), "artifactId");
+        form.Add(new StringContent("ProblemReport"), "artifactType");
+        form.Add(new StringContent(sessionId.ToString()), "editSessionId");
+        form.Add(new StringContent("Closure evidence"), "label");
+        form.Add(new StringContent("Evidence added after the pending closure candidate."), "description");
+        var file = new ByteArrayContent(Encoding.UTF8.GetBytes("candidate mutation evidence\n"));
+        file.Headers.ContentType = new("text/plain");
+        form.Add(file, "file", "candidate-mutation.txt");
+        using var upload = await engineer.PostAsync("/api/enterprise-hardening/attachments", form);
+        Assert.Equal(HttpStatusCode.Created, upload.StatusCode);
+
+        var detail = await engineer.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
+        var invalidated = Assert.Single(detail.GetProperty("closureCandidates").EnumerateArray());
+        Assert.Equal("Invalidated", invalidated.GetProperty("state").GetString());
+        Assert.Equal("SupportingAttachmentAdded", invalidated.GetProperty("invalidationReason").GetString());
+        var invalidation = Assert.Single(detail.GetProperty("revisions").EnumerateArray(), revision =>
+            revision.GetProperty("eventType").GetString() == "ClosureVerificationInvalidatedByChange");
+        Assert.Equal("admin", invalidation.GetProperty("actor").GetString());
+        Assert.Equal(detail.GetProperty("snapshotHash").GetString(), invalidation.GetProperty("snapshotHash").GetString());
+
+        using var quality = factory.CreateClient();
+        await LoginAsync(quality, "closure.quality");
+        using var staleApproval = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
+            new { expectedVersion = candidate.ReportVersion });
+        Assert.Equal(HttpStatusCode.Conflict, staleApproval.StatusCode);
+        var staleBody = await staleApproval.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("pr_closure_candidate_stale", staleBody.GetProperty("code").GetString());
+        var stillWaiting = await engineer.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
+        Assert.Equal("WaitingForSqaToClose", stillWaiting.GetProperty("state").GetString());
     }
 
     [Fact]
