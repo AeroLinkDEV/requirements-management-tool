@@ -87,12 +87,22 @@ remains editable and is not released.
 
 ### Problem Reports and work distribution
 
-The deterministic FMS seed also carries eight Problem Reports split across the released 1.5 and in-work 1.6
-builds. They intentionally cover Draft, Open, Implementing, Verifying, Waiting for SQA closure, Closed, and
-Rejected states, with Task, Improvement, Code, Requirements, Test, and Environment categories. Responsible
-work is distributed across six named synthetic people; the broader identity seed includes additional project
-members with no current obligations, so Team Work can show both populated and zero-obligation people without
-inventing ownership.
+The deterministic FMS seed also carries eight Problem Reports split four-and-four across the released 1.5 and
+in-work 1.6 builds. Every one has an authoritative controlled `BuildScope` link to its target release, so build
+work lists and the report centre answer the same scope question. They intentionally cover Draft, Open,
+Implementing, Verifying, Waiting for SQA closure, Closed, and Rejected states, with Task, Improvement, Code,
+Requirements, Test, and Environment categories. The two verification scenarios carry a controlled
+`ResolutionVerification` link, immutable `ResolutionVerified` history, and closure candidate evidence; the
+closed scenario also carries a frozen `ClosureApproved` package. Responsible work is distributed across five
+eligible synthetic engineers/test engineers; the broader identity seed includes additional project members with
+no current obligations, so Team Work can show both populated and zero-obligation people without inventing
+ownership.
+
+Interface and Problem Report scenarios carry an owned FMS marker and prefer the deterministic `86601` number
+range. If a legitimate record already occupies a preferred number, the next free number is selected; a
+user-created `ICDCR-00001` or `PR-00001` is never mistaken for a showcase row. The upgrade marker is written
+only after all scenario postconditions pass, so an interrupted or incomplete enrichment retries on the next
+startup without rewriting controlled history.
 
 ## Terminology
 

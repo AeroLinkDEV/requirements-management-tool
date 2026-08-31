@@ -4,6 +4,7 @@ using System.Text.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
@@ -24,7 +25,24 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
 {
     private readonly IProjectLadderPolicyResolver resolver = policyResolver ?? new EffectiveProjectLadderPolicyResolver(db);
     public const string ProgramCode = "FMSLIVE";
+    // Showcase rows are identified by an owned scenario marker, never by a controlled number that an
+    // operator could legitimately allocate in another project. The high-numbered preferred range keeps
+    // the demo readable while AllocateScenarioNumber still fails safely around existing data.
+    private const string InterfaceScenarioMarkerPrefix = "[FMSLIVE showcase scenario: interface-";
+    private const string ProblemReportScenarioMarkerPrefix = "[FMSLIVE showcase scenario: problem-report-";
+    private const int PreferredScenarioNumber = 86601;
+    private static readonly string[] InterfaceScenarioAuthors = ["systems.author", "software.author"];
+    private static readonly string[] ProblemReportOwners =
+        ["systems.author", "software.author", "test.engineer", "engineer.demo", "test.author", "test.engineer", "software.author", "systems.author"];
     private static readonly string[] Topics = ["flight plan", "lateral navigation", "vertical navigation", "performance prediction", "navigation database", "guidance", "radio navigation", "position estimation", "fuel management", "crew interface", "departure procedures", "arrival procedures", "approach management", "airspace constraints", "route sequencing"];
+
+    private static string InterfaceScenarioMarker(int index) => $"{InterfaceScenarioMarkerPrefix}{index:D2}]";
+    private static string ProblemReportScenarioMarker(int index) => $"{ProblemReportScenarioMarkerPrefix}{index:D2}]";
+    private static bool IsInterfaceScenario(SystemChangeRequest request) =>
+        request.Type == ChangeRequestType.Interface
+        && request.Analysis.Contains(InterfaceScenarioMarkerPrefix, StringComparison.OrdinalIgnoreCase);
+    private static bool IsProblemReportScenario(ProblemReport report) =>
+        report.AdditionalInformation.Contains(ProblemReportScenarioMarkerPrefix, StringComparison.OrdinalIgnoreCase);
 
     public async Task<FmsShowcaseSummary> EnsureSeededAsync(CancellationToken ct = default)
     {
@@ -168,7 +186,21 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
 
         foreach (var step in steps)
         {
-            if (await db.ShowcaseUpgradeSteps.AsNoTracking().AnyAsync(x => x.ProgramId == programId && x.StepKey == step.Key, ct)) continue;
+            var recorded = await db.ShowcaseUpgradeSteps
+                .SingleOrDefaultAsync(x => x.ProgramId == programId && x.StepKey == step.Key, ct);
+            if (recorded is not null)
+            {
+                // Scenario richness has externally visible postconditions. An older build could have
+                // recorded its marker before the final rows/links were committed; do not let that marker
+                // turn an incomplete showcase into a permanent no-op. Removing only the upgrade marker
+                // makes the next run retry the owned additive work, while all controlled rows remain intact.
+                if (step.Key == "scenario-richness" && !await ScenarioRichnessCompleteAsync(programId, ct))
+                {
+                    db.ShowcaseUpgradeSteps.Remove(recorded);
+                    await db.SaveChangesAsync(ct);
+                }
+                else continue;
+            }
             var detail = await step.Run(programId, ct);
             db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId, step.Key, detail ?? "No change required.", DateTimeOffset.UtcNow));
             await db.SaveChangesAsync(ct);
@@ -569,11 +601,13 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var documents = await db.ControlledDocuments.CountAsync(x => x.ProjectId == projectId, ct);
         var campaigns = await db.ReleaseCampaigns.CountAsync(x => x.ProjectId == projectId, ct);
         var components = await db.ProductLineComponents.CountAsync(x => x.ProjectId == projectId, ct);
-        var interfaceRequests = await db.SystemChangeRequests.AsNoTracking()
-            .Where(x => x.ProjectId == projectId && x.Type == ChangeRequestType.Interface)
-            .ToListAsync(ct);
-        var problemReports = await db.ProblemReports.AsNoTracking()
+        var allProjectRequests = await db.SystemChangeRequests.AsNoTracking()
             .Where(x => x.ProjectId == projectId).ToListAsync(ct);
+        var interfaceRequests = allProjectRequests.Where(IsInterfaceScenario).ToList();
+        var allProblemReports = await db.ProblemReports.AsNoTracking()
+            .Where(x => x.ProjectId == projectId).ToListAsync(ct);
+        var problemReports = allProblemReports.Where(IsProblemReportScenario).ToList();
+        var activeRequests = allProjectRequests.Where(x => x.TargetReleaseId == releases.SingleOrDefault(r => r.Version == "1.6")?.Id).ToList();
         var requiredInterfaceStates = new[]
         {
             ChangeRequestState.Draft, ChangeRequestState.InReview, ChangeRequestState.Approved,
@@ -598,16 +632,61 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 $"{approved} approved or selected change request(s) and {impacts} verification-impact item(s)."),
             new("release-campaign", campaigns >= 1, $"{campaigns} release campaign(s)."),
             new("product-line", components >= 1, $"{components} product-line component(s)."),
-            new("interface-scenarios", interfaceRequests.Count >= 8
+            new("active-change-request-distribution", activeRequests.Count >= 16,
+                $"{activeRequests.Count} active-build change request(s); the showcase contributes 8 baseline scenarios and 8 Interface scenarios."),
+            new("interface-scenarios", interfaceRequests.Count == 8
                     && requiredInterfaceStates.All(state => interfaceRequests.Any(x => x.State == state)),
                 $"{interfaceRequests.Count} Interface change-control scenario(s); the active build should show draft, review, approval, selection, deferral and withdrawal."),
-            new("problem-report-scenarios", problemReports.Count >= 8
+            new("problem-report-scenarios", problemReports.Count == 8
                     && requiredProblemStates.All(state => problemReports.Any(x => x.State == state)),
                 $"{problemReports.Count} Problem Report scenario(s); lifecycle variety should include active, closure and rejected records."),
             new("work-distribution", problemReports.Select(x => x.ResponsibleEngineerId)
                     .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count() >= 5,
                 $"{problemReports.Select(x => x.ResponsibleEngineerId).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count()} responsible people hold seeded Problem Report work."),
+            new("problem-report-build-scope", await ProblemReportBuildScopeInvariantAsync(problemReports, ct),
+                "Every seeded Problem Report has one authoritative BuildScope release link matching its target build."),
+            new("problem-report-controlled-evidence", await ProblemReportEvidenceInvariantAsync(problemReports, ct),
+                "Verified and closed seeded Problem Reports carry controlled resolution links and closure evidence."),
         ];
+    }
+
+    private async Task<bool> ProblemReportBuildScopeInvariantAsync(IReadOnlyCollection<ProblemReport> reports,
+        CancellationToken ct)
+    {
+        if (reports.Count != 8) return false;
+        foreach (var report in reports)
+        {
+            if (report.TargetReleaseId is null) return false;
+            var links = await db.ProblemReportLinks.AsNoTracking().Where(x => x.ProblemReportId == report.Id
+                && x.ArtifactType == "Release" && x.Relationship == ProblemReportRelationshipPolicy.BuildScope).ToListAsync(ct);
+            if (links.Count != 1 || links[0].ArtifactId != report.TargetReleaseId.Value) return false;
+        }
+        return true;
+    }
+
+    private async Task<bool> ProblemReportEvidenceInvariantAsync(IReadOnlyCollection<ProblemReport> reports,
+        CancellationToken ct)
+    {
+        foreach (var index in new[] { 6, 7 })
+        {
+            var marker = ProblemReportScenarioMarker(index);
+            var report = reports.SingleOrDefault(x => x.AdditionalInformation.Contains(marker, StringComparison.OrdinalIgnoreCase));
+            if (report?.ResolutionVerificationExecutionId is null) return false;
+            if (!await db.ProblemReportLinks.AsNoTracking().AnyAsync(x => x.ProblemReportId == report.Id
+                    && x.ArtifactType == "TestExecution" && x.ArtifactId == report.ResolutionVerificationExecutionId
+                    && x.Relationship == ProblemReportRelationshipPolicy.ResolutionVerification, ct)) return false;
+            if (!await db.ProblemReportRevisions.AsNoTracking().AnyAsync(x => x.ProblemReportId == report.Id
+                    && x.EventType == "ResolutionVerified", ct)) return false;
+            var candidate = await db.ProblemReportClosureCandidates.AsNoTracking().Where(x => x.ProblemReportId == report.Id)
+                .OrderByDescending(x => x.Sequence).FirstOrDefaultAsync(ct);
+            if (candidate is null || candidate.VerificationExecutionId != report.ResolutionVerificationExecutionId) return false;
+            if (index == 6 && candidate.State != ProblemReportClosureCandidateState.Pending) return false;
+            if (index == 7 && (report.State != ProblemReportState.Closed
+                    || candidate.State != ProblemReportClosureCandidateState.Approved
+                    || !await db.ProblemReportRevisions.AsNoTracking().AnyAsync(x => x.ProblemReportId == report.Id
+                        && x.EventType == "ClosureApproved", ct))) return false;
+        }
+        return true;
     }
 
     /// <summary>
@@ -733,38 +812,56 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     private async Task<string?> EnsureScenarioRichnessAsync(Guid programId, CancellationToken ct)
     {
         var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleOrDefaultAsync(ct);
-        if (projectId == Guid.Empty) return null;
+        if (projectId == Guid.Empty)
+            throw new InvalidOperationException("The FMS showcase Project is required before scenario enrichment can be recorded.");
         var releases = await db.Releases.Where(x => x.ProjectId == projectId).ToDictionaryAsync(x => x.Version, ct);
         if (!releases.TryGetValue("1.6", out var active) || !releases.TryGetValue("1.5", out var released))
-            return "The FMS build pair is not available for scenario enrichment.";
+            throw new InvalidOperationException("Both FMS 1.5 and 1.6 releases are required before scenario enrichment can be recorded.");
 
         var interfaceCount = await EnsureInterfaceScenariosAsync(projectId, active.Id, ct);
         var problemCount = await EnsureProblemReportScenariosAsync(projectId, released.Id, active.Id, ct);
+        if (!await ScenarioRichnessCompleteAsync(programId, ct))
+            throw new InvalidOperationException("The FMS scenario enrichment did not reach its controlled postconditions; the upgrade step remains retryable.");
         return $"Ensured {interfaceCount} Interface change-control scenarios and {problemCount} Problem Report scenarios across Builds 1.5 and 1.6.";
     }
 
     private async Task<int> EnsureInterfaceScenariosAsync(Guid projectId, Guid releaseId, CancellationToken ct)
     {
         var existing = await db.SystemChangeRequests
-            .Where(x => x.ProjectId == projectId && x.TargetReleaseId == releaseId && x.Type == ChangeRequestType.Interface)
+            .Where(x => x.ProjectId == projectId)
             .ToListAsync(ct);
-        var byNumber = existing.ToDictionary(x => x.BaseNumber, StringComparer.OrdinalIgnoreCase);
-        var authors = new[] { "systems.author", "software.author", "software.lead", "quality.analyst", "systems.author", "software.author", "software.lead", "release.manager" };
+        var byMarker = existing.Where(IsInterfaceScenario)
+            .ToDictionary(x => x.Analysis[ x.Analysis.IndexOf(InterfaceScenarioMarkerPrefix, StringComparison.OrdinalIgnoreCase).. ], StringComparer.OrdinalIgnoreCase);
+        var usedNumbers = existing.Select(x => x.BaseNumber).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var usedRequirementNumbers = (await db.Requirements.Where(x => x.ProjectId == projectId)
+                .Select(x => x.BaseNumber).ToListAsync(ct))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var existingRequestIds = existing.Select(request => request.Id).ToList();
+        foreach (var number in await db.RequirementChanges.Where(x => existingRequestIds.Contains(x.ChangeRequestId))
+                     .Select(x => x.BaseNumber).ToListAsync(ct))
+            usedRequirementNumbers.Add(number);
         var now = new DateTimeOffset(2024, 12, 2, 10, 0, 0, TimeSpan.Zero);
         var baseline = await db.CandidateBaselines
             .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.ReleaseId == releaseId && x.BaseNumber == "SW-01.60", ct);
 
         for (var i = 1; i <= 8; i++)
         {
-            var baseNumber = $"ICDCR-{i:D5}";
-            if (byNumber.ContainsKey(baseNumber)) continue;
-            var author = authors[i - 1];
+            var marker = InterfaceScenarioMarker(i);
+            if (byMarker.TryGetValue(marker, out var existingScenario))
+            {
+                if (existingScenario.Type != ChangeRequestType.Interface || existingScenario.TargetReleaseId != releaseId)
+                    throw new InvalidOperationException($"The {marker} Interface scenario has an invalid controlled scope.");
+                continue;
+            }
+            var baseNumber = AllocateScenarioNumber("ICDCR", i, usedNumbers);
+            var requirementBaseNumber = AllocateScenarioNumber("ICDR", i, usedRequirementNumbers);
+            var author = InterfaceScenarioAuthors[(i - 1) % InterfaceScenarioAuthors.Length];
             var request = new SystemChangeRequest(baseNumber, 0, projectId, releaseId,
                 i == 1 ? "Align navigation interface timing contract" : $"FMS 1.6 interface contract scenario {i}",
                 "The controlled interface contract needs a documented FMS 1.6 decision.",
-                "The interface impact was reviewed against the current navigation and display boundaries.",
+                $"The interface impact was reviewed against the current navigation and display boundaries. {marker}",
                 "Record the exact interface behaviour and its compatibility decision.", author, now.AddDays(i), ChangeRequestType.Interface);
-            request.AddRequirementChange(author, $"ICDR-{i:D5}", 0, RequirementLevel.Interface,
+            request.AddRequirementChange(author, requirementBaseNumber, 0, RequirementLevel.Interface,
                 RequirementChangeKind.Introduce,
                 $"The FMS interface shall preserve deterministic navigation exchange behaviour {i:D2}.",
                 "The interface requirement is retained as controlled showcase content.", "Not Applicable", now.AddDays(i));
@@ -795,7 +892,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             }
 
             db.SystemChangeRequests.Add(request);
-            byNumber.Add(baseNumber, request);
+            byMarker.Add(marker, request);
+            usedNumbers.Add(baseNumber);
+            usedRequirementNumbers.Add(requirementBaseNumber);
             // Selection is a separate fact from approval. Keep one Interface example in the active candidate
             // only when the expected draft baseline is available; an older installation without that baseline
             // must not be made to look as though a build accepted work it cannot name.
@@ -803,15 +902,15 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 baseline.Select(request, "cm.fms", now.AddDays(i).AddHours(3));
         }
         await db.SaveChangesAsync(ct);
-        return byNumber.Count;
+        return byMarker.Count;
     }
 
     private async Task<int> EnsureProblemReportScenariosAsync(Guid projectId, Guid releasedId, Guid activeId, CancellationToken ct)
     {
         var existing = await db.ProblemReports.Where(x => x.ProjectId == projectId).ToListAsync(ct);
-        var byNumber = existing.ToDictionary(x => x.ReportNumber, StringComparer.OrdinalIgnoreCase);
-        var owners = new[] { "systems.author", "software.author", "test.engineer", "quality.analyst", "software.lead", "test.engineer", "software.author", "release.manager" };
-        var reporters = new[] { "systems.author", "software.author", "test.engineer", "quality.analyst", "software.lead", "systems.author", "software.author", "release.manager" };
+        var byMarker = existing.Where(IsProblemReportScenario)
+            .ToDictionary(x => x.AdditionalInformation[x.AdditionalInformation.IndexOf(ProblemReportScenarioMarkerPrefix, StringComparison.OrdinalIgnoreCase)..], StringComparer.OrdinalIgnoreCase);
+        var usedNumbers = existing.Select(x => x.ReportNumber).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var categories = new[]
         {
             ProblemReportCategory.TaskDriver, ProblemReportCategory.ProductImprovement,
@@ -828,13 +927,20 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
 
         for (var i = 1; i <= 8; i++)
         {
-            var reportNumber = $"PR-{i:D5}";
-            if (byNumber.ContainsKey(reportNumber)) continue;
-            var owner = owners[i - 1];
+            var marker = ProblemReportScenarioMarker(i);
+            if (byMarker.TryGetValue(marker, out var existingScenario))
+            {
+                var expectedRelease = i <= 4 ? releasedId : activeId;
+                if (existingScenario.TargetReleaseId != expectedRelease)
+                    throw new InvalidOperationException($"The {marker} Problem Report scenario has an invalid build scope.");
+                continue;
+            }
+            var reportNumber = AllocateScenarioNumber("PR", i, usedNumbers);
+            var owner = ProblemReportOwners[i - 1];
             var report = new ProblemReport(projectId, reportNumber,
                 i == 1 ? "Navigation database handoff follow-up" : $"FMS showcase problem report {i}",
                 "The FMS demonstration record captures a controlled engineering concern for this scenario.",
-                "Initial triage is retained with the report so the reader can follow the decision.", reporters[i - 1], now.AddDays(i),
+                "Initial triage is retained with the report so the reader can follow the decision.", owner, now.AddDays(i),
                 classification: "FMS engineering record",
                 severity: i is 3 or 6 ? ProblemReportSeverity.High : ProblemReportSeverity.Major,
                 priority: i is 1 or 6 ? ProblemReportPriority.High : ProblemReportPriority.Normal,
@@ -842,7 +948,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 affectedConfiguration: i <= 4 ? "FMS 1.5" : "FMS 1.6",
                 targetReleaseId: i <= 4 ? releasedId : activeId,
                 responsibleEngineerId: owner,
-                additionalInformation: "Synthetic, deterministic showcase content; no external incident is implied.",
+                additionalInformation: $"Synthetic, deterministic showcase content; no external incident is implied. {marker}",
                 category: categories[i - 1]);
 
             var eventTime = now.AddDays(i);
@@ -891,7 +997,6 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                     if (firstExecutionId is Guid verified)
                     {
                         report.RecordResolutionVerification("test.engineer", verified, eventTime.AddHours(6));
-                        report.ApproveClosure("quality.analyst", Guid.Empty, eventTime.AddHours(7));
                     }
                     break;
                 case 8:
@@ -902,10 +1007,190 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                     break;
             }
             db.ProblemReports.Add(report);
-            byNumber.Add(reportNumber, report);
+            byMarker.Add(marker, report);
+            usedNumbers.Add(reportNumber);
         }
         await db.SaveChangesAsync(ct);
-        return byNumber.Count;
+        await EnsureProblemReportBuildScopeLinksAsync(projectId, releasedId, activeId, ct);
+        await EnsureProblemReportControlledEvidenceAsync(projectId, ct);
+        return byMarker.Count;
+    }
+
+    private static string AllocateScenarioNumber(string prefix, int scenarioIndex, ISet<string> usedNumbers)
+    {
+        // Keep the scenario identity in the owned marker, not this number. A legitimate record may already
+        // occupy the preferred slot, so move deterministically to the next free slot rather than treating it
+        // as one of ours or allowing a uniqueness failure to consume the upgrade attempt.
+        for (var offset = 0; offset < 1000; offset++)
+        {
+            var candidate = $"{prefix}-{PreferredScenarioNumber + scenarioIndex - 1 + offset:D5}";
+            if (!usedNumbers.Contains(candidate)) return candidate;
+        }
+        throw new InvalidOperationException($"No free deterministic {prefix} number was available for FMS showcase scenario {scenarioIndex:D2}.");
+    }
+
+    private async Task EnsureProblemReportBuildScopeLinksAsync(Guid projectId, Guid releasedId, Guid activeId,
+        CancellationToken ct)
+    {
+        var scenarios = (await db.ProblemReports.Where(x => x.ProjectId == projectId).ToListAsync(ct))
+            .Where(IsProblemReportScenario).ToList();
+        foreach (var report in scenarios)
+        {
+            var isReleasedScenario = Enumerable.Range(1, 4)
+                .Any(index => report.AdditionalInformation.Contains(ProblemReportScenarioMarker(index), StringComparison.OrdinalIgnoreCase));
+            var expectedRelease = isReleasedScenario ? releasedId : activeId;
+            if (report.TargetReleaseId != expectedRelease)
+                throw new InvalidOperationException($"The {report.ReportNumber} FMS Problem Report scenario has an invalid target release.");
+
+            var links = await db.ProblemReportLinks.Where(x => x.ProblemReportId == report.Id
+                && x.ArtifactType == "Release" && x.Relationship == ProblemReportRelationshipPolicy.BuildScope).ToListAsync(ct);
+            if (links.Any(x => x.ArtifactId != expectedRelease))
+                throw new InvalidOperationException($"The {report.ReportNumber} FMS Problem Report scenario has an incorrect BuildScope link.");
+            if (links.Count == 0)
+                db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(report.Id, "Release", expectedRelease,
+                    ProblemReportRelationshipPolicy.BuildScope, ProblemReportRelationshipProducer.TargetBuildWorkflow,
+                    "system.workspace", report.CreatedAt));
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task EnsureProblemReportControlledEvidenceAsync(Guid projectId, CancellationToken ct)
+    {
+        var executions = (await db.TestExecutions.AsNoTracking().Where(x => x.ProjectId == projectId)
+                .Select(x => new { x.Id, x.ExecutedAt }).ToListAsync(ct))
+            .OrderBy(x => x.ExecutedAt).ToList();
+        if (executions.Count == 0)
+            throw new InvalidOperationException("FMS Problem Report closure scenarios require a recorded project execution.");
+        // FmsShowcaseSeeder runs before IdentitySeeder during a first demo-data startup. Preserve that
+        // historical bootstrap behavior when no directory exists yet, but never discard a real seeded SQA
+        // account identity when the directory is already present (the normal upgrade path).
+        var sqaAccountId = await db.UserAccounts.AsNoTracking()
+            .Where(x => x.UserName == "quality.analyst")
+            .Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct) ?? Guid.Empty;
+
+        var scenarios = (await db.ProblemReports.Where(x => x.ProjectId == projectId).ToListAsync(ct))
+            .Where(IsProblemReportScenario).ToDictionary(
+                x => x.AdditionalInformation[x.AdditionalInformation.IndexOf(ProblemReportScenarioMarkerPrefix, StringComparison.OrdinalIgnoreCase)..],
+                StringComparer.OrdinalIgnoreCase);
+        var evidenceService = new ProblemReportClosureCandidateService(db);
+        for (var index = 6; index <= 7; index++)
+        {
+            var marker = ProblemReportScenarioMarker(index);
+            if (!scenarios.TryGetValue(marker, out var report))
+                throw new InvalidOperationException($"The {marker} Problem Report scenario was not created.");
+
+            var executionId = report.ResolutionVerificationExecutionId ?? executions[0].Id;
+            var execution = await db.TestExecutions.SingleOrDefaultAsync(x => x.Id == executionId && x.ProjectId == projectId, ct);
+            if (execution is null)
+                throw new InvalidOperationException($"The {marker} scenario names a missing project verification execution.");
+            if (report.ResolutionVerificationExecutionId is null)
+            {
+                if (report.State != ProblemReportState.Verifying)
+                    throw new InvalidOperationException($"The {marker} scenario cannot record verification from {report.State}.");
+                report.RecordResolutionVerification("test.engineer", execution.Id,
+                    new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero).AddDays(index).AddHours(6));
+            }
+            else if (report.ResolutionVerificationExecutionId != execution.Id)
+                throw new InvalidOperationException($"The {marker} scenario has inconsistent verification evidence.");
+
+            var resolutionLinks = await db.ProblemReportLinks.Where(x => x.ProblemReportId == report.Id
+                && x.ArtifactType == "TestExecution"
+                && x.Relationship == ProblemReportRelationshipPolicy.ResolutionVerification).ToListAsync(ct);
+            if (resolutionLinks.Any(x => x.ArtifactId != execution.Id))
+                throw new InvalidOperationException($"The {marker} scenario has an incorrect resolution-verification link.");
+            var resolutionLink = resolutionLinks.SingleOrDefault(x => x.ArtifactId == execution.Id);
+            if (resolutionLink is null)
+            {
+                resolutionLink = ProblemReportRelationshipPolicy.CreateControlled(report.Id, "TestExecution", execution.Id,
+                    ProblemReportRelationshipPolicy.ResolutionVerification,
+                    ProblemReportRelationshipProducer.ResolutionVerificationWorkflow, "test.engineer",
+                    new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero).AddDays(index).AddHours(6));
+                db.ProblemReportLinks.Add(resolutionLink);
+            }
+            await db.SaveChangesAsync(ct);
+
+            var hasVerificationRevision = await db.ProblemReportRevisions.AnyAsync(x => x.ProblemReportId == report.Id
+                && x.EventType == "ResolutionVerified", ct);
+            if (!hasVerificationRevision)
+                db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision, "ResolutionVerified",
+                    "test.engineer", report.CanonicalHash(), report.CanonicalSnapshot(),
+                    new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero).AddDays(index).AddHours(6),
+                    detail: "Controlled verification evidence recorded for the deterministic showcase scenario.",
+                    fromState: ProblemReportState.Verifying.ToString(), toState: ProblemReportState.WaitingForSqaToClose.ToString()));
+
+            var candidates = await db.ProblemReportClosureCandidates
+                .Where(x => x.ProblemReportId == report.Id).OrderByDescending(x => x.Sequence).ToListAsync(ct);
+            var candidate = candidates.FirstOrDefault(x => x.State is ProblemReportClosureCandidateState.Pending or ProblemReportClosureCandidateState.Approved);
+            if (report.State == ProblemReportState.WaitingForSqaToClose && candidate is null)
+                candidate = await evidenceService.CreateAsync(report, execution, resolutionLink, "test.engineer",
+                    new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero).AddDays(index).AddHours(6), ct);
+
+            if (index == 7 && report.State == ProblemReportState.WaitingForSqaToClose)
+            {
+                if (candidate is null || candidate.State != ProblemReportClosureCandidateState.Pending)
+                    throw new InvalidOperationException("The closed FMS Problem Report must have a pending closure candidate.");
+                var closureAt = new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero).AddDays(index).AddHours(7);
+                report.ApproveClosure("quality.analyst", sqaAccountId, closureAt);
+                var closureRevision = new ProblemReportRevision(report.Id, report.Revision, "ClosureApproved", "quality.analyst",
+                    report.CanonicalHash(), report.CanonicalSnapshot(), closureAt,
+                    detail: "Independent SQA closure approved for the deterministic showcase scenario.",
+                    fromState: ProblemReportState.WaitingForSqaToClose.ToString(), toState: ProblemReportState.Closed.ToString());
+                db.ProblemReportRevisions.Add(closureRevision);
+                await evidenceService.FreezeForApprovalAsync(report, candidate, closureRevision, "quality.analyst", sqaAccountId,
+                    ProgramRole.SoftwareQualityAnalyst.ToString(), closureAt, ct);
+            }
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task<bool> ScenarioRichnessCompleteAsync(Guid programId, CancellationToken ct)
+    {
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleOrDefaultAsync(ct);
+        if (projectId == Guid.Empty) return false;
+        var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToDictionaryAsync(x => x.Version, ct);
+        if (!releases.TryGetValue("1.5", out var released) || !releases.TryGetValue("1.6", out var active)) return false;
+
+        var interfaces = (await db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct))
+            .Where(IsInterfaceScenario).ToList();
+        if (interfaces.Count != 8
+            || !interfaces.All(x => x.TargetReleaseId == active.Id && InterfaceScenarioAuthors.Contains(x.AuthorId, StringComparer.OrdinalIgnoreCase))
+            || !Enum.GetValues<ChangeRequestState>().Where(x => x is ChangeRequestState.Draft or ChangeRequestState.InReview
+                or ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline or ChangeRequestState.Deferred or ChangeRequestState.Withdrawn)
+                .All(state => interfaces.Any(x => x.State == state))) return false;
+
+        var reports = (await db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct))
+            .Where(IsProblemReportScenario).ToList();
+        if (reports.Count != 8 || !reports.All(x => ProblemReportOwners.Contains(x.ResponsibleEngineerId, StringComparer.OrdinalIgnoreCase))) return false;
+        if (reports.Count(x => x.TargetReleaseId == released.Id) != 4 || reports.Count(x => x.TargetReleaseId == active.Id) != 4) return false;
+        var requiredStates = new[] { ProblemReportState.Draft, ProblemReportState.Implementing, ProblemReportState.Verifying,
+            ProblemReportState.WaitingForSqaToClose, ProblemReportState.Closed, ProblemReportState.Rejected };
+        if (!requiredStates.All(state => reports.Any(x => x.State == state))) return false;
+
+        foreach (var report in reports)
+        {
+            var expectedRelease = report.TargetReleaseId;
+            var buildLinks = await db.ProblemReportLinks.AsNoTracking().Where(x => x.ProblemReportId == report.Id
+                && x.ArtifactType == "Release" && x.Relationship == ProblemReportRelationshipPolicy.BuildScope).ToListAsync(ct);
+            if (expectedRelease is null || buildLinks.Count != 1 || buildLinks[0].ArtifactId != expectedRelease) return false;
+        }
+        foreach (var index in new[] { 6, 7 })
+        {
+            var marker = ProblemReportScenarioMarker(index);
+            var report = reports.SingleOrDefault(x => x.AdditionalInformation.Contains(marker, StringComparison.OrdinalIgnoreCase));
+            if (report?.ResolutionVerificationExecutionId is null) return false;
+            if (!await db.ProblemReportLinks.AsNoTracking().AnyAsync(x => x.ProblemReportId == report.Id
+                    && x.ArtifactType == "TestExecution" && x.ArtifactId == report.ResolutionVerificationExecutionId
+                    && x.Relationship == ProblemReportRelationshipPolicy.ResolutionVerification, ct)) return false;
+            if (!await db.ProblemReportRevisions.AsNoTracking().AnyAsync(x => x.ProblemReportId == report.Id && x.EventType == "ResolutionVerified", ct)) return false;
+            var candidate = await db.ProblemReportClosureCandidates.AsNoTracking().Where(x => x.ProblemReportId == report.Id)
+                .OrderByDescending(x => x.Sequence).FirstOrDefaultAsync(ct);
+            if (candidate is null || candidate.VerificationExecutionId != report.ResolutionVerificationExecutionId) return false;
+            if (index == 6 && candidate.State != ProblemReportClosureCandidateState.Pending) return false;
+            if (index == 7 && (report.State != ProblemReportState.Closed || candidate.State != ProblemReportClosureCandidateState.Approved
+                    || string.IsNullOrWhiteSpace(candidate.ClosurePackageHash)
+                    || !await db.ProblemReportRevisions.AnyAsync(x => x.ProblemReportId == report.Id && x.EventType == "ClosureApproved", ct))) return false;
+        }
+        return true;
     }
 
     /// <summary>
