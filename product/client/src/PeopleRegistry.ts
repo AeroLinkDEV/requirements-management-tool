@@ -33,20 +33,9 @@ export function demoPerson(userName: string, fallbackName?: string, fallbackRole
   const normalized = userName.trim().toLowerCase();
   const exact = people[normalized];
   if (exact) return exact;
-  // FMS showcase accounts are deterministic synthetic identities. Reuse repository-owned portraits by
-  // account family so new generated roster members get a safe, stable visual while unknown/real accounts
-  // still fall back to initials. The API-supplied display name remains authoritative.
-  if (normalized.startsWith("system.engineer.")) return { name: fallbackName ?? "System Engineer", role: "System Engineer", portrait: mayaPatel };
-  if (normalized.startsWith("software.engineer.")) return { name: fallbackName ?? "Software Engineer", role: "Software Engineer", portrait: danielReyes };
-  if (normalized.startsWith("verification.engineer.")) return { name: fallbackName ?? "Verification Engineer", role: "Verification Engineer", portrait: ethanBrooks };
-  if (normalized.startsWith("systems.lead.")) return { name: fallbackName ?? "Systems Lead", role: "Systems Lead", portrait: mayaPatel };
-  if (normalized.startsWith("software.lead.")) return { name: fallbackName ?? "Software Lead", role: "Software Lead", portrait: danielReyes };
-  if (normalized.startsWith("engineering.manager.")) return { name: fallbackName ?? "Engineering Manager", role: "Engineering Manager", portrait: oliviaChen };
-  if (normalized.startsWith("configuration.specialist.")) return { name: fallbackName ?? "Configuration Specialist", role: "Configuration Specialist", portrait: danielReyes };
-  if (normalized.startsWith("systems.lead")) return people["systems.lead"];
-  if (normalized.startsWith("verification.engineer")) return people["verification.engineer"];
-  if (normalized.startsWith("engineering.manager")) return people["engineering.manager"];
-  if (normalized.startsWith("configuration.specialist")) return people["cm.fms"];
+  // Only the explicit, trusted showcase identities above may contribute a portrait or role. A username
+  // prefix is not identity evidence: generated, renamed, or real accounts must retain their API-provided
+  // display name and use the initials fallback rather than inheriting somebody else's likeness or title.
   if (!fallbackName) return undefined;
   return { name: fallbackName, role: fallbackRole, portrait: "" };
 }

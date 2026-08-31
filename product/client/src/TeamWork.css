@@ -64,7 +64,7 @@
 .teamWorkPerson { display: flex; width: 100%; align-items: center; gap: 9px; min-height: 78px; padding: 9px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--ink-900); text-align: left; cursor: pointer; scroll-snap-align: start; }
 .teamWorkPerson:hover, .teamWorkPerson:focus-visible, .teamWorkPerson.selected { border-color: var(--teal-700); box-shadow: 0 2px 7px rgba(18,37,65,.12); outline: none; }
 .teamWorkPerson .personAvatar { width: 38px; height: 38px; border-width: 1px; }
-.teamWorkPersonDetails { justify-self: end; padding: 0 4px; border: 0; background: transparent; color: var(--teal-700); font-size: 11px; font-weight: 800; text-decoration: underline; cursor: pointer; }
+.teamWorkPersonDetails { justify-self: end; padding: 0 4px; border: 0; background: transparent; color: var(--teal-700); font-size: 12px; font-weight: 800; text-decoration: underline; cursor: pointer; }
 .teamWorkPersonInfo { display: grid; min-width: 0; gap: 2px; }
 .teamWorkPersonInfo strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .teamWorkPersonInfo small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-500); font-size: 12px; }

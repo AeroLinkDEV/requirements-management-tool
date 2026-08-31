@@ -372,6 +372,47 @@ test('Team Work derives contextual layers and artifact types without duplicating
   await expect(page.getByText('Assessment of HLRCR-00002.00')).toHaveCount(0)
 })
 
+test('Team Work replaces person selection, preserves shared-holder cards, and clears without hiding the board', async ({ page }) => {
+  await openTeamWork(page)
+  const parallelCard = page.getByRole('link', { name: /Parallel review change/ })
+
+  await page.locator('.teamWorkPerson').filter({ hasText: 'API Alice' }).click()
+  await expect(page.getByRole('status')).toContainText('Showing work held by API Alice')
+  await expect(parallelCard).toBeVisible()
+  await expect(parallelCard).toContainText('API Alice')
+  await expect(parallelCard).toContainText('API Bob')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  await page.locator('.teamWorkPerson').filter({ hasText: 'API Bob' }).click()
+  await expect(page.getByRole('status')).toContainText('Showing work held by API Bob')
+  await expect(page).toHaveURL(/person=bob/)
+  await expect(parallelCard).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Clear person', exact: true }).click()
+  await expect(page.getByRole('status')).toHaveCount(0)
+  await expect(page.locator('[data-team-work-board="true"]')).toBeVisible()
+  await expect(page.locator('[data-team-work-card="true"]')).toHaveCount(6)
+  await expect(page).not.toHaveURL(/person=/)
+})
+
+test('Team Work uses initials for an unproven username prefix and does not infer a role', async ({ page }) => {
+  const person = {
+    userId: '00000000-0000-0000-0000-0000000000ff', userName: 'system.engineer.999', displayName: 'Unproven Account',
+    isCurrentProjectMember: true, accountState: 'active', baseRoles: [], disciplineAffinities: [], holds: 0,
+    byLane: { work: 0, review: 0, sign: 0, approved: 0 },
+  }
+  await openTeamWork(page, {
+    generatedAt: fixture.generatedAt,
+    totals: { items: 0, returned: 0, unheld: 0 },
+    layers: [], artifactTypes: [], people: [person], items: [],
+  })
+  const card = page.locator('.teamWorkPerson').filter({ hasText: 'Unproven Account' })
+  await expect(card.locator('img.personAvatar')).toHaveCount(0)
+  await expect(card.locator('span.personInitials')).toHaveText('UA')
+  await expect(card).not.toContainText('System Engineer')
+})
+
 test('Team Work searches people, filters by one holder, and keeps details behind an explicit affordance', async ({ page }) => {
   await openTeamWork(page)
   const search = page.getByRole('textbox', { name: 'Search' })

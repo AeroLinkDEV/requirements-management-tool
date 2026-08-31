@@ -8,6 +8,7 @@ using System.Text.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
@@ -89,6 +90,20 @@ public sealed class TeamWorkProjectionApiTests
             Assert.True(item.TryGetProperty("artifactType", out var artifactType));
             Assert.False(string.IsNullOrWhiteSpace(artifactType.GetString()));
         });
+        var systemTypes = layers.Single(layer => layer.GetProperty("id").GetString() == "System")
+            .GetProperty("artifactTypes").EnumerateArray().Select(facet => facet.GetProperty("id").GetString()).ToHashSet();
+        var highLevelTypes = layers.Single(layer => layer.GetProperty("id").GetString() == "HighLevel")
+            .GetProperty("artifactTypes").EnumerateArray().Select(facet => facet.GetProperty("id").GetString()).ToHashSet();
+        var lowLevelTypes = layers.Single(layer => layer.GetProperty("id").GetString() == "LowLevel")
+            .GetProperty("artifactTypes").EnumerateArray().Select(facet => facet.GetProperty("id").GetString()).ToHashSet();
+        Assert.Contains("SRCR", systemTypes);
+        Assert.Contains("SYSTPCR", systemTypes);
+        Assert.DoesNotContain("HLRTCCR", systemTypes);
+        Assert.Contains("HLRTCCR", highLevelTypes);
+        Assert.Contains("HLRTPCR", highLevelTypes);
+        Assert.DoesNotContain("SRCR", highLevelTypes);
+        Assert.Contains("LLRTPCR", lowLevelTypes);
+        Assert.DoesNotContain("SRCR", lowLevelTypes);
 
         AssertItem(byId, fixture.CrDraft, "work", [fixture.Author], "author", "Draft");
         AssertItem(byId, fixture.CrReview, "review", [fixture.Reviewer], "activeReviewStage", "InReview");
@@ -442,6 +457,7 @@ public sealed class TeamWorkProjectionApiTests
             Account("matrix.assessment", "Assessment Approver", now), Account("matrix.idle", "Idle Member", now),
             Account("matrix.locked", "Locked Member", now), Account("matrix.inactive", "Inactive Non Holder", now),
         };
+        db.Add(LegacyDefaultProjectLadderFactory.Create(project.Id, now));
         db.AddRange(program, project, releaseA, releaseB);
         db.AddRange(accounts);
         foreach (var account in accounts.Where(account => account.UserName is not ("matrix.inactive" or "matrix.frozen")))
