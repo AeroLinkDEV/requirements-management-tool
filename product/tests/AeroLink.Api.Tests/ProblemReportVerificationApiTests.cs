@@ -491,6 +491,60 @@ public sealed class ProblemReportVerificationApiTests
     }
 
     [Fact]
+    public async Task Concurrent_SQA_approval_and_supporting_attachment_mutation_allow_one_serialized_outcome()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var engineer = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(engineer);
+        var fixture = await SeedAsync(factory);
+        var candidate = await SelectCandidateAsync(engineer, fixture, fixture.TargetBuildId, targetReleaseId: null);
+        using var quality = factory.CreateClient();
+        await LoginAsync(quality, "closure.quality");
+
+        using var checkout = await engineer.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = fixture.ReportId, leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.Created, checkout.StatusCode);
+        var session = await checkout.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = session.GetProperty("id").GetGuid();
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(fixture.ProjectId.ToString()), "projectId");
+        form.Add(new StringContent(fixture.ReportId.ToString()), "artifactId");
+        form.Add(new StringContent("ProblemReport"), "artifactType");
+        form.Add(new StringContent(sessionId.ToString()), "editSessionId");
+        form.Add(new StringContent("Concurrent closure evidence"), "label");
+        form.Add(new StringContent("The file competes with SQA approval for the same controlled report."), "description");
+        var file = new ByteArrayContent(Encoding.UTF8.GetBytes("concurrent closure evidence\n"));
+        file.Headers.ContentType = new("text/plain");
+        form.Add(file, "file", "concurrent-closure-evidence.txt");
+
+        var approvalTask = quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
+            new { expectedVersion = candidate.ReportVersion });
+        var uploadTask = engineer.PostAsync(
+            $"/api/enterprise-hardening/attachments?projectId={fixture.ProjectId}&artifactType=ProblemReport&artifactId={fixture.ReportId}&editSessionId={sessionId}",
+            form);
+        await Task.WhenAll(approvalTask, uploadTask);
+        using var approval = await approvalTask;
+        using var upload = await uploadTask;
+        Assert.InRange((int)approval.StatusCode, 200, 499);
+        Assert.InRange((int)upload.StatusCode, 200, 499);
+        Assert.Equal(1, new[] { approval.IsSuccessStatusCode, upload.StatusCode == HttpStatusCode.Created }.Count(success => success));
+
+        var detail = await engineer.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
+        var persistedCandidate = Assert.Single(detail.GetProperty("closureCandidates").EnumerateArray());
+        if (approval.IsSuccessStatusCode)
+        {
+            Assert.Equal("Closed", detail.GetProperty("state").GetString());
+            Assert.Equal("Approved", persistedCandidate.GetProperty("state").GetString());
+        }
+        else
+        {
+            Assert.Equal(HttpStatusCode.Conflict, approval.StatusCode);
+            Assert.Equal("WaitingForSqaToClose", detail.GetProperty("state").GetString());
+            Assert.Equal("Invalidated", persistedCandidate.GetProperty("state").GetString());
+        }
+    }
+
+    [Fact]
     public async Task Concurrent_closure_approvals_freeze_exactly_one_package()
     {
         using var factory = new AeroLinkApiFactory();

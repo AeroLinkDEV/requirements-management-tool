@@ -306,7 +306,11 @@ public static class EditSessionEndpoints
             ArtifactEditSession? reportSession=null;
             if(artifactType=="ProblemReport")
             {
-                report=await db.ProblemReports.SingleOrDefaultAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct);
+                // Approval and every supporting-file mutation take this same row lock. The upload therefore
+                // either invalidates the candidate before approval validates it, or observes the closed report;
+                // it can never leave approval with a stale manifest and an unhandled 500.
+                report=await ProblemReportLock.AcquireAsync(db,artifactId,ct);
+                if(report is not null&&report.ProjectId!=projectId)report=null;
                 if(report is null)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
                 if(report.State is ProblemReportState.Closed or ProblemReportState.Rejected)
                     return Results.Conflict(new{error="Finished Problem Reports cannot accept supporting-file changes.",code="artifact_not_editable"});
@@ -414,7 +418,17 @@ public static class EditSessionEndpoints
                 await storage.CompleteAsync(storageOperation,now,ct);
             return Results.Created($"/api/enterprise-hardening/attachments/{attachment.Id}",new{attachment.Id,attachment.LogicalId,attachment.Version,attachment.Sha256});
         }
+        catch(DbUpdateConcurrencyException)
+        {
+            CleanupFailedUpload(store,stored,staged,committed,commitAttempted);
+            return Results.Conflict(new{error="The supporting file changed concurrently. Refresh and retry.",code="attachment_concurrency"});
+        }
         catch(DbUpdateException)
+        {
+            CleanupFailedUpload(store,stored,staged,committed,commitAttempted);
+            return Results.Conflict(new{error="The supporting file changed concurrently. Refresh and retry.",code="attachment_concurrency"});
+        }
+        catch(Exception ex) when(ProblemReportLock.IsSerializationConflict(ex))
         {
             CleanupFailedUpload(store,stored,staged,committed,commitAttempted);
             return Results.Conflict(new{error="The supporting file changed concurrently. Refresh and retry.",code="attachment_concurrency"});
@@ -446,10 +460,13 @@ public static class EditSessionEndpoints
         WithdrawSupportingAttachmentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)
     {
         await using var transaction=await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable,ct);
-        var item=await db.ControlledAttachments.SingleOrDefaultAsync(x=>x.Id==id&&x.ArtifactType=="ProblemReport",ct);
+        var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id&&x.ArtifactType=="ProblemReport",ct);
         if(item is null)return Results.NotFound();
         if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();
-        var report=await db.ProblemReports.SingleOrDefaultAsync(x=>x.Id==item.ArtifactId&&x.ProjectId==item.ProjectId,ct);
+        var report=await ProblemReportLock.AcquireAsync(db,item.ArtifactId,ct);
+        if(report is null||report.ProjectId!=item.ProjectId)return Results.NotFound();
+        item=await db.ControlledAttachments.SingleOrDefaultAsync(x=>x.Id==id&&x.ArtifactType=="ProblemReport",ct);
+        if(item is null)return Results.NotFound();
         if(report is null)return Results.NotFound();
         var session=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==request.EditSessionId,ct);
         if(session is null||!ValidProblemReportSession(session,item.ProjectId,item.ArtifactId,http.UserAccount().UserName))return Results.Forbid();
@@ -467,7 +484,14 @@ public static class EditSessionEndpoints
         await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
             "SupportingAttachmentRemoved", now, ct, rationale: reason, actorDisplayName: actor.DisplayName);
         session.RebindBaseSnapshot(evidence.Hash, now);
-        await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);
+        }
+        catch(DbUpdateConcurrencyException){return Results.Conflict(new{error="The supporting file changed concurrently. Refresh and retry.",code="attachment_concurrency"});}
+        catch(DbUpdateException){return Results.Conflict(new{error="The supporting file changed concurrently. Refresh and retry.",code="attachment_concurrency"});}
+        catch(Exception ex) when(ProblemReportLock.IsSerializationConflict(ex))
+        { return Results.Conflict(new{error="The supporting file changed concurrently. Refresh and retry.",code="attachment_concurrency"}); }
         return Results.NoContent();
     }
 

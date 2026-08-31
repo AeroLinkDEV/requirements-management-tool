@@ -556,6 +556,9 @@ public static class ProblemReportEndpoints
         if (!Enum.TryParse<ProblemReportState>(requested, true, out var parsed))
             return Results.BadRequest(new { error = "Choose one of the eight supported Problem Report states.", code = "pr_state_invalid" });
         var target = ProblemReportTransitionPolicy.Canonical(parsed);
+        if (target == ProblemReportState.Closed)
+            return await CloseWithCandidateAsync(id, request.ExpectedVersion, request.Rationale, http, db, identity,
+                "ProblemReportTransitionedToClosed", ct);
         if (ProblemReportTransitionPolicy.IsSccbOpening(report.State, target))
         {
             if (http.UserAccount().IsAdministrator || !await HasSccbOpeningAuthorityAsync(report, http.UserAccount(), db, ct))
@@ -570,16 +573,6 @@ public static class ProblemReportEndpoints
                     || string.Equals(http.UserAccount().UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase)))
                 return Results.Forbid();
         }
-        ProblemReportClosureCandidate? candidate = null;
-        if (target == ProblemReportState.Closed)
-        {
-            if (request.ExpectedVersion is not null && request.ExpectedVersion != report.Version)
-                return Results.Conflict(new { error = "This problem report changed after it was opened. Refresh before continuing.", code = "stale_version", currentVersion = report.Version });
-            var candidateDecision = await new ProblemReportClosureCandidateService(db).ValidateForApprovalAsync(report, ct);
-            if (!candidateDecision.Accepted && candidateDecision.Candidate is not null)
-                return Results.Conflict(new { error = candidateDecision.Error, code = candidateDecision.Code });
-            candidate = candidateDecision.Accepted ? candidateDecision.Candidate : null;
-        }
         var acceptedRationale = ProblemReportTransitionPolicy.RequiresRationale(report.State, target)
             ? request.Rationale
             : null;
@@ -587,12 +580,8 @@ public static class ProblemReportEndpoints
             $"ProblemReportTransitionedTo{target}",
             (item, actor, now) =>
             {
-                if (target == ProblemReportState.Closed) item.ApproveClosure(actor.UserName, actor.Id, now);
-                else item.TransitionTo(target, actor.UserName, acceptedRationale, now);
+                item.TransitionTo(target, actor.UserName, acceptedRationale, now);
             },
-            afterMutation: candidate is null ? null : async (item, actor, now, _, closureRevision, token) =>
-                await new ProblemReportClosureCandidateService(db).FreezeForApprovalAsync(item, candidate,
-                    closureRevision, actor.UserName, actor.Id, ProgramRole.SoftwareQualityAnalyst.ToString(), now, token),
             detail: acceptedRationale, rationale: acceptedRationale);
     }
 
@@ -623,29 +612,9 @@ public static class ProblemReportEndpoints
                     resolutionLink!, actor.UserName, now, token));
     }
 
-    private static async Task<IResult> ApproveClosureAsync(Guid id, ClosureApprovalRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
-    {
-        var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
-        if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
-        if (http.UserAccount().IsAdministrator || !await HasCurrentSqaClosureAuthorityAsync(report, http, db, identity, ct)) return Results.Forbid();
-        if (string.Equals(http.UserAccount().UserName, report.ReportedBy, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(http.UserAccount().UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase))
-            return Results.Forbid();
-        // Closure remains intentionally ungated by evidence: a legacy or manually reviewed report may
-        // have no valid candidate. When a current candidate is valid, preserve its truthful frozen package
-        // instead of leaving an approved verification cycle stranded as merely Pending.
-        if (request.ExpectedVersion is not null && request.ExpectedVersion != report.Version)
-            return Results.Conflict(new { error = "This problem report changed after it was opened. Refresh before continuing.", code = "stale_version", currentVersion = report.Version });
-        var candidateDecision = await new ProblemReportClosureCandidateService(db).ValidateForApprovalAsync(report, ct);
-        if (!candidateDecision.Accepted && candidateDecision.Candidate is not null)
-            return Results.Conflict(new { error = candidateDecision.Error, code = candidateDecision.Code });
-        var candidate = candidateDecision.Accepted ? candidateDecision.Candidate : null;
-        return await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "ClosureApproved",
-            (item, user, now) => item.ApproveClosure(user.UserName, user.Id, now),
-            afterMutation: candidate is null ? null : async (item, user, now, _, closureRevision, token) =>
-                await new ProblemReportClosureCandidateService(db).FreezeForApprovalAsync(item, candidate,
-                    closureRevision, user.UserName, user.Id, ProgramRole.SoftwareQualityAnalyst.ToString(), now, token));
-    }
+    private static Task<IResult> ApproveClosureAsync(Guid id, ClosureApprovalRequest request, HttpContext http,
+        AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        CloseWithCandidateAsync(id, request.ExpectedVersion, rationale: null, http, db, identity, "ClosureApproved", ct);
 
     private static async Task<IResult> DispositionAsync(Guid id, DispositionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
@@ -922,6 +891,68 @@ public static class ProblemReportEndpoints
                 approvalAuthority = ClosureApprovalAuthority(candidate.ClosurePackageJson) },
             package = JsonSerializer.Deserialize<JsonElement>(candidate.ClosurePackageJson),
         });
+    }
+
+    private static async Task<IResult> CloseWithCandidateAsync(Guid id, long? expectedVersion, string? rationale,
+        HttpContext http, AeroLinkDbContext db, IdentityService identity, string eventType, CancellationToken ct)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        try
+        {
+            var report = await ProblemReportLock.AcquireAsync(db, id, ct);
+            if (report is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
+            var actor = http.UserAccount();
+            if (actor.IsAdministrator || !await HasCurrentSqaClosureAuthorityAsync(report, actor, db, identity, ct))
+                return Results.Forbid();
+            if (string.Equals(actor.UserName, report.ReportedBy, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(actor.UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase))
+                return Results.Forbid();
+            if (expectedVersion is not null && expectedVersion != report.Version)
+                return Results.Conflict(new { error = "This problem report changed after it was opened. Refresh before continuing.", code = "stale_version", currentVersion = report.Version });
+
+            // Candidate validation and the Closed mutation share the same serializable row lock as every
+            // Problem Report supporting-file mutation. An upload either wins first and invalidates this
+            // candidate, or approval wins first and the upload observes the now-finished report.
+            var candidateDecision = await new ProblemReportClosureCandidateService(db).ValidateForApprovalAsync(report, ct);
+            if (!candidateDecision.Accepted && candidateDecision.Candidate is not null)
+                return Results.Conflict(new { error = candidateDecision.Error, code = candidateDecision.Code });
+            var candidate = candidateDecision.Accepted ? candidateDecision.Candidate : null;
+            var now = DateTimeOffset.UtcNow;
+            var fromState = ProblemReportTransitionPolicy.Canonical(report.State);
+            report.ApproveClosure(actor.UserName, actor.Id, now);
+            var toState = ProblemReportTransitionPolicy.Canonical(report.State);
+            var transitionRationale = LifecycleTransitionRationale(eventType, fromState, toState, rationale);
+            var revision = await AddRevisionAsync(db, report, eventType, actor.UserName, now, ct,
+                detail: transitionRationale, fromState: fromState, toState: toState,
+                rationale: transitionRationale, actorDisplayName: actor.DisplayName);
+            if (candidate is not null)
+                await new ProblemReportClosureCandidateService(db).FreezeForApprovalAsync(report, candidate,
+                    revision, actor.UserName, actor.Id, ProgramRole.SoftwareQualityAnalyst.ToString(), now, ct);
+            await db.SaveChangesAsync(ct);
+            var snapshot = await ProblemReportAttachmentEvidence.SnapshotAsync(db, report, ct);
+            await transaction.CommitAsync(ct);
+            return Results.Ok(new { id = report.Id, displayNumber = report.DisplayNumber,
+                state = ProblemReportTransitionPolicy.Canonical(report.State).ToString(), version = report.Version,
+                snapshotHash = snapshot.Hash });
+        }
+        catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Conflict(new { error = ex.Message, code = "pr_closure_candidate_stale" });
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Results.Conflict(new { error = "This Problem Report changed concurrently. Refresh before continuing.", code = "stale_version" });
+        }
+        catch (DbUpdateException)
+        {
+            return Results.Conflict(new { error = "This Problem Report changed concurrently. Refresh before continuing.", code = "stale_version" });
+        }
+        catch (Exception ex) when (ProblemReportLock.IsSerializationConflict(ex))
+        {
+            return Results.Conflict(new { error = "This Problem Report changed concurrently. Refresh before continuing.", code = "stale_version" });
+        }
     }
 
     private static async Task<IResult> ChangeAsync(Guid id, long? expectedVersion, HttpContext http, AeroLinkDbContext db, CancellationToken ct, string eventType, Action<ProblemReport, AuthenticatedUser, DateTimeOffset> action, Func<AuthenticatedUser, DateTimeOffset, ProblemReportLink>? link = null,

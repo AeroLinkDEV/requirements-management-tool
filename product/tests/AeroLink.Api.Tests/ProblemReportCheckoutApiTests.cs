@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
 using AeroLink.Domain.Documents;
 using AeroLink.Domain.Identity;
@@ -1465,6 +1466,126 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.Equal(0, JsonDocument.Parse(removed.GetProperty("snapshotJson").GetString()!).RootElement.GetProperty("supportingAttachments").GetArrayLength());
         Assert.NotEqual(added.GetProperty("snapshotHash").GetString(), removed.GetProperty("snapshotHash").GetString());
         Assert.Equal(removed.GetProperty("snapshotHash").GetString(), detail.GetProperty("snapshotHash").GetString());
+
+        async Task AssertHistoricalAttachmentOutput(JsonElement revision, string expectedFileName, string expectedHash,
+            bool expectsAttachment)
+        {
+            var snapshotId = revision.GetProperty("id").GetGuid();
+            using var page = await client.GetAsync($"/api/problem-reports/{reportId}/history/{snapshotId}");
+            Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+            var pageBody = await page.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.True(pageBody.GetProperty("historicalReadOnly").GetBoolean());
+            Assert.Equal(snapshotId, pageBody.GetProperty("snapshotId").GetGuid());
+            Assert.Equal(expectsAttachment ? 1 : 0, pageBody.GetProperty("supportingAttachments").GetArrayLength());
+
+            using var docx = await client.GetAsync($"/api/problem-reports/{reportId}/download?snapshotId={snapshotId}&format=docx");
+            Assert.Equal(HttpStatusCode.OK, docx.StatusCode);
+            using (var archive = new ZipArchive(new MemoryStream(await docx.Content.ReadAsByteArrayAsync()), ZipArchiveMode.Read))
+            using (var document = new StreamReader(archive.GetEntry("word/document.xml")!.Open()))
+            {
+                var text = await document.ReadToEndAsync();
+                if (expectsAttachment)
+                {
+                    Assert.Contains(expectedFileName, text);
+                    Assert.Contains(expectedHash, text);
+                }
+                else
+                    Assert.DoesNotContain("NavigationAnalysis.xlsx", text);
+            }
+
+            using var pdf = await client.GetAsync($"/api/problem-reports/{reportId}/download?snapshotId={snapshotId}&format=pdf");
+            Assert.Equal(HttpStatusCode.OK, pdf.StatusCode);
+            var pdfText = Encoding.ASCII.GetString(await pdf.Content.ReadAsByteArrayAsync());
+            if (expectsAttachment)
+            {
+                Assert.Contains(expectedFileName, pdfText);
+                Assert.Contains(expectedHash, pdfText);
+            }
+            else
+                Assert.DoesNotContain("NavigationAnalysis.xlsx", pdfText);
+        }
+
+        await AssertHistoricalAttachmentOutput(added, "NavigationAnalysis.xlsx",
+            Convert.ToHexString(SHA256.HashData(firstBytes)).ToLowerInvariant(), expectsAttachment: true);
+        await AssertHistoricalAttachmentOutput(replaced, "NavigationAnalysis.xlsx",
+            Convert.ToHexString(SHA256.HashData(secondBytes)).ToLowerInvariant(), expectsAttachment: true);
+        await AssertHistoricalAttachmentOutput(removed, "", "", expectsAttachment: false);
+    }
+
+    [Fact]
+    public async Task Concurrent_supporting_attachment_mutations_preserve_history_and_map_quota_conflicts()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, _) = await SeedAsync(factory, "PRATTACHCONC");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+        using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = reportId, leaseMinutes = 15 });
+        Assert.Equal(HttpStatusCode.Created, checkout.StatusCode);
+        var session = await checkout.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = session.GetProperty("id").GetGuid();
+        var firstBytes = Encoding.UTF8.GetBytes("concurrency fixture v1\n");
+        using var first = await client.PostAsync(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}",
+            SupportingFile(projectId, reportId, sessionId, "concurrency.txt", "text/plain", firstBytes));
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
+        var logicalId = firstBody.GetProperty("logicalId").GetGuid();
+
+        // Same-report uploads are serialized by the Problem Report lock. Both may commit as immutable
+        // versions, or one may receive a deterministic 409 if its provider transaction loses the race;
+        // neither outcome may become a 5xx or overwrite the other's history.
+        var oneTask = client.PostAsync(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}",
+            SupportingFile(projectId, reportId, sessionId, "concurrency.txt", "text/plain", Encoding.UTF8.GetBytes("concurrency fixture v2a\n"), logicalId));
+        var twoTask = client.PostAsync(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}",
+            SupportingFile(projectId, reportId, sessionId, "concurrency.txt", "text/plain", Encoding.UTF8.GetBytes("concurrency fixture v2b\n"), logicalId));
+        await Task.WhenAll(oneTask, twoTask);
+        using var one = await oneTask;
+        using var two = await twoTask;
+        Assert.InRange((int)one.StatusCode, 200, 499);
+        Assert.InRange((int)two.StatusCode, 200, 499);
+        Assert.True(one.StatusCode == HttpStatusCode.Created || two.StatusCode == HttpStatusCode.Created);
+
+        var listed = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}");
+        Assert.Equal(1, listed.EnumerateArray().Count(item => item.GetProperty("state").GetString() == "Active"));
+        var activeId = listed.EnumerateArray().Single(item => item.GetProperty("state").GetString() == "Active").GetProperty("id").GetGuid();
+
+        // Removal and replacement use the same arbitration boundary. Depending on lock acquisition order,
+        // removal can win and the replacement becomes the next active version, or replacement wins and the
+        // removal correctly receives attachment_not_current for the superseded row.
+        var replacementTask = client.PostAsync(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}",
+            SupportingFile(projectId, reportId, sessionId, "concurrency.txt", "text/plain", Encoding.UTF8.GetBytes("concurrency fixture v3\n"), logicalId));
+        var removalTask = client.PostAsJsonAsync($"/api/enterprise-hardening/attachments/{activeId}/withdraw",
+            new { editSessionId = sessionId, reason = "Concurrent mutation fixture removal." });
+        await Task.WhenAll(replacementTask, removalTask);
+        using var replacement = await replacementTask;
+        using var removal = await removalTask;
+        Assert.InRange((int)replacement.StatusCode, 200, 499);
+        Assert.InRange((int)removal.StatusCode, 200, 499);
+        Assert.True(replacement.StatusCode == HttpStatusCode.Created || removal.StatusCode == HttpStatusCode.NoContent);
+        var afterMutations = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}");
+        Assert.Equal(1, afterMutations.EnumerateArray().Count(item => item.GetProperty("state").GetString() == "Active"));
+
+        // Quota rejection happens after the same row lock and before filesystem staging. A retained historical
+        // row is enough to exercise the limit without writing a 256 MB fixture or touching persistent state.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            db.ControlledAttachments.Add(new ControlledAttachment(projectId, "ProblemReport", reportId, null,
+                Guid.NewGuid(), 1, "Quota fixture", "", "quota-fixture.txt", "text/plain",
+                256L * 1024 * 1024, new string('d', 64), "test/quota-fixture.txt", null, "admin", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+        using var quota = await client.PostAsync(
+            $"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}",
+            SupportingFile(projectId, reportId, sessionId, "quota.txt", "text/plain", Encoding.UTF8.GetBytes("quota request\n")));
+        Assert.Equal(HttpStatusCode.Conflict, quota.StatusCode);
     }
 
     private static MultipartFormDataContent SupportingFile(Guid projectId, Guid artifactId, Guid sessionId,
