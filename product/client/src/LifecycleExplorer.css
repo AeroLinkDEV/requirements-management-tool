@@ -33,6 +33,7 @@ html .traceVerification > section.suspect em { color: #765313; font-weight: 650;
 html .traceLinkState { margin-left: 8px; font-style: normal; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #8a5a00; }
 html .traceLinkState.closed { color: #28704f; }
 main.lifecyclePage { box-sizing: border-box; }
+body:has(main.lifecyclePage) { min-width: 0; }
 
 /* Shown when a route asked for a requirement the loaded set does not contain. Saying which record is on
    screen instead is the point: the alternative is a thread that quietly answers a different question. */
