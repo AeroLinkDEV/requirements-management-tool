@@ -150,7 +150,14 @@ test('requirements register preserves deep-link history, native links, and autho
     await page.setViewportSize({ width, height: 900 })
     await page.evaluate(() => window.scrollTo(0, 0))
     await inspector.evaluate(element => { element.scrollTop = 0 })
-    if (width <= 1360) await inspector.scrollIntoViewIfNeeded()
+    if (width <= 1360) {
+      // The supported 1280 layout stacks the inspector below the register. Align its own top edge explicitly;
+      // scrollIntoViewIfNeeded may center an inspector taller than the viewport and clip the calm header frame.
+      await page.evaluate(() => {
+        const element = document.querySelector<HTMLElement>('.requirementInspector')
+        if (element) window.scrollTo(0, Math.max(0, element.getBoundingClientRect().top + window.scrollY - 16))
+      })
+    }
     await expect(inspector).toBeVisible()
     const path = testInfo.outputPath(`cr-inspector-${width}x900.png`)
     await page.screenshot({ path, fullPage: false })
@@ -159,7 +166,7 @@ test('requirements register preserves deep-link history, native links, and autho
     // The desktop inspector is taller than one viewport once all immediate relationships are rendered. Keep a
     // companion evidence frame scrolled to the relationship body so fan-out, provenance, and the Digital Thread
     // action are visible without changing the product's supported scrolling behavior.
-    await inspector.evaluate(element => { element.scrollTop = Math.min(260, element.scrollHeight) })
+    await inspector.evaluate(element => { element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight) })
     const tracePath = testInfo.outputPath(`cr-inspector-${width}x900-trace.png`)
     await page.screenshot({ path: tracePath, fullPage: false })
     expect(pngSize(tracePath)).toEqual({ width, height: 900 })
