@@ -25,6 +25,11 @@ namespace AeroLink.Api;
 /// </summary>
 public static class RequirementsEndpoints
 {
+    // Inline figures are deliberately smaller than general evidence and share one bounded project budget.
+    // The budget counts every stored version, including withdrawn content, because those bytes still occupy
+    // the protected evidence volume and may remain necessary for exact historical publication.
+    internal const long MaximumInlineImageBytesPerProject = 512L * 1024 * 1024;
+
     public static void MapRequirementsEndpoints(this WebApplication app)
     {
         app.MapGet("/api/requirements", async (Guid projectId, string? search, Guid? releaseId, Guid? baselineId,
@@ -714,13 +719,23 @@ public static class RequirementsEndpoints
         // writes the figure into the paragraph as they are drafting it. Uploading here stores and hashes the file
         // against the project, and the authored content then references it by identifier. The file is never
         // duplicated into the record, so one diagram used in five requirements is stored once and stays one thing.
-        app.MapPost("/api/content/images",async(HttpRequest request,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
+        app.MapPost("/api/content/images",async(HttpRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,EvidenceFileStore store,CancellationToken ct)=>
         {
             if(!request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data."});
             var form=await request.ReadFormAsync(ct);var file=form.Files.GetFile("file");
             if(file is null||file.Length==0)return Results.BadRequest(new{error="Select a non-empty image."});
             if(!Guid.TryParse(form["projectId"],out var projectId))return Results.BadRequest(new{error="A project identifier is required."});
             if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
+            var actor=http.UserAccount();
+            ArtifactEditSession? editSession=null;
+            if(Guid.TryParse(form["editSessionId"],out var editSessionId))
+            {
+                editSession=await db.ArtifactEditSessions.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==editSessionId,ct);
+                if(editSession is null||editSession.ProjectId!=projectId||editSession.State!=EditSessionState.Active
+                    ||editSession.ExpiresAt<=DateTimeOffset.UtcNow||editSession.UserName!=actor.UserName)return Results.Forbid();
+            }
+            else if(!await http.HasProjectRoleAsync(db,identity,projectId,ct,
+                        ProgramRole.Engineer,ProgramRole.TestEngineer,ProgramRole.ConfigurationManager,ProgramRole.ProgramManager))return Results.Forbid();
             // Only formats every renderer here can produce. An image the workspace shows but the generated Word
             // document cannot would make a controlled document disagree with the record it came from.
             var contentType=(file.ContentType??"").ToLowerInvariant();
@@ -737,17 +752,35 @@ public static class RequirementsEndpoints
                 if(read<signature.Length||!PngImage.IsDeclaredImage(signature,contentType))
                     return Results.BadRequest(new{error="That file is not the image type it claims to be."});
             }
-            var stored=await store.StoreAsync(file.OpenReadStream(),file.FileName,contentType,ct);
+            // The row and the evidence object are one bounded operation. Serializable isolation makes the
+            // predicate read participate in PostgreSQL's write-skew detection; SQLite serializes the writer.
+            // If either provider rejects a concurrent writer after the object has been promoted, the catch
+            // removes those uncommitted bytes rather than leaving an orphan behind.
+            await using var transaction=await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable,ct);
+            var used=await db.ControlledAttachments.AsNoTracking()
+                .Where(x=>x.ProjectId==projectId&&x.ArtifactType=="InlineImage")
+                .SumAsync(x=>(long?)x.Size,ct)??0;
+            if(used>=MaximumInlineImageBytesPerProject||file.Length>MaximumInlineImageBytesPerProject-used)
+                return Results.Conflict(new{error="This Project has reached its controlled inline-image storage limit.",code="inline_image_project_quota",limitBytes=MaximumInlineImageBytesPerProject});
+            StoredEvidence? stored=null;
             try
             {
-                var attachment=new ControlledAttachment(projectId,"InlineImage",projectId,null,Guid.NewGuid(),1,
+                stored=await store.StoreAsync(file.OpenReadStream(),file.FileName,contentType,ct);
+                // A checked-out record owns its images immediately. New-record authors do not have an artifact
+                // identifier yet, so their role-authorized figures remain project-bound until the record is saved.
+                var attachment=new ControlledAttachment(projectId,"InlineImage",editSession?.ArtifactId??projectId,editSession?.RevisionId,Guid.NewGuid(),1,
                     string.IsNullOrWhiteSpace(form["alt"])?stored.OriginalFileName:form["alt"].ToString(),"",
                     stored.OriginalFileName,stored.ContentType,stored.Size,stored.Sha256,stored.StorageKey,null,
-                    http.UserAccount().UserName,DateTimeOffset.UtcNow);
-                db.ControlledAttachments.Add(attachment);await db.SaveChangesAsync(ct);
+                    actor.UserName,DateTimeOffset.UtcNow);
+                db.ControlledAttachments.Add(attachment);await db.SaveChangesAsync(ct);await transaction.CommitAsync(ct);
                 return Results.Created($"/api/content/images/{attachment.Id}",new{attachment.Id,attachment.OriginalFileName,attachment.Size,attachment.Sha256});
             }
-            catch{store.Delete(stored.StorageKey);throw;}
+            catch(Exception ex) when(IsInlineImageConcurrencyConflict(ex))
+            {
+                if(stored is not null)store.Delete(stored.StorageKey);
+                return Results.Conflict(new{error="Another inline image changed this Project's storage budget. Retry the upload.",code="inline_image_quota_changed"});
+            }
+            catch{if(stored is not null)store.Delete(stored.StorageKey);throw;}
         }).DisableAntiforgery();
 
         app.MapGet("/api/content/images/{id:guid}",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
@@ -765,6 +798,13 @@ public static class RequirementsEndpoints
             }
             catch(EvidenceIntegrityException){return Results.NotFound();}
         });
+    }
+
+    private static bool IsInlineImageConcurrencyConflict(Exception exception)
+    {
+        var root=exception.GetBaseException();
+        return root is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 5 or 6 }
+            || root is Npgsql.PostgresException { SqlState: "40001" or "40P01" };
     }
 
     private static async Task<RequirementRevision?> CurrentRequirementRevisionAsync(

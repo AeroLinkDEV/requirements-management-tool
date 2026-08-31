@@ -571,17 +571,139 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.Equal(HttpStatusCode.Forbidden, frozen.StatusCode);
     }
 
+    [Fact]
+    public async Task Inline_image_upload_requires_authoring_authority_or_the_actors_live_checkout()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId, sccbUserName) = await SeedAsync(factory, "PRIMGINTENT");
+        var reportId = await RaiseAsync(client, projectId, releaseId);
+        await OpenAsync(client, reportId, sccbUserName);
+        await VerifyingAsync(client, reportId);
+        var bystander = await SeedBystanderAsync(factory, projectId, "PRIMGINTENT");
+        await LoginAsync(client, bystander, AeroLinkApiFactory.MemberPassword);
+
+        using (var unbound = await client.PostAsync("/api/content/images",
+                   ImageUpload(projectId, "unbound.png")))
+            Assert.Equal(HttpStatusCode.Forbidden, unbound.StatusCode);
+
+        using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
+            new { artifactType = "ProblemReport", artifactId = reportId, leaseMinutes = 15 });
+        Assert.True(checkout.IsSuccessStatusCode, await checkout.Content.ReadAsStringAsync());
+        var sessionId = (await checkout.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var bound = await client.PostAsync("/api/content/images",
+            ImageUpload(projectId, "checked-out.png", sessionId));
+        Assert.Equal(HttpStatusCode.Created, bound.StatusCode);
+        var imageId = (await bound.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var stored = await db.ControlledAttachments.AsNoTracking().SingleAsync(x => x.Id == imageId);
+        Assert.Equal(reportId, stored.ArtifactId);
+        Assert.Equal(bystander, stored.UploadedBy);
+    }
+
+    [Fact]
+    public async Task Inline_image_upload_enforces_the_cumulative_project_budget_without_storing_more_bytes()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var seeded = await SeedAsync(factory, "PRIMGQUOTA");
+        string root;
+        int filesBefore;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var store = scope.ServiceProvider.GetRequiredService<EvidenceFileStore>();
+            root = store.RootPath;
+            filesBefore = Directory.Exists(root)
+                ? Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Count()
+                : 0;
+            db.ControlledAttachments.Add(new ControlledAttachment(seeded.ProjectId, "InlineImage", seeded.ProjectId,
+                null, Guid.NewGuid(), 1, "Existing controlled image budget", "", "existing.png", "image/png",
+                RequirementsEndpoints.MaximumInlineImageBytesPerProject, new string('a', 64), "test/quota-existing.png",
+                null, "test.setup", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        using var response = await client.PostAsync("/api/content/images", ImageUpload(seeded.ProjectId, "over-budget.png"));
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("inline_image_project_quota", body.GetProperty("code").GetString());
+        var filesAfter = Directory.Exists(root)
+            ? Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Count()
+            : 0;
+        Assert.Equal(filesBefore, filesAfter);
+    }
+
+    [Fact]
+    public async Task Concurrent_inline_image_uploads_cannot_overrun_the_cumulative_project_budget()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var seeded = await SeedAsync(factory, "PRIMGCONCURRENT");
+        var imageBytes = Png();
+        string root;
+        int filesBefore;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var store = scope.ServiceProvider.GetRequiredService<EvidenceFileStore>();
+            root = store.RootPath;
+            filesBefore = Directory.Exists(root)
+                ? Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Count()
+                : 0;
+            db.ControlledAttachments.Add(new ControlledAttachment(seeded.ProjectId, "InlineImage", seeded.ProjectId,
+                null, Guid.NewGuid(), 1, "Nearly full controlled image budget", "", "existing.png", "image/png",
+                RequirementsEndpoints.MaximumInlineImageBytesPerProject - imageBytes.LongLength,
+                new string('b', 64), "test/quota-nearly-full.png", null, "test.setup", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        var first = client.PostAsync("/api/content/images", ImageUpload(seeded.ProjectId, "first.png"));
+        var second = client.PostAsync("/api/content/images", ImageUpload(seeded.ProjectId, "second.png"));
+        var responses = await Task.WhenAll(first, second);
+        try
+        {
+            Assert.Single(responses, response => response.StatusCode == HttpStatusCode.Created);
+            Assert.Single(responses, response => response.StatusCode == HttpStatusCode.Conflict);
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var total = await db.ControlledAttachments.AsNoTracking()
+                .Where(x => x.ProjectId == seeded.ProjectId && x.ArtifactType == "InlineImage")
+                .SumAsync(x => x.Size);
+            Assert.Equal(RequirementsEndpoints.MaximumInlineImageBytesPerProject, total);
+            Assert.Equal(filesBefore + 1,
+                Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Count());
+        }
+        finally
+        {
+            foreach (var response in responses) response.Dispose();
+        }
+    }
+
     private static async Task<Guid> UploadImageAsync(HttpClient client, Guid projectId, string fileName)
     {
-        using var content = new MultipartFormDataContent();
+        using var content = ImageUpload(projectId, fileName);
+        using var response = await client.PostAsync("/api/content/images", content);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+    }
+
+    private static MultipartFormDataContent ImageUpload(Guid projectId, string fileName, Guid? editSessionId = null)
+    {
+        var content = new MultipartFormDataContent();
         content.Add(new StringContent(projectId.ToString()), "projectId");
+        if (editSessionId is Guid sessionId)
+            content.Add(new StringContent(sessionId.ToString()), "editSessionId");
         content.Add(new StringContent("A controlled test figure"), "alt");
         var image = new ByteArrayContent(Png());
         image.Headers.ContentType = new("image/png");
         content.Add(image, "file", fileName);
-        using var response = await client.PostAsync("/api/content/images", content);
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        return content;
     }
 
     private static string LegacyOutputSnapshot(ProblemReport report, int schema)

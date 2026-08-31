@@ -312,15 +312,15 @@ export default function ControlledProblemReportEditor({ api, projectId, report, 
         {error && <div className="workspaceError" role="alert">{error}</div>}
         {uploadsPending > 0 && <div className="workspaceNotice" role="status" aria-live="polite">Storing {uploadsPending} inline image{uploadsPending === 1 ? '' : 's'}… Save and check in will be enabled when the upload finishes.</div>}
         <label>Title<input required value={draft.title} onChange={event => set('title', event.target.value)} /></label>
-        <RichContentEditor api={api} projectId={projectId} label="Problem Description" value={draft.problemRich} documentLike onUploadingChange={onUploadingChange} onChange={value => set('problemRich', value)} />
-        <RichContentEditor api={api} projectId={projectId} label="Additional Information" value={draft.additionalInformationRich} documentLike onUploadingChange={onUploadingChange} onChange={value => set('additionalInformationRich', value)} />
+        <RichContentEditor api={api} projectId={projectId} editSessionId={session?.id} label="Problem Description" value={draft.problemRich} documentLike onUploadingChange={onUploadingChange} onChange={value => set('problemRich', value)} />
+        <RichContentEditor api={api} projectId={projectId} editSessionId={session?.id} label="Additional Information" value={draft.additionalInformationRich} documentLike onUploadingChange={onUploadingChange} onChange={value => set('additionalInformationRich', value)} />
         <div className="prFormGrid">
           <label>Severity<select value={draft.severity} onChange={event => set('severity', event.target.value)}>{['Critical', 'High', 'Major', 'Minor', 'Trivial'].map(x => <option key={x}>{x}</option>)}</select></label>
           <label>Priority<select value={draft.priority} onChange={event => set('priority', event.target.value)}>{['Urgent', 'High', 'Normal', 'Low'].map(x => <option key={x}>{x}</option>)}</select></label>
         </div>
         <label>Category<ProblemReportCategoryPicker api={api} value={draft.category} required onChange={value => set('category', value)} /></label>
         {NARRATIVE.map(field =>
-          <RichContentEditor key={field.key} api={api} projectId={projectId} label={field.label} documentLike onUploadingChange={onUploadingChange}
+          <RichContentEditor key={field.key} api={api} projectId={projectId} editSessionId={session?.id} label={field.label} documentLike onUploadingChange={onUploadingChange}
             value={draft[field.key]} onChange={value => set(field.key, value)} />)}
         <fieldset className="prImpactEditor"><legend>Impact matrix</legend>{impactFields.map(([key, label]) =>
           <label key={key}>{label}<select aria-label={label} value={draft.impacts[key] ?? 'Unknown'} onChange={event => set('impacts', { ...draft.impacts, [key]: event.target.value })}>{['Unknown', 'No', 'Yes'].map(value => <option key={value}>{value}</option>)}</select></label>)}

@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 715,
-    "cases": 798,
+    "tests": 718,
+    "cases": 801,
     "classes": 116,
-    "hostedTests": 686,
-    "hostedCases": 755,
+    "hostedTests": 689,
+    "hostedCases": 758,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 7,
@@ -37,8 +37,8 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 83,
-      "cases": 87,
+      "tests": 84,
+      "cases": 88,
       "unknownCases": 0,
       "classes": 48
     },
@@ -53,8 +53,8 @@
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
       "level": "API or Infrastructure (must stay hosted)",
-      "tests": 15,
-      "cases": 15,
+      "tests": 17,
+      "cases": 17,
       "unknownCases": 0,
       "classes": 9
     },
@@ -5535,8 +5535,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 699,
-        "end": 732
+        "start": 823,
+        "end": 856
       }
     },
     {
@@ -5552,8 +5552,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 738,
-        "end": 767
+        "start": 862,
+        "end": 891
       }
     },
     {
@@ -5589,6 +5589,24 @@
       "sourceLines": {
         "start": 108,
         "end": 150
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Concurrent_inline_image_uploads_cannot_overrun_the_cumulative_project_budget",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 641,
+        "end": 686
       }
     },
     {
@@ -5681,6 +5699,42 @@
     },
     {
       "cls": "ProblemReportCheckoutApiTests",
+      "test": "Inline_image_upload_enforces_the_cumulative_project_budget_without_storing_more_bytes",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 607,
+        "end": 639
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Inline_image_upload_requires_authoring_authority_or_the_actors_live_checkout",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 574,
+        "end": 605
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
       "test": "Only_Software_Quality_is_offered_the_revive_on_a_rejected_report",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -5692,8 +5746,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 773,
-        "end": 812
+        "start": 897,
+        "end": 936
       }
     },
     {

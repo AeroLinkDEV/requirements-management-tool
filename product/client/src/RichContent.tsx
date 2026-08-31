@@ -98,6 +98,8 @@ export function RichContentView({ api, value, empty }: { api: string; value: str
 type EditorProps = {
   api: string;
   projectId: string;
+  /** A live controlled checkout binds uploaded figures to the exact record and authorizes collaborative PR editors. */
+  editSessionId?: string;
   value: string;
   label: string;
   placeholder?: string;
@@ -110,7 +112,7 @@ type EditorProps = {
   onChange: (value: string) => void;
 };
 
-export function RichContentEditor({ api, projectId, value, label, placeholder, disabled, documentLike = false, onUploadingChange, onChange }: EditorProps) {
+export function RichContentEditor({ api, projectId, editSessionId, value, label, placeholder, disabled, documentLike = false, onUploadingChange, onChange }: EditorProps) {
   const blocks = useMemo(() => readBlocks(value), [value]);
   const blocksRef = useRef(blocks);
   const [uploading, setUploading] = useState(false);
@@ -174,6 +176,7 @@ export function RichContentEditor({ api, projectId, value, label, placeholder, d
         if (file.type !== "image/png" && file.type !== "image/jpeg") continue;
         const body = new FormData();
         body.set("projectId", projectId);
+        if (editSessionId) body.set("editSessionId", editSessionId);
         body.set("file", file);
         body.set("alt", file.name);
         try {
