@@ -134,3 +134,11 @@ html .appNavigation .signOut[aria-busy="true"] { color: #8fa1b9; }
   .contextBar { padding: 0 22px; }
   .contextBar nav span { max-width: 180px; }
 }
+
+/* App.css collapses the shell at the supported narrow breakpoint. Keep that decision authoritative here;
+   this stylesheet is imported later, so the tablet rail rule above otherwise leaves only a sliver of the
+   workspace at phone widths. */
+@media (max-width: 760px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .shell aside.appNavigation { min-width: 0; }
+}

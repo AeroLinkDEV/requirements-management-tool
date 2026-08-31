@@ -468,6 +468,37 @@ test('Team Work keeps its holder drawer contained at a 320px viewport', async ({
   expect(documentWidthWithDrawer).toBe(await page.evaluate(() => document.documentElement.scrollWidth))
 })
 
+test('Team Work stays readable without document overflow at the supported narrow breakpoint', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await openTeamWork(page)
+
+  const dimensions = await page.evaluate(() => {
+    const shell = document.querySelector('.shell')
+    const main = document.querySelector('main.teamWorkPage')
+    const heading = document.querySelector('main.teamWorkPage h1')
+    const people = document.querySelector('.teamWorkPeople')
+    return {
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: document.documentElement.clientWidth,
+      shellColumns: shell ? getComputedStyle(shell).gridTemplateColumns : '',
+      mainWidth: main?.getBoundingClientRect().width ?? 0,
+      headingWidth: heading?.getBoundingClientRect().width ?? 0,
+      peopleWidth: people?.getBoundingClientRect().width ?? 0,
+    }
+  })
+
+  expect(dimensions.documentWidth).toBe(dimensions.viewportWidth)
+  expect(dimensions.shellColumns).toBe(`${dimensions.viewportWidth}px`)
+  expect(dimensions.mainWidth).toBeLessThanOrEqual(dimensions.viewportWidth)
+  expect(dimensions.headingWidth).toBeGreaterThan(0)
+  expect(dimensions.peopleWidth).toBeLessThanOrEqual(dimensions.viewportWidth)
+  await expect(page.getByRole('heading', { name: 'Team Work', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'People', exact: true })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Search' })).toBeVisible()
+  if (process.env.AEROLINK_TEAM_WORK_NARROW_SCREENSHOT)
+    await page.screenshot({ path: process.env.AEROLINK_TEAM_WORK_NARROW_SCREENSHOT, fullPage: true })
+})
+
 test('Team Work retains zero-hold members, scopes affinity storage, and exposes the exact zero-holder empty state', async ({ page }) => {
   const zero = { userId: '00000000-0000-0000-0000-0000000000ae', userName: 'erin', displayName: 'API Erin', isCurrentProjectMember: true, accountState: 'locked', baseRoles: ['SoftwareTestEngineer'], disciplineAffinities: ['software'], holds: 0, byLane: { work: 0, review: 0, sign: 0, approved: 0 } }
   const body = { ...fixture, totals: { ...fixture.totals, unheld: 3 }, people: [...fixture.people, zero] }
