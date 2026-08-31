@@ -865,7 +865,7 @@ test('Team Work names a known raiser without exposing their account handle', asy
   const alice = page.locator('.teamWorkPerson').filter({ hasText: 'API Alice' })
   await expect(alice).toBeVisible()
   await expect(alice).not.toContainText('alice')
-  await page.locator('.teamWorkPersonDetails[aria-label="View details for API Alice"]').click()
+  await page.locator('.teamWorkPeopleStrip .teamWorkPersonDetails[aria-label="View details for API Alice"]').click()
   const drawer = page.getByRole('dialog', { name: 'API Alice' })
   await expect(drawer).toBeVisible()
   await expect(drawer.getByText('alice', { exact: true })).toHaveCount(0)
