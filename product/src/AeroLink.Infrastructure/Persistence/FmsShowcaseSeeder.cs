@@ -90,8 +90,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             if (db.Database.IsNpgsql())
                 // Serialize first creation across API instances. The second creator rechecks after the lock
                 // and observes the committed Program instead of racing a duplicate or a partial dataset.
-                await db.Database.ExecuteSqlInterpolatedAsync(
-                    $"SELECT pg_advisory_xact_lock(hashtext('aerolink-showcase-seed'))", ct);
+                await AcquirePostgresAdvisoryLockAsync(
+                    $"SELECT pg_advisory_xact_lock(hashtext({"aerolink-showcase-seed"}))", ct);
             existing = await db.Programs.AsNoTracking().SingleOrDefaultAsync(x => x.Code == ProgramCode, ct);
             if (existing is not null)
             {
@@ -562,8 +562,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             if (db.Database.IsNpgsql())
                 // The database lock covers multiple API instances. READ COMMITTED deliberately takes its
                 // post-wait snapshots after the prior holder commits, so the next request sees every marker.
-                await db.Database.ExecuteSqlInterpolatedAsync(
-                    $"SELECT pg_advisory_xact_lock(hashtext('aerolink-showcase-upgrade'), hashtext({programId.ToString("D")}))", ct);
+                await AcquirePostgresAdvisoryLockAsync(
+                    $"SELECT pg_advisory_xact_lock(hashtext({"aerolink-showcase-upgrade"}), hashtext({programId.ToString("D")}))", ct);
 
             var applied = await ApplyUpgradeStepsAsync(programId, ct);
             await transaction.CommitAsync(ct);
@@ -572,6 +572,24 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         finally
         {
             UpgradeGate.Release();
+        }
+    }
+
+    private async Task AcquirePostgresAdvisoryLockAsync(FormattableString statement, CancellationToken ct)
+    {
+        // A complete fresh showcase legitimately takes longer than Npgsql's default 30-second command
+        // timeout. A concurrent operator request must remain queued behind the transaction lock instead of
+        // failing merely because the current owner is still building controlled rows. Keep the wider budget
+        // local to lock acquisition; ordinary commands immediately return to the configured timeout.
+        var previousTimeout = db.Database.GetCommandTimeout();
+        db.Database.SetCommandTimeout(TimeSpan.FromMinutes(10));
+        try
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(statement, ct);
+        }
+        finally
+        {
+            db.Database.SetCommandTimeout(previousTimeout);
         }
     }
 
