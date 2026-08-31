@@ -3,7 +3,6 @@ using AeroLink.Domain.Common;
 using AeroLink.Domain.Documents;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
-using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Http.Features;
@@ -55,8 +54,8 @@ public static class EditSessionEndpoints
         });
 
         app.MapPost("/api/enterprise-hardening/attachments",(HttpRequest request,Guid? projectId,string? artifactType,Guid? artifactId,Guid? editSessionId,
-                HttpContext http,AeroLinkDbContext db,IdentityService identity,EvidenceFileStore store,ManagedDocumentStorageCoordinator storage,CancellationToken ct)=>
-            UploadAttachmentAsync(request,http,db,identity,store,storage,projectId,artifactType,artifactId,editSessionId,ct)).DisableAntiforgery();
+                HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,ManagedDocumentStorageCoordinator storage,CancellationToken ct)=>
+            UploadAttachmentAsync(request,http,db,store,storage,projectId,artifactType,artifactId,editSessionId,ct)).DisableAntiforgery();
 
         app.MapPost("/api/enterprise-hardening/attachments/{id:guid}/withdraw",(Guid id,WithdrawSupportingAttachmentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
             WithdrawProblemReportAttachmentAsync(id,request,http,db,ct));
@@ -216,7 +215,7 @@ public static class EditSessionEndpoints
     private const long MaximumProblemReportAttachmentBytesPerProject = 2L * 1024 * 1024 * 1024;
 
     private static async Task<IResult> UploadAttachmentAsync(HttpRequest request,HttpContext http,
-        AeroLinkDbContext db,IdentityService identity,EvidenceFileStore store,ManagedDocumentStorageCoordinator storage,
+        AeroLinkDbContext db,EvidenceFileStore store,ManagedDocumentStorageCoordinator storage,
         Guid? queryProjectId,string? queryArtifactType,Guid? queryArtifactId,Guid? queryEditSessionId,CancellationToken ct)
     {
         if(!request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data."});
@@ -231,8 +230,7 @@ public static class EditSessionEndpoints
         // fall through to the generic attachment path after parsing the multipart body.
         artifactType=artifactType.Equals("ProblemReport",StringComparison.OrdinalIgnoreCase)?"ProblemReport":
             artifactType.Equals("Requirement",StringComparison.OrdinalIgnoreCase)?"Requirement":
-            artifactType.Equals("ChangeRequest",StringComparison.OrdinalIgnoreCase)?"ChangeRequest":
-            artifactType.Equals("TestChangeRequest",StringComparison.OrdinalIgnoreCase)?"TestChangeRequest":artifactType;
+            artifactType.Equals("ChangeRequest",StringComparison.OrdinalIgnoreCase)?"ChangeRequest":artifactType;
         if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
         if(artifactType.Equals("ProblemReport",StringComparison.OrdinalIgnoreCase))
         {
@@ -250,7 +248,6 @@ public static class EditSessionEndpoints
             {
                 "Requirement"=>await db.Requirements.AsNoTracking().AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
                 "ChangeRequest"=>await db.SystemChangeRequests.AsNoTracking().AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
-                "TestChangeRequest"=>await db.TestChangeReviews.AsNoTracking().AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
                 _=>false,
             };
             if(!artifactExists)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
@@ -260,13 +257,6 @@ public static class EditSessionEndpoints
                 var actor=http.UserAccount();
                 if(!actor.IsAdministrator&&!string.Equals(changeRequest.AuthorId,actor.UserName,StringComparison.OrdinalIgnoreCase))return Results.Forbid();
                 if(changeRequest.State!=ChangeRequestState.Draft)return Results.Conflict(new{error="Supporting files can be added only while the change request is a Draft.",code="artifact_not_editable"});
-            }
-            if(artifactType.Equals("TestChangeRequest",StringComparison.OrdinalIgnoreCase))
-            {
-                var review=await db.TestChangeReviews.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct);
-                if(review is null)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
-                var refusal=await RefuseUnlessTestChangeRequestAttachmentEditableAsync(review,http,db,identity,ct);
-                if(refusal is not null)return refusal;
             }
         }
         const long multipartOverhead=128L*1024;
@@ -314,17 +304,17 @@ public static class EditSessionEndpoints
             ArtifactEditSession? reportSession=null;
             if(artifactType=="ProblemReport")
             {
-                // Approval and every supporting-file mutation take this same row lock. The upload therefore
-                // either invalidates the candidate before approval validates it, or observes the closed report;
-                // it can never leave approval with a stale manifest and an unhandled 500.
+                if(!Guid.TryParse(form["editSessionId"],out var editSessionId))return Results.Forbid();
+                // Approval/check-in and every supporting-file mutation use this common order: first the
+                // exclusive edit session, then the Problem Report row. The session lock is the arbitration
+                // point for the working copy; the aggregate lock then covers its exact attachment manifest.
+                reportSession=await ArtifactEditSessionLock.AcquireAsync(db,editSessionId,ct);
+                if(!ValidProblemReportSession(reportSession,projectId,artifactId,http.UserAccount().UserName))return Results.Forbid();
                 report=await ProblemReportLock.AcquireAsync(db,artifactId,ct);
                 if(report is not null&&report.ProjectId!=projectId)report=null;
                 if(report is null)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
                 if(report.State is ProblemReportState.Closed or ProblemReportState.Rejected)
                     return Results.Conflict(new{error="Finished Problem Reports cannot accept supporting-file changes.",code="artifact_not_editable"});
-                if(!Guid.TryParse(form["editSessionId"],out var editSessionId))return Results.Forbid();
-                reportSession=await db.ArtifactEditSessions.SingleOrDefaultAsync(x=>x.Id==editSessionId,ct);
-                if(!ValidProblemReportSession(reportSession,projectId,artifactId,http.UserAccount().UserName))return Results.Forbid();
                 var reportBytes=await db.ControlledAttachments.AsNoTracking()
                     .Where(x=>x.ProjectId==projectId&&x.ArtifactType=="ProblemReport"&&x.ArtifactId==artifactId)
                     .SumAsync(x=>(long?)x.Size,ct)??0;
@@ -342,7 +332,6 @@ public static class EditSessionEndpoints
                 {
                     "Requirement"=>await db.Requirements.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
                     "ChangeRequest"=>await db.SystemChangeRequests.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
-                    "TestChangeRequest"=>await db.TestChangeReviews.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
                     _=>false,
                 };
                 if(!artifactExists)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
@@ -352,13 +341,6 @@ public static class EditSessionEndpoints
                     var actor=http.UserAccount();
                     if(!actor.IsAdministrator&&!string.Equals(changeRequest.AuthorId,actor.UserName,StringComparison.OrdinalIgnoreCase))return Results.Forbid();
                     if(changeRequest.State!=ChangeRequestState.Draft)return Results.Conflict(new{error="Supporting files can be added only while the change request is a Draft.",code="artifact_not_editable"});
-                }
-                if(artifactType=="TestChangeRequest")
-                {
-                    var review=await db.TestChangeReviews.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct);
-                    if(review is null)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
-                    var refusal=await RefuseUnlessTestChangeRequestAttachmentEditableAsync(review,http,db,identity,ct);
-                    if(refusal is not null)return refusal;
                 }
             }
 
@@ -521,23 +503,6 @@ public static class EditSessionEndpoints
         &&session.ArtifactType.Equals("ProblemReport",StringComparison.OrdinalIgnoreCase)
         &&session.State==EditSessionState.Active&&session.ExpiresAt>DateTimeOffset.UtcNow
         &&string.Equals(session.UserName,actor,StringComparison.OrdinalIgnoreCase);
-
-    private static async Task<IResult?> RefuseUnlessTestChangeRequestAttachmentEditableAsync(
-        TestChangeReview review,HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)
-    {
-        if(await db.Releases.AnyAsync(x=>x.Id==review.ReleaseId&&x.IsReleased,ct))
-            return Results.Conflict(new{error="Released software-build test change requests are read-only.",code="artifact_not_editable"});
-        if(!await http.HasProjectRoleAsync(db,identity,review.ProjectId,ct,ProgramRole.TestEngineer,ProgramRole.TestLead))
-            return Results.Forbid();
-        var actor=http.UserAccount().UserName;
-        if(review.AssignedEngineerId is not null
-            && !string.Equals(review.AssignedEngineerId,actor,StringComparison.OrdinalIgnoreCase)
-            && !await http.HasProjectRoleAsync(db,identity,review.ProjectId,ct,ProgramRole.TestLead))
-            return Results.Forbid();
-        if(review.State!=TestChangeReviewState.Draft)
-            return Results.Conflict(new{error="Supporting files can be added only while the Test Change Request is a Draft.",code="artifact_not_editable"});
-        return null;
-    }
 
     private static async Task<(string? ContentType,string? Error)> ValidateProblemReportFileAsync(IFormFile file,CancellationToken ct)
     {

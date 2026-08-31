@@ -59,6 +59,12 @@ public sealed class ControlledEditingCheckInEngine(
         if (session is null)
             return new(ControlledCheckInStatus.NotFound, "edit_session_not_found", "The controlled edit session was not found.");
 
+        // Supporting-file mutation takes these locks in the same order: first the exclusive edit session,
+        // then the Problem Report aggregate. Acquiring the aggregate row here, before resolving the adapter,
+        // prevents check-in from deadlocking an upload that is arbitrating the exact same report manifest.
+        if (session.ArtifactType.Equals("ProblemReport", StringComparison.OrdinalIgnoreCase))
+            await ProblemReportLock.AcquireAsync(db, session.ArtifactId, ct);
+
         if (session.State != EditSessionState.Active)
             return await RejectAsync(session, actor.UserName, now, "edit_session_inactive",
                 "This controlled edit session is no longer active.", ControlledCheckInStatus.Conflict,

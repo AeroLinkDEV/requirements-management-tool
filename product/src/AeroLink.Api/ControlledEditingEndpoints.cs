@@ -247,8 +247,23 @@ public static class ControlledEditingEndpoints
     private static async Task<IResult> CheckInAsync(Guid id, UniversalCheckInRequest request, HttpContext http,
         ControlledEditingCheckInEngine engine, CancellationToken ct)
     {
-        var result = await engine.CheckInAsync(id, request.ExpectedVersion, http.UserAccount(),
-            DateTimeOffset.UtcNow, ct);
+        ControlledCheckInResult result;
+        try
+        {
+            result = await engine.CheckInAsync(id, request.ExpectedVersion, http.UserAccount(),
+                DateTimeOffset.UtcNow, ct);
+        }
+        catch (Exception ex) when (ProblemReportLock.IsSerializationConflict(ex))
+        {
+            // A PostgreSQL serialization/deadlock abort cannot produce a successful stale check-in. The
+            // transaction is disposed/rolled back by the engine, and the caller receives a deterministic
+            // retryable conflict instead of an unhandled 500.
+            return Results.Conflict(new
+            {
+                error = "The controlled record changed concurrently; refresh and retry the check-in.",
+                code = "edit_session_concurrency"
+            });
+        }
         if (result.Success)
             return Results.Ok(new
             {

@@ -806,6 +806,7 @@
         "IdentifierAllocationTests",
         "ProblemReportApiTests",
         "ProblemReportCheckoutApiTests",
+        "ProblemReportPostgresQualificationTests",
         "ProblemReportVerificationApiTests",
         "RequirementProposalOptionsApiTests",
         "TestChangeRequestRegisterApiTests"
@@ -823,6 +824,7 @@
         "ControlledEditingProcedureAuthorityTests",
         "ProblemReportApiTests",
         "ProblemReportCheckoutApiTests",
+        "ProblemReportPostgresQualificationTests",
         "ProblemReportVerificationApiTests"
       ]
     },
@@ -995,6 +997,7 @@
         "AdministratorChangeRequestApiTests",
         "IdentifierAllocationTests",
         "ProblemReportCheckoutApiTests",
+        "ProblemReportPostgresQualificationTests",
         "ProblemReportVerificationApiTests"
       ]
     },
