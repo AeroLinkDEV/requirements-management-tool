@@ -24,6 +24,7 @@ public static class ProblemReportEndpoints
         group.MapPost("", CreateAsync);
         group.MapPost("/from-test-execution/{executionId:guid}", CreateFromFailureAsync);
         group.MapGet("/{id:guid}", DetailAsync);
+        group.MapGet("/{id:guid}/history/{snapshotId:guid}", HistoricalAsync);
         group.MapGet("/{id:guid}/download", DownloadAsync);
         group.MapGet("/{id:guid}/corrective-action", CorrectiveActionAsync);
         // Details are edited under the universal controlled-editing lease, not here. A second write path to
@@ -380,6 +381,67 @@ public static class ProblemReportEndpoints
                 canReassignOwner = string.Equals(actor.UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase) || canRecoverOwner,
                 canRecoverOwner,
             }, waivers, duplicateDiagnostic, currentNames));
+    }
+
+    private static async Task<IResult> HistoricalAsync(Guid id, Guid snapshotId, HttpContext http,
+        AeroLinkDbContext db, CancellationToken ct)
+    {
+        // The parent report is used only to establish the Project authorization boundary. Every displayed
+        // value below comes from the immutable revision row; in particular, never substitute the current
+        // aggregate when a historical envelope is missing, malformed, or fails its stored digest check.
+        var projectId = await db.ProblemReports.AsNoTracking().Where(x => x.Id == id)
+            .Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+        if (projectId is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
+
+        var row = await db.ProblemReportRevisions.AsNoTracking()
+            .Where(x => x.Id == snapshotId && x.ProblemReportId == id)
+            .SingleOrDefaultAsync(ct);
+        if (row is null || string.IsNullOrWhiteSpace(row.SnapshotJson)
+            || row.SnapshotSchemaVersion is < 1 or > ProblemReportEvidenceContract.SchemaVersion
+            || !string.Equals(ProblemReportEvidenceContract.Hash(row.SnapshotJson), row.SnapshotHash,
+                StringComparison.OrdinalIgnoreCase)) return Results.NotFound();
+        var parsed = ProblemReportOutputGenerator.ReadStoredSnapshot(row.SnapshotJson, row.SnapshotSchemaVersion);
+        if (parsed is null || parsed.Value.Snapshot.Id != id || parsed.Value.Snapshot.ProjectId != projectId.Value
+            || parsed.Value.Snapshot.Revision != row.Revision) return Results.NotFound();
+        var snapshot = parsed.Value.Snapshot;
+        var category = HistoricalCategoryResponse(snapshot.Category, snapshot.CategoryProvenance);
+        var revision = new
+        {
+            row.Id, row.Revision, row.EventType, row.Actor, row.ActorDisplayName, row.Detail,
+            rationale = string.IsNullOrWhiteSpace(row.Rationale) ? row.Detail : row.Rationale,
+            row.FromState, row.ToState, row.EvidenceJson, row.EventSchemaVersion,
+            row.SnapshotSchemaVersion, row.SnapshotHash, row.SnapshotJson, row.OccurredAt,
+        };
+        return Results.Ok(new
+        {
+            snapshot.Id, snapshot.ProjectId, snapshot.ReportNumber, snapshot.Revision, snapshot.DisplayNumber,
+            snapshot.Title, snapshot.Problem, snapshot.ProblemRich, snapshot.AdditionalInformation,
+            snapshot.AdditionalInformationRich, snapshot.Analysis, snapshot.AnalysisRich, snapshot.ReportedBy,
+            reportedByDisplayName = snapshot.ReportedBy, snapshot.ResponsibleEngineerId,
+            responsibleEngineerDisplayName = snapshot.ResponsibleEngineerId, snapshot.TargetReleaseId,
+            snapshot.Classification, severity = snapshot.Severity, priority = snapshot.Priority, snapshot.Origin,
+            snapshot.AffectedConfiguration, snapshot.RootCause, snapshot.RootCauseRich, snapshot.Effects,
+            snapshot.EffectsRich, snapshot.Containment, snapshot.ContainmentRich, snapshot.CorrectiveAction,
+            snapshot.CorrectiveActionRich, snapshot.Workaround, snapshot.WorkaroundRich,
+            snapshot.SystemAircraftImpact, snapshot.SystemAircraftImpactRich, snapshot.ImpactAssessmentJson,
+            snapshot.Disposition, snapshot.DispositionRationale, snapshot.ResolutionVerificationExecutionId,
+            snapshot.ClosureApprovedByName, snapshot.ClosureApprovedAt, snapshot.IsReleaseBlocker,
+            snapshot.ReleaseBlockerVersion, waived = false, activeReleaseWaiver = (object?)null,
+            releaseWaivers = Array.Empty<object>(), legacyWaiver = (object?)null, state = snapshot.State,
+            snapshot.CreatedAt, snapshot.UpdatedAt, snapshot.Version, category,
+            snapshotHash = row.SnapshotHash, snapshotSchemaVersion = row.SnapshotSchemaVersion,
+            snapshotId = row.Id, historicalReadOnly = true, historicalLegacyType = parsed.Value.LegacyType,
+            capabilities = new
+            {
+                canApproveSqaClosure = false, canApproveReleaseWaiver = false, canReassignOwner = false,
+                canRecoverOwner = false, canRevive = false, availableTransitions = Array.Empty<object>(),
+            }, duplicateDiagnostic = (object?)null, impactAreas = Array.Empty<object>(),
+            relatedReports = Array.Empty<object>(), links = Array.Empty<object>(),
+            approvedCorrectiveActions = Array.Empty<object>(), testEvidence = Array.Empty<object>(),
+            closureCandidates = Array.Empty<object>(), revisions = new[] { revision },
+            supportingAttachments = snapshot.SupportingAttachments ?? [],
+        });
     }
 
     private static async Task<IResult> DownloadAsync(Guid id, int? revision, Guid? snapshotId, string? format, HttpContext http,
@@ -1190,6 +1252,21 @@ public static class ProblemReportEndpoints
             definition.Label,
             definition.Meaning,
             provenance = report.CategoryProvenance?.ToString(),
+        };
+    }
+
+    private static object? HistoricalCategoryResponse(string? value, string? provenance)
+    {
+        if (!ProblemReportCategoryVocabulary.TryParse(value, out var category)) return null;
+        var definition = ProblemReportCategoryVocabulary.Of(category);
+        return new
+        {
+            value = category.ToString(),
+            definition.Code,
+            definition.Family,
+            definition.Label,
+            definition.Meaning,
+            provenance,
         };
     }
 

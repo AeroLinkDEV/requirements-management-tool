@@ -5,6 +5,7 @@ using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Http.Features;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -52,8 +53,9 @@ public static class EditSessionEndpoints
             return Results.Ok(rows.Select(x=>new{x.Id,x.LogicalId,x.Version,x.RevisionId,x.Label,x.Description,x.OriginalFileName,x.ContentType,x.Size,x.Sha256,state=x.State.ToString(),x.UploadedBy,x.UploadedAt,x.IntegrityVerifiedAt,x.SupersedesId}));
         });
 
-        app.MapPost("/api/enterprise-hardening/attachments",(HttpRequest request,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,ManagedDocumentStorageCoordinator storage,CancellationToken ct)=>
-            UploadAttachmentAsync(request,http,db,store,storage,ct)).DisableAntiforgery();
+        app.MapPost("/api/enterprise-hardening/attachments",(HttpRequest request,Guid? projectId,string? artifactType,Guid? artifactId,Guid? editSessionId,
+                HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,ManagedDocumentStorageCoordinator storage,CancellationToken ct)=>
+            UploadAttachmentAsync(request,http,db,store,storage,projectId,artifactType,artifactId,editSessionId,ct)).DisableAntiforgery();
 
         app.MapPost("/api/enterprise-hardening/attachments/{id:guid}/withdraw",(Guid id,WithdrawSupportingAttachmentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
             WithdrawProblemReportAttachmentAsync(id,request,http,db,ct));
@@ -72,7 +74,7 @@ public static class EditSessionEndpoints
             if(item is null)return Results.NotFound();
             if(item.ArtifactType=="InlineImageDraft")return Results.NotFound();
             if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();
-            try{return Results.File(await store.OpenVerifiedReadAsync(item.StorageKey,item.Size,item.Sha256,ct),item.ContentType,item.OriginalFileName,enableRangeProcessing:true);}
+            try{return Results.File(await store.OpenVerifiedReadAsync(item.StorageKey,item.Size,item.Sha256,ct),item.ContentType,SafeDownloadFileName(item.OriginalFileName,item.Id),enableRangeProcessing:true);}
             catch(EvidenceIntegrityException){return Results.NotFound();}
         });
 
@@ -213,15 +215,74 @@ public static class EditSessionEndpoints
     private const long MaximumProblemReportAttachmentBytesPerProject = 2L * 1024 * 1024 * 1024;
 
     private static async Task<IResult> UploadAttachmentAsync(HttpRequest request,HttpContext http,
-        AeroLinkDbContext db,EvidenceFileStore store,ManagedDocumentStorageCoordinator storage,CancellationToken ct)
+        AeroLinkDbContext db,EvidenceFileStore store,ManagedDocumentStorageCoordinator storage,
+        Guid? queryProjectId,string? queryArtifactType,Guid? queryArtifactId,Guid? queryEditSessionId,CancellationToken ct)
     {
         if(!request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data."});
-        var form=await request.ReadFormAsync(ct);var file=form.Files.GetFile("file");
-        if(file is null||file.Length==0)return Results.BadRequest(new{error="Select a non-empty file."});
-        if(!Guid.TryParse(form["projectId"],out var projectId)||!Guid.TryParse(form["artifactId"],out var artifactId))
-            return Results.BadRequest(new{error="Project and artifact identifiers are required."});
+        // Authorize the query target before parsing multipart fields. The form echoes these values for
+        // compatibility, but attacker-controlled body fields must never select the project or lease whose
+        // quota and controlled history will be changed.
+        if(queryProjectId is not Guid projectId||queryArtifactId is not Guid artifactId||string.IsNullOrWhiteSpace(queryArtifactType))
+            return Results.BadRequest(new{error="Project, artifact type, and artifact identifiers are required in the request query."});
+        var artifactType=queryArtifactType.Trim();
+        // Keep the authorization decision and the transactional write on the same canonical
+        // discriminator.  A case-variant must not pass the Problem Report lease check and then
+        // fall through to the generic attachment path after parsing the multipart body.
+        artifactType=artifactType.Equals("ProblemReport",StringComparison.OrdinalIgnoreCase)?"ProblemReport":
+            artifactType.Equals("Requirement",StringComparison.OrdinalIgnoreCase)?"Requirement":
+            artifactType.Equals("ChangeRequest",StringComparison.OrdinalIgnoreCase)?"ChangeRequest":
+            artifactType.Equals("TestChangeRequest",StringComparison.OrdinalIgnoreCase)?"TestChangeRequest":artifactType;
         if(!await http.HasProjectAccessAsync(db,projectId,ct))return Results.Forbid();
-        var artifactType=string.IsNullOrWhiteSpace(form["artifactType"])?"Requirement":form["artifactType"].ToString();
+        if(artifactType.Equals("ProblemReport",StringComparison.OrdinalIgnoreCase))
+        {
+            var report=await db.ProblemReports.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct);
+            if(report is null)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
+            if(report.State is ProblemReportState.Closed or ProblemReportState.Rejected)
+                return Results.Conflict(new{error="Finished Problem Reports cannot accept supporting-file changes.",code="artifact_not_editable"});
+            if(queryEditSessionId is not Guid sessionId)return Results.Forbid();
+            var session=await db.ArtifactEditSessions.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==sessionId,ct);
+            if(!ValidProblemReportSession(session,projectId,artifactId,http.UserAccount().UserName))return Results.Forbid();
+        }
+        else
+        {
+            var artifactExists=artifactType switch
+            {
+                "Requirement"=>await db.Requirements.AsNoTracking().AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
+                "ChangeRequest"=>await db.SystemChangeRequests.AsNoTracking().AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
+                "TestChangeRequest"=>await db.TestChangeReviews.AsNoTracking().AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
+                _=>false,
+            };
+            if(!artifactExists)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
+            if(artifactType.Equals("ChangeRequest",StringComparison.OrdinalIgnoreCase))
+            {
+                var changeRequest=await db.SystemChangeRequests.AsNoTracking().SingleAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct);
+                var actor=http.UserAccount();
+                if(!actor.IsAdministrator&&!string.Equals(changeRequest.AuthorId,actor.UserName,StringComparison.OrdinalIgnoreCase))return Results.Forbid();
+                if(changeRequest.State!=ChangeRequestState.Draft)return Results.Conflict(new{error="Supporting files can be added only while the change request is a Draft.",code="artifact_not_editable"});
+            }
+        }
+        const long multipartOverhead=128L*1024;
+        var maximumRequestBytes=MaximumProblemReportAttachmentBytes+multipartOverhead;
+        if(request.ContentLength is long requestLength&&requestLength>maximumRequestBytes)
+            return Results.BadRequest(new{error="The supporting file request exceeds the 25 MB limit.",code="attachment_too_large"});
+        var sizeFeature=request.HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        if(sizeFeature is { IsReadOnly:false })sizeFeature.MaxRequestBodySize=maximumRequestBytes;
+        var form=await request.ReadFormAsync(new FormOptions
+        {
+            MultipartBodyLengthLimit=maximumRequestBytes,
+            MemoryBufferThreshold=64*1024,
+            ValueCountLimit=32,
+            KeyLengthLimit=256,
+            ValueLengthLimit=8*1024,
+            MultipartHeadersCountLimit=16,
+            MultipartHeadersLengthLimit=16*1024,
+        },ct);var file=form.Files.GetFile("file");
+        if(file is null||file.Length==0)return Results.BadRequest(new{error="Select a non-empty file."});
+        if(!Guid.TryParse(form["projectId"],out var bodyProjectId)||!Guid.TryParse(form["artifactId"],out var bodyArtifactId)
+            ||!string.Equals(form["artifactType"].ToString(),artifactType,StringComparison.OrdinalIgnoreCase)
+            ||bodyProjectId!=projectId||bodyArtifactId!=artifactId
+            ||(queryEditSessionId is Guid bodySessionId && (!Guid.TryParse(form["editSessionId"],out var echoedSessionId)||echoedSessionId!=bodySessionId)))
+            return Results.BadRequest(new{error="Multipart target fields must match the authorized request query."});
         var label=form["label"].ToString().Trim();var description=form["description"].ToString().Trim();
         if(string.IsNullOrWhiteSpace(label)||label.Length>300||description.Length>4000)
             return Results.BadRequest(new{error="A label is required and attachment text must stay within its controlled limits."});
@@ -372,6 +433,15 @@ public static class EditSessionEndpoints
         if(stored is not null)store.Delete(stored.StorageKey);
     }
 
+    private static string SafeDownloadFileName(string originalName,Guid attachmentId)
+    {
+        var name=Path.GetFileName(originalName);
+        var invalid=Path.GetInvalidFileNameChars();
+        name=new string(name.Select(character=>char.IsControl(character)||invalid.Contains(character)?'-':character).ToArray()).Trim();
+        if(string.IsNullOrWhiteSpace(name))name=$"attachment-{attachmentId:N}.bin";
+        return name.Length>180?name[..180]:name;
+    }
+
     private static async Task<IResult> WithdrawProblemReportAttachmentAsync(Guid id,
         WithdrawSupportingAttachmentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)
     {
@@ -488,14 +558,80 @@ public static class EditSessionEndpoints
         return false;
     }
 
+    private const long MaximumOfficePackageBytes=64L*1024*1024;
+    private const long MaximumOfficeEntryBytes=16L*1024*1024;
+    private const long MaximumOfficeXmlCharacters=8L*1024*1024;
+
     private static bool ValidOfficePackage(Stream stream,string requiredPart)
     {
+        // This is intentionally a bounded, read-only OOXML profile.  We accept only the parts
+        // needed for a document/workbook and reject features that can make a supposedly inert
+        // supporting file execute code, reach a network resource, or consume unbounded memory.
         try
         {
             using var archive=new System.IO.Compression.ZipArchive(stream,System.IO.Compression.ZipArchiveMode.Read,leaveOpen:true);
-            return archive.Entries.Count<=10_000&&archive.GetEntry("[Content_Types].xml") is not null&&archive.GetEntry(requiredPart) is not null;
+            if(archive.Entries.Count is 0 or >10_000)return false;
+            if(archive.GetEntry("[Content_Types].xml") is null||archive.GetEntry(requiredPart) is null)return false;
+
+            var names=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            long totalBytes=0;
+            foreach(var entry in archive.Entries)
+            {
+                var name=entry.FullName;
+                if(string.IsNullOrWhiteSpace(name)||name.Length>180||name.Contains('\\')||name.StartsWith('/')||
+                    name.Split('/').Any(segment=>segment is "." or ".."))return false;
+                if(!names.Add(name))return false;
+                if(entry.Length<0||entry.Length>MaximumOfficeEntryBytes)return false;
+                totalBytes=checked(totalBytes+entry.Length);
+                if(totalBytes>MaximumOfficePackageBytes)return false;
+                // Highly compressed large members are a common ZIP-bomb shape.  Small XML parts
+                // can legitimately have a high ratio, so enforce the ratio only above 1 MiB.
+                if(entry.Length>1024L*1024&&
+                    (entry.CompressedLength<=0||entry.Length/entry.CompressedLength>1000))return false;
+                if(name.Contains("vbaProject",StringComparison.OrdinalIgnoreCase)||
+                    name.Contains("externalLink",StringComparison.OrdinalIgnoreCase)||
+                    name.EndsWith(".bin",StringComparison.OrdinalIgnoreCase))return false;
+            }
+
+            var settings=new System.Xml.XmlReaderSettings
+            {
+                DtdProcessing=System.Xml.DtdProcessing.Prohibit,
+                XmlResolver=null,
+                MaxCharactersInDocument=MaximumOfficeXmlCharacters,
+                MaxCharactersFromEntities=0,
+                IgnoreComments=true,
+                IgnoreWhitespace=true,
+            };
+            foreach(var entry in archive.Entries.Where(x=>x.FullName.EndsWith(".xml",StringComparison.OrdinalIgnoreCase)||
+                                                            x.FullName.EndsWith(".rels",StringComparison.OrdinalIgnoreCase)))
+            {
+                using var entryStream=entry.Open();
+                using var reader=System.Xml.XmlReader.Create(entryStream,settings);
+                while(reader.Read())
+                {
+                    if(reader.NodeType==System.Xml.XmlNodeType.Element)
+                    {
+                        for(var index=0;index<reader.AttributeCount;index++)
+                        {
+                            reader.MoveToAttribute(index);
+                            if(reader.Value.Contains("macroEnabled",StringComparison.OrdinalIgnoreCase))return false;
+                        }
+                        reader.MoveToElement();
+                    }
+                    if(reader.NodeType!=System.Xml.XmlNodeType.Element||
+                        !reader.LocalName.Equals("Relationship",StringComparison.OrdinalIgnoreCase))continue;
+                    if(string.Equals(reader.GetAttribute("TargetMode"),"External",StringComparison.OrdinalIgnoreCase))return false;
+                    var target=reader.GetAttribute("Target");
+                    if(target is not null&&target.Contains("..",StringComparison.Ordinal))return false;
+                }
+            }
+            return true;
         }
         catch(InvalidDataException){return false;}
+        catch(System.Xml.XmlException){return false;}
+        catch(OverflowException){return false;}
+        catch(IOException){return false;}
+        catch(ArgumentException){return false;}
     }
 
     static string ControlledScrDraft(SystemChangeRequest scr)=>JsonSerializer.Serialize(new{scrVersion=scr.Version,title=scr.Title,problem=scr.Problem,analysis=scr.Analysis,solution=scr.Solution,requirementChanges=scr.RequirementChanges.Select(x=>new{baseNumber=x.BaseNumber,revision=x.Revision,level=x.Level.ToString(),kind=x.Kind.ToString(),statement=x.Statement,rationale=x.Rationale,verificationMethod=x.VerificationMethod,richText=x.RichText,attributesJson=x.AttributesJson,impactDispositionJson=x.ImpactDispositionJson,targetSectionId=x.TargetSectionId})});

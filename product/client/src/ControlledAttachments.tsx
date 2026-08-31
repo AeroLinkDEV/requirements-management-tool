@@ -71,6 +71,12 @@ export default function ControlledAttachments({
     void load();
   }, [load]);
 
+  const uploadUrl = () => {
+    const query = new URLSearchParams({ projectId, artifactType, artifactId });
+    if (editSessionId) query.set("editSessionId", editSessionId);
+    return `${api}/api/enterprise-hardening/attachments?${query.toString()}`;
+  };
+
   const upload = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -83,7 +89,7 @@ export default function ControlledAttachments({
     setBusy(true);
     setError("");
     setMessage("");
-    const response = await fetch(`${api}/api/enterprise-hardening/attachments`, { method: "POST", body });
+    const response = await fetch(uploadUrl(), { method: "POST", body });
     setBusy(false);
     if (!response.ok) {
       const detail = (await response.json().catch(() => ({}))) as { error?: string };
@@ -107,7 +113,7 @@ export default function ControlledAttachments({
     body.set("description", item.description);
     body.set("file", file);
     setError("");
-    const response = await fetch(`${api}/api/enterprise-hardening/attachments`, { method: "POST", body });
+    const response = await fetch(uploadUrl(), { method: "POST", body });
     if (!response.ok) {
       const detail = (await response.json().catch(() => ({}))) as { error?: string };
       setError(detail.error || "The new version could not be stored.");

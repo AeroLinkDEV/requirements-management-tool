@@ -542,7 +542,7 @@ public sealed class ProblemReportVerificationApiTests
         var file = new ByteArrayContent(Encoding.UTF8.GetBytes("closure evidence v1\n"));
         file.Headers.ContentType = new("text/plain");
         form.Add(file, "file", "closure-evidence.txt");
-        using var uploaded = await engineer.PostAsync("/api/enterprise-hardening/attachments", form);
+        using var uploaded = await engineer.PostAsync($"/api/enterprise-hardening/attachments?projectId={fixture.ProjectId}&artifactType=ProblemReport&artifactId={fixture.ReportId}&editSessionId={sessionId}", form);
         Assert.Equal(HttpStatusCode.Created, uploaded.StatusCode);
 
         using var checkedIn = await engineer.PostAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/check-in",
@@ -603,7 +603,7 @@ public sealed class ProblemReportVerificationApiTests
         var file = new ByteArrayContent(Encoding.UTF8.GetBytes("candidate mutation evidence\n"));
         file.Headers.ContentType = new("text/plain");
         form.Add(file, "file", "candidate-mutation.txt");
-        using var upload = await engineer.PostAsync("/api/enterprise-hardening/attachments", form);
+        using var upload = await engineer.PostAsync($"/api/enterprise-hardening/attachments?projectId={fixture.ProjectId}&artifactType=ProblemReport&artifactId={fixture.ReportId}&editSessionId={sessionId}", form);
         Assert.Equal(HttpStatusCode.Created, upload.StatusCode);
 
         var detail = await engineer.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");

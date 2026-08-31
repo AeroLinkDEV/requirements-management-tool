@@ -803,6 +803,7 @@
         "ChangeRequestUpstreamTraceApiTests",
         "ControlledEditingCheckInApiTests",
         "ControlledEditingProcedureAuthorityTests",
+        "IdentifierAllocationTests",
         "ProblemReportApiTests",
         "ProblemReportCheckoutApiTests",
         "ProblemReportVerificationApiTests",

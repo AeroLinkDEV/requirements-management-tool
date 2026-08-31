@@ -156,7 +156,7 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
     /// and v5 added authored image layout. Missing fields therefore render as "not recorded", never as a
     /// value borrowed from the current Problem Report.
     /// </summary>
-    internal static (ProblemReportEvidenceSnapshot Snapshot, string? LegacyType)? ReadStoredSnapshot(string json, int expectedSchema)
+    public static (ProblemReportEvidenceSnapshot Snapshot, string? LegacyType)? ReadStoredSnapshot(string json, int expectedSchema)
     {
         StoredSnapshot? stored;
         try { stored = JsonSerializer.Deserialize<StoredSnapshot>(json, SnapshotOptions); }

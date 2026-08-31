@@ -515,10 +515,22 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.Contains(secondTitle, secondXml);
         Assert.Contains("SameRevisionFollowUp", secondXml);
 
+        using var historicalPage = await client.GetAsync($"/api/problem-reports/{reportId}/history/{firstSnapshotId}");
+        Assert.Equal(HttpStatusCode.OK, historicalPage.StatusCode);
+        var historicalBody = await historicalPage.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(historicalBody.GetProperty("historicalReadOnly").GetBoolean());
+        Assert.Equal(firstSnapshotId, historicalBody.GetProperty("snapshotId").GetGuid());
+        Assert.Equal(firstTitle, historicalBody.GetProperty("title").GetString());
+        Assert.False(historicalBody.GetProperty("capabilities").GetProperty("canApproveSqaClosure").GetBoolean());
+
         using var foreign = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&snapshotId={foreignSnapshotId}&format=docx");
         Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
         using var missing = await client.GetAsync($"/api/problem-reports/{reportId}/download?revision=0&snapshotId={Guid.NewGuid()}&format=docx");
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        using var foreignPage = await client.GetAsync($"/api/problem-reports/{reportId}/history/{foreignSnapshotId}");
+        Assert.Equal(HttpStatusCode.NotFound, foreignPage.StatusCode);
+        using var missingPage = await client.GetAsync($"/api/problem-reports/{reportId}/history/{Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.NotFound, missingPage.StatusCode);
     }
 
     [Fact]
@@ -1309,7 +1321,18 @@ public sealed class ProblemReportCheckoutApiTests
         var sessionId = session.GetProperty("id").GetGuid();
 
         var firstBytes = OfficePackage("xl/workbook.xml", "navigation analysis v1");
-        using var first = await client.PostAsync("/api/enterprise-hardening/attachments",
+        // The target is an authorization input, not a multipart form field. Missing or foreign query
+        // targets must be rejected before the request body is parsed or any storage/quota work begins.
+        using var missingQuery = await client.PostAsync("/api/enterprise-hardening/attachments",
+            SupportingFile(projectId, reportId, sessionId, "NavigationAnalysis.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", firstBytes));
+        Assert.Equal(HttpStatusCode.BadRequest, missingQuery.StatusCode);
+        using var foreignQuery = await client.PostAsync(
+            $"/api/enterprise-hardening/attachments?projectId={Guid.NewGuid()}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}",
+            SupportingFile(projectId, reportId, sessionId, "NavigationAnalysis.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", firstBytes));
+        Assert.Equal(HttpStatusCode.BadRequest, foreignQuery.StatusCode);
+        using var first = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={sessionId}",
             SupportingFile(projectId, reportId, sessionId, "NavigationAnalysis.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", firstBytes));
         Assert.True(first.StatusCode == HttpStatusCode.Created, $"Supporting attachment upload returned {first.StatusCode}: {await first.Content.ReadAsStringAsync()}");
         var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
@@ -1341,19 +1364,36 @@ public sealed class ProblemReportCheckoutApiTests
         var nextSession = await nextCheckout.Content.ReadFromJsonAsync<JsonElement>();
         var nextSessionId = nextSession.GetProperty("id").GetGuid();
 
-        using var badType = await client.PostAsync("/api/enterprise-hardening/attachments",
+        using var badType = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
             SupportingFile(projectId, reportId, nextSessionId, "notes.exe", "application/octet-stream", [1, 2, 3]));
         Assert.Equal(HttpStatusCode.BadRequest, badType.StatusCode);
-        using var mismatchedType = await client.PostAsync("/api/enterprise-hardening/attachments",
+        using var mismatchedType = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
             SupportingFile(projectId, reportId, nextSessionId, "NavigationAnalysis.xlsx", "application/pdf", firstBytes));
         Assert.Equal(HttpStatusCode.BadRequest, mismatchedType.StatusCode);
-        using var unsafeName = await client.PostAsync("/api/enterprise-hardening/attachments",
+        using var unsafeName = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
             SupportingFile(projectId, reportId, nextSessionId, "../escape.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", firstBytes));
         Assert.Equal(HttpStatusCode.BadRequest, unsafeName.StatusCode);
-        using var malformedJpeg = await client.PostAsync("/api/enterprise-hardening/attachments",
+        using var malformedJpeg = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
             SupportingFile(projectId, reportId, nextSessionId, "screenshot.jpg", "image/jpeg", [0xff, 0xd8, 0xff, 0xd9]));
         Assert.Equal(HttpStatusCode.BadRequest, malformedJpeg.StatusCode);
+        using var macroPackage = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
+            SupportingFile(projectId, reportId, nextSessionId, "macro.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                OfficePackage("xl/workbook.xml", "macro", ("xl/vbaProject.bin", "not executable here"))));
+        Assert.Equal(HttpStatusCode.BadRequest, macroPackage.StatusCode);
+        using var externalPackage = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
+            SupportingFile(projectId, reportId, nextSessionId, "external.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                OfficePackage("xl/workbook.xml", "external", ("xl/_rels/workbook.xml.rels",
+                    "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"x\" Target=\"https://example.test\" TargetMode=\"External\" /></Relationships>"))));
+        Assert.Equal(HttpStatusCode.BadRequest, externalPackage.StatusCode);
+        using var duplicatePackage = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
+            SupportingFile(projectId, reportId, nextSessionId, "duplicate.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                OfficePackage("xl/workbook.xml", "duplicate", ("xl/workbook.xml", "same path twice"))));
+        Assert.Equal(HttpStatusCode.BadRequest, duplicatePackage.StatusCode);
+        using var zipBomb = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
+            SupportingFile(projectId, reportId, nextSessionId, "bomb.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                OfficePackage("xl/workbook.xml", new string('A', 8 * 1024 * 1024))));
+        Assert.Equal(HttpStatusCode.BadRequest, zipBomb.StatusCode);
 
         using var download = await client.GetAsync($"/api/enterprise-hardening/attachments/{firstId}/download");
         Assert.Equal(HttpStatusCode.OK, download.StatusCode);
@@ -1365,7 +1405,7 @@ public sealed class ProblemReportCheckoutApiTests
         Assert.True((await verified.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("valid").GetBoolean());
 
         var secondBytes = OfficePackage("xl/workbook.xml", "navigation analysis v2");
-        using var replacement = await client.PostAsync("/api/enterprise-hardening/attachments",
+        using var replacement = await client.PostAsync($"/api/enterprise-hardening/attachments?projectId={projectId}&artifactType=ProblemReport&artifactId={reportId}&editSessionId={nextSessionId}",
             SupportingFile(projectId, reportId, nextSessionId, "NavigationAnalysis.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", secondBytes, logicalId));
         Assert.Equal(HttpStatusCode.Created, replacement.StatusCode);
         var secondBody = await replacement.Content.ReadFromJsonAsync<JsonElement>();
@@ -1444,7 +1484,7 @@ public sealed class ProblemReportCheckoutApiTests
         return content;
     }
 
-    private static byte[] OfficePackage(string requiredPart, string content)
+    private static byte[] OfficePackage(string requiredPart, string content, params (string Name, string Content)[] extras)
     {
         using var output = new MemoryStream();
         using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
@@ -1452,7 +1492,17 @@ public sealed class ProblemReportCheckoutApiTests
             using (var types = new StreamWriter(archive.CreateEntry("[Content_Types].xml").Open(), Encoding.UTF8, 1024, leaveOpen: false))
                 types.Write("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\" />");
             using (var part = new StreamWriter(archive.CreateEntry(requiredPart).Open(), Encoding.UTF8, 1024, leaveOpen: false))
-                part.Write(content);
+            {
+                var escaped = System.Security.SecurityElement.Escape(content);
+                part.Write(requiredPart.StartsWith("xl/", StringComparison.Ordinal)
+                    ? $"<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><scenario>{escaped}</scenario></workbook>"
+                    : $"<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:t>{escaped}</w:t></w:r></w:p></w:body></w:document>");
+            }
+            foreach (var extra in extras)
+            {
+                using var extraPart = new StreamWriter(archive.CreateEntry(extra.Name).Open(), Encoding.UTF8, 1024, leaveOpen: false);
+                extraPart.Write(extra.Content);
+            }
         }
         return output.ToArray();
     }
