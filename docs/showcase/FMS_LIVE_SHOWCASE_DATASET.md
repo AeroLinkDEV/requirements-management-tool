@@ -104,13 +104,16 @@ Interface and Problem Report scenario ownership is recorded durably in one immut
 marker in narrative text is only a display breadcrumb and is never used to locate or mutate a controlled row,
 so user-authored content that happens to contain the same text is safe. Scenarios prefer the deterministic
 `86601` number range; if a legitimate record already occupies a preferred number, the next free number is
-selected. The upgrade marker is written only after all scenario postconditions pass, so an interrupted or
-incomplete enrichment retries on the next startup without rewriting controlled history.
+selected. The upgrade marker is written only after all scenario postconditions pass. An interrupted or
+incomplete enrichment remains unchanged at startup and is retried only by the explicit, administrator-only
+`POST /api/showcase/upgrade` operation after the operator has verified the target database and backup.
 
 On a fresh demo-data startup, the seeded identity directory is created before FMS controlled closure evidence
-is frozen, and the existing post-Program identity pass remains in place to grant memberships to every Program
-created by the showcase seeders. This keeps the closure package attributable to the real `quality.analyst`
-account rather than an empty synthetic identity.
+is frozen, and the fresh FMS transaction grants the exact memberships required by its controlled scenarios.
+Once `FMSLIVE` exists, the normal startup and `/api/showcase/seed` identity passes leave its memberships and
+Project Leadership assignments unchanged. Controlled enrichment of an existing FMS is operator-controlled
+through `POST /api/showcase/upgrade`, after target confirmation and a verified backup; it never runs as an
+automatic incomplete-enrichment retry.
 
 ## Terminology
 

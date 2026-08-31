@@ -360,6 +360,13 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                     problemPending = await ResolveProblemReportScenarioAsync(programId, project, index, expected, ct) is null;
                 }
 
+            // A durable scenario mapping is only an identity pointer. It does not prove that the mapped
+            // Problem Report's verification, candidate and (where applicable) frozen closure evidence is
+            // complete. Treat an incomplete mapped scenario as pending too, so the full controlled actor
+            // roster is checked before any upgrade step can mutate it.
+            if (!problemPending)
+                problemPending = !await ScenarioRichnessCompleteAsync(programId, ct);
+
             if (interfacePending)
             {
                 var effectiveAt = await EffectiveInterfaceTimelineAtAsync(programId,
@@ -388,6 +395,26 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 {
                     return new(false, "showcase_actor_authority_unavailable", ex.Message, closureAt);
                 }
+
+                // The SQA approval must follow any newly-created controlled PR evidence. If an existing
+                // installation granted a required PR actor years after the deterministic execution, move
+                // the operator-triggered evidence/approval timeline after that real grant; never backdate
+                // either authority or evidence. Recheck the SQA membership against the moved timestamp so
+                // an ending membership fails before UpgradeAsync can write anything.
+                // EffectiveProblemReportTimelineAtAsync returns the deterministic baseline when all grants
+                // pre-date it. Only a timeline moved by a real late grant should move the historical SQA
+                // approval; otherwise a fresh seed would unnecessarily rewrite its June 2024 chronology
+                // merely because the baseline used for new PR drafts is in December.
+                var deterministicProblemTimeline = new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero);
+                if (effectiveAt != deterministicProblemTimeline && effectiveAt >= closureAt.Value)
+                    // Leave room for the verification, relationship and candidate events for both governed
+                    // scenarios. They share one timestamp per report and are therefore still ordered before
+                    // this operator-triggered closure approval.
+                    closureAt = effectiveAt.AddMinutes(10);
+                if (!memberships.Any(x => x.GrantedAt <= closureAt.Value
+                        && (x.EndedAt is null || x.EndedAt.Value > closureAt.Value)))
+                    return new(false, "quality_analyst_membership_does_not_cover_closure",
+                        $"The quality.analyst membership history does not cover the controlled evidence timeline at {closureAt.Value:O}; an operator-created membership is not backdated.");
             }
         }
 
@@ -1533,6 +1560,26 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (!sqaMemberships.Any(x => x.EndedAt is null))
             throw new InvalidOperationException("The current quality.analyst SoftwareQualityAnalyst membership is required before FMS closure scenarios can be frozen.");
         var hasActiveSqa = true;
+        // CheckUpgradeAuthorityAsync has already preflighted every actor used by pending Problem Report
+        // scenarios. Keep newly-created evidence after the latest real grant even when the mapped report
+        // itself was authored in the original deterministic 2024 timeline.
+        var deterministicProblemTimeline = new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero);
+        var effectiveProblemTimeline = await EffectiveProblemReportTimelineAtAsync(programId,
+            deterministicProblemTimeline, ct);
+        // The helper returns the deterministic baseline when all current grants already pre-date it. That
+        // baseline is for new draft records, not a reason to move an existing 2024 execution's evidence into
+        // December. Only retain a timeline override when a real late grant caused the helper to move it.
+        DateTimeOffset? evidenceTimelineAt = effectiveProblemTimeline == deterministicProblemTimeline
+            ? null : effectiveProblemTimeline;
+        DateTimeOffset? lastEvidenceAt = null;
+        DateTimeOffset EvidenceAt(TestExecution execution)
+        {
+            var at = execution.RecordedAt.AddMinutes(1);
+            if (evidenceTimelineAt is { } requiredAt && at < requiredAt) at = requiredAt;
+            if (lastEvidenceAt is { } previous && at <= previous) at = previous.AddMinutes(1);
+            lastEvidenceAt = at;
+            return at;
+        }
         var actorHandles = new[] { "test.engineer", "quality.analyst" };
         var actorNames = (await db.UserAccounts.AsNoTracking()
                 .Where(x => actorHandles.Contains(x.UserName)).ToListAsync(ct))
@@ -1548,6 +1595,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             var pair = failurePairs[index - 6];
             var failure = pair.Failure;
             var execution = pair.Retest!;
+            // Reuse one controlled timestamp for all rows created for this report. The next governed report
+            // receives a strictly later timestamp, preserving event ordering without putting the closure
+            // candidate after its own SQA approval.
+            var evidenceAt = EvidenceAt(execution);
 
             // Reopening a frozen historical closure deliberately clears its verification execution and
             // advances the report revision. The old Build 1.5 retest is no longer a valid successor for that
@@ -1582,9 +1633,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 var decision = await policy.ValidateAsync(report, execution, ct);
                 if (!decision.Accepted)
                     throw new InvalidOperationException($"The {marker} scenario failed closure verification policy: {decision.Code} {decision.Error}");
-                var verificationAt = execution.RecordedAt.AddMinutes(1);
-                report.RecordResolutionVerification("test.engineer", execution.Id, verificationAt);
-                AddScenarioRevision(report, "ResolutionVerified", "test.engineer", verificationAt, ActorName("test.engineer"),
+                report.RecordResolutionVerification("test.engineer", execution.Id, evidenceAt);
+                AddScenarioRevision(report, "ResolutionVerified", "test.engineer", evidenceAt, ActorName("test.engineer"),
                     ProblemReportState.Verifying, ProblemReportState.WaitingForSqaToClose,
                     detail: "Controlled verification evidence recorded for the deterministic showcase scenario.");
             }
@@ -1605,8 +1655,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             {
                 resolutionLink = ProblemReportRelationshipPolicy.CreateControlled(report.Id, "TestExecution", execution.Id,
                     ProblemReportRelationshipPolicy.ResolutionVerification,
-                    ProblemReportRelationshipProducer.ResolutionVerificationWorkflow, "test.engineer",
-                    execution.RecordedAt.AddMinutes(1));
+                    ProblemReportRelationshipProducer.ResolutionVerificationWorkflow, "test.engineer", evidenceAt);
                 db.ProblemReportLinks.Add(resolutionLink);
             }
             await db.SaveChangesAsync(ct);
@@ -1620,7 +1669,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 && x.ReportRevision == report.Revision && x.VerificationExecutionId == execution.Id);
             if (report.State == ProblemReportState.WaitingForSqaToClose && candidate is null)
                 candidate = await evidenceService.CreateAsync(report, execution, resolutionLink, "test.engineer",
-                    execution.RecordedAt.AddMinutes(1), ct);
+                    evidenceAt, ct);
             await db.SaveChangesAsync(ct);
 
             if (report.State == ProblemReportState.WaitingForSqaToClose)

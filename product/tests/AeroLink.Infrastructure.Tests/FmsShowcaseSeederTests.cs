@@ -290,6 +290,83 @@ public sealed class FmsShowcaseSeederTests
     }
 
     [Fact]
+    public async Task Mapped_incomplete_problem_report_evidence_preflights_test_engineer_and_preserves_late_grant_chronology()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-showcase-pr-authority-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            await new IdentitySeeder(db).EnsureSeededAsync();
+            var seeder = new FmsShowcaseSeeder(db);
+            var summary = await seeder.EnsureSeededAsync();
+
+            // Keep the durable scenario mapping and its controlled artifact, but invalidate the current
+            // closure candidate. This leaves a mapped Problem Report with incomplete controlled evidence
+            // while retaining the existing valid verification successor. It is the upgrade shape that used
+            // to bypass the actor preflight because the mapping itself was present.
+            var reportIdText = await db.ShowcaseUpgradeSteps.AsNoTracking()
+                .Where(x => x.ProgramId == summary.ProgramId && x.StepKey == "scenario-richness/problem-report/06")
+                .Select(x => x.Detail).SingleAsync();
+            var reportId = Guid.Parse(reportIdText);
+            var candidateBefore = await db.ProblemReportClosureCandidates.SingleAsync(x => x.ProblemReportId == reportId
+                && x.State == ProblemReportClosureCandidateState.Pending);
+            candidateBefore.Invalidate("test.engineer", "Force a retryable incomplete-evidence scenario for qualification.", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+            var scenarioStep = await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
+                && x.StepKey == "scenario-richness");
+
+            var testEngineer = await db.UserAccounts.SingleAsync(x => x.UserName == "test.engineer");
+            var testMembership = await db.ProgramMemberships.SingleAsync(x => x.UserId == testEngineer.Id
+                && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.TestEngineer && x.EndedAt == null);
+            var revisionCountBeforeRefusal = await db.ProblemReportRevisions.CountAsync(x => x.ProblemReportId == reportId);
+
+            testEngineer.Disable(DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+            var disabled = await seeder.CheckUpgradeAuthorityAsync(summary.ProgramId);
+            Assert.False(disabled.Ready);
+            Assert.Equal("showcase_actor_authority_unavailable", disabled.Code);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.UpgradeAsync(summary.ProgramId));
+            Assert.Equal(revisionCountBeforeRefusal,
+                await db.ProblemReportRevisions.CountAsync(x => x.ProblemReportId == reportId));
+            Assert.True(await db.ShowcaseUpgradeSteps.AnyAsync(x => x.Id == scenarioStep.Id));
+
+            testEngineer.Enable();
+            var endedAt = DateTimeOffset.UtcNow;
+            testMembership.End("operator", endedAt);
+            await db.SaveChangesAsync();
+            var ended = await seeder.CheckUpgradeAuthorityAsync(summary.ProgramId);
+            Assert.False(ended.Ready);
+            Assert.Equal("showcase_actor_authority_unavailable", ended.Code);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.UpgradeAsync(summary.ProgramId));
+            Assert.Equal(revisionCountBeforeRefusal,
+                await db.ProblemReportRevisions.CountAsync(x => x.ProblemReportId == reportId));
+
+            // An explicit operator grant makes the actor current again. The new evidence must follow that
+            // actual grant, even though the mapped test execution and Problem Report were authored in 2024.
+            var lateGrant = endedAt.AddMinutes(1);
+            db.ProgramMemberships.Add(new ProgramMembership(testEngineer.Id, summary.ProgramId,
+                ProgramRole.TestEngineer, "operator", lateGrant));
+            await db.SaveChangesAsync();
+            var ready = await seeder.CheckUpgradeAuthorityAsync(summary.ProgramId);
+            Assert.True(ready.Ready, ready.Detail);
+            await seeder.UpgradeAsync(summary.ProgramId);
+
+            var candidate = await db.ProblemReportClosureCandidates.AsNoTracking()
+                .Where(x => x.ProblemReportId == reportId).OrderByDescending(x => x.Sequence).FirstAsync();
+            Assert.Equal(ProblemReportClosureCandidateState.Pending, candidate.State);
+            Assert.True(candidate.SelectedAt >= lateGrant,
+                $"Closure candidate was selected at {candidate.SelectedAt:O} before the grant at {lateGrant:O}.");
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task Existing_collidable_low_numbers_are_not_mistaken_for_owned_showcase_scenarios()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-showcase-collision-{Guid.NewGuid():N}.db");
