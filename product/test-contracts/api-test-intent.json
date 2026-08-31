@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 719,
-    "cases": 802,
+    "tests": 721,
+    "cases": 804,
     "classes": 116,
-    "hostedTests": 690,
-    "hostedCases": 759,
+    "hostedTests": 692,
+    "hostedCases": 761,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 7,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 427,
-      "cases": 481,
+      "tests": 429,
+      "cases": 483,
       "unknownCases": 0,
       "classes": 95
     },
@@ -5535,8 +5535,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 871,
-        "end": 904
+        "start": 927,
+        "end": 960
       }
     },
     {
@@ -5552,8 +5552,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 910,
-        "end": 939
+        "start": 966,
+        "end": 995
       }
     },
     {
@@ -5605,8 +5605,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 689,
-        "end": 734
+        "start": 742,
+        "end": 787
       }
     },
     {
@@ -5764,8 +5764,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 945,
-        "end": 984
+        "start": 1001,
+        "end": 1040
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
+      "test": "Problem_report_creation_claims_recovery_images_and_expired_unclaimed_images_are_reclaimed",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 689,
+        "end": 740
       }
     },
     {

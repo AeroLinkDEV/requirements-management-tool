@@ -59,6 +59,7 @@ public static class ProblemReportEndpoints
         if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.TestEngineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
         if (request.ReleaseId is not null && !await db.Releases.AnyAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId, ct))
             return Results.BadRequest(new { error = "The selected build does not belong to this project." });
+        var actor = http.UserAccount();
         var referencedImages = new[] { request.ProblemRich, request.AdditionalInformationRich, request.AnalysisRich,
             request.RootCauseRich, request.WorkaroundRich, request.CorrectiveActionRich, request.SystemAircraftImpactRich,
             request.EffectsRich, request.ContainmentRich }
@@ -67,7 +68,9 @@ public static class ProblemReportEndpoints
         {
             var available = await db.ControlledAttachments.AsNoTracking()
                 .Where(image => referencedImages.Contains(image.Id) && image.ProjectId == request.ProjectId
-                    && image.ArtifactType == "InlineImage" && image.State != ControlledAttachmentState.Withdrawn)
+                    && (image.ArtifactType == "InlineImage"
+                        || (image.ArtifactType == "InlineImageDraft" && image.UploadedBy == actor.UserName))
+                    && image.State != ControlledAttachmentState.Withdrawn)
                 .Select(image => image.Id).ToListAsync(ct);
             if (referencedImages.Except(available).Any())
                 return Results.BadRequest(new { error = "Every inline image must belong to this Project and remain available." });
@@ -75,7 +78,7 @@ public static class ProblemReportEndpoints
         await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
         try
         {
-            var now = DateTimeOffset.UtcNow; var actor = http.UserAccount();
+            var now = DateTimeOffset.UtcNow;
             var item = new ProblemReport(request.ProjectId, await IdentifierAllocator.NextProblemReportAsync(db, ct), request.Title, request.Problem, request.Analysis ?? "", actor.UserName, now,
                 request.Classification ?? "Software anomaly", request.Severity ?? ProblemReportSeverity.Major, request.Priority ?? ProblemReportPriority.Normal, request.Origin ?? "Manual report", request.AffectedConfiguration ?? "",
                 request.ReleaseId, actor.UserName, request.ProblemRich ?? "", request.AdditionalInformation ?? "", request.AdditionalInformationRich ?? "", request.SystemAircraftImpact ?? "", request.ImpactAssessmentJson ?? "{}",
@@ -87,6 +90,19 @@ public static class ProblemReportEndpoints
                 request.CorrectiveActionRich, request.SystemAircraftImpactRich,
                 request.Effects, request.EffectsRich, request.Containment, request.ContainmentRich),
                 request.RootCause, request.CorrectiveAction, request.Workaround, now);
+            if (referencedImages.Length > 0)
+            {
+                var commitImages = await db.ControlledAttachments
+                    .Where(image => referencedImages.Contains(image.Id) && image.ProjectId == request.ProjectId
+                        && (image.ArtifactType == "InlineImage" || image.ArtifactType == "InlineImageDraft")
+                        && image.State != ControlledAttachmentState.Withdrawn)
+                    .ToListAsync(ct);
+                if (referencedImages.Except(commitImages.Select(image => image.Id)).Any()
+                    || commitImages.Any(image => image.ArtifactType == "InlineImageDraft" && image.UploadedBy != actor.UserName))
+                    return Results.BadRequest(new { error = "Every inline image must belong to this Project and remain available." });
+                foreach (var image in commitImages.Where(image => image.ArtifactType == "InlineImageDraft"))
+                    image.ClaimInlineImage(item.Id, null);
+            }
             db.ProblemReports.Add(item);
             if (request.ReleaseId is not null)
                 db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(item.Id, "Release", request.ReleaseId.Value,

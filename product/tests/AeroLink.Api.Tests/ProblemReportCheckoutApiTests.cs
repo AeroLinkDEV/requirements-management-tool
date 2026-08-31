@@ -687,6 +687,59 @@ public sealed class ProblemReportCheckoutApiTests
     }
 
     [Fact]
+    public async Task Problem_report_creation_claims_recovery_images_and_expired_unclaimed_images_are_reclaimed()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var seeded = await SeedAsync(factory, "PRIMGRECOVERY");
+
+        using var upload = await client.PostAsync("/api/content/images",
+            ImageUpload(seeded.ProjectId, "recovery.png", problemReportRecovery: true));
+        Assert.Equal(HttpStatusCode.Created, upload.StatusCode);
+        var recoveryId = (await upload.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var preview = await client.GetAsync($"/api/content/images/{recoveryId}");
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+
+        using var created = await CreateWithImageAsync(client, seeded.ProjectId, seeded.ReleaseId, recoveryId,
+            "Claimed recovery image");
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var reportId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        Guid expiredId;
+        string expiredStorageKey;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var store = scope.ServiceProvider.GetRequiredService<EvidenceFileStore>();
+            var claimed = await db.ControlledAttachments.SingleAsync(x => x.Id == recoveryId);
+            Assert.Equal("InlineImage", claimed.ArtifactType);
+            Assert.Equal(reportId, claimed.ArtifactId);
+
+            var stored = await store.StoreAsync(new MemoryStream(Png()), "expired.png", "image/png", CancellationToken.None);
+            var expired = new ControlledAttachment(seeded.ProjectId, "InlineImageDraft", seeded.ProjectId, null,
+                Guid.NewGuid(), 1, "Expired browser recovery image", "", stored.OriginalFileName, stored.ContentType,
+                stored.Size, stored.Sha256, stored.StorageKey, null, "admin", DateTimeOffset.UtcNow.AddDays(-31));
+            db.ControlledAttachments.Add(expired);
+            await db.SaveChangesAsync();
+            expiredId = expired.Id;
+            expiredStorageKey = stored.StorageKey;
+            Assert.True(store.Exists(expiredStorageKey));
+        }
+
+        using var replacement = await client.PostAsync("/api/content/images",
+            ImageUpload(seeded.ProjectId, "current-recovery.png", problemReportRecovery: true));
+        Assert.Equal(HttpStatusCode.Created, replacement.StatusCode);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var store = scope.ServiceProvider.GetRequiredService<EvidenceFileStore>();
+            Assert.False(await db.ControlledAttachments.AnyAsync(x => x.Id == expiredId));
+            Assert.False(store.Exists(expiredStorageKey));
+        }
+    }
+
+    [Fact]
     public async Task Concurrent_inline_image_uploads_cannot_overrun_the_cumulative_project_budget()
     {
         using var factory = new AeroLinkApiFactory();
@@ -741,12 +794,15 @@ public sealed class ProblemReportCheckoutApiTests
         return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
     }
 
-    private static MultipartFormDataContent ImageUpload(Guid projectId, string fileName, Guid? editSessionId = null)
+    private static MultipartFormDataContent ImageUpload(Guid projectId, string fileName, Guid? editSessionId = null,
+        bool problemReportRecovery = false)
     {
         var content = new MultipartFormDataContent();
         content.Add(new StringContent(projectId.ToString()), "projectId");
         if (editSessionId is Guid sessionId)
             content.Add(new StringContent(sessionId.ToString()), "editSessionId");
+        if (problemReportRecovery)
+            content.Add(new StringContent("ProblemReport"), "authoringContext");
         content.Add(new StringContent("A controlled test figure"), "alt");
         var image = new ByteArrayContent(Png());
         image.Headers.ContentType = new("image/png");

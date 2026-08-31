@@ -177,6 +177,7 @@ export function RichContentEditor({ api, projectId, editSessionId, value, label,
         const body = new FormData();
         body.set("projectId", projectId);
         if (editSessionId) body.set("editSessionId", editSessionId);
+        else if (documentLike) body.set("authoringContext", "ProblemReport");
         body.set("file", file);
         body.set("alt", file.name);
         try {

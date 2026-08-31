@@ -46,6 +46,19 @@ public sealed class ControlledAttachment
     public string? ValidationResult { get; private set; }
     public void Supersede() { if (State == ControlledAttachmentState.Active) State = ControlledAttachmentState.Superseded; }
     public void Withdraw() { if (State != ControlledAttachmentState.Withdrawn) State = ControlledAttachmentState.Withdrawn; }
+    /// <summary>
+    /// Claims a browser-recovery image into the controlled Problem Report that now references it. A staged
+    /// image is deliberately not historical evidence: until this transition it may expire and be reclaimed.
+    /// Once claimed, its immutable file identity, uploader, timestamp, size and digest stay unchanged.
+    /// </summary>
+    public void ClaimInlineImage(Guid artifactId, Guid? revisionId)
+    {
+        if (State != ControlledAttachmentState.Active || ArtifactType != "InlineImageDraft" || ArtifactId != ProjectId)
+            throw new DomainException("Only an active unclaimed inline image can be claimed.");
+        if (artifactId == Guid.Empty || artifactId == ProjectId)
+            throw new DomainException("A controlled artifact identifier is required to claim an inline image.");
+        ArtifactType = "InlineImage"; ArtifactId = artifactId; RevisionId = revisionId;
+    }
     public void RecordIntegrityVerification(DateTimeOffset now) => IntegrityVerifiedAt = now;
     private static string Required(string value) => string.IsNullOrWhiteSpace(value) ? throw new DomainException("A required attachment value is missing.") : value.Trim();
 }
