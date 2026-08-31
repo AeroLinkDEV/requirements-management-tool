@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 721,
-    "cases": 804,
+    "tests": 722,
+    "cases": 805,
     "classes": 116,
-    "hostedTests": 692,
-    "hostedCases": 761,
+    "hostedTests": 693,
+    "hostedCases": 762,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 7,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 429,
-      "cases": 483,
+      "tests": 430,
+      "cases": 484,
       "unknownCases": 0,
       "classes": 95
     },
@@ -5535,8 +5535,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 927,
-        "end": 960
+        "start": 953,
+        "end": 986
       }
     },
     {
@@ -5552,8 +5552,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 966,
-        "end": 995
+        "start": 992,
+        "end": 1021
       }
     },
     {
@@ -5605,8 +5605,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 742,
-        "end": 787
+        "start": 768,
+        "end": 813
       }
     },
     {
@@ -5735,6 +5735,23 @@
     },
     {
       "cls": "ProblemReportCheckoutApiTests",
+      "test": "Inline_image_upload_rejects_a_truncated_jpeg_after_the_signature_probe",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 748,
+        "end": 766
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
       "test": "Inline_image_upload_requires_authoring_authority_or_the_actors_live_checkout",
       "kind": "Fact",
       "intent": "auth-policy",
@@ -5764,8 +5781,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1001,
-        "end": 1040
+        "start": 1027,
+        "end": 1066
       }
     },
     {
@@ -5783,7 +5800,7 @@
       ],
       "sourceLines": {
         "start": 689,
-        "end": 740
+        "end": 746
       }
     },
     {
