@@ -74,6 +74,22 @@ public sealed class TeamWorkProjectionApiTests
         Assert.All(items, item => Assert.True(item.TryGetProperty("openUrl", out _)));
         Assert.DoesNotContain("ownerId", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
 
+        // #868 exposes server-owned contextual facets. The returned item classification is the same
+        // authoritative identity used to build those facets; a client must not guess family combinations.
+        var layers = root.GetProperty("layers").EnumerateArray().ToList();
+        Assert.Contains(layers, layer => layer.GetProperty("id").GetString() == "System");
+        Assert.Contains(layers, layer => layer.GetProperty("id").GetString() == "HighLevel");
+        Assert.Contains(layers, layer => layer.GetProperty("id").GetString() == "LowLevel");
+        Assert.Contains(root.GetProperty("artifactTypes").EnumerateArray(),
+            facet => facet.GetProperty("id").GetString() == "SRCR");
+        Assert.Contains(root.GetProperty("artifactTypes").EnumerateArray(),
+            facet => facet.GetProperty("id").GetString() == "HLRTCCR");
+        Assert.All(items, item =>
+        {
+            Assert.True(item.TryGetProperty("artifactType", out var artifactType));
+            Assert.False(string.IsNullOrWhiteSpace(artifactType.GetString()));
+        });
+
         AssertItem(byId, fixture.CrDraft, "work", [fixture.Author], "author", "Draft");
         AssertItem(byId, fixture.CrReview, "review", [fixture.Reviewer], "activeReviewStage", "InReview");
         AssertStageKinds(byId[fixture.CrReview], [(fixture.Reviewer, "review")]);

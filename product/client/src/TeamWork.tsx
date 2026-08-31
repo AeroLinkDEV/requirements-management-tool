@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import type { AuthUser } from "./IdentityCenter";
+import { PersonAvatar } from "./People";
 import { stateLabel } from "./presentation";
 import "./TeamWork.css";
 
@@ -35,6 +36,8 @@ type TeamWorkStageObligation = { holderId: string; stageKind: "review" | "approv
 type TeamWorkItem = {
   id: string;
   family: TeamWorkFamily;
+  layer?: string | null;
+  artifactType?: string | null;
   category?: string | null;
   prefix?: string | null;
   number?: string | null;
@@ -59,7 +62,11 @@ type TeamWorkResponse = {
   totals: { items: number; returned: number; unheld: number };
   people: TeamWorkPerson[];
   items: TeamWorkItem[];
+  layers?: TeamWorkLayerFacet[];
+  artifactTypes?: TeamWorkArtifactTypeFacet[];
 };
+type TeamWorkArtifactTypeFacet = { id: string; label: string; count: number };
+type TeamWorkLayerFacet = { id: string; label: string; count: number; artifactTypes: TeamWorkArtifactTypeFacet[] };
 type LaneId = "work" | "review" | "sign" | "approved";
 type TeamWorkFamily =
   | "system" | "software" | "interface" | "verification" | "problemReport" | "assessment";
@@ -131,6 +138,13 @@ const isNonBlankString = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 const isOptionalString = (value: unknown): value is string | null | undefined =>
   value === null || value === undefined || isNonBlankString(value);
+const isValidFacet = (value: unknown): value is TeamWorkArtifactTypeFacet =>
+  isRecord(value) && isNonBlankString(value.id) && isNonBlankString(value.label)
+  && isNonNegativeInteger(value.count);
+const isValidLayerFacet = (value: unknown): value is TeamWorkLayerFacet =>
+  isRecord(value) && isNonBlankString(value.id) && isNonBlankString(value.label)
+  && isNonNegativeInteger(value.count) && Array.isArray(value.artifactTypes)
+  && value.artifactTypes.every(isValidFacet);
 const isNonNegativeInteger = (value: unknown): value is number =>
   Number.isInteger(value) && (value as number) >= 0;
 const isGuid = (value: unknown): value is string =>
@@ -182,6 +196,7 @@ function isValidItem(value: unknown, people: Map<string, TeamWorkPerson>): value
   if (!isRecord(value)) return false;
   const { family, lane, holderBasis, currentHolderIds, activeStageObligations, updatedAt } = value;
   if (!isGuid(value.id) || typeof value.title !== "string" || !isNonBlankString(value.nativeState)
+    || !isOptionalString(value.layer) || !isOptionalString(value.artifactType)
     || !isOptionalString(value.category) || !isOptionalString(value.prefix) || !isOptionalString(value.number)
     || !isOptionalString(value.nativeOutcome) || typeof value.deferred !== "boolean"
     || !isOptionalString(value.deferredFromState) || !isNonBlankString(updatedAt)
@@ -273,6 +288,12 @@ function validateProjection(value: unknown): TeamWorkResponse {
       peopleByIdentity.set(idKey, person);
     }
   }
+  if (value.layers !== undefined && (!Array.isArray(value.layers) || value.layers.some(layer => !isValidLayerFacet(layer)))) {
+    throw new Error("The Team Work response contains an invalid layer facet.");
+  }
+  if (value.artifactTypes !== undefined && (!Array.isArray(value.artifactTypes) || value.artifactTypes.some(facet => !isValidFacet(facet)))) {
+    throw new Error("The Team Work response contains an invalid artifact type facet.");
+  }
   if (value.items.some(item => !isValidItem(item, peopleByIdentity))) {
     throw new Error("The Team Work response contains an unknown family, lane, holder basis, or invalid identity, lifecycle, holder obligation, release, or canonical open link.");
   }
@@ -302,6 +323,8 @@ function validateProjection(value: unknown): TeamWorkResponse {
     totals: { items: value.totals.items, returned: value.totals.returned, unheld: value.totals.unheld },
     people: value.people as TeamWorkPerson[],
     items,
+    layers: value.layers as TeamWorkLayerFacet[] | undefined,
+    artifactTypes: value.artifactTypes as TeamWorkArtifactTypeFacet[] | undefined,
   };
 }
 
@@ -371,15 +394,35 @@ function writeAffinity(viewerId: string, projectId: string, person: TeamWorkPers
   try { localStorage.setItem(affinityStorageKey, JSON.stringify(bounded)); } catch { /* optional local preference */ }
 }
 
-function initials(person: Pick<TeamWorkPerson, "displayName" | "userName">) {
-  const parts = (person.displayName.trim() || person.userName).split(/\s+/).filter(Boolean);
-  return (parts.length > 1 ? `${parts[0][0]}${parts.at(-1)![0]}` : parts[0].slice(0, 2)).toUpperCase();
-}
 function personMatches(person: TeamWorkPerson, key: string) {
   return person.userName.toLowerCase() === key.toLowerCase() || !!person.userId && person.userId.toLowerCase() === key.toLowerCase();
 }
 function displayNameFor(id: string, people: Map<string, TeamWorkPerson>) {
   return people.get(id.toLowerCase())?.displayName ?? id;
+}
+function layerFor(item: TeamWorkItem): string | null {
+  if (item.layer) return item.layer;
+  if (item.family === "system") return "System";
+  if (item.family === "interface") return "Interface";
+  if (item.family === "software") return item.category === "LLR" ? "LowLevel" : "HighLevel";
+  if (item.family === "verification") {
+    return item.category === "system" ? "System" : item.category === "LLR" ? "LowLevel" : "HighLevel";
+  }
+  if (item.family === "assessment") {
+    if (item.category === "Assessment") return "System";
+    if (item.category === "LLR assessment") return "LowLevel";
+    if (item.category === "HLR assessment") return "HighLevel";
+  }
+  return null;
+}
+function artifactTypeFor(item: TeamWorkItem): string {
+  if (item.artifactType) return item.artifactType;
+  if (item.family === "problemReport") return "ProblemReport";
+  if (item.family === "assessment") return "Assessment";
+  return item.prefix || item.family;
+}
+function layerLabel(id: string) {
+  return id === "HighLevel" ? "HLR" : id === "LowLevel" ? "LLR" : id;
 }
 function urlWithoutHolder(url = new URL(window.location.href)) {
   url.searchParams.delete("holder");
@@ -455,12 +498,13 @@ function TeamWorkCard({ item, people }: { item: TeamWorkItem; people: Map<string
   );
 }
 
-function PersonStrip({ people, selected, search, viewer, onSelect }: {
+function PersonStrip({ people, selected, search, viewer, onSelect, onDetails }: {
   people: TeamWorkPerson[];
   selected: string | null;
   search: string;
   viewer: AuthUser;
   onSelect: (person: TeamWorkPerson, trigger: HTMLElement) => void;
+  onDetails?: (person: TeamWorkPerson, trigger: HTMLElement) => void;
 }) {
   const strip = useRef<HTMLDivElement>(null);
   const visible = people.filter(person =>
@@ -501,7 +545,7 @@ function PersonStrip({ people, selected, search, viewer, onSelect }: {
                 aria-pressed={selected === person.userName.toLowerCase()}
                 onClick={event => onSelect(person, event.currentTarget)}
               >
-                <span className="teamWorkPersonAvatar" aria-hidden="true">{initials(person)}</span>
+                <PersonAvatar userName={person.userName} displayName={person.displayName} size="medium" />
                 <span className="teamWorkPersonInfo">
                   <strong>{person.displayName}{isViewer ? " (you)" : ""}</strong>
                   <small>{roleLabel}</small>
@@ -517,6 +561,19 @@ function PersonStrip({ people, selected, search, viewer, onSelect }: {
                   <i style={{ height: `${Math.min(100, person.byLane.approved * 18)}%` }} />
                 </span>
               </button>
+              {onDetails && (
+                <button
+                  type="button"
+                  className="teamWorkPersonDetails"
+                  aria-label={`View details for ${person.displayName}`}
+                  onClick={event => {
+                    event.stopPropagation();
+                    onDetails(person, event.currentTarget);
+                  }}
+                >
+                  Details
+                </button>
+              )}
             </div>
           );
         })}
@@ -590,7 +647,7 @@ function TeamWorkDrawer({ person, items, people, onClose }: {
         <header>
           <div>
             <span className="teamWorkEyebrow">CURRENT HOLDER</span>
-            <h2 id="team-work-drawer-title">{person.displayName}</h2>
+            <h2 id="team-work-drawer-title"><PersonAvatar userName={person.userName} displayName={person.displayName} size="small" />{person.displayName}</h2>
           </div>
           <button type="button" aria-label="Close current holder" ref={close} onClick={onClose}>×</button>
         </header>
@@ -645,11 +702,12 @@ function TeamWorkDrawer({ person, items, people, onClose }: {
   );
 }
 
-function TeamWorkBoard({ items, group, people, onHolder }: {
+function TeamWorkBoard({ items, group, people, onHolder, onDetails }: {
   items: TeamWorkItem[];
   group: "lifecycle" | "holder";
   people: Map<string, TeamWorkPerson>;
   onHolder: (person: TeamWorkPerson, trigger?: HTMLElement) => void;
+  onDetails?: (person: TeamWorkPerson, trigger?: HTMLElement) => void;
 }) {
   if (group === "lifecycle") {
     return (
@@ -712,13 +770,27 @@ function TeamWorkBoard({ items, group, people, onHolder }: {
               <div>
                 {person
                   ? (
-                    <button
-                      type="button"
-                      className="teamWorkHolderHeading"
-                      onClick={event => onHolder(person, event.currentTarget)}
-                    >
-                      {person.displayName}
-                    </button>
+                    <div className="teamWorkHolderPerson">
+                      <button
+                        type="button"
+                        className="teamWorkHolderHeading"
+                        aria-pressed="false"
+                        onClick={event => onHolder(person, event.currentTarget)}
+                      >
+                        <PersonAvatar userName={person.userName} displayName={person.displayName} size="small" />
+                        <span>{person.displayName}</span>
+                      </button>
+                      {onDetails && (
+                        <button
+                          type="button"
+                          className="teamWorkPersonDetails"
+                          aria-label={`View details for ${person.displayName}`}
+                          onClick={event => onDetails(person, event.currentTarget)}
+                        >
+                          Details
+                        </button>
+                      )}
+                    </div>
                   )
                   : <h2>No current holder</h2>}
               </div>
@@ -746,7 +818,8 @@ export default function TeamWork({ api, projectId, user }: {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [build, setBuild] = useState("all");
-  const [family, setFamily] = useState<TeamWorkFamily | "all">("all");
+  const [layer, setLayer] = useState<string>("all");
+  const [artifactType, setArtifactType] = useState<string>("all");
   const [group, setGroup] = useState<"lifecycle" | "holder">("lifecycle");
   const [selectedPerson, setSelectedPerson] = useState<string | null>(null);
   const [drawerHolder, setDrawerHolder] = useState<TeamWorkPerson | null>(null);
@@ -853,17 +926,44 @@ export default function TeamWork({ api, projectId, user }: {
       ${item.release?.version ?? ""} ${holderFacts}`;
     return !query || searchableFacts.toLowerCase().includes(query);
   }, [peopleByIdentity, search]);
-  const filterItems = useCallback((includeFamily: boolean) => (response?.items ?? []).filter(item => {
+  const filterItems = useCallback((includeArtifactType: boolean, includeLayer = true) => (response?.items ?? []).filter(item => {
     const matchesBuild = build === "all"
       || build === "deferred" && item.deferred
       || build !== "deferred" && item.release?.id === build;
     const matchesPerson = !selectedPerson
       || item.currentHolderIds.some(id => id.toLowerCase() === selectedPerson);
-    const matchesFamily = !includeFamily || family === "all" || item.family === family;
-    return searchMatch(item) && matchesBuild && matchesPerson && matchesFamily;
-  }), [build, family, response, searchMatch, selectedPerson]);
+    const matchesLayer = !includeLayer || layer === "all" || layerFor(item)?.toLowerCase() === layer.toLowerCase();
+    const matchesArtifactType = !includeArtifactType || artifactType === "all"
+      || artifactTypeFor(item).toLowerCase() === artifactType.toLowerCase();
+    return searchMatch(item) && matchesBuild && matchesPerson && matchesLayer && matchesArtifactType;
+  }), [artifactType, build, layer, response, searchMatch, selectedPerson]);
   const facetItems = useMemo(() => filterItems(false), [filterItems]);
+  const layerFacetItems = useMemo(() => filterItems(false, false), [filterItems]);
   const filteredItems = useMemo(() => filterItems(true), [filterItems]);
+  const layerOptions = useMemo<TeamWorkLayerFacet[]>(() => {
+    if (response?.layers?.length) return response.layers;
+    const observed = new Map<string, number>();
+    for (const item of response?.items ?? []) {
+      const itemLayer = layerFor(item);
+      if (itemLayer) observed.set(itemLayer, (observed.get(itemLayer) ?? 0) + 1);
+    }
+    return [...observed.entries()].map(([id, count]) => ({
+      id, label: layerLabel(id), count,
+      artifactTypes: [],
+    }));
+  }, [response]);
+  const artifactTypeOptions = useMemo<TeamWorkArtifactTypeFacet[]>(() => {
+    const scoped = layer === "all"
+      ? response?.artifactTypes
+      : layerOptions.find(option => option.id.toLowerCase() === layer.toLowerCase())?.artifactTypes;
+    if (scoped !== undefined) return scoped;
+    const observed = new Map<string, number>();
+    for (const item of facetItems) {
+      const id = artifactTypeFor(item);
+      observed.set(id, (observed.get(id) ?? 0) + 1);
+    }
+    return [...observed.entries()].map(([id, count]) => ({ id, label: id === "ProblemReport" ? "Problem Report" : id, count }));
+  }, [facetItems, layer, layerOptions, response]);
 
   const closeDrawer = useCallback(() => {
     if (!drawerHolder) return;
@@ -876,22 +976,35 @@ export default function TeamWork({ api, projectId, user }: {
   }, [drawerHolder]);
   const selectPerson = useCallback((person: TeamWorkPerson, trigger?: HTMLElement, recordAffinity = true) => {
     setSelectedPerson(person.userName.toLowerCase());
-    setDrawerHolder(person);
     lastTrigger.current = trigger ?? null;
     if (recordAffinity) {
       writeAffinity(user.id, projectId, person);
       setAffinityStore(readAffinityStore());
     }
     const url = new URL(window.location.href);
+    if (url.searchParams.get("person")?.toLowerCase() !== person.userName.toLowerCase()) {
+      url.searchParams.set("person", person.userName);
+      history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  }, [projectId, user.id]);
+  const showDetails = useCallback((person: TeamWorkPerson, trigger?: HTMLElement) => {
+    setDrawerHolder(person);
+    lastTrigger.current = trigger ?? null;
+    const url = new URL(window.location.href);
     if (url.searchParams.get("holder")?.toLowerCase() !== person.userName.toLowerCase()) {
       url.searchParams.set("holder", person.userName);
       history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
     }
-  }, [projectId, user.id]);
+  }, []);
 
   useEffect(() => {
     if (!response) return;
     const syncUrl = () => {
+      const personQuery = new URL(window.location.href).searchParams.get("person");
+      const selected = personQuery
+        ? people.find(candidate => candidate.userName.toLowerCase() === personQuery.toLowerCase())
+        : undefined;
+      setSelectedPerson(selected?.userName.toLowerCase() ?? null);
       const holder = new URL(window.location.href).searchParams.get("holder");
       if (!holder) {
         setDrawerHolder(null);
@@ -905,10 +1018,8 @@ export default function TeamWork({ api, projectId, user }: {
           history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
         }
         setDrawerHolder(null);
-        setSelectedPerson(null);
         return;
       }
-      setSelectedPerson(person.userName.toLowerCase());
       setDrawerHolder(person);
     };
     syncUrl();
@@ -930,9 +1041,13 @@ export default function TeamWork({ api, projectId, user }: {
   const clearFilters = () => {
     setSearch("");
     setBuild("all");
-    setFamily("all");
+    setLayer("all");
+    setArtifactType("all");
     setSelectedPerson(null);
     if (drawerHolder) closeDrawer();
+    const url = new URL(window.location.href);
+    url.searchParams.delete("person");
+    history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
   };
   if (loading) {
     return (
@@ -979,7 +1094,7 @@ export default function TeamWork({ api, projectId, user }: {
     : build === "all"
       ? ""
       : `Build ${buildOptions.find(option => option.id === build)?.version ?? build}`;
-  const filterDescription = `${family !== "all" ? familyBadgeLabels[family] : "Controlled work"}${selectedBuild ? ` on ${selectedBuild}` : ""}`;
+  const filterDescription = `${layer !== "all" ? layerLabel(layer) : artifactType !== "all" ? artifactTypeOptions.find(option => option.id === artifactType)?.label ?? artifactType : "Controlled work"}${selectedBuild ? ` on ${selectedBuild}` : ""}`;
 
   return (
     <main className="teamWorkPage" aria-label="Team Work">
@@ -1001,6 +1116,7 @@ export default function TeamWork({ api, projectId, user }: {
         search={search}
         viewer={user}
         onSelect={selectPerson}
+        onDetails={showDetails}
       />
       {projectEmpty ? (
         <section className="teamWorkMessage">
@@ -1009,6 +1125,14 @@ export default function TeamWork({ api, projectId, user }: {
       ) : (
         <>
           <section className="teamWorkFilters" aria-label="Team Work filters">
+            {selected && (
+              <div className="teamWorkSelectedFilter" role="status">
+                <span>Showing work held by <strong>{selected.displayName}</strong></span>
+                <button type="button" onClick={() => { setSelectedPerson(null); const url = new URL(window.location.href); url.searchParams.delete("person"); history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`); }}>
+                  Clear person
+                </button>
+              </div>
+            )}
             <label className="teamWorkSearch">
               <span>Search</span>
               <input
@@ -1041,14 +1165,25 @@ export default function TeamWork({ api, projectId, user }: {
                   </button>
                 )}
               </div>
-              <div className="teamWorkFilterGroup" role="group" aria-label="Record type">
-                <span>Type</span>
-                <button type="button" className={family === "all" ? "active" : ""} onClick={() => setFamily("all")}>
+              <div className="teamWorkFilterGroup" role="group" aria-label="Layer">
+                <span>Layer</span>
+                <button type="button" className={layer === "all" ? "active" : ""} onClick={() => { setLayer("all"); setArtifactType("all"); }}>
+                  All ({layerFacetItems.length})
+                </button>
+                {layerOptions.map(option => (
+                  <button type="button" key={option.id} className={layer === option.id ? "active" : ""} onClick={() => { setLayer(option.id); setArtifactType("all"); }}>
+                    {option.label} ({layerFacetItems.filter(item => layerFor(item)?.toLowerCase() === option.id.toLowerCase()).length})
+                  </button>
+                ))}
+              </div>
+              <div className="teamWorkFilterGroup" role="group" aria-label="Artifact Type">
+                <span>Artifact Type</span>
+                <button type="button" className={artifactType === "all" ? "active" : ""} onClick={() => setArtifactType("all")}>
                   All ({facetItems.length})
                 </button>
-                {[...familyIds].map(id => (
-                  <button type="button" key={id} className={family === id ? "active" : ""} onClick={() => setFamily(id)}>
-                    {familyBadgeLabels[id]} ({facetItems.filter(item => item.family === id).length})
+                {artifactTypeOptions.map(option => (
+                  <button type="button" key={option.id} className={artifactType === option.id ? "active" : ""} onClick={() => setArtifactType(option.id)}>
+                    {option.label} ({facetItems.filter(item => artifactTypeFor(item).toLowerCase() === option.id.toLowerCase()).length})
                   </button>
                 ))}
               </div>
@@ -1061,12 +1196,12 @@ export default function TeamWork({ api, projectId, user }: {
           ) : noFilteredItems ? (
             <section className="teamWorkMessage teamWorkFilteredEmpty">
               <strong>
-                {family !== "all" || selectedBuild
+                {layer !== "all" || artifactType !== "all" || selectedBuild
                   ? <>No {filterDescription} — <button type="button" onClick={clearFilters}>Clear filters</button></>
                   : <>No controlled work matches these filters — <button type="button" onClick={clearFilters}>Clear filters</button></>}
               </strong>
               <p>
-                Search, person, build, and record-type filters compose against the authorized project result.
+                Search, person, build, layer, and artifact-type filters compose against the authorized project result.
               </p>
             </section>
           ) : (
@@ -1075,6 +1210,7 @@ export default function TeamWork({ api, projectId, user }: {
               group={group}
               people={peopleByIdentity}
               onHolder={(person, trigger) => selectPerson(person, trigger, false)}
+              onDetails={showDetails}
             />
           )}
         </>

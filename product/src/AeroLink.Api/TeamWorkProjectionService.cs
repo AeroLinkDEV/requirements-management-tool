@@ -2,6 +2,7 @@ using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.TeamWork;
@@ -16,7 +17,7 @@ namespace AeroLink.Api;
 /// aggregate family before applying the domain policy. It keeps lifecycle truth in Domain while allowing the
 /// API to characterize query count, materialization, and payload size against a real provider later.
 /// </summary>
-public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
+public sealed class TeamWorkProjectionService(AeroLinkDbContext db, IProjectLadderPolicyResolver? ladderResolver = null)
 {
     public async Task<TeamWorkProjectionResponse?> ProjectAsync(Guid projectId, CancellationToken ct)
     {
@@ -25,6 +26,14 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
             .Select(project => (Guid?)project.ProgramId)
             .SingleOrDefaultAsync(ct);
         if (programId is null) return null;
+
+        // Team Work consumes the same effective ladder policy as the rest of the product. Older isolated
+        // fixtures may predate persisted ladder rows, so leave the policy absent in that compatibility case;
+        // observed controlled records still provide an honest fallback facet rather than inventing levels.
+        ILadderPolicy? effectiveLadder = null;
+        if (ladderResolver is not null
+            && await db.ProjectLadderConfigurations.AsNoTracking().AnyAsync(x => x.ProjectId == projectId, ct))
+            effectiveLadder = await ladderResolver.ResolveAsync(projectId, ct);
 
         // These are intentionally project-wide. A selected build in the browser must not silently narrow the
         // management view to one release, because an item can target a predecessor or successor release.
@@ -149,6 +158,8 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
             items.Add(new TeamWorkItemDraft(
                 change.Id,
                 WireFamily(change.Type),
+                ChangeRequestLayer(change),
+                ArtifactTypeForNumber(change.BaseNumber) ?? WireFamily(change.Type).ToUpperInvariant(),
                 ChangeRequestCategory(change),
                 Prefix(change.BaseNumber),
                 change.DisplayNumber,
@@ -206,6 +217,8 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
             items.Add(new TeamWorkItemDraft(
                 review.Id,
                 "verification",
+                VerificationLayer(review.Discipline),
+                ArtifactTypeForNumber(review.BaseNumber) ?? "Verification",
                 TestChangeReviewCategory(review),
                 Prefix(review.BaseNumber),
                 string.IsNullOrWhiteSpace(review.BaseNumber) ? null : review.DisplayNumber,
@@ -234,6 +247,8 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
             items.Add(new TeamWorkItemDraft(
                 report.Id,
                 "problemReport",
+                null,
+                ArtifactTypeForNumber(report.ReportNumber) ?? "ProblemReport",
                 report.Category?.ToString(),
                 Prefix(report.ReportNumber),
                 report.DisplayNumber,
@@ -263,6 +278,8 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
             items.Add(new TeamWorkItemDraft(
                 assessment.Id,
                 "assessment",
+                AssessmentLayer(assessment.TargetLevel),
+                "Assessment",
                 AssessmentCategory(assessment.TargetLevel),
                 null,
                 null,
@@ -289,6 +306,8 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
             .ThenBy(item => item.Id)
             .Select(ToResponseItem)
             .ToList();
+
+        var facets = BuildFacets(orderedItems, effectiveLadder);
 
         var holderIds = orderedItems.SelectMany(item => item.CurrentHolderIds)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -348,7 +367,9 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
                 .OrderBy(person => person.UserName, StringComparer.OrdinalIgnoreCase)
                 .Select(person => person.ToResponse())
                 .ToList(),
-            responseItems);
+            responseItems,
+            facets.Layers,
+            facets.ArtifactTypes);
     }
 
     private static IReadOnlyList<ApprovalStep> StepsFor(ReviewCycle? cycle,
@@ -381,6 +402,8 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
     private static TeamWorkItemResponse ToResponseItem(TeamWorkItemDraft item) => new(
         item.Id,
         item.Family,
+        item.Layer,
+        item.ArtifactType,
         item.Category,
         item.Prefix,
         item.Number,
@@ -449,6 +472,98 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
 
     private static string? CanonicalUserName(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
+
+    private static string? ChangeRequestLayer(SystemChangeRequest change) => change.Type switch
+    {
+        ChangeRequestType.System => RequirementLevel.System.ToString(),
+        ChangeRequestType.Interface => RequirementLevel.Interface.ToString(),
+        ChangeRequestType.Software when change.SoftwareLevel is RequirementLevel.HighLevel
+            or RequirementLevel.LowLevel => change.SoftwareLevel.Value.ToString(),
+        _ => null,
+    };
+
+    private static string? VerificationLayer(TestChangeReviewDiscipline discipline) => discipline switch
+    {
+        TestChangeReviewDiscipline.System => RequirementLevel.System.ToString(),
+        TestChangeReviewDiscipline.HighLevelSoftware => RequirementLevel.HighLevel.ToString(),
+        TestChangeReviewDiscipline.LowLevelSoftware => RequirementLevel.LowLevel.ToString(),
+        _ => null,
+    };
+
+    private static string? AssessmentLayer(RequirementLevel level) => level switch
+    {
+        RequirementLevel.System or RequirementLevel.HighLevel or RequirementLevel.LowLevel or RequirementLevel.Interface
+            => level.ToString(),
+        _ => null,
+    };
+
+    private static string? ArtifactTypeForNumber(string? number)
+    {
+        if (string.IsNullOrWhiteSpace(number)) return null;
+        var separator = number.IndexOf('-');
+        var value = separator > 0
+            ? number[..separator]
+            : new string(number.TakeWhile(char.IsLetter).ToArray());
+        return string.IsNullOrWhiteSpace(value) ? null : value.ToUpperInvariant();
+    }
+
+    private static TeamWorkFacetProjection BuildFacets(
+        IReadOnlyList<TeamWorkItemResponse> items, ILadderPolicy? effectiveLadder)
+    {
+        var allTypes = items
+            .Where(item => !string.IsNullOrWhiteSpace(item.ArtifactType))
+            .GroupBy(item => item.ArtifactType, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new TeamWorkArtifactTypeFacet(
+                group.Key,
+                ArtifactTypeLabel(group.Key),
+                group.Count()))
+            .OrderBy(type => type.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        // The ladder supplies the allowed layer vocabulary. Observed rows are included as a compatibility
+        // bridge for old projects (and make a persisted Interface change request visible even when the legacy
+        // ladder deliberately omits Interface from its three-level requirement chain).
+        var levels = new List<string>();
+        if (effectiveLadder is not null)
+            levels.AddRange(effectiveLadder.OrderedLevels
+                .Where(level => level is not RequirementLevel.Customer)
+                .Select(level => level.ToString()));
+        levels.AddRange(items.Where(item => !string.IsNullOrWhiteSpace(item.Layer)).Select(item => item.Layer!));
+        var orderedLevels = levels.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var layerOrder = effectiveLadder?.OrderedLevels
+            .Select((level, index) => (Id: level.ToString(), index))
+            .ToDictionary(value => value.Id, value => value.index, StringComparer.OrdinalIgnoreCase)
+            ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var layers = orderedLevels
+            .Select(id =>
+            {
+                var layerItems = items.Where(item => string.Equals(item.Layer, id, StringComparison.OrdinalIgnoreCase)).ToArray();
+                var types = layerItems
+                    .GroupBy(item => item.ArtifactType, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => new TeamWorkArtifactTypeFacet(group.Key, ArtifactTypeLabel(group.Key), group.Count()))
+                    .OrderBy(type => type.Id, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                return new TeamWorkLayerFacet(id, LayerLabel(id), layerItems.Length, types);
+            })
+            .OrderBy(layer => layerOrder.GetValueOrDefault(layer.Id, int.MaxValue))
+            .ThenBy(layer => layer.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return new TeamWorkFacetProjection(layers, allTypes);
+    }
+
+    private static string LayerLabel(string id) => id switch
+    {
+        nameof(RequirementLevel.HighLevel) => "HLR",
+        nameof(RequirementLevel.LowLevel) => "LLR",
+        _ => id,
+    };
+
+    private static string ArtifactTypeLabel(string id) => id switch
+    {
+        "ProblemReport" => "Problem Report",
+        "Assessment" => "Assessment",
+        _ => id,
+    };
 
     private static IReadOnlyList<string> CanonicalHolderIds(IEnumerable<string> values) => values
         .Where(value => !string.IsNullOrWhiteSpace(value))
@@ -540,6 +655,8 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db)
     private sealed record TeamWorkItemDraft(
         Guid Id,
         string Family,
+        string? Layer,
+        string ArtifactType,
         string? Category,
         string? Prefix,
         string? Number,
@@ -611,7 +728,21 @@ public sealed record TeamWorkProjectionResponse(
     DateTimeOffset GeneratedAt,
     TeamWorkTotals Totals,
     IReadOnlyList<TeamWorkPerson> People,
-    IReadOnlyList<TeamWorkItemResponse> Items);
+    IReadOnlyList<TeamWorkItemResponse> Items,
+    IReadOnlyList<TeamWorkLayerFacet> Layers,
+    IReadOnlyList<TeamWorkArtifactTypeFacet> ArtifactTypes);
+
+public sealed record TeamWorkFacetProjection(
+    IReadOnlyList<TeamWorkLayerFacet> Layers,
+    IReadOnlyList<TeamWorkArtifactTypeFacet> ArtifactTypes);
+
+public sealed record TeamWorkLayerFacet(
+    string Id,
+    string Label,
+    int Count,
+    IReadOnlyList<TeamWorkArtifactTypeFacet> ArtifactTypes);
+
+public sealed record TeamWorkArtifactTypeFacet(string Id, string Label, int Count);
 
 public sealed record TeamWorkTotals(int Items, int Returned, int Unheld);
 
@@ -641,6 +772,8 @@ public sealed record TeamWorkAllocation(
 public sealed record TeamWorkItemResponse(
     Guid Id,
     string Family,
+    string? Layer,
+    string ArtifactType,
     string? Category,
     string? Prefix,
     string? Number,
