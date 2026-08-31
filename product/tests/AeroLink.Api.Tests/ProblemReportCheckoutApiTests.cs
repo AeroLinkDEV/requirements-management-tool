@@ -588,10 +588,26 @@ public sealed class ProblemReportCheckoutApiTests
                    ImageUpload(projectId, "unbound.png")))
             Assert.Equal(HttpStatusCode.Forbidden, unbound.StatusCode);
 
+        Guid unrelatedSessionId;
+        using (var unrelatedScope = factory.Services.CreateScope())
+        {
+            var unrelatedDb = unrelatedScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var unrelated = new ArtifactEditSession(projectId, "Requirement", Guid.NewGuid(), null,
+                new string('c', 64), "{}", bystander, DateTimeOffset.UtcNow, exclusive: false);
+            unrelatedDb.ArtifactEditSessions.Add(unrelated);
+            await unrelatedDb.SaveChangesAsync();
+            unrelatedSessionId = unrelated.Id;
+        }
+        using (var unrelated = await client.PostAsync("/api/content/images",
+                   ImageUpload(projectId, "unrelated-session.png", unrelatedSessionId)))
+            Assert.Equal(HttpStatusCode.Forbidden, unrelated.StatusCode);
+
         using var checkout = await client.PostAsJsonAsync("/api/controlled-editing/checkout",
             new { artifactType = "ProblemReport", artifactId = reportId, leaseMinutes = 15 });
         Assert.True(checkout.IsSuccessStatusCode, await checkout.Content.ReadAsStringAsync());
-        var sessionId = (await checkout.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var checkedOut = await checkout.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = checkedOut.GetProperty("id").GetGuid();
+        var sessionVersion = checkedOut.GetProperty("version").GetInt64();
         using var bound = await client.PostAsync("/api/content/images",
             ImageUpload(projectId, "checked-out.png", sessionId));
         Assert.Equal(HttpStatusCode.Created, bound.StatusCode);
@@ -602,6 +618,13 @@ public sealed class ProblemReportCheckoutApiTests
         var stored = await db.ControlledAttachments.AsNoTracking().SingleAsync(x => x.Id == imageId);
         Assert.Equal(reportId, stored.ArtifactId);
         Assert.Equal(bystander, stored.UploadedBy);
+
+        using var discard = await client.PostAsJsonAsync($"/api/controlled-editing/sessions/{sessionId}/discard",
+            new { expectedVersion = sessionVersion, reason = "Intent-bound upload test complete." });
+        Assert.Equal(HttpStatusCode.NoContent, discard.StatusCode);
+        using var abandoned = await client.PostAsync("/api/content/images",
+            ImageUpload(projectId, "abandoned-session.png", sessionId));
+        Assert.Equal(HttpStatusCode.Forbidden, abandoned.StatusCode);
     }
 
     [Fact]
@@ -636,6 +659,31 @@ public sealed class ProblemReportCheckoutApiTests
             ? Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Count()
             : 0;
         Assert.Equal(filesBefore, filesAfter);
+    }
+
+    [Fact]
+    public async Task Inline_image_upload_enforces_an_attributable_per_actor_budget()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var seeded = await SeedAsync(factory, "PRIMGACTOR");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            db.ControlledAttachments.Add(new ControlledAttachment(seeded.ProjectId, "InlineImage", seeded.ProjectId,
+                null, Guid.NewGuid(), 1, "Actor recovery-image budget", "", "existing.png", "image/png",
+                RequirementsEndpoints.MaximumInlineImageBytesPerActorPerProject, new string('d', 64),
+                "test/actor-quota-existing.png", null, "admin", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        using var response = await client.PostAsync("/api/content/images", ImageUpload(seeded.ProjectId, "actor-over-budget.png"));
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("inline_image_actor_quota", body.GetProperty("code").GetString());
+        Assert.Equal(RequirementsEndpoints.MaximumInlineImageBytesPerActorPerProject,
+            body.GetProperty("limitBytes").GetInt64());
     }
 
     [Fact]

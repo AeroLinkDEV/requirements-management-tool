@@ -29,6 +29,7 @@ public static class RequirementsEndpoints
     // The budget counts every stored version, including withdrawn content, because those bytes still occupy
     // the protected evidence volume and may remain necessary for exact historical publication.
     internal const long MaximumInlineImageBytesPerProject = 512L * 1024 * 1024;
+    internal const long MaximumInlineImageBytesPerActorPerProject = 128L * 1024 * 1024;
 
     public static void MapRequirementsEndpoints(this WebApplication app)
     {
@@ -731,7 +732,9 @@ public static class RequirementsEndpoints
             if(Guid.TryParse(form["editSessionId"],out var editSessionId))
             {
                 editSession=await db.ArtifactEditSessions.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==editSessionId,ct);
-                if(editSession is null||editSession.ProjectId!=projectId||editSession.State!=EditSessionState.Active
+                if(editSession is null||editSession.ProjectId!=projectId||!editSession.IsExclusive
+                    ||!editSession.ArtifactType.Equals("ProblemReport",StringComparison.OrdinalIgnoreCase)
+                    ||editSession.State!=EditSessionState.Active
                     ||editSession.ExpiresAt<=DateTimeOffset.UtcNow||editSession.UserName!=actor.UserName)return Results.Forbid();
             }
             else if(!await http.HasProjectRoleAsync(db,identity,projectId,ct,
@@ -762,6 +765,14 @@ public static class RequirementsEndpoints
                 .SumAsync(x=>(long?)x.Size,ct)??0;
             if(used>=MaximumInlineImageBytesPerProject||file.Length>MaximumInlineImageBytesPerProject-used)
                 return Results.Conflict(new{error="This Project has reached its controlled inline-image storage limit.",code="inline_image_project_quota",limitBytes=MaximumInlineImageBytesPerProject});
+            // Keep one authorized author from consuming the Project's entire shared budget. Retained recovery
+            // uploads are intentional controlled objects — attributable and hash-addressed — but remain bounded
+            // per actor even when a browser draft is abandoned and later recovered.
+            var actorUsed=await db.ControlledAttachments.AsNoTracking()
+                .Where(x=>x.ProjectId==projectId&&x.ArtifactType=="InlineImage"&&x.UploadedBy==actor.UserName)
+                .SumAsync(x=>(long?)x.Size,ct)??0;
+            if(actorUsed>=MaximumInlineImageBytesPerActorPerProject||file.Length>MaximumInlineImageBytesPerActorPerProject-actorUsed)
+                return Results.Conflict(new{error="You have reached your controlled inline-image storage limit for this Project.",code="inline_image_actor_quota",limitBytes=MaximumInlineImageBytesPerActorPerProject});
             StoredEvidence? stored=null;
             try
             {

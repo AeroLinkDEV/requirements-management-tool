@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 718,
-    "cases": 801,
+    "tests": 719,
+    "cases": 802,
     "classes": 116,
-    "hostedTests": 689,
-    "hostedCases": 758,
+    "hostedTests": 690,
+    "hostedCases": 759,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 7,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 426,
-      "cases": 480,
+      "tests": 427,
+      "cases": 481,
       "unknownCases": 0,
       "classes": 95
     },
@@ -5535,8 +5535,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 823,
-        "end": 856
+        "start": 871,
+        "end": 904
       }
     },
     {
@@ -5552,8 +5552,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 862,
-        "end": 891
+        "start": 910,
+        "end": 939
       }
     },
     {
@@ -5605,8 +5605,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 641,
-        "end": 686
+        "start": 689,
+        "end": 734
       }
     },
     {
@@ -5699,6 +5699,24 @@
     },
     {
       "cls": "ProblemReportCheckoutApiTests",
+      "test": "Inline_image_upload_enforces_an_attributable_per_actor_budget",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 664,
+        "end": 687
+      }
+    },
+    {
+      "cls": "ProblemReportCheckoutApiTests",
       "test": "Inline_image_upload_enforces_the_cumulative_project_budget_without_storing_more_bytes",
       "kind": "Fact",
       "intent": "filesystem",
@@ -5711,8 +5729,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 607,
-        "end": 639
+        "start": 630,
+        "end": 662
       }
     },
     {
@@ -5730,7 +5748,7 @@
       ],
       "sourceLines": {
         "start": 574,
-        "end": 605
+        "end": 628
       }
     },
     {
@@ -5746,8 +5764,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 897,
-        "end": 936
+        "start": 945,
+        "end": 984
       }
     },
     {
