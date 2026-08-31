@@ -87,11 +87,12 @@ remains editable and is not released.
 
 ### Problem Reports and work distribution
 
-The deterministic FMS seed also carries eight Problem Reports split four-and-four across the released 1.5 and
-in-work 1.6 builds. Every one has an authoritative controlled `BuildScope` link to its target release, so build
-work lists and the report centre answer the same scope question. They intentionally cover Draft, Open,
-Implementing, Verifying, Waiting for SQA closure, Closed, and Rejected states, with Task, Improvement, Code,
-Requirements, Test, and Environment categories. The two verification scenarios carry a controlled
+The deterministic FMS seed also carries eight Problem Reports: six historical records target released Build 1.5
+and two records remain against in-work Build 1.6 (one Verifying and one Rejected). Every one has an authoritative controlled `BuildScope`
+link to its target release, so build work lists and the report centre answer the same scope question. They
+intentionally cover Draft, Open, Implementing, Verifying, Waiting for SQA closure, Closed, and Rejected states,
+with Task, Improvement, Code, Requirements, Test, and Environment categories. The two governed verification
+scenarios target Build 1.5 and carry a real failed-execution → passing-retest predecessor chain, a controlled
 `ResolutionVerification` link, immutable `ResolutionVerified` history, and closure candidate evidence; the
 closed scenario also carries a frozen `ClosureApproved` package. Responsible work is distributed across five
 eligible synthetic engineers/test engineers; the broader identity seed includes additional project members with

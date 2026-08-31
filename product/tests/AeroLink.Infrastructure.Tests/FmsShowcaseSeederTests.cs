@@ -5,6 +5,7 @@ using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -88,13 +89,13 @@ public sealed class FmsShowcaseSeederTests
                 .Where(x => interfaceScenarioIds.Contains(x.Id))
                 .OrderBy(x => x.BaseNumber).Select(x => new { x.BaseNumber, x.Revision, x.State, x.AuthorId }).ToListAsync();
             var firstReports = await db.ProblemReports.AsNoTracking().Where(x => reportScenarioIds.Contains(x.Id))
-                .OrderBy(x => x.ReportNumber).Select(x => new { x.Id, x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId, x.ResolutionVerificationExecutionId, x.AdditionalInformation }).ToListAsync();
+                .OrderBy(x => x.ReportNumber).Select(x => new { x.Id, x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId, x.ResolutionVerificationExecutionId, x.AdditionalInformation, x.CreatedAt }).ToListAsync();
 
             Assert.Equal(8, firstInterface.Count);
             Assert.Equal(8, firstReports.Count);
             Assert.Equal(16, await db.SystemChangeRequests.CountAsync(x => x.ProjectId == summary.ProjectId && x.TargetReleaseId == summary.ActiveReleaseId));
-            Assert.Equal(4, firstReports.Count(x => x.TargetReleaseId == release15Id));
-            Assert.Equal(4, firstReports.Count(x => x.TargetReleaseId == summary.ActiveReleaseId));
+            Assert.Equal(6, firstReports.Count(x => x.TargetReleaseId == release15Id));
+            Assert.Equal(2, firstReports.Count(x => x.TargetReleaseId == summary.ActiveReleaseId));
             var eligibleAuthors = new[] { "systems.author", "software.author" };
             var eligibleOwners = new[] { "systems.author", "software.author", "test.engineer", "engineer.demo", "test.author" };
             Assert.All(firstInterface, item => Assert.Contains(item.AuthorId, eligibleAuthors, StringComparer.OrdinalIgnoreCase));
@@ -131,6 +132,37 @@ public sealed class FmsShowcaseSeederTests
                     .SingleAsync(x => x.ProblemReportId == report.Id);
                 Assert.Equal(report.ResolutionVerificationExecutionId, candidate.VerificationExecutionId);
                 Assert.Equal(index == 6 ? ProblemReportClosureCandidateState.Pending : ProblemReportClosureCandidateState.Approved, candidate.State);
+                var execution = await db.TestExecutions.AsNoTracking().SingleAsync(x => x.Id == report.ResolutionVerificationExecutionId);
+                var failure = await db.TestExecutions.AsNoTracking().SingleAsync(x => x.Id == execution.RetestOfExecutionId);
+                Assert.Equal(TestOutcome.Fail, failure.Outcome);
+                Assert.Equal(TestOutcome.Pass, execution.Outcome);
+                Assert.Equal(release15Id, failure.ReleaseId);
+                Assert.Equal(release15Id, execution.ReleaseId);
+                Assert.True(failure.ExecutedAt < report.CreatedAt);
+                Assert.True(report.CreatedAt < execution.RecordedAt);
+                var history = (await db.ProblemReportRevisions.AsNoTracking()
+                    .Where(x => x.ProblemReportId == report.Id).ToListAsync())
+                    .OrderBy(x => x.OccurredAt).ThenBy(x => x.Id).ToList();
+                var expectedEvents = index == 7
+                    ? new[] { "ProblemReportCreatedFromFailedExecution", "ReadyForSccb", "OpenedBySccb", "ImplementationStarted", "InvestigationRecorded", "ResolutionProposed", "ResolutionVerified", "ClosureApproved" }
+                    : new[] { "ProblemReportCreatedFromFailedExecution", "ReadyForSccb", "OpenedBySccb", "ImplementationStarted", "InvestigationRecorded", "ResolutionProposed", "ResolutionVerified" };
+                Assert.Equal(expectedEvents, history.Select(x => x.EventType).ToArray());
+                var expectedActors = index == 7
+                    ? new[] { report.ResponsibleEngineerId, report.ResponsibleEngineerId, "systems.reviewer", report.ResponsibleEngineerId,
+                        report.ResponsibleEngineerId, report.ResponsibleEngineerId, "test.engineer", "quality.analyst" }
+                    : new[] { report.ResponsibleEngineerId, report.ResponsibleEngineerId, "systems.reviewer", report.ResponsibleEngineerId,
+                        report.ResponsibleEngineerId, report.ResponsibleEngineerId, "test.engineer" };
+                Assert.Equal(expectedActors, history.Select(x => x.Actor).ToArray());
+                Assert.Equal(new[] { "", "Draft", "ReadyForSccb", "Open", "Implementing", "Implementing", "Verifying", "WaitingForSqaToClose" }
+                    .Take(expectedEvents.Length), history.Select(x => x.FromState).ToArray());
+                Assert.Equal(new[] { "", "ReadyForSccb", "Open", "Implementing", "Implementing", "Verifying", "WaitingForSqaToClose", "Closed" }
+                    .Take(expectedEvents.Length), history.Select(x => x.ToState).ToArray());
+                Assert.All(history, item =>
+                {
+                    Assert.False(string.IsNullOrWhiteSpace(item.Actor));
+                    Assert.False(string.IsNullOrWhiteSpace(item.ActorDisplayName));
+                    Assert.Equal(ProblemReportEvidenceContract.Hash(item.SnapshotJson), item.SnapshotHash);
+                });
                 if (index == 7)
                 {
                     var sqaAccountId = await db.UserAccounts.Where(x => x.UserName == "quality.analyst").Select(x => x.Id).SingleAsync();
@@ -138,6 +170,12 @@ public sealed class FmsShowcaseSeederTests
                         && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null));
                     Assert.Equal(sqaAccountId, candidate.ApprovedByAccountId);
                     Assert.True(await db.ProblemReportRevisions.AnyAsync(x => x.ProblemReportId == report.Id && x.EventType == "ClosureApproved"));
+                    Assert.Equal(ProblemReportEvidenceContract.Hash(candidate.ClosurePackageJson), candidate.ClosurePackageHash);
+                    using var package = JsonDocument.Parse(candidate.ClosurePackageJson);
+                    Assert.Equal("FrozenAtApproval", package.RootElement.GetProperty("provenance").GetString());
+                    Assert.Equal(candidate.Id, package.RootElement.GetProperty("candidate").GetProperty("id").GetGuid());
+                    Assert.Equal(expectedEvents, package.RootElement.GetProperty("history").EnumerateArray()
+                        .Select(item => item.GetProperty("eventType").GetString()).ToArray());
                 }
             }
 
@@ -148,12 +186,56 @@ public sealed class FmsShowcaseSeederTests
                 .Where(x => interfaceScenarioIds.Contains(x.Id))
                 .OrderBy(x => x.BaseNumber).Select(x => new { x.BaseNumber, x.Revision, x.State, x.AuthorId }).ToListAsync();
             var secondReports = await db.ProblemReports.AsNoTracking().Where(x => reportScenarioIds.Contains(x.Id))
-                .OrderBy(x => x.ReportNumber).Select(x => new { x.Id, x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId, x.ResolutionVerificationExecutionId, x.AdditionalInformation }).ToListAsync();
+                .OrderBy(x => x.ReportNumber).Select(x => new { x.Id, x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId, x.ResolutionVerificationExecutionId, x.AdditionalInformation, x.CreatedAt }).ToListAsync();
             Assert.Equal(firstInterface, secondInterface);
             Assert.Equal(firstReports, secondReports);
             Assert.All(await seeder.CheckInvariantsAsync(summary.ProgramId), x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
         }
         finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Ended_sqa_membership_is_preserved_and_reopened_closure_stays_in_work()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-showcase-ended-sqa-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            await new IdentitySeeder(db).EnsureSeededAsync();
+            var seeder = new FmsShowcaseSeeder(db);
+            var summary = await seeder.EnsureSeededAsync();
+            var sqaId = await db.UserAccounts.Where(x => x.UserName == "quality.analyst").Select(x => x.Id).SingleAsync();
+            var membership = await db.ProgramMemberships.SingleAsync(x => x.UserId == sqaId && x.ProgramId == summary.ProgramId
+                && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null);
+            membership.End("admin", membership.GrantedAt.AddHours(1));
+            var reportIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/problem-report/");
+            var report7Id = reportIds[6];
+            var report7 = await db.ProblemReports.SingleAsync(x => x.Id == report7Id);
+            report7.Reopen("quality.analyst", "Reopen the historical scenario to qualify ended-authority handling.", membership.GrantedAt.AddHours(2));
+            await db.SaveChangesAsync();
+
+            await seeder.EnsureSeededAsync();
+
+            Assert.Equal(1, await db.ProgramMemberships.CountAsync(x => x.UserId == sqaId && x.ProgramId == summary.ProgramId
+                && x.Role == ProgramRole.SoftwareQualityAnalyst));
+            Assert.False(await db.ProgramMemberships.AnyAsync(x => x.UserId == sqaId && x.ProgramId == summary.ProgramId
+                && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null));
+            report7 = await db.ProblemReports.AsNoTracking().SingleAsync(x => x.Id == report7Id);
+            Assert.Equal(ProblemReportState.Verifying, report7.State);
+            Assert.Null(report7.ResolutionVerificationExecutionId);
+            var historicalCandidate = await db.ProblemReportClosureCandidates.AsNoTracking()
+                .Where(x => x.ProblemReportId == report7Id).OrderByDescending(x => x.Sequence).FirstAsync();
+            Assert.Equal(ProblemReportClosureCandidateState.Approved, historicalCandidate.State);
+            Assert.Equal(1, await db.ProblemReportRevisions.CountAsync(x => x.ProblemReportId == report7Id
+                && x.EventType == "ClosureApproved"));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (File.Exists(path)) File.Delete(path);
+        }
     }
 
     [Fact]

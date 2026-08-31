@@ -42,6 +42,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     private static string InterfaceScenarioStepKey(int index) => $"{InterfaceScenarioStepPrefix}{index:D2}";
     private static string ProblemReportScenarioStepKey(int index) => $"{ProblemReportScenarioStepPrefix}{index:D2}";
 
+    // Only the historical Build 1.5 scenarios carry governed closure evidence. Build 1.6 remains an
+    // in-work release and its Problem Reports deliberately stop at an honest active/rejected state.
+    private static bool IsHistoricalProblemReportScenario(int index) => index <= 4 || index is 6 or 7;
+
     public async Task<FmsShowcaseSummary> EnsureSeededAsync(CancellationToken ct = default)
     {
         var existing = await db.Programs.AsNoTracking().SingleOrDefaultAsync(x => x.Code == ProgramCode, ct);
@@ -160,18 +164,27 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         return await SummarizeAsync(program.Id, ct);
     }
 
-    private async Task EnsureQualityAnalystMembershipAsync(Guid programId, CancellationToken ct)
+    private async Task<bool> EnsureQualityAnalystMembershipAsync(Guid programId, CancellationToken ct)
     {
         var account = await db.UserAccounts.AsNoTracking()
             .SingleOrDefaultAsync(x => x.UserName == "quality.analyst" && x.State == AccountState.Active, ct)
             ?? throw new InvalidOperationException(
                 "The seeded quality.analyst account is required before FMS closure scenarios can be frozen.");
-        if (await db.ProgramMemberships.AnyAsync(x => x.UserId == account.Id && x.ProgramId == programId
-                && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null, ct)) return;
+
+        var history = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.UserId == account.Id && x.ProgramId == programId
+                && x.Role == ProgramRole.SoftwareQualityAnalyst)
+            .ToListAsync(ct);
+        if (history.Any(x => x.EndedAt is null)) return true;
+        // An ended membership is an intentional authority decision. Do not restore it merely because the
+        // deterministic showcase happens to contain a closed Problem Report. The enrichment step will keep
+        // closure scenarios in their honest in-work state until an operator grants authority again.
+        if (history.Count > 0) return false;
 
         db.ProgramMemberships.Add(new ProgramMembership(account.Id, programId, ProgramRole.SoftwareQualityAnalyst,
             "system.bootstrap", DateTimeOffset.UtcNow));
         await db.SaveChangesAsync(ct);
+        return true;
     }
 
     /// <summary>
@@ -646,6 +659,14 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             ProblemReportState.Draft, ProblemReportState.Implementing, ProblemReportState.Verifying,
             ProblemReportState.WaitingForSqaToClose, ProblemReportState.Closed, ProblemReportState.Rejected,
         };
+        var sqaAccount = await db.UserAccounts.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.UserName == "quality.analyst", ct);
+        var hasActiveSqa = sqaAccount is not null && await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == sqaAccount.Id
+            && x.ProgramId == programId && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null, ct);
+        // Ending SQA authority is itself controlled history. A new seed cannot invent a Closed record while
+        // that authority is absent; an existing frozen closure remains valid and is accepted below.
+        if (!hasActiveSqa)
+            requiredProblemStates = requiredProblemStates.Where(state => state != ProblemReportState.Closed).ToArray();
 
         return
         [
@@ -697,16 +718,24 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         CancellationToken ct)
     {
         if (reports.Count != 8) return false;
-        var activeReleaseId = await db.Releases.Where(x => x.ProjectId == projectId && x.Version == "1.6")
+        var historicalReleaseId = await db.Releases.Where(x => x.ProjectId == projectId && x.Version == "1.5")
             .Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct);
-        if (activeReleaseId is null) return false;
+        if (historicalReleaseId is null) return false;
         var sqaAccount = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x => x.UserName == "quality.analyst"
-            && x.State == AccountState.Active, ct);
-        if (sqaAccount is null || !await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == sqaAccount.Id
-                && x.ProgramId == programId && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null, ct)) return false;
+            , ct);
+        var hasActiveSqa = sqaAccount is not null && await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == sqaAccount.Id
+                && x.ProgramId == programId && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null, ct);
+        var hasSqaHistory = sqaAccount is not null && await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == sqaAccount.Id
+                && x.ProgramId == programId && x.Role == ProgramRole.SoftwareQualityAnalyst, ct);
+        if (!hasSqaHistory) return false;
         foreach (var index in new[] { 6, 7 })
         {
-            var report = await ResolveProblemReportScenarioAsync(programId, projectId, index, activeReleaseId.Value, ct);
+            var report = await ResolveProblemReportScenarioAsync(programId, projectId, index, historicalReleaseId.Value, ct);
+            if (index == 7 && !hasActiveSqa && report is not null && report.ResolutionVerificationExecutionId is null
+                && report.State == ProblemReportState.Verifying
+                && await db.ProblemReportRevisions.AsNoTracking().AnyAsync(x => x.ProblemReportId == report.Id
+                    && x.EventType == "ClosureApproved", ct))
+                continue;
             if (report?.ResolutionVerificationExecutionId is null) return false;
             if (!await db.ProblemReportLinks.AsNoTracking().AnyAsync(x => x.ProblemReportId == report.Id
                     && x.ArtifactType == "TestExecution" && x.ArtifactId == report.ResolutionVerificationExecutionId
@@ -717,10 +746,16 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 .OrderByDescending(x => x.Sequence).FirstOrDefaultAsync(ct);
             if (candidate is null || candidate.VerificationExecutionId != report.ResolutionVerificationExecutionId) return false;
             if (index == 6 && candidate.State != ProblemReportClosureCandidateState.Pending) return false;
-            if (index == 7 && (report.State != ProblemReportState.Closed
-                    || candidate.State != ProblemReportClosureCandidateState.Approved
-                    || !await db.ProblemReportRevisions.AsNoTracking().AnyAsync(x => x.ProblemReportId == report.Id
-                        && x.EventType == "ClosureApproved", ct))) return false;
+            if (index == 7)
+            {
+                var closureIsFrozen = report.State == ProblemReportState.Closed
+                    && candidate.State == ProblemReportClosureCandidateState.Approved
+                    && !string.IsNullOrWhiteSpace(candidate.ClosurePackageHash)
+                    && await db.ProblemReportRevisions.AsNoTracking().AnyAsync(x => x.ProblemReportId == report.Id
+                        && x.EventType == "ClosureApproved", ct);
+                if (hasActiveSqa ? !closureIsFrozen : report.State != ProblemReportState.WaitingForSqaToClose && !closureIsFrozen)
+                    return false;
+            }
         }
         return true;
     }
@@ -989,86 +1024,152 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             ProblemReportCategory.TestNonBlocking, ProblemReportCategory.EnvironmentTooling,
         };
         // SQLite stores DateTimeOffset as a value it cannot order server-side. This is the bounded execution
-        // set for one showcase Project, so keep the provider-neutral ordering in memory.
-        var firstExecutionId = (await db.TestExecutions.AsNoTracking().Where(x => x.ProjectId == projectId)
-                .Select(x => new { x.Id, x.ExecutedAt }).ToListAsync(ct))
-            .OrderBy(x => x.ExecutedAt).Select(x => (Guid?)x.Id).FirstOrDefault();
+        // set for one showcase Project, so keep the provider-neutral ordering in memory. Only a failed
+        // Build 1.5 execution with an actual passing retest can seed closure evidence.
+        var projectExecutions = await db.TestExecutions.AsNoTracking()
+            .Where(x => x.ProjectId == projectId && x.ReleaseId == releasedId)
+            .ToListAsync(ct);
+        var releasedBuildIds = (await db.SoftwareBuilds.AsNoTracking()
+                .Where(x => x.ProjectId == projectId && x.ReleaseId == releasedId)
+                .Select(x => x.Id).ToListAsync(ct)).ToHashSet();
+        var failurePairs = projectExecutions
+            .Where(x => x.Outcome == TestOutcome.Fail && x.SoftwareBuildId is { } buildId && releasedBuildIds.Contains(buildId))
+            .OrderBy(x => x.ExecutedAt).ThenBy(x => x.Id)
+            .Select(failure => new
+            {
+                Failure = failure,
+                Retest = projectExecutions.Where(candidate => candidate.RetestOfExecutionId == failure.Id
+                        && candidate.Outcome == TestOutcome.Pass && candidate.SoftwareBuildId is { } buildId
+                        && releasedBuildIds.Contains(buildId)
+                        && candidate.ProcedureRevisionId == failure.ProcedureRevisionId)
+                    .OrderBy(candidate => candidate.RecordedAt).ThenBy(candidate => candidate.Id)
+                    .FirstOrDefault(),
+            })
+            .Where(pair => pair.Retest is not null)
+            .ToList();
+        if (failurePairs.Count < 2)
+            throw new InvalidOperationException("FMS closure scenarios require two failed Build 1.5 executions with passing retest successors.");
+
+        var actorHandles = ProblemReportOwners.Concat(["systems.reviewer", "quality.analyst"])
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var actorNames = (await db.UserAccounts.AsNoTracking()
+                .Where(x => actorHandles.Contains(x.UserName)).ToListAsync(ct))
+            .ToDictionary(x => x.UserName, x => x.DisplayName, StringComparer.OrdinalIgnoreCase);
+        string? ActorName(string actor) => actorNames.TryGetValue(actor, out var name) ? name : null;
         var now = new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero);
 
         for (var i = 1; i <= 8; i++)
         {
             var marker = ProblemReportScenarioMarker(i);
-            var expectedRelease = i <= 4 ? releasedId : activeId;
+            var expectedRelease = IsHistoricalProblemReportScenario(i) ? releasedId : activeId;
             if (await ResolveProblemReportScenarioAsync(programId, projectId, i, expectedRelease, ct) is not null) continue;
             var reportNumber = AllocateScenarioNumber("PR", i, usedNumbers);
             var owner = ProblemReportOwners[i - 1];
+            var retestPair = i is 6 or 7 ? failurePairs[i - 6] : null;
+            var createdAt = retestPair is null
+                ? now.AddDays(i)
+                : retestPair.Failure.ExecutedAt.AddMinutes(5);
             var report = new ProblemReport(projectId, reportNumber,
                 i == 1 ? "Navigation database handoff follow-up" : $"FMS showcase problem report {i}",
                 "The FMS demonstration record captures a controlled engineering concern for this scenario.",
-                "Initial triage is retained with the report so the reader can follow the decision.", owner, now.AddDays(i),
+                "Initial triage is retained with the report so the reader can follow the decision.", owner, createdAt,
                 classification: "FMS engineering record",
                 severity: i is 3 or 6 ? ProblemReportSeverity.High : ProblemReportSeverity.Major,
                 priority: i is 1 or 6 ? ProblemReportPriority.High : ProblemReportPriority.Normal,
                 origin: i is 6 or 7 ? "Test execution" : "Engineering review",
-                affectedConfiguration: i <= 4 ? "FMS 1.5" : "FMS 1.6",
-                targetReleaseId: i <= 4 ? releasedId : activeId,
+                affectedConfiguration: IsHistoricalProblemReportScenario(i) ? "FMS 1.5" : "FMS 1.6",
+                targetReleaseId: expectedRelease,
                 responsibleEngineerId: owner,
                 additionalInformation: $"Synthetic, deterministic showcase content; no external incident is implied. {marker}",
                 category: categories[i - 1]);
 
-            var eventTime = now.AddDays(i);
+            // The endpoint writes one immutable event after each domain mutation. Keep the same event names,
+            // exact post-mutation snapshots, actors and state edges in the synthetic lifecycle.
+            AddScenarioRevision(report, i is 6 or 7 ? "ProblemReportCreatedFromFailedExecution" : "ProblemReportCreated",
+                owner, createdAt, ActorName(owner));
+            if (retestPair is not null)
+                db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(report.Id, "TestExecution",
+                    retestPair.Failure.Id, ProblemReportRelationshipPolicy.OriginatingFailure,
+                    ProblemReportRelationshipProducer.FailureCreationWorkflow, owner, createdAt));
+
+            var eventTime = createdAt;
+            DateTimeOffset At(int hours, int minutes) => i is 6 or 7
+                ? eventTime.AddMinutes(minutes)
+                : eventTime.AddHours(hours);
             switch (i)
             {
                 case 2:
-                    report.ReadyForSccb(owner, eventTime.AddHours(1));
+                    report.ReadyForSccb(owner, At(1, 10));
+                    AddScenarioRevision(report, "ReadyForSccb", owner, At(1, 10), ActorName(owner), ProblemReportState.Draft, ProblemReportState.ReadyForSccb);
                     break;
                 case 3:
-                    report.ReadyForSccb(owner, eventTime.AddHours(1));
-                    report.OpenBySccb("systems.reviewer", eventTime.AddHours(2));
+                    report.ReadyForSccb(owner, At(1, 10));
+                    AddScenarioRevision(report, "ReadyForSccb", owner, At(1, 10), ActorName(owner), ProblemReportState.Draft, ProblemReportState.ReadyForSccb);
+                    report.OpenBySccb("systems.reviewer", At(2, 20));
+                    AddScenarioRevision(report, "OpenedBySccb", "systems.reviewer", At(2, 20), ActorName("systems.reviewer"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
                     break;
                 case 4:
-                    report.ReadyForSccb(owner, eventTime.AddHours(1));
-                    report.OpenBySccb("systems.reviewer", eventTime.AddHours(2));
-                    report.BeginImplementation(owner, eventTime.AddHours(3));
+                    report.ReadyForSccb(owner, At(1, 10));
+                    AddScenarioRevision(report, "ReadyForSccb", owner, At(1, 10), ActorName(owner), ProblemReportState.Draft, ProblemReportState.ReadyForSccb);
+                    report.OpenBySccb("systems.reviewer", At(2, 20));
+                    AddScenarioRevision(report, "OpenedBySccb", "systems.reviewer", At(2, 20), ActorName("systems.reviewer"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
+                    report.BeginImplementation(owner, At(3, 30));
+                    AddScenarioRevision(report, "ImplementationStarted", owner, At(3, 30), ActorName(owner), ProblemReportState.Open, ProblemReportState.Implementing);
                     break;
                 case 5:
-                    report.ReadyForSccb(owner, eventTime.AddHours(1));
-                    report.OpenBySccb("systems.reviewer", eventTime.AddHours(2));
-                    report.BeginImplementation(owner, eventTime.AddHours(3));
+                    report.ReadyForSccb(owner, At(1, 10));
+                    AddScenarioRevision(report, "ReadyForSccb", owner, At(1, 10), ActorName(owner), ProblemReportState.Draft, ProblemReportState.ReadyForSccb);
+                    report.OpenBySccb("systems.reviewer", At(2, 20));
+                    AddScenarioRevision(report, "OpenedBySccb", "systems.reviewer", At(2, 20), ActorName("systems.reviewer"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
+                    report.BeginImplementation(owner, At(3, 30));
+                    AddScenarioRevision(report, "ImplementationStarted", owner, At(3, 30), ActorName(owner), ProblemReportState.Open, ProblemReportState.Implementing);
                     report.BeginInvestigation(owner, "The implementation path and affected interface were reviewed.",
                         "The demonstration root cause is bounded to the scenario record.", "No aircraft effect is claimed.",
-                        "The active build remains clearly identified while work is in progress.", eventTime.AddHours(4));
-                    report.ProposeResolution(owner, "Apply the controlled corrective action in the next FMS 1.6 review.", eventTime.AddHours(5));
+                        "The active build remains clearly identified while work is in progress.", At(4, 40));
+                    AddScenarioRevision(report, "InvestigationRecorded", owner, At(4, 40), ActorName(owner), ProblemReportState.Implementing, ProblemReportState.Implementing,
+                        detail: "The implementation path and affected interface were reviewed.");
+                    report.ProposeResolution(owner, "Apply the controlled corrective action in the next FMS 1.6 review.", At(5, 50));
+                    AddScenarioRevision(report, "ResolutionProposed", owner, At(5, 50), ActorName(owner), ProblemReportState.Implementing, ProblemReportState.Verifying);
                     break;
                 case 6:
-                    report.ReadyForSccb(owner, eventTime.AddHours(1));
-                    report.OpenBySccb("systems.reviewer", eventTime.AddHours(2));
-                    report.BeginImplementation(owner, eventTime.AddHours(3));
+                    report.ReadyForSccb(owner, At(1, 10));
+                    AddScenarioRevision(report, "ReadyForSccb", owner, At(1, 10), ActorName(owner), ProblemReportState.Draft, ProblemReportState.ReadyForSccb);
+                    report.OpenBySccb("systems.reviewer", At(2, 20));
+                    AddScenarioRevision(report, "OpenedBySccb", "systems.reviewer", At(2, 20), ActorName("systems.reviewer"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
+                    report.BeginImplementation(owner, At(3, 30));
+                    AddScenarioRevision(report, "ImplementationStarted", owner, At(3, 30), ActorName(owner), ProblemReportState.Open, ProblemReportState.Implementing);
                     report.BeginInvestigation(owner, "The test finding was reproduced and isolated to the seeded path.",
                         "The deterministic test setup was the source of the observation.", "No released-build safety claim is changed.",
-                        "Retain the failed observation and use the recorded retest evidence.", eventTime.AddHours(4));
-                    report.ProposeResolution(owner, "Correct the test setup and retain the retest result.", eventTime.AddHours(5));
-                    if (firstExecutionId is Guid execution)
-                        report.RecordResolutionVerification("test.engineer", execution, eventTime.AddHours(6));
+                        "Retain the failed observation and use the recorded retest evidence.", At(4, 40));
+                    AddScenarioRevision(report, "InvestigationRecorded", owner, At(4, 40), ActorName(owner), ProblemReportState.Implementing, ProblemReportState.Implementing,
+                        detail: "The test finding was reproduced and isolated to the seeded path.");
+                    report.ProposeResolution(owner, "Correct the test setup and retain the retest result.", At(5, 50));
+                    AddScenarioRevision(report, "ResolutionProposed", owner, At(5, 50), ActorName(owner), ProblemReportState.Implementing, ProblemReportState.Verifying);
                     break;
                 case 7:
-                    report.ReadyForSccb(owner, eventTime.AddHours(1));
-                    report.OpenBySccb("systems.reviewer", eventTime.AddHours(2));
-                    report.BeginImplementation(owner, eventTime.AddHours(3));
+                    report.ReadyForSccb(owner, At(1, 10));
+                    AddScenarioRevision(report, "ReadyForSccb", owner, At(1, 10), ActorName(owner), ProblemReportState.Draft, ProblemReportState.ReadyForSccb);
+                    report.OpenBySccb("systems.reviewer", At(2, 20));
+                    AddScenarioRevision(report, "OpenedBySccb", "systems.reviewer", At(2, 20), ActorName("systems.reviewer"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
+                    report.BeginImplementation(owner, At(3, 30));
+                    AddScenarioRevision(report, "ImplementationStarted", owner, At(3, 30), ActorName(owner), ProblemReportState.Open, ProblemReportState.Implementing);
                     report.BeginInvestigation(owner, "The correction was verified against the controlled scenario.",
                         "A non-functional test weakness was identified and corrected.", "No operational effect is claimed.",
-                        "The active record remains available for SQA closure.", eventTime.AddHours(4));
-                    report.ProposeResolution(owner, "Retain the corrected verification path in the active build.", eventTime.AddHours(5));
-                    if (firstExecutionId is Guid verified)
-                    {
-                        report.RecordResolutionVerification("test.engineer", verified, eventTime.AddHours(6));
-                    }
+                        "The active record remains available for SQA closure.", At(4, 40));
+                    AddScenarioRevision(report, "InvestigationRecorded", owner, At(4, 40), ActorName(owner), ProblemReportState.Implementing, ProblemReportState.Implementing,
+                        detail: "The correction was verified against the controlled scenario.");
+                    report.ProposeResolution(owner, "Retain the corrected verification path in the active build.", At(5, 50));
+                    AddScenarioRevision(report, "ResolutionProposed", owner, At(5, 50), ActorName(owner), ProblemReportState.Implementing, ProblemReportState.Verifying);
                     break;
                 case 8:
-                    report.ReadyForSccb(owner, eventTime.AddHours(1));
-                    report.OpenBySccb("systems.reviewer", eventTime.AddHours(2));
+                    report.ReadyForSccb(owner, At(1, 10));
+                    AddScenarioRevision(report, "ReadyForSccb", owner, At(1, 10), ActorName(owner), ProblemReportState.Draft, ProblemReportState.ReadyForSccb);
+                    report.OpenBySccb("systems.reviewer", At(2, 20));
+                    AddScenarioRevision(report, "OpenedBySccb", "systems.reviewer", At(2, 20), ActorName("systems.reviewer"), ProblemReportState.ReadyForSccb, ProblemReportState.Open);
                     report.ApplyDisposition(owner, ProblemReportDisposition.CannotReproduce,
-                        "The reported condition could not be reproduced in the controlled showcase setup.", null, eventTime.AddHours(3));
+                        "The reported condition could not be reproduced in the controlled showcase setup.", null, At(3, 30));
+                    AddScenarioRevision(report, "DispositionRecorded", owner, At(3, 30), ActorName(owner), ProblemReportState.Open, ProblemReportState.Rejected,
+                        detail: "The reported condition could not be reproduced in the controlled showcase setup.", rationale: "The reported condition could not be reproduced in the controlled showcase setup.");
                     break;
             }
             db.ProblemReports.Add(report);
@@ -1080,6 +1181,19 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         await EnsureProblemReportControlledEvidenceAsync(programId, projectId, ct);
         return await db.ShowcaseUpgradeSteps.CountAsync(x => x.ProgramId == programId
             && x.StepKey.StartsWith(ProblemReportScenarioStepPrefix), ct);
+    }
+
+    private ProblemReportRevision AddScenarioRevision(ProblemReport report, string eventType, string actor, DateTimeOffset occurredAt,
+        string? actorDisplayName, ProblemReportState? fromState = null, ProblemReportState? toState = null,
+        string? detail = null, string? rationale = null)
+    {
+        var snapshot = ProblemReportControlledEditingAdapter.EvidenceSnapshot(report);
+        var revision = new ProblemReportRevision(report.Id, report.Revision, eventType, actor,
+            report.CanonicalHash(), snapshot, occurredAt, detail: detail,
+            fromState: fromState?.ToString(), toState: toState?.ToString(), rationale: rationale,
+            actorDisplayName: actorDisplayName);
+        db.ProblemReportRevisions.Add(revision);
+        return revision;
     }
 
     private static string AllocateScenarioNumber(string prefix, int scenarioIndex, ISet<string> usedNumbers)
@@ -1100,7 +1214,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     {
         for (var index = 1; index <= 8; index++)
         {
-            var expectedRelease = index <= 4 ? releasedId : activeId;
+            var expectedRelease = IsHistoricalProblemReportScenario(index) ? releasedId : activeId;
             var report = await ResolveProblemReportScenarioAsync(programId, projectId, index, expectedRelease, ct)
                 ?? throw new InvalidOperationException($"The {ProblemReportScenarioStepKey(index)} ownership record is missing.");
             if (report.TargetReleaseId != expectedRelease)
@@ -1120,45 +1234,108 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
 
     private async Task EnsureProblemReportControlledEvidenceAsync(Guid programId, Guid projectId, CancellationToken ct)
     {
-        var executions = (await db.TestExecutions.AsNoTracking().Where(x => x.ProjectId == projectId)
-                .Select(x => new { x.Id, x.ExecutedAt }).ToListAsync(ct))
-            .OrderBy(x => x.ExecutedAt).ToList();
-        if (executions.Count == 0)
-            throw new InvalidOperationException("FMS Problem Report closure scenarios require a recorded project execution.");
-        // The host seeds the demo directory before FMS data. A frozen controlled closure must name the
-        // actual seeded SQA account; fail closed if a caller invokes this seeder out of that order rather
-        // than writing a synthetic approval with an empty account identity.
-        var sqaAccountId = await db.UserAccounts.AsNoTracking()
-            .Where(x => x.UserName == "quality.analyst" && x.State == AccountState.Active)
+        var releasedReleaseId = await db.Releases.Where(x => x.ProjectId == projectId && x.Version == "1.5")
             .Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct)
-            ?? throw new InvalidOperationException("The seeded quality.analyst account is required before FMS closure scenarios can be frozen.");
-        if (!await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == sqaAccountId
-                && x.ProgramId == programId && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null, ct))
-            throw new InvalidOperationException("The seeded quality.analyst account must have an active SQA membership in FMSLIVE before closure can be frozen.");
+            ?? throw new InvalidOperationException("The FMS 1.5 release is required for historical closure-scenario evidence.");
+        var releasedBuildIds = (await db.SoftwareBuilds.AsNoTracking()
+                .Where(x => x.ProjectId == projectId && x.ReleaseId == releasedReleaseId)
+                .Select(x => x.Id).ToListAsync(ct)).ToHashSet();
+        var executions = await db.TestExecutions.AsNoTracking()
+            .Where(x => x.ProjectId == projectId && x.ReleaseId == releasedReleaseId)
+            .ToListAsync(ct);
+        var failurePairs = executions
+            .Where(x => x.Outcome == TestOutcome.Fail && x.SoftwareBuildId is { } buildId && releasedBuildIds.Contains(buildId))
+            .OrderBy(x => x.ExecutedAt).ThenBy(x => x.Id)
+            .Select(failure => new
+            {
+                Failure = failure,
+                Retest = executions.Where(candidate => candidate.RetestOfExecutionId == failure.Id
+                        && candidate.Outcome == TestOutcome.Pass && candidate.SoftwareBuildId is { } buildId
+                        && releasedBuildIds.Contains(buildId)
+                        && candidate.ProcedureRevisionId == failure.ProcedureRevisionId)
+                    .OrderBy(candidate => candidate.RecordedAt).ThenBy(candidate => candidate.Id)
+                    .FirstOrDefault(),
+            })
+            .Where(pair => pair.Retest is not null)
+            .ToList();
+        if (failurePairs.Count < 2)
+            throw new InvalidOperationException("FMS closure scenarios require two failed Build 1.5 executions with passing retest successors.");
 
-        var activeReleaseId = await db.Releases.Where(x => x.ProjectId == projectId && x.Version == "1.6")
-            .Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct)
-            ?? throw new InvalidOperationException("The FMS 1.6 release is required for closure-scenario evidence.");
+        // The host seeds the demo directory before FMS data. A frozen controlled closure must name the
+        // actual seeded SQA account and membership. An ended membership is deliberate authority history:
+        // preserve it and leave a new closure candidate waiting rather than restoring authority.
+        var sqaAccount = await db.UserAccounts.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.UserName == "quality.analyst", ct)
+            ?? throw new InvalidOperationException("The seeded quality.analyst account is required before FMS closure scenarios can be frozen.");
+        var sqaAccountId = sqaAccount.Id;
+        var sqaMemberships = await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.UserId == sqaAccountId && x.ProgramId == programId
+                && x.Role == ProgramRole.SoftwareQualityAnalyst)
+            .ToListAsync(ct);
+        if (sqaMemberships.Count == 0)
+            throw new InvalidOperationException("The seeded quality.analyst membership history is required before FMS closure scenarios can be frozen.");
+        var hasActiveSqa = sqaMemberships.Any(x => x.EndedAt is null);
+        var actorHandles = new[] { "test.engineer", "quality.analyst" };
+        var actorNames = (await db.UserAccounts.AsNoTracking()
+                .Where(x => actorHandles.Contains(x.UserName)).ToListAsync(ct))
+            .ToDictionary(x => x.UserName, x => x.DisplayName, StringComparer.OrdinalIgnoreCase);
+        string? ActorName(string actor) => actorNames.TryGetValue(actor, out var name) ? name : null;
         var evidenceService = new ProblemReportClosureCandidateService(db);
+        var policy = new ProblemReportClosureVerificationPolicy(db);
         for (var index = 6; index <= 7; index++)
         {
             var marker = ProblemReportScenarioMarker(index);
-            var report = await ResolveProblemReportScenarioAsync(programId, projectId, index, activeReleaseId, ct)
+            var report = await ResolveProblemReportScenarioAsync(programId, projectId, index, releasedReleaseId, ct)
                 ?? throw new InvalidOperationException($"The {ProblemReportScenarioStepKey(index)} ownership record is missing.");
+            var pair = failurePairs[index - 6];
+            var failure = pair.Failure;
+            var execution = pair.Retest!;
 
-            var executionId = report.ResolutionVerificationExecutionId ?? executions[0].Id;
-            var execution = await db.TestExecutions.SingleOrDefaultAsync(x => x.Id == executionId && x.ProjectId == projectId, ct);
-            if (execution is null)
-                throw new InvalidOperationException($"The {marker} scenario names a missing project verification execution.");
+            // Reopening a frozen historical closure deliberately clears its verification execution and
+            // advances the report revision. The old Build 1.5 retest is no longer a valid successor for that
+            // new revision. With ended SQA authority, leave the report in that honest in-work state rather
+            // than inventing a new passing execution or restoring the ended membership.
+            if (!hasActiveSqa && report.ResolutionVerificationExecutionId is null && report.State == ProblemReportState.Verifying
+                && await db.ProblemReportRevisions.AsNoTracking().AnyAsync(x => x.ProblemReportId == report.Id
+                    && x.EventType == "ClosureApproved", ct))
+                continue;
+
+            var originLinks = await db.ProblemReportLinks.Where(x => x.ProblemReportId == report.Id
+                && x.ArtifactType == "TestExecution"
+                && x.Relationship == ProblemReportRelationshipPolicy.OriginatingFailure).ToListAsync(ct);
+            if (originLinks.Any(x => x.ArtifactId != failure.Id))
+                throw new InvalidOperationException($"The {marker} scenario has an incorrect originating failed execution link.");
+            if (originLinks.Count == 0)
+            {
+                if (report.State is ProblemReportState.Closed or ProblemReportState.Rejected)
+                    throw new InvalidOperationException($"The {marker} scenario is terminal and cannot receive missing origin evidence.");
+                db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(report.Id, "TestExecution",
+                    failure.Id, ProblemReportRelationshipPolicy.OriginatingFailure,
+                    ProblemReportRelationshipProducer.FailureCreationWorkflow, report.ReportedBy, report.CreatedAt));
+            }
+
             if (report.ResolutionVerificationExecutionId is null)
             {
                 if (report.State != ProblemReportState.Verifying)
                     throw new InvalidOperationException($"The {marker} scenario cannot record verification from {report.State}.");
-                report.RecordResolutionVerification("test.engineer", execution.Id,
-                    new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero).AddDays(index).AddHours(6));
+                // This is the same authority used by /verify. It proves project/build scope, exact Build 1.5
+                // procedure effectivity, a passing result, attributable evidence, and a retest chain to the
+                // linked failure before the report is allowed to enter SQA closure.
+                var decision = await policy.ValidateAsync(report, execution, ct);
+                if (!decision.Accepted)
+                    throw new InvalidOperationException($"The {marker} scenario failed closure verification policy: {decision.Code} {decision.Error}");
+                var verificationAt = execution.RecordedAt.AddMinutes(1);
+                report.RecordResolutionVerification("test.engineer", execution.Id, verificationAt);
+                AddScenarioRevision(report, "ResolutionVerified", "test.engineer", verificationAt, ActorName("test.engineer"),
+                    ProblemReportState.Verifying, ProblemReportState.WaitingForSqaToClose,
+                    detail: "Controlled verification evidence recorded for the deterministic showcase scenario.");
             }
             else if (report.ResolutionVerificationExecutionId != execution.Id)
                 throw new InvalidOperationException($"The {marker} scenario has inconsistent verification evidence.");
+
+            var existingDecision = await policy.ValidateAsync(report, execution, ct);
+            if (!existingDecision.Accepted)
+                throw new InvalidOperationException($"The {marker} scenario failed closure verification policy: {existingDecision.Code} {existingDecision.Error}");
 
             var resolutionLinks = await db.ProblemReportLinks.Where(x => x.ProblemReportId == report.Id
                 && x.ArtifactType == "TestExecution"
@@ -1171,40 +1348,39 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 resolutionLink = ProblemReportRelationshipPolicy.CreateControlled(report.Id, "TestExecution", execution.Id,
                     ProblemReportRelationshipPolicy.ResolutionVerification,
                     ProblemReportRelationshipProducer.ResolutionVerificationWorkflow, "test.engineer",
-                    new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero).AddDays(index).AddHours(6));
+                    execution.RecordedAt.AddMinutes(1));
                 db.ProblemReportLinks.Add(resolutionLink);
             }
             await db.SaveChangesAsync(ct);
 
-            var hasVerificationRevision = await db.ProblemReportRevisions.AnyAsync(x => x.ProblemReportId == report.Id
-                && x.EventType == "ResolutionVerified", ct);
-            if (!hasVerificationRevision)
-                db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision, "ResolutionVerified",
-                    "test.engineer", report.CanonicalHash(), report.CanonicalSnapshot(),
-                    new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero).AddDays(index).AddHours(6),
-                    detail: "Controlled verification evidence recorded for the deterministic showcase scenario.",
-                    fromState: ProblemReportState.Verifying.ToString(), toState: ProblemReportState.WaitingForSqaToClose.ToString()));
-
             var candidates = await db.ProblemReportClosureCandidates
                 .Where(x => x.ProblemReportId == report.Id).OrderByDescending(x => x.Sequence).ToListAsync(ct);
-            var candidate = candidates.FirstOrDefault(x => x.State is ProblemReportClosureCandidateState.Pending or ProblemReportClosureCandidateState.Approved);
+            // A reopened historical closure has an approved candidate for its old report revision. It is
+            // immutable evidence, not an approval for this new verification; create a fresh candidate for
+            // the current Waiting revision. A current pending candidate remains retryable and is reused.
+            var candidate = candidates.FirstOrDefault(x => x.State == ProblemReportClosureCandidateState.Pending
+                && x.ReportRevision == report.Revision && x.VerificationExecutionId == execution.Id);
             if (report.State == ProblemReportState.WaitingForSqaToClose && candidate is null)
                 candidate = await evidenceService.CreateAsync(report, execution, resolutionLink, "test.engineer",
-                    new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero).AddDays(index).AddHours(6), ct);
+                    execution.RecordedAt.AddMinutes(1), ct);
+            await db.SaveChangesAsync(ct);
 
-            if (index == 7 && report.State == ProblemReportState.WaitingForSqaToClose)
+            if (report.State == ProblemReportState.WaitingForSqaToClose)
             {
-                if (candidate is null || candidate.State != ProblemReportClosureCandidateState.Pending)
-                    throw new InvalidOperationException("The closed FMS Problem Report must have a pending closure candidate.");
-                var closureAt = new DateTimeOffset(2024, 12, 12, 9, 0, 0, TimeSpan.Zero).AddDays(index).AddHours(7);
-                report.ApproveClosure("quality.analyst", sqaAccountId, closureAt);
-                var closureRevision = new ProblemReportRevision(report.Id, report.Revision, "ClosureApproved", "quality.analyst",
-                    report.CanonicalHash(), report.CanonicalSnapshot(), closureAt,
-                    detail: "Independent SQA closure approved for the deterministic showcase scenario.",
-                    fromState: ProblemReportState.WaitingForSqaToClose.ToString(), toState: ProblemReportState.Closed.ToString());
-                db.ProblemReportRevisions.Add(closureRevision);
-                await evidenceService.FreezeForApprovalAsync(report, candidate, closureRevision, "quality.analyst", sqaAccountId,
-                    ProgramRole.SoftwareQualityAnalyst.ToString(), closureAt, ct);
+                var candidateDecision = await evidenceService.ValidateForApprovalAsync(report, ct);
+                if (!candidateDecision.Accepted || candidateDecision.Candidate is null)
+                    throw new InvalidOperationException($"The {marker} scenario failed closure-candidate validation: {candidateDecision.Code} {candidateDecision.Error}");
+                candidate = candidateDecision.Candidate;
+                if (index == 7 && hasActiveSqa)
+                {
+                    var closureAt = execution.RecordedAt.AddHours(1);
+                    report.ApproveClosure("quality.analyst", sqaAccountId, closureAt);
+                    var closureRevision = AddScenarioRevision(report, "ClosureApproved", "quality.analyst", closureAt, ActorName("quality.analyst"),
+                        ProblemReportState.WaitingForSqaToClose, ProblemReportState.Closed,
+                        detail: "Independent SQA closure approved for the deterministic showcase scenario.");
+                    await evidenceService.FreezeForApprovalAsync(report, candidate, closureRevision, "quality.analyst", sqaAccountId,
+                        ProgramRole.SoftwareQualityAnalyst.ToString(), closureAt, ct);
+                }
             }
         }
         await db.SaveChangesAsync(ct);
@@ -1218,8 +1394,11 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (!releases.TryGetValue("1.5", out var released) || !releases.TryGetValue("1.6", out var active)) return false;
         var sqaAccount = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x => x.UserName == "quality.analyst"
             && x.State == AccountState.Active, ct);
-        if (sqaAccount is null || !await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == sqaAccount.Id
-                && x.ProgramId == programId && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null, ct)) return false;
+        var hasActiveSqa = sqaAccount is not null && await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == sqaAccount.Id
+                && x.ProgramId == programId && x.Role == ProgramRole.SoftwareQualityAnalyst && x.EndedAt == null, ct);
+        var hasSqaHistory = sqaAccount is not null && await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == sqaAccount.Id
+                && x.ProgramId == programId && x.Role == ProgramRole.SoftwareQualityAnalyst, ct);
+        if (!hasSqaHistory) return false;
 
         var interfaces = new List<SystemChangeRequest>();
         for (var index = 1; index <= 8; index++)
@@ -1237,14 +1416,16 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         for (var index = 1; index <= 8; index++)
         {
             var report = await ResolveProblemReportScenarioAsync(programId, projectId, index,
-                index <= 4 ? released.Id : active.Id, ct);
+                IsHistoricalProblemReportScenario(index) ? released.Id : active.Id, ct);
             if (report is null) return false;
             reports.Add(report);
         }
         if (reports.Count != 8 || !reports.All(x => ProblemReportOwners.Contains(x.ResponsibleEngineerId, StringComparer.OrdinalIgnoreCase))) return false;
-        if (reports.Count(x => x.TargetReleaseId == released.Id) != 4 || reports.Count(x => x.TargetReleaseId == active.Id) != 4) return false;
+        if (reports.Count(x => x.TargetReleaseId == released.Id) != 6 || reports.Count(x => x.TargetReleaseId == active.Id) != 2) return false;
         var requiredStates = new[] { ProblemReportState.Draft, ProblemReportState.Implementing, ProblemReportState.Verifying,
             ProblemReportState.WaitingForSqaToClose, ProblemReportState.Closed, ProblemReportState.Rejected };
+        if (!hasActiveSqa)
+            requiredStates = requiredStates.Where(state => state != ProblemReportState.Closed).ToArray();
         if (!requiredStates.All(state => reports.Any(x => x.State == state))) return false;
 
         foreach (var report in reports)
@@ -1257,6 +1438,11 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         foreach (var index in new[] { 6, 7 })
         {
             var report = reports[index - 1];
+            if (index == 7 && !hasActiveSqa && report.ResolutionVerificationExecutionId is null
+                && report.State == ProblemReportState.Verifying
+                && await db.ProblemReportRevisions.AsNoTracking().AnyAsync(x => x.ProblemReportId == report.Id
+                    && x.EventType == "ClosureApproved", ct))
+                continue;
             if (report?.ResolutionVerificationExecutionId is null) return false;
             if (!await db.ProblemReportLinks.AsNoTracking().AnyAsync(x => x.ProblemReportId == report.Id
                     && x.ArtifactType == "TestExecution" && x.ArtifactId == report.ResolutionVerificationExecutionId
@@ -1266,9 +1452,18 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 .OrderByDescending(x => x.Sequence).FirstOrDefaultAsync(ct);
             if (candidate is null || candidate.VerificationExecutionId != report.ResolutionVerificationExecutionId) return false;
             if (index == 6 && candidate.State != ProblemReportClosureCandidateState.Pending) return false;
-            if (index == 7 && (report.State != ProblemReportState.Closed || candidate.State != ProblemReportClosureCandidateState.Approved
-                    || string.IsNullOrWhiteSpace(candidate.ClosurePackageHash)
-                    || !await db.ProblemReportRevisions.AnyAsync(x => x.ProblemReportId == report.Id && x.EventType == "ClosureApproved", ct))) return false;
+            if (index == 7)
+            {
+                var closureIsFrozen = report.State == ProblemReportState.Closed
+                    && candidate.State == ProblemReportClosureCandidateState.Approved
+                    && !string.IsNullOrWhiteSpace(candidate.ClosurePackageHash)
+                    && await db.ProblemReportRevisions.AnyAsync(x => x.ProblemReportId == report.Id && x.EventType == "ClosureApproved", ct);
+                // If the SQA membership was deliberately ended, a new closure cannot be fabricated. A
+                // pre-existing frozen closure remains valid historical evidence; an unclosed scenario stays
+                // in work and is retried after an operator grants authority again.
+                if (hasActiveSqa ? !closureIsFrozen : report.State != ProblemReportState.WaitingForSqaToClose && !closureIsFrozen)
+                    return false;
+            }
         }
         return true;
     }
