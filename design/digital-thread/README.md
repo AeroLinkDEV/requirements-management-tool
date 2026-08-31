@@ -17,7 +17,8 @@ prose or screenshots.
 | `prototype/canvas.json` | Multi-artboard layout for the review canvas, plus the reviewer notes captured during each round. |
 | `prototype/checks.js` | Headless behavioural checks over `Main.dc.html` — see below. |
 | `prototype/serve.js` | Minimal static server, for looking at the prototype in a browser. |
-| `review/*.png` | Reviewer screenshots from rounds 2 and 3, each showing a defect or question that changed the design. |
+| `review/01..05-*.png` | Reviewer screenshots from prototype rounds 2 and 3, each showing a defect or question that changed the design. |
+| `review/06..08-*.png` | The **shipped** Digital Thread page as it stands on `main` after #867, which this work replaces. |
 
 ## Running it
 
