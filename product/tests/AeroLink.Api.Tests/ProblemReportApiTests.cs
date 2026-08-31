@@ -375,7 +375,16 @@ public sealed class ProblemReportApiTests
         Assert.True(createdChange.StatusCode == HttpStatusCode.Created, text);
         var changeId = JsonDocument.Parse(text).RootElement.GetProperty("id").GetGuid();
         var linked = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/linked/ChangeRequest/{changeId}");
-        Assert.Equal(reportId, Assert.Single(linked.EnumerateArray()).GetProperty("id").GetGuid());
+        var linkedReport = Assert.Single(linked.EnumerateArray());
+        Assert.Equal(reportId, linkedReport.GetProperty("id").GetGuid());
+        var snapshotId = linkedReport.GetProperty("snapshotId").GetGuid();
+        Assert.NotEqual(Guid.Empty, snapshotId);
+        using var historical = await client.GetAsync($"/api/problem-reports/{reportId}/history/{snapshotId}");
+        Assert.Equal(HttpStatusCode.OK, historical.StatusCode);
+        var historicalBody = await historical.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(reportId, historicalBody.GetProperty("id").GetGuid());
+        Assert.Equal(snapshotId, historicalBody.GetProperty("snapshotId").GetGuid());
+        Assert.True(historicalBody.GetProperty("historicalReadOnly").GetBoolean());
 
         var changeNumber = JsonDocument.Parse(text).RootElement.GetProperty("displayNumber").GetString();
         var reportNumber = reportBody.GetProperty("displayNumber").GetString();

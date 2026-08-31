@@ -67,9 +67,15 @@ public sealed class ProblemReportRelatedApiTests
         Assert.Equal("Missed-approach sequencing loses hold entry", fromFirst.GetProperty("title").GetString());
         Assert.Equal("Draft", fromFirst.GetProperty("state").GetString());
         Assert.Equal("1.6", fromFirst.GetProperty("targetBuild").GetString());
+        var secondSnapshotId = fromFirst.GetProperty("snapshotId").GetGuid();
+        Assert.NotEqual(Guid.Empty, secondSnapshotId);
+        using var historicalSecond = await client.GetAsync($"/api/problem-reports/{second.Id}/history/{secondSnapshotId}");
+        Assert.Equal(HttpStatusCode.OK, historicalSecond.StatusCode);
+        Assert.Equal(second.Id, (await historicalSecond.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid());
 
         var fromSecond = Assert.Single((await RelatedAsync(client, second.Id)).EnumerateArray());
         Assert.Equal(first.DisplayNumber, fromSecond.GetProperty("displayNumber").GetString());
+        Assert.NotEqual(Guid.Empty, fromSecond.GetProperty("snapshotId").GetGuid());
     }
 
     [Fact]

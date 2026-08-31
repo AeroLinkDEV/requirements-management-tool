@@ -22,6 +22,7 @@
   background: #f8fbfd; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: none; box-sizing: border-box;
 }
 .prRelatedOpen:hover, .prRelatedOpen:focus-visible { background: #eef5fb; border-color: #cfdeec; }
+.prRelatedOpen[data-exact-artifact-link="unresolved"] { cursor: default; }
 .prRelatedOpen:focus-visible, .prRelatedUnlink:focus-visible { outline: 2px solid #16766f; outline-offset: 1px; }
 .prRelatedOpen > i {
   display: grid; place-items: center; width: 30px; height: 26px; border-radius: 6px;

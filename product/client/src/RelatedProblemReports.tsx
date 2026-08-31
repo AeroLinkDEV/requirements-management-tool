@@ -16,6 +16,8 @@ import "./RelatedProblemReports.css";
 export type RelatedReport = {
   id: string;
   displayNumber: string;
+  /** Immutable ProblemReportRevision.Id used by the strict historical route, when one is available. */
+  snapshotId?: string | null;
   title: string;
   state: string;
   severity: string;
@@ -37,8 +39,8 @@ export default function RelatedProblemReports({ api, projectId, reportId, relate
   busy: boolean;
   onLink: (relatedId: string) => Promise<void>;
   onUnlink: (relatedId: string) => Promise<void>;
-  onOpen: (id: string) => void;
-  hrefFor?: (id: string) => string | undefined;
+  onOpen?: (id: string, snapshotId?: string) => void;
+  hrefFor?: (report: RelatedReport) => string | undefined;
 }) {
   const [picking, setPicking] = useState(false);
 
@@ -87,10 +89,10 @@ export default function RelatedProblemReports({ api, projectId, reportId, relate
       {related.length > 0 && (
         <div className="prRelatedList">
           {related.map(item => {
-            // The endpoint returns the related Problem Report aggregate id and its current controlled
-            // display number. This canonical route opens that same authorized aggregate/detail; it does
-            // not fabricate a revision route from a display number that has no separate revision id.
-            const href = hrefFor?.(item.id);
+            // The endpoint returns an immutable snapshot id only when the exact historical route can
+            // validate it. Never fall back to the aggregate route for a display number that includes a
+            // revision suffix — that would silently open a different controlled record later.
+            const href = hrefFor?.(item);
             const card = <>
               <i>PR</i>
               <span>
@@ -104,8 +106,8 @@ export default function RelatedProblemReports({ api, projectId, reportId, relate
             </>;
             return <div key={item.id} className="prRelatedCard">
               {href
-                ? <ExactArtifactLink className="prRelatedOpen" href={href} onOpen={() => onOpen(item.id)} title="Open this controlled Problem Report">{card}</ExactArtifactLink>
-                : <button type="button" className="prRelatedOpen" onClick={() => onOpen(item.id)}>{card}</button>}
+                ? <ExactArtifactLink className="prRelatedOpen" href={href} onOpen={onOpen ? () => onOpen(item.id, item.snapshotId ?? undefined) : undefined} title="Open this exact controlled Problem Report">{card}</ExactArtifactLink>
+                : <div className="prRelatedOpen" data-exact-artifact-link="unresolved" title="This exact Problem Report revision is not openable in the current scope">{card}</div>}
               {canEdit && (
                 <button
                   type="button"

@@ -143,6 +143,8 @@ type ImpactItem = {
   name?: string;
   type?: string;
   revisionId?: string;
+  artifactRevisionId?: string;
+  artifactKind?: string;
   isSuspect?: boolean;
   coverageState?: "Confirmed" | "Suspect";
 };
@@ -217,7 +219,8 @@ type Props = {
   onOpenRequirementRevision?: (requirement: { id: string; revisionId: string; level: string }) => void;
   onCloseRequirement: () => void;
   onOpenTraceability: (artifactId?: string) => void;
-  onOpenVerification: (artifact?: { artifactId: string; procedureId?: string; revisionId?: string; displayNumber?: string; level?: string }) => void;
+  verificationArtifactHref?: (artifact: { artifactId: string; procedureId?: string; revisionId?: string; artifactRevisionId?: string; artifactKind?: string; displayNumber?: string; level?: string }) => string | undefined;
+  onOpenVerification: (artifact?: { artifactId: string; procedureId?: string; revisionId?: string; artifactRevisionId?: string; artifactKind?: string; displayNumber?: string; level?: string }) => void;
 };
 
 const parseTags = (json: string) => {
@@ -246,6 +249,7 @@ export default function RequirementsWorkspace({
   onOpenRequirementRevision,
   onCloseRequirement,
   onOpenTraceability,
+  verificationArtifactHref,
   onOpenVerification,
 }: Props) {
   const appliedInitialView = useRef(false);
@@ -1500,7 +1504,7 @@ export default function RequirementsWorkspace({
                 {impact?.children.map((item) => <article className="traceRelation" key={item.id}><div className="traceRelationTarget">{impactRequirementLink(item)}<button type="button" onClick={() => focusImpactRequirement(item)}>Focus exact requirement</button></div><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
                 {!impact?.children.length && <div className="traceEmpty"><span>No downstream requirement is recorded.</span></div>}
                 <h3>Verification coverage</h3>
-                {impact?.tests.map((item) => { const unsettled = item.coverageState !== "Confirmed"; const target = { artifactId: item.id, revisionId: item.revisionId, displayNumber: item.displayNumber, level: item.level }; const noun = verificationArtifactNoun(item.level).toLowerCase(); return <article className={`traceRelation${unsettled ? " attention" : ""}`} key={item.revisionId ?? item.id}><button type="button" className="linkedArtifactText" onClick={() => onOpenVerification(target)}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · Open {noun} →</small></button><small>{unsettled ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{unsettled && <button type="button" onClick={() => onOpenVerification(target)}>Resolve in Verification →</button>}</article>; })}
+                {impact?.tests.map((item) => { const unsettled = item.coverageState !== "Confirmed"; const target = { artifactId: item.id, revisionId: item.artifactRevisionId ?? item.revisionId, artifactRevisionId: item.artifactRevisionId, artifactKind: item.artifactKind, displayNumber: item.displayNumber, level: item.level }; const noun = verificationArtifactNoun(item.level).toLowerCase(); return <article className={`traceRelation${unsettled ? " attention" : ""}`} key={item.artifactRevisionId ?? item.revisionId ?? item.id}><ExactArtifactLink className="linkedArtifactText" href={verificationArtifactHref?.(target)} onOpen={verificationArtifactHref?.(target) ? () => onOpenVerification(target) : undefined} title={verificationArtifactHref?.(target) ? "Open this exact verification artifact" : undefined}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · Open {noun} →</small></ExactArtifactLink><small>{unsettled ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{unsettled && <button type="button" onClick={() => onOpenVerification(target)}>Resolve in Verification →</button>}</article>; })}
                 {!impact?.tests.length && <div className="traceEmpty attention"><span>No verification artifact currently covers this revision.</span></div>}
               </div>
             )}

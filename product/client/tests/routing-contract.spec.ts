@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { artifactPath, coverageExplorerPath, exactTraceArtifactPath, parseRoute, routePath } from '../src/routing'
+import { artifactPath, coverageExplorerPath, exactTraceArtifactPath, parseRoute, problemReportSnapshotPath, routePath } from '../src/routing'
 
 const context = {
   programId: 'program-a',
@@ -87,6 +87,9 @@ test('problem reports and configuration baselines are active while retired produ
   expect(routePath(context, 'problemReports')).toBe(`${root}/problem-reports`)
   expect(parseRoute(`${root}/problem-reports/report-a`)).toMatchObject({ view: 'problemReports', artifactId: 'report-a' })
   expect(routePath(context, 'problemReports', 'system', 'report-a')).toBe(`${root}/problem-reports/report-a`)
+  const snapshotPath = problemReportSnapshotPath(context, 'report-a', 'snapshot-a')
+  expect(snapshotPath).toBe(`${root}/problem-reports/report-a?snapshotId=snapshot-a`)
+  expect(parseRoute(snapshotPath)).toMatchObject({ view: 'problemReports', artifactId: 'report-a', historicalProblemReportSnapshotId: 'snapshot-a' })
   expect(parseRoute(`${root}/release-planning`)).toMatchObject({ view: 'notFound' })
   expect(parseRoute(`${root}/baselines`)).toMatchObject({ view: 'baselines' })
   for (const kind of ['problem-report', 'baseline', 'build'])
@@ -103,6 +106,10 @@ test('exact verification artifact routes preserve immutable revision identity al
   expect(exactTraceArtifactPath(context, {
     id: 'procedure-a', kind: 'TestProcedure', revisionId, buildId: 'release-a', displayNumber: 'HLRTP-000001.00',
   })).toBe(path)
+  // A display number without its immutable revision cannot safely open the aggregate/latest route.
+  expect(exactTraceArtifactPath(context, {
+    id: 'procedure-a', kind: 'TestProcedure', buildId: 'release-a', displayNumber: 'HLRTP-000001.00',
+  })).toBeUndefined()
 })
 
 test('controlled document TCR links open the exact package in its build and discipline', () => {

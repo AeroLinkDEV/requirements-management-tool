@@ -359,6 +359,15 @@ export function coverageExplorerPath(context: RouteContext, discipline: "systemT
   return `${path}?${query}`;
 }
 
+/**
+ * Builds the only browser route that can open an immutable Problem Report snapshot. The snapshot id is
+ * supplied by an authorized server projection; callers must not derive it from a display number.
+ */
+export function problemReportSnapshotPath(context: RouteContext, reportId: string, snapshotId: string): string {
+  const path = routePath(context, "problemReports", "system", reportId);
+  return `${path}?snapshotId=${encodeURIComponent(snapshotId)}`;
+}
+
 export function artifactPath(context: RouteContext, kind: string, id: string, discipline = "system", level?: string) {
   if (kind === "change-request") return routePath(context, "scr", discipline === "software" ? "software" : "system", id, level === "Interface" ? "Interface" : undefined);
   if (kind === "requirement") return routePath(context, "requirements", discipline === "software" ? "software" : "system", id);
@@ -409,8 +418,12 @@ export function exactTraceArtifactPath(context: RouteContext, node: ExactTraceAr
     return `${path}&requirementRevisionId=${encodeURIComponent(node.id)}`;
   }
 
-  if (node.kind === 'TestProcedure' || node.kind === 'TestCase')
-    return routePath(scoped, 'artifact', 'system', node.id, node.kind === 'TestProcedure' ? 'test-procedure' : 'test-case', undefined, undefined, undefined, undefined, node.revisionId ?? undefined);
+  if (node.kind === 'TestProcedure' || node.kind === 'TestCase') {
+    // The artifact route without revisionId opens the mutable aggregate/latest revision. A displayed
+    // controlled verification identifier is linkable only when its immutable revision identity is present.
+    if (!node.revisionId) return undefined;
+    return routePath(scoped, 'artifact', 'system', node.id, node.kind === 'TestProcedure' ? 'test-procedure' : 'test-case', undefined, undefined, undefined, undefined, node.revisionId);
+  }
   if (node.kind === 'TestExecution') return routePath(scoped, 'artifact', 'system', node.id, 'test-execution');
   if (node.kind === 'Evidence') return routePath(scoped, 'artifact', 'system', node.id, 'evidence');
 

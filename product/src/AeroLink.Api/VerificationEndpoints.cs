@@ -1474,6 +1474,7 @@ public static class VerificationEndpoints
                         artifactId = link.ProcedureId,
                         procedureId = link.ProcedureId, // compatibility alias for the pre-Case contract
                         artifactKind = link.ArtifactKind,
+                        level = link.Level,
                         revisionId = link.ProcedureRevisionId,
                         link.DisplayNumber,
                         link.Title,

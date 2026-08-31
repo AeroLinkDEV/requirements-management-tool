@@ -183,6 +183,7 @@ type ChangeRequestDetail = {
 };
 type ProblemReportSummary = {
   id: string;
+  snapshotId?: string | null;
   displayNumber: string;
   title: string;
   state: string;
@@ -252,9 +253,9 @@ type Props = {
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void;
   /** Builds the canonical browser URL for that exact requirement revision. */
   requirementRevisionHref?: (requirement: { id: string; revisionId: string; level: string }) => string | undefined;
-  onOpenProblemReport: (id: string) => void;
+  onOpenProblemReport: (id: string, snapshotId?: string) => void;
   /** Builds the canonical browser URL for a driving Problem Report. */
-  problemReportHref?: (id: string) => string | undefined;
+  problemReportHref?: (report: ProblemReportSummary) => string | undefined;
   onDisciplineResolved: (discipline: "system" | "software", changeRequestType?: "Interface") => void;
   digitalThreadHref?: string;
   /**
@@ -1647,8 +1648,8 @@ export default function ChangeRequestWorkspace({
               <section className="workspaceCard">
                 <div className="workspaceTitle"><div><h2>Driving Problem Reports</h2><p>The problem records that authorized this engineering response</p></div></div>
                 {drivingProblemReports.map((report) => {
-                  const href=problemReportHref?.(report.id)
-                  return <ExactArtifactLink className="requirementView artifactReferenceCard" key={report.id} href={href} onOpen={href ? ()=>onOpenProblemReport(report.id) : undefined} title={href ? "Open this controlled Problem Report" : undefined}>
+                  const href=problemReportHref?.(report)
+                  return <ExactArtifactLink className="requirementView artifactReferenceCard" key={report.id} href={href} onOpen={href ? ()=>onOpenProblemReport(report.id,report.snapshotId ?? undefined) : undefined} title={href ? "Open this exact controlled Problem Report" : undefined}>
                     <div><b>{report.displayNumber}</b><span>{stateLabel(report.state)}</span></div>
                     <p>{report.title}</p>
                     <footer><small>Linked as a proposed corrective action</small><em>Open controlled PR →</em></footer>
