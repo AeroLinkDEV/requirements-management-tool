@@ -110,10 +110,11 @@ For a software verification profile configured as `[Case, Procedure]`, the Proce
 
 The ordinary Software verification UI is profile-aware rather than FMS-hard-coded. Full-profile projects expose HLR/LLR Case and Procedure change-control contexts and a unified build-scoped Test Case/Procedure Explorer. Case-only or partial profiles expose only their configured artifact keys.
 
-### Controlled software verification identities
+### Controlled verification identities
 
 | Level | Artifact | Artifact prefix | Change Request | Controlled document |
 | --- | --- | --- | --- | --- |
+| System | Test Procedure | `SYSTP` | `SYSTPCR` | `SYSTD` |
 | HLR | Test Case | `HLRTC` | `HLRTCCR` | `HLRTD` |
 | HLR | Test Procedure | `HLRTP` | `HLRTPCR` | `HLRTPD` |
 | LLR | Test Case | `LLRTC` | `LLRTCCR` | `LLRTD` |
