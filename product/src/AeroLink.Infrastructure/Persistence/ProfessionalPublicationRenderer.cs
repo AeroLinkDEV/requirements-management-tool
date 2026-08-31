@@ -641,6 +641,29 @@ public static class ProfessionalPublicationRenderer
         for(var i=0;i<streams.Count;i++){var stream=streams[i]+$"\nBT /F1 7 Tf 0.443 0.502 0.565 rg 1 0 0 1 500 28 Tm (Page {i+1} of {streams.Count}) Tj ET";var contentNumber=pageNumbers[i]+1;objects.Add(A($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>{xobjects} >> /Contents {contentNumber} 0 R >>"));objects.Add(A($"<< /Length {Encoding.ASCII.GetByteCount(stream)} >>\nstream\n{stream}\nendstream"));}
         using var output=new MemoryStream();output.Write(A("%PDF-1.4\n%----\n"));var offsets=new List<long>{0};for(var i=0;i<objects.Count;i++){offsets.Add(output.Position);output.Write(A($"{i+1} 0 obj\n"));output.Write(objects[i]);output.Write(A("\nendobj\n"));}var xref=output.Position;output.Write(A($"xref\n0 {objects.Count+1}\n0000000000 65535 f \n"));foreach(var offset in offsets.Skip(1))output.Write(A($"{offset:D10} 00000 n \n"));output.Write(A($"trailer\n<< /Size {objects.Count+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF"));return output.ToArray();
     }
-    private static IEnumerable<string> Wrap(string text, int width) { text = text ?? ""; if (text.Length == 0) { yield return ""; yield break; } for(var start=0;start<text.Length;){var length=Math.Min(width,text.Length-start);if(start+length<text.Length){var split=text.LastIndexOf(' ',start+length-1,length);if(split>start)length=split-start;}yield return text.Substring(start,length).Trim();start+=length;while(start<text.Length&&text[start]==' ')start++;} }
+    private static IEnumerable<string> Wrap(string text, int width)
+    {
+        text = (text ?? "").Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        if (text.Length == 0) { yield return ""; yield break; }
+        // A plain projection uses line breaks to separate paragraphs, figures and table rows. PDF text
+        // operators do not interpret a newline embedded inside one string, so preserve each authored line
+        // as its own positioned text operator before applying the ordinary width wrap.
+        foreach (var authoredLine in text.Split('\n'))
+        {
+            if (authoredLine.Length == 0) { yield return ""; continue; }
+            for (var start = 0; start < authoredLine.Length;)
+            {
+                var length = Math.Min(width, authoredLine.Length - start);
+                if (start + length < authoredLine.Length)
+                {
+                    var split = authoredLine.LastIndexOf(' ', start + length - 1, length);
+                    if (split > start) length = split - start;
+                }
+                yield return authoredLine.Substring(start, length).Trim();
+                start += length;
+                while (start < authoredLine.Length && authoredLine[start] == ' ') start++;
+            }
+        }
+    }
     private static string PdfEscape(string value) => new(value.Select(c => c is '(' or ')' or '\\' ? ' ' : c > 126 ? '-' : c).ToArray());
 }

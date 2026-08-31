@@ -329,6 +329,25 @@ public sealed class RichContentPublicationTests
     }
 
     [Fact]
+    public void Pdf_preserves_plain_projection_line_breaks_as_separate_text_lines()
+    {
+        var record = new PublicationRecord("Problem", "Narrative", "Problem statement",
+            "First figure description\nSecond figure description\nText below figures.", [], RichContent.Empty);
+        var publication = new ProfessionalPublication(
+            "FMS", "Flight Management System (FMS)", "FMS Showcase", "Problem Report", "Line break test",
+            "Controlled narrative", "PR-00001.00", "00", "Draft", "1.6", "Not yet baseline-effective",
+            "test.engineer", new DateTimeOffset(2026, 8, 31, 12, 0, 0, TimeSpan.Zero), new string('a', 64),
+            [], [], [], [new PublicationSection("Narrative", "", [record])]);
+
+        var output = ProfessionalPublicationRenderer.Render(publication, "pdf", "plain-line-breaks");
+        var pdf = Encoding.ASCII.GetString(output.Content);
+
+        Assert.Contains("(First figure description) Tj", pdf);
+        Assert.Contains("(Second figure description) Tj", pdf);
+        Assert.Contains("(Text below figures.) Tj", pdf);
+    }
+
+    [Fact]
     public void Pdf_keeps_image_rows_in_global_authored_order_with_surrounding_narrative()
     {
         var uri = "data:image/png;base64," + Convert.ToBase64String(Png());
