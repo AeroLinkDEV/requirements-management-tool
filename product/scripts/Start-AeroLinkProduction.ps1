@@ -38,8 +38,18 @@ $distRoot = Join-Path $clientRoot 'dist'
 $logs = Join-Path $productRoot '.local\logs'
 
 # Source posture first, before any prerequisite, build, or PostgreSQL start. The canonical HOME database must
-# only ever be exercised by a clean, current main; anything else is refused here, and Git is never mutated to
-# make an unsafe posture go away. The remote-demo stack invokes this launcher, so it inherits the same contract.
+# only ever be exercised by a clean, current main — clean also means no untracked, non-ignored source, which
+# merged main does not attest to; anything else is refused here, and Git is never mutated to make an unsafe
+# posture go away.
+#
+# Remote Demo inherits this policy whenever it invokes this launcher. A healthy already-running HOME process
+# from an older source revision is a separate gap, deferred to the later #881 runtime-identity /
+# stale-process slice.
+#
+# The re-entry identity must list every launcher implementation file already loaded into memory before this
+# call (or invoked on the way here): the running script, everything it dot-sourced or imported, the cmd/bat
+# entry chain, and the bootstrap module itself. A fast-forward that changes any of them must restart the
+# launch from the updated files rather than continue half-old/half-new.
 $bootstrapResult = Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical `
     -RepositoryRoot $repositoryRoot `
     -CurrentScriptPath $PSCommandPath `
@@ -48,8 +58,9 @@ $bootstrapResult = Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical `
         'START_AEROLINK_PRODUCTION.bat',
         'product\scripts\launch.cmd',
         'product\scripts\Start-AeroLinkProduction.ps1',
-        'product\scripts\AeroLinkLaunch.ps1',
         'product\scripts\AeroLinkPrerequisites.ps1',
+        'product\scripts\AeroLinkLaunch.ps1',
+        'product\scripts\AeroLinkNativeRunner.psm1',
         'product\scripts\AeroLinkBootstrap.psm1'
     )
 if ($bootstrapResult.Action -eq 'Reentered') { exit $bootstrapResult.ExitCode }

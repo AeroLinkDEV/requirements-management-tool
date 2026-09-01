@@ -14,11 +14,17 @@
 
     This module characterizes the repository BEFORE mutating anything (never `git pull` first and diagnose
     from the failure), permits exactly one kind of automatic mutation - a strictly fast-forward update of a
-    clean `main` with no local-only commits - and continues legibly when GitHub is unreachable.
+    clean `main` with no local-only commits and no non-ignored untracked files in HOME canonical mode - and
+    continues legibly when GitHub is unreachable. Untracked source is potentially executable source (an
+    untracked .ts/.tsx or SDK-style C# file can enter a build), so HOME canonical refuses it; development
+    mode preserves and runs with it.
 
     Two bounded auxiliary behaviors live here because a fast-forward can change the files that are running:
-    a one-shot re-entry mechanism (rerun the launch from the updated files, exactly once, marker-guarded), and
-    a package-lock.json fingerprint so `npm ci` runs only when client dependency inputs actually changed.
+    a one-shot re-entry mechanism (rerun the launch from the updated files, exactly once, carrying an expected
+    source SHA), and a package-lock.json fingerprint so `npm ci` runs only when client dependency inputs
+    actually changed. Re-entry skips the network/update cycle but never skips mode-policy validation: the
+    child re-runs the full policy for its mode and verifies the source identity the parent verified, then
+    consumes the one-shot markers so a stale marker can never bypass a later launch.
 
     Every test-facing seam is a parameter: repositories, state directories, and the dependency refresh command
     are injected, so the contract suites use disposable Git fixtures and temporary state and never touch the
@@ -262,13 +268,17 @@ function Invoke-AeroLinkBootstrapReentry {
     <#
         .SYNOPSIS Restarts the launch from the updated launcher files, in a fresh process, exactly once.
         .DESCRIPTION
-            The child process carries AEROLINK_BOOTSTRAP_REENTRY, which makes the bootstrap skip its update
-            path entirely, so a defect here cannot loop. The parent waits for the child and returns its exit
-            code; the caller exits with it so launch.cmd reports the true outcome.
+            The child process carries two one-shot environment markers: AEROLINK_BOOTSTRAP_REENTRY, which lets
+            the child's bootstrap skip the network/update cycle, and AEROLINK_BOOTSTRAP_EXPECTED_SHA, the exact
+            source identity the parent verified. The markers are loop prevention and source identity only —
+            they are never authority to skip mode-policy validation, and the child consumes both immediately.
+            The parent waits for the child and returns its exit code; the caller exits with it so launch.cmd
+            reports the true outcome.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$CurrentScriptPath,
+        [Parameter(Mandatory)][string]$ExpectedSha,
         [AllowEmptyCollection()][string[]]$ScriptArguments = @()
     )
     $hostExecutable = (Get-Process -Id $PID).Path
@@ -284,12 +294,13 @@ function Invoke-AeroLinkBootstrapReentry {
     Write-Host 'The launcher implementation itself was just updated by the safe update. Restarting the launch from the updated files...' -ForegroundColor Yellow
 
     $env:AEROLINK_BOOTSTRAP_REENTRY = '1'
+    $env:AEROLINK_BOOTSTRAP_EXPECTED_SHA = $ExpectedSha
     try {
         $child = Start-Process -FilePath $hostExecutable -ArgumentList $argumentLine -NoNewWindow -PassThru -Wait
         return $child.ExitCode
     }
     finally {
-        Remove-Item -Path 'Env:AEROLINK_BOOTSTRAP_REENTRY' -ErrorAction SilentlyContinue
+        Remove-Item -Path 'Env:AEROLINK_BOOTSTRAP_REENTRY', 'Env:AEROLINK_BOOTSTRAP_EXPECTED_SHA' -ErrorAction SilentlyContinue
     }
 }
 
@@ -364,15 +375,84 @@ function Update-AeroLinkClientDependencies {
     return [pscustomobject]@{ Refreshed = $true; Fingerprint = $fingerprint }
 }
 
+function Write-AeroLinkProductionRefusal {
+    <#
+        .SYNOPSIS Prints the production refusal block and throws so the launcher exits before any product start.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Reason,
+        [string[]]$AdditionalLines = @()
+    )
+    Write-Host 'AEROLINK PRODUCTION START REFUSED' -ForegroundColor Red
+    Write-Host $Reason -ForegroundColor Red
+    foreach ($line in $AdditionalLines) { Write-Host $line -ForegroundColor Red }
+    Write-Host 'No Git files or database state were changed.' -ForegroundColor Red
+    throw "Production launch refused: $Reason"
+}
+
+function Assert-AeroLinkHomeCanonicalSourcePolicy {
+    <#
+        .SYNOPSIS Validates a posture against the HOME canonical source invariant, without touching anything.
+        .DESCRIPTION
+            The invariant: a Git working tree on a non-detached `main`, zero tracked modifications, zero
+            non-ignored untracked files (untracked source is potentially executable source and is not
+            attested by merged main), and no commits ahead of or diverged from the last-known origin/main.
+            When an expected SHA is supplied, HEAD must match it exactly. Used at startup, offline, on
+            re-entry, and again after any fast-forward, because the source can change between those moments.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Posture,
+        [string]$ExpectedSha,
+        [ValidateSet('startup', 'offline', 're-entry', 'post-update')][string]$Context = 'startup'
+    )
+    if (-not $Posture.IsGitRepository) {
+        throw "AeroLink cannot characterize its source: $($Posture.RepositoryRoot) is not a Git working tree. Launch refused; nothing was changed."
+    }
+    if ($Posture.IsDetachedHead) {
+        throw "AeroLink cannot characterize its source: the repository is in detached HEAD state at $($Posture.ShortSha). Check out a branch, then launch again. Nothing was changed."
+    }
+    if ($Posture.Branch -ne $script:AeroLinkBootstrapMainBranch) {
+        Write-AeroLinkProductionRefusal -Reason "Repository is on $($Posture.Branch), not canonical main."
+    }
+    if ($Posture.HasTrackedChanges) {
+        Write-AeroLinkProductionRefusal -Reason 'The working tree has uncommitted modifications to tracked files.'
+    }
+    if ($Posture.UntrackedFileCount -gt 0) {
+        $noun = if ($Posture.UntrackedFileCount -eq 1) { 'file' } else { 'files' }
+        Write-AeroLinkProductionRefusal -Reason "The repository contains $($Posture.UntrackedFileCount) untracked local $noun." `
+            -AdditionalLines @('Canonical HOME AeroLink only runs from a clean merged main.')
+    }
+    if (-not [string]::IsNullOrEmpty($ExpectedSha) -and $Posture.HeadSha -ne $ExpectedSha) {
+        throw "AeroLink source identity mismatch ($Context): HEAD is $($Posture.ShortSha) but the verified source is $($ExpectedSha.Substring(0, [Math]::Min(8, $ExpectedSha.Length))). The source changed during startup and must be inspected; no automatic action was taken."
+    }
+    if ($Posture.Relationship -eq 'Diverged') {
+        Write-AeroLinkProductionRefusal -Reason 'Local main has diverged from origin/main.'
+    }
+    if ($null -ne $Posture.AheadOfRemoteMain -and $Posture.AheadOfRemoteMain -gt 0) {
+        $offlineNote = if ($Context -eq 'offline') { ', and GitHub is unavailable to verify otherwise' } else { '' }
+        Write-AeroLinkProductionRefusal -Reason "Local main contains commits that are not on origin/main$offlineNote."
+    }
+}
+
 function Invoke-AeroLinkSourceBootstrap {
     <#
         .SYNOPSIS Applies the mode-specific source policy, then updates and re-enters when permitted.
         .DESCRIPTION
             Decision order is deliberately posture-first: characterize, decide by mode, and only then touch
             anything. The only permitted automatic Git mutation is a strictly fast-forward update of a clean
-            `main` with no local-only commits, performed after the fetch so preconditions are re-derived from
-            the refreshed state. Refusals happen before any product process, build, or PostgreSQL start, and
-            never mutate Git.
+            `main` with no local-only commits and no untracked files in HOME canonical mode, performed after
+            the fetch so preconditions are re-derived from the refreshed state. Refusals happen before any
+            product process, build, or PostgreSQL start, and never mutate Git.
+
+            Re-entry (the fresh-process restart after a launcher-changing fast-forward) skips the network and
+            update cycle but NEVER skips mode-policy validation: the child still runs the full policy for its
+            mode, plus an exact expected-SHA identity check against the SHA the parent verified, and consumes
+            the one-shot markers so a stale marker can never bypass a later launch.
+
+            -FastForwardObserver is a deterministic diagnostic/test seam invoked between the fast-forward and
+            the post-update revalidation, so contract tests can prove that source appearing in that window
+            fails closed instead of racing.
     #>
     [CmdletBinding()]
     param(
@@ -381,17 +461,41 @@ function Invoke-AeroLinkSourceBootstrap {
         [Parameter(Mandatory)][string]$CurrentScriptPath,
         [AllowEmptyCollection()][string[]]$ScriptArguments = @(),
         [AllowEmptyCollection()][string[]]$LauncherFiles = @(),
-        [int]$FetchTimeoutSeconds = 45
+        [int]$FetchTimeoutSeconds = 45,
+        [scriptblock]$FastForwardObserver
     )
 
+    $isHomeCanonical = ($Mode -eq 'HomeCanonical')
+
+    # Re-entry: the parent has already performed the update and verified the source. Skip the network and
+    # update cycle, but re-run the full mode policy against the actual tree, consume the markers, and refuse
+    # closed on any mismatch. The marker is loop prevention and identity, never validation authority.
     if ($env:AEROLINK_BOOTSTRAP_REENTRY) {
-        Write-Host 'Source bootstrap: re-entry in progress; the source update step is skipped (bounded one-shot re-entry).' -ForegroundColor DarkGray
+        $expectedShaFromParent = $env:AEROLINK_BOOTSTRAP_EXPECTED_SHA
+        Remove-Item -Path 'Env:AEROLINK_BOOTSTRAP_REENTRY', 'Env:AEROLINK_BOOTSTRAP_EXPECTED_SHA' -ErrorAction SilentlyContinue
+
+        $posture = Get-AeroLinkRepositoryPosture -RepositoryRoot $RepositoryRoot
+        if (-not $isHomeCanonical) {
+            if (-not $posture.IsGitRepository) {
+                throw "AeroLink cannot characterize its source: $RepositoryRoot is not a Git working tree. Launch refused; nothing was changed."
+            }
+            if ($posture.IsDetachedHead) {
+                throw "AeroLink cannot characterize its source: the repository is in detached HEAD state at $($posture.ShortSha). Check out a branch, then launch again. Nothing was changed."
+            }
+            if ($null -ne $expectedShaFromParent -and $posture.HeadSha -ne $expectedShaFromParent) {
+                throw "AeroLink source identity mismatch (re-entry): HEAD is $($posture.ShortSha) but the updated launcher expected $($expectedShaFromParent.Substring(0, [Math]::Min(8, $expectedShaFromParent.Length))). The source changed during startup and must be inspected; no automatic action was taken."
+            }
+            Write-Host "Source bootstrap re-entry: development source validated at $($posture.Branch) @ $($posture.ShortSha); no further fetch or update." -ForegroundColor DarkGray
+            return [pscustomobject]@{
+                Action = 'ReentryValidated'; HeadSha = $posture.HeadSha; UpdatedToSha = $null
+                RemoteReachable = $null; Reason = 'Re-entry validated the local source posture; the update cycle was skipped.'
+            }
+        }
+        Assert-AeroLinkHomeCanonicalSourcePolicy -Posture $posture -ExpectedSha $expectedShaFromParent -Context 're-entry'
+        Write-Host "Source bootstrap re-entry: HOME canonical source revalidated at main @ $($posture.ShortSha); no further fetch or update." -ForegroundColor DarkGray
         return [pscustomobject]@{
-            Action         = 'ReentryInProgress'
-            HeadSha        = $null
-            UpdatedToSha   = $null
-            RemoteReachable = $null
-            Reason         = 'The one-shot re-entry marker is present, so no further bootstrap update may run.'
+            Action = 'ReentryValidated'; HeadSha = $posture.HeadSha; UpdatedToSha = $null
+            RemoteReachable = $null; Reason = 'Re-entry revalidated the HOME canonical source posture; the update cycle was skipped.'
         }
     }
 
@@ -404,7 +508,6 @@ function Invoke-AeroLinkSourceBootstrap {
         throw "AeroLink cannot characterize its source: the repository is in detached HEAD state at $($posture.ShortSha). Check out a branch, then launch again. Nothing was changed."
     }
 
-    $isHomeCanonical = ($Mode -eq 'HomeCanonical')
     $shortSha = $posture.ShortSha
 
     if ($posture.Branch -ne $script:AeroLinkBootstrapMainBranch) {
@@ -416,10 +519,7 @@ function Invoke-AeroLinkSourceBootstrap {
                 RemoteReachable = $null; Reason = "Deliberate branch $($posture.Branch) was left unchanged."
             }
         }
-        Write-Host 'AEROLINK PRODUCTION START REFUSED' -ForegroundColor Red
-        Write-Host "Repository is on $($posture.Branch), not canonical main." -ForegroundColor Red
-        Write-Host 'No Git files or database state were changed.' -ForegroundColor Red
-        throw "Production launch refused: the repository is on $($posture.Branch), not canonical main."
+        Write-AeroLinkProductionRefusal -Reason "Repository is on $($posture.Branch), not canonical main."
     }
 
     if ($posture.HasTrackedChanges) {
@@ -431,10 +531,19 @@ function Invoke-AeroLinkSourceBootstrap {
                 RemoteReachable = $null; Reason = 'The working tree has tracked modifications, so no update was attempted.'
             }
         }
-        Write-Host 'AEROLINK PRODUCTION START REFUSED' -ForegroundColor Red
-        Write-Host 'The working tree has uncommitted modifications to tracked files.' -ForegroundColor Red
-        Write-Host 'No Git files or database state were changed.' -ForegroundColor Red
-        throw 'Production launch refused: the working tree has uncommitted modifications to tracked files.'
+        Write-AeroLinkProductionRefusal -Reason 'The working tree has uncommitted modifications to tracked files.'
+    }
+
+    if ($isHomeCanonical -and $posture.UntrackedFileCount -gt 0) {
+        # Untracked source is potentially executable source (an untracked .ts/.tsx or SDK-style C# file can
+        # enter a build), and it is not attested by merged main. Never delete, stash, or modify it: refuse.
+        $noun = if ($posture.UntrackedFileCount -eq 1) { 'file' } else { 'files' }
+        Write-AeroLinkProductionRefusal -Reason "The repository contains $($posture.UntrackedFileCount) untracked local $noun." `
+            -AdditionalLines @('Canonical HOME AeroLink only runs from a clean merged main.')
+    }
+
+    if (-not $isHomeCanonical -and $posture.UntrackedFileCount -gt 0) {
+        Write-Host "Note: $($posture.UntrackedFileCount) untracked local file(s) present. They are preserved and never deleted." -ForegroundColor DarkGray
     }
 
     if (-not $posture.HasRemote) {
@@ -454,38 +563,31 @@ function Invoke-AeroLinkSourceBootstrap {
                 RemoteReachable = $false; Reason = 'The working tree became dirty during the update attempt; nothing was changed.'
             }
         }
-        if (-not $isHomeCanonical) {
+        if ($isHomeCanonical) {
+            # HOME canonical offline: acceptable only for a clean, known main with no local-only commits and
+            # no untracked work; the shared invariant check decides, with no network involved.
             if ($null -eq $posture.RemoteMainSha) {
-                Write-Host "GitHub unavailable. Continuing with local main @ $shortSha. The remote revision could not be verified and no upstream main is cached locally."
+                Write-AeroLinkProductionRefusal -Reason "GitHub is unavailable and no cached origin/main exists, so the canonical source posture cannot be verified for main @ $shortSha."
             }
-            else {
-                Write-Host "GitHub unavailable. Continuing with local main @ $shortSha. Latest remote revision could not be verified."
-                if ($posture.Relationship -eq 'Ahead' -or $posture.Relationship -eq 'Diverged') {
-                    Write-Host 'Note: local main is not identical to the last-known origin/main; nothing was merged, rebased, or reset.'
-                }
-            }
+            Assert-AeroLinkHomeCanonicalSourcePolicy -Posture $posture -Context 'offline'
+            Write-Host "GitHub unavailable. Running cached clean main @ $shortSha. Latest remote revision could not be verified." -ForegroundColor Yellow
             return [pscustomobject]@{
-                Action = 'ContinuedOffline'; HeadSha = $posture.HeadSha; UpdatedToSha = $null
-                RemoteReachable = $false; Reason = 'GitHub is unavailable; the local checkout was left unchanged.'
+                Action = 'ContinuedOfflineCachedMain'; HeadSha = $posture.HeadSha; UpdatedToSha = $null
+                RemoteReachable = $false; Reason = 'GitHub is unavailable; the cached clean main is explicitly not verified against the remote.'
             }
         }
-        # HOME canonical offline: acceptable only for a clean, known main with no local-only commits.
         if ($null -eq $posture.RemoteMainSha) {
-            Write-Host 'AEROLINK PRODUCTION START REFUSED' -ForegroundColor Red
-            Write-Host "GitHub is unavailable and no cached origin/main exists, so the canonical source posture cannot be verified for main @ $shortSha." -ForegroundColor Red
-            Write-Host 'No Git files or database state were changed.' -ForegroundColor Red
-            throw 'Production launch refused: the canonical source posture cannot be verified offline (no cached origin/main).'
+            Write-Host "GitHub unavailable. Continuing with local main @ $shortSha. The remote revision could not be verified and no upstream main is cached locally."
         }
-        if ($posture.AheadOfRemoteMain -gt 0) {
-            Write-Host 'AEROLINK PRODUCTION START REFUSED' -ForegroundColor Red
-            Write-Host 'Local main contains commits that are not on the last-known origin/main, and GitHub is unavailable to verify otherwise.' -ForegroundColor Red
-            Write-Host 'No Git files or database state were changed.' -ForegroundColor Red
-            throw 'Production launch refused: main has local-only commits.'
+        else {
+            Write-Host "GitHub unavailable. Continuing with local main @ $shortSha. Latest remote revision could not be verified."
+            if ($posture.Relationship -eq 'Ahead' -or $posture.Relationship -eq 'Diverged') {
+                Write-Host 'Note: local main is not identical to the last-known origin/main; nothing was merged, rebased, or reset.'
+            }
         }
-        Write-Host "GitHub unavailable. Running cached clean main @ $shortSha. Latest remote revision could not be verified." -ForegroundColor Yellow
         return [pscustomobject]@{
-            Action = 'ContinuedOfflineCachedMain'; HeadSha = $posture.HeadSha; UpdatedToSha = $null
-            RemoteReachable = $false; Reason = 'GitHub is unavailable; the cached clean main is explicitly not verified against the remote.'
+            Action = 'ContinuedOffline'; HeadSha = $posture.HeadSha; UpdatedToSha = $null
+            RemoteReachable = $false; Reason = 'GitHub is unavailable; the local checkout was left unchanged.'
         }
     }
 
@@ -502,14 +604,13 @@ function Invoke-AeroLinkSourceBootstrap {
                 RemoteReachable = $true; Reason = 'The working tree has tracked modifications, so no update was attempted.'
             }
         }
-        Write-Host 'AEROLINK PRODUCTION START REFUSED' -ForegroundColor Red
-        Write-Host 'The working tree has uncommitted modifications to tracked files.' -ForegroundColor Red
-        Write-Host 'No Git files or database state were changed.' -ForegroundColor Red
-        throw 'Production launch refused: the working tree has uncommitted modifications to tracked files.'
+        Write-AeroLinkProductionRefusal -Reason 'The working tree has uncommitted modifications to tracked files.'
     }
 
-    if ($posture.UntrackedFileCount -gt 0) {
-        Write-Host "Note: $($posture.UntrackedFileCount) untracked local file(s) present. They are preserved and never deleted." -ForegroundColor DarkGray
+    if ($isHomeCanonical) {
+        # The refreshed posture is the last word before the relationship decision: anything that appeared
+        # while fetching is refused here, exactly as it would have been before the fetch.
+        Assert-AeroLinkHomeCanonicalSourcePolicy -Posture $posture -Context 'startup'
     }
 
     switch ($posture.Relationship) {
@@ -530,10 +631,7 @@ function Invoke-AeroLinkSourceBootstrap {
                     RemoteReachable = $true; Reason = 'Main has local-only commits; no update was attempted.'
                 }
             }
-            Write-Host 'AEROLINK PRODUCTION START REFUSED' -ForegroundColor Red
-            Write-Host 'Local main contains commits that are not on origin/main.' -ForegroundColor Red
-            Write-Host 'No Git files or database state were changed.' -ForegroundColor Red
-            throw 'Production launch refused: main has local-only commits.'
+            Write-AeroLinkProductionRefusal -Reason 'Local main contains commits that are not on origin/main.'
         }
         'Diverged' {
             if (-not $isHomeCanonical) {
@@ -544,10 +642,7 @@ function Invoke-AeroLinkSourceBootstrap {
                     RemoteReachable = $true; Reason = 'Main has diverged from origin/main; no update was attempted.'
                 }
             }
-            Write-Host 'AEROLINK PRODUCTION START REFUSED' -ForegroundColor Red
-            Write-Host 'Local main has diverged from origin/main.' -ForegroundColor Red
-            Write-Host 'No Git files or database state were changed.' -ForegroundColor Red
-            throw 'Production launch refused: main has diverged from origin/main.'
+            Write-AeroLinkProductionRefusal -Reason 'Local main has diverged from origin/main.'
         }
         'Behind' {
             Write-Host "Source: main @ $shortSha"
@@ -561,9 +656,25 @@ function Invoke-AeroLinkSourceBootstrap {
                 # A refused merge (for example an untracked file in the way) mutates nothing; say so plainly.
                 throw "The safe fast-forward update was refused by Git and nothing was changed: $($_.Exception.Message)"
             }
+
+            # Deterministic diagnostic/test seam: anything another process does in the real window between
+            # the merge and the revalidation below can be simulated here without sleeps or races.
+            if ($FastForwardObserver) { & $FastForwardObserver $RepositoryRoot }
+
+            # Full revalidation after the update, before anything else may consume the new tree: the source
+            # must still satisfy the complete mode policy, not merely sit at the expected commit.
             $updated = Get-AeroLinkRepositoryPosture -RepositoryRoot $RepositoryRoot
-            if (-not $updated.HeadSha -or $updated.HeadSha -ne $posture.RemoteMainSha) {
-                throw 'The fast-forward update did not land on origin/main. Refusing to continue; inspect the repository before launching again.'
+            if (-not $updated.IsGitRepository -or $updated.IsDetachedHead) {
+                throw 'The repository state changed during startup and can no longer be characterized. Inspect the repository; no automatic action was taken.'
+            }
+            if ($updated.HeadSha -ne $posture.RemoteMainSha) {
+                throw "The source changed during startup: HEAD is $($updated.ShortSha) but the verified update target was $($posture.ShortRemoteMainSha). Inspect the repository; no automatic action was taken."
+            }
+            if ($isHomeCanonical) {
+                Assert-AeroLinkHomeCanonicalSourcePolicy -Posture $updated -ExpectedSha $posture.RemoteMainSha -Context 'post-update'
+            }
+            elseif ($updated.HasTrackedChanges) {
+                Write-Host 'Note: local modifications appeared during the update. They are preserved and nothing was merged, rebased, or reset.' -ForegroundColor DarkGray
             }
             Write-Host "Updated safely to $($updated.ShortSha)" -ForegroundColor Green
 
@@ -572,7 +683,7 @@ function Invoke-AeroLinkSourceBootstrap {
                 $changedFiles = @(Compare-AeroLinkBootstrapFileSet -Before $beforeFiles -After $afterFiles)
                 if ($changedFiles.Count -gt 0) {
                     Write-Host "Updated launcher files: $($changedFiles -join ', ')" -ForegroundColor DarkGray
-                    $exitCode = Invoke-AeroLinkBootstrapReentry -CurrentScriptPath $CurrentScriptPath -ScriptArguments $ScriptArguments
+                    $exitCode = Invoke-AeroLinkBootstrapReentry -CurrentScriptPath $CurrentScriptPath -ExpectedSha $updated.HeadSha -ScriptArguments $ScriptArguments
                     return [pscustomobject]@{
                         Action = 'Reentered'; HeadSha = $updated.HeadSha; UpdatedToSha = $updated.ShortSha
                         RemoteReachable = $true; Reason = 'The updated launcher implementation ran in a fresh process.'; ExitCode = $exitCode
@@ -581,7 +692,7 @@ function Invoke-AeroLinkSourceBootstrap {
             }
             return [pscustomobject]@{
                 Action = 'Updated'; HeadSha = $updated.HeadSha; UpdatedToSha = $updated.ShortSha
-                RemoteReachable = $true; Reason = 'Strictly fast-forwarded to origin/main.'
+                RemoteReachable = $true; Reason = 'Strictly fast-forwarded to origin/main and the result revalidated.'
             }
         }
         default {

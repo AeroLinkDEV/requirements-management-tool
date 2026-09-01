@@ -25,7 +25,13 @@ $apiUrl = 'http://127.0.0.1:5080'
 $websiteUrl = 'http://127.0.0.1:5173'
 
 # Source posture before anything else. Development mode preserves deliberate local work — feature branches,
-# dirt, local-only commits — and only fast-forwards a clean main; it never polices the checkout.
+# dirt, local-only commits, untracked files — and only fast-forwards a clean main; it never polices the
+# checkout.
+#
+# The re-entry identity must list every launcher implementation file already loaded into memory before this
+# call (or invoked on the way here): the running script, everything it dot-sourced or imported, the cmd/bat
+# entry chain, and the bootstrap module itself. A fast-forward that changes any of them must restart the
+# launch from the updated files rather than continue half-old/half-new.
 $bootstrapResult = Invoke-AeroLinkSourceBootstrap -Mode Development `
     -RepositoryRoot $repositoryRoot `
     -CurrentScriptPath $PSCommandPath `
@@ -34,8 +40,9 @@ $bootstrapResult = Invoke-AeroLinkSourceBootstrap -Mode Development `
         'START_AEROLINK.bat',
         'product\scripts\launch.cmd',
         'product\scripts\Start-AeroLink.ps1',
-        'product\scripts\AeroLinkLaunch.ps1',
         'product\scripts\AeroLinkPrerequisites.ps1',
+        'product\scripts\AeroLinkLaunch.ps1',
+        'product\scripts\AeroLinkNativeRunner.psm1',
         'product\scripts\AeroLinkBootstrap.psm1'
     )
 if ($bootstrapResult.Action -eq 'Reentered') { exit $bootstrapResult.ExitCode }
