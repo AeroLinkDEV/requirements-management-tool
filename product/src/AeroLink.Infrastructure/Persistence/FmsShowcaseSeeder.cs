@@ -36,6 +36,18 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     // that supposedly approved it existed.
     private static readonly DateTimeOffset FreshSqaMembershipGrantedAt = new(2024, 1, 8, 14, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset FreshProblemReportTimelineAt = new(2024, 12, 12, 9, 0, 0, TimeSpan.Zero);
+    // PostgreSQL stores timestamp-with-time-zone values at microsecond precision. Keep operator-triggered
+    // compatibility evidence on that boundary before it is used in any hash or immutable snapshot, while
+    // leaving the fixed fresh-seed timeline byte-for-byte unchanged.
+    private const long PersistedTimestampTickQuantum = TimeSpan.TicksPerMicrosecond;
+    private static DateTimeOffset PersistedTimestamp(DateTimeOffset value)
+    {
+        var utc = value.ToUniversalTime();
+        return new DateTimeOffset(utc.Ticks - (utc.Ticks % PersistedTimestampTickQuantum), TimeSpan.Zero);
+    }
+
+    private static DateTimeOffset NextPersistedTimestamp(DateTimeOffset value) =>
+        PersistedTimestamp(value).AddTicks(PersistedTimestampTickQuantum);
     // Scenario ownership is recorded in one immutable upgrade-step row per artifact. Prose markers below
     // are display breadcrumbs only; they are never used to locate or mutate controlled rows.
     private const string InterfaceScenarioMarkerPrefix = "[FMSLIVE showcase scenario: interface-";
@@ -362,14 +374,14 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             .Where(x => x.ProgramId == programId && actorIds.Contains(x.UserId) && x.EndedAt == null)
             .Select(x => x.GrantedAt).ToListAsync(ct);
         var latestGrant = grants.Count == 0 ? (DateTimeOffset?)null : grants.Max();
-        return latestGrant is { } grant && grant >= baselineAt ? grant.AddTicks(1) : baselineAt;
+        return latestGrant is { } grant && grant >= baselineAt ? NextPersistedTimestamp(grant) : baselineAt;
     }
 
     private async Task<DateTimeOffset> EffectiveProblemReportTimelineAtAsync(Guid programId,
         DateTimeOffset baselineAt, CancellationToken ct)
     {
         var latestGrant = await LatestCurrentProblemReportActorGrantAsync(programId, ct);
-        return latestGrant is { } grant && grant >= baselineAt ? grant.AddTicks(1) : baselineAt;
+        return latestGrant is { } grant && grant >= baselineAt ? NextPersistedTimestamp(grant) : baselineAt;
     }
 
     private async Task<DateTimeOffset?> LatestCurrentProblemReportActorGrantAsync(Guid programId,
@@ -703,7 +715,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             // The historical event still exists, but there is no defensible old-build closure scope. The
             // current-time compatibility evidence uses the active, exact carried scope and needs a real
             // current authority window rather than an old timestamp from unrelated executions.
-            return DateTimeOffset.UtcNow;
+            return PersistedTimestamp(DateTimeOffset.UtcNow);
 
         var planned = effectivePairs[1].Retest.RecordedAt.AddHours(1);
         // A pre-existing installation may have received its current authority years after the deterministic
@@ -754,7 +766,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var reconciled = 0;
         foreach (var report in reports.Where(x => !terminal.Contains(x.State)))
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = PersistedTimestamp(DateTimeOffset.UtcNow);
             report.Retarget(report.ResponsibleEngineerId, active.Id, now);
             if (!await db.ProblemReportLinks.AnyAsync(x => x.ProblemReportId == report.Id && x.ArtifactType == "Release" && x.Relationship == ProblemReportRelationshipPolicy.BuildScope, ct))
                 db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(report.Id, "Release", active.Id,
@@ -1146,12 +1158,20 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             .Where(x => x.ProgramId == programId && x.StepKey.StartsWith(ProblemReportScenarioStepPrefix)).ToListAsync(ct);
         var problemIds = ParseScenarioIds(problemSteps, ProblemReportScenarioStepPrefix);
         var problemReports = allProblemReports.Where(x => problemIds.Contains(x.Id)).ToList();
-        var activeRequests = allProjectRequests.Where(x => x.TargetReleaseId == releases.SingleOrDefault(r => r.Version == "1.6")?.Id).ToList();
+        var activeRelease = releases.SingleOrDefault(r => r.Version == "1.6");
+        var activeRequests = allProjectRequests.Where(x => x.TargetReleaseId == activeRelease?.Id).ToList();
+        var hasDraftActiveBaseline = activeRelease is not null && baselines.Any(x => x.ReleaseId == activeRelease.Id
+            && x.State == CandidateBaselineState.Draft);
         var requiredInterfaceStates = new[]
         {
             ChangeRequestState.Draft, ChangeRequestState.InReview, ChangeRequestState.Approved,
             ChangeRequestState.SelectedForBaseline, ChangeRequestState.Deferred, ChangeRequestState.Withdrawn,
         };
+        if (!hasDraftActiveBaseline)
+            requiredInterfaceStates = requiredInterfaceStates.Where(x => x != ChangeRequestState.SelectedForBaseline).ToArray();
+        var interfaceSelectionHealthy = hasDraftActiveBaseline
+            ? interfaceRequests.Any(x => x.State == ChangeRequestState.SelectedForBaseline)
+            : activeRequests.Any(x => x.State == ChangeRequestState.SelectedForBaseline);
         var requiredProblemStates = new[]
         {
             ProblemReportState.Draft, ProblemReportState.Implementing, ProblemReportState.Verifying,
@@ -1204,8 +1224,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             new("active-change-request-distribution", activeRequests.Count >= 16,
                 $"{activeRequests.Count} active-build change request(s); the showcase contributes 8 baseline scenarios and 8 Interface scenarios."),
             new("interface-scenarios", interfaceSteps.Count == 8 && interfaceRequests.Count == 8
-                    && requiredInterfaceStates.All(state => interfaceRequests.Any(x => x.State == state)),
-                $"{interfaceRequests.Count} Interface change-control scenario(s); the active build should show draft, review, approval, selection, deferral and withdrawal."),
+                    && requiredInterfaceStates.All(state => interfaceRequests.Any(x => x.State == state))
+                    && interfaceSelectionHealthy,
+                $"{interfaceRequests.Count} Interface change-control scenario(s); the active build should show draft, review, approval, deferral and withdrawal, plus truthful selection on either a current draft candidate or its existing frozen baseline."),
             new("problem-report-scenarios", problemSteps.Count == 8 && problemReports.Count == 8
                     && requiredProblemStates.All(state => problemReports.Any(x => x.State == state)),
                 $"{problemReports.Count} Problem Report scenario(s); lifecycle variety should include active, closure and rejected records."),
@@ -1263,6 +1284,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 .OrderByDescending(x => x.Sequence).FirstOrDefaultAsync(ct);
             if (candidate is null || candidate.VerificationExecutionId != report.ResolutionVerificationExecutionId) return false;
             if (index == 6 && candidate.State != ProblemReportClosureCandidateState.Pending) return false;
+            if (candidate.State == ProblemReportClosureCandidateState.Pending
+                && report.State == ProblemReportState.WaitingForSqaToClose
+                && !(await new ProblemReportClosureCandidateService(db).ValidateForApprovalAsync(report, ct)).Accepted)
+                return false;
             if (index == 7)
             {
                 var closureIsFrozen = report.State == ProblemReportState.Closed
@@ -1409,7 +1434,12 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var interfaceCount = await EnsureInterfaceScenariosAsync(programId, projectId, active.Id, ct);
         var problemCount = await EnsureProblemReportScenariosAsync(programId, projectId, released.Id, active.Id, ct);
         if (!await ScenarioRichnessCompleteAsync(programId, ct))
-            throw new InvalidOperationException("The FMS scenario enrichment did not reach its controlled postconditions; the upgrade step remains retryable.");
+        {
+            var failed = (await CheckInvariantsAsync(programId, ct)).Where(x => !x.Holds)
+                .Select(x => $"{x.Key}: {x.Detail}");
+            throw new InvalidOperationException("The FMS scenario enrichment did not reach its controlled postconditions; "
+                + $"the upgrade step remains retryable. Failed invariants: {string.Join("; ", failed)}");
+        }
         return $"Ensured {interfaceCount} Interface change-control scenarios and {problemCount} Problem Report scenarios across Builds 1.5 and 1.6.";
     }
 
@@ -1487,7 +1517,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var now = await EffectiveInterfaceTimelineAtAsync(programId, deterministicAt, ct);
         var currentTimeline = now > deterministicAt;
         DateTimeOffset At(int scenario, int stage = 0) => currentTimeline
-            ? now.AddTicks((scenario * 10L) + stage)
+            ? now.AddTicks(((scenario * 10L) + stage) * PersistedTimestampTickQuantum)
             : now.AddDays(scenario).AddHours(stage);
         if (currentTimeline && At(8, 3) > DateTimeOffset.UtcNow)
             throw new InvalidOperationException("Current FMS Interface scenario events would be future-dated; retry after the actor grants are established.");
@@ -1627,7 +1657,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var deterministicAt = FreshProblemReportTimelineAt;
         var now = await EffectiveProblemReportTimelineAtAsync(programId, deterministicAt, ct);
         var currentTimeline = now > deterministicAt;
-        if (currentTimeline && now.AddTicks(850) > DateTimeOffset.UtcNow)
+        if (currentTimeline && now.AddTicks(850 * PersistedTimestampTickQuantum) > DateTimeOffset.UtcNow)
             throw new InvalidOperationException("Current FMS Problem Report scenario events would be future-dated; retry after the actor grants are established.");
 
         for (var i = 1; i <= 8; i++)
@@ -1662,7 +1692,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             var owner = ProblemReportOwners[i - 1];
             var retestPair = i is 6 or 7 ? closurePairs[i - 6] : null;
             var createdAt = currentTimeline
-                ? now.AddTicks(i * 100L)
+                ? now.AddTicks(i * 100L * PersistedTimestampTickQuantum)
                 : retestPair is null
                     ? now.AddDays(i)
                     : await EffectiveProblemReportTimelineAtAsync(programId,
@@ -1692,7 +1722,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
 
             var eventTime = createdAt;
             DateTimeOffset At(int hours, int minutes) => currentTimeline
-                ? eventTime.AddTicks(minutes)
+                ? eventTime.AddTicks(minutes * PersistedTimestampTickQuantum)
                 : i is 6 or 7
                     ? eventTime.AddMinutes(minutes)
                     : eventTime.AddHours(hours);
@@ -1871,11 +1901,16 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         DateTimeOffset EvidenceAt(TestExecution execution, DateTimeOffset lastReportEventAt,
             bool currentCompatibility)
         {
-            var increment = currentCompatibility ? TimeSpan.FromTicks(1) : TimeSpan.FromMinutes(1);
-            var at = execution.RecordedAt.Add(increment);
-            if (latestProblemActorGrant is { } grant && at <= grant) at = grant.Add(increment);
-            if (at <= lastReportEventAt) at = lastReportEventAt.Add(increment);
-            if (lastEvidenceAt is { } previous && at <= previous) at = previous.Add(increment);
+            var increment = currentCompatibility ? TimeSpan.FromTicks(PersistedTimestampTickQuantum) : TimeSpan.FromMinutes(1);
+            var at = currentCompatibility
+                ? NextPersistedTimestamp(execution.RecordedAt)
+                : execution.RecordedAt.Add(increment);
+            if (latestProblemActorGrant is { } grant && at <= grant)
+                at = currentCompatibility ? NextPersistedTimestamp(grant) : grant.Add(increment);
+            if (at <= lastReportEventAt)
+                at = currentCompatibility ? NextPersistedTimestamp(lastReportEventAt) : lastReportEventAt.Add(increment);
+            if (lastEvidenceAt is { } previous && at <= previous)
+                at = currentCompatibility ? NextPersistedTimestamp(previous) : previous.Add(increment);
             if (currentCompatibility && at > DateTimeOffset.UtcNow)
                 throw new InvalidOperationException($"Current FMS corrective evidence at {at:O} would be future-dated "
                     + $"(execution {execution.RecordedAt:O}, report {lastReportEventAt:O}, grant {latestProblemActorGrant:O}, prior {lastEvidenceAt:O}); "
@@ -1959,9 +1994,16 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                     : await CurrentProblemReportEvidenceAtAsync(report, lastReportEventAt,
                         latestProblemActorGrant, ct);
                 if (latestProblemActorGrant is { } grant && successorAt <= grant)
-                    successorAt = grant.Add(currentActorTimeline ? TimeSpan.FromTicks(1) : TimeSpan.FromMinutes(1));
+                    successorAt = currentActorTimeline
+                        ? NextPersistedTimestamp(grant)
+                        : grant.AddMinutes(1);
                 execution = await EnsureProblemReportVerificationSuccessorAsync(programId, index, report,
                     failure, pair.Retest!, successorAt, ct);
+                // PostgreSQL persists DateTimeOffset values at microsecond precision. The newly-created
+                // execution still carries the original .NET tick value in the change tracker after SaveChanges,
+                // while closure-candidate validation reads the persisted value. Re-read the immutable execution
+                // before hashing its evidence so candidate bytes describe exactly what the database stores.
+                execution = await db.TestExecutions.AsNoTracking().SingleAsync(x => x.Id == execution.Id, ct);
                 verificationDecision = await policy.ValidateAsync(report, execution, ct);
             }
             if (!verificationDecision.Accepted)
@@ -2025,7 +2067,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 {
                     var closureAt = approvedClosureAt > evidenceAt
                         ? approvedClosureAt
-                        : evidenceAt.AddTicks(1);
+                        : currentActorTimeline
+                            ? NextPersistedTimestamp(evidenceAt)
+                            : evidenceAt.AddTicks(1);
                     if (currentActorTimeline && closureAt > DateTimeOffset.UtcNow)
                         throw new InvalidOperationException("Current FMS corrective closure would be future-dated; retry after the target evidence timeline is established.");
                     report.ApproveClosure("quality.analyst", sqaAccountId, closureAt);
@@ -2046,10 +2090,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         // Leave enough room for the evidence/candidate and approval records that follow in the same
         // transaction. This keeps operator-triggered compatibility evidence current without assigning rows
         // a future wall-clock timestamp merely to preserve their causal order.
-        var at = DateTimeOffset.UtcNow.AddSeconds(-1);
+        var at = PersistedTimestamp(DateTimeOffset.UtcNow.AddSeconds(-1));
         void After(DateTimeOffset boundary)
         {
-            if (boundary >= at) at = boundary.AddTicks(1);
+            if (boundary >= at) at = NextPersistedTimestamp(boundary);
         }
 
         After(lastReportEventAt);
@@ -2148,10 +2192,20 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             if (request is null) return false;
             interfaces.Add(request);
         }
+        var hasDraftActiveBaseline = await db.CandidateBaselines.AsNoTracking().AnyAsync(x => x.ProjectId == projectId
+            && x.ReleaseId == active.Id && x.State == CandidateBaselineState.Draft, ct);
+        var requiredInterfaceStates = Enum.GetValues<ChangeRequestState>().Where(x => x is ChangeRequestState.Draft
+            or ChangeRequestState.InReview or ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline
+            or ChangeRequestState.Deferred or ChangeRequestState.Withdrawn);
+        if (!hasDraftActiveBaseline)
+            requiredInterfaceStates = requiredInterfaceStates.Where(x => x != ChangeRequestState.SelectedForBaseline);
+        var interfaceSelectionHealthy = hasDraftActiveBaseline
+            ? interfaces.Any(x => x.State == ChangeRequestState.SelectedForBaseline)
+            : await db.SystemChangeRequests.AsNoTracking().AnyAsync(x => x.ProjectId == projectId
+                && x.TargetReleaseId == active.Id && x.State == ChangeRequestState.SelectedForBaseline, ct);
         if (!interfaces.All(x => x.TargetReleaseId == active.Id && InterfaceScenarioAuthors.Contains(x.AuthorId, StringComparer.OrdinalIgnoreCase))
-            || !Enum.GetValues<ChangeRequestState>().Where(x => x is ChangeRequestState.Draft or ChangeRequestState.InReview
-                or ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline or ChangeRequestState.Deferred or ChangeRequestState.Withdrawn)
-                .All(state => interfaces.Any(x => x.State == state))) return false;
+            || !requiredInterfaceStates.All(state => interfaces.Any(x => x.State == state))
+            || !interfaceSelectionHealthy) return false;
 
         var reports = new List<ProblemReport>();
         for (var index = 1; index <= 8; index++)
@@ -2199,6 +2253,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 .OrderByDescending(x => x.Sequence).FirstOrDefaultAsync(ct);
             if (candidate is null || candidate.VerificationExecutionId != report.ResolutionVerificationExecutionId) return false;
             if (index == 6 && candidate.State != ProblemReportClosureCandidateState.Pending) return false;
+            if (candidate.State == ProblemReportClosureCandidateState.Pending
+                && report.State == ProblemReportState.WaitingForSqaToClose
+                && !(await new ProblemReportClosureCandidateService(db).ValidateForApprovalAsync(report, ct)).Accepted)
+                return false;
             if (index == 7)
             {
                 var closureIsFrozen = report.State == ProblemReportState.Closed

@@ -1,3 +1,4 @@
+using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
@@ -309,7 +310,8 @@ public sealed class FmsShowcaseSeederTests
             db.Entry(releasedBaseline).Property(x => x.TestProceduresHash).CurrentValue =
                 "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
             var retrySteps = await db.ShowcaseUpgradeSteps.Where(x => x.ProgramId == summary.ProgramId
-                && x.StepKey == "scenario-richness").ToListAsync();
+                && (x.StepKey == "scenario-richness"
+                    || x.StepKey.StartsWith("scenario-richness/interface/"))).ToListAsync();
             db.ShowcaseUpgradeSteps.RemoveRange(retrySteps);
             await db.SaveChangesAsync();
 
@@ -322,6 +324,13 @@ public sealed class FmsShowcaseSeederTests
 
             var applied = await seeder.UpgradeAsync(summary.ProgramId);
             Assert.Contains(applied, x => x.StartsWith("scenario-richness:", StringComparison.Ordinal));
+            var currentInterfaceIds = await OwnedScenarioIdsAsync(db, summary.ProgramId,
+                "scenario-richness/interface/");
+            var currentInterfaces = await db.SystemChangeRequests.AsNoTracking()
+                .Where(x => currentInterfaceIds.Contains(x.Id)).ToListAsync();
+            Assert.Equal(8, currentInterfaces.Count);
+            Assert.DoesNotContain(currentInterfaces, x => x.State == ChangeRequestState.SelectedForBaseline);
+            Assert.Equal(CandidateBaselineState.Frozen, activeBaseline.State);
             var currentScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId,
                 "scenario-richness/problem-report/");
             var currentClosureIds = currentScenarioIds.Skip(5).Take(2).ToArray();
