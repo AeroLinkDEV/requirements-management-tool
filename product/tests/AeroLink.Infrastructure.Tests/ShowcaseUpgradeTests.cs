@@ -82,6 +82,41 @@ public sealed class ShowcaseUpgradeTests(ShowcaseDatabaseFixture showcase)
         Assert.Single(await db.Programs.ToListAsync());
     }
 
+    [Fact]
+    public async Task A_stale_pending_legacy_closure_candidate_stays_fail_closed()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+        var summary = showcase.Summary;
+        var reportId = Guid.Parse(await db.ShowcaseUpgradeSteps.AsNoTracking()
+            .Where(x => x.ProgramId == summary.ProgramId && x.StepKey == "scenario-richness/problem-report/06")
+            .Select(x => x.Detail).SingleAsync());
+        var original = await db.ProblemReportClosureCandidates.SingleAsync(x => x.ProblemReportId == reportId
+            && x.State == ProblemReportClosureCandidateState.Pending);
+        var originalId = original.Id;
+        var originalRevisionCount = await db.ProblemReportRevisions.CountAsync(x => x.ProblemReportId == reportId);
+
+        // PostgreSQL can round a freshly-written DateTimeOffset to microseconds. Simulate the resulting
+        // legacy pending candidate whose immutable evidence hash no longer matches the persisted execution.
+        db.Entry(original).Property(x => x.VerificationEvidenceHash).CurrentValue = new string('0', 64);
+        await db.SaveChangesAsync();
+
+        var executionCount = await db.TestExecutions.CountAsync();
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => seeder.UpgradeAsync(summary.ProgramId));
+        Assert.Contains("pr_closure_candidate_stale", failure.Message, StringComparison.Ordinal);
+        var persisted = await db.ProblemReportClosureCandidates.AsNoTracking()
+            .SingleAsync(x => x.Id == originalId);
+        Assert.Equal(ProblemReportClosureCandidateState.Pending, persisted.State);
+        Assert.Equal(new string('0', 64), persisted.VerificationEvidenceHash);
+        Assert.Equal(originalRevisionCount,
+            await db.ProblemReportRevisions.CountAsync(x => x.ProblemReportId == reportId));
+        Assert.True(await db.ShowcaseUpgradeSteps.AnyAsync(x => x.ProgramId == summary.ProgramId
+            && x.StepKey == "scenario-richness"));
+        Assert.Equal(executionCount, await db.TestExecutions.CountAsync());
+    }
+
     /// <summary>
     /// An upgrade that stops half way must resume, not restart. Each step records itself only after its own
     /// work commits, so the record is evidence the step finished rather than that it was attempted.
