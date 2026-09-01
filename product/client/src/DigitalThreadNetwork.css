@@ -1,0 +1,267 @@
+/* The build change network. Cards, the trace treatment, and the detail panel.
+   Tokens come from index.css; the amber suspect family matches LifecycleExplorer.css. */
+
+.dtnRoot { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 520px; }
+
+.dtnToolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  border-bottom: 1px solid #e0e7ee;
+  background: var(--surface);
+}
+
+.dtnFilters { display: flex; gap: 5px; }
+
+.dtnFilters button {
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  padding: 4px 11px;
+  color: #5d6d82;
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
+  cursor: pointer;
+  transition: border-color .14s ease, background .14s ease, color .14s ease;
+}
+
+.dtnFilters button:hover { border-color: #a9bccd; }
+.dtnFilters button.is-on { border-color: var(--teal-700); background: var(--teal-700); color: #fff; }
+
+.dtnSearch { margin-left: auto; }
+
+.dtnSearch input {
+  width: 208px;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+  padding: 7px 10px;
+  color: #2b3d54;
+  font: var(--weight-body) var(--text-control) var(--font-body);
+}
+
+.dtnStage { position: relative; flex: 1; min-height: 0; }
+.dtnStage > .dtCanvas { position: absolute; inset: 0; }
+
+.dtnLoading {
+  position: absolute;
+  left: 50%;
+  top: 44px;
+  transform: translateX(-50%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .94);
+  padding: 7px 15px;
+  color: var(--ink-500);
+  font-size: var(--text-xs);
+}
+
+/* Truncation is stated, never silent: a shortened network is a false claim about traceability. */
+.dtnTruncated {
+  margin: 0;
+  border-bottom: 1px solid #e6cd94;
+  background: #fff8e8;
+  padding: 9px 18px;
+  color: #765313;
+  font-size: var(--text-sm);
+}
+
+.dtnState {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 6px;
+  min-height: 320px;
+  padding: 40px;
+  color: var(--ink-500);
+  text-align: center;
+}
+
+.dtnState b { color: var(--ink-900); font-size: var(--text-lg); }
+.dtnState p { margin: 0; font-size: var(--text-sm); }
+.dtnState-error b { color: #8a2f2f; }
+
+.dtnState button {
+  margin-top: 8px;
+  min-height: 36px;
+  border: 1px solid var(--teal-700);
+  border-radius: var(--radius-sm);
+  background: var(--teal-700);
+  padding: 8px 15px;
+  color: #fff;
+  font: var(--weight-strong) var(--text-control) var(--font-body);
+  cursor: pointer;
+}
+
+/* ---- cards ------------------------------------------------------------- */
+
+.dtnCard { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
+.dtnCardTop { display: flex; align-items: center; gap: 7px; }
+
+.dtnBadge {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  font: var(--weight-bold) 8.5px var(--font-body);
+}
+
+.dtnId { font: var(--weight-strong) 11.5px ui-monospace, SFMono-Regular, Consolas, monospace; color: #17324d; white-space: nowrap; }
+
+.dtnPill {
+  margin-left: auto;
+  border-radius: var(--radius-pill);
+  padding: 3px 8px;
+  font: var(--weight-bold) 9px var(--font-body);
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+
+.dtnTitle {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #56677c;
+  font-size: 11.5px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.dtnMeta { display: flex; gap: 10px; color: #8493a6; font-size: 10px; }
+
+/* Suspect carries its word in the pill as well as the colour; colour alone is never the signal. */
+.dtCanvasNode:has(.dtnCard.is-suspect) { border-color: #e0c17e; background: #fffdf6; }
+.dtCanvasNode:has(.dtnCard.is-selected) {
+  border-color: #2a8e83;
+  box-shadow: 0 0 0 3px rgba(42, 142, 131, .15), 0 18px 38px rgba(16, 70, 68, .18);
+  z-index: 60;
+}
+
+/* Untraced records recede rather than disappearing: they are still context, just not the answer. */
+.dtCanvasNode:has(.dtnCard.is-untraced) { opacity: .17; }
+.dtCanvasNode:has(.dtnCard.is-filtered) { opacity: .2; }
+
+.dtnHop {
+  position: absolute;
+  left: -7px;
+  top: -7px;
+  min-width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: #2a8e83;
+  padding: 0 4px;
+  color: #fff;
+  font: var(--weight-bold) 9px var(--font-body);
+  box-shadow: 0 2px 6px rgba(16, 70, 68, .3);
+}
+
+/* ---- detail panel ------------------------------------------------------ */
+
+.dtnPanel {
+  position: absolute;
+  z-index: 70;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 18px 44px rgba(15, 35, 58, .16);
+  padding: 14px 16px;
+}
+
+.dtnPanel-right { right: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
+.dtnPanel-left { left: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
+.dtnPanel-bottom { left: 16px; right: 16px; bottom: 18px; height: 190px; overflow: hidden; }
+
+.dtnPanelTools { position: absolute; right: 10px; top: 10px; display: flex; gap: 4px; z-index: 2; }
+
+.dtnPanelTools button {
+  min-height: 24px;
+  border: 1px solid #e4eaf0;
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 2px 8px;
+  color: #8493a6;
+  font: var(--weight-strong) 10px var(--font-body);
+  cursor: pointer;
+}
+
+.dtnPanelTools button:hover { border-color: #a9c9c4; color: var(--teal-700); }
+.dtnPanelTools button.is-on { border-color: var(--teal-700); background: #eff9f6; color: var(--teal-700); }
+
+.dtnEyebrow { margin: 0; color: var(--teal-600); font: var(--weight-bold) 9px var(--font-body); letter-spacing: .13em; }
+.dtnPanelGrid { display: flex; flex-direction: column; gap: 13px; }
+
+/* Flattened, the panel is four columns rather than one third of a tall box with empty space beneath it. */
+.dtnPanel-bottom .dtnPanelGrid {
+  display: grid;
+  grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr) 158px;
+  gap: 18px;
+  align-items: start;
+  height: 100%;
+}
+
+.dtnPanelIdentity { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.dtnPanelIdentity .exactArtifactLink { font: var(--weight-strong) 13px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.dtnPanelGrid h3 { margin: 5px 0 0; color: var(--ink-900); font: var(--weight-strong) 14px/1.3 var(--font-display); }
+
+.dtnPanelCol { min-width: 0; display: flex; flex-direction: column; }
+.dtnRelHead { display: flex; align-items: baseline; gap: 6px; margin-bottom: 5px; }
+.dtnRelHead span { color: #8fa0b2; font-size: 9.5px; font-weight: var(--weight-strong); }
+
+.dtnRel { display: grid; gap: 4px; overflow-y: auto; max-height: 152px; }
+.dtnPanel-bottom .dtnRel { grid-template-columns: 1fr 1fr; align-content: start; max-height: 96px; padding-right: 3px; }
+
+.dtnRel button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  border: 1px solid #e7edf2;
+  border-radius: 7px;
+  background: #fafcfd;
+  padding: 5px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dtnRel button:hover { border-color: #a9c9c4; background: #f2f9f8; }
+/* Anything past the first hop is dashed, so direct and distant links are not read as the same thing. */
+.dtnRel button.is-far { border-style: dashed; background: var(--surface); }
+.dtnRel small { display: block; color: #8493a6; font-size: 8.5px; letter-spacing: .04em; }
+.dtnRel button > span > span { display: block; overflow: hidden; color: #17324d; font: var(--weight-strong) 10px ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; }
+.dtnRel em { margin-left: auto; color: #8493a6; font-size: 13px; font-style: normal; }
+.dtnRelEmpty { margin: 0; color: #8fa0b2; font-size: 10.5px; padding: 4px 0; }
+
+.dtnPanelActions { display: flex; flex-direction: column; gap: 6px; justify-content: flex-end; }
+
+.dtnPanelActions button {
+  min-height: 32px;
+  border: 1px solid #cfe0e5;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 6px 10px;
+  color: var(--teal-700);
+  font: var(--weight-bold) 11px var(--font-body);
+  cursor: pointer;
+}
+
+.dtnPanelActions button.is-primary { border-color: var(--teal-700); background: var(--teal-700); color: #fff; }
+.dtnPanel-bottom .dtnPanelActions { padding-top: 26px; }
+
+.dtnVisuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dtnFilters button { transition: none; }
+}
