@@ -560,6 +560,10 @@ function Invoke-AeroLinkSourceBootstrap {
         throw "AeroLink cannot characterize its source: no 'origin' remote is configured in $RepositoryRoot. Launch refused; nothing was changed."
     }
 
+    # The source identity this startup transaction inspected. HOME canonical requires the repository to sit
+    # exactly here when the fetch fails; a concurrent clean HEAD move is a moved precondition, not a safe one.
+    $preFetchHeadSha = $posture.HeadSha
+
     $reached = Sync-AeroLinkRemoteRefs -RepositoryRoot $RepositoryRoot -TimeoutSeconds $FetchTimeoutSeconds
     # Deterministic diagnostic/test seam: source that another process creates while the fetch is failing can
     # be simulated here, so the contract tests can prove the failed-fetch window is still fully mode-aware.
@@ -567,11 +571,20 @@ function Invoke-AeroLinkSourceBootstrap {
     # The fetch may have moved remote-tracking refs; the policy is decided from the refreshed posture, so a
     # precondition that "moved" is simply re-evaluated, never broadened.
     $posture = Get-AeroLinkRepositoryPosture -RepositoryRoot $RepositoryRoot
+    # Every message from here on describes the actual current checkout, never the pre-fetch one.
+    $preFetchShortSha = $shortSha
+    $shortSha = $posture.ShortSha
 
     if (-not $reached) {
         if ($isHomeCanonical) {
-            # HOME canonical during a failed/offline fetch: the full invariant still decides, and dirt that
-            # appeared in the fetch window is refused, never "preserved and continued".
+            # HOME canonical during a failed/offline fetch: the inspected source identity must still be the
+            # one on disk. A clean HEAD move (for example another process resetting main backwards) escapes
+            # the dirt/untracked/branch checks, so the identity itself is pinned; it is never adopted,
+            # rewound, or re-fetched — the repository is left exactly as found and the launch is refused.
+            if ($posture.HeadSha -ne $preFetchHeadSha) {
+                Write-AeroLinkProductionRefusal -Reason "The source revision changed while AeroLink was checking for updates. Expected $preFetchShortSha; found $($posture.ShortSha)." `
+                    -AdditionalLines @('Canonical HOME AeroLink requires a stable source revision during startup.')
+            }
             if ($posture.HasTrackedChanges) {
                 Write-AeroLinkProductionRefusal -Reason 'The working tree changed while AeroLink was checking for updates.' `
                     -AdditionalLines @('Canonical HOME AeroLink only runs from a clean merged main.')

@@ -446,6 +446,81 @@ try {
     }
     Assert-True ((Test-Path -LiteralPath (Join-Path $fixture.WorkPath 'race-untracked.ts') -PathType Leaf)) 'B20c: the refusal deleted the concurrent untracked file.'
 
+    # B21/B22. a CLEAN HEAD move during the failed-fetch window: the dirt/untracked/branch checks cannot see
+    # it, so HOME pins the exact pre-fetch source identity. The fixture moves HEAD to an ANCESTOR commit so
+    # the refreshed posture would otherwise classify as Behind and pass the offline invariant.
+    # B21. HOME: clean HEAD move during failed fetch: REFUSED; the moved checkout is preserved, never rewound.
+    $fixture = New-FixtureRepository
+    Set-Content -LiteralPath (Join-Path $fixture.WorkPath 'second.txt') -Value 'second commit' -Encoding ASCII
+    $null = Invoke-FixtureGit -GitArguments @('add', '-A') -Repository $fixture.WorkPath
+    $null = Invoke-FixtureGit -GitArguments @('commit', '-m', 'second') -Repository $fixture.WorkPath
+    $null = Invoke-FixtureGit -GitArguments @('push', 'origin', 'main') -Repository $fixture.WorkPath
+    $headBeforeFetch = Get-FixtureHead $fixture
+    $ancestorSha = Invoke-FixtureGit -GitArguments @('rev-list', '--max-parents=0', 'HEAD') -Repository $fixture.WorkPath
+    Assert-True ($ancestorSha -ne $headBeforeFetch) 'B21: fixture setup failed to produce an ancestor commit.'
+    Disconnect-Remote -Fixture $fixture
+    $fetchObserver = {
+        param([string]$ObservedRepositoryRoot)
+        # Another process cleanly moves main backwards; no dirt, no untracked files, relationship Behind.
+        $null = Invoke-FixtureGit -GitArguments @('reset', '--hard', $env:AEROLINK_TEST_ANCESTOR_SHA) -Repository $ObservedRepositoryRoot
+    }
+    $env:AEROLINK_TEST_ANCESTOR_SHA = $ancestorSha
+    try {
+        Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical -RepositoryRoot $fixture.WorkPath `
+            -CurrentScriptPath (Join-Path $fixture.FixtureRoot 'launcher.ps1') -LauncherFiles @() `
+            -FailedFetchObserver $fetchObserver | Out-Null
+        $script:failures.Add('B21: HOME canonical continued after a clean HEAD move during a failed fetch.')
+    }
+    catch {
+        $message = "$($_.Exception.Message)"
+        if ($message -notmatch 'source revision changed while AeroLink was checking for updates') {
+            $script:failures.Add("B21: the refusal did not name the moved source revision; got: '$message'")
+        }
+        if ($message -notmatch [regex]::Escape($headBeforeFetch.Substring(0, 8)) -or $message -notmatch [regex]::Escape($ancestorSha.Substring(0, 8))) {
+            $script:failures.Add("B21: the refusal did not state expected-vs-actual identity; got: '$message'")
+        }
+    }
+    finally {
+        Remove-Item -Path 'Env:AEROLINK_TEST_ANCESTOR_SHA' -ErrorAction SilentlyContinue
+    }
+    Assert-True ((Get-FixtureHead $fixture) -eq $ancestorSha) 'B21: the moved checkout was not preserved (an automatic rollback/reset occurred).'
+    Assert-True ((Get-FixtureBranch $fixture) -eq 'main') 'B21: the refusal left the repository off main.'
+    Assert-True ((Get-FixtureStatus $fixture).Length -eq 0) 'B21: the refusal left the worktree dirty.'
+    Assert-True ((Get-OriginMain $fixture) -eq $headBeforeFetch) 'B21: the refusal moved the remote.'
+
+    # B22. DEVELOPMENT: the same clean HEAD move is preserved and reported honestly at the actual SHA.
+    $fixture = New-FixtureRepository
+    Set-Content -LiteralPath (Join-Path $fixture.WorkPath 'second.txt') -Value 'second commit' -Encoding ASCII
+    $null = Invoke-FixtureGit -GitArguments @('add', '-A') -Repository $fixture.WorkPath
+    $null = Invoke-FixtureGit -GitArguments @('commit', '-m', 'second') -Repository $fixture.WorkPath
+    $null = Invoke-FixtureGit -GitArguments @('push', 'origin', 'main') -Repository $fixture.WorkPath
+    $headBeforeFetch = Get-FixtureHead $fixture
+    $ancestorSha = Invoke-FixtureGit -GitArguments @('rev-list', '--max-parents=0', 'HEAD') -Repository $fixture.WorkPath
+    Disconnect-Remote -Fixture $fixture
+    $fetchObserver = {
+        param([string]$ObservedRepositoryRoot)
+        $null = Invoke-FixtureGit -GitArguments @('reset', '--hard', $env:AEROLINK_TEST_ANCESTOR_SHA) -Repository $ObservedRepositoryRoot
+    }
+    $env:AEROLINK_TEST_ANCESTOR_SHA = $ancestorSha
+    try {
+        # 6>&1 captures the operator diagnostics so the printed SHA can be proven to be the refreshed one.
+        $captured = Invoke-AeroLinkSourceBootstrap -Mode Development -RepositoryRoot $fixture.WorkPath `
+            -CurrentScriptPath (Join-Path $fixture.FixtureRoot 'launcher.ps1') -LauncherFiles @() `
+            -FailedFetchObserver $fetchObserver 6>&1
+        $messages = @($captured | ForEach-Object { "$_" })
+        $result = $messages | Where-Object { $_ -match '^\s*$' -eq $false -and $_ -match 'GitHub unavailable' } | Select-Object -First 1
+        $returned = $captured | Where-Object { $_ -is [pscustomobject] -and $_.PSObject.Properties['Action'] } | Select-Object -First 1
+        Assert-True ($null -ne $returned -and $returned.Action -eq 'ContinuedOffline') "B22: expected ContinuedOffline, got '$($returned.Action)'."
+        Assert-True ($null -ne $returned -and $returned.HeadSha -eq $ancestorSha) 'B22: the result did not report the actual refreshed HEAD.'
+        Assert-True ((Get-FixtureHead $fixture) -eq $ancestorSha) 'B22: the moved checkout was not preserved.'
+        Assert-True ((Get-FixtureStatus $fixture).Length -eq 0) 'B22: the worktree was left dirty.'
+        Assert-True ($null -ne $result -and $result -match "local main @ $($ancestorSha.Substring(0, 8))") "B22: the offline diagnostic did not report the actual refreshed SHA; got: '$result'"
+        Assert-True ($null -eq ($messages | Where-Object { $_ -match "local main @ $($headBeforeFetch.Substring(0, 8))" })) 'B22: a stale pre-fetch SHA survived into the offline diagnostic.'
+    }
+    finally {
+        Remove-Item -Path 'Env:AEROLINK_TEST_ANCESTOR_SHA' -ErrorAction SilentlyContinue
+    }
+
     # ---------------------------------------------------------------- BOOTSTRAP RE-ENTRY
     # C15. a valid fast-forward that modifies the bootstrap implementation reruns the updated launcher
     #      exactly once, in a fresh process, validating the expected source identity and carrying the mode
