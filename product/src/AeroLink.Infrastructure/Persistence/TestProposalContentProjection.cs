@@ -50,18 +50,43 @@ public sealed record RequirementCoverageTarget(
 /// to it. It is still returned, because a traceability surface that silently drops a named reference shows a
 /// smaller relationship set than the record holds — and the Digital Thread reads Draft proposals, where an
 /// incomplete reference is a legitimate state the reader needs to see rather than a validation failure.
-/// Details stay empty when unresolved so nothing from another Project can leak through this seam.
+///
+/// <paramref name="Kind"/> is null when unresolved, and that is a deliberate distinction from the gap's
+/// <c>ExpectedKind</c>. What the package expects to find and what the referenced object actually is are two
+/// different claims; stating the expectation in a field that reads as identity would assert knowledge of an
+/// object nobody could locate. Every detail stays null for the same reason — and so nothing from another
+/// Project can leak through this seam.
 /// </summary>
 public sealed record VerificationParentTarget(
     Guid RevisionId,
-    string Kind,
+    string? Kind,
     bool Resolved,
     string? DisplayNumber = null,
     string? Level = null,
     Guid? ArtifactId = null);
 
-/// <summary>A recorded identity the projection could not resolve inside this Project.</summary>
-public sealed record ProposalReferenceGap(Guid RevisionId, string Role, string ExpectedKind);
+/// <summary>Why a recorded relationship could not be turned into a resolved target.</summary>
+public enum ProposalReferenceGapReason
+{
+    /// <summary>The list parsed, but this identity resolves to nothing inside the authorized Project.</summary>
+    UnresolvedReference,
+    /// <summary>The stored list could not be interpreted at all, so no identity can be named.</summary>
+    MalformedReferenceList,
+}
+
+/// <summary>
+/// A recorded relationship the projection could not resolve.
+///
+/// <paramref name="RevisionId"/> is null for a malformed list, because there is no identity to name — the
+/// bytes could not be read as one. <paramref name="ExpectedKind"/> is what this relationship expected to find,
+/// which is not the same claim as what the object is; the resolved target carries that, and only when it
+/// resolved.
+/// </summary>
+public sealed record ProposalReferenceGap(
+    Guid? RevisionId,
+    string Role,
+    string ExpectedKind,
+    ProposalReferenceGapReason Reason);
 
 /// <summary>
 /// One proposed verification artifact change, with its exact predecessor and its coverage.
@@ -183,9 +208,9 @@ public static class TestProposalContentProjection
         // added delta and the removed delta. Resolved in one pass, and scoped to this Project so a recorded
         // identity belonging elsewhere resolves to nothing here rather than leaking another Project's artifact.
         var requirementIds = changes
-            .SelectMany(x => Ids(x.ParentRevisionIdsJson)
-                .Concat(Ids(x.DrivingRequirementRevisionIdsJson))
-                .Concat(Ids(x.RemovedRequirementRevisionIdsJson)))
+            .SelectMany(x => Ids(x.ParentRevisionIdsJson).Ids
+                .Concat(Ids(x.DrivingRequirementRevisionIdsJson).Ids)
+                .Concat(Ids(x.RemovedRequirementRevisionIdsJson).Ids))
             .Distinct().ToList();
 
         var requirements = new Dictionary<Guid, RequirementCoverageTarget>();
@@ -212,7 +237,7 @@ public static class TestProposalContentProjection
 
         // Case revisions a software Procedure names as its exact parents, resolved to real controlled identity
         // rather than echoed back as a bare identifier with an assumed kind.
-        var caseIds = changes.SelectMany(x => Ids(x.ParentRevisionIdsJson)).Distinct().ToList();
+        var caseIds = changes.SelectMany(x => Ids(x.ParentRevisionIdsJson).Ids).Distinct().ToList();
         var cases = new Dictionary<Guid, VerificationParentTarget>();
         if (caseIds.Count > 0)
         {
@@ -264,7 +289,13 @@ public static class TestProposalContentProjection
             var parents = new List<VerificationParentTarget>();
             var finalCoverage = new List<RequirementCoverageTarget>();
 
-            foreach (var id in Ids(change.ParentRevisionIdsJson))
+            var parentIds = Ids(change.ParentRevisionIdsJson);
+            var expectedParentWord = parentKind.ToString();
+            if (parentIds.Malformed)
+                gaps.Add(new ProposalReferenceGap(null, "ExactParent", expectedParentWord,
+                    ProposalReferenceGapReason.MalformedReferenceList));
+
+            foreach (var id in parentIds.Ids)
             {
                 if (parentKind == VerificationParentArtifactKind.Case)
                 {
@@ -274,8 +305,11 @@ public static class TestProposalContentProjection
                     if (cases.TryGetValue(id, out var resolvedCase)) parents.Add(resolvedCase);
                     else
                     {
-                        parents.Add(new VerificationParentTarget(id, "Case", Resolved: false));
-                        gaps.Add(new ProposalReferenceGap(id, "ExactParent", "Case"));
+                        // No kind: nothing located it, so nothing establishes what it is. The expectation
+                        // lives on the gap, where it reads as an expectation.
+                        parents.Add(new VerificationParentTarget(id, Kind: null, Resolved: false));
+                        gaps.Add(new ProposalReferenceGap(id, "ExactParent", "Case",
+                            ProposalReferenceGapReason.UnresolvedReference));
                     }
                     continue;
                 }
@@ -290,8 +324,9 @@ public static class TestProposalContentProjection
                 }
                 else
                 {
-                    parents.Add(new VerificationParentTarget(id, "Requirement", Resolved: false));
-                    gaps.Add(new ProposalReferenceGap(id, "ExactParent", "Requirement"));
+                    parents.Add(new VerificationParentTarget(id, Kind: null, Resolved: false));
+                    gaps.Add(new ProposalReferenceGap(id, "ExactParent", "Requirement",
+                        ProposalReferenceGapReason.UnresolvedReference));
                 }
             }
 
@@ -313,7 +348,8 @@ public static class TestProposalContentProjection
                 removed,
                 change.ParentKind.ToString(),
                 parents.OrderBy(x => x.DisplayNumber ?? x.RevisionId.ToString(), StringComparer.Ordinal).ToList(),
-                gaps.OrderBy(x => x.Role, StringComparer.Ordinal).ThenBy(x => x.RevisionId).ToList()));
+                gaps.OrderBy(x => x.Role, StringComparer.Ordinal)
+                    .ThenBy(x => x.RevisionId ?? Guid.Empty).ToList()));
         }
 
         return new VerificationProposalContent(
@@ -347,20 +383,40 @@ public static class TestProposalContentProjection
         string role,
         List<ProposalReferenceGap> gaps)
     {
+        var stored = Ids(json);
+        if (stored.Malformed)
+            gaps.Add(new ProposalReferenceGap(null, role, "Requirement",
+                ProposalReferenceGapReason.MalformedReferenceList));
+
         var resolved = new List<RequirementCoverageTarget>();
-        foreach (var id in Ids(json))
+        foreach (var id in stored.Ids)
         {
             if (known.TryGetValue(id, out var target)) resolved.Add(target);
             else if (gaps.All(gap => gap.RevisionId != id || gap.Role != role))
-                gaps.Add(new ProposalReferenceGap(id, role, "Requirement"));
+                gaps.Add(new ProposalReferenceGap(id, role, "Requirement",
+                    ProposalReferenceGapReason.UnresolvedReference));
         }
         return Ordered(resolved);
     }
 
-    private static IReadOnlyList<Guid> Ids(string json)
+    /// <summary>
+    /// A stored identity list, and whether it could be read at all.
+    ///
+    /// The two are kept apart because "no relationships were recorded" and "relationship data exists that
+    /// AeroLink cannot interpret" are different facts, and collapsing the second into the first is the more
+    /// dangerous direction on a traceability surface: it reports an absence that was never established. The
+    /// Digital Thread reads Draft proposals, where controlled editing deliberately allows incomplete work to
+    /// be checked in before submission validation runs, so malformed content is reachable by design.
+    /// </summary>
+    private readonly record struct StoredIds(IReadOnlyList<Guid> Ids, bool Malformed)
     {
-        if (string.IsNullOrWhiteSpace(json)) return [];
-        try { return JsonSerializer.Deserialize<List<Guid>>(json) ?? []; }
-        catch (JsonException) { return []; }
+        public static readonly StoredIds Empty = new([], false);
+    }
+
+    private static StoredIds Ids(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return StoredIds.Empty;
+        try { return new StoredIds(JsonSerializer.Deserialize<List<Guid>>(json) ?? [], false); }
+        catch (JsonException) { return new StoredIds([], true); }
     }
 }

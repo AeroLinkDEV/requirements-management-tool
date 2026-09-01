@@ -33,6 +33,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
         Guid IntroduceId, Guid ModifyId, Guid RetireId, Guid CaseIntroduceId, Guid ProcedureIntroduceId,
         Guid RetainedAId, Guid RetainedBId, Guid RemovedCId, Guid AddedDId,
         Guid CaseParentRevisionId, Guid RetiredPredecessorId, Guid MissingReferenceId,
+        Guid MalformedParentItemId, Guid MalformedCoverageItemId, Guid ForeignItemId, Guid ForeignRevisionId,
         string Member, string Outsider);
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
@@ -176,10 +177,54 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
                 Cleanup: "Restore fixed order.",
                 ToolingAutomation: "Manual."), now);
 
+        // A real revision in a DIFFERENT Project, recorded by a proposal in this one. The projection is
+        // Project-scoped, so it must resolve to nothing here — and must not carry a single detail of it back.
+        var foreignProgram = new ProgramRecord($"Foreign {tag}", $"FN{tag}");
+        var foreignProject = new ProjectRecord(foreignProgram.Id, "Other product", "Foreign");
+        var foreignRelease = new SoftwareRelease(foreignProject.Id, "9.9", false);
+        var foreignBaseline = new CandidateBaseline("SW-99.00", 0, foreignProject.Id, foreignRelease.Id, null,
+            "Foreign", "cm", now);
+        var foreignScr = new SystemChangeRequest("SRCR-99001", 0, foreignProject.Id, foreignRelease.Id,
+            "Foreign change", "Problem", "Analysis", "Solution", memberName, now);
+        var foreignArtifact = new RequirementArtifact(foreignProject.Id, "SR-99001",
+            RequirementLevel.System, now);
+        var foreignRevision = new RequirementRevision(foreignArtifact.Id, 0,
+            "The other product shall do something entirely unrelated.", "Rationale", "Test",
+            RequirementRevisionState.Active, foreignScr.Id, foreignBaseline.Id, now);
+        db.AddRange(foreignProgram, foreignProject, foreignRelease, foreignBaseline, foreignScr,
+            foreignArtifact, foreignRevision);
+
+        var foreignItem = systemTcr.AddProcedureChange(memberName, new TestProcedureChangeDraft("SYSTP-92004", 0,
+            TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Foreign reference",
+            "Verify nothing leaks.", "Configured product.", "Observe.", "Nothing leaks.", "Non-leak.",
+            "[]", "[]", "", VerificationProcedureParentKind.Allocated,
+            JsonSerializer.Serialize(new[] { foreignRevision.Id })), now);
+
+        // Two proposals whose stored lists are then made unreadable through the persistence seam, which is how
+        // a Draft checked in before submission validation can legitimately look.
+        var malformedParent = systemTcr.AddProcedureChange(memberName,
+            new TestProcedureChangeDraft("SYSTP-92005", 0, TestProcedureLevel.System,
+                TestProcedureChangeKind.Introduce, "Malformed parents", "Verify parsing.",
+                "Configured product.", "Observe.", "Parsed.", "Malformed.", "[]", "[]", "",
+                VerificationProcedureParentKind.Allocated, "[]"), now);
+        var malformedCoverage = systemTcr.AddProcedureChange(memberName,
+            new TestProcedureChangeDraft("SYSTP-92006", 0, TestProcedureLevel.System,
+                TestProcedureChangeKind.Introduce, "Malformed coverage", "Verify parsing.",
+                "Configured product.", "Observe.", "Parsed.", "Malformed."), now);
+
         await db.SaveChangesAsync();
+
+        // Written through EF rather than the aggregate, because the aggregate is right to refuse it. Production
+        // validation is untouched; this reproduces a row that controlled editing can already leave behind.
+        db.Entry(malformedParent).Property("ParentRevisionIdsJson").CurrentValue = "{ not a list";
+        db.Entry(malformedCoverage).Property("DrivingRequirementRevisionIdsJson").CurrentValue = "oops";
+        await db.SaveChangesAsync();
+
         return new(project.Id, systemTcr.Id, caseTcr.Id, procedureTcr.Id, introduce.Id, modify.Id, retire.Id,
             caseIntroduce.Id, procedureIntroduce.Id, retainedA.Id, retainedB.Id, removedC.Id, addedD.Id,
-            parentCaseRevision.Id, retiringRevision.Id, missingReferenceId, memberName, outsiderName);
+            parentCaseRevision.Id, retiringRevision.Id, missingReferenceId,
+            malformedParent.Id, malformedCoverage.Id, foreignItem.Id, foreignRevision.Id,
+            memberName, outsiderName);
     }
 
     private static async Task SignInAsync(HttpClient client, string userName)
@@ -368,7 +413,9 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
 
         var unresolved = parents.Single(x => !x.GetProperty("resolved").GetBoolean());
         Assert.Equal(fixture.MissingReferenceId.ToString(), unresolved.GetProperty("revisionId").GetString());
-        // No details are invented for it, and none can leak from elsewhere.
+        // No kind, because nothing located it and so nothing establishes what it is. What the package expected
+        // to find is a different claim, and it lives on the gap where it reads as an expectation.
+        Assert.Equal(JsonValueKind.Null, unresolved.GetProperty("kind").ValueKind);
         Assert.Equal(JsonValueKind.Null, unresolved.GetProperty("displayNumber").ValueKind);
         Assert.Equal(JsonValueKind.Null, unresolved.GetProperty("level").ValueKind);
         Assert.Equal(JsonValueKind.Null, unresolved.GetProperty("artifactId").ValueKind);
@@ -376,6 +423,8 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
         var gap = Assert.Single(introduce.GetProperty("referenceGaps").EnumerateArray().ToList());
         Assert.Equal(fixture.MissingReferenceId.ToString(), gap.GetProperty("revisionId").GetString());
         Assert.Equal("ExactParent", gap.GetProperty("role").GetString());
+        Assert.Equal("Requirement", gap.GetProperty("expectedKind").GetString());
+        Assert.Equal("UnresolvedReference", gap.GetProperty("reason").GetString());
 
         // The one that does resolve is unaffected.
         Assert.Contains(parents, x => x.GetProperty("revisionId").GetString() == fixture.AddedDId.ToString()
@@ -421,6 +470,75 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
             .Select(x => x.GetProperty("revisionId").GetString()).ToList();
         Assert.DoesNotContain(fixture.CaseParentRevisionId.ToString(), coverageIds);
     }
+
+    [Fact]
+    public async Task A_malformed_exact_parent_list_is_a_stated_gap_rather_than_an_empty_relationship_set()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        // The rest of the proposal still reads: one unreadable list must not fail the whole Digital Thread.
+        var body = await ContentAsync(client, fixture.SystemTcrId);
+        var item = Item(body, fixture.MalformedParentItemId);
+
+        // "No relationships were recorded" and "relationship data exists that cannot be interpreted" are
+        // different facts, and reporting the second as the first asserts an absence nobody established.
+        Assert.Empty(item.GetProperty("exactParents").EnumerateArray());
+        var gap = Assert.Single(item.GetProperty("referenceGaps").EnumerateArray().ToList());
+        Assert.Equal("MalformedReferenceList", gap.GetProperty("reason").GetString());
+        Assert.Equal("ExactParent", gap.GetProperty("role").GetString());
+        // No identity can be named, because the bytes could not be read as one.
+        Assert.Equal(JsonValueKind.Null, gap.GetProperty("revisionId").ValueKind);
+    }
+
+    [Fact]
+    public async Task A_malformed_coverage_list_is_reported_against_its_own_role()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var item = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.MalformedCoverageItemId);
+
+        Assert.Empty(item.GetProperty("addedCoverage").EnumerateArray());
+        var gap = Assert.Single(item.GetProperty("referenceGaps").EnumerateArray().ToList());
+        Assert.Equal("MalformedReferenceList", gap.GetProperty("reason").GetString());
+        // The role says which relationship is unreadable, so the reader is not left guessing which lane lied.
+        Assert.Equal("AddedCoverage", gap.GetProperty("role").GetString());
+    }
+
+    [Fact]
+    public async Task A_reference_to_another_project_resolves_to_nothing_and_leaks_nothing()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var item = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.ForeignItemId);
+
+        var parent = Assert.Single(item.GetProperty("exactParents").EnumerateArray().ToList());
+        Assert.Equal(fixture.ForeignRevisionId.ToString(), parent.GetProperty("revisionId").GetString());
+        Assert.False(parent.GetProperty("resolved").GetBoolean());
+        // Not a single detail of the other Project's record crosses this seam, and no kind is claimed for it.
+        Assert.Equal(JsonValueKind.Null, parent.GetProperty("kind").ValueKind);
+        Assert.Equal(JsonValueKind.Null, parent.GetProperty("displayNumber").ValueKind);
+        Assert.Equal(JsonValueKind.Null, parent.GetProperty("level").ValueKind);
+        Assert.Equal(JsonValueKind.Null, parent.GetProperty("artifactId").ValueKind);
+
+        // The gap stays visible: the record names something, and the reader must not be shown a smaller
+        // relationship set than the record holds.
+        var gap = Assert.Single(item.GetProperty("referenceGaps").EnumerateArray().ToList());
+        Assert.Equal("UnresolvedReference", gap.GetProperty("reason").GetString());
+        Assert.Equal("Requirement", gap.GetProperty("expectedKind").GetString());
+
+        // Nothing anywhere in the response carries the foreign identifier or its statement.
+        var raw = body(item);
+        Assert.DoesNotContain("SR-99001", raw);
+        Assert.DoesNotContain("entirely unrelated", raw);
+    }
+
+    private static string body(JsonElement element) => element.GetRawText();
 
     [Fact]
     public async Task Test_proposal_content_is_refused_to_a_caller_outside_the_project()
