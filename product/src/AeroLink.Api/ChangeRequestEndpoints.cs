@@ -24,6 +24,13 @@ namespace AeroLink.Api;
 /// </summary>
 public static class ChangeRequestEndpoints
 {
+    /// <summary>
+    /// The default ceiling on nodes returned by the build change network. A build carries change requests in
+    /// the tens, so this is a runaway guard rather than paging; passing it is a deliberate caller choice and
+    /// the response declares whether the cut was applied.
+    /// </summary>
+    private const int DefaultNetworkNodeCeiling = 500;
+
     public static void MapChangeRequestEndpoints(this WebApplication app)
     {
         app.MapPost("/api/change-requests/{id:guid}/retarget", async (Guid id, RetargetChangeRequestRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, CancellationToken ct) =>
@@ -185,6 +192,23 @@ public static class ChangeRequestEndpoints
             var policy = await policyResolver.ResolveAsync(projectId.Value, ct);
             var trace = await ChangeRequestTraceProjection.ForChangeRequestAsync(db, projectId.Value, id, policy, ct);
             return trace is null ? Results.NotFound() : Results.Ok(trace);
+        });
+
+        // The build-scoped change network. The rooted trace above answers "what is this change connected to";
+        // this answers "what is in this build, and how is it connected". The release is resolved inside the
+        // authorized Project so a release identifier cannot pull a network out of a Project the caller cannot see.
+        app.MapGet("/api/change-requests/network", async (Guid projectId, Guid releaseId, int? maxNodes,
+            HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver,
+            CancellationToken ct) =>
+        {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var releaseExists = await db.Releases.AsNoTracking()
+                .AnyAsync(x => x.Id == releaseId && x.ProjectId == projectId, ct);
+            if (!releaseExists) return Results.NotFound();
+            var policy = await policyResolver.ResolveAsync(projectId, ct);
+            var network = await ChangeRequestTraceProjection.ForBuildAsync(db, projectId, releaseId, policy,
+                maxNodes is null or < 1 ? DefaultNetworkNodeCeiling : maxNodes.Value, ct);
+            return Results.Ok(network);
         });
 
         app.MapGet("/api/change-requests/{id:guid}/upstream-candidates", async (Guid id, string? search,
