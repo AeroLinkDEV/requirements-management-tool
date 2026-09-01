@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test"
 import {
   badgeForKind,
-  compactInsideLanes,
   diffFor,
+  insideEdges,
   downstreamNotice,
   downstreamState,
   insideLaneLabels,
@@ -124,27 +124,46 @@ test("a change request flagged for rebase reads as behind its target even with a
   expect(downstreamState(flagged, true)).toBe("behindTarget")
 })
 
-test("structurally empty lanes are dropped and the gap closes", () => {
-  const labels = insideLaneLabels("LowLevel", false)
-  const lanes = compactInsideLanes(labels, {
-    register: 12,
-    proposed: 3,
-    allocated: 0,
-    verification: 2,
-    effect: 1,
-  })
+test("coverage edges are drawn only where the record says what it covers", () => {
+  const items = [
+    item({ id: "SR-10", kind: "Modify", allocatedDownstream: [
+      { id: "h1", displayNumber: "HLR-1.00", level: "HighLevel", statement: "s", isProposed: false },
+      { id: "h2", displayNumber: "HLR-2.00", level: "HighLevel", statement: "s", isProposed: false },
+    ] }),
+  ]
+  // Two allocations and two procedures. Pairing them all would produce four "covered by" edges and claim
+  // coverage nothing recorded — a requirement three procedures cover would look the same as one nothing
+  // covers. Only the one recorded link may be drawn.
+  const covering = [{ id: "tp1", coversIds: ["h1"] }, { id: "tp2" }]
 
-  expect(lanes.map(lane => lane.key)).toEqual(["register", "proposed", "verification", "effect"])
+  const edges = insideEdges("SRCR-1", items, covering)
+  const coverage = edges.filter(edge => edge.label === "covered by")
+
+  expect(coverage).toHaveLength(1)
+  expect(coverage[0]).toMatchObject({ from: "h1", to: "tp1" })
 })
 
-test("a downstream lane with something to say is kept even with no cards", () => {
-  const labels = insideLaneLabels("System", false)
-  const lanes = compactInsideLanes(
-    labels,
-    { register: 12, proposed: 3, allocated: 0, verification: 2, effect: 1 },
-    true,
-  )
+test("a retirement and its cascade are marked so they can be drawn dashed", () => {
+  const items = [
+    item({ id: "SR-11", kind: "Retire", allocatedDownstream: [
+      { id: "h3", displayNumber: "HLR-3.00", level: "HighLevel", statement: "s", isProposed: false },
+    ] }),
+  ]
 
-  // The lane holds a notice explaining why it is empty, which is content — dropping it would lose the reason.
-  expect(lanes.map(lane => lane.key)).toContain("allocated")
+  const edges = insideEdges("SRCR-1", items)
+
+  expect(edges.every(edge => edge.kind === "retire")).toBe(true)
+  expect(edges.map(edge => edge.label)).toEqual(["retire", "retire cascade"])
+})
+
+test("the opened change links to every item it proposes", () => {
+  const items = [
+    item({ id: "SR-12", kind: "Introduce" }),
+    item({ id: "SR-13", kind: "Modify" }),
+  ]
+
+  const edges = insideEdges("SRCR-9", items)
+
+  expect(edges.filter(edge => edge.from === "SRCR-9")).toHaveLength(2)
+  expect(edges.map(edge => edge.label)).toEqual(["introduce", "modify"])
 })

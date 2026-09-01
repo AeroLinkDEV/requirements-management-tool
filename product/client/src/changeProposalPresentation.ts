@@ -231,26 +231,61 @@ export const downstreamNotice = (state: DownstreamState): string | null => {
 }
 
 /**
- * Lane contents for one opened change, with structurally empty lanes dropped and the gap closed (§5.2).
+ * Where the downstream explanation belongs.
  *
- * Dropping happens here rather than in the canvas so the labels and the rows can never disagree about which
- * lane is which. A lane holding only a notice is kept: it has something to say.
+ * Not in the downstream lane. That lane is shared by every proposed item in the change, so "why is this
+ * empty" has no single answer there: one item can be behind its target while another simply has nothing
+ * below it. The sentence is per-item, so it renders on the item card, and the lane itself is dropped when
+ * genuinely empty like any other. An earlier draft of this module carried a lane-level helper for it; it
+ * could never have been correct, and the component rightly never used it.
  */
-export type InsideLane = { label: string; key: string; count: number }
 
-export const compactInsideLanes = (
-  labels: InsideLaneLabels,
-  counts: { register: number; proposed: number; allocated: number; verification: number; effect: number },
-  keepAllocatedNotice = false,
-): InsideLane[] =>
-  [
-    { label: labels.register, key: "register", count: counts.register },
-    { label: labels.proposed, key: "proposed", count: counts.proposed },
-    {
-      label: labels.allocated,
-      key: "allocated",
-      count: counts.allocated || (keepAllocatedNotice ? 1 : 0),
-    },
-    { label: labels.verification, key: "verification", count: counts.verification },
-    { label: labels.effect, key: "effect", count: counts.effect },
-  ].filter(lane => lane.count > 0)
+/** A record that verifies or receives proposed content, as the rooted trace supplies it. */
+export type CoveringRecord = {
+  id: string
+  /** What this record covers, as recorded. Absent means nothing is known, not "covers everything nearby". */
+  coversIds?: readonly string[]
+}
+
+/** `kind` stays narrow so it drops straight into the canvas edge type without a cast. */
+export type InsideEdge = { from: string; to: string; label: string; kind: "" | "retire" }
+
+/**
+ * Every edge inside one change: the change to each proposal, each proposal to what it allocates to, and each
+ * covering record to what it actually covers.
+ *
+ * The coverage rule is the reason this is a function rather than a loop in the component. Pairing every
+ * allocation with every verification artifact produces a fuller-looking picture that is a lie: it makes a
+ * requirement three procedures cover indistinguishable from one nothing covers, and asserts relationships the
+ * record never held. #880 §8.6 forbids exactly that. A covering record that names nothing draws no edge.
+ */
+export const insideEdges = (
+  openedId: string,
+  items: readonly ProposalItem[],
+  covering: readonly CoveringRecord[] = [],
+): InsideEdge[] => {
+  const edges: InsideEdge[] = []
+  for (const item of items) {
+    const retiring = item.kind === "Retire"
+    edges.push({
+      from: openedId,
+      to: item.id,
+      label: operationLabel(item.kind).toLowerCase(),
+      kind: retiring ? "retire" : "",
+    })
+    for (const target of item.allocatedDownstream) {
+      edges.push({
+        from: item.id,
+        to: target.id,
+        label: retiring ? "retire cascade" : "allocates to",
+        kind: retiring ? "retire" : "",
+      })
+    }
+  }
+  for (const record of covering) {
+    for (const coveredId of record.coversIds ?? []) {
+      edges.push({ from: coveredId, to: record.id, label: "covered by", kind: "" })
+    }
+  }
+  return edges
+}

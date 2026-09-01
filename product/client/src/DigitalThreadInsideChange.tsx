@@ -15,6 +15,7 @@ import {
   diffFor,
   downstreamNotice,
   downstreamState,
+  insideEdges,
   insideLaneLabels,
   matchesType,
   operationLabel,
@@ -34,6 +35,12 @@ export type InsideTraceRecord = {
   title?: string | null
   state?: string | null
   badge: string
+  /**
+   * The records this one covers, as the trace recorded them. Absent or empty draws no coverage edge at all,
+   * which is the honest rendering: the alternative — assuming it covers everything in the lane beside it —
+   * would make a verification artifact that covers one requirement indistinguishable from one that covers ten.
+   */
+  coversIds?: readonly string[]
 }
 
 export type DigitalThreadInsideChangeProps = {
@@ -66,7 +73,7 @@ type Card =
   | { kind: "register"; node: NetworkNode }
   | { kind: "proposal"; item: ProposalItem }
   | { kind: "allocation"; target: AllocationTarget }
-  | { kind: "trace"; record: InsideTraceRecord; lane: "verification" | "effect" }
+  | { kind: "trace"; record: InsideTraceRecord }
 
 /**
  * Inside one change: what it proposes, what that allocates to, what verifies it, and what it does to the build.
@@ -124,10 +131,12 @@ export default function DigitalThreadInsideChange({
   }, [items])
 
   /**
-   * Whether the downstream lane has something to say despite holding no cards.
+   * Why each item has nothing below it, keyed by item.
    *
-   * A lane explaining why it is empty is content. Dropping it would lose the reason, which for a proposal that
-   * is behind its target is the single most useful thing the view can tell the reader.
+   * This belongs on the item card rather than in the downstream lane, because the lane is shared by every
+   * proposed item in the change and "why is this empty" has no single answer there: one item can be behind
+   * its target while another simply has nothing allocated. For a proposal that is behind its target this is
+   * the most useful sentence the view can show, so it travels with the item it describes.
    */
   const downstreamNotices = useMemo(() => {
     const notices = new Map<string, string>()
@@ -144,8 +153,8 @@ export default function DigitalThreadInsideChange({
     for (const node of registerNodes) byId.set(node.id, { kind: "register", node })
     for (const item of items) byId.set(item.id, { kind: "proposal", item })
     for (const target of allocations) byId.set(target.id, { kind: "allocation", target })
-    for (const record of verification) byId.set(record.id, { kind: "trace", record, lane: "verification" })
-    for (const record of effect) byId.set(record.id, { kind: "trace", record, lane: "effect" })
+    for (const record of verification) byId.set(record.id, { kind: "trace", record })
+    for (const record of effect) byId.set(record.id, { kind: "trace", record })
     return byId
   }, [allocations, effect, items, registerNodes, verification])
 
@@ -168,32 +177,10 @@ export default function DigitalThreadInsideChange({
    * what covers it. A retirement and everything it cascades to is drawn dashed.
    */
   const canvasEdges = useMemo<CanvasEdge[]>(() => {
-    const edges: CanvasEdge[] = []
-    for (const item of items) {
-      const retiring = item.kind === "Retire"
-      edges.push({
-        from: opened.id,
-        to: item.id,
-        label: operationLabel(item.kind).toLowerCase(),
-        kind: retiring ? "retire" : "",
-      })
-      for (const target of item.allocatedDownstream) {
-        edges.push({
-          from: item.id,
-          to: target.id,
-          label: retiring ? "retire cascade" : "allocates to",
-          kind: retiring ? "retire" : "",
-        })
-      }
-    }
-    for (const record of verification) {
-      for (const target of allocations) {
-        edges.push({ from: target.id, to: record.id, label: "covered by", kind: "" })
-      }
-    }
     const present = new Set(canvasNodes.map(node => node.id))
-    return edges.filter(edge => present.has(edge.from) && present.has(edge.to))
-  }, [allocations, canvasNodes, items, opened.id, verification])
+    return insideEdges(opened.id, items, verification)
+      .filter(edge => present.has(edge.from) && present.has(edge.to))
+  }, [canvasNodes, items, opened.id, verification])
 
   const renderCard = useCallback(
     (canvasNode: CanvasNode) => {
