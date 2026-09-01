@@ -857,6 +857,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./product/scripts/AeroLinkLauncherContract.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Root launcher contract failed.' }
+      - name: Validate the launcher source-posture bootstrap contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/AeroLinkBootstrap.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Launcher source-posture bootstrap contract failed.' }
       - name: Validate the changed-test planner Windows contract
         shell: powershell
         run: |
