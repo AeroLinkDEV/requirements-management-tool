@@ -138,8 +138,8 @@ Assert-True ($sensitiveFastJson.classification.fastFullInfrastructure -eq $true)
 $sensitiveInfrastructure = @($sensitiveFastJson.local | Where-Object { $_.label -eq 'Infrastructure suite' }) | Select-Object -First 1
 Assert-True ($sensitiveInfrastructure.command -notmatch '--filter=') 'A showcase seeder change must not filter its directly relevant Infrastructure tests.'
 
-$fastInfrastructureFilter = 'FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests'
-Assert-True (([regex]::Matches($plannerSource, [regex]::Escape($fastInfrastructureFilter))).Count -eq 1) 'The six-case Fast infrastructure filter must appear exactly once so Full remains unfiltered.'
+$fastInfrastructureFilter = 'FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseScenarioTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests'
+Assert-True (([regex]::Matches($plannerSource, [regex]::Escape($fastInfrastructureFilter))).Count -eq 1) 'The showcase Fast infrastructure filter must appear exactly once so Full remains unfiltered.'
 Assert-True (Test-Path -LiteralPath (Join-Path $root 'TEST_AEROLINK_CHANGED.bat') -PathType Leaf) 'Friendly root BAT entry point is missing.'
 
 if ($failures.Count -gt 0) {

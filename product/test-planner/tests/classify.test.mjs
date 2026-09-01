@@ -205,6 +205,7 @@ test('the normal local Fast infrastructure profile leaves only synthetic showcas
   assert.ok(infrastructure)
   assert.match(infrastructure.command, /--filter=/)
   assert.match(infrastructure.command, /FmsShowcaseSeederTests/)
+  assert.match(infrastructure.command, /FmsShowcaseScenarioTests/)
   assert.match(infrastructure.command, /ShowcaseUpgradeTests/)
   assert.match(infrastructure.why, /authoritative GitHub backend-core-infrastructure/)
 })
@@ -213,6 +214,7 @@ test('showcase-sensitive and broad changes restore the complete Infrastructure s
   const sensitivePaths = [
     'product/src/AeroLink.Infrastructure/Persistence/FmsShowcaseSeeder.cs',
     'product/tests/AeroLink.Infrastructure.Tests/FmsShowcaseSeederTests.cs',
+    'product/tests/AeroLink.Infrastructure.Tests/FmsShowcaseScenarioTests.cs',
     'product/tests/AeroLink.Infrastructure.Tests/ShowcaseUpgradeTests.cs',
     'product/tests/AeroLink.Infrastructure.Tests/ShowcaseDatabaseFixture.cs',
   ]

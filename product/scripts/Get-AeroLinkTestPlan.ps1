@@ -738,7 +738,7 @@ function Invoke-FastStep {
                 Invoke-TestSuiteWithDiagnostics -Label 'Infrastructure suite' -FilePath 'dotnet' -Arguments @('test', 'product/tests/AeroLink.Infrastructure.Tests', '--configuration', 'Release', '--no-build')
             }
             else {
-                Invoke-TestSuiteWithDiagnostics -Label 'Infrastructure suite' -FilePath 'dotnet' -Arguments @('test', 'product/tests/AeroLink.Infrastructure.Tests', '--configuration', 'Release', '--no-build', '--filter', 'FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests')
+                Invoke-TestSuiteWithDiagnostics -Label 'Infrastructure suite' -FilePath 'dotnet' -Arguments @('test', 'product/tests/AeroLink.Infrastructure.Tests', '--configuration', 'Release', '--no-build', '--filter', 'FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseScenarioTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests')
             }
         }
         'Client lint, type-check and build' { Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'lint'); Invoke-CheckedProcess 'npm.cmd' @('--prefix', 'product/client', 'run', 'build') }

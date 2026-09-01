@@ -18,8 +18,11 @@ namespace AeroLink.Infrastructure.Tests;
 /// and can approve, freeze and release inside it without any other test seeing it. What is no longer repeated is
 /// the building of a dataset that was identical all eight times.
 ///
-/// `FmsShowcaseSeederTests` deliberately does not use this. That test exists to prove the seeder produces the
-/// dataset and is idempotent when run twice, which cannot be demonstrated against a copy of its own output.
+/// `FmsShowcaseSeederTests` deliberately does not use this. That test exists to prove the seeder produces
+/// the dataset and is idempotent when run twice, which cannot be demonstrated against a copy of its own
+/// output. The scenario tests in `FmsShowcaseScenarioTests` do use it: their subject is post-seed upgrade,
+/// authority, closure and coverage behaviour, for which the fresh rebuild was merely expensive setup that
+/// serialised the Infrastructure lane's critical path (#891).
 /// </summary>
 public sealed class ShowcaseDatabaseFixture : IAsyncLifetime
 {
