@@ -1,0 +1,111 @@
+/* Digital Thread canvas shell.
+   Positional values are written by digitalThreadCanvas.ts; this file owns appearance and the density tiers.
+   Tokens come from index.css — nothing here invents a colour or a radius. */
+
+.dtCanvas {
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  background-color: var(--canvas);
+  background-image: radial-gradient(#d8e1e9 1px, transparent 1px);
+  background-size: 24px 24px;
+  touch-action: none;
+}
+
+.dtCanvas.is-panning { cursor: grabbing; }
+/* Rolling a lane is vertical, and saying so before the drag starts is most of what makes it discoverable. */
+.dtCanvas.is-rolling { cursor: ns-resize; }
+.dtCanvas:focus-visible { outline: 3px solid rgba(35, 135, 125, .28); outline-offset: -3px; }
+
+.dtCanvasScene {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.dtCanvasBands { position: absolute; inset: 0; }
+
+.dtCanvasBand {
+  position: absolute;
+  top: 0;
+  overflow: hidden;
+  border: 1px solid rgba(212, 225, 235, .9);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, .6);
+}
+
+.dtCanvasBand.is-rollable { background: rgba(255, 255, 255, .72); }
+
+/* A record leaving its lane's window fades rather than being clipped mid-card. */
+.dtCanvasFadeTop,
+.dtCanvasFadeBottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 24px;
+  display: block;
+  pointer-events: none;
+}
+
+.dtCanvasFadeTop { top: 0; background: linear-gradient(180deg, rgba(255, 255, 255, .96), rgba(255, 255, 255, 0)); }
+.dtCanvasFadeBottom { bottom: 0; background: linear-gradient(0deg, rgba(255, 255, 255, .96), rgba(255, 255, 255, 0)); }
+
+.dtCanvasLaneHead {
+  position: absolute;
+  top: -30px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #7a8a9c;
+  font: var(--weight-bold) var(--text-xs) var(--font-body);
+  letter-spacing: .13em;
+  white-space: nowrap;
+}
+
+.dtCanvasLaneHead em {
+  border-radius: var(--radius-pill);
+  background: #e6ecf2;
+  padding: 2px 7px;
+  color: var(--ink-500);
+  font-size: var(--text-xs);
+  font-style: normal;
+  letter-spacing: .02em;
+}
+
+.dtCanvasEdges { position: absolute; overflow: visible; pointer-events: none; }
+.dtCanvasEdge { stroke: #9dc2c9; stroke-width: 1.5; }
+.dtCanvasEdge.is-suspect { stroke: #d6a33b; stroke-width: 2; stroke-dasharray: 6 6; }
+.dtCanvasEdge.is-retire { stroke: #a9b8c7; stroke-dasharray: 6 6; }
+.dtCanvasEdgeDot { fill: #7fb3ab; }
+.dtCanvasEdgeDot.is-suspect { fill: #d6a33b; }
+
+.dtCanvasNodes { position: absolute; inset: 0; }
+
+.dtCanvasNode {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: 0 6px 16px rgba(16, 36, 57, .07);
+  cursor: pointer;
+  transition: box-shadow .18s ease, border-color .18s ease, opacity .2s ease;
+}
+
+.dtCanvasNode:hover { border-color: #8ec3bb; box-shadow: 0 12px 26px rgba(16, 36, 57, .13); }
+.dtCanvasNode:focus-visible { outline: 2px solid var(--teal-600); outline-offset: 2px; }
+.dtCanvasNode.is-offscreen { opacity: 0; pointer-events: none; }
+
+/* Zoom-driven density. Pulling back shrinks the row pitch, so the same lane window holds more records; the
+   card sheds content to stay legible at the smaller size rather than shrinking its type. The selected card
+   keeps its full detail at every tier — it is the one the reader is actually looking at. */
+.dtCanvasScene[data-tier="1"] .dtCanvasNode:not(.is-selected) [data-density="meta"] { display: none; }
+.dtCanvasScene[data-tier="0"] .dtCanvasNode:not(.is-selected) [data-density="meta"],
+.dtCanvasScene[data-tier="0"] .dtCanvasNode:not(.is-selected) [data-density="title"] { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dtCanvasNode { transition: none; }
+}
