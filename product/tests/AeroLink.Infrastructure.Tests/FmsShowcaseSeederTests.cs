@@ -234,6 +234,161 @@ public sealed class FmsShowcaseSeederTests
     }
 
     [Fact]
+    public async Task Exact_empty_released_manifest_moves_only_corrective_evidence_to_the_active_build()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-showcase-legacy-closure-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            await new IdentitySeeder(db).EnsureSeededAsync();
+            var seeder = new FmsShowcaseSeeder(db);
+            var summary = await seeder.EnsureSeededAsync();
+
+            var released = await db.Releases.SingleAsync(x => x.ProjectId == summary.ProjectId && x.Version == "1.5");
+            var active = await db.Releases.SingleAsync(x => x.ProjectId == summary.ProjectId && x.Version == "1.6");
+            var releasedBaseline = await db.CandidateBaselines.SingleAsync(x => x.ReleaseId == released.Id);
+            var activeBaseline = await db.CandidateBaselines.SingleAsync(x => x.ReleaseId == active.Id);
+
+            // The persistent predecessor we are reproducing has already progressed 1.6 to an exact frozen
+            // candidate. Drive this disposable fixture through the same domain materializers so the test does
+            // not manufacture baseline membership or infer carried procedure truth from global revisions.
+            var activeMaterializedAt = DateTimeOffset.UtcNow.AddSeconds(-5);
+            activeBaseline.Freeze("cm.fms", activeMaterializedAt.AddMinutes(-2));
+            await db.SaveChangesAsync();
+            var policyResolver = new EffectiveProjectLadderPolicyResolver(db);
+            await new RequirementBaselineMaterializer(db,
+                    new VerificationImpactService(db, policyResolver: policyResolver),
+                    policyResolver: policyResolver)
+                .MaterializeAsync(activeBaseline.Id, "cm.fms", activeMaterializedAt.AddMinutes(-1),
+                    CancellationToken.None);
+            await new TestProcedureBaselineMaterializer(db, policyResolver: policyResolver)
+                .MaterializeAsync(activeBaseline.Id, "cm.fms", activeMaterializedAt, CancellationToken.None);
+
+            // Mirror the persistent installation's operator-time personnel reconciliation. Timeline
+            // construction must remain attributable to that real grant without writing future events.
+            var testEngineer = await db.UserAccounts.SingleAsync(x => x.UserName == "test.engineer");
+            var currentTestAuthority = await db.ProgramMemberships.SingleOrDefaultAsync(x => x.UserId == testEngineer.Id
+                && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.TestEngineer && x.EndedAt == null);
+            var currentGrant = DateTimeOffset.UtcNow.AddSeconds(-1);
+            if (currentTestAuthority is not null)
+            {
+                currentTestAuthority.End("operator", currentGrant.AddTicks(-1));
+                await db.SaveChangesAsync();
+            }
+            db.ProgramMemberships.Add(new ProgramMembership(testEngineer.Id, summary.ProgramId,
+                ProgramRole.TestEngineer, "operator", currentGrant));
+            await db.SaveChangesAsync();
+            var activeEffectivity = await TestProcedureEffectivity.ForReleaseAsync(db, summary.ProjectId, active.Id,
+                CancellationToken.None);
+            Assert.NotNull(activeEffectivity);
+            Assert.True(activeEffectivity.IsExactManifest);
+            Assert.NotEmpty(activeEffectivity.RevisionByProcedure);
+
+            var priorScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId,
+                "scenario-richness/problem-report/");
+            var priorClosureIds = priorScenarioIds.Skip(5).Take(2).ToArray();
+            var priorRevisions = (await db.ProblemReportRevisions.AsNoTracking()
+                    .Where(x => priorClosureIds.Contains(x.ProblemReportId)).ToListAsync())
+                .OrderBy(x => x.Id).Select(x => (x.Id, x.SnapshotHash, x.SnapshotJson)).ToArray();
+            var priorLinks = (await db.ProblemReportLinks.AsNoTracking()
+                    .Where(x => priorClosureIds.Contains(x.ProblemReportId)).ToListAsync())
+                .OrderBy(x => x.Id).Select(x => (x.Id, x.ArtifactId, x.Relationship, x.AddedAt)).ToArray();
+            var priorCandidates = (await db.ProblemReportClosureCandidates.AsNoTracking()
+                    .Where(x => priorClosureIds.Contains(x.ProblemReportId)).ToListAsync())
+                .OrderBy(x => x.Id).Select(x => (x.Id, x.State, x.ClosurePackageHash, x.ClosurePackageJson)).ToArray();
+
+            // Reproduce the real legacy installation: its released predecessor has an authoritative exact
+            // empty manifest after the verification-model cutover, while 1.6 carries the stable Procedure
+            // lineages. The old executions and reports remain immutable history.
+            var releasedSelections = await db.BaselineTestProcedures
+                .Where(x => x.BaselineId == releasedBaseline.Id).ToListAsync();
+            Assert.NotEmpty(releasedSelections);
+            db.BaselineTestProcedures.RemoveRange(releasedSelections);
+            db.Entry(releasedBaseline).Property(x => x.TestProceduresHash).CurrentValue =
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+            var retrySteps = await db.ShowcaseUpgradeSteps.Where(x => x.ProgramId == summary.ProgramId
+                && x.StepKey == "scenario-richness").ToListAsync();
+            db.ShowcaseUpgradeSteps.RemoveRange(retrySteps);
+            await db.SaveChangesAsync();
+
+            var releasedEffectivity = await TestProcedureEffectivity.ForReleaseAsync(db, summary.ProjectId,
+                released.Id, CancellationToken.None);
+            Assert.NotNull(releasedEffectivity);
+            Assert.Empty(releasedEffectivity.RevisionByProcedure);
+            var ready = await seeder.CheckUpgradeAuthorityAsync(summary.ProgramId);
+            Assert.True(ready.Ready, $"{ready.Code}: {ready.Detail}");
+
+            var applied = await seeder.UpgradeAsync(summary.ProgramId);
+            Assert.Contains(applied, x => x.StartsWith("scenario-richness:", StringComparison.Ordinal));
+            var currentScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId,
+                "scenario-richness/problem-report/");
+            var currentClosureIds = currentScenarioIds.Skip(5).Take(2).ToArray();
+            Assert.DoesNotContain(currentClosureIds, id => priorClosureIds.Contains(id));
+            var currentReports = await db.ProblemReports.AsNoTracking()
+                .Where(x => currentClosureIds.Contains(x.Id)).OrderBy(x => x.ReportNumber).ToListAsync();
+            Assert.Equal(2, currentReports.Count);
+            Assert.All(currentReports, report => Assert.Equal(active.Id, report.TargetReleaseId));
+
+            foreach (var report in currentReports)
+            {
+                var originId = await db.ProblemReportLinks.AsNoTracking()
+                    .Where(x => x.ProblemReportId == report.Id
+                        && x.Relationship == ProblemReportRelationshipPolicy.OriginatingFailure)
+                    .Select(x => x.ArtifactId).SingleAsync();
+                var origin = await db.TestExecutions.AsNoTracking().SingleAsync(x => x.Id == originId);
+                Assert.Equal(released.Id, origin.ReleaseId);
+                var selectedId = Assert.IsType<Guid>(report.ResolutionVerificationExecutionId);
+                var selected = await db.TestExecutions.AsNoTracking().SingleAsync(x => x.Id == selectedId);
+                Assert.Equal(active.Id, selected.ReleaseId);
+                Assert.Null(selected.SoftwareBuildId);
+                var predecessor = await db.TestExecutions.AsNoTracking()
+                    .SingleAsync(x => x.Id == selected.RetestOfExecutionId);
+                Assert.Equal(origin.Id, predecessor.RetestOfExecutionId);
+                var originProcedureId = await db.TestProcedureRevisions.AsNoTracking()
+                    .Where(x => x.Id == origin.ProcedureRevisionId).Select(x => x.ProcedureId).SingleAsync();
+                Assert.Equal(activeEffectivity.RevisionByProcedure[originProcedureId], selected.ProcedureRevisionId);
+                Assert.True(selected.RecordedAt > activeBaseline.TestProceduresMaterializedAt);
+                Assert.True(selected.RecordedAt <= DateTimeOffset.UtcNow);
+                Assert.True(report.CreatedAt >= currentGrant);
+                Assert.True(report.CreatedAt <= DateTimeOffset.UtcNow);
+                Assert.True(report.UpdatedAt <= DateTimeOffset.UtcNow);
+                Assert.All(await db.ProblemReportRevisions.AsNoTracking()
+                        .Where(x => x.ProblemReportId == report.Id).ToListAsync(),
+                    revision => Assert.True(revision.OccurredAt <= DateTimeOffset.UtcNow));
+                var decision = await new ProblemReportClosureVerificationPolicy(db)
+                    .ValidateAsync(report, selected, CancellationToken.None);
+                Assert.True(decision.Accepted, $"{decision.Code}: {decision.Error}");
+            }
+            Assert.Contains(currentReports, x => x.State == ProblemReportState.WaitingForSqaToClose);
+            Assert.Contains(currentReports, x => x.State == ProblemReportState.Closed);
+            var closed = currentReports.Single(x => x.State == ProblemReportState.Closed);
+            var closedExecution = await db.TestExecutions.AsNoTracking()
+                .SingleAsync(x => x.Id == closed.ResolutionVerificationExecutionId);
+            Assert.True(closed.ClosureApprovedAt > closedExecution.RecordedAt);
+
+            Assert.Equal(priorRevisions, (await db.ProblemReportRevisions.AsNoTracking()
+                    .Where(x => priorClosureIds.Contains(x.ProblemReportId)).ToListAsync())
+                .OrderBy(x => x.Id).Select(x => (x.Id, x.SnapshotHash, x.SnapshotJson)).ToArray());
+            Assert.Equal(priorLinks, (await db.ProblemReportLinks.AsNoTracking()
+                    .Where(x => priorClosureIds.Contains(x.ProblemReportId)).ToListAsync())
+                .OrderBy(x => x.Id).Select(x => (x.Id, x.ArtifactId, x.Relationship, x.AddedAt)).ToArray());
+            Assert.Equal(priorCandidates, (await db.ProblemReportClosureCandidates.AsNoTracking()
+                    .Where(x => priorClosureIds.Contains(x.ProblemReportId)).ToListAsync())
+                .OrderBy(x => x.Id).Select(x => (x.Id, x.State, x.ClosurePackageHash, x.ClosurePackageJson)).ToArray());
+            Assert.Empty(await seeder.UpgradeAsync(summary.ProgramId));
+            Assert.All(await seeder.CheckInvariantsAsync(summary.ProgramId),
+                invariant => Assert.True(invariant.Holds, $"{invariant.Key}: {invariant.Detail}"));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task Ended_sqa_membership_is_preserved_and_reopened_closure_stays_in_work()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-showcase-ended-sqa-{Guid.NewGuid():N}.db");
@@ -310,7 +465,8 @@ public sealed class FmsShowcaseSeederTests
                 && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.SoftwareEngineer && x.EndedAt == null);
             leadMembership.End("admin", leadMembership.GrantedAt.AddDays(1));
             var missing = await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
-                && x.StepKey == "scenario-richness/interface/01");
+                && x.StepKey == "scenario-richness/interface/03");
+            var priorRequestId = Guid.Parse(missing.Detail);
             db.ShowcaseUpgradeSteps.Remove(missing);
             db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
                 && x.StepKey == "scenario-richness"));
@@ -321,7 +477,23 @@ public sealed class FmsShowcaseSeederTests
             Assert.Contains("lead.reviewer", failure.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Equal(requestCount, await db.SystemChangeRequests.CountAsync(x => x.ProjectId == summary.ProjectId));
             Assert.False(await db.ShowcaseUpgradeSteps.AnyAsync(x => x.ProgramId == summary.ProgramId
-                && x.StepKey == "scenario-richness/interface/01"));
+                && x.StepKey == "scenario-richness/interface/03"));
+
+            var lateGrant = DateTimeOffset.UtcNow.AddSeconds(-1);
+            db.ProgramMemberships.Add(new ProgramMembership(leadId, summary.ProgramId,
+                ProgramRole.SoftwareEngineer, "operator", lateGrant));
+            await db.SaveChangesAsync();
+            var applied = await seeder.UpgradeAsync(summary.ProgramId);
+            Assert.Contains(applied, x => x.StartsWith("scenario-richness:", StringComparison.Ordinal));
+            var replacementRequestId = Guid.Parse(await db.ShowcaseUpgradeSteps.AsNoTracking()
+                .Where(x => x.ProgramId == summary.ProgramId && x.StepKey == "scenario-richness/interface/03")
+                .Select(x => x.Detail).SingleAsync());
+            Assert.NotEqual(priorRequestId, replacementRequestId);
+            var replacement = await db.SystemChangeRequests.AsNoTracking()
+                .SingleAsync(x => x.Id == replacementRequestId);
+            Assert.True(replacement.CreatedAt >= lateGrant);
+            Assert.True(replacement.CreatedAt <= DateTimeOffset.UtcNow);
+            Assert.True(replacement.UpdatedAt <= DateTimeOffset.UtcNow);
         }
         finally { File.Delete(path); }
     }
@@ -402,7 +574,7 @@ public sealed class FmsShowcaseSeederTests
             Assert.True(await db.ShowcaseUpgradeSteps.AnyAsync(x => x.Id == scenarioStep.Id));
 
             testEngineer.Enable();
-            var endedAt = DateTimeOffset.UtcNow;
+            var endedAt = DateTimeOffset.UtcNow.AddSeconds(-2);
             testMembership.End("operator", endedAt);
             await db.SaveChangesAsync();
             var ended = await seeder.CheckUpgradeAuthorityAsync(summary.ProgramId);
@@ -414,7 +586,7 @@ public sealed class FmsShowcaseSeederTests
 
             // An explicit operator grant makes the actor current again. The new evidence must follow that
             // actual grant, even though the mapped test execution and Problem Report were authored in 2024.
-            var lateGrant = endedAt.AddMinutes(1);
+            var lateGrant = endedAt.AddSeconds(1);
             db.ProgramMemberships.Add(new ProgramMembership(testEngineer.Id, summary.ProgramId,
                 ProgramRole.TestEngineer, "operator", lateGrant));
             await db.SaveChangesAsync();
@@ -427,6 +599,7 @@ public sealed class FmsShowcaseSeederTests
             Assert.Equal(ProblemReportClosureCandidateState.Pending, candidate.State);
             Assert.True(candidate.SelectedAt >= lateGrant,
                 $"Closure candidate was selected at {candidate.SelectedAt:O} before the grant at {lateGrant:O}.");
+            Assert.True(candidate.SelectedAt <= DateTimeOffset.UtcNow);
         }
         finally
         {
@@ -464,9 +637,9 @@ public sealed class FmsShowcaseSeederTests
             var testEngineer = await db.UserAccounts.SingleAsync(x => x.UserName == "test.engineer");
             var priorMembership = await db.ProgramMemberships.SingleAsync(x => x.UserId == testEngineer.Id
                 && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.TestEngineer && x.EndedAt == null);
-            var endedAt = DateTimeOffset.UtcNow;
+            var endedAt = DateTimeOffset.UtcNow.AddSeconds(-2);
             priorMembership.End("operator", endedAt);
-            var lateGrant = endedAt.AddMinutes(1);
+            var lateGrant = endedAt.AddSeconds(1);
             db.ProgramMemberships.Add(new ProgramMembership(testEngineer.Id, summary.ProgramId,
                 ProgramRole.TestEngineer, "operator", lateGrant));
             await db.SaveChangesAsync();
@@ -483,6 +656,8 @@ public sealed class FmsShowcaseSeederTests
             Assert.NotEmpty(revisions);
             Assert.All(revisions, revision => Assert.True(revision.OccurredAt >= lateGrant,
                 $"{revision.EventType} by {revision.Actor} occurred at {revision.OccurredAt:O} before {lateGrant:O}."));
+            Assert.All(revisions, revision => Assert.True(revision.OccurredAt <= DateTimeOffset.UtcNow,
+                $"{revision.EventType} by {revision.Actor} is future-dated at {revision.OccurredAt:O}."));
 
             var requiredRoles = new Dictionary<string, ProgramRole>(StringComparer.OrdinalIgnoreCase)
             {
@@ -509,6 +684,7 @@ public sealed class FmsShowcaseSeederTests
             var verification = await db.TestExecutions.AsNoTracking().SingleAsync(x => x.Id == verificationId);
             Assert.Equal(TestOutcome.Pass, verification.Outcome);
             Assert.True(verification.RecordedAt >= lateGrant);
+            Assert.True(verification.RecordedAt <= DateTimeOffset.UtcNow);
             var predecessorId = Assert.IsType<Guid>(verification.RetestOfExecutionId);
             var predecessor = await db.TestExecutions.AsNoTracking().SingleAsync(x => x.Id == predecessorId);
             Assert.Equal(TestOutcome.Pass, predecessor.Outcome);
