@@ -299,6 +299,7 @@
         "CancelReviewAuthorityTests",
         "CaseProcedureLifecycleApiTests",
         "ChangeAuthoringInvariantApiTests",
+        "ChangeProposalContentApiTests",
         "ChangeRequestNetworkApiTests",
         "ChangeRequestReviewRationaleApiTests",
         "ChangeRequestUpstreamTraceApiTests",

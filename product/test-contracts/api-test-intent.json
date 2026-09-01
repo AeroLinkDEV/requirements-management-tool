@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 744,
-    "cases": 828,
-    "classes": 119,
-    "hostedTests": 714,
-    "hostedCases": 784,
+    "tests": 753,
+    "cases": 837,
+    "classes": 120,
+    "hostedTests": 723,
+    "hostedCases": 793,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 8,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 445,
-      "cases": 497,
+      "tests": 453,
+      "cases": 505,
       "unknownCases": 0,
-      "classes": 98
+      "classes": 99
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 86,
-      "cases": 90,
+      "tests": 87,
+      "cases": 91,
       "unknownCases": 0,
-      "classes": 49
+      "classes": 50
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -1923,6 +1923,168 @@
       "sourceLines": {
         "start": 92,
         "end": 131
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "A_proposal_written_against_a_superseded_revision_shows_nothing_allocated_below_it",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 244,
+        "end": 258
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "An_unknown_change_request_is_not_found",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 273,
+        "end": 284
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "Downstream_allocation_carries_a_proposed_child_and_marks_it_as_not_yet_in_the_build",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 213,
+        "end": 228
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "Downstream_allocation_carries_the_materialized_child_of_the_superseded_revision",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 197,
+        "end": 211
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "Downstream_allocation_excludes_a_proposal_from_a_different_build",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 230,
+        "end": 242
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "Introduce_supersedes_nothing_and_says_so_with_a_null_rather_than_an_empty_string",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 166,
+        "end": 180
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "Modify_carries_the_statement_of_the_exact_revision_it_supersedes",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 151,
+        "end": 164
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "Proposal_content_is_refused_to_a_caller_outside_the_project",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 260,
+        "end": 271
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "Retire_shows_no_before_text_but_still_resolves_what_hangs_below_it",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 182,
+        "end": 195
       }
     },
     {
