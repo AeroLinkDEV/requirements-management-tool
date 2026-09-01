@@ -38,7 +38,39 @@ public sealed record ChangeProposalItem(
     string? SupersededStatement,
     int? SupersededRevision,
     Guid? BaseRevisionId,
-    IReadOnlyList<ProposalAllocationTarget> AllocatedDownstream);
+    IReadOnlyList<ProposalAllocationTarget> AllocatedDownstream,
+    /// <summary>Why <see cref="AllocatedDownstream"/> is empty, when it is. See the enum.</summary>
+    ProposalDownstreamDisposition Disposition = ProposalDownstreamDisposition.Allocated,
+    /// <summary>The newest revision of this base number in the Project, when the base number is known.</summary>
+    int? LatestRevision = null);
+
+/// <summary>
+/// Why a proposed item has nothing allocated below it, decided from the record rather than guessed.
+///
+/// These are five different facts and the browser must not have to tell them apart from a null and a
+/// change-request-wide flag. In particular <see cref="BehindTarget"/> and <see cref="BaseRevisionUnresolved"/>
+/// are not interchangeable: the first says a later revision of this requirement exists and the allocation
+/// hangs off that, which is a claim about traceability; the second says the named base could not be resolved
+/// at all, which is a gap in the record and claims nothing. Presenting a gap as staleness would assert a
+/// relationship nobody recorded.
+/// </summary>
+public enum ProposalDownstreamDisposition
+{
+    /// <summary>Something is allocated below this item.</summary>
+    Allocated,
+    /// <summary>An Introduce: nothing can allocate to a requirement the build does not have yet.</summary>
+    TargetNotYetCreated,
+    /// <summary>The exact base revision resolved and genuinely has nothing below it.</summary>
+    NoAllocationRecorded,
+    /// <summary>
+    /// A later revision of this same requirement exists, so what is allocated hangs off that one. Decided per
+    /// item by comparing revisions, never from the change request's overall rebase flag: one stale item
+    /// strands the whole change request, and the other items in it are not thereby stale.
+    /// </summary>
+    BehindTarget,
+    /// <summary>The named base number and revision resolved to no revision at all. A data gap, not staleness.</summary>
+    BaseRevisionUnresolved,
+}
 
 /// <summary>The proposed content of one change request: lane 1 and lane 2 of the Digital Thread's inside-a-change view.</summary>
 public sealed record ChangeProposalContentResult(
@@ -100,6 +132,14 @@ public static class ChangeProposalContentProjection
                              .ToListAsync(ct);
             foreach (var row in rows) byBase[(row.BaseNumber, row.Revision)] = row;
         }
+
+        // The newest revision of each named base number. This is what makes "behind its target" provable for a
+        // single item: the proposal names revision N and the Project already holds N+1, so whatever is allocated
+        // hangs off the later one. Nothing here consults the change request's overall rebase flag, which says
+        // only that *some* item stranded it.
+        var latestByBase = byBase.Values
+            .GroupBy(x => x.BaseNumber)
+            .ToDictionary(x => x.Key, x => x.Max(y => y.Revision));
 
         var revisionIds = byBase.Values.Select(x => x.Id).ToList();
 
@@ -186,6 +226,20 @@ public static class ChangeProposalContentProjection
                         ChangeRequestDisplayNumber: Display(x.OwnerNumber, x.OwnerRevision))));
             }
 
+            var latest = string.IsNullOrWhiteSpace(change.BaseNumber)
+                ? (int?)null
+                : latestByBase.TryGetValue(change.BaseNumber, out var newest) ? newest : null;
+
+            var disposition = allocated.Count > 0
+                ? ProposalDownstreamDisposition.Allocated
+                : change.Kind == RequirementChangeKind.Introduce
+                    ? ProposalDownstreamDisposition.TargetNotYetCreated
+                    : resolved is null
+                        ? ProposalDownstreamDisposition.BaseRevisionUnresolved
+                        : latest is int newestRevision && newestRevision > resolved.Revision
+                            ? ProposalDownstreamDisposition.BehindTarget
+                            : ProposalDownstreamDisposition.NoAllocationRecorded;
+
             items.Add(new ChangeProposalItem(
                 change.Id,
                 change.DisplayNumber,
@@ -195,7 +249,9 @@ public static class ChangeProposalContentProjection
                 superseded,
                 resolved?.Revision,
                 resolved?.Id,
-                allocated.OrderBy(x => x.DisplayNumber, StringComparer.Ordinal).ToList()));
+                allocated.OrderBy(x => x.DisplayNumber, StringComparer.Ordinal).ToList(),
+                disposition,
+                latest));
         }
 
         return new ChangeProposalContentResult(scr.Id, scr.ProjectId, scr.DisplayNumber, items);

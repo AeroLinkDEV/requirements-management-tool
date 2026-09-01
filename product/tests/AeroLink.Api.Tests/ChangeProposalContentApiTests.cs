@@ -30,7 +30,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
 
     private sealed record Fixture(Guid ProjectId, Guid ChangeRequestId, Guid ModifyId, Guid IntroduceId,
         Guid RetireId, Guid AllocatingModifyId, Guid MaterializedChildId, Guid ProposedChildId,
-        Guid OtherBuildChildId, string Member, string Outsider);
+        Guid OtherBuildChildId, Guid RealRetireId, Guid RetiredCascadeChildId, string Member, string Outsider);
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
     {
@@ -102,6 +102,29 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
         var retire = subject.AddRequirementChange(memberName, "SR-91003", 1, RequirementLevel.System,
             RequirementChangeKind.Retire, "", "No longer applicable.", "Test", now);
 
+        // A Retire against a requirement that really exists and really has something below it. #880 §8.5.1
+        // settled that a Retire resolves its base revision, because what hangs below the thing being retired is
+        // the cascade §5.2 draws dashed. The unresolved case above proves graceful degradation; only this one
+        // proves the requirement.
+        var retiring = new RequirementArtifact(project.Id, "SR-91005", RequirementLevel.System, now);
+        var retiringRevision = new RequirementRevision(retiring.Id, 0,
+            "The FMS shall sequence oceanic waypoints in fixed order.", "Rationale", "Test",
+            RequirementRevisionState.Active, subject.Id, baseline.Id, now);
+        var cascadeChild = new RequirementArtifact(project.Id, "HLR-91005", RequirementLevel.HighLevel, now);
+        var cascadeChildRevision = new RequirementRevision(cascadeChild.Id, 0,
+            "The FMS shall hold the entered waypoint order.", "Rationale", "Test",
+            RequirementRevisionState.Active, subject.Id, baseline.Id, now,
+            RequirementParentKind.Allocated, parentRevisionIds: [retiringRevision.Id]);
+        db.AddRange(retiring, retiringRevision, cascadeChild, cascadeChildRevision);
+        db.AddRange(
+            new BaselineRequirementSelection(baseline.Id, retiring.Id, retiringRevision.Id),
+            new BaselineRequirementSelection(baseline.Id, cascadeChild.Id, cascadeChildRevision.Id));
+        db.RequirementTraces.Add(new RequirementTraceLink(project.Id, cascadeChildRevision.Id,
+            retiringRevision.Id, RequirementTraceType.AllocatedFrom, "Allocated from the system requirement.", now));
+
+        var realRetire = subject.AddRequirementChange(memberName, "SR-91005", 0, RequirementLevel.System,
+            RequirementChangeKind.Retire, "", "Superseded by round-robin sequencing.", "Test", now);
+
         // A proposed child in a sibling change request in the same build, pointing at the allocating revision.
         // Nothing materialized carries this relationship, so it exists only as the sibling's upstream list.
         var upstream = JsonSerializer.Serialize(new[] { allocatingRevision.Id });
@@ -127,7 +150,8 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
 
         await db.SaveChangesAsync();
         return new(project.Id, subject.Id, modify.Id, introduce.Id, retire.Id, allocatingModify.Id,
-            childRevision.Id, proposedChild.Id, otherBuildChild.Id, memberName, outsiderName);
+            childRevision.Id, proposedChild.Id, otherBuildChild.Id, realRetire.Id, cascadeChild.Id,
+            memberName, outsiderName);
     }
 
     private static async Task SignInAsync(HttpClient client, string userName)
@@ -180,7 +204,30 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     }
 
     [Fact]
-    public async Task Retire_shows_no_before_text_but_still_resolves_what_hangs_below_it()
+    public async Task Retire_resolves_its_real_base_revision_and_returns_the_cascade_below_it()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var retire = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.RealRetireId);
+
+        // No before/after: a Retire proposes no successor text, so there is nothing to diff against.
+        Assert.Equal(JsonValueKind.Null, retire.GetProperty("supersededStatement").ValueKind);
+        // But the base revision resolves, and what hangs below it is the cascade §5.2 draws dashed.
+        Assert.Equal(0, retire.GetProperty("supersededRevision").GetInt32());
+        Assert.Equal(JsonValueKind.String, retire.GetProperty("baseRevisionId").ValueKind);
+
+        var cascade = retire.GetProperty("allocatedDownstream").EnumerateArray().ToList();
+        var child = Assert.Single(cascade);
+        Assert.Equal(fixture.RetiredCascadeChildId.ToString(), child.GetProperty("id").GetString());
+        Assert.Equal("HLR-91005.00", child.GetProperty("displayNumber").GetString());
+        Assert.False(child.GetProperty("isProposed").GetBoolean());
+        Assert.Equal("Allocated", retire.GetProperty("disposition").GetString());
+    }
+
+    [Fact]
+    public async Task Retire_naming_a_base_that_does_not_resolve_is_reported_as_a_data_gap()
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
@@ -192,6 +239,9 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
         // SR-91003 has no artifact in this fixture, so its base revision does not resolve. That is a gap in
         // the record rather than an error, and it must read as an absence rather than as an empty diff.
         Assert.Equal(JsonValueKind.Null, retire.GetProperty("baseRevisionId").ValueKind);
+        // And it must be reported as a gap, never as staleness. "Behind its target" claims a later revision
+        // exists and carries the allocation; nothing here supports that claim.
+        Assert.Equal("BaseRevisionUnresolved", retire.GetProperty("disposition").GetString());
     }
 
     [Fact]
@@ -255,6 +305,45 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
         // The honest answer is an empty lane; the change request carries the rebase prompt that explains it.
         Assert.Equal(SupersededText, stale.GetProperty("supersededStatement").GetString());
         Assert.Empty(stale.GetProperty("allocatedDownstream").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task A_stale_item_does_not_make_its_current_siblings_look_stale()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var body = await ContentAsync(client, fixture.ChangeRequestId);
+
+        // SR-91001 names revision 1 while revision 2 exists, so this item genuinely is behind its target and
+        // whatever is allocated hangs off the later revision.
+        var stale = Item(body, fixture.ModifyId);
+        Assert.Equal("BehindTarget", stale.GetProperty("disposition").GetString());
+        Assert.Equal(2, stale.GetProperty("latestRevision").GetInt32());
+
+        // One stale item strands the whole change request, but it says nothing about the others. SR-91002 is an
+        // Introduce and SR-91005 is a current Retire; neither may inherit the first one's staleness. Deciding
+        // this from the change request's overall rebase flag would mark all three behind their targets.
+        Assert.Equal("TargetNotYetCreated", Item(body, fixture.IntroduceId).GetProperty("disposition").GetString());
+        Assert.Equal("Allocated", Item(body, fixture.RealRetireId).GetProperty("disposition").GetString());
+        Assert.Equal("BaseRevisionUnresolved", Item(body, fixture.RetireId).GetProperty("disposition").GetString());
+    }
+
+    [Fact]
+    public async Task An_item_naming_the_current_revision_with_nothing_below_it_reads_as_no_allocation()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        // SR-91004 is the current revision and does have downstream, so it is Allocated rather than empty; the
+        // distinction being proved here is that a resolved, current base is never reported as behind target.
+        var current = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.AllocatingModifyId);
+
+        Assert.Equal("Allocated", current.GetProperty("disposition").GetString());
+        Assert.Equal(0, current.GetProperty("supersededRevision").GetInt32());
+        Assert.Equal(0, current.GetProperty("latestRevision").GetInt32());
     }
 
     [Fact]

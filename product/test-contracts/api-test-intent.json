@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 753,
-    "cases": 837,
+    "tests": 756,
+    "cases": 840,
     "classes": 120,
-    "hostedTests": 723,
-    "hostedCases": 793,
+    "hostedTests": 726,
+    "hostedCases": 796,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 8,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 453,
-      "cases": 505,
+      "tests": 456,
+      "cases": 508,
       "unknownCases": 0,
       "classes": 99
     },
@@ -1939,8 +1939,44 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 244,
-        "end": 258
+        "start": 294,
+        "end": 308
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "A_stale_item_does_not_make_its_current_siblings_look_stale",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 310,
+        "end": 331
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "An_item_naming_the_current_revision_with_nothing_below_it_reads_as_no_allocation",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 333,
+        "end": 347
       }
     },
     {
@@ -1957,8 +1993,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 273,
-        "end": 284
+        "start": 362,
+        "end": 373
       }
     },
     {
@@ -1975,8 +2011,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 213,
-        "end": 228
+        "start": 263,
+        "end": 278
       }
     },
     {
@@ -1993,8 +2029,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 197,
-        "end": 211
+        "start": 247,
+        "end": 261
       }
     },
     {
@@ -2011,8 +2047,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 230,
-        "end": 242
+        "start": 280,
+        "end": 292
       }
     },
     {
@@ -2029,8 +2065,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 166,
-        "end": 180
+        "start": 190,
+        "end": 204
       }
     },
     {
@@ -2047,8 +2083,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 151,
-        "end": 164
+        "start": 175,
+        "end": 188
       }
     },
     {
@@ -2065,13 +2101,13 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 260,
-        "end": 271
+        "start": 349,
+        "end": 360
       }
     },
     {
       "cls": "ChangeProposalContentApiTests",
-      "test": "Retire_shows_no_before_text_but_still_resolves_what_hangs_below_it",
+      "test": "Retire_naming_a_base_that_does_not_resolve_is_reported_as_a_data_gap",
       "kind": "Fact",
       "intent": "http-boundary",
       "cases": 1,
@@ -2083,8 +2119,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 182,
-        "end": 195
+        "start": 229,
+        "end": 245
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "Retire_resolves_its_real_base_revision_and_returns_the_cascade_below_it",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 206,
+        "end": 227
       }
     },
     {
