@@ -144,3 +144,18 @@
 @media (prefers-reduced-motion: reduce) {
   .dtCanvasScene.is-easing { transition: none; }
 }
+
+/* A lane whose records are all hidden by a filter keeps its place and says so, greyed rather than collapsed
+   (#880 §6.8). Collapsing would slide every other lane sideways while the reader is mid-search. */
+.dtCanvasBand.is-filtered-empty { background: #f4f6f8; }
+
+.dtCanvasBandNotice {
+  position: absolute;
+  left: 50%;
+  top: 22px;
+  transform: translateX(-50%);
+  margin: 0;
+  white-space: nowrap;
+  color: #8a9bad;
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
+}

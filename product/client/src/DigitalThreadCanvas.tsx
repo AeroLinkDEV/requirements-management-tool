@@ -34,6 +34,14 @@ export type DigitalThreadCanvasProps = {
   renderCard: (node: CanvasNode) => React.ReactNode
   /** Count shown beside a lane heading, when the lane holds more than one record. */
   laneCount?: (lane: number) => number
+  /**
+   * A sentence a lane shows in place of cards, when it has records but none the reader can currently see.
+   *
+   * A lane emptied by a filter keeps its place and says so (#880 §6.8). Collapsing it would slide every other
+   * lane sideways mid-search, and leaving it silently blank would read as a lane with nothing in it, which is
+   * a different fact from a lane whose records the filter is hiding.
+   */
+  laneNotice?: (lane: number) => string | null
   selectedId?: string | null
   onSelect?: (id: string | null) => void
   onHover?: (id: string | null) => void
@@ -65,6 +73,7 @@ export default function DigitalThreadCanvas({
   edges,
   renderCard,
   laneCount,
+  laneNotice,
   selectedId = null,
   onSelect,
   onHover,
@@ -89,6 +98,9 @@ export default function DigitalThreadCanvas({
    * One stop per lane means Tab moves between lanes and the arrows move within one, which is the contract.
    */
   const [roving, setRoving] = useState<Record<number, string>>({})
+  // paint() runs outside React on every pointer move, so it reads these rather than the closed-over state.
+  const rovingRef = useRef<Record<number, string>>({})
+  const byLaneRef = useRef<Map<number, CanvasNode[]>>(new Map())
   const offsets = useRef<number[]>([])
   const targets = useRef<number[]>([])
   const geometryRef = useRef<LayoutResult | null>(null)
@@ -168,6 +180,26 @@ export default function DigitalThreadCanvas({
       // The density rules exempt the selected card from compaction, and they key off this class on the node
       // element. Without it the exemption silently never applied and a selected card compacted with the rest.
       card.classList.toggle("is-selected", selectedId === node.id)
+    }
+
+    // Tab stops are authored here, from the positions just written, because a lane rolls under the pointer
+    // without React re-rendering. React's tabIndex is the starting point; a card that has since been rolled
+    // out of its window must lose the stop, or a keyboard user tabs into something faded out and unreachable
+    // by eye. Opacity and pointer-events do not remove an element from the tab order — only tabindex does.
+    for (const [lane, bucket] of byLaneRef.current) {
+      const visible = bucket.filter(candidate => {
+        const position = positions.get(candidate.id)
+        return position ? isVisible(position.y, geometry, bandHeight) : false
+      })
+      const remembered = rovingRef.current[lane]
+      const stop =
+        (remembered && visible.some(candidate => candidate.id === remembered) ? remembered : null) ??
+        visible[0]?.id ??
+        null
+      for (const candidate of bucket) {
+        const card = cardRefs.current.get(candidate.id)
+        if (card) card.tabIndex = candidate.id === stop ? 0 : -1
+      }
     }
 
     const svg = edgeLayerRef.current
@@ -438,6 +470,15 @@ export default function DigitalThreadCanvas({
     return map
   }, [nodes])
 
+  /** Cards in lane-then-row order: the sequence Tab and the arrows follow. */
+  const domOrdered = useMemo(
+    () => [...nodes].sort((a, b) => a.lane - b.lane || a.row - b.row),
+    [nodes],
+  )
+
+  rovingRef.current = roving
+  byLaneRef.current = byLane
+
   /** The card holding this lane's tab stop: the remembered one, else the lane's first. */
   const rovingFor = useCallback(
     (lane: number): string | undefined => {
@@ -522,12 +563,24 @@ export default function DigitalThreadCanvas({
     >
       <div className="dtCanvasScene" ref={sceneRef}>
         <div className="dtCanvasBands">
-          {lanes.map((title, lane) => (
-            <div className="dtCanvasBand" data-band={lane} key={`band-${title}`}>
-              <i className="dtCanvasFadeTop" />
-              <i className="dtCanvasFadeBottom" />
-            </div>
-          ))}
+          {lanes.map((title, lane) => {
+            const notice = laneNotice?.(lane) ?? null
+            return (
+              <div
+                className={`dtCanvasBand${notice ? " is-filtered-empty" : ""}`}
+                data-band={lane}
+                key={`band-${title}`}
+              >
+                <i className="dtCanvasFadeTop" />
+                <i className="dtCanvasFadeBottom" />
+                {notice ? (
+                  <p className="dtCanvasBandNotice" role="status">
+                    {notice}
+                  </p>
+                ) : null}
+              </div>
+            )
+          })}
           {lanes.map((title, lane) => (
             <div className="dtCanvasLaneHead" data-lane-head={lane} key={`head-${title}`}>
               {title}
@@ -559,7 +612,11 @@ export default function DigitalThreadCanvas({
           ))}
         </svg>
         <div className="dtCanvasNodes">
-          {nodes.map(node => (
+          {/* Rendered in lane then row order, because DOM order is tab order. The caller supplies nodes in
+              whatever order its projection produced, and #880 §6.9 promises Tab moves between lanes in lane
+              order — left to right along the ladder. Positions are written by the geometry pass, so ordering
+              here costs nothing visually and makes the keyboard path deterministic. */}
+          {domOrdered.map(node => (
             <div
               className="dtCanvasNode"
               key={node.id}

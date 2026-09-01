@@ -40,6 +40,15 @@ export type DigitalThreadNetworkProps = {
   loading?: boolean
   error?: string | null
   onRetry?: () => void
+  /**
+   * The Project ladder, when the page already knows it.
+   *
+   * Only used before the projection arrives. Without it the skeleton falls back to the default ladder, which
+   * carries Customer and Interface; FMS configures neither, so the first paint would show seven lanes and the
+   * response would collapse it to five — the structural jump the loading rule exists to prevent. The page has
+   * this from Project context already, so it is passed rather than fetched again.
+   */
+  orderedLevels?: readonly string[]
   /** Exact route for a record, when the current workspace can open it. Absent renders non-openable. */
   hrefFor?: (node: NetworkNode) => string | undefined
   /** Opens the change inside its own view. Slice 4 supplies this. */
@@ -58,6 +67,7 @@ export default function DigitalThreadNetwork({
   loading = false,
   error = null,
   onRetry,
+  orderedLevels,
   hrefFor,
   onOpenChange,
   buildLabel,
@@ -80,7 +90,11 @@ export default function DigitalThreadNetwork({
    * Compaction is on real emptiness only. A lane emptied by the filter chips keeps its place — collapsing it
    * would slide every other lane sideways while the reader is mid-search.
    */
-  const model = useMemo(() => laneModel(projection?.orderedLevels), [projection?.orderedLevels])
+  // The projection is authoritative once it lands; the caller-supplied ladder only holds the frame until then.
+  const model = useMemo(
+    () => laneModel(projection?.orderedLevels ?? orderedLevels),
+    [orderedLevels, projection?.orderedLevels],
+  )
 
   // Records at a level this project does not configure get no lane. They are counted so the canvas can say
   // how many exist rather than quietly showing a smaller build than there is.
@@ -182,6 +196,25 @@ export default function DigitalThreadNetwork({
       return true
     },
     [groups, query],
+  )
+
+  /**
+   * A lane that holds records but is showing none of them, because the chips or the search hid them all.
+   *
+   * Per lane, not per board: with the SYS chip active the System lane is full while HLR and LLR are empty, so
+   * a board-wide message would never appear and those two lanes would sit blank with nothing to explain them.
+   */
+  const laneNotice = useCallback(
+    (lane: number): string | null => {
+      const inLane = canvasNodes.filter(node => node.lane === lane)
+      if (!inLane.length) return null
+      const visible = inLane.filter(node => {
+        const record = byId.get(node.id)
+        return record ? matchesFilters(record) : false
+      })
+      return visible.length ? null : "No records match"
+    },
+    [byId, canvasNodes, matchesFilters],
   )
 
   const renderCard = useCallback(
@@ -338,6 +371,7 @@ export default function DigitalThreadNetwork({
           nodes={canvasNodes}
           edges={canvasEdges}
           renderCard={renderCard}
+          laneNotice={laneNotice}
           selectedId={selectedId}
           onSelect={setSelectedId}
           onHover={setHoveredId}
@@ -369,9 +403,9 @@ export default function DigitalThreadNetwork({
           </div>
         ) : null}
 
-        {/* A lane emptied by the chips keeps its place — collapsing it would slide every other lane sideways
-            mid-search — so it says why it is empty rather than looking like a lane with nothing in it. */}
-        {!loading && !error && nodes.length && !nodes.some(matchesFilters) ? (
+        {/* Every lane empty at once earns a board-level line as well, because at that point the reader is
+            looking at a board with nothing on it and needs the way out, not one label per lane. */}
+        {!loading && !error && nodes.length > 0 && !nodes.some(matchesFilters) ? (
           <div className="dtnInFrame" role="status">
             <b>No records match.</b>
             <p>Clear a filter chip or the search box to bring records back.</p>

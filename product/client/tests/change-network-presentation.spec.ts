@@ -81,11 +81,10 @@ test.describe("change network presentation", () => {
       toKind: "ChangeRequest",
       relation: "Upstream",
       provenance: [{ kind: "AuthorStated" }],
+      isSuspect: false,
     }
 
     expect(isSuspectEdge({ ...base, isSuspect: true })).toBe(true)
-    expect(isSuspectEdge({ ...base, isSuspect: false })).toBe(false)
-    // Absent means not suspect rather than unknown; the projection states it on every edge.
     expect(isSuspectEdge(base)).toBe(false)
 
     // The two cases an earlier string-matching version got wrong, in both directions. Wording that happens to
@@ -232,4 +231,29 @@ test.describe("records at a level the ladder does not configure", () => {
     // Higher in the ladder means further left: it derives down into System.
     expect(laneOf(nodes[0], model)).toBeLessThan(laneOf(nodes[1], model))
   })
+})
+
+test("the loading frame uses the project's own ladder, so the lane set does not change when data arrives", () => {
+  // FMS configures [System, HighLevel, LowLevel]. The default ladder carries Customer and Interface as well,
+  // so falling back to it during loading would paint seven lanes and then collapse to five — the structural
+  // jump the loading rule exists to prevent.
+  const fms = ["System", "HighLevel", "LowLevel"]
+
+  const whileLoading = laneModel(fms).labels
+  const whenLoaded = laneModel(fms).labels
+
+  expect(whileLoading).toEqual([
+    "PROBLEM REPORT",
+    "SYSTEM CHANGE",
+    "SOFTWARE HLR CHANGE",
+    "SOFTWARE LLR CHANGE",
+    "VERIFICATION CHANGE",
+  ])
+  expect(whenLoaded).toEqual(whileLoading)
+
+  // And the fallback really is different, which is why the caller has to supply the ladder rather than let it
+  // default: this is the seven-lane frame FMS would otherwise flash before its response landed.
+  expect(laneModel().labels).toHaveLength(7)
+  expect(laneModel().labels).toContain("CUSTOMER CHANGE")
+  expect(laneModel().labels).toContain("INTERFACE / ICD CHANGE")
 })

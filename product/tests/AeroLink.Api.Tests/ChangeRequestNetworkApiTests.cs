@@ -105,7 +105,7 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
     }
 
     [Fact]
-    public async Task Network_states_suspect_on_every_edge_so_the_client_never_reads_it_out_of_wording()
+    public async Task Network_states_suspect_on_every_edge_and_no_network_relation_can_currently_be_suspect()
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
@@ -116,11 +116,17 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
         Assert.NotEmpty(edges);
         foreach (var edge in edges)
         {
-            // Present on every edge, not only on suspect ones. A field that appears only when true forces the
-            // reader to treat absence as a value, which is how a client ends up inferring the state instead of
-            // being told it. These fixture edges are settled, so each says so explicitly.
+            // Present on every edge, not only on suspect ones, so the client never reads absence as a value.
             Assert.True(edge.TryGetProperty("isSuspect", out var isSuspect),
                 "Every projected edge must state its suspect status.");
+
+            // False on every edge of this board, and that is the record rather than a gap in the fixture. A
+            // suspect lifecycle exists only for ExactLinkKind.RequirementTrace and ExactLinkKind.CaseProcedure;
+            // the change network renders ProblemReportResolution, change-to-upstream-change and
+            // CoveredByTestChangeRequest, between ChangeRequest, TestChangeRequest and ProblemReport nodes.
+            // There is no relation here a suspect lifecycle can attach to, so no fixture can make one true
+            // without inventing a fact the domain does not hold. A true-positive belongs with the artifact
+            // thread (#880 §5.3, slice 5), which is the first view to render requirement revisions.
             Assert.Equal(JsonValueKind.False, isSuspect.ValueKind);
         }
     }

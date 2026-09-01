@@ -1939,8 +1939,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 176,
-        "end": 193
+        "start": 182,
+        "end": 199
       }
     },
     {
@@ -1975,8 +1975,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 158,
-        "end": 174
+        "start": 164,
+        "end": 180
       }
     },
     {
@@ -1993,8 +1993,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 195,
-        "end": 214
+        "start": 201,
+        "end": 220
       }
     },
     {
@@ -2011,8 +2011,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 146,
-        "end": 156
+        "start": 152,
+        "end": 162
       }
     },
     {
@@ -2029,13 +2029,13 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 216,
-        "end": 232
+        "start": 222,
+        "end": 238
       }
     },
     {
       "cls": "ChangeRequestNetworkApiTests",
-      "test": "Network_states_suspect_on_every_edge_so_the_client_never_reads_it_out_of_wording",
+      "test": "Network_states_suspect_on_every_edge_and_no_network_relation_can_currently_be_suspect",
       "kind": "Fact",
       "intent": "http-boundary",
       "cases": 1,
@@ -2048,7 +2048,7 @@
       ],
       "sourceLines": {
         "start": 107,
-        "end": 126
+        "end": 132
       }
     },
     {
@@ -2065,8 +2065,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 128,
-        "end": 144
+        "start": 134,
+        "end": 150
       }
     },
     {

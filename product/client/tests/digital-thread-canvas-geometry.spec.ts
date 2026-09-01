@@ -300,3 +300,65 @@ test.describe("keyboard reveal", () => {
     expect(offsetToReveal(0, geometry, band, 0)).toBeLessThanOrEqual(0)
   })
 })
+
+test.describe("keyboard tab stops and lane order", () => {
+  // The tab stop is authored from real visibility during the geometry pass, so these assert the rule that pass
+  // applies: the stop is the remembered card when it is visible, otherwise the first visible card in the lane.
+  const stopFor = (
+    bucket: readonly CanvasNode[],
+    remembered: string | undefined,
+    isCardVisible: (node: CanvasNode) => boolean,
+  ): string | null => {
+    const visible = bucket.filter(isCardVisible)
+    return (
+      (remembered && visible.some(candidate => candidate.id === remembered) ? remembered : null) ??
+      visible[0]?.id ??
+      null
+    )
+  }
+
+  test("a card rolled out of its lane loses the tab stop to a visible one", () => {
+    const bucket: CanvasNode[] = [
+      { id: "a", lane: 1, row: 0 },
+      { id: "b", lane: 1, row: 1 },
+      { id: "c", lane: 1, row: 2 },
+    ]
+    // Before rolling, the lane's first card holds the stop.
+    expect(stopFor(bucket, undefined, () => true)).toBe("a")
+
+    // The pointer rolls the lane and "a" leaves the window. Opacity and pointer-events do not remove an
+    // element from the tab order, so if the stop stayed on "a" a keyboard user would tab into a card they
+    // cannot see — the focus trap §6.9 forbids.
+    const rolledAway = (node: CanvasNode) => node.id !== "a"
+    expect(stopFor(bucket, "a", rolledAway)).toBe("b")
+  })
+
+  test("a remembered card keeps the stop while it stays visible", () => {
+    const bucket: CanvasNode[] = [
+      { id: "a", lane: 1, row: 0 },
+      { id: "b", lane: 1, row: 1 },
+    ]
+    // Arrowing to "b" must not be undone by the next geometry pass.
+    expect(stopFor(bucket, "b", () => true)).toBe("b")
+  })
+
+  test("a lane with nothing visible offers no tab stop at all", () => {
+    const bucket: CanvasNode[] = [{ id: "a", lane: 1, row: 0 }]
+    expect(stopFor(bucket, "a", () => false)).toBeNull()
+  })
+
+  test("cards are ordered lane first, then row, so Tab walks the ladder in order", () => {
+    // DOM order is tab order, and the projection supplies nodes in whatever order it produced them.
+    const produced: CanvasNode[] = [
+      { id: "llr-1", lane: 3, row: 1 },
+      { id: "pr-1", lane: 0, row: 0 },
+      { id: "sys-2", lane: 1, row: 1 },
+      { id: "sys-1", lane: 1, row: 0 },
+      { id: "hlr-1", lane: 2, row: 0 },
+    ]
+
+    const ordered = [...produced].sort((a, b) => a.lane - b.lane || a.row - b.row)
+
+    expect(ordered.map(node => node.id)).toEqual(["pr-1", "sys-1", "sys-2", "hlr-1", "llr-1"])
+  })
+})

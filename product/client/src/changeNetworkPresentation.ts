@@ -29,13 +29,18 @@ export type NetworkEdge = {
   relation: string
   provenance: { kind: string; sourceId?: string | null; isLive?: boolean; status?: string | null }[]
   /**
-   * Whether this relationship is suspect, as the server states it from the exact-link suspect lifecycle.
+   * Whether this relationship is suspect, as the server states it.
    *
-   * Absent means not suspect. It is never derived here: relation and provenance carry display vocabulary, and
-   * deciding lifecycle state by looking for a word inside them would make any wording containing "suspect" a
-   * suspect edge and hide a genuinely suspect one whose wording does not.
+   * Required, not optional: the projection states it on every edge, so the client never has to read absence as
+   * a value. It is never derived here — relation and provenance carry display vocabulary, and deciding
+   * lifecycle state by looking for a word inside them would make any wording containing "suspect" a suspect
+   * edge and hide a genuinely suspect one whose wording does not.
+   *
+   * On the change-network board it is currently always false, and that is the truth rather than a stub: a
+   * suspect lifecycle exists only for requirement-trace and case-procedure links, and this board renders
+   * neither. Requirement-trace suspectness becomes reachable in the artifact thread (§5.3, slice 5).
    */
-  isSuspect?: boolean
+  isSuspect: boolean
 }
 
 export type NetworkProjection = {
@@ -212,7 +217,7 @@ export const badgeTintFor = (node: NetworkNode): Pill => {
  * suspect edge looking settled whenever its wording did not. Suspect state and relation vocabulary are
  * separate facts and are kept separate.
  */
-export const isSuspectEdge = (edge: NetworkEdge): boolean => edge.isSuspect === true
+export const isSuspectEdge = (edge: NetworkEdge): boolean => edge.isSuspect
 
 /**
  * Which side the detail panel takes for a selected record.

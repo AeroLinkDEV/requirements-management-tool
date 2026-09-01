@@ -446,15 +446,20 @@ public static class ChangeRequestTraceProjection
         var membershipsByRevision = baselineMemberships
             .GroupBy(x => x.RevisionId)
             .ToDictionary(x => x.Key, x => (IReadOnlyList<Guid>)x.Select(y => y.BaselineId).Distinct().OrderBy(y => y).ToList());
-        // A link whose suspect lifecycle is still open is settled truth about an unsettled relationship, and the
-        // two reads want opposite things from it.
+        // Suspect links are excluded from both reads, and the reason is worth stating because it looks like an
+        // omission.
         //
-        // The rooted trace feeds the Change Request register inspector, whose one-hop behaviour #866 decision 4
-        // fixed deliberately; it keeps showing only links that are live, so this changes nothing for it. The
-        // Digital Thread network must show the suspect link and say that it is suspect, because a relationship
-        // the reader cannot see is one they cannot act on, and #880 §7 gives suspect its own treatment for
-        // exactly this case. So the network widens the set and carries the state; nothing infers it later.
-        var liveOnly = !isNetwork;
+        // A suspect lifecycle exists only for ExactLinkKind.RequirementTrace and ExactLinkKind.CaseProcedure.
+        // Neither is a relation the change network draws: that board renders ProblemReportResolution, change to
+        // upstream change, and CoveredByTestChangeRequest, between ChangeRequest, TestChangeRequest and
+        // ProblemReport nodes only. So widening this set for the network would change nothing there — the
+        // RequirementRevision endpoints are not in its visited set and the edges are dropped anyway.
+        //
+        // Requirement-trace suspectness becomes visible when a view actually shows requirement revisions, which
+        // is the artifact thread of §5.3 in slice 5. That slice owns the decision, because showing suspect links
+        // in the rooted trace would also change what the register inspector shows, and #866 decision 4 fixed
+        // that deliberately.
+        var liveOnly = true;
         var allRequirementLinks = await db.RequirementTraces.AsNoTracking()
             .Where(x => x.ProjectId == projectId)
             .Select(x => new { x.Id, x.SourceRevisionId, x.TargetRevisionId, x.Type,
