@@ -31,7 +31,8 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
 
     private sealed record Fixture(Guid ProjectId, Guid SystemTcrId, Guid CaseTcrId, Guid ProcedureTcrId,
         Guid IntroduceId, Guid ModifyId, Guid RetireId, Guid CaseIntroduceId, Guid ProcedureIntroduceId,
-        Guid CoveredRevisionId, Guid RemovedRevisionId, Guid CaseParentRevisionId,
+        Guid RetainedAId, Guid RetainedBId, Guid RemovedCId, Guid AddedDId,
+        Guid CaseParentRevisionId, Guid RetiredPredecessorId, Guid MissingReferenceId,
         string Member, string Outsider);
 
     private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
@@ -59,16 +60,21 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
         var baseline = new CandidateBaseline("SW-92.00", 0, project.Id, release.Id, null, "Origin", "cm", now);
         db.Add(baseline);
 
-        // Two requirement revisions: one this package proposes to cover, one whose coverage it removes.
-        var covered = new RequirementArtifact(project.Id, "SR-92001", RequirementLevel.System, now);
-        var coveredRevision = new RequirementRevision(covered.Id, 0,
-            "The FMS shall sequence oceanic waypoints in round-robin order.", "Rationale", "Test",
-            RequirementRevisionState.Active, scr.Id, baseline.Id, now);
-        var dropped = new RequirementArtifact(project.Id, "SR-92002", RequirementLevel.System, now);
-        var droppedRevision = new RequirementRevision(dropped.Id, 0,
-            "The FMS shall sequence oceanic waypoints in fixed order.", "Rationale", "Test",
-            RequirementRevisionState.Active, scr.Id, baseline.Id, now);
-        db.AddRange(covered, coveredRevision, dropped, droppedRevision);
+        // Four requirement revisions, so the coverage arithmetic can actually be observed: the Modify keeps
+        // A and B, drops C and adds D, leaving the successor covering A, B and D.
+        RequirementRevision Req(string number, string statement, out RequirementArtifact artifact)
+        {
+            artifact = new RequirementArtifact(project.Id, number, RequirementLevel.System, now);
+            var revision = new RequirementRevision(artifact.Id, 0, statement, "Rationale", "Test",
+                RequirementRevisionState.Active, scr.Id, baseline.Id, now);
+            db.AddRange(artifact, revision);
+            return revision;
+        }
+
+        var retainedA = Req("SR-92001", "The FMS shall sequence oceanic waypoints.", out _);
+        var retainedB = Req("SR-92002", "The FMS shall annunciate the sequencing mode.", out _);
+        var removedC = Req("SR-92003", "The FMS shall sequence in fixed order.", out _);
+        var addedD = Req("SR-92004", "The FMS shall sequence in round-robin order.", out _);
 
         // The controlled procedure the Modify targets, with a LATER revision that says something different.
         // This is the whole point: a proposal written against revision 0 must be shown against revision 0.
@@ -82,8 +88,31 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
             TestProcedureState.Approved, memberName, now);
         db.AddRange(procedure, supersededRevision, latestRevision);
 
-        var driving = JsonSerializer.Serialize(new[] { coveredRevision.Id });
-        var removed = JsonSerializer.Serialize(new[] { droppedRevision.Id });
+        // A real controlled predecessor for the Retire, so its exact resolution is actually qualified rather
+        // than passing because nothing was asserted about it.
+        var retiring = new TestProcedure(project.Id, "SYSTP-92003", "Fixed-order sequencing", memberName, now,
+            TestProcedureLevel.System, null, VerificationArtifactKind.Procedure);
+        var retiringRevision = new TestProcedureRevision(retiring.Id, 0, "Verify fixed order",
+            "Configured product.", "Enter waypoints in order.", "The order holds.",
+            TestProcedureState.Approved, memberName, now);
+        db.AddRange(retiring, retiringRevision);
+
+        // A real controlled software Case, to be the software Procedure's exact parent. A random GUID would
+        // only have proven the projection echoes an identifier back with a label it chose itself.
+        var parentCase = new TestProcedure(project.Id, "HLRTC-92010", "Round-robin case", memberName, now,
+            TestProcedureLevel.HighLevel, null, VerificationArtifactKind.Case);
+        var parentCaseRevision = new TestProcedureRevision(parentCase.Id, 0, "Cover round robin",
+            "Configured product.", "Select round robin.", "Round robin is selected.",
+            TestProcedureState.Approved, memberName, now);
+        db.AddRange(parentCase, parentCaseRevision);
+
+        // An identity the record names that nothing in this Project answers to.
+        var missingReferenceId = Guid.NewGuid();
+
+        // The full successor selection is the exact-parent list; driving and removed are the deltas.
+        var finalSelection = JsonSerializer.Serialize(new[] { retainedA.Id, retainedB.Id, addedD.Id });
+        var driving = JsonSerializer.Serialize(new[] { addedD.Id });
+        var removed = JsonSerializer.Serialize(new[] { removedC.Id });
 
         // A System Procedure package: Introduce, Modify against the exact earlier revision, and Retire.
         var systemTcr = new TestChangeReview(project.Id, release.Id, scr.Id,
@@ -91,14 +120,23 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
             "SRCR-92001.00", now, "SYSTPCR-92001", 0);
         systemTcr.RecordTestChangeRequired(memberName, now);
         db.Add(systemTcr);
+        // Introduce: its exact parents are its initial requirement coverage, plus one identity that does not
+        // resolve, so the unresolved-reference behaviour is exercised on a real response.
         var introduce = systemTcr.AddProcedureChange(memberName, new TestProcedureChangeDraft("SYSTP-92002", 0,
             TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Round-robin sequencing",
             "Verify round-robin sequencing.", "Configured product.", ProposedSteps,
-            "Sequencing is round-robin.", "New coverage.", driving), now);
+            "Sequencing is round-robin.", "New coverage.",
+            JsonSerializer.Serialize(new[] { addedD.Id }), "[]", "",
+            VerificationProcedureParentKind.Allocated,
+            JsonSerializer.Serialize(new[] { addedD.Id, missingReferenceId })), now);
+
+        // Modify: retains A and B, removes C, adds D. The successor covers A, B and D.
         var modify = systemTcr.AddProcedureChange(memberName, new TestProcedureChangeDraft("SYSTP-92001", 0,
             TestProcedureLevel.System, TestProcedureChangeKind.Modify, "Oceanic sequencing",
             "Verify sequencing.", "Configured product.", ProposedSteps, "The sequence is correct.",
-            "Reworked for round-robin.", driving, removed), now);
+            "Reworked for round-robin.", driving, removed, "",
+            VerificationProcedureParentKind.Allocated, finalSelection), now);
+
         var retire = systemTcr.AddProcedureChange(memberName, new TestProcedureChangeDraft("SYSTP-92003", 0,
             TestProcedureLevel.System, TestProcedureChangeKind.Retire, "", "", "", "", "",
             "No longer applicable."), now);
@@ -112,9 +150,10 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
         var caseIntroduce = caseTcr.AddProcedureChange(memberName, new TestProcedureChangeDraft("HLRTC-92001", 0,
             TestProcedureLevel.HighLevel, TestProcedureChangeKind.Introduce, "Waypoint case",
             "Cover round-robin selection.", "Configured product.", "Select round robin.",
-            "Round robin is selected.", "New case.", driving), now);
+            "Round robin is selected.", "New case.", driving, "[]", "",
+            VerificationProcedureParentKind.Allocated,
+            JsonSerializer.Serialize(new[] { addedD.Id })), now);
 
-        var caseParentRevisionId = Guid.NewGuid();
         var procedureTcr = new TestChangeReview(project.Id, release.Id, scr.Id,
             new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware,
                 VerificationArtifactKind.Procedure),
@@ -127,7 +166,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
                 "Configured product.", "Execute the steps.", "The steps pass.", "New procedure.",
                 driving, "[]", "",
                 VerificationProcedureParentKind.Allocated,
-                JsonSerializer.Serialize(new[] { caseParentRevisionId }), "",
+                JsonSerializer.Serialize(new[] { parentCaseRevision.Id }), "",
                 // A software Procedure carries the fuller controlled body the domain demands of it. These are
                 // exactly the fields that would be lost by flattening a procedure into a requirement statement.
                 EnvironmentSetup: "Bench rig with the configured product.",
@@ -139,8 +178,8 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
 
         await db.SaveChangesAsync();
         return new(project.Id, systemTcr.Id, caseTcr.Id, procedureTcr.Id, introduce.Id, modify.Id, retire.Id,
-            caseIntroduce.Id, procedureIntroduce.Id, coveredRevision.Id, droppedRevision.Id,
-            caseParentRevisionId, memberName, outsiderName);
+            caseIntroduce.Id, procedureIntroduce.Id, retainedA.Id, retainedB.Id, removedC.Id, addedD.Id,
+            parentCaseRevision.Id, retiringRevision.Id, missingReferenceId, memberName, outsiderName);
     }
 
     private static async Task SignInAsync(HttpClient client, string userName)
@@ -218,7 +257,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     }
 
     [Fact]
-    public async Task A_retire_carries_its_predecessor_identity_and_proposes_no_successor_body()
+    public async Task A_retire_resolves_its_real_predecessor_and_proposes_no_successor_body()
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
@@ -230,10 +269,23 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
         // A retirement withdraws a procedure rather than restating it, so an empty body would read as a
         // procedure emptied of its steps. Null means absent.
         Assert.Equal(JsonValueKind.Null, retire.GetProperty("proposedContent").ValueKind);
+
+        // The predecessor is a real controlled revision, resolved exactly. Asserting only that the kind is
+        // Retire would pass against a base number nothing answers to, which is how the requirement-side Retire
+        // test previously proved nothing.
+        Assert.Equal(fixture.RetiredPredecessorId.ToString(), retire.GetProperty("baseRevisionId").GetString());
+        Assert.Equal(0, retire.GetProperty("supersededRevision").GetInt32());
+        // The predecessor body travels as factual context, not as half of a diff: a Retire has no successor
+        // text, so 4B must not render it as a before/after.
+        Assert.Equal("Enter waypoints in order.",
+            retire.GetProperty("supersededContent").GetProperty("steps").GetString());
+
+        // A retirement proposes no successor coverage.
+        Assert.Empty(retire.GetProperty("finalCoverage").EnumerateArray());
     }
 
     [Fact]
-    public async Task Proposed_coverage_resolves_exact_requirement_revisions_and_stays_a_proposal()
+    public async Task A_modify_reports_the_full_successor_coverage_not_only_what_it_added()
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
@@ -241,33 +293,93 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
 
         var modify = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.ModifyId);
 
-        var proposed = modify.GetProperty("proposedCoverage").EnumerateArray().ToList();
-        var target = Assert.Single(proposed);
-        Assert.Equal(fixture.CoveredRevisionId.ToString(), target.GetProperty("revisionId").GetString());
-        Assert.Equal("SR-92001.00", target.GetProperty("displayNumber").GetString());
-        Assert.Equal("System", target.GetProperty("level").GetString());
-        // A package proposes coverage; it has not verified anything until it is approved and materialised.
-        Assert.True(target.GetProperty("isProposedCoverage").GetBoolean());
+        static IReadOnlyList<string> Ids(JsonElement element, string property) =>
+            element.GetProperty(property).EnumerateArray()
+                .Select(x => x.GetProperty("revisionId").GetString()!).OrderBy(x => x).ToList();
+
+        // The successor keeps A and B, drops C and gains D. A lane fed only the added delta would show D alone
+        // and tell the reader that A and B had stopped being covered.
+        Assert.Equal(
+            new[] { fixture.RetainedAId.ToString(), fixture.RetainedBId.ToString(), fixture.AddedDId.ToString() }
+                .OrderBy(x => x).ToList(),
+            Ids(modify, "finalCoverage"));
+
+        Assert.Equal(new[] { fixture.AddedDId.ToString() }, Ids(modify, "addedCoverage"));
+        Assert.Equal(new[] { fixture.RemovedCId.ToString() }, Ids(modify, "removedCoverage"));
+
+        // The removed requirement is not in the successor set.
+        Assert.DoesNotContain(fixture.RemovedCId.ToString(), Ids(modify, "finalCoverage"));
     }
 
     [Fact]
-    public async Task Removed_coverage_is_reported_separately_from_proposed_coverage()
+    public async Task A_removed_requirement_never_describes_itself_as_proposed_coverage()
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
         await SignInAsync(client, fixture.Member);
 
         var modify = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.ModifyId);
-
-        // Deliberately dropping predecessor coverage is a truthful part of the change, and folding it into the
-        // proposed list would present a removal as an addition.
         var removed = Assert.Single(modify.GetProperty("removedCoverage").EnumerateArray().ToList());
-        Assert.Equal(fixture.RemovedRevisionId.ToString(), removed.GetProperty("revisionId").GetString());
-        Assert.Equal("SR-92002.00", removed.GetProperty("displayNumber").GetString());
 
-        var proposedIds = modify.GetProperty("proposedCoverage").EnumerateArray()
-            .Select(x => x.GetProperty("revisionId").GetString()).ToList();
-        Assert.DoesNotContain(fixture.RemovedRevisionId.ToString(), proposedIds);
+        // The list a target sits in states its meaning. A single shared boolean previously said
+        // isProposedCoverage: true on rows that were being removed — a removal claiming to be proposed coverage.
+        Assert.False(removed.TryGetProperty("isProposedCoverage", out _),
+            "A coverage target must not carry a flag whose meaning breaks for removal.");
+        Assert.Equal(fixture.RemovedCId.ToString(), removed.GetProperty("revisionId").GetString());
+        Assert.Equal("SR-92003.00", removed.GetProperty("displayNumber").GetString());
+    }
+
+    [Fact]
+    public async Task A_system_procedure_parent_is_a_requirement_not_a_case()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var modify = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.ModifyId);
+
+        // A System Procedure takes requirement revisions as exact parents; only a *software* Procedure takes
+        // Case revisions. Deciding the kind from the package being a Procedure reports this one as hanging off
+        // a Case it has no relationship with.
+        var parents = modify.GetProperty("exactParents").EnumerateArray().ToList();
+        Assert.NotEmpty(parents);
+        Assert.All(parents, parent => Assert.Equal("Requirement", parent.GetProperty("kind").GetString()));
+
+        var retained = parents.Single(x => x.GetProperty("revisionId").GetString() == fixture.RetainedAId.ToString());
+        Assert.True(retained.GetProperty("resolved").GetBoolean());
+        Assert.Equal("SR-92001.00", retained.GetProperty("displayNumber").GetString());
+        Assert.Equal("System", retained.GetProperty("level").GetString());
+    }
+
+    [Fact]
+    public async Task An_unresolvable_recorded_reference_is_reported_as_a_gap_rather_than_dropped()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var introduce = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.IntroduceId);
+
+        // The proposal names two exact parents; one resolves and one does not. Dropping the second would show a
+        // smaller relationship set than the record holds, which on a traceability surface reads as "nothing is
+        // recorded" rather than "something is recorded that cannot be resolved".
+        var parents = introduce.GetProperty("exactParents").EnumerateArray().ToList();
+        Assert.Equal(2, parents.Count);
+
+        var unresolved = parents.Single(x => !x.GetProperty("resolved").GetBoolean());
+        Assert.Equal(fixture.MissingReferenceId.ToString(), unresolved.GetProperty("revisionId").GetString());
+        // No details are invented for it, and none can leak from elsewhere.
+        Assert.Equal(JsonValueKind.Null, unresolved.GetProperty("displayNumber").ValueKind);
+        Assert.Equal(JsonValueKind.Null, unresolved.GetProperty("level").ValueKind);
+        Assert.Equal(JsonValueKind.Null, unresolved.GetProperty("artifactId").ValueKind);
+
+        var gap = Assert.Single(introduce.GetProperty("referenceGaps").EnumerateArray().ToList());
+        Assert.Equal(fixture.MissingReferenceId.ToString(), gap.GetProperty("revisionId").GetString());
+        Assert.Equal("ExactParent", gap.GetProperty("role").GetString());
+
+        // The one that does resolve is unaffected.
+        Assert.Contains(parents, x => x.GetProperty("revisionId").GetString() == fixture.AddedDId.ToString()
+            && x.GetProperty("resolved").GetBoolean());
     }
 
     [Fact]
@@ -295,12 +407,17 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
 
         Assert.Equal("Allocated", item.GetProperty("parentKind").GetString());
         var parent = Assert.Single(item.GetProperty("exactParents").EnumerateArray().ToList());
-        Assert.Equal(fixture.CaseParentRevisionId.ToString(), parent.GetProperty("revisionId").GetString());
-        // The exact parent of a software Procedure is a Case revision. Relabelling it as requirement coverage
-        // would tell the reader the procedure verifies a requirement it has no recorded relationship with.
-        Assert.Equal("Case", parent.GetProperty("kind").GetString());
 
-        var coverageIds = item.GetProperty("proposedCoverage").EnumerateArray()
+        // A real controlled Case revision, resolved to its actual identity. Echoing back a random identifier
+        // with a label the projection chose itself would prove only that it can repeat a GUID.
+        Assert.Equal(fixture.CaseParentRevisionId.ToString(), parent.GetProperty("revisionId").GetString());
+        Assert.Equal("Case", parent.GetProperty("kind").GetString());
+        Assert.True(parent.GetProperty("resolved").GetBoolean());
+        Assert.Equal("HLRTC-92010.00", parent.GetProperty("displayNumber").GetString());
+        Assert.Equal("HighLevel", parent.GetProperty("level").GetString());
+
+        // A Case parent is not requirement coverage, so it must not appear in the coverage lists.
+        var coverageIds = item.GetProperty("finalCoverage").EnumerateArray()
             .Select(x => x.GetProperty("revisionId").GetString()).ToList();
         Assert.DoesNotContain(fixture.CaseParentRevisionId.ToString(), coverageIds);
     }

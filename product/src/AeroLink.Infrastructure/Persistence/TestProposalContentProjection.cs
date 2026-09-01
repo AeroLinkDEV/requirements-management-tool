@@ -25,31 +25,52 @@ public sealed record VerificationArtifactContent(
     string ToolingAutomation = "");
 
 /// <summary>
-/// One requirement revision a verification proposal covers, or stops covering.
+/// One requirement revision named by a verification proposal.
 ///
-/// <paramref name="IsProposedCoverage"/> separates coverage this package proposes from coverage already in the
-/// build. A test change request is a proposal until it is approved and materialised, so drawing the two alike
-/// would say the requirement is verified when nobody has agreed to verify it yet.
+/// Deliberately carries no "is this proposed" flag. The list a target sits in already states its meaning, and
+/// a single boolean set once for every list said <c>isProposedCoverage: true</c> on rows that were being
+/// *removed* — a removal describing itself as proposed coverage. Membership is the statement.
 /// </summary>
 public sealed record RequirementCoverageTarget(
     Guid RevisionId,
     Guid ArtifactId,
     string DisplayNumber,
     string Level,
-    string Statement,
-    bool IsProposedCoverage);
+    string Statement);
 
 /// <summary>
-/// An exact parent of a verification proposal, carrying what kind of thing the parent actually is.
+/// An exact parent of a verification proposal, resolved and carrying what kind of thing it actually is.
 ///
-/// Not folded into requirement coverage. For a software Procedure the exact parent is a <b>Case</b> revision,
-/// not a requirement, and relabelling it to fit the "requirements covered" lane would tell the reader a
-/// procedure verifies a requirement it has no recorded relationship with. Case/Procedure parentage and
-/// requirement coverage are different relationships and stay apart.
+/// The kind comes from <see cref="VerificationProcedureParentPolicy.ParentArtifactKind"/> rather than from the
+/// package's own artifact kind. A System Procedure and a software Case both take requirement revisions; only a
+/// software Procedure takes Case revisions. Reading "Procedure implies Case parent" reports a System Procedure
+/// as hanging off a Case it has no relationship with.
+///
+/// <paramref name="Resolved"/> false means the record names this identity but nothing in this Project answers
+/// to it. It is still returned, because a traceability surface that silently drops a named reference shows a
+/// smaller relationship set than the record holds — and the Digital Thread reads Draft proposals, where an
+/// incomplete reference is a legitimate state the reader needs to see rather than a validation failure.
+/// Details stay empty when unresolved so nothing from another Project can leak through this seam.
 /// </summary>
-public sealed record VerificationParentTarget(Guid RevisionId, string Kind, string? DisplayNumber = null);
+public sealed record VerificationParentTarget(
+    Guid RevisionId,
+    string Kind,
+    bool Resolved,
+    string? DisplayNumber = null,
+    string? Level = null,
+    Guid? ArtifactId = null);
 
-/// <summary>One proposed verification artifact change, with its exact predecessor where it has one.</summary>
+/// <summary>A recorded identity the projection could not resolve inside this Project.</summary>
+public sealed record ProposalReferenceGap(Guid RevisionId, string Role, string ExpectedKind);
+
+/// <summary>
+/// One proposed verification artifact change, with its exact predecessor and its coverage.
+///
+/// Coverage is given as a final state and two deltas, because they answer different questions and the delta
+/// alone is not the lane-2 story. A Modify that retains A and B, drops C and adds D leaves the successor
+/// covering A, B and D; a lane fed only the added set would show D and quietly lose A and B, telling the
+/// reader that retained coverage had disappeared.
+/// </summary>
 public sealed record VerificationProposalItem(
     Guid Id,
     string DisplayNumber,
@@ -60,10 +81,16 @@ public sealed record VerificationProposalItem(
     int? SupersededRevision,
     Guid? BaseRevisionId,
     VerificationArtifactContent? SupersededContent,
-    IReadOnlyList<RequirementCoverageTarget> ProposedCoverage,
+    /// <summary>What the proposed successor covers in full: retained + added − removed, as the proposal carries it.</summary>
+    IReadOnlyList<RequirementCoverageTarget> FinalCoverage,
+    /// <summary>Requirement revisions this proposal newly drives.</summary>
+    IReadOnlyList<RequirementCoverageTarget> AddedCoverage,
+    /// <summary>Requirement revisions this proposal deliberately stops covering.</summary>
     IReadOnlyList<RequirementCoverageTarget> RemovedCoverage,
     string ParentKind,
-    IReadOnlyList<VerificationParentTarget> ExactParents);
+    IReadOnlyList<VerificationParentTarget> ExactParents,
+    /// <summary>Recorded identities nothing in this Project answers to. Never silently dropped.</summary>
+    IReadOnlyList<ProposalReferenceGap> ReferenceGaps);
 
 /// <summary>
 /// The proposed content of one controlled Test Change Request.
@@ -152,17 +179,20 @@ public static class TestProposalContentProjection
             }
         }
 
-        // Every requirement revision named as driving or removed coverage, resolved in one pass. These are exact
-        // revision identities carried by the proposal; nothing is inferred from an identifier prefix.
-        var coverageIds = changes
-            .SelectMany(x => Ids(x.DrivingRequirementRevisionIdsJson).Concat(Ids(x.RemovedRequirementRevisionIdsJson)))
+        // Every requirement revision this package names, in any role: the full exact-parent selection, the
+        // added delta and the removed delta. Resolved in one pass, and scoped to this Project so a recorded
+        // identity belonging elsewhere resolves to nothing here rather than leaking another Project's artifact.
+        var requirementIds = changes
+            .SelectMany(x => Ids(x.ParentRevisionIdsJson)
+                .Concat(Ids(x.DrivingRequirementRevisionIdsJson))
+                .Concat(Ids(x.RemovedRequirementRevisionIdsJson)))
             .Distinct().ToList();
 
-        var coverage = new Dictionary<Guid, RequirementCoverageTarget>();
-        if (coverageIds.Count > 0)
+        var requirements = new Dictionary<Guid, RequirementCoverageTarget>();
+        if (requirementIds.Count > 0)
         {
             var rows = await (from revision in db.RequirementRevisions.AsNoTracking()
-                              where coverageIds.Contains(revision.Id)
+                              where requirementIds.Contains(revision.Id)
                               join artifact in db.Requirements.AsNoTracking()
                                   on revision.ArtifactId equals artifact.Id
                               where artifact.ProjectId == projectId
@@ -176,14 +206,41 @@ public static class TestProposalContentProjection
                                   revision.Statement,
                               }).ToListAsync(ct);
             foreach (var row in rows)
-            {
-                coverage[row.Id] = new RequirementCoverageTarget(row.Id, row.ArtifactId,
-                    $"{row.BaseNumber}.{row.Revision:D2}", row.Level.ToString(), row.Statement,
-                    // A test change request is a proposal until it is approved and materialised. Until then the
-                    // coverage it names is proposed, whatever else is true of the requirement.
-                    IsProposedCoverage: true);
-            }
+                requirements[row.Id] = new RequirementCoverageTarget(row.Id, row.ArtifactId,
+                    Display(row.BaseNumber, row.Revision), row.Level.ToString(), row.Statement);
         }
+
+        // Case revisions a software Procedure names as its exact parents, resolved to real controlled identity
+        // rather than echoed back as a bare identifier with an assumed kind.
+        var caseIds = changes.SelectMany(x => Ids(x.ParentRevisionIdsJson)).Distinct().ToList();
+        var cases = new Dictionary<Guid, VerificationParentTarget>();
+        if (caseIds.Count > 0)
+        {
+            var rows = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                              where caseIds.Contains(revision.Id)
+                              join artifact in db.TestProcedures.AsNoTracking()
+                                  on revision.ProcedureId equals artifact.Id
+                              where artifact.ProjectId == projectId
+                                  && artifact.ArtifactKind == VerificationArtifactKind.Case
+                              select new
+                              {
+                                  revision.Id,
+                                  ArtifactId = artifact.Id,
+                                  artifact.BaseNumber,
+                                  revision.Revision,
+                                  Level = artifact.Level,
+                              }).ToListAsync(ct);
+            foreach (var row in rows)
+                cases[row.Id] = new VerificationParentTarget(row.Id, "Case", Resolved: true,
+                    Display(row.BaseNumber, row.Revision), row.Level.ToString(), row.ArtifactId);
+        }
+
+        // What kind of thing this package's exact parents are, from the domain policy rather than from the
+        // package's own artifact kind. A System Procedure and a software Case both take requirement revisions;
+        // only a software Procedure takes Case revisions.
+        var discipline = VerificationArtifactProfile.ToNeutral(review.Discipline);
+        var parentKind = VerificationProcedureParentPolicy.ParentArtifactKind(discipline, review.ArtifactKind);
+        var parentKindWord = parentKind.ToString();
 
         var items = new List<VerificationProposalItem>(changes.Count);
         foreach (var change in changes)
@@ -193,16 +250,57 @@ public static class TestProposalContentProjection
                 predecessors.TryGetValue((change.BaseNumber, change.Revision), out predecessor);
 
             // A Retire proposes no successor body, so it carries no proposed content — null means absent, and an
-            // empty body would read as a procedure emptied of its steps rather than one being withdrawn.
+            // empty body would read as a procedure emptied of its steps rather than one being withdrawn. Its
+            // predecessor is still resolved: what hangs below the thing being retired is the cascade the view
+            // draws dashed. The predecessor body travels as factual context, not as half of a diff — a Retire
+            // has no successor text to compare against.
             var proposed = change.Kind == TestProcedureChangeKind.Retire
                 ? null
                 : new VerificationArtifactContent(change.Title, change.Objective, change.Preconditions,
                     change.Steps, change.ExpectedResult, change.EnvironmentSetup, change.TestData,
                     change.OrderedSteps, change.ExpectedObservations, change.Cleanup, change.ToolingAutomation);
 
+            var gaps = new List<ProposalReferenceGap>();
+            var parents = new List<VerificationParentTarget>();
+            var finalCoverage = new List<RequirementCoverageTarget>();
+
+            foreach (var id in Ids(change.ParentRevisionIdsJson))
+            {
+                if (parentKind == VerificationParentArtifactKind.Case)
+                {
+                    // A software Procedure's exact parents are Cases. They are not requirement coverage, and
+                    // putting them in the coverage lists would tell the reader the procedure covers a
+                    // requirement it has no recorded relationship with.
+                    if (cases.TryGetValue(id, out var resolvedCase)) parents.Add(resolvedCase);
+                    else
+                    {
+                        parents.Add(new VerificationParentTarget(id, "Case", Resolved: false));
+                        gaps.Add(new ProposalReferenceGap(id, "ExactParent", "Case"));
+                    }
+                    continue;
+                }
+
+                // For a System Procedure or a software Case the exact parent selection *is* the coverage: the
+                // full successor set the signed proposal carries, not the delta that produced it.
+                if (requirements.TryGetValue(id, out var requirement))
+                {
+                    parents.Add(new VerificationParentTarget(id, "Requirement", Resolved: true,
+                        requirement.DisplayNumber, requirement.Level, requirement.ArtifactId));
+                    finalCoverage.Add(requirement);
+                }
+                else
+                {
+                    parents.Add(new VerificationParentTarget(id, "Requirement", Resolved: false));
+                    gaps.Add(new ProposalReferenceGap(id, "ExactParent", "Requirement"));
+                }
+            }
+
+            var added = Resolve(change.DrivingRequirementRevisionIdsJson, requirements, "AddedCoverage", gaps);
+            var removed = Resolve(change.RemovedRequirementRevisionIdsJson, requirements, "RemovedCoverage", gaps);
+
             items.Add(new VerificationProposalItem(
                 change.Id,
-                string.IsNullOrWhiteSpace(change.BaseNumber) ? "" : $"{change.BaseNumber}.{change.Revision:D2}",
+                string.IsNullOrWhiteSpace(change.BaseNumber) ? "" : Display(change.BaseNumber, change.Revision),
                 change.Level.ToString(),
                 review.ArtifactKind.ToString(),
                 change.Kind.ToString(),
@@ -210,15 +308,12 @@ public static class TestProposalContentProjection
                 predecessor?.Revision,
                 predecessor?.Id,
                 predecessor?.Content,
-                Resolve(change.DrivingRequirementRevisionIdsJson, coverage),
-                Resolve(change.RemovedRequirementRevisionIdsJson, coverage),
+                Ordered(finalCoverage),
+                added,
+                removed,
                 change.ParentKind.ToString(),
-                // Parent identities keep their own kind. For a software Procedure the exact parent is a Case
-                // revision, and calling it requirement coverage would assert a relationship nobody recorded.
-                Ids(change.ParentRevisionIdsJson)
-                    .Select(id => new VerificationParentTarget(id,
-                        review.ArtifactKind == VerificationArtifactKind.Procedure ? "Case" : "Requirement"))
-                    .ToList()));
+                parents.OrderBy(x => x.DisplayNumber ?? x.RevisionId.ToString(), StringComparer.Ordinal).ToList(),
+                gaps.OrderBy(x => x.Role, StringComparer.Ordinal).ThenBy(x => x.RevisionId).ToList()));
         }
 
         return new VerificationProposalContent(
@@ -226,16 +321,41 @@ public static class TestProposalContentProjection
             review.Id,
             review.ProjectId,
             review.ReleaseId,
-            $"{review.BaseNumber}.{review.Revision:D2}",
-            review.Discipline.ToString(),
+            Display(review.BaseNumber, review.Revision),
+            discipline.ToString(),
             review.ArtifactKind.ToString(),
             items);
     }
 
+    private static string Display(string baseNumber, int revision) =>
+        string.IsNullOrWhiteSpace(baseNumber) ? "" : $"{baseNumber}.{revision:D2}";
+
+    private static IReadOnlyList<RequirementCoverageTarget> Ordered(
+        IEnumerable<RequirementCoverageTarget> targets) =>
+        targets.OrderBy(x => x.DisplayNumber, StringComparer.Ordinal).ToList();
+
+    /// <summary>
+    /// Resolves a recorded delta, recording a gap for anything this Project cannot answer to.
+    ///
+    /// An unresolvable identity is kept as a gap rather than dropped. Dropping it would show a smaller
+    /// relationship set than the record names, which on a traceability surface reads as "there is nothing
+    /// there" instead of "something is recorded that I cannot resolve".
+    /// </summary>
     private static IReadOnlyList<RequirementCoverageTarget> Resolve(
-        string json, IReadOnlyDictionary<Guid, RequirementCoverageTarget> known) =>
-        Ids(json).Select(id => known.GetValueOrDefault(id)).OfType<RequirementCoverageTarget>()
-            .OrderBy(x => x.DisplayNumber, StringComparer.Ordinal).ToList();
+        string json,
+        IReadOnlyDictionary<Guid, RequirementCoverageTarget> known,
+        string role,
+        List<ProposalReferenceGap> gaps)
+    {
+        var resolved = new List<RequirementCoverageTarget>();
+        foreach (var id in Ids(json))
+        {
+            if (known.TryGetValue(id, out var target)) resolved.Add(target);
+            else if (gaps.All(gap => gap.RevisionId != id || gap.Role != role))
+                gaps.Add(new ProposalReferenceGap(id, role, "Requirement"));
+        }
+        return Ordered(resolved);
+    }
 
     private static IReadOnlyList<Guid> Ids(string json)
     {

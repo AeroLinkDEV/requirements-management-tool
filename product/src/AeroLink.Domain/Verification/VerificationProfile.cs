@@ -143,12 +143,34 @@ public enum VerificationProcedureParentKind
 }
 
 /// <summary>
+/// What a verification package's exact parent actually is. Distinct from <see cref="VerificationArtifactKind"/>,
+/// which says what the package itself is: a Procedure's parent may be a Case or a requirement depending on
+/// discipline, and conflating the two is how a System Procedure ends up reported as hanging off a Case.
+/// </summary>
+public enum VerificationParentArtifactKind { Requirement, Case }
+
+/// <summary>
 /// Compatibility seam for the existing Procedure parent API. Requirements and
 /// Case/System coverage call the neutral policy directly so the XOR invariant
 /// is not reimplemented per artifact type.
 /// </summary>
 public static class VerificationProcedureParentPolicy
 {
+    /// <summary>
+    /// What kind of artifact a verification package's exact parents are.
+    ///
+    /// Not derivable from the artifact kind alone, which is the mistake this exists to stop. A System
+    /// Procedure and a software Case both take requirement revisions as exact parents; only a software
+    /// Procedure takes Case revisions. Reading "Procedure implies Case parent" reports a System Procedure as
+    /// hanging off a Case it has no relationship with — see the field comment on
+    /// <c>TestProcedureChange.ParentKind</c>, which is the authority this mirrors.
+    /// </summary>
+    public static VerificationParentArtifactKind ParentArtifactKind(
+        VerificationDiscipline discipline, VerificationArtifactKind artifactKind) =>
+        artifactKind == VerificationArtifactKind.Procedure && discipline != VerificationDiscipline.System
+            ? VerificationParentArtifactKind.Case
+            : VerificationParentArtifactKind.Requirement;
+
     public static ExactParentClassification Classification(VerificationProcedureParentKind kind) => kind switch
     {
         VerificationProcedureParentKind.Allocated => ExactParentClassification.Allocated,

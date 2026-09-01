@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 767,
-    "cases": 851,
+    "tests": 769,
+    "cases": 853,
     "classes": 121,
-    "hostedTests": 737,
-    "hostedCases": 807,
+    "hostedTests": 739,
+    "hostedCases": 809,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 8,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 466,
-      "cases": 518,
+      "tests": 468,
+      "cases": 520,
       "unknownCases": 0,
       "classes": 100
     },
@@ -12342,8 +12342,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 334,
-        "end": 349
+        "start": 451,
+        "end": 466
+      }
+    },
+    {
+      "cls": "TestProposalContentApiTests",
+      "test": "A_modify_reports_the_full_successor_coverage_not_only_what_it_added",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 287,
+        "end": 312
       }
     },
     {
@@ -12360,13 +12378,13 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 202,
-        "end": 218
+        "start": 241,
+        "end": 257
       }
     },
     {
       "cls": "TestProposalContentApiTests",
-      "test": "A_retire_carries_its_predecessor_identity_and_proposes_no_successor_body",
+      "test": "A_removed_requirement_never_describes_itself_as_proposed_coverage",
       "kind": "Fact",
       "intent": "http-boundary",
       "cases": 1,
@@ -12378,8 +12396,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 220,
-        "end": 233
+        "start": 314,
+        "end": 330
+      }
+    },
+    {
+      "cls": "TestProposalContentApiTests",
+      "test": "A_retire_resolves_its_real_predecessor_and_proposes_no_successor_body",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 259,
+        "end": 285
       }
     },
     {
@@ -12396,8 +12432,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 273,
-        "end": 285
+        "start": 385,
+        "end": 397
       }
     },
     {
@@ -12414,8 +12450,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 287,
-        "end": 306
+        "start": 399,
+        "end": 423
       }
     },
     {
@@ -12432,8 +12468,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 164,
-        "end": 187
+        "start": 203,
+        "end": 226
+      }
+    },
+    {
+      "cls": "TestProposalContentApiTests",
+      "test": "A_system_procedure_parent_is_a_requirement_not_a_case",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 332,
+        "end": 352
       }
     },
     {
@@ -12450,8 +12504,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 189,
-        "end": 200
+        "start": 228,
+        "end": 239
       }
     },
     {
@@ -12468,13 +12522,13 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 321,
-        "end": 332
+        "start": 438,
+        "end": 449
       }
     },
     {
       "cls": "TestProposalContentApiTests",
-      "test": "Proposed_coverage_resolves_exact_requirement_revisions_and_stays_a_proposal",
+      "test": "An_unresolvable_recorded_reference_is_reported_as_a_gap_rather_than_dropped",
       "kind": "Fact",
       "intent": "http-boundary",
       "cases": 1,
@@ -12486,26 +12540,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 235,
-        "end": 251
-      }
-    },
-    {
-      "cls": "TestProposalContentApiTests",
-      "test": "Removed_coverage_is_reported_separately_from_proposed_coverage",
-      "kind": "Fact",
-      "intent": "http-boundary",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "shared-host-fixture",
-        "factory-client",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 253,
-        "end": 271
+        "start": 354,
+        "end": 383
       }
     },
     {
@@ -12522,8 +12558,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 308,
-        "end": 319
+        "start": 425,
+        "end": 436
       }
     },
     {
