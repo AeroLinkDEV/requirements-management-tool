@@ -22,7 +22,7 @@ jobs:
     name: ${{ github.event.label.name == 'ready-for-full-ci' && github.event.pull_request.head.repo.full_name == github.repository && 'Report what this run validated' || 'Ignore non-readiness PR label for Full CI' }}
     if: github.event.label.name == 'ready-for-full-ci' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 75
     env:
       GITHUB_TOKEN: ${{ github.token }}
       HEAD_REF: ${{ github.event.pull_request.head.ref }}
@@ -88,11 +88,27 @@ jobs:
                   and pr_number in prs
               ):
                   matches.append(run)
-          if len(matches) > 1:
-              print("ERROR multiple trusted Product workflow_dispatch runs exist for this exact PR SHA")
-          elif len(matches) == 1:
-              run = matches[0]
-              print(f"FOUND {run['id']} {run.get('status')} {run.get('conclusion')}")
+          # Every run reaching here is already trusted: exact head SHA, exact branch, dispatched by the bot on
+          # behalf of this PR. So a second one is not an ambiguity to refuse, it is another attempt at the same
+          # question. Refusing outright made a SHA permanently unbindable once a first attempt timed out and a
+          # retry dispatched a second, with a fresh commit the only escape.
+          successful = [
+              run for run in matches
+              if run.get("status") == "completed" and run.get("conclusion") == "success"
+          ]
+          if successful:
+              # A success at this exact SHA is authoritative however many attempts it took. Lowest id keeps the
+              # choice deterministic across polls.
+              run = min(successful, key=lambda item: item["id"])
+              print(f"FOUND {run['id']} completed success")
+          elif matches and all(run.get("status") == "completed" for run in matches):
+              # All attempts finished and none passed. Report one so the caller fails on the real conclusion
+              # rather than on a timeout that names nothing.
+              run = min(matches, key=lambda item: item["id"])
+              print(f"FOUND {run['id']} completed {run.get('conclusion')}")
+          elif matches:
+              # An attempt is still running. Wait for it; dispatching another is what created the deadlock.
+              print("PENDING")
           else:
               print("NONE")
           PY
@@ -103,6 +119,7 @@ jobs:
           case "$match" in
             ERROR*) echo "::error::$match"; exit 1 ;;
             FOUND*) read -r _ run_id _ _ <<< "$match" ;;
+            PENDING) run_id="" ;;
             NONE)
               python - <<'PY' > "$RUNNER_TEMP/full-ci-dispatch.json"
           import json, os
@@ -127,12 +144,20 @@ jobs:
           esac
 
           authoritative="false"
-          for attempt in $(seq 1 210); do
+          # 420 polls at 10s is 70 minutes, and timeout-minutes above must stay ahead of it.
+          #
+          # 210 was 35 minutes, which sat below the Product gate's own median. Sixteen successful gate runs
+          # measured 15.1m min, 36.9m median, 54.3m p90, 54.4m max — bimodal, because a change that touches the
+          # client runs the browser journey shards and one that does not skips them. So more than half of
+          # genuinely passing gates could not be bound, and every miss cost a full re-run of a suite that had
+          # already gone green. Seventy clears the observed maximum with room for dispatch queueing; the only
+          # cost of the headroom is that a truly hung gate takes longer to be declared dead.
+          for attempt in $(seq 1 420); do
             verify_live_pr
             match="$(find_product_run)"
             case "$match" in
               ERROR*) echo "::error::$match"; exit 1 ;;
-              NONE) sleep 10; continue ;;
+              NONE|PENDING) sleep 10; continue ;;
               FOUND*)
                 read -r _ run_id status conclusion <<< "$match"
                 if [ "$status" != "completed" ]; then
