@@ -109,3 +109,10 @@
 @media (prefers-reduced-motion: reduce) {
   .dtCanvasNode { transition: none; }
 }
+
+/* Programmatic moves ease; pointer-driven pan and zoom never do, because easing a drag feels like lag. */
+.dtCanvasScene.is-easing { transition: transform .4s cubic-bezier(.22, .61, .36, 1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dtCanvasScene.is-easing { transition: none; }
+}

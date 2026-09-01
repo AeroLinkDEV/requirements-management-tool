@@ -322,6 +322,96 @@ export const rescaleOffsets = (
     return Math.max(next.laneMinimums[lane] ?? 0, Math.min(0, fraction * Math.max(0, nextRange)))
   })
 
+/**
+ * Drop lanes holding nothing and close the gap, so no empty lane is ever displayed (#880 acceptance).
+ *
+ * This is structural emptiness only — a lane with no records at all. A lane emptied by a filter deliberately
+ * stays put: collapsing it would shift every other lane sideways and lose the reader's place mid-search.
+ */
+export const compactLanes = <T extends { lane: number }>(
+  lanes: readonly string[],
+  nodes: readonly T[],
+): { lanes: string[]; nodes: T[] } => {
+  const used = new Set(nodes.map(node => node.lane))
+  if (used.size >= lanes.length) return { lanes: lanes.slice(), nodes: nodes.slice() }
+  const remap = new Map<number, number>()
+  lanes.forEach((_, lane) => {
+    if (used.has(lane)) remap.set(lane, remap.size)
+  })
+  return {
+    lanes: lanes.filter((_, lane) => used.has(lane)),
+    nodes: nodes.map(node => ({ ...node, lane: remap.get(node.lane) ?? 0 })),
+  }
+}
+
+/**
+ * A transform that frames `ids` inside the free area.
+ *
+ * Measured twice on purpose. Choosing a zoom changes the lane window and can cross a density tier, both of
+ * which move the very records being framed — so the box is taken again once the zoom has settled, and the pan
+ * is then clamped to the real card rectangles. Skipping that second measure was the cause of two defects
+ * during the design review: the camera framed records and then slid them out from under itself.
+ */
+export const frameNodes = (
+  ids: readonly string[],
+  nodes: readonly CanvasNode[],
+  laneCounts: readonly number[],
+  frame: CanvasFrame,
+  offsets: readonly number[],
+  selectedId: string | null,
+  maxZoom = 1.12,
+): { x: number; y: number; zoom: number } | null => {
+  const wanted = new Set(ids)
+  const measure = (result: LayoutResult, room: boolean) => {
+    let x0 = Infinity
+    let y0 = Infinity
+    let x1 = -Infinity
+    let y1 = -Infinity
+    for (const node of nodes) {
+      if (!wanted.has(node.id)) continue
+      const { x, y } = nodePosition(node, result.geometry, offsets)
+      x0 = Math.min(x0, x)
+      x1 = Math.max(x1, x + result.geometry.laneWidth)
+      y0 = Math.min(y0, y)
+      y1 = Math.max(y1, y + result.geometry.cardHeight + (room && node.id === selectedId ? 132 : 0))
+    }
+    return x0 > x1 ? null : { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
+  }
+
+  const first = layout(laneCounts, frame, 1)
+  const want = measure(first, true)
+  if (!want) return null
+  const pad = 46
+  const zoom = Math.max(
+    minimumZoom(frame, laneCounts),
+    Math.min(maxZoom, Math.min((frame.width - pad * 2) / (want.width + 52), (frame.height - pad * 2) / (want.height + 52))),
+  )
+
+  const settled = layout(laneCounts, frame, zoom)
+  const room = measure(settled, true)
+  const core = measure(settled, false)
+  if (!room || !core) return null
+
+  let x = frame.x + (frame.width - (room.width + 52) * zoom) / 2 - (room.x - 26) * zoom
+  let y = frame.y + (frame.height - (room.height + 52) * zoom) / 2 - (room.y - 26) * zoom
+
+  // Keep every real card inside the free area. The expanded body may overflow; a record never does.
+  const margin = 12
+  const clamp = (start: number, length: number, low: number, high: number, offset: number): number => {
+    const from = start * zoom + offset
+    const to = from + length * zoom
+    if (length * zoom <= high - low - margin * 2) {
+      if (from < low + margin) return offset + (low + margin - from)
+      if (to > high - margin) return offset - (to - (high - margin))
+      return offset
+    }
+    return offset + (low + margin - from)
+  }
+  y = clamp(core.y, core.height, frame.y, frame.y + frame.height, y)
+  x = clamp(core.x, core.width, frame.x, frame.x + frame.width, x)
+  return { x, y, zoom }
+}
+
 /** The cubic path for an edge, routed from the source's right edge to the target's left edge. */
 export const edgePath = (
   from: { x: number; y: number },

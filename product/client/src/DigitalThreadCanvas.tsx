@@ -8,6 +8,7 @@ import {
   clampOffsets,
   edgePath,
   fitTransform,
+  frameNodes,
   isVisible,
   laneAt,
   layout,
@@ -216,6 +217,39 @@ export default function DigitalThreadCanvas({
     paint()
   }, [paint])
 
+  /**
+   * Reframe onto the selection and its direct links.
+   *
+   * This is the half of the panel rule that side-picking cannot do on its own: the board moves into the area
+   * the panel is not covering, so a linked record cannot end up underneath it. It also gives the panel's
+   * relation rows somewhere to go — clicking one selects that record and the board comes to it.
+   */
+  useEffect(() => {
+    if (!selectedId) return
+    const box = frame()
+    const result = geometryRef.current
+    if (!box || !result) return
+    const linked = new Set<string>([selectedId])
+    for (const edge of edges) {
+      if (edge.from === selectedId) linked.add(edge.to)
+      else if (edge.to === selectedId) linked.add(edge.from)
+    }
+    const next = frameNodes(
+      [...linked],
+      nodes,
+      counts,
+      box,
+      offsets.current,
+      selectedId,
+    )
+    if (!next) return
+    sceneRef.current?.classList.add("is-easing")
+    transform.current = next
+    paint()
+    const timer = window.setTimeout(() => sceneRef.current?.classList.remove("is-easing"), 420)
+    return () => window.clearTimeout(timer)
+  }, [counts, edges, frame, nodes, paint, selectedId])
+
   useEffect(
     () => () => {
       if (animation.current !== null) cancelAnimationFrame(animation.current)
@@ -404,6 +438,15 @@ export default function DigitalThreadCanvas({
               className="dtCanvasNode"
               key={node.id}
               data-node-id={node.id}
+              tabIndex={0}
+              role="button"
+              aria-pressed={selectedId === node.id}
+              onKeyDown={event => {
+                if (event.key !== "Enter" && event.key !== " ") return
+                event.preventDefault()
+                event.stopPropagation()
+                onSelect?.(selectedId === node.id ? null : node.id)
+              }}
               ref={element => {
                 if (element) cardRefs.current.set(node.id, element)
                 else cardRefs.current.delete(node.id)

@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test"
 import {
   MIN_ZOOM,
+  compactLanes,
+  frameNodes,
   type CanvasEdge,
   type CanvasNode,
   anchorInLane,
@@ -175,5 +177,52 @@ test.describe("digital thread canvas geometry", () => {
     expect(upward.up).toContain("root")
     expect(upward.up).toContain("pr")
     expect(upward.hops.get("pr")).toBe(3)
+  })
+})
+
+test.describe("digital thread canvas framing and lanes", () => {
+  test("a structurally empty lane is dropped and the remaining lanes close the gap", () => {
+    const lanes = ["A", "B", "C", "D"]
+    // Nothing in lane 1 or lane 3.
+    const nodes = [
+      { id: "a", lane: 0, row: 0 },
+      { id: "c", lane: 2, row: 0 },
+    ]
+    const compacted = compactLanes(lanes, nodes)
+    expect(compacted.lanes).toEqual(["A", "C"])
+    expect(compacted.nodes.map(node => node.lane)).toEqual([0, 1])
+
+    // A board where every lane holds something is returned untouched.
+    const full = compactLanes(lanes, lanes.map((_, lane) => ({ id: String(lane), lane, row: 0 })))
+    expect(full.lanes).toEqual(lanes)
+  })
+
+  test("framing keeps every real record inside the area the panel is not covering", () => {
+    const lanes = [4, 4, 4]
+    // A right-docked panel takes 330px, so the board may only use what is left.
+    const free = { x: 0, y: 0, width: 1280 - 330, height: 684 }
+    const nodes = [
+      { id: "sel", lane: 0, row: 1 },
+      { id: "near", lane: 1, row: 1 },
+      { id: "far", lane: 2, row: 3 },
+    ]
+    const offsets = [0, 0, 0]
+
+    const transform = frameNodes(["sel", "near", "far"], nodes, lanes, free, offsets, "sel")
+    expect(transform).not.toBeNull()
+    if (!transform) return
+
+    const geometry = layout(lanes, free, transform.zoom).geometry
+    for (const node of nodes) {
+      const x = node.lane * geometry.lanePitch * transform.zoom + transform.x
+      const right = x + geometry.laneWidth * transform.zoom
+      const y = (node.row * geometry.rowPitch + geometry.pad) * transform.zoom + transform.y
+      const bottom = y + geometry.cardHeight * transform.zoom
+      // Nothing linked may sit outside the free area — that is the panel-occlusion rule, geometrically.
+      expect(x).toBeGreaterThanOrEqual(free.x - 1)
+      expect(right).toBeLessThanOrEqual(free.x + free.width + 1)
+      expect(y).toBeGreaterThanOrEqual(free.y - 1)
+      expect(bottom).toBeLessThanOrEqual(free.y + free.height + 1)
+    }
   })
 })

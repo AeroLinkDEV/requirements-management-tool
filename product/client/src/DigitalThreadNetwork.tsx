@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import DigitalThreadCanvas from "./DigitalThreadCanvas"
 import ExactArtifactLink from "./ExactArtifactLink"
-import { type CanvasEdge, type CanvasNode, trace } from "./digitalThreadGeometry"
+import { type CanvasEdge, type CanvasNode, compactLanes, trace } from "./digitalThreadGeometry"
 import { stateLabel } from "./presentation"
 import { traceRelationLabel } from "./tracePresentation"
 import {
@@ -67,9 +67,21 @@ export default function DigitalThreadNetwork({
   const edges = useMemo(() => projection?.edges ?? [], [projection])
   const byId = useMemo(() => new Map(nodes.map(node => [node.id, node])), [nodes])
 
-  const canvasNodes = useMemo<CanvasNode[]>(() => {
+  /**
+   * Lanes and rows, with structurally empty lanes dropped so none is ever displayed empty (#880 §5.2).
+   *
+   * Compaction is on real emptiness only. A lane emptied by the filter chips keeps its place — collapsing it
+   * would slide every other lane sideways while the reader is mid-search.
+   */
+  const { lanes, canvasNodes } = useMemo(() => {
     const rows = assignRows(nodes)
-    return nodes.map(node => ({ id: node.id, lane: laneOf(node), row: rows.get(node.id) ?? 0 }))
+    const placed: CanvasNode[] = nodes.map(node => ({
+      id: node.id,
+      lane: laneOf(node),
+      row: rows.get(node.id) ?? 0,
+    }))
+    const compacted = compactLanes(NETWORK_LANES, placed)
+    return { lanes: compacted.lanes, canvasNodes: compacted.nodes }
   }, [nodes])
 
   const canvasEdges = useMemo<CanvasEdge[]>(
@@ -266,7 +278,7 @@ export default function DigitalThreadNetwork({
 
       <div className="dtnStage">
         <DigitalThreadCanvas
-          lanes={NETWORK_LANES}
+          lanes={lanes}
           nodes={canvasNodes}
           edges={canvasEdges}
           renderCard={renderCard}

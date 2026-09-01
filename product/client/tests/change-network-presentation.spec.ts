@@ -1,10 +1,12 @@
 import { expect, test } from "@playwright/test"
 import {
   LANE_HLR,
+  LANE_INTERFACE,
   LANE_LLR,
   LANE_PROBLEM,
   LANE_SYSTEM,
   LANE_VERIFICATION,
+  NETWORK_LANES,
   type NetworkEdge,
   type NetworkNode,
   assignRows,
@@ -16,6 +18,7 @@ import {
   resolveDock,
 } from "../src/changeNetworkPresentation"
 import { stateLabel } from "../src/presentation"
+import { compactLanes } from "../src/digitalThreadGeometry"
 
 // Lane, badge and dock are pure, so they are asserted directly. The dock rule in particular is the behaviour
 // the design review pushed hardest on: a detail panel must never come to rest on a linked record.
@@ -39,10 +42,13 @@ test.describe("change network presentation", () => {
     expect(laneOf(misleading)).toBe(LANE_SYSTEM)
     expect(badgeOf(misleading)).toBe("SYS")
 
-    // Interface change control is system-level and shares that lane, with its own badge so it stays legible.
-    expect(laneOf(node({ id: "i", level: "Interface" }))).toBe(LANE_SYSTEM)
-    expect(badgeOf(node({ id: "i", level: "Interface" }))).toBe("IFC")
-    expect(groupOf(node({ id: "i", level: "Interface" }))).toBe("sys")
+    // Interface / ICD is a ladder layer above System, so it gets its own lane to the left of it.
+    const iface = node({ id: "i", level: "Interface" })
+    expect(laneOf(iface)).toBe(LANE_INTERFACE)
+    expect(LANE_INTERFACE).toBeLessThan(LANE_SYSTEM)
+    expect(badgeOf(iface)).toBe("IFC")
+    // It still answers the System chip: that chip means system-level change control.
+    expect(groupOf(iface)).toBe("sys")
   })
 
   test("the panel docks away from the links, so it cannot cover one", () => {
@@ -103,5 +109,40 @@ test.describe("change network presentation", () => {
     expect(rows.get("3")).toBe(0)
 
     expect(assignRows(nodes.slice().reverse())).toEqual(rows)
+  })
+})
+
+test.describe("configurable ladder layers", () => {
+  test("a project without the Interface layer never shows an Interface lane", () => {
+    // Our FMS project has no Interface layer configured, so the projection returns no Interface records and
+    // lane compaction removes the lane entirely — the vocabulary naming it costs an unconfigured project
+    // nothing.
+    const nodes = [
+      node({ id: "pr", kind: "ProblemReport" }),
+      node({ id: "sys", level: "System" }),
+      node({ id: "hlr", level: "HighLevel" }),
+    ]
+    const placed = nodes.map(item => ({ id: item.id, lane: laneOf(item), row: 0 }))
+    const compacted = compactLanes(NETWORK_LANES, placed)
+    expect(compacted.lanes).not.toContain("INTERFACE / ICD CHANGE")
+    expect(compacted.lanes).toEqual(["PROBLEM REPORT", "SYSTEM CHANGE", "SOFTWARE HLR CHANGE"])
+  })
+
+  test("a project that configures the Interface layer gets the lane, above System", () => {
+    const nodes = [
+      node({ id: "ifc", level: "Interface" }),
+      node({ id: "sys", level: "System" }),
+      node({ id: "hlr", level: "HighLevel" }),
+    ]
+    const placed = nodes.map(item => ({ id: item.id, lane: laneOf(item), row: 0 }))
+    const compacted = compactLanes(NETWORK_LANES, placed)
+    expect(compacted.lanes).toEqual([
+      "INTERFACE / ICD CHANGE",
+      "SYSTEM CHANGE",
+      "SOFTWARE HLR CHANGE",
+    ])
+    // Higher in the ladder means further left, so Interface derives down into System.
+    const laneById = new Map(compacted.nodes.map(item => [item.id, item.lane]))
+    expect(laneById.get("ifc")).toBeLessThan(laneById.get("sys") as number)
   })
 })

@@ -38,8 +38,18 @@ export type NetworkProjection = {
   truncated: boolean
 }
 
+/**
+ * The lane vocabulary, in ladder order: higher layers derive downward to the left of what they drive.
+ *
+ * Interface / ICD is a configurable ladder layer that sits *above* System when a project has it. It is named
+ * here so the canvas supports it, not because every project has one — a project without that layer simply
+ * produces no Interface records, and the canvas drops structurally empty lanes, so the lane never appears.
+ * That is why this list is fixed and the lane set is not: absence is handled by compaction, not by a
+ * conditional vocabulary that would have to be kept in step with project configuration.
+ */
 export const NETWORK_LANES = [
   "PROBLEM REPORT",
+  "INTERFACE / ICD CHANGE",
   "SYSTEM CHANGE",
   "SOFTWARE HLR CHANGE",
   "SOFTWARE LLR CHANGE",
@@ -47,27 +57,26 @@ export const NETWORK_LANES = [
 ] as const
 
 export const LANE_PROBLEM = 0
-export const LANE_SYSTEM = 1
-export const LANE_HLR = 2
-export const LANE_LLR = 3
-export const LANE_VERIFICATION = 4
+export const LANE_INTERFACE = 1
+export const LANE_SYSTEM = 2
+export const LANE_HLR = 3
+export const LANE_LLR = 4
+export const LANE_VERIFICATION = 5
 
-/**
- * Which lane a projection node belongs to.
- *
- * Interface changes are system-level change control and share the System lane. #880's five lanes do not name
- * them, so this keeps them visible with their own badge rather than hiding them or inventing a sixth lane;
- * the owner should confirm whether they deserve one.
- */
+/** Which lane a projection node belongs to, from the server-stated kind and level. */
 export const laneOf = (node: NetworkNode): number => {
   if (node.kind === "ProblemReport") return LANE_PROBLEM
   if (node.kind === "TestChangeRequest") return LANE_VERIFICATION
   switch (node.level) {
+    case "Interface":
+      return LANE_INTERFACE
     case "HighLevel":
       return LANE_HLR
     case "LowLevel":
       return LANE_LLR
     default:
+      // Customer is the other configurable layer above System. It has no confirmed ladder position yet, so it
+      // stays with System rather than being given an invented one; raise it before a project configures it.
       return LANE_SYSTEM
   }
 }
@@ -90,9 +99,14 @@ export const badgeOf = (node: NetworkNode): string => {
   }
 }
 
-/** Filter groups behind the toolbar chips. Mirrors the lane vocabulary rather than the identifier prefix. */
+/**
+ * Filter groups behind the toolbar chips. Mirrors the lane vocabulary rather than the identifier prefix.
+ *
+ * Interface groups with System: the System chip means system-level change control, and a project that has the
+ * Interface layer should not find its Interface records vanish when that chip is used.
+ */
 export const groupOf = (node: NetworkNode): string =>
-  ["pr", "sys", "hlr", "llr", "ver"][laneOf(node)] ?? "sys"
+  ["pr", "sys", "sys", "hlr", "llr", "ver"][laneOf(node)] ?? "sys"
 
 export type Pill = { background: string; color: string }
 
