@@ -23,7 +23,7 @@ const run = {
   repository: 'owner/repo',
 }
 
-function fragment(group, instance, { needs = [], result = 'success', jobStartMs = 0, jobEndMs = 10000, setupEndMs = 2000, testEndMs = 9000, counts = null, cache = {}, classification = { docsOnly: false, backend: true, client: false, browser: false, postgresql: false, unavailable: false }, flakyTests = [] } = {}) {
+function fragment(group, instance, { needs = [], result = 'success', jobStartMs = 0, jobEndMs = 10000, setupEndMs = 2000, testEndMs = 9000, counts = null, cache = {}, classification = { docsOnly: false, backend: true, client: false, browser: false, postgresql: false, unavailable: false }, flakyTests = [], slowest = [] } = {}) {
   if (jobEndMs !== null && testEndMs !== null && jobEndMs <= testEndMs) testEndMs = jobEndMs - 1
   if (testEndMs !== null && setupEndMs !== null && setupEndMs >= testEndMs) setupEndMs = Math.max(jobStartMs ?? 0, testEndMs - 1)
   return buildFragment({
@@ -40,7 +40,7 @@ function fragment(group, instance, { needs = [], result = 'success', jobStartMs 
       missing: {},
     },
     counts: counts ?? { expected: null, executed: null, passed: null, failed: null, skipped: null, flaky: null, source: null, missing: 'no structured output' },
-    slowest: [],
+    slowest,
     flakyTests,
     cache: { nuget: cache.nuget ?? null, npm: cache.npm ?? null, chromium: cache.chromium ?? null, missing: {} },
     classification,
@@ -1209,6 +1209,28 @@ test('the merged record carries bounded slowest class/spec duration detail', () 
     { name: 'AeroLink.Api.Tests.SlowApiTests', durationMs: 50000, kind: 'class' },
     { name: 'AeroLink.Api.Tests.FastApiTests', durationMs: 100, kind: 'class' },
   ])
+})
+
+test('the run summary surfaces the slowest classes and warns when one class dominates a job', () => {
+  // Default helper timings: setupEndMs 2000, testEndMs 9000 → testMs 7000.
+  const hotspot = fragment('backend-core-infrastructure', 'backend-core-infrastructure', { needs: ['changes'], slowest: [
+    { name: 'AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests', durationMs: 5600, kind: 'class' },
+    { name: 'AeroLink.Infrastructure.Tests.NotificationOutboxTests', durationMs: 200, kind: 'class' },
+  ] })
+  const balanced = fragment('backend-api', 'backend-api-1', { needs: ['changes'], slowest: [
+    { name: 'AeroLink.Api.Tests.SomethingElse', durationMs: 350, kind: 'class' },
+  ] })
+  const merged = aggregateFragments({ fragments: [hotspot, balanced] })
+  const markdown = renderMarkdown(merged)
+  assert.match(markdown, /## Slowest test classes\/specs \(advisory\)/)
+  assert.match(markdown, /AeroLink\.Infrastructure\.Tests\.FmsShowcaseSeederTests/)
+  // 5600 of 7000ms of job test time → dominant-class advisory; 350 of 7000ms → no advisory for the API job.
+  assert.match(markdown, /backend-core-infrastructure \(backend-core-infrastructure\): AeroLink\.Infrastructure\.Tests\.FmsShowcaseSeederTests accounts for 80% of the job's test time/)
+  assert.doesNotMatch(markdown, /backend-api \(backend-api-1\): .* accounts for/)
+  assert.match(markdown, /Advisory only/)
+
+  const quiet = renderMarkdown(aggregateFragments({ fragments: [fragment('changes', 'changes')] }))
+  assert.doesNotMatch(quiet, /## Slowest test classes/)
 })
 
 test('postTestMs is the interval between test-end and writer, never called upload/cleanup', () => {

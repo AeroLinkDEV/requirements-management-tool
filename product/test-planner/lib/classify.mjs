@@ -77,12 +77,12 @@ export function isLauncherPath(path) {
   return LAUNCHER_PATHS.some((pattern) => pattern.test(normalizePath(path)))
 }
 
-// The normal Fast lane defers six synthetic showcase seed/upgrade maintenance cases to authoritative
-// Full/CI. Direct edits to those tests, their shared fixture, or the seeder they prove must restore the
-// complete Infrastructure suite locally rather than filtering the most relevant coverage.
+// The normal Fast lane defers the synthetic showcase seeder/upgrade/scenario maintenance tests to
+// authoritative Full/CI. Direct edits to those tests, their shared fixture, or the seeder they prove must
+// restore the complete Infrastructure suite locally rather than filtering the most relevant coverage.
 const FAST_FULL_INFRASTRUCTURE_PATHS = [
   /^product\/src\/AeroLink\.Infrastructure\/Persistence\/FmsShowcaseSeeder\.cs$/i,
-  /^product\/tests\/AeroLink\.Infrastructure\.Tests\/(?:FmsShowcaseSeederTests|ShowcaseUpgradeTests|ShowcaseDatabaseFixture)\.cs$/i,
+  /^product\/tests\/AeroLink\.Infrastructure\.Tests\/(?:FmsShowcaseSeederTests|FmsShowcaseScenarioTests|ShowcaseUpgradeTests|ShowcaseDatabaseFixture)\.cs$/i,
 ]
 
 export function needsFullFastInfrastructure(paths) {
@@ -255,10 +255,10 @@ export function localPlan(classification) {
       label: 'Infrastructure suite',
       command: fullFastInfrastructure
         ? 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build'
-        : 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build --filter=FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests',
+        : 'dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build --filter=FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseSeederTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.FmsShowcaseScenarioTests&FullyQualifiedName!~AeroLink.Infrastructure.Tests.ShowcaseUpgradeTests',
       why: fullFastInfrastructure
         ? 'This change directly affects showcase seed/upgrade coverage or broad test-planner behavior, so Fast restores the complete Infrastructure suite locally.'
-        : 'Fast persistence/provider coverage excludes six synthetic showcase seed/upgrade maintenance cases; the authoritative GitHub backend-core-infrastructure lane still runs the complete infrastructure suite.',
+        : 'Fast persistence/provider coverage excludes the synthetic showcase seeder/upgrade/scenario maintenance classes; the authoritative GitHub backend-core-infrastructure lane still runs the complete infrastructure suite.',
     })
   }
   if (classification.client) {

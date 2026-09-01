@@ -602,11 +602,42 @@ export function renderMarkdown(merged) {
   push('')
   push('| Job | Result | Total | Setup | Test | After test | Counts |')
   push('|---|---|---|---|---|---|---|')
+  const seconds = (ms) => (ms === null ? '—' : `${(ms / 1000).toFixed(1)}s`)
   for (const job of merged.jobs) {
-    const seconds = (ms) => (ms === null ? '—' : `${(ms / 1000).toFixed(1)}s`)
     const counts = job.counts.source ? `${job.counts.executed ?? '?'}/${job.counts.expected ?? '?'}` : '—'
     const total = job.timings.jobStartMs !== null && job.timings.jobEndMs !== null ? job.timings.jobEndMs - job.timings.jobStartMs : null
     push(`| ${escapeMarkdown(job.name)} | ${escapeMarkdown(job.result)} | ${seconds(total)} | ${seconds(job.timings.setupMs)} | ${seconds(job.timings.testMs)} | ${seconds(job.timings.postTestMs)} | ${counts} |`)
+  }
+  // Advisory per-class timing (#891): a future serial hotspot should be visible here before it reaches
+  // tens of minutes again. Correctness gates never read this section — runner fluctuation must not
+  // turn a timing observation into a false failure.
+  const timedJobs = merged.jobs.filter((job) => Array.isArray(job.slowest) && job.slowest.length > 0)
+  if (timedJobs.length > 0) {
+    push('')
+    push('## Slowest test classes/specs (advisory)')
+    push('')
+    push('| Job | Class/spec | Duration | Share of job test time |')
+    push('|---|---|---|---|')
+    for (const job of timedJobs) {
+      for (const entry of job.slowest.slice(0, 3)) {
+        const share = typeof entry.durationMs === 'number' && job.timings.testMs > 0
+          ? `${Math.round((entry.durationMs / job.timings.testMs) * 100)}%`
+          : '—'
+        push(`| ${escapeMarkdown(job.name)} | ${escapeMarkdown(entry.name)} | ${seconds(entry.durationMs)} | ${share} |`)
+      }
+    }
+    const dominant = timedJobs.flatMap((job) => {
+      const top = job.slowest[0]
+      return typeof top?.durationMs === 'number' && job.timings.testMs > 0 && top.durationMs / job.timings.testMs >= 0.5
+        ? [`${job.name}: ${top.name} accounts for ${Math.round((top.durationMs / job.timings.testMs) * 100)}% of the job's test time`]
+        : []
+    })
+    if (dominant.length > 0) {
+      push('')
+      push('A single class/spec dominates a job\'s test time — adding tests there extends its serialized critical path. Advisory only; this does not fail the run.')
+      for (const entry of dominant) push(`- ${escapeMarkdown(entry)}`)
+    }
+    push('')
   }
   push('')
   if (merged.skipped.length > 0) {
