@@ -72,28 +72,25 @@ export type LaneModel = {
   laneForLevel: Map<string, number>
   problemLane: number
   verificationLane: number
-  /** Levels carried by records but absent from the project ladder. Empty is the healthy case. */
-  offLadderLevels: string[]
 }
 
 /**
- * Build the lane set from the project's ladder, plus any level the records actually carry.
+ * Build the lane set strictly from the project's configured ladder.
  *
- * The two can disagree. FMS configures `[System, HighLevel, LowLevel]` yet its showcase seeds eight Interface
- * change requests into Build 1.6 — real controlled records at a level the ladder does not list. Folding those
- * into a ladder lane would file them under a level they are not, and dropping them would be worse: a
- * traceability view that omits change requests present in the build states something false about the build.
+ * The ladder is the authority on which levels a project has, so it decides how many lanes there are. A level
+ * it does not configure gets no lane, even when records carrying that level exist — FMS configures
+ * `[System, HighLevel, LowLevel]` while its showcase seeds Interface change requests into Build 1.6. Those
+ * records are a configuration or seeding defect to fix at source, and inventing a lane for them here would
+ * present a ladder step this project does not have.
  *
- * So an off-ladder level gets its own lane, at the head of the ladder because nothing in the ladder derives
- * into it, and `offLadderLevels` names them so the caller can say plainly that they sit outside it.
+ * They are not drawn, but they are not concealed either: `OFF_LADDER` marks them so the caller can state how
+ * many exist and why they are absent. Omitting them silently would leave the canvas quietly claiming a build
+ * holds fewer change requests than it does.
  */
-export const laneModel = (
-  orderedLevels: readonly string[] = DEFAULT_ORDERED_LEVELS,
-  presentLevels: readonly string[] = [],
-): LaneModel => {
-  const ladder = orderedLevels.length ? [...orderedLevels] : [...DEFAULT_ORDERED_LEVELS]
-  const offLadder = [...new Set(presentLevels)].filter(level => level && !ladder.includes(level)).sort()
-  const levels = [...offLadder, ...ladder]
+export const OFF_LADDER = -1
+
+export const laneModel = (orderedLevels: readonly string[] = DEFAULT_ORDERED_LEVELS): LaneModel => {
+  const levels = orderedLevels.length ? [...orderedLevels] : [...DEFAULT_ORDERED_LEVELS]
   const laneForLevel = new Map<string, number>()
   levels.forEach((level, index) => laneForLevel.set(level, index + 1))
   return {
@@ -101,17 +98,32 @@ export const laneModel = (
     laneForLevel,
     problemLane: 0,
     verificationLane: levels.length + 1,
-    offLadderLevels: offLadder,
   }
 }
 
-/** Which lane a projection node belongs to, from the server-stated kind and level. */
+/**
+ * Which lane a projection node belongs to, or `OFF_LADDER` when its level is not configured for the project.
+ */
 export const laneOf = (node: NetworkNode, model: LaneModel = laneModel()): number => {
   if (node.kind === "ProblemReport") return model.problemLane
   if (node.kind === "TestChangeRequest") return model.verificationLane
-  // A level the model has never seen still gets the head of the ladder rather than being folded into the
-  // nearest one: a record the server returned must stay visible, and under its own level.
-  return model.laneForLevel.get(node.level ?? "") ?? 1
+  return model.laneForLevel.get(node.level ?? "") ?? OFF_LADDER
+}
+
+/** Records the ladder has no lane for, grouped by level, so the caller can say what is missing and why. */
+export const offLadderLevels = (
+  nodes: readonly NetworkNode[],
+  model: LaneModel = laneModel(),
+): { level: string; count: number }[] => {
+  const counts = new Map<string, number>()
+  for (const node of nodes) {
+    if (laneOf(node, model) !== OFF_LADDER) continue
+    const level = node.level ?? "Unknown"
+    counts.set(level, (counts.get(level) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([level, count]) => ({ level, count }))
+    .sort((a, b) => a.level.localeCompare(b.level))
 }
 
 /** The short square badge on a card. Says the level, which the identifier alone does not reliably carry. */
@@ -228,6 +240,7 @@ export const assignRows = (
   const perLane = new Map<number, NetworkNode[]>()
   for (const node of nodes) {
     const lane = laneOf(node, model)
+    if (lane === OFF_LADDER) continue
     const bucket = perLane.get(lane)
     if (bucket) bucket.push(node)
     else perLane.set(lane, [node])

@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test"
 import {
+  OFF_LADDER,
   laneModel,
+  offLadderLevels,
   type NetworkEdge,
   type NetworkNode,
   assignRows,
@@ -166,28 +168,51 @@ test.describe("configurable ladder layers", () => {
 })
 
 test.describe("records at a level the ladder does not configure", () => {
-  test("FMS: Interface change requests exist in the build but Interface is not a ladder layer", () => {
-    // The FMS ladder is [System, HighLevel, LowLevel]; the showcase still seeds eight Interface change
-    // requests into Build 1.6. Both are true, so the canvas must show them without filing them under a level
-    // they are not — omitting change requests present in a build would state something false about the build.
-    const model = laneModel(["System", "HighLevel", "LowLevel"], ["System", "HighLevel", "Interface"])
-
-    expect(model.offLadderLevels).toEqual(["Interface"])
-    expect(model.labels).toContain("INTERFACE / ICD CHANGE")
+  test("FMS: Interface change requests get no lane, because the ladder does not configure that level", () => {
+    // The FMS ladder is [System, HighLevel, LowLevel]; the showcase still seeds Interface change requests into
+    // Build 1.6. The ladder decides how many lanes there are, so no Interface lane appears — those records are
+    // a seeding or configuration defect to fix at source, not a ladder step to invent here.
+    const model = laneModel(["System", "HighLevel", "LowLevel"])
+    expect(model.labels).toEqual([
+      "PROBLEM REPORT",
+      "SYSTEM CHANGE",
+      "SOFTWARE HLR CHANGE",
+      "SOFTWARE LLR CHANGE",
+      "VERIFICATION CHANGE",
+    ])
 
     const iface = node({ id: "ifc", level: "Interface" })
-    const system = node({ id: "sys", level: "System" })
-    const low = node({ id: "llr", level: "LowLevel" })
-
-    // Its own lane, and not folded into the foot of the ladder as an earlier fallback did.
-    expect(laneOf(iface, model)).not.toBe(laneOf(low, model))
-    expect(laneOf(iface, model)).not.toBe(laneOf(system, model))
-    // At the head, because nothing in the ladder derives into it.
-    expect(laneOf(iface, model)).toBeLessThan(laneOf(system, model))
+    expect(laneOf(iface, model)).toBe(OFF_LADDER)
+    // Not quietly filed under a level it is not.
+    expect(laneOf(iface, model)).not.toBe(model.laneForLevel.get("System"))
+    expect(laneOf(iface, model)).not.toBe(model.laneForLevel.get("LowLevel"))
   })
 
-  test("a ladder that does configure the layer reports nothing off-ladder", () => {
-    const model = laneModel(["Interface", "System", "HighLevel"], ["Interface", "System"])
-    expect(model.offLadderLevels).toEqual([])
+  test("records without a lane are counted, so the canvas never shows a smaller build than there is", () => {
+    const model = laneModel(["System", "HighLevel", "LowLevel"])
+    const nodes = [
+      node({ id: "sys", level: "System" }),
+      node({ id: "i1", level: "Interface" }),
+      node({ id: "i2", level: "Interface" }),
+      node({ id: "c1", level: "Customer" }),
+    ]
+    expect(offLadderLevels(nodes, model)).toEqual([
+      { level: "Customer", count: 1 },
+      { level: "Interface", count: 2 },
+    ])
+
+    // They are excluded from the board itself.
+    const rows = assignRows(nodes, model)
+    expect(rows.has("i1")).toBe(false)
+    expect(rows.has("sys")).toBe(true)
+  })
+
+  test("a ladder that configures the layer has nothing off-ladder and gains the lane", () => {
+    const model = laneModel(["Interface", "System", "HighLevel"])
+    const nodes = [node({ id: "ifc", level: "Interface" }), node({ id: "sys", level: "System" })]
+    expect(offLadderLevels(nodes, model)).toEqual([])
+    expect(model.labels).toContain("INTERFACE / ICD CHANGE")
+    // Higher in the ladder means further left: it derives down into System.
+    expect(laneOf(nodes[0], model)).toBeLessThan(laneOf(nodes[1], model))
   })
 })

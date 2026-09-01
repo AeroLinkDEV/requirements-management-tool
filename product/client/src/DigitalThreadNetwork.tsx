@@ -5,8 +5,10 @@ import { type CanvasEdge, type CanvasNode, compactLanes, trace } from "./digital
 import { stateLabel } from "./presentation"
 import { traceRelationLabel } from "./tracePresentation"
 import {
+  OFF_LADDER,
   laneModel,
   levelLaneLabel,
+  offLadderLevels,
   type NetworkNode,
   type NetworkProjection,
   assignRows,
@@ -74,18 +76,21 @@ export default function DigitalThreadNetwork({
    * Compaction is on real emptiness only. A lane emptied by the filter chips keeps its place — collapsing it
    * would slide every other lane sideways while the reader is mid-search.
    */
-  const model = useMemo(
-    () => laneModel(projection?.orderedLevels, nodes.map(item => item.level ?? "").filter(Boolean)),
-    [nodes, projection?.orderedLevels],
-  )
+  const model = useMemo(() => laneModel(projection?.orderedLevels), [projection?.orderedLevels])
+
+  // Records at a level this project does not configure get no lane. They are counted so the canvas can say
+  // how many exist rather than quietly showing a smaller build than there is.
+  const offLadder = useMemo(() => offLadderLevels(nodes, model), [model, nodes])
 
   const { lanes, canvasNodes } = useMemo(() => {
     const rows = assignRows(nodes, model)
-    const placed: CanvasNode[] = nodes.map(node => ({
-      id: node.id,
-      lane: laneOf(node, model),
-      row: rows.get(node.id) ?? 0,
-    }))
+    const placed: CanvasNode[] = nodes
+      .filter(node => laneOf(node, model) !== OFF_LADDER)
+      .map(node => ({
+        id: node.id,
+        lane: laneOf(node, model),
+        row: rows.get(node.id) ?? 0,
+      }))
     const compacted = compactLanes(model.labels, placed)
     return { lanes: compacted.lanes, canvasNodes: compacted.nodes }
   }, [model, nodes])
@@ -275,11 +280,13 @@ export default function DigitalThreadNetwork({
         </label>
       </div>
 
-      {model.offLadderLevels.length ? (
+      {offLadder.length ? (
         <p className="dtnTruncated" role="status">
-          {model.offLadderLevels.map(levelLaneLabel).join(" and ")} sit outside this project's configured
-          requirement ladder. Their change requests are shown because they exist in this build, in their own
-          lane rather than folded into a ladder level.
+          {offLadder
+            .map(item => `${item.count} ${levelLaneLabel(item.level).toLowerCase()}`)
+            .join(" and ")}{" "}
+          {offLadder.reduce((sum, item) => sum + item.count, 0) === 1 ? "record is" : "records are"} not shown:
+          this project&rsquo;s requirement ladder does not configure that level.
         </p>
       ) : null}
 
