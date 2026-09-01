@@ -20,6 +20,7 @@ const scriptContractNames = [
   'AeroLinkMigrationPosture.Tests.ps1',
   'AeroLinkRemoteDemo.Tests.ps1',
   'AeroLinkRemoteDemoRecovery.Tests.ps1',
+  'AeroLinkBootstrap.Tests.ps1',
   'Get-AeroLinkTestPlan.Tests.ps1',
   'Test-RepositoryLayout.ps1',
   'Test-RepositoryLayout.Tests.ps1',

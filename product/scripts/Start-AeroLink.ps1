@@ -14,6 +14,7 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
 . (Join-Path $PSScriptRoot 'AeroLinkLaunch.ps1')
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkBootstrap.psm1') -Force
 
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
@@ -23,6 +24,29 @@ $logs = Join-Path $productRoot '.local\logs'
 $apiUrl = 'http://127.0.0.1:5080'
 $websiteUrl = 'http://127.0.0.1:5173'
 
+# Source posture before anything else. Development mode preserves deliberate local work — feature branches,
+# dirt, local-only commits, untracked files — and only fast-forwards a clean main; it never polices the
+# checkout.
+#
+# The re-entry identity must list every launcher implementation file already loaded into memory before this
+# call (or invoked on the way here): the running script, everything it dot-sourced or imported, the cmd/bat
+# entry chain, and the bootstrap module itself. A fast-forward that changes any of them must restart the
+# launch from the updated files rather than continue half-old/half-new.
+$bootstrapResult = Invoke-AeroLinkSourceBootstrap -Mode Development `
+    -RepositoryRoot $repositoryRoot `
+    -CurrentScriptPath $PSCommandPath `
+    -ScriptArguments (Get-AeroLinkBootstrapScriptArguments $PSBoundParameters) `
+    -LauncherFiles @(
+        'START_AEROLINK.bat',
+        'product\scripts\launch.cmd',
+        'product\scripts\Start-AeroLink.ps1',
+        'product\scripts\AeroLinkPrerequisites.ps1',
+        'product\scripts\AeroLinkLaunch.ps1',
+        'product\scripts\AeroLinkNativeRunner.psm1',
+        'product\scripts\AeroLinkBootstrap.psm1'
+    )
+if ($bootstrapResult.Action -eq 'Reentered') { exit $bootstrapResult.ExitCode }
+
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 
 # Prerequisites first, before anything that takes minutes, so a missing SDK is reported in seconds rather than
@@ -31,6 +55,10 @@ Write-Host '[0/4] Checking prerequisites...' -ForegroundColor Cyan
 $dotnet = Resolve-AeroLinkDotnet
 Assert-AeroLinkNode
 Write-Host "      .NET SDK: $dotnet" -ForegroundColor Green
+
+# The Vite dev server needs node_modules; this is the same fingerprinted path the production launcher uses, so
+# npm ci runs only when package-lock.json actually changed since the last successful preparation.
+Update-AeroLinkClientDependencies -ClientRoot $clientRoot -StateDirectory (Join-Path $productRoot '.local\bootstrap')
 
 Write-Host '[1/4] Checking PostgreSQL...' -ForegroundColor Cyan
 Assert-AeroLinkPostgres -ProductRoot $productRoot

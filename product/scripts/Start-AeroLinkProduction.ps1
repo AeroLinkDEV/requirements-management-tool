@@ -28,6 +28,7 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
 . (Join-Path $PSScriptRoot 'AeroLinkLaunch.ps1')
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkBootstrap.psm1') -Force
 
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
@@ -35,6 +36,34 @@ $apiProject = Join-Path $productRoot 'src\AeroLink.Api\AeroLink.Api.csproj'
 $clientRoot = Join-Path $productRoot 'client'
 $distRoot = Join-Path $clientRoot 'dist'
 $logs = Join-Path $productRoot '.local\logs'
+
+# Source posture first, before any prerequisite, build, or PostgreSQL start. The canonical HOME database must
+# only ever be exercised by a clean, current main — clean also means no untracked, non-ignored source, which
+# merged main does not attest to; anything else is refused here, and Git is never mutated to make an unsafe
+# posture go away.
+#
+# Remote Demo inherits this policy whenever it invokes this launcher. A healthy already-running HOME process
+# from an older source revision is a separate gap, deferred to the later #881 runtime-identity /
+# stale-process slice.
+#
+# The re-entry identity must list every launcher implementation file already loaded into memory before this
+# call (or invoked on the way here): the running script, everything it dot-sourced or imported, the cmd/bat
+# entry chain, and the bootstrap module itself. A fast-forward that changes any of them must restart the
+# launch from the updated files rather than continue half-old/half-new.
+$bootstrapResult = Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical `
+    -RepositoryRoot $repositoryRoot `
+    -CurrentScriptPath $PSCommandPath `
+    -ScriptArguments (Get-AeroLinkBootstrapScriptArguments $PSBoundParameters) `
+    -LauncherFiles @(
+        'START_AEROLINK_PRODUCTION.bat',
+        'product\scripts\launch.cmd',
+        'product\scripts\Start-AeroLinkProduction.ps1',
+        'product\scripts\AeroLinkPrerequisites.ps1',
+        'product\scripts\AeroLinkLaunch.ps1',
+        'product\scripts\AeroLinkNativeRunner.psm1',
+        'product\scripts\AeroLinkBootstrap.psm1'
+    )
+if ($bootstrapResult.Action -eq 'Reentered') { exit $bootstrapResult.ExitCode }
 
 # Reaching this machine from another one takes two changes, not one, and the second is the one nobody expects.
 #
@@ -121,11 +150,9 @@ if ($SkipClientBuild) {
     Write-Host '      Reusing the existing build.' -ForegroundColor Green
 }
 else {
-    if (-not (Test-Path (Join-Path $clientRoot 'node_modules'))) {
-        Write-Host '      Installing client dependencies (first run only)...'
-        Push-Location $clientRoot
-        try { & npm.cmd ci; if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' } } finally { Pop-Location }
-    }
+    # Fingerprinted dependency refresh: npm ci runs only when package-lock.json changed since the last
+    # successful preparation, or node_modules is missing. A failed refresh never records the fingerprint.
+    Update-AeroLinkClientDependencies -ClientRoot $clientRoot -StateDirectory (Join-Path $productRoot '.local\bootstrap')
     Push-Location $clientRoot
     try {
         # Type checking is part of `npm run build`, and on purpose: a build that compiles is the whole claim
