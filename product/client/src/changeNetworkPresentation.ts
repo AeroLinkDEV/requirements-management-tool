@@ -72,10 +72,28 @@ export type LaneModel = {
   laneForLevel: Map<string, number>
   problemLane: number
   verificationLane: number
+  /** Levels carried by records but absent from the project ladder. Empty is the healthy case. */
+  offLadderLevels: string[]
 }
 
-export const laneModel = (orderedLevels: readonly string[] = DEFAULT_ORDERED_LEVELS): LaneModel => {
-  const levels = orderedLevels.length ? orderedLevels : DEFAULT_ORDERED_LEVELS
+/**
+ * Build the lane set from the project's ladder, plus any level the records actually carry.
+ *
+ * The two can disagree. FMS configures `[System, HighLevel, LowLevel]` yet its showcase seeds eight Interface
+ * change requests into Build 1.6 — real controlled records at a level the ladder does not list. Folding those
+ * into a ladder lane would file them under a level they are not, and dropping them would be worse: a
+ * traceability view that omits change requests present in the build states something false about the build.
+ *
+ * So an off-ladder level gets its own lane, at the head of the ladder because nothing in the ladder derives
+ * into it, and `offLadderLevels` names them so the caller can say plainly that they sit outside it.
+ */
+export const laneModel = (
+  orderedLevels: readonly string[] = DEFAULT_ORDERED_LEVELS,
+  presentLevels: readonly string[] = [],
+): LaneModel => {
+  const ladder = orderedLevels.length ? [...orderedLevels] : [...DEFAULT_ORDERED_LEVELS]
+  const offLadder = [...new Set(presentLevels)].filter(level => level && !ladder.includes(level)).sort()
+  const levels = [...offLadder, ...ladder]
   const laneForLevel = new Map<string, number>()
   levels.forEach((level, index) => laneForLevel.set(level, index + 1))
   return {
@@ -83,6 +101,7 @@ export const laneModel = (orderedLevels: readonly string[] = DEFAULT_ORDERED_LEV
     laneForLevel,
     problemLane: 0,
     verificationLane: levels.length + 1,
+    offLadderLevels: offLadder,
   }
 }
 
@@ -90,9 +109,9 @@ export const laneModel = (orderedLevels: readonly string[] = DEFAULT_ORDERED_LEV
 export const laneOf = (node: NetworkNode, model: LaneModel = laneModel()): number => {
   if (node.kind === "ProblemReport") return model.problemLane
   if (node.kind === "TestChangeRequest") return model.verificationLane
-  // An unknown level is placed at the foot of the ladder rather than dropped: a record the server returned
-  // must stay visible even if this client predates the level it carries.
-  return model.laneForLevel.get(node.level ?? "") ?? model.verificationLane - 1
+  // A level the model has never seen still gets the head of the ladder rather than being folded into the
+  // nearest one: a record the server returned must stay visible, and under its own level.
+  return model.laneForLevel.get(node.level ?? "") ?? 1
 }
 
 /** The short square badge on a card. Says the level, which the identifier alone does not reliably carry. */

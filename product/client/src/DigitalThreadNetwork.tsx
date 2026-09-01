@@ -6,6 +6,7 @@ import { stateLabel } from "./presentation"
 import { traceRelationLabel } from "./tracePresentation"
 import {
   laneModel,
+  levelLaneLabel,
   type NetworkNode,
   type NetworkProjection,
   assignRows,
@@ -73,7 +74,10 @@ export default function DigitalThreadNetwork({
    * Compaction is on real emptiness only. A lane emptied by the filter chips keeps its place — collapsing it
    * would slide every other lane sideways while the reader is mid-search.
    */
-  const model = useMemo(() => laneModel(projection?.orderedLevels), [projection?.orderedLevels])
+  const model = useMemo(
+    () => laneModel(projection?.orderedLevels, nodes.map(item => item.level ?? "").filter(Boolean)),
+    [nodes, projection?.orderedLevels],
+  )
 
   const { lanes, canvasNodes } = useMemo(() => {
     const rows = assignRows(nodes, model)
@@ -270,6 +274,14 @@ export default function DigitalThreadNetwork({
           />
         </label>
       </div>
+
+      {model.offLadderLevels.length ? (
+        <p className="dtnTruncated" role="status">
+          {model.offLadderLevels.map(levelLaneLabel).join(" and ")} sit outside this project's configured
+          requirement ladder. Their change requests are shown because they exist in this build, in their own
+          lane rather than folded into a ladder level.
+        </p>
+      ) : null}
 
       {projection?.truncated ? (
         <p className="dtnTruncated" role="status">

@@ -164,3 +164,30 @@ test.describe("configurable ladder layers", () => {
     expect(groupOf(node({ id: "ifc", level: "Interface" }))).toBe("sys")
   })
 })
+
+test.describe("records at a level the ladder does not configure", () => {
+  test("FMS: Interface change requests exist in the build but Interface is not a ladder layer", () => {
+    // The FMS ladder is [System, HighLevel, LowLevel]; the showcase still seeds eight Interface change
+    // requests into Build 1.6. Both are true, so the canvas must show them without filing them under a level
+    // they are not — omitting change requests present in a build would state something false about the build.
+    const model = laneModel(["System", "HighLevel", "LowLevel"], ["System", "HighLevel", "Interface"])
+
+    expect(model.offLadderLevels).toEqual(["Interface"])
+    expect(model.labels).toContain("INTERFACE / ICD CHANGE")
+
+    const iface = node({ id: "ifc", level: "Interface" })
+    const system = node({ id: "sys", level: "System" })
+    const low = node({ id: "llr", level: "LowLevel" })
+
+    // Its own lane, and not folded into the foot of the ladder as an earlier fallback did.
+    expect(laneOf(iface, model)).not.toBe(laneOf(low, model))
+    expect(laneOf(iface, model)).not.toBe(laneOf(system, model))
+    // At the head, because nothing in the ladder derives into it.
+    expect(laneOf(iface, model)).toBeLessThan(laneOf(system, model))
+  })
+
+  test("a ladder that does configure the layer reports nothing off-ladder", () => {
+    const model = laneModel(["Interface", "System", "HighLevel"], ["Interface", "System"])
+    expect(model.offLadderLevels).toEqual([])
+  })
+})
