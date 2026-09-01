@@ -5,7 +5,7 @@ import { type CanvasEdge, type CanvasNode, compactLanes, trace } from "./digital
 import { stateLabel } from "./presentation"
 import { traceRelationLabel } from "./tracePresentation"
 import {
-  NETWORK_LANES,
+  laneModel,
   type NetworkNode,
   type NetworkProjection,
   assignRows,
@@ -73,16 +73,18 @@ export default function DigitalThreadNetwork({
    * Compaction is on real emptiness only. A lane emptied by the filter chips keeps its place — collapsing it
    * would slide every other lane sideways while the reader is mid-search.
    */
+  const model = useMemo(() => laneModel(projection?.orderedLevels), [projection?.orderedLevels])
+
   const { lanes, canvasNodes } = useMemo(() => {
-    const rows = assignRows(nodes)
+    const rows = assignRows(nodes, model)
     const placed: CanvasNode[] = nodes.map(node => ({
       id: node.id,
-      lane: laneOf(node),
+      lane: laneOf(node, model),
       row: rows.get(node.id) ?? 0,
     }))
-    const compacted = compactLanes(NETWORK_LANES, placed)
+    const compacted = compactLanes(model.labels, placed)
     return { lanes: compacted.lanes, canvasNodes: compacted.nodes }
-  }, [nodes])
+  }, [model, nodes])
 
   const canvasEdges = useMemo<CanvasEdge[]>(
     () =>
@@ -114,8 +116,8 @@ export default function DigitalThreadNetwork({
    */
   const dock: ResolvedDock = useMemo(() => {
     if (dockPreference !== "auto") return dockPreference
-    return selected ? resolveDock(selected, directLinks, byId) : "right"
-  }, [byId, directLinks, dockPreference, selected])
+    return selected ? resolveDock(selected, directLinks, byId, model) : "right"
+  }, [byId, directLinks, dockPreference, model, selected])
 
   // The canvas must not lay records out under the panel, so the frame it may use shrinks by the dock.
   const frameInset = useMemo(

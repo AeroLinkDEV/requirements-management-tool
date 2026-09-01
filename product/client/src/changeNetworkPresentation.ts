@@ -36,49 +36,63 @@ export type NetworkProjection = {
   nodes: NetworkNode[]
   edges: NetworkEdge[]
   truncated: boolean
+  /** The project's configured ladder, highest layer first. The client never decides this order. */
+  orderedLevels?: string[]
 }
 
 /**
- * The lane vocabulary, in ladder order: higher layers derive downward to the left of what they drive.
+ * The lane vocabulary for a project, built from the ladder the projection states.
  *
- * Interface / ICD is a configurable ladder layer that sits *above* System when a project has it. It is named
- * here so the canvas supports it, not because every project has one — a project without that layer simply
- * produces no Interface records, and the canvas drops structurally empty lanes, so the lane never appears.
- * That is why this list is fixed and the lane set is not: absence is handled by compaction, not by a
- * conditional vocabulary that would have to be kept in step with project configuration.
+ * The requirement ladder is configured per project — Customer and Interface / ICD are both layers that can sit
+ * above System — so the client must not hold a fixed order. `orderedLevels` comes from the server's ladder
+ * policy, highest layer first, and the lanes follow it: problem reports feed the ladder from the left,
+ * verification change closes it on the right.
+ *
+ * A project that has not configured a layer simply produces no records at that level, and the canvas drops
+ * structurally empty lanes. So a new layer needs no client change at all.
  */
-export const NETWORK_LANES = [
-  "PROBLEM REPORT",
-  "INTERFACE / ICD CHANGE",
-  "SYSTEM CHANGE",
-  "SOFTWARE HLR CHANGE",
-  "SOFTWARE LLR CHANGE",
-  "VERIFICATION CHANGE",
-] as const
+export const LEVEL_LANE_LABELS: Record<string, string> = {
+  Customer: "CUSTOMER CHANGE",
+  Interface: "INTERFACE / ICD CHANGE",
+  System: "SYSTEM CHANGE",
+  HighLevel: "SOFTWARE HLR CHANGE",
+  LowLevel: "SOFTWARE LLR CHANGE",
+}
 
-export const LANE_PROBLEM = 0
-export const LANE_INTERFACE = 1
-export const LANE_SYSTEM = 2
-export const LANE_HLR = 3
-export const LANE_LLR = 4
-export const LANE_VERIFICATION = 5
+/** The ladder used when a projection has not stated one. Matches the levels this product ships today. */
+export const DEFAULT_ORDERED_LEVELS = ["Customer", "Interface", "System", "HighLevel", "LowLevel"] as const
+
+export const levelLaneLabel = (level: string): string =>
+  LEVEL_LANE_LABELS[level] ??
+  `${level.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toUpperCase()} CHANGE`
+
+export type LaneModel = {
+  labels: string[]
+  /** Lane index for a level key, and the fixed lanes either side of the ladder. */
+  laneForLevel: Map<string, number>
+  problemLane: number
+  verificationLane: number
+}
+
+export const laneModel = (orderedLevels: readonly string[] = DEFAULT_ORDERED_LEVELS): LaneModel => {
+  const levels = orderedLevels.length ? orderedLevels : DEFAULT_ORDERED_LEVELS
+  const laneForLevel = new Map<string, number>()
+  levels.forEach((level, index) => laneForLevel.set(level, index + 1))
+  return {
+    labels: ["PROBLEM REPORT", ...levels.map(levelLaneLabel), "VERIFICATION CHANGE"],
+    laneForLevel,
+    problemLane: 0,
+    verificationLane: levels.length + 1,
+  }
+}
 
 /** Which lane a projection node belongs to, from the server-stated kind and level. */
-export const laneOf = (node: NetworkNode): number => {
-  if (node.kind === "ProblemReport") return LANE_PROBLEM
-  if (node.kind === "TestChangeRequest") return LANE_VERIFICATION
-  switch (node.level) {
-    case "Interface":
-      return LANE_INTERFACE
-    case "HighLevel":
-      return LANE_HLR
-    case "LowLevel":
-      return LANE_LLR
-    default:
-      // Customer is the other configurable layer above System. It has no confirmed ladder position yet, so it
-      // stays with System rather than being given an invented one; raise it before a project configures it.
-      return LANE_SYSTEM
-  }
+export const laneOf = (node: NetworkNode, model: LaneModel = laneModel()): number => {
+  if (node.kind === "ProblemReport") return model.problemLane
+  if (node.kind === "TestChangeRequest") return model.verificationLane
+  // An unknown level is placed at the foot of the ladder rather than dropped: a record the server returned
+  // must stay visible even if this client predates the level it carries.
+  return model.laneForLevel.get(node.level ?? "") ?? model.verificationLane - 1
 }
 
 /** The short square badge on a card. Says the level, which the identifier alone does not reliably carry. */
@@ -105,8 +119,15 @@ export const badgeOf = (node: NetworkNode): string => {
  * Interface groups with System: the System chip means system-level change control, and a project that has the
  * Interface layer should not find its Interface records vanish when that chip is used.
  */
-export const groupOf = (node: NetworkNode): string =>
-  ["pr", "sys", "sys", "hlr", "llr", "ver"][laneOf(node)] ?? "sys"
+export const groupOf = (node: NetworkNode): string => {
+  if (node.kind === "ProblemReport") return "pr"
+  if (node.kind === "TestChangeRequest") return "ver"
+  // Layers above System answer the System chip: it means system-level change control, and a project with the
+  // Interface or Customer layer should not find those records vanish when it is used.
+  if (node.level === "HighLevel") return "hlr"
+  if (node.level === "LowLevel") return "llr"
+  return "sys"
+}
 
 export type Pill = { background: string; color: string }
 
@@ -136,16 +157,11 @@ export const pillFor = (state?: string | null): Pill => {
 
 /** Badge tints, keyed on lane so a card reads its level before its text is legible. */
 export const badgeTintFor = (node: NetworkNode): Pill => {
-  switch (laneOf(node)) {
-    case LANE_PROBLEM:
-      return { background: "#eef1f6", color: "#566579" }
-    case LANE_SYSTEM:
-      return { background: "#dff3ee", color: "#176f68" }
-    case LANE_VERIFICATION:
-      return { background: "#e8f4ef", color: "#28735f" }
-    default:
-      return { background: "#e7effb", color: "#3569a8" }
-  }
+  const group = groupOf(node)
+  if (group === "pr") return { background: "#eef1f6", color: "#566579" }
+  if (group === "ver") return { background: "#e8f4ef", color: "#28735f" }
+  if (group === "sys") return { background: "#dff3ee", color: "#176f68" }
+  return { background: "#e7effb", color: "#3569a8" }
 }
 
 /** True when this edge is one the server has flagged as suspect. */
@@ -167,15 +183,16 @@ export const resolveDock = (
   selected: NetworkNode,
   directLinks: readonly NetworkEdge[],
   byId: ReadonlyMap<string, NetworkNode>,
+  model: LaneModel = laneModel(),
 ): "left" | "right" => {
-  const lane = laneOf(selected)
+  const lane = laneOf(selected, model)
   let right = 0
   let left = 0
   for (const edge of directLinks) {
     const other = byId.get(edge.fromId === selected.id ? edge.toId : edge.fromId)
     if (!other) continue
-    if (laneOf(other) > lane) right += 1
-    else if (laneOf(other) < lane) left += 1
+    if (laneOf(other, model) > lane) right += 1
+    else if (laneOf(other, model) < lane) left += 1
   }
   return right >= left ? "left" : "right"
 }
@@ -184,11 +201,14 @@ export const resolveDock = (
  * Rows within a lane, ordered by display number so the board is stable across reloads. The projection returns
  * nodes sorted already; this keeps the ordering explicit rather than depending on it.
  */
-export const assignRows = (nodes: readonly NetworkNode[]): Map<string, number> => {
+export const assignRows = (
+  nodes: readonly NetworkNode[],
+  model: LaneModel = laneModel(),
+): Map<string, number> => {
   const rows = new Map<string, number>()
   const perLane = new Map<number, NetworkNode[]>()
   for (const node of nodes) {
-    const lane = laneOf(node)
+    const lane = laneOf(node, model)
     const bucket = perLane.get(lane)
     if (bucket) bucket.push(node)
     else perLane.set(lane, [node])

@@ -1,12 +1,6 @@
 import { expect, test } from "@playwright/test"
 import {
-  LANE_HLR,
-  LANE_INTERFACE,
-  LANE_LLR,
-  LANE_PROBLEM,
-  LANE_SYSTEM,
-  LANE_VERIFICATION,
-  NETWORK_LANES,
+  laneModel,
   type NetworkEdge,
   type NetworkNode,
   assignRows,
@@ -31,21 +25,22 @@ const node = (over: Partial<NetworkNode> & { id: string }): NetworkNode => ({
 
 test.describe("change network presentation", () => {
   test("lane and badge come from the server-stated kind and level, never the identifier", () => {
-    expect(laneOf(node({ id: "PR-1", kind: "ProblemReport" }))).toBe(LANE_PROBLEM)
-    expect(laneOf(node({ id: "a", level: "System" }))).toBe(LANE_SYSTEM)
-    expect(laneOf(node({ id: "b", level: "HighLevel" }))).toBe(LANE_HLR)
-    expect(laneOf(node({ id: "c", level: "LowLevel" }))).toBe(LANE_LLR)
-    expect(laneOf(node({ id: "d", kind: "TestChangeRequest" }))).toBe(LANE_VERIFICATION)
+    const m = laneModel(["System", "HighLevel", "LowLevel"])
+    expect(laneOf(node({ id: "PR-1", kind: "ProblemReport" }), m)).toBe(m.problemLane)
+    expect(laneOf(node({ id: "d", kind: "TestChangeRequest" }), m)).toBe(m.verificationLane)
+    // The ladder runs left to right in the order the project configured.
+    expect(laneOf(node({ id: "a", level: "System" }), m)).toBeLessThan(laneOf(node({ id: "b", level: "HighLevel" }), m))
+    expect(laneOf(node({ id: "b", level: "HighLevel" }), m)).toBeLessThan(laneOf(node({ id: "c", level: "LowLevel" }), m))
 
     // A display number that looks like another level must not move the card. The projection is the authority.
     const misleading = node({ id: "x", displayNumber: "LLRCR-00061.00", level: "System" })
-    expect(laneOf(misleading)).toBe(LANE_SYSTEM)
+    expect(laneOf(misleading, m)).toBe(m.laneForLevel.get("System"))
     expect(badgeOf(misleading)).toBe("SYS")
 
     // Interface / ICD is a ladder layer above System, so it gets its own lane to the left of it.
     const iface = node({ id: "i", level: "Interface" })
-    expect(laneOf(iface)).toBe(LANE_INTERFACE)
-    expect(LANE_INTERFACE).toBeLessThan(LANE_SYSTEM)
+    const withIface = laneModel(["Interface", "System", "HighLevel"])
+    expect(laneOf(iface, withIface)).toBeLessThan(laneOf(node({ id: "s", level: "System" }), withIface))
     expect(badgeOf(iface)).toBe("IFC")
     // It still answers the System chip: that chip means system-level change control.
     expect(groupOf(iface)).toBe("sys")
@@ -113,36 +108,59 @@ test.describe("change network presentation", () => {
 })
 
 test.describe("configurable ladder layers", () => {
-  test("a project without the Interface layer never shows an Interface lane", () => {
-    // Our FMS project has no Interface layer configured, so the projection returns no Interface records and
-    // lane compaction removes the lane entirely — the vocabulary naming it costs an unconfigured project
-    // nothing.
+  test("the ladder order comes from the projection, not from the client", () => {
+    // Customer and Interface are both layers a project can configure above System, and their relative order
+    // is the project's to state. The client renders whatever the ladder policy sends.
+    const model = laneModel(["Customer", "Interface", "System", "HighLevel", "LowLevel"])
+    expect(model.labels[0]).toBe("PROBLEM REPORT")
+    expect(model.labels[1]).toBe("CUSTOMER CHANGE")
+    expect(model.labels[2]).toBe("INTERFACE / ICD CHANGE")
+    expect(model.labels[model.labels.length - 1]).toBe("VERIFICATION CHANGE")
+
+    // A project that orders them the other way gets that, with no client change.
+    const swapped = laneModel(["Interface", "Customer", "System"])
+    expect(swapped.labels[1]).toBe("INTERFACE / ICD CHANGE")
+    expect(swapped.labels[2]).toBe("CUSTOMER CHANGE")
+
+    // A level this client has never heard of still gets a lane and a readable label.
+    const future = laneModel(["System", "SubSystem"])
+    expect(future.labels).toContain("SUB SYSTEM CHANGE")
+  })
+
+  test("a project without a layer never shows its lane", () => {
+    // FMS configures no Customer or Interface layer, so the projection returns no records at those levels and
+    // compaction removes the lanes. Naming them in the vocabulary costs an unconfigured project nothing.
+    const model = laneModel(["Customer", "Interface", "System", "HighLevel", "LowLevel"])
     const nodes = [
       node({ id: "pr", kind: "ProblemReport" }),
       node({ id: "sys", level: "System" }),
       node({ id: "hlr", level: "HighLevel" }),
     ]
-    const placed = nodes.map(item => ({ id: item.id, lane: laneOf(item), row: 0 }))
-    const compacted = compactLanes(NETWORK_LANES, placed)
-    expect(compacted.lanes).not.toContain("INTERFACE / ICD CHANGE")
+    const placed = nodes.map(item => ({ id: item.id, lane: laneOf(item, model), row: 0 }))
+    const compacted = compactLanes(model.labels, placed)
     expect(compacted.lanes).toEqual(["PROBLEM REPORT", "SYSTEM CHANGE", "SOFTWARE HLR CHANGE"])
+    expect(compacted.lanes).not.toContain("CUSTOMER CHANGE")
+    expect(compacted.lanes).not.toContain("INTERFACE / ICD CHANGE")
   })
 
-  test("a project that configures the Interface layer gets the lane, above System", () => {
+  test("a project that configures a higher layer gets its lane, above System", () => {
+    const model = laneModel(["Customer", "Interface", "System", "HighLevel"])
     const nodes = [
+      node({ id: "cus", level: "Customer" }),
       node({ id: "ifc", level: "Interface" }),
       node({ id: "sys", level: "System" }),
-      node({ id: "hlr", level: "HighLevel" }),
     ]
-    const placed = nodes.map(item => ({ id: item.id, lane: laneOf(item), row: 0 }))
-    const compacted = compactLanes(NETWORK_LANES, placed)
-    expect(compacted.lanes).toEqual([
-      "INTERFACE / ICD CHANGE",
-      "SYSTEM CHANGE",
-      "SOFTWARE HLR CHANGE",
-    ])
-    // Higher in the ladder means further left, so Interface derives down into System.
+    const placed = nodes.map(item => ({ id: item.id, lane: laneOf(item, model), row: 0 }))
+    const compacted = compactLanes(model.labels, placed)
+    expect(compacted.lanes).toEqual(["CUSTOMER CHANGE", "INTERFACE / ICD CHANGE", "SYSTEM CHANGE"])
+
+    // Higher in the ladder means further left: these layers derive down into System.
     const laneById = new Map(compacted.nodes.map(item => [item.id, item.lane]))
+    expect(laneById.get("cus")).toBeLessThan(laneById.get("ifc") as number)
     expect(laneById.get("ifc")).toBeLessThan(laneById.get("sys") as number)
+
+    // All of them still answer the System chip, so filtering never hides a configured higher layer.
+    expect(groupOf(node({ id: "cus", level: "Customer" }))).toBe("sys")
+    expect(groupOf(node({ id: "ifc", level: "Interface" }))).toBe("sys")
   })
 })
