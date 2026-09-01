@@ -88,6 +88,12 @@ public enum ProposalDownstreamDisposition
 
 /// <summary>The proposed content of one change request: lane 1 and lane 2 of the Digital Thread's inside-a-change view.</summary>
 public sealed record ChangeProposalContentResult(
+    /// <summary>
+    /// Which aggregate this content came from, so the client can hold the two proposal shapes as a
+    /// discriminated union rather than one shape whose fields mean different things depending on the owner.
+    /// Matches the node kinds the trace projection already uses.
+    /// </summary>
+    string OwnerKind,
     Guid ChangeRequestId,
     Guid ProjectId,
     string DisplayNumber,
@@ -273,7 +279,7 @@ public static class ChangeProposalContentProjection
                 newest?.State));
         }
 
-        return new ChangeProposalContentResult(scr.Id, scr.ProjectId, scr.DisplayNumber, items);
+        return new ChangeProposalContentResult("ChangeRequest", scr.Id, scr.ProjectId, scr.DisplayNumber, items);
     }
 
     private static string Display(string baseNumber, int revision)

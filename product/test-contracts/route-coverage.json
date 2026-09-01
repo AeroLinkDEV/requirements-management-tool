@@ -383,6 +383,7 @@
         "TestProcedureAuthoringApiTests",
         "TestProcedureDocumentApiTests",
         "TestProcedureRevisionHistoryApiTests",
+        "TestProposalContentApiTests",
         "VerificationImpactApiTests",
         "VerificationProgramIsolationApiTests",
         "VerificationVocabularyApiTests",
