@@ -41,8 +41,16 @@ public sealed record ChangeProposalItem(
     IReadOnlyList<ProposalAllocationTarget> AllocatedDownstream,
     /// <summary>Why <see cref="AllocatedDownstream"/> is empty, when it is. See the enum.</summary>
     ProposalDownstreamDisposition Disposition = ProposalDownstreamDisposition.Allocated,
-    /// <summary>The newest revision of this base number in the Project, when the base number is known.</summary>
-    int? LatestRevision = null);
+    /// <summary>
+    /// The highest revision number this base number has in the Project, when the base number is known.
+    ///
+    /// A number, not a lifecycle judgement. It is paired with <see cref="LatestRevisionState"/> because the
+    /// highest revision of a retired requirement is Retired, and a bare maximum would let a reader infer the
+    /// requirement is live when it is not.
+    /// </summary>
+    int? LatestRevision = null,
+    /// <summary>The state of <see cref="LatestRevision"/>: Active, Superseded or Retired.</summary>
+    string? LatestRevisionState = null);
 
 /// <summary>
 /// Why a proposed item has nothing allocated below it, decided from the record rather than guessed.
@@ -63,9 +71,15 @@ public enum ProposalDownstreamDisposition
     /// <summary>The exact base revision resolved and genuinely has nothing below it.</summary>
     NoAllocationRecorded,
     /// <summary>
-    /// A later revision of this same requirement exists, so what is allocated hangs off that one. Decided per
-    /// item by comparing revisions, never from the change request's overall rebase flag: one stale item
-    /// strands the whole change request, and the other items in it are not thereby stale.
+    /// The proposal names an older revision than the Project now holds.
+    ///
+    /// That is exactly what this claims and no more. It does <b>not</b> say an allocation exists on the later
+    /// revision — nothing here looked there, and saying "what is allocated hangs off the later revision" would
+    /// assert a relationship that may not exist at all. The reader is told which revision the proposal targets
+    /// and which the requirement has reached; that is a fact, and it is enough to explain the empty lane.
+    ///
+    /// Decided per item by comparing revisions, never from the change request's overall rebase flag: one
+    /// stale item strands the whole change request, and its siblings are not thereby stale.
     /// </summary>
     BehindTarget,
     /// <summary>The named base number and revision resolved to no revision at all. A data gap, not staleness.</summary>
@@ -91,7 +105,7 @@ public sealed record ChangeProposalContentResult(
 /// </summary>
 public static class ChangeProposalContentProjection
 {
-    private sealed record BaseRevision(string BaseNumber, int Revision, Guid Id, string Statement);
+    private sealed record BaseRevision(string BaseNumber, int Revision, Guid Id, string Statement, string State);
 
     private sealed record MaterializedChild(
         Guid TargetRevisionId, Guid Id, string BaseNumber, int Revision, string Level, string Statement, string Type);
@@ -128,7 +142,8 @@ public static class ChangeProposalContentProjection
                               join revision in db.RequirementRevisions.AsNoTracking()
                                   on artifact.Id equals revision.ArtifactId
                               select new BaseRevision(
-                                  artifact.BaseNumber, revision.Revision, revision.Id, revision.Statement))
+                                  artifact.BaseNumber, revision.Revision, revision.Id, revision.Statement,
+                                  revision.State.ToString()))
                              .ToListAsync(ct);
             foreach (var row in rows) byBase[(row.BaseNumber, row.Revision)] = row;
         }
@@ -139,7 +154,9 @@ public static class ChangeProposalContentProjection
         // only that *some* item stranded it.
         var latestByBase = byBase.Values
             .GroupBy(x => x.BaseNumber)
-            .ToDictionary(x => x.Key, x => x.Max(y => y.Revision));
+            .ToDictionary(
+                x => x.Key,
+                x => x.OrderByDescending(y => y.Revision).First());
 
         var revisionIds = byBase.Values.Select(x => x.Id).ToList();
 
@@ -226,9 +243,10 @@ public static class ChangeProposalContentProjection
                         ChangeRequestDisplayNumber: Display(x.OwnerNumber, x.OwnerRevision))));
             }
 
-            var latest = string.IsNullOrWhiteSpace(change.BaseNumber)
-                ? (int?)null
-                : latestByBase.TryGetValue(change.BaseNumber, out var newest) ? newest : null;
+            BaseRevision? newest = null;
+            if (!string.IsNullOrWhiteSpace(change.BaseNumber))
+                latestByBase.TryGetValue(change.BaseNumber, out newest);
+            var latest = newest?.Revision;
 
             var disposition = allocated.Count > 0
                 ? ProposalDownstreamDisposition.Allocated
@@ -251,7 +269,8 @@ public static class ChangeProposalContentProjection
                 resolved?.Id,
                 allocated.OrderBy(x => x.DisplayNumber, StringComparer.Ordinal).ToList(),
                 disposition,
-                latest));
+                latest,
+                newest?.State));
         }
 
         return new ChangeProposalContentResult(scr.Id, scr.ProjectId, scr.DisplayNumber, items);

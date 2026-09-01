@@ -320,7 +320,13 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
         // whatever is allocated hangs off the later revision.
         var stale = Item(body, fixture.ModifyId);
         Assert.Equal("BehindTarget", stale.GetProperty("disposition").GetString());
+        // Both revisions are served so the view can state a fact — targets 01, requirement is now at 02 —
+        // rather than claiming an allocation exists on the later one, which nothing here looked for.
+        Assert.Equal(1, stale.GetProperty("supersededRevision").GetInt32());
         Assert.Equal(2, stale.GetProperty("latestRevision").GetInt32());
+        // Paired with its state: the highest revision of a retired requirement is Retired, and a bare maximum
+        // would let a reader infer the requirement is live when it is not.
+        Assert.Equal("Active", stale.GetProperty("latestRevisionState").GetString());
 
         // One stale item strands the whole change request, but it says nothing about the others. SR-91002 is an
         // Introduce and SR-91005 is a current Retire; neither may inherit the first one's staleness. Deciding
