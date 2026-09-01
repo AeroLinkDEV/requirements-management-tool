@@ -18,10 +18,10 @@ import {
   syncTargets,
   wheelFactor,
   zoomAbout,
-} from "./digitalThreadCanvas"
+} from "./digitalThreadGeometry"
 import "./DigitalThreadCanvas.css"
 
-export type { CanvasEdge, CanvasNode } from "./digitalThreadCanvas"
+export type { CanvasEdge, CanvasNode } from "./digitalThreadGeometry"
 
 export type DigitalThreadCanvasProps = {
   lanes: readonly string[]

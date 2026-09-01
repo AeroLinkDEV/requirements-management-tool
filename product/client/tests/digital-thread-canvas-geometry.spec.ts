@@ -14,7 +14,7 @@ import {
   trace,
   windowHeight,
   zoomAbout,
-} from "../src/digitalThreadCanvas"
+} from "../src/digitalThreadGeometry"
 
 // The canvas geometry is pure, so it is asserted directly rather than through a rendered board. These are the
 // behaviours the design review settled; the browser journeys cover them again once there is a page to drive.
