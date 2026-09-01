@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 742,
-    "cases": 826,
+    "tests": 743,
+    "cases": 827,
     "classes": 119,
-    "hostedTests": 712,
-    "hostedCases": 782,
+    "hostedTests": 713,
+    "hostedCases": 783,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 8,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 443,
-      "cases": 495,
+      "tests": 444,
+      "cases": 496,
       "unknownCases": 0,
       "classes": 98
     },
@@ -1939,8 +1939,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 137,
-        "end": 154
+        "start": 155,
+        "end": 172
       }
     },
     {
@@ -1975,8 +1975,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 119,
-        "end": 135
+        "start": 137,
+        "end": 153
       }
     },
     {
@@ -1993,8 +1993,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 156,
-        "end": 175
+        "start": 174,
+        "end": 193
       }
     },
     {
@@ -2011,8 +2011,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 107,
-        "end": 117
+        "start": 125,
+        "end": 135
       }
     },
     {
@@ -2029,8 +2029,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 177,
-        "end": 193
+        "start": 195,
+        "end": 211
+      }
+    },
+    {
+      "cls": "ChangeRequestNetworkApiTests",
+      "test": "Network_states_the_projects_configured_ladder_so_the_client_never_orders_levels",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 107,
+        "end": 123
       }
     },
     {

@@ -105,6 +105,24 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
     }
 
     [Fact]
+    public async Task Network_states_the_projects_configured_ladder_so_the_client_never_orders_levels()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var levels = (await NetworkAsync(client, fixture)).GetProperty("orderedLevels")
+            .EnumerateArray().Select(x => x.GetString()).ToList();
+
+        // Layers above System are configured per Project, so their order is the ladder policy's to state and
+        // not something a consumer may assume. System must derive into the software levels, in that order.
+        Assert.NotEmpty(levels);
+        Assert.Contains("System", levels);
+        Assert.True(levels.IndexOf("System") < levels.IndexOf("HighLevel"));
+        Assert.True(levels.IndexOf("HighLevel") < levels.IndexOf("LowLevel"));
+    }
+
+    [Fact]
     public async Task Network_excludes_a_change_targeting_a_different_build_in_the_same_project()
     {
         var fixture = await SeedAsync(_host.Factory);

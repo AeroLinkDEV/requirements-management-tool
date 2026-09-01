@@ -87,7 +87,16 @@ public sealed record ChangeRequestNetworkResult(
     Guid ReleaseId,
     IReadOnlyList<ChangeRequestTraceNode> Nodes,
     IReadOnlyList<ChangeRequestTraceEdge> Edges,
-    bool Truncated);
+    bool Truncated,
+    /// <summary>
+    /// The Project's configured requirement ladder, highest layer first.
+    ///
+    /// A consumer laying records out by level must not decide that order for itself. Layers above System —
+    /// Customer and Interface among them — are configured per Project, so a fixed client-side order would be
+    /// wrong for any Project that configures them differently, and would need editing whenever a new layer is
+    /// supported. The ladder policy already owns this; the projection states it.
+    /// </summary>
+    IReadOnlyList<string> OrderedLevels);
 
 /// <summary>
 /// Read authority for the Phase 2 composed change-request trace.
@@ -149,12 +158,13 @@ public static class ChangeRequestTraceProjection
         AeroLinkDbContext db, Guid projectId, Guid releaseId, ILadderPolicy policy, int maxNodes,
         CancellationToken ct)
     {
+        var ladder = policy.OrderedLevels.Select(x => x.ToString()).ToList();
         var projection = await BuildAsync(db, projectId, Guid.Empty, NetworkRootKind, policy, ct, releaseId);
-        if (projection is null) return new(projectId, releaseId, [], [], false);
+        if (projection is null) return new(projectId, releaseId, [], [], false, ladder);
 
         var ceiling = maxNodes < 1 ? 1 : maxNodes;
         if (projection.Nodes.Count <= ceiling)
-            return new(projectId, releaseId, projection.Nodes, projection.Edges, false);
+            return new(projectId, releaseId, projection.Nodes, projection.Edges, false, ladder);
 
         // Over the ceiling the network is cut deterministically and the cut is declared. Dropping records from
         // a traceability view without saying so would be a false statement about traceability, so the caller is
@@ -163,7 +173,7 @@ public static class ChangeRequestTraceProjection
         var keptIds = kept.Select(x => (x.Kind, x.Id)).ToHashSet();
         return new(projectId, releaseId, kept,
             projection.Edges.Where(x => keptIds.Contains((x.FromKind, x.FromId))
-                && keptIds.Contains((x.ToKind, x.ToId))).ToList(), true);
+                && keptIds.Contains((x.ToKind, x.ToId))).ToList(), true, ladder);
     }
 
     private const string NetworkRootKind = "BuildNetwork";

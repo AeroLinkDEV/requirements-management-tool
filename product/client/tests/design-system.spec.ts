@@ -147,11 +147,17 @@ test('compact density fits materially more on the screen than comfortable', asyn
       await surfacePainted(page)
       if (path === '/system-verification') await verificationLandingRendered(page)
       await layoutSettled(page)
-      const height = await page.evaluate(() => {
+      const measure = () => page.evaluate(() => {
         const main = document.querySelector('.workspaceView > main') as HTMLElement | null
         return main ? main.scrollHeight : document.documentElement.scrollHeight
       })
-      ;(heights[path] ??= {})[density] = height
+      // Zero is never a real height for a record-heavy surface: it means `main` exists but has not filled
+      // yet, and the comparison then reads as "compact made it taller" on a page that simply had not
+      // rendered. Seen in CI as `/systems/requirements: comfortable 0px, compact 1140px` while the other
+      // three surfaces measured normally. Asserting the height directly covers every path, rather than
+      // adding a waiter per surface and waiting for the next one to be slow.
+      await expect.poll(measure, { timeout: 20_000 }).toBeGreaterThan(0)
+      ;(heights[path] ??= {})[density] = await measure()
     }
   }
 
