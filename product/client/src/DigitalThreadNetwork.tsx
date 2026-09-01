@@ -180,15 +180,9 @@ export default function DigitalThreadNetwork({
 
   const matchesFilters = useCallback(
     (node: NetworkNode): boolean => {
-      if (groups.size) {
-        const suspectOnly = groups.size === 1 && groups.has("suspect")
-        const isSuspect = node.state === "Suspect"
-        if (suspectOnly) {
-          if (!isSuspect) return false
-        } else if (!groups.has(groupOf(node)) && !(groups.has("suspect") && isSuspect)) {
-          return false
-        }
-      }
+      // Level chips only. Suspect is a property of a relationship, not of these records, and no relation
+      // this board draws can carry it.
+      if (groups.size && !groups.has(groupOf(node))) return false
       if (query) {
         const haystack = `${node.displayNumber} ${node.title ?? ""}`.toLowerCase()
         if (!haystack.includes(query.toLowerCase())) return false
@@ -227,7 +221,6 @@ export default function DigitalThreadNetwork({
       const traced = web?.nodes.has(node.id) ?? false
       const classes = [
         "dtnCard",
-        node.state === "Suspect" ? "is-suspect" : "",
         selectedId === node.id ? "is-selected" : "",
         web && !traced ? "is-untraced" : "",
         matchesFilters(node) ? "" : "is-filtered",
@@ -282,11 +275,6 @@ export default function DigitalThreadNetwork({
                   <b>{node.buildVersion}</b>
                 </div>
               ) : null}
-              {node.state === "Suspect" ? (
-                <p className="dtnNote">
-                  Coverage does not settle while a revision is in flight, so this link reads suspect.
-                </p>
-              ) : null}
               {node.kind !== "ProblemReport" && onOpenChange ? (
                 <div className="dtnCardActs">
                   <button
@@ -317,7 +305,11 @@ export default function DigitalThreadNetwork({
             ["hlr", "HLR"],
             ["llr", "LLR"],
             ["ver", "Test"],
-            ["suspect", "Suspect"],
+            // No Suspect chip here, and not because today's data happens to hold none. A suspect lifecycle
+            // governs RequirementTrace and CaseProcedure links; this board renders ProblemReportResolution,
+            // change-to-upstream-change and CoveredByTestChangeRequest between ChangeRequest,
+            // TestChangeRequest and ProblemReport nodes, none of which those lifecycles attach to. The chip
+            // could only ever return nothing, so it is absent rather than dead. See #880 section 10.2.
           ].map(([key, label]) => (
             <button
               type="button"

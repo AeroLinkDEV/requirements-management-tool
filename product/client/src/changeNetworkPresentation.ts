@@ -272,3 +272,42 @@ export const assignRows = (
   }
   return rows
 }
+
+/**
+ * Whether a view's relation vocabulary can carry suspect lifecycle at all.
+ *
+ * A view capability, not a data accident. The change network renders ProblemReportResolution,
+ * change-to-upstream-change and CoveredByTestChangeRequest between ChangeRequest, TestChangeRequest and
+ * ProblemReport nodes. A suspect lifecycle governs only `RequirementTrace` and `CaseProcedure` links, so none
+ * of those relations can ever be suspect — the answer is structural, not "zero today". A view that decided
+ * this by counting suspect edges in the current response would show the control whenever a fixture happened
+ * to contain one and hide it otherwise, which is a control that flickers rather than one that means something.
+ *
+ * The artifact thread (#880 §5.3) is the first planned view that renders requirement revisions and their
+ * traces, so it is the first that may set this true. See #880 §10.2.
+ */
+export const supportsSuspectRelations = (relations: readonly string[]): boolean =>
+  relations.some(relation => SUSPECT_CAPABLE_RELATIONS.has(relation))
+
+/** The relation kinds an exact-link suspect lifecycle can attach to, mirroring `ExactLinkKind` on the server. */
+export const SUSPECT_CAPABLE_RELATIONS: ReadonlySet<string> = new Set([
+  "RequirementTrace",
+  "CaseProcedure",
+])
+
+/**
+ * The records a Suspect filter keeps: those at either end of a server-stated suspect relationship.
+ *
+ * Presentation filtering over a fact the server already decided, not lifecycle derivation. Nothing here reads
+ * node state, an identifier prefix, relation wording, provenance wording, or a revision comparison — only
+ * `edge.isSuspect`, which the projection states.
+ */
+export const suspectEndpointIds = (edges: readonly NetworkEdge[]): Set<string> => {
+  const endpoints = new Set<string>()
+  for (const edge of edges) {
+    if (!edge.isSuspect) continue
+    endpoints.add(edge.fromId)
+    endpoints.add(edge.toId)
+  }
+  return endpoints
+}

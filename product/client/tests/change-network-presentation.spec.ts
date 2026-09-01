@@ -12,6 +12,8 @@ import {
   laneOf,
   pillFor,
   resolveDock,
+  supportsSuspectRelations,
+  suspectEndpointIds,
 } from "../src/changeNetworkPresentation"
 import { stateLabel } from "../src/presentation"
 import { compactLanes } from "../src/digitalThreadGeometry"
@@ -256,4 +258,50 @@ test("the loading frame uses the project's own ladder, so the lane set does not 
   expect(laneModel().labels).toHaveLength(7)
   expect(laneModel().labels).toContain("CUSTOMER CHANGE")
   expect(laneModel().labels).toContain("INTERFACE / ICD CHANGE")
+})
+
+test.describe("suspect is a property of relationships, not of these records", () => {
+  test("the change network cannot carry suspect relations, structurally", () => {
+    // The relations this board actually draws.
+    const networkRelations = [
+      "ProblemReportResolution",
+      "UpstreamChangeRequest",
+      "CoveredByTestChangeRequest",
+    ]
+    expect(supportsSuspectRelations(networkRelations)).toBe(false)
+
+    // The artifact thread renders requirement revisions and their traces, so it may legitimately offer it.
+    expect(supportsSuspectRelations(["RequirementTrace"])).toBe(true)
+    expect(supportsSuspectRelations(["CaseProcedure"])).toBe(true)
+  })
+
+  test("a Suspect filter keeps records incident to a server-stated suspect edge", () => {
+    const edges: NetworkEdge[] = [
+      {
+        fromId: "a",
+        toId: "b",
+        fromKind: "RequirementRevision",
+        toKind: "RequirementRevision",
+        relation: "RequirementTrace",
+        provenance: [],
+        isSuspect: true,
+      },
+      {
+        fromId: "c",
+        toId: "d",
+        fromKind: "RequirementRevision",
+        toKind: "RequirementRevision",
+        // Wording containing the word must not pull settled records into the filter.
+        relation: "SupersededBySuspectReassessment",
+        provenance: [{ kind: "AssessmentDerived", status: "Suspect pending reassessment" }],
+        isSuspect: false,
+      },
+    ]
+
+    const endpoints = suspectEndpointIds(edges)
+
+    expect([...endpoints].sort()).toEqual(["a", "b"])
+    expect(endpoints.has("c")).toBe(false)
+    expect(endpoints.has("d")).toBe(false)
+  })
 })
