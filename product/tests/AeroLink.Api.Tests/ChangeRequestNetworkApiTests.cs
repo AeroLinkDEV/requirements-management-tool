@@ -105,6 +105,27 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
     }
 
     [Fact]
+    public async Task Network_states_suspect_on_every_edge_so_the_client_never_reads_it_out_of_wording()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var edges = (await NetworkAsync(client, fixture)).GetProperty("edges").EnumerateArray().ToList();
+
+        Assert.NotEmpty(edges);
+        foreach (var edge in edges)
+        {
+            // Present on every edge, not only on suspect ones. A field that appears only when true forces the
+            // reader to treat absence as a value, which is how a client ends up inferring the state instead of
+            // being told it. These fixture edges are settled, so each says so explicitly.
+            Assert.True(edge.TryGetProperty("isSuspect", out var isSuspect),
+                "Every projected edge must state its suspect status.");
+            Assert.Equal(JsonValueKind.False, isSuspect.ValueKind);
+        }
+    }
+
+    [Fact]
     public async Task Network_states_the_projects_configured_ladder_so_the_client_never_orders_levels()
     {
         var fixture = await SeedAsync(_host.Factory);

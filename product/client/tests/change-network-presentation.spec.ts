@@ -73,18 +73,35 @@ test.describe("change network presentation", () => {
     expect(["left", "right"]).toContain(resolveDock(selected, [], map))
   })
 
-  test("suspect is stated by the server and always carries its word", () => {
-    const suspect: NetworkEdge = {
+  test("suspect is read from the served field, never from wording", () => {
+    const base: NetworkEdge = {
       fromId: "a",
       toId: "b",
       fromKind: "ChangeRequest",
       toKind: "ChangeRequest",
       relation: "Upstream",
-      provenance: [{ kind: "AssessmentDerived", status: "Suspect link pending reassessment" }],
+      provenance: [{ kind: "AuthorStated" }],
     }
-    const settled: NetworkEdge = { ...suspect, provenance: [{ kind: "AuthorStated" }] }
-    expect(isSuspectEdge(suspect)).toBe(true)
-    expect(isSuspectEdge(settled)).toBe(false)
+
+    expect(isSuspectEdge({ ...base, isSuspect: true })).toBe(true)
+    expect(isSuspectEdge({ ...base, isSuspect: false })).toBe(false)
+    // Absent means not suspect rather than unknown; the projection states it on every edge.
+    expect(isSuspectEdge(base)).toBe(false)
+
+    // The two cases an earlier string-matching version got wrong, in both directions. Wording that happens to
+    // contain the word must not manufacture a suspect edge...
+    expect(
+      isSuspectEdge({
+        ...base,
+        isSuspect: false,
+        relation: "SupersededBySuspectReassessment",
+        provenance: [{ kind: "AssessmentDerived", status: "Suspect link pending reassessment" }],
+      }),
+    ).toBe(false)
+    // ...and wording that does not contain it must not hide a genuinely suspect one.
+    expect(
+      isSuspectEdge({ ...base, isSuspect: true, relation: "Upstream", provenance: [{ kind: "AuthorStated" }] }),
+    ).toBe(true)
 
     // The pill is amber, and the text says so too — status is never colour alone.
     expect(pillFor("Suspect").color).toBe("#8a5a00")

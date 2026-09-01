@@ -28,6 +28,14 @@ export type NetworkEdge = {
   toKind: string
   relation: string
   provenance: { kind: string; sourceId?: string | null; isLive?: boolean; status?: string | null }[]
+  /**
+   * Whether this relationship is suspect, as the server states it from the exact-link suspect lifecycle.
+   *
+   * Absent means not suspect. It is never derived here: relation and provenance carry display vocabulary, and
+   * deciding lifecycle state by looking for a word inside them would make any wording containing "suspect" a
+   * suspect edge and hide a genuinely suspect one whose wording does not.
+   */
+  isSuspect?: boolean
 }
 
 export type NetworkProjection = {
@@ -195,10 +203,16 @@ export const badgeTintFor = (node: NetworkNode): Pill => {
   return { background: "#e7effb", color: "#3569a8" }
 }
 
-/** True when this edge is one the server has flagged as suspect. */
-export const isSuspectEdge = (edge: NetworkEdge): boolean =>
-  edge.provenance.some(fact => fact.status?.toLowerCase().includes("suspect") === true) ||
-  edge.relation.toLowerCase().includes("suspect")
+/**
+ * True when the server has stated this edge is suspect.
+ *
+ * A plain read of a served fact, deliberately. An earlier version searched the relation and provenance status
+ * text for the word "suspect", which reconstructed lifecycle meaning from display vocabulary in the browser:
+ * it made any relation whose wording happened to contain the word read as suspect, and left a genuinely
+ * suspect edge looking settled whenever its wording did not. Suspect state and relation vocabulary are
+ * separate facts and are kept separate.
+ */
+export const isSuspectEdge = (edge: NetworkEdge): boolean => edge.isSuspect === true
 
 /**
  * Which side the detail panel takes for a selected record.

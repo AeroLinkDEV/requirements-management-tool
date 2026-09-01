@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 743,
-    "cases": 827,
+    "tests": 744,
+    "cases": 828,
     "classes": 119,
-    "hostedTests": 713,
-    "hostedCases": 783,
+    "hostedTests": 714,
+    "hostedCases": 784,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 8,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 444,
-      "cases": 496,
+      "tests": 445,
+      "cases": 497,
       "unknownCases": 0,
       "classes": 98
     },
@@ -1939,8 +1939,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 155,
-        "end": 172
+        "start": 176,
+        "end": 193
       }
     },
     {
@@ -1975,8 +1975,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 137,
-        "end": 153
+        "start": 158,
+        "end": 174
       }
     },
     {
@@ -1993,8 +1993,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 174,
-        "end": 193
+        "start": 195,
+        "end": 214
       }
     },
     {
@@ -2011,8 +2011,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 125,
-        "end": 135
+        "start": 146,
+        "end": 156
       }
     },
     {
@@ -2029,8 +2029,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 195,
-        "end": 211
+        "start": 216,
+        "end": 232
+      }
+    },
+    {
+      "cls": "ChangeRequestNetworkApiTests",
+      "test": "Network_states_suspect_on_every_edge_so_the_client_never_reads_it_out_of_wording",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 107,
+        "end": 126
       }
     },
     {
@@ -2047,8 +2065,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 107,
-        "end": 123
+        "start": 128,
+        "end": 144
       }
     },
     {

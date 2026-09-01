@@ -28,8 +28,12 @@ export type PanelDock = "auto" | "left" | "right" | "bottom"
 /** `auto` resolved to a real side. */
 export type ResolvedDock = Exclude<PanelDock, "auto">
 
-const PANEL_WIDTH = 330
-const PANEL_HEIGHT = 226
+// Derived from what the panel actually renders, so the reserved free area is the panel plus its margins and
+// not a guess with slack in it. Slack reads as correctness — the board simply never uses the spare band — while
+// hiding whether the real rule holds. Right/left: 300px wide at a 16px offset. Bottom: 150px (#880 §6.6) at an
+// 18px offset. The remainder in each case is the gap between the panel edge and the nearest card.
+const PANEL_WIDTH = 300 + 16 + 14
+const PANEL_HEIGHT = 150 + 18 + 16
 
 export type DigitalThreadNetworkProps = {
   projection: NetworkProjection | null
@@ -82,7 +86,17 @@ export default function DigitalThreadNetwork({
   // how many exist rather than quietly showing a smaller build than there is.
   const offLadder = useMemo(() => offLadderLevels(nodes, model), [model, nodes])
 
+  /**
+   * Structural compaction runs only once the content is known (#880 §6.8).
+   *
+   * While a build is still loading there are no nodes, so compacting would drop every lane and then put them
+   * back as the response lands — the whole board jumping under the reader at the moment they start looking at
+   * it. The lane bands and headers render immediately with counts unknown, and cards fade into them.
+   */
+  const contentKnown = !loading || nodes.length > 0
+
   const { lanes, canvasNodes } = useMemo(() => {
+    if (!contentKnown) return { lanes: [...model.labels], canvasNodes: [] as CanvasNode[] }
     const rows = assignRows(nodes, model)
     const placed: CanvasNode[] = nodes
       .filter(node => laneOf(node, model) !== OFF_LADDER)
@@ -93,7 +107,7 @@ export default function DigitalThreadNetwork({
       }))
     const compacted = compactLanes(model.labels, placed)
     return { lanes: compacted.lanes, canvasNodes: compacted.nodes }
-  }, [model, nodes])
+  }, [contentKnown, model, nodes])
 
   const canvasEdges = useMemo<CanvasEdge[]>(
     () =>
@@ -211,34 +225,55 @@ export default function DigitalThreadNetwork({
           <div className="dtnMeta" data-density="meta">
             <span>{node.buildVersion ? `Build ${node.buildVersion}` : "No target build"}</span>
           </div>
+
+          {/* The selected card expands in place (#880 §6.5), showing only rows it actually has. A record with
+              no revision or no build simply does not show that row; nothing here is invented to fill the box,
+              and the panel remains the place for the whole traced web. */}
+          {selectedId === node.id ? (
+            <div className="dtnCardBody">
+              {node.level ? (
+                <div className="dtnKv">
+                  <i>Level</i>
+                  <b>{node.level}</b>
+                </div>
+              ) : null}
+              {node.revision !== null && node.revision !== undefined ? (
+                <div className="dtnKv">
+                  <i>Revision</i>
+                  <b>{String(node.revision).padStart(2, "0")}</b>
+                </div>
+              ) : null}
+              {node.buildVersion ? (
+                <div className="dtnKv">
+                  <i>In build</i>
+                  <b>{node.buildVersion}</b>
+                </div>
+              ) : null}
+              {node.state === "Suspect" ? (
+                <p className="dtnNote">
+                  Coverage does not settle while a revision is in flight, so this link reads suspect.
+                </p>
+              ) : null}
+              {node.kind !== "ProblemReport" && onOpenChange ? (
+                <div className="dtnCardActs">
+                  <button
+                    type="button"
+                    onClick={event => {
+                      event.stopPropagation()
+                      onOpenChange(node)
+                    }}
+                  >
+                    Open this change
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       )
     },
-    [byId, hrefFor, matchesFilters, selectedId, web],
+    [byId, hrefFor, matchesFilters, onOpenChange, selectedId, web],
   )
-
-  if (error) {
-    return (
-      <div className="dtnState dtnState-error" role="alert">
-        <b>The change network could not be loaded.</b>
-        <p>{error}</p>
-        {onRetry ? (
-          <button type="button" onClick={onRetry}>
-            Try again
-          </button>
-        ) : null}
-      </div>
-    )
-  }
-
-  if (!loading && projection && !nodes.length) {
-    return (
-      <div className="dtnState">
-        <b>No change requests in {buildLabel ?? "this build"}.</b>
-        <p>Change requests appear here as soon as one targets this build.</p>
-      </div>
-    )
-  }
 
   return (
     <div className="dtnRoot">
@@ -307,9 +342,41 @@ export default function DigitalThreadNetwork({
           onSelect={setSelectedId}
           onHover={setHoveredId}
           frameInset={frameInset}
+          tracedEdges={web?.edges}
           ariaLabel="Change network for this build"
         />
         {loading ? <div className="dtnLoading">Loading the change network…</div> : null}
+
+        {/* Every state below sits inside the frame rather than replacing it (#880 §6.8). Swapping the canvas
+            out for a message discards the transform, the zoom and the selection, so recovering from a failed
+            refresh would cost the reader the view they had built up. */}
+        {error ? (
+          <div className="dtnInFrame dtnInFrame-error" role="alert">
+            <b>The change network could not be loaded.</b>
+            <p>{error}</p>
+            {onRetry ? (
+              <button type="button" onClick={onRetry}>
+                Try again
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {!loading && !error && projection && !nodes.length ? (
+          <div className="dtnInFrame" role="status">
+            <b>No change requests in {buildLabel ?? "this build"}.</b>
+            <p>Change requests appear here as soon as one targets this build.</p>
+          </div>
+        ) : null}
+
+        {/* A lane emptied by the chips keeps its place — collapsing it would slide every other lane sideways
+            mid-search — so it says why it is empty rather than looking like a lane with nothing in it. */}
+        {!loading && !error && nodes.length && !nodes.some(matchesFilters) ? (
+          <div className="dtnInFrame" role="status">
+            <b>No records match.</b>
+            <p>Clear a filter chip or the search box to bring records back.</p>
+          </div>
+        ) : null}
       </div>
 
       <div className="dtnVisuallyHidden" aria-live="polite" ref={liveRegion} />

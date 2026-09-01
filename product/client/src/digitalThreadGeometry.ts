@@ -433,6 +433,12 @@ export const edgePath = (
  * Directed on purpose. An undirected walk would leak sideways into a sibling change that merely shares a
  * procedure, which is not something the record is traceable to.
  */
+/**
+ * How an edge is identified wherever one is looked up by its endpoints — the traced set the canvas reads, and
+ * the set `trace` builds. One definition, so the two can never drift into disagreeing about the same edge.
+ */
+export const edgeKey = (from: string, to: string): string => `${from}>${to}`
+
 export const trace = (
   id: string,
   edges: readonly CanvasEdge[],
@@ -449,7 +455,7 @@ export const trace = (
           const from = downstream ? edge.from : edge.to
           const to = downstream ? edge.to : edge.from
           if (from !== current) continue
-          touched.add(`${edge.from}>${edge.to}`)
+          touched.add(edgeKey(edge.from, edge.to))
           if (seen.has(to)) continue
           seen.add(to)
           hops.set(to, (hops.get(current) ?? 0) + 1)
@@ -464,4 +470,30 @@ export const trace = (
   const down = walk(true)
   const up = walk(false)
   return { nodes: new Set([id, ...down, ...up]), edges: touched, hops, up, down }
+}
+
+/**
+ * The lane offset that brings a row into its lane's visible window, or the current offset when it already is.
+ *
+ * Keyboard focus needs this: a lane rolls independently, so the card arrow-navigation moves to can sit outside
+ * the window. Moving focus to a card nobody can see is how a keyboard user ends up lost, and #880 §6.9 requires
+ * the lane to roll and keep the focused card visible.
+ *
+ * Offsets are zero-or-negative — a lane rolls its content upward — so the result is clamped at 0 to stop a
+ * short lane being pulled below its own first row.
+ */
+export const offsetToReveal = (
+  row: number,
+  geometry: CanvasGeometry,
+  bandHeight: number,
+  currentOffset: number,
+): number => {
+  const y = row * geometry.rowPitch + geometry.pad + currentOffset
+  if (isVisible(y, geometry, bandHeight)) return currentOffset
+  // Above the window: bring the row to the top of the band. Below: bring it to the bottom.
+  const desired =
+    y <= 0
+      ? currentOffset - y + geometry.pad
+      : currentOffset - (y - (bandHeight - geometry.cardHeight - 12))
+  return Math.min(0, desired)
 }

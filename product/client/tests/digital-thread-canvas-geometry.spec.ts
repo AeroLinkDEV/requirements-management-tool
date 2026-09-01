@@ -7,6 +7,8 @@ import {
   type CanvasNode,
   anchorInLane,
   geometryFor,
+  isVisible,
+  offsetToReveal,
   laneHeight,
   layout,
   minimumZoom,
@@ -101,6 +103,41 @@ test.describe("digital thread canvas geometry", () => {
     expect(targets[3]).toBe(0)
     // The scrubbed lane is driven by the pointer, not by the sync.
     expect(targets[1]).toBe(0)
+  })
+
+  test("selection fetches back a linked record that had been rolled out of its lane", () => {
+    // The case camera framing cannot cover. The linked record is not merely off-centre: its lane has been
+    // rolled so far that the record is outside the lane window entirely. Panning or zooming the board moves
+    // every lane together and can never bring it back — only rolling that lane can. #880 §6.4 requires the
+    // same routine to run on selection, and a selection that only reframed would leave the reader looking at
+    // a highlighted edge pointing into an empty band.
+    const nodes: CanvasNode[] = [
+      { id: "sys-2", lane: 1, row: 4 },
+      { id: "hlr-1", lane: 2, row: 6 },
+    ]
+    const edges: CanvasEdge[] = [{ from: "sys-2", to: "hlr-1", label: "allocates to" }]
+    const result = layout([0, 5, 40, 0, 0], FRAME, 1)
+
+    // Roll lane 2 a long way, so hlr-1 is well outside its window.
+    const rolledAway = [0, 0, -1400, 0, 0]
+    const before = 6 * result.geometry.rowPitch + result.geometry.pad + rolledAway[2]
+    expect(isVisible(before, result.geometry, result.bandHeight)).toBe(false)
+
+    // Selecting sys-2 runs the sync across every lane (exceptLane -1, as selection does).
+    const targets = syncTargets(
+      "sys-2",
+      nodes,
+      edges,
+      result.geometry,
+      rolledAway,
+      result.laneMinimums,
+      5,
+      -1,
+    )
+
+    const after = 6 * result.geometry.rowPitch + result.geometry.pad + targets[2]
+    expect(targets[2]).not.toBe(rolledAway[2])
+    expect(isVisible(after, result.geometry, result.bandHeight)).toBe(true)
   })
 
   test("the anchor is the record nearest the middle of the rolled lane", () => {
@@ -224,5 +261,42 @@ test.describe("digital thread canvas framing and lanes", () => {
       expect(y).toBeGreaterThanOrEqual(free.y - 1)
       expect(bottom).toBeLessThanOrEqual(free.y + free.height + 1)
     }
+  })
+})
+
+test.describe("keyboard reveal", () => {
+  const geometry = geometryFor(2)
+  const band = 400
+
+  test("a row already in the window does not move its lane", () => {
+    // Nothing to fetch, so the lane must hold still — rolling a settled lane under a keyboard user is its own
+    // kind of disorientation.
+    expect(offsetToReveal(1, geometry, band, 0)).toBe(0)
+  })
+
+  test("a row below the window rolls the lane up to reach it", () => {
+    // Row 20 sits far below a 400px band, so the lane must roll (a negative offset) to bring it in.
+    const offset = offsetToReveal(20, geometry, band, 0)
+    expect(offset).toBeLessThan(0)
+
+    const y = 20 * geometry.rowPitch + geometry.pad + offset
+    expect(y).toBeGreaterThan(-geometry.cardHeight)
+    expect(y).toBeLessThan(band)
+  })
+
+  test("a row above the window rolls the lane back down to reach it", () => {
+    // The lane has already been rolled a long way; row 0 is now off the top.
+    const rolled = -1200
+    const offset = offsetToReveal(0, geometry, band, rolled)
+    expect(offset).toBeGreaterThan(rolled)
+
+    const y = 0 * geometry.rowPitch + geometry.pad + offset
+    expect(y).toBeGreaterThan(-geometry.cardHeight)
+    expect(y).toBeLessThan(band)
+  })
+
+  test("a lane is never rolled below its own first row", () => {
+    // Offsets are zero-or-negative. A short lane must not be pulled into positive territory chasing row 0.
+    expect(offsetToReveal(0, geometry, band, 0)).toBeLessThanOrEqual(0)
   })
 })
