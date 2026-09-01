@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 736,
-    "cases": 820,
-    "classes": 118,
-    "hostedTests": 706,
-    "hostedCases": 776,
+    "tests": 742,
+    "cases": 826,
+    "classes": 119,
+    "hostedTests": 712,
+    "hostedCases": 782,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 8,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 438,
-      "cases": 490,
+      "tests": 443,
+      "cases": 495,
       "unknownCases": 0,
-      "classes": 97
+      "classes": 98
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 85,
-      "cases": 89,
+      "tests": 86,
+      "cases": 90,
       "unknownCases": 0,
-      "classes": 48
+      "classes": 49
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -1923,6 +1923,114 @@
       "sourceLines": {
         "start": 92,
         "end": 131
+      }
+    },
+    {
+      "cls": "ChangeRequestNetworkApiTests",
+      "test": "Network_carries_a_problem_report_feeding_a_change_in_the_build",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 137,
+        "end": 154
+      }
+    },
+    {
+      "cls": "ChangeRequestNetworkApiTests",
+      "test": "Network_carries_every_change_in_the_build_including_one_with_no_relations",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 90,
+        "end": 105
+      }
+    },
+    {
+      "cls": "ChangeRequestNetworkApiTests",
+      "test": "Network_carries_the_typed_relation_between_two_changes_in_the_build",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 119,
+        "end": 135
+      }
+    },
+    {
+      "cls": "ChangeRequestNetworkApiTests",
+      "test": "Network_declares_truncation_and_drops_edges_to_records_it_cut",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 156,
+        "end": 175
+      }
+    },
+    {
+      "cls": "ChangeRequestNetworkApiTests",
+      "test": "Network_excludes_a_change_targeting_a_different_build_in_the_same_project",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 107,
+        "end": 117
+      }
+    },
+    {
+      "cls": "ChangeRequestNetworkApiTests",
+      "test": "Network_refuses_a_project_the_caller_cannot_see_and_a_release_outside_it",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 177,
+        "end": 193
       }
     },
     {

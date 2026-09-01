@@ -75,6 +75,21 @@ public sealed record ChangeRequestTraceProjectionResult(
     string? RootArtifactKind = null);
 
 /// <summary>
+/// The change-control network for one exact build: every change request and test change request targeting it,
+/// every problem report feeding one of those, and the typed relations between them.
+///
+/// This is the same node and edge vocabulary as the rooted trace, scoped by build rather than by reachability
+/// from a root. <see cref="Truncated"/> is true when the build carried more records than the caller's ceiling
+/// allowed; a consumer must say so rather than presenting a shortened network as the whole one.
+/// </summary>
+public sealed record ChangeRequestNetworkResult(
+    Guid ProjectId,
+    Guid ReleaseId,
+    IReadOnlyList<ChangeRequestTraceNode> Nodes,
+    IReadOnlyList<ChangeRequestTraceEdge> Edges,
+    bool Truncated);
+
+/// <summary>
 /// Read authority for the Phase 2 composed change-request trace.
 ///
 /// This is deliberately a domain-specific projection rather than a generic relationship graph. It reads the
@@ -123,6 +138,37 @@ public static class ChangeRequestTraceProjection
         CancellationToken ct) => BuildAsync(db, projectId, rootTestChangeReviewId, "TestChangeRequest", policy, ct);
 
     /// <summary>
+    /// Projects the whole change-control network for one exact build in a single read.
+    ///
+    /// The rooted trace answers "what is this change connected to". This answers "what is in this build, and
+    /// how is it connected", which no existing read covers and which a client must not assemble by calling the
+    /// rooted trace once per change request. Membership is by exact target build for change and test-change
+    /// requests, and by recorded link for problem reports, which have no build of their own on this surface.
+    /// </summary>
+    public static async Task<ChangeRequestNetworkResult> ForBuildAsync(
+        AeroLinkDbContext db, Guid projectId, Guid releaseId, ILadderPolicy policy, int maxNodes,
+        CancellationToken ct)
+    {
+        var projection = await BuildAsync(db, projectId, Guid.Empty, NetworkRootKind, policy, ct, releaseId);
+        if (projection is null) return new(projectId, releaseId, [], [], false);
+
+        var ceiling = maxNodes < 1 ? 1 : maxNodes;
+        if (projection.Nodes.Count <= ceiling)
+            return new(projectId, releaseId, projection.Nodes, projection.Edges, false);
+
+        // Over the ceiling the network is cut deterministically and the cut is declared. Dropping records from
+        // a traceability view without saying so would be a false statement about traceability, so the caller is
+        // told; edges to a dropped node go with it rather than being rerouted into an invented shorter chain.
+        var kept = projection.Nodes.Take(ceiling).ToList();
+        var keptIds = kept.Select(x => (x.Kind, x.Id)).ToHashSet();
+        return new(projectId, releaseId, kept,
+            projection.Edges.Where(x => keptIds.Contains((x.FromKind, x.FromId))
+                && keptIds.Contains((x.ToKind, x.ToId))).ToList(), true);
+    }
+
+    private const string NetworkRootKind = "BuildNetwork";
+
+    /// <summary>
     /// Computes register state for a page in bounded set-based queries. The caller supplies only rows from one
     /// Project; the method still scopes every read to that Project so a cross-Project ID cannot leak state.
     /// </summary>
@@ -144,8 +190,9 @@ public static class ChangeRequestTraceProjection
 
     private static async Task<ChangeRequestTraceProjectionResult?> BuildAsync(
         AeroLinkDbContext db, Guid projectId, Guid rootId, string rootKind, ILadderPolicy policy,
-        CancellationToken ct)
+        CancellationToken ct, Guid? networkReleaseId = null)
     {
+        var isNetwork = rootKind == NetworkRootKind;
         var allCr = await db.SystemChangeRequests.AsNoTracking()
             .Where(x => x.ProjectId == projectId)
             .Select(x => new CrRow(x.Id, x.ProjectId, x.TargetReleaseId, x.BaseNumber, x.Revision,
@@ -426,6 +473,38 @@ public static class ChangeRequestTraceProjection
             edgeBuilders.Add(edge);
         }
 
+        // Problem reports enter only the build network. The rooted trace deliberately does not carry them —
+        // #866 decision 4 fixed the register inspector at one hop and its output is depended upon — so this
+        // block is scoped rather than added to the shared graph.
+        if (isNetwork)
+        {
+            var problemLinks = await (from link in db.ProblemReportLinks.AsNoTracking()
+                                      join report in db.ProblemReports.AsNoTracking()
+                                          on link.ProblemReportId equals report.Id
+                                      where report.ProjectId == projectId
+                                          && (link.ArtifactType == "ChangeRequest"
+                                              || link.ArtifactType == "TestChangeRequest")
+                                      select new { link.Id, link.ProblemReportId, link.ArtifactType,
+                                          link.ArtifactId, link.Relationship, report.ReportNumber,
+                                          report.Revision, report.Title, report.State, report.TargetReleaseId })
+                .ToListAsync(ct);
+            foreach (var link in problemLinks)
+            {
+                var targetKind = link.ArtifactType;
+                if (targetKind == "ChangeRequest" && !byCr.ContainsKey(link.ArtifactId)) continue;
+                if (targetKind == "TestChangeRequest" && !tcrById.ContainsKey(link.ArtifactId)) continue;
+                nodes[("ProblemReport", link.ProblemReportId)] = new(link.ProblemReportId, "ProblemReport",
+                    Display(link.ReportNumber, link.Revision), link.Title, link.State.ToString(), projectId,
+                    link.TargetReleaseId,
+                    link.TargetReleaseId is Guid prBuild ? releases.GetValueOrDefault(prBuild) : null,
+                    link.Revision, null);
+                var edge = new EdgeBuilder(link.ProblemReportId, "ProblemReport", link.ArtifactId, targetKind,
+                    "ProblemReportResolution");
+                edge.Provenance.Add(new("ProblemReportLink", link.Id, Status: link.Relationship));
+                edgeBuilders.Add(edge);
+            }
+        }
+
         // All typed relations have now been materialized. One undirected visited-set walk is the only
         // component boundary: it prevents unrelated Project TCRs, requirements, and code records from
         // leaking while still reaching late-discovered CR/TCR/requirement chains in either direction.
@@ -441,16 +520,35 @@ public static class ChangeRequestTraceProjection
         foreach (var edge in typedEdges)
             Connect((edge.FromKind, edge.FromId), (edge.ToKind, edge.ToId));
         var visited = new HashSet<(string Kind, Guid Id)>();
-        var pending = new Stack<(string Kind, Guid Id)>([(rootKind, rootId)]);
-        while (pending.Count > 0)
+        if (isNetwork)
         {
-            var current = pending.Pop();
-            if (!visited.Add(current) || !graph.TryGetValue(current, out var next)) continue;
-            foreach (var node in next.OrderByDescending(x => x.Kind).ThenByDescending(x => x.Id)) pending.Push(node);
+            // Build scope is membership, not reachability: an isolated change still belongs to its build and
+            // must appear. Change and test-change requests are in by exact target build; a problem report is
+            // in because it links to one of them, which is what "feeding this build" means here.
+            foreach (var entry in nodes)
+                if ((entry.Key.Kind == "ChangeRequest" || entry.Key.Kind == "TestChangeRequest")
+                    && entry.Value.BuildId == networkReleaseId)
+                    visited.Add(entry.Key);
+            foreach (var edge in typedEdges)
+                if (edge.FromKind == "ProblemReport" && visited.Contains((edge.ToKind, edge.ToId)))
+                    visited.Add((edge.FromKind, edge.FromId));
         }
-        var stateRows = byCr.Values.Where(x => visited.Contains(("ChangeRequest", x.Id))).ToList();
-        var states = await ComputeStatesAsync(db, projectId, stateRows, policy, ct);
-        var state = rootKind == "ChangeRequest" ? states[rootCr] : null;
+        else
+        {
+            var pending = new Stack<(string Kind, Guid Id)>([(rootKind, rootId)]);
+            while (pending.Count > 0)
+            {
+                var current = pending.Pop();
+                if (!visited.Add(current) || !graph.TryGetValue(current, out var next)) continue;
+                foreach (var node in next.OrderByDescending(x => x.Kind).ThenByDescending(x => x.Id)) pending.Push(node);
+            }
+        }
+        // The rooted trace's register state is what the inspector reads. The network does not present it and
+        // computing it per change request would be the expensive part of an otherwise single-pass read.
+        var state = rootKind == "ChangeRequest"
+            ? (await ComputeStatesAsync(db, projectId,
+                byCr.Values.Where(x => visited.Contains(("ChangeRequest", x.Id))).ToList(), policy, ct))[rootCr]
+            : null;
         var edges = typedEdges.Where(x => visited.Contains((x.FromKind, x.FromId))
                 && visited.Contains((x.ToKind, x.ToId)))
             .GroupBy(x => (x.FromId, x.FromKind, x.ToId, x.ToKind, x.Relation))
