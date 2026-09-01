@@ -380,6 +380,72 @@ try {
     Assert-True ($result.Action -eq 'Updated') "B19: expected Updated for development with a concurrent edit, got '$($result.Action)'."
     Assert-True ((Get-Content -LiteralPath (Join-Path $fixture.WorkPath 'README.md') -Raw) -match 'race edit') 'B19: the concurrent development edit was not preserved.'
 
+    # ---------------------------------------------------------------- FAILED-FETCH WINDOW (P1)
+    # B20. source appearing while the fetch is failing is decided mode-aware, never "preserved and continued"
+    #      into HOME production. The -FailedFetchObserver seam simulates the window deterministically: the
+    #      remote is disconnected so the fetch fails, and the observer dirties the tree during that failure.
+    # B20a. HOME: tracked source appears during the failed fetch: REFUSED, file and HEAD untouched.
+    $fixture = New-FixtureRepository
+    Push-RemoteCommit -Fixture $fixture -FileName 'docs/remote.txt' -Content 'newer'
+    Disconnect-Remote -Fixture $fixture
+    $beforeHead = Get-FixtureHead $fixture
+    $fetchObserver = {
+        param([string]$ObservedRepositoryRoot)
+        Set-Content -LiteralPath (Join-Path $ObservedRepositoryRoot 'README.md') -Value 'race edit during failed fetch' -Encoding ASCII
+    }
+    try {
+        Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical -RepositoryRoot $fixture.WorkPath `
+            -CurrentScriptPath (Join-Path $fixture.FixtureRoot 'launcher.ps1') -LauncherFiles @() `
+            -FailedFetchObserver $fetchObserver | Out-Null
+        $script:failures.Add('B20a: HOME canonical continued after tracked source appeared during a failed fetch.')
+    }
+    catch {
+        $message = "$($_.Exception.Message)"
+        if ($message -notmatch 'changed while AeroLink was checking for updates') {
+            $script:failures.Add("B20a: the failed-fetch refusal did not name the moved precondition; got: '$message'")
+        }
+    }
+    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture.WorkPath 'README.md') -Raw) -match 'race edit during failed fetch') 'B20a: the refusal altered the concurrent edit.'
+    Assert-True ((Get-FixtureHead $fixture) -eq $beforeHead) 'B20a: the refusal moved HEAD.'
+
+    # B20b. DEVELOPMENT: the same window preserves the work and continues locally.
+    $fixture = New-FixtureRepository
+    Push-RemoteCommit -Fixture $fixture -FileName 'docs/remote.txt' -Content 'newer'
+    Disconnect-Remote -Fixture $fixture
+    $beforeHead = Get-FixtureHead $fixture
+    $fetchObserver = {
+        param([string]$ObservedRepositoryRoot)
+        Set-Content -LiteralPath (Join-Path $ObservedRepositoryRoot 'README.md') -Value 'race edit during failed fetch' -Encoding ASCII
+    }
+    $result = Invoke-AeroLinkSourceBootstrap -Mode Development -RepositoryRoot $fixture.WorkPath `
+        -CurrentScriptPath (Join-Path $fixture.FixtureRoot 'launcher.ps1') -LauncherFiles @() `
+        -FailedFetchObserver $fetchObserver
+    Assert-True ($result.Action -eq 'LocalChangesPreserved') "B20b: expected LocalChangesPreserved, got '$($result.Action)'."
+    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture.WorkPath 'README.md') -Raw) -match 'race edit during failed fetch') 'B20b: the concurrent development edit was not preserved.'
+    Assert-True ((Get-FixtureHead $fixture) -eq $beforeHead) 'B20b: HEAD moved during the failed-fetch window.'
+
+    # B20c. HOME: untracked source appearing during the failed fetch is refused by the same offline invariant.
+    $fixture = New-FixtureRepository
+    Push-RemoteCommit -Fixture $fixture -FileName 'docs/remote.txt' -Content 'newer'
+    Disconnect-Remote -Fixture $fixture
+    $fetchObserver = {
+        param([string]$ObservedRepositoryRoot)
+        Set-Content -LiteralPath (Join-Path $ObservedRepositoryRoot 'race-untracked.ts') -Value 'unattested' -Encoding ASCII
+    }
+    try {
+        Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical -RepositoryRoot $fixture.WorkPath `
+            -CurrentScriptPath (Join-Path $fixture.FixtureRoot 'launcher.ps1') -LauncherFiles @() `
+            -FailedFetchObserver $fetchObserver | Out-Null
+        $script:failures.Add('B20c: HOME canonical continued after untracked source appeared during a failed fetch.')
+    }
+    catch {
+        $message = "$($_.Exception.Message)"
+        if ($message -notmatch 'untracked local file') {
+            $script:failures.Add("B20c: the failed-fetch refusal did not name the untracked source; got: '$message'")
+        }
+    }
+    Assert-True ((Test-Path -LiteralPath (Join-Path $fixture.WorkPath 'race-untracked.ts') -PathType Leaf)) 'B20c: the refusal deleted the concurrent untracked file.'
+
     # ---------------------------------------------------------------- BOOTSTRAP RE-ENTRY
     # C15. a valid fast-forward that modifies the bootstrap implementation reruns the updated launcher
     #      exactly once, in a fresh process, validating the expected source identity and carrying the mode
@@ -427,15 +493,60 @@ exit 7
         Remove-Item -Path 'Env:AEROLINK_TEST_MARKER_PATH', 'Env:AEROLINK_TEST_WORK_PATH' -ErrorAction SilentlyContinue
     }
 
-    # C16. a re-entry marker already present skips the update cycle but never skips validation; the marker is
-    #      consumed so nothing later can inherit a bypass.
+    # C16. a re-entry marker with a matching expected SHA skips the update cycle but never skips validation;
+    #      the markers are consumed so nothing later can inherit a bypass.
     $fixture = New-FixtureRepository
     Push-RemoteCommit -Fixture $fixture -FileName 'docs/remote.txt' -Content 'newer'
+    $headBefore = Get-FixtureHead $fixture
     $env:AEROLINK_BOOTSTRAP_REENTRY = '1'
+    $env:AEROLINK_BOOTSTRAP_EXPECTED_SHA = $headBefore
     try {
         $result = Invoke-BootstrapQuiet -Mode Development -Fixture $fixture
         Assert-True ($result.Action -eq 'ReentryValidated') "C16: expected ReentryValidated, got '$($result.Action)'."
         Assert-True ($env:AEROLINK_BOOTSTRAP_REENTRY -eq $null) 'C16: the one-shot re-entry marker was not consumed.'
+    }
+    finally {
+        Remove-Item -Path 'Env:AEROLINK_BOOTSTRAP_REENTRY', 'Env:AEROLINK_BOOTSTRAP_EXPECTED_SHA' -ErrorAction SilentlyContinue
+    }
+
+    # C16b. a re-entry marker without an expected SHA is never a generic local-run authority, in development
+    #       mode either: the parent-created re-entry contract is exact source identity.
+    $fixture = New-FixtureRepository
+    $env:AEROLINK_BOOTSTRAP_REENTRY = '1'
+    try {
+        Invoke-BootstrapExpectingRefusal -Mode Development -Fixture $fixture -ExpectedFragment 're-entry source identity is incomplete'
+    }
+    finally {
+        Remove-Item -Path 'Env:AEROLINK_BOOTSTRAP_REENTRY', 'Env:AEROLINK_BOOTSTRAP_EXPECTED_SHA' -ErrorAction SilentlyContinue
+    }
+
+    # C19. the expected-SHA marker itself is part of the re-entry authority boundary: missing, blank, or
+    #      malformed identities fail closed even when the rest of the HOME posture is perfectly clean.
+    # C19a. HOME: marker present, expected SHA missing.
+    $fixture = New-FixtureRepository
+    $env:AEROLINK_BOOTSTRAP_REENTRY = '1'
+    try {
+        Invoke-BootstrapExpectingRefusal -Mode HomeCanonical -Fixture $fixture -ExpectedFragment 're-entry source identity is incomplete'
+    }
+    finally {
+        Remove-Item -Path 'Env:AEROLINK_BOOTSTRAP_REENTRY', 'Env:AEROLINK_BOOTSTRAP_EXPECTED_SHA' -ErrorAction SilentlyContinue
+    }
+    # C19b. HOME: marker present, expected SHA blank.
+    $fixture = New-FixtureRepository
+    $env:AEROLINK_BOOTSTRAP_REENTRY = '1'
+    $env:AEROLINK_BOOTSTRAP_EXPECTED_SHA = '   '
+    try {
+        Invoke-BootstrapExpectingRefusal -Mode HomeCanonical -Fixture $fixture -ExpectedFragment 're-entry source identity is incomplete'
+    }
+    finally {
+        Remove-Item -Path 'Env:AEROLINK_BOOTSTRAP_REENTRY', 'Env:AEROLINK_BOOTSTRAP_EXPECTED_SHA' -ErrorAction SilentlyContinue
+    }
+    # C19c. HOME: marker present, expected SHA malformed.
+    $fixture = New-FixtureRepository
+    $env:AEROLINK_BOOTSTRAP_REENTRY = '1'
+    $env:AEROLINK_BOOTSTRAP_EXPECTED_SHA = 'not-a-commit-sha'
+    try {
+        Invoke-BootstrapExpectingRefusal -Mode HomeCanonical -Fixture $fixture -ExpectedFragment 're-entry source identity is malformed'
     }
     finally {
         Remove-Item -Path 'Env:AEROLINK_BOOTSTRAP_REENTRY', 'Env:AEROLINK_BOOTSTRAP_EXPECTED_SHA' -ErrorAction SilentlyContinue
@@ -447,6 +558,7 @@ exit 7
     $fixture = New-FixtureRepository
     $null = Invoke-FixtureGit -GitArguments @('checkout', '-b', 'feature/reentry-bypass') -Repository $fixture.WorkPath
     $env:AEROLINK_BOOTSTRAP_REENTRY = '1'
+    $env:AEROLINK_BOOTSTRAP_EXPECTED_SHA = Get-FixtureHead $fixture
     try {
         Invoke-BootstrapExpectingRefusal -Mode HomeCanonical -Fixture $fixture -ExpectedFragment 'not canonical main'
         Assert-True ((Get-FixtureBranch $fixture) -eq 'feature/reentry-bypass') 'C17a: the refusal switched the branch.'
@@ -458,6 +570,7 @@ exit 7
     $fixture = New-FixtureRepository
     Set-Content -LiteralPath (Join-Path $fixture.WorkPath 'README.md') -Value 'dirty during reentry' -Encoding ASCII
     $env:AEROLINK_BOOTSTRAP_REENTRY = '1'
+    $env:AEROLINK_BOOTSTRAP_EXPECTED_SHA = Get-FixtureHead $fixture
     try {
         Invoke-BootstrapExpectingRefusal -Mode HomeCanonical -Fixture $fixture -ExpectedFragment 'uncommitted modifications'
         Assert-True ((Get-Content -LiteralPath (Join-Path $fixture.WorkPath 'README.md') -Raw) -match 'dirty during reentry') 'C17b: the refusal altered the local modification.'
@@ -469,6 +582,7 @@ exit 7
     $fixture = New-FixtureRepository
     Set-Content -LiteralPath (Join-Path $fixture.WorkPath 'untracked.ts') -Value 'unattested source' -Encoding ASCII
     $env:AEROLINK_BOOTSTRAP_REENTRY = '1'
+    $env:AEROLINK_BOOTSTRAP_EXPECTED_SHA = Get-FixtureHead $fixture
     try {
         Invoke-BootstrapExpectingRefusal -Mode HomeCanonical -Fixture $fixture -ExpectedFragment 'untracked local file'
         Assert-True ((Get-Content -LiteralPath (Join-Path $fixture.WorkPath 'untracked.ts') -Raw) -match 'unattested source') 'C17c: the refusal altered the untracked file.'
@@ -480,6 +594,7 @@ exit 7
     $fixture = New-FixtureRepository
     $null = Invoke-FixtureGit -GitArguments @('checkout', '--detach') -Repository $fixture.WorkPath
     $env:AEROLINK_BOOTSTRAP_REENTRY = '1'
+    $env:AEROLINK_BOOTSTRAP_EXPECTED_SHA = Get-FixtureHead $fixture
     try {
         Invoke-BootstrapExpectingRefusal -Mode HomeCanonical -Fixture $fixture -ExpectedFragment 'detached HEAD'
     }

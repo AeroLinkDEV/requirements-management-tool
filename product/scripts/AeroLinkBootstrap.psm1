@@ -451,8 +451,9 @@ function Invoke-AeroLinkSourceBootstrap {
             the one-shot markers so a stale marker can never bypass a later launch.
 
             -FastForwardObserver is a deterministic diagnostic/test seam invoked between the fast-forward and
-            the post-update revalidation, so contract tests can prove that source appearing in that window
-            fails closed instead of racing.
+            the post-update revalidation, and -FailedFetchObserver between a failed fetch and the refreshed
+            posture, so contract tests can prove that source appearing in those windows fails closed instead
+            of racing.
     #>
     [CmdletBinding()]
     param(
@@ -462,17 +463,26 @@ function Invoke-AeroLinkSourceBootstrap {
         [AllowEmptyCollection()][string[]]$ScriptArguments = @(),
         [AllowEmptyCollection()][string[]]$LauncherFiles = @(),
         [int]$FetchTimeoutSeconds = 45,
-        [scriptblock]$FastForwardObserver
+        [scriptblock]$FastForwardObserver,
+        [scriptblock]$FailedFetchObserver
     )
 
     $isHomeCanonical = ($Mode -eq 'HomeCanonical')
 
     # Re-entry: the parent has already performed the update and verified the source. Skip the network and
     # update cycle, but re-run the full mode policy against the actual tree, consume the markers, and refuse
-    # closed on any mismatch. The marker is loop prevention and identity, never validation authority.
+    # closed on any mismatch. The marker is loop prevention and identity, never validation authority — and it
+    # is never sufficient on its own: re-entry is valid ONLY with a well-formed expected SHA that HEAD matches.
     if ($env:AEROLINK_BOOTSTRAP_REENTRY) {
         $expectedShaFromParent = $env:AEROLINK_BOOTSTRAP_EXPECTED_SHA
         Remove-Item -Path 'Env:AEROLINK_BOOTSTRAP_REENTRY', 'Env:AEROLINK_BOOTSTRAP_EXPECTED_SHA' -ErrorAction SilentlyContinue
+
+        if ([string]::IsNullOrWhiteSpace($expectedShaFromParent)) {
+            throw 'AeroLink re-entry source identity is incomplete: expected SHA was not provided. Launch refused; nothing was changed.'
+        }
+        if ($expectedShaFromParent -notmatch '^[0-9a-fA-F]{40}$') {
+            throw 'AeroLink re-entry source identity is malformed: the expected SHA is not a full 40-character hexadecimal commit identity. Launch refused; nothing was changed.'
+        }
 
         $posture = Get-AeroLinkRepositoryPosture -RepositoryRoot $RepositoryRoot
         if (-not $isHomeCanonical) {
@@ -551,21 +561,21 @@ function Invoke-AeroLinkSourceBootstrap {
     }
 
     $reached = Sync-AeroLinkRemoteRefs -RepositoryRoot $RepositoryRoot -TimeoutSeconds $FetchTimeoutSeconds
+    # Deterministic diagnostic/test seam: source that another process creates while the fetch is failing can
+    # be simulated here, so the contract tests can prove the failed-fetch window is still fully mode-aware.
+    if (-not $reached -and $FailedFetchObserver) { & $FailedFetchObserver $RepositoryRoot }
     # The fetch may have moved remote-tracking refs; the policy is decided from the refreshed posture, so a
     # precondition that "moved" is simply re-evaluated, never broadened.
     $posture = Get-AeroLinkRepositoryPosture -RepositoryRoot $RepositoryRoot
 
     if (-not $reached) {
-        if ($posture.HasTrackedChanges) {
-            # Reached only if the tree became dirty while fetching; the dirty policy above has already spoken.
-            return [pscustomobject]@{
-                Action = 'LocalChangesPreserved'; HeadSha = $posture.HeadSha; UpdatedToSha = $null
-                RemoteReachable = $false; Reason = 'The working tree became dirty during the update attempt; nothing was changed.'
-            }
-        }
         if ($isHomeCanonical) {
-            # HOME canonical offline: acceptable only for a clean, known main with no local-only commits and
-            # no untracked work; the shared invariant check decides, with no network involved.
+            # HOME canonical during a failed/offline fetch: the full invariant still decides, and dirt that
+            # appeared in the fetch window is refused, never "preserved and continued".
+            if ($posture.HasTrackedChanges) {
+                Write-AeroLinkProductionRefusal -Reason 'The working tree changed while AeroLink was checking for updates.' `
+                    -AdditionalLines @('Canonical HOME AeroLink only runs from a clean merged main.')
+            }
             if ($null -eq $posture.RemoteMainSha) {
                 Write-AeroLinkProductionRefusal -Reason "GitHub is unavailable and no cached origin/main exists, so the canonical source posture cannot be verified for main @ $shortSha."
             }
@@ -574,6 +584,15 @@ function Invoke-AeroLinkSourceBootstrap {
             return [pscustomobject]@{
                 Action = 'ContinuedOfflineCachedMain'; HeadSha = $posture.HeadSha; UpdatedToSha = $null
                 RemoteReachable = $false; Reason = 'GitHub is unavailable; the cached clean main is explicitly not verified against the remote.'
+            }
+        }
+        if ($posture.HasTrackedChanges) {
+            # Development: local work that appeared during the fetch window is preserved exactly, untouched.
+            Write-Host "Development checkout: main @ $($posture.ShortSha) with local modifications."
+            Write-Host 'Automatic main update skipped. Your uncommitted changes were left byte-for-byte unchanged.'
+            return [pscustomobject]@{
+                Action = 'LocalChangesPreserved'; HeadSha = $posture.HeadSha; UpdatedToSha = $null
+                RemoteReachable = $false; Reason = 'The working tree has tracked modifications, so no update was attempted.'
             }
         }
         if ($null -eq $posture.RemoteMainSha) {
