@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 813,
-    "cases": 902,
+    "tests": 817,
+    "cases": 906,
     "classes": 122,
-    "hostedTests": 783,
-    "hostedCases": 858,
+    "hostedTests": 787,
+    "hostedCases": 862,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 8,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 510,
-      "cases": 567,
+      "tests": 514,
+      "cases": 571,
       "unknownCases": 0,
       "classes": 101
     },
@@ -630,6 +630,24 @@
     },
     {
       "cls": "ArtifactThreadApiTests",
+      "test": "A_case_focal_does_not_reach_a_peer_case_through_a_shared_procedure",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 690,
+        "end": 708
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
       "test": "A_case_with_no_recorded_relationship_at_all_returns_only_itself",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -720,6 +738,24 @@
     },
     {
       "cls": "ArtifactThreadApiTests",
+      "test": "A_procedure_focal_does_not_reach_its_case_s_other_procedures",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 670,
+        "end": 688
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
       "test": "A_procedure_keeps_its_case_link_when_the_case_covers_nothing",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -752,6 +788,24 @@
       "sourceLines": {
         "start": 444,
         "end": 458
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "A_requirement_focal_still_keeps_every_verification_branch_below_it",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 726,
+        "end": 742
       }
     },
     {
@@ -932,6 +986,24 @@
       "sourceLines": {
         "start": 132,
         "end": 150
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "An_execution_focal_does_not_branch_back_down_into_sibling_procedures",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 710,
+        "end": 724
       }
     },
     {

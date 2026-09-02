@@ -264,7 +264,7 @@ public static class ArtifactThreadProjection
         // nothing lost both its procedure and its build, though it records them directly.
         var anchors = await AnchorsAsync(db, projectId, focalKind, focalId, buildIds, ct);
 
-        var seeds = await CoveredRequirementsAsync(db, projectId, anchors.Count == 0 ? [] : anchors, ct);
+        var seeds = await CoveredRequirementsAsync(db, projectId, anchors.Revisions, ct);
         if (focalKind == ArtifactThreadFocalKind.Requirement) seeds = [focalId];
         var requirementIds = await WalkAsync(db, projectId, seeds, focalKind, acc, ct);
 
@@ -375,38 +375,59 @@ public static class ArtifactThreadProjection
             State: outcome, Level: null, IsFocal: isFocal, ArtifactId: null, Revision: null, Outcome: outcome,
             ExecutedBy: executedBy, ExecutedAt: executedAt, RecordedAt: recordedAt, Evidence: evidence);
 
+    /// <summary>One exact Case-to-Procedure link admitted into the thread, with its suspect lifecycle.</summary>
+    private sealed record AnchorLink(Guid CaseRevisionId, Guid ProcedureRevisionId, Guid? LifecycleId);
+
+    /// <summary>
+    /// What the focal record itself reaches on the verification side, and the exact links that reached it.
+    ///
+    /// <para>
+    /// The links are carried rather than re-derived because direction cannot be recovered from a set of node
+    /// ids. Asking afterwards for every link touching those nodes reverses at the far end: from a Procedure,
+    /// its parent Case is upstream, but that Case's <i>other</i> procedures are siblings, and a query on either
+    /// endpoint would pull them in. §6.5 unions two direction-pure walks and does not walk sideways.
+    /// </para>
+    /// </summary>
+    private sealed record Anchors(IReadOnlyList<Guid> Revisions, IReadOnlyList<AnchorLink> Links)
+    {
+        public static readonly Anchors None = new([], []);
+    }
+
     /// <summary>
     /// The verification revisions the focal record itself names, independent of any requirement coverage.
     ///
     /// <para>
     /// This is what keeps a partial chain distinct from an unconnected record. An execution records its
-    /// procedure; a build records its executions; a procedure records its cases. Those are direct exact facts,
-    /// and a missing requirement above them stops the chain — it does not delete them.
+    /// procedure; a build records its executions; a procedure records its parent cases. Those are direct exact
+    /// facts, and a missing requirement above them stops the chain — it does not delete them.
+    /// </para>
+    /// <para>
+    /// Each kind expands in one direction only. A Case focal goes down to the procedures it runs; a Procedure,
+    /// Execution or Build focal goes up to the cases that run them. Neither turns round at the far end.
     /// </para>
     /// </summary>
-    private static async Task<IReadOnlyList<Guid>> AnchorsAsync(
+    private static async Task<Anchors> AnchorsAsync(
         AeroLinkDbContext db, Guid projectId, ArtifactThreadFocalKind kind, Guid focalId,
         IReadOnlyCollection<Guid> buildIds, CancellationToken ct)
     {
         switch (kind)
         {
             case ArtifactThreadFocalKind.Requirement:
-                return [];
+                return Anchors.None;
 
             case ArtifactThreadFocalKind.Case:
             {
-                var procedures = await db.TestCaseProcedureLinks.AsNoTracking()
-                    .Where(x => x.CaseRevisionId == focalId)
-                    .Select(x => x.ProcedureRevisionId).ToListAsync(ct);
-                return [focalId, .. procedures];
+                // Downstream only: the procedures this case runs. Their other parent cases are peers of this
+                // one, reachable only by reversing at a shared procedure.
+                var links = await LinksAsync(db, [focalId], byCase: true, ct);
+                return new Anchors([focalId, .. links.Select(x => x.ProcedureRevisionId)], links);
             }
 
             case ArtifactThreadFocalKind.Procedure:
             {
-                var cases = await db.TestCaseProcedureLinks.AsNoTracking()
-                    .Where(x => x.ProcedureRevisionId == focalId)
-                    .Select(x => x.CaseRevisionId).ToListAsync(ct);
-                return [focalId, .. cases];
+                // Upstream only: the cases that run this procedure. Their other procedures are siblings.
+                var links = await LinksAsync(db, [focalId], byCase: false, ct);
+                return new Anchors([focalId, .. links.Select(x => x.CaseRevisionId)], links);
             }
 
             case ArtifactThreadFocalKind.Execution:
@@ -414,11 +435,9 @@ public static class ArtifactThreadProjection
                 var procedureRevisionId = await db.TestExecutions.AsNoTracking()
                     .Where(x => x.Id == focalId)
                     .Select(x => (Guid?)x.ProcedureRevisionId).SingleOrDefaultAsync(ct);
-                if (procedureRevisionId is not Guid revisionId) return [];
-                var cases = await db.TestCaseProcedureLinks.AsNoTracking()
-                    .Where(x => x.ProcedureRevisionId == revisionId)
-                    .Select(x => x.CaseRevisionId).ToListAsync(ct);
-                return [revisionId, .. cases];
+                if (procedureRevisionId is not Guid revisionId) return Anchors.None;
+                var links = await LinksAsync(db, [revisionId], byCase: false, ct);
+                return new Anchors([revisionId, .. links.Select(x => x.CaseRevisionId)], links);
             }
 
             case ArtifactThreadFocalKind.Build:
@@ -430,16 +449,31 @@ public static class ArtifactThreadProjection
                     .Where(x => x.SoftwareBuildId != null && buildIds.Contains(x.SoftwareBuildId.Value)
                         && x.ProjectId == projectId)
                     .Select(x => x.ProcedureRevisionId).Distinct().ToListAsync(ct);
-                if (procedures.Count == 0) return [];
-                var cases = await db.TestCaseProcedureLinks.AsNoTracking()
-                    .Where(x => procedures.Contains(x.ProcedureRevisionId))
-                    .Select(x => x.CaseRevisionId).ToListAsync(ct);
-                return [.. procedures, .. cases];
+                if (procedures.Count == 0) return Anchors.None;
+                var links = await LinksAsync(db, procedures, byCase: false, ct);
+                return new Anchors([.. procedures, .. links.Select(x => x.CaseRevisionId)], links);
             }
 
             default:
-                return [];
+                return Anchors.None;
         }
+    }
+
+    /// <summary>
+    /// Exact Case-to-Procedure links in one direction: down from the given cases, or up from the given
+    /// procedures. Never both, which is what would reverse direction at the far endpoint.
+    /// </summary>
+    private static async Task<IReadOnlyList<AnchorLink>> LinksAsync(
+        AeroLinkDbContext db, IReadOnlyCollection<Guid> from, bool byCase, CancellationToken ct)
+    {
+        if (from.Count == 0) return [];
+        var query = db.TestCaseProcedureLinks.AsNoTracking();
+        query = byCase
+            ? query.Where(x => from.Contains(x.CaseRevisionId))
+            : query.Where(x => from.Contains(x.ProcedureRevisionId));
+        return await query
+            .Select(x => new AnchorLink(x.CaseRevisionId, x.ProcedureRevisionId, x.ExactLinkSuspectLifecycleId))
+            .ToListAsync(ct);
     }
 
     private static async Task<IReadOnlyList<Guid>> CoveredRequirementsAsync(
@@ -449,11 +483,11 @@ public static class ArtifactThreadProjection
         // A Procedure may be reached directly (System covers requirements) or through its Case (HLR and LLR).
         // Both are followed from recorded rows rather than assumed from the level.
         if (verificationRevisionIds.Count == 0) return [];
+
+        // No further expansion here. The caller's anchors already carry the correct side of each link, and
+        // adding every case that points at a reached procedure would reverse direction — pulling in peer cases
+        // whose coverage has nothing to do with the artifact the reader opened.
         var reach = verificationRevisionIds.ToHashSet();
-        var parents = await db.TestCaseProcedureLinks.AsNoTracking()
-            .Where(x => reach.Contains(x.ProcedureRevisionId))
-            .Select(x => x.CaseRevisionId).ToListAsync(ct);
-        foreach (var parent in parents) reach.Add(parent);
 
         return await (from coverage in db.TestCoverage.AsNoTracking()
                       join revision in db.RequirementRevisions.AsNoTracking()
@@ -605,7 +639,7 @@ public static class ArtifactThreadProjection
     /// <summary>Lanes 3, 4 and 5, plus the applicability statement when the levels have no discipline.</summary>
     private static async Task<ArtifactThreadVerification> AddVerificationAsync(
         AeroLinkDbContext db, Guid projectId, IReadOnlyCollection<Guid> requirementIds,
-        IReadOnlyCollection<Guid> anchors,
+        Anchors anchors,
         ArtifactThreadFocalKind focalKind, Guid focalId, IReadOnlyCollection<Guid> buildIds,
         IReadOnlyDictionary<Guid, (string Number, string Description, SoftwareBuildState State)> builds,
         Accumulator acc, CancellationToken ct)
@@ -621,7 +655,7 @@ public static class ArtifactThreadProjection
             // A level either has a verification discipline or it does not; the domain is the authority and is
             // not widened here. Customer and Interface have none, so their chain truthfully stops.
             var without = levels.Where(level => !HasVerificationDiscipline(level)).ToList();
-            if (levels.Count > 0 && without.Count == levels.Count && anchors.Count == 0)
+            if (levels.Count > 0 && without.Count == levels.Count && anchors.Revisions.Count == 0)
             {
                 var named = string.Join(" and ", without.Select(x => x.ToString()).OrderBy(x => x));
                 return new ArtifactThreadVerification(false,
@@ -636,24 +670,30 @@ public static class ArtifactThreadProjection
                 .Select(x => new { x.ProcedureRevisionId, x.RequirementRevisionId, x.IsSuspect })
                 .ToListAsync(ct);
 
+        // Only a requirement focal owns the downstream verification side. Reached from below — a procedure, a
+        // case, a run, a build — the requirement above is upstream, and coming back down from it into every
+        // other artifact that verifies it is the same direction reversal §6.5 forbids on the trace: those are
+        // peers of the record the reader opened, not part of its chain. The coverage row joining the focal side
+        // to that requirement is still drawn, because that link is genuinely upstream.
+        if (focalKind != ArtifactThreadFocalKind.Requirement)
+            coverage = coverage.Where(x => anchors.Revisions.Contains(x.ProcedureRevisionId)).ToList();
+
         var directIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
 
-        // Case-to-Procedure links are read from the anchor set as well as from coverage. A procedure opened
-        // directly records its case whether or not that case covers a requirement, and deriving these links
-        // from coverage alone silently dropped the one exact relationship such a thread has.
-        var linkScope = directIds.Concat(anchors).Distinct().ToList();
-        var caseLinks = linkScope.Count == 0
-            ? []
-            : await db.TestCaseProcedureLinks.AsNoTracking()
-                .Where(x => linkScope.Contains(x.CaseRevisionId) || linkScope.Contains(x.ProcedureRevisionId))
-                .Select(x => new { x.CaseRevisionId, x.ProcedureRevisionId, x.ExactLinkSuspectLifecycleId })
-                .ToListAsync(ct);
+        // Downstream from the covering cases only. Matching on either endpoint would reverse direction at a
+        // shared procedure and bring in a peer case. The focal record's own links arrive separately, already
+        // direction-pure, so a procedure opened directly still keeps the exact link to its parent case.
+        var coveringLinks = focalKind == ArtifactThreadFocalKind.Requirement
+            ? await LinksAsync(db, directIds, byCase: true, ct)
+            : [];
+        var caseLinks = coveringLinks.Concat(anchors.Links)
+            .DistinctBy(x => (x.CaseRevisionId, x.ProcedureRevisionId)).ToList();
 
         // The focal record's own anchors are always present, whether or not coverage reached them.
         var allRevisionIds = directIds
             .Concat(caseLinks.Select(x => x.ProcedureRevisionId))
             .Concat(caseLinks.Select(x => x.CaseRevisionId))
-            .Concat(anchors).Distinct().ToList();
+            .Concat(anchors.Revisions).Distinct().ToList();
         var kindByRevision = new Dictionary<Guid, string>();
         if (allRevisionIds.Count > 0)
         {
@@ -691,12 +731,12 @@ public static class ArtifactThreadProjection
                 "verified by", row.IsSuspect));
 
         var caseStates = await LifecycleStatesAsync(db, projectId,
-            caseLinks.Where(x => x.ExactLinkSuspectLifecycleId is not null)
-                .Select(x => x.ExactLinkSuspectLifecycleId!.Value).ToList(), ct);
+            caseLinks.Where(x => x.LifecycleId is not null)
+                .Select(x => x.LifecycleId!.Value).ToList(), ct);
 
         foreach (var link in caseLinks)
             acc.Link(new ArtifactThreadEdge(link.CaseRevisionId, KindCase, link.ProcedureRevisionId,
-                KindProcedure, "run by", SuspectFromLifecycle(link.ExactLinkSuspectLifecycleId, caseStates)));
+                KindProcedure, "run by", SuspectFromLifecycle(link.LifecycleId, caseStates)));
 
         await AddResultsAsync(db, projectId, allRevisionIds, buildIds, builds, focalKind, focalId, acc, ct);
         return new ArtifactThreadVerification(true, null);

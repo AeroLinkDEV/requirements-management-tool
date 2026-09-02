@@ -665,6 +665,82 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
             x => x.GetProperty("relation").GetString() == "retest of");
     }
 
+    // ---- direction purity on the verification side -------------------------------------------------------
+
+    [Fact]
+    public async Task A_procedure_focal_does_not_reach_its_case_s_other_procedures()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Procedure", world.FirstProcedureRevisionId);
+        var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
+
+        // The parent case is upstream of this procedure and belongs. Turning round at that case and collecting
+        // the other procedures it runs is sideways: they are peers, neither upstream nor downstream of the
+        // record the reader opened. §6.5 unions two direction-pure walks and does not walk sideways.
+        Assert.Contains(Nodes(thread, "Case"),
+            x => x.GetProperty("id").GetString() == world.CaseRevisionId.ToString());
+        Assert.Contains(world.FirstProcedureRevisionId.ToString(), procedures);
+        Assert.DoesNotContain(world.SecondProcedureRevisionId.ToString(), procedures);
+        Assert.DoesNotContain(world.ClosedProcedureRevisionId.ToString(), procedures);
+    }
+
+    [Fact]
+    public async Task A_case_focal_does_not_reach_a_peer_case_through_a_shared_procedure()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Case", world.CaseRevisionId);
+        var cases = Nodes(thread, "Case").Select(x => x.GetProperty("id").GetString()).ToList();
+        var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
+
+        // Every procedure this case runs is genuinely downstream and must stay — direction purity is not
+        // narrowing. The revised case shares two of those procedures, and reaching it means reversing at a
+        // shared procedure into a peer case.
+        Assert.Contains(world.FirstProcedureRevisionId.ToString(), procedures);
+        Assert.Contains(world.SecondProcedureRevisionId.ToString(), procedures);
+        Assert.Contains(world.ClosedProcedureRevisionId.ToString(), procedures);
+        Assert.DoesNotContain(world.RevisedCaseRevisionId.ToString(), cases);
+    }
+
+    [Fact]
+    public async Task An_execution_focal_does_not_branch_back_down_into_sibling_procedures()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Execution", world.PassExecutionId);
+        var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
+
+        // Upstream through its own procedure and that procedure's parent case is valid; the case's other
+        // procedures are not part of what this run evidences.
+        Assert.Contains(world.FirstProcedureRevisionId.ToString(), procedures);
+        Assert.DoesNotContain(world.SecondProcedureRevisionId.ToString(), procedures);
+    }
+
+    [Fact]
+    public async Task A_requirement_focal_still_keeps_every_verification_branch_below_it()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
+        var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
+
+        // The requirement is above all of it, so every covering case and every procedure those cases run is
+        // genuinely downstream. This is the fan-out direction purity must not cost.
+        Assert.Contains(world.FirstProcedureRevisionId.ToString(), procedures);
+        Assert.Contains(world.SecondProcedureRevisionId.ToString(), procedures);
+        Assert.Contains(Nodes(thread, "Case"),
+            x => x.GetProperty("id").GetString() == world.CaseRevisionId.ToString());
+    }
+
     // ---- helpers ---------------------------------------------------------------------------------------
 
     private static List<JsonElement> Nodes(JsonElement thread, string kind) =>
