@@ -92,12 +92,15 @@ public sealed class WebhookDeliveryWorker(IServiceScopeFactory scopeFactory, ICo
         }
     }
 
-    private async Task DeliverBatchAsync(CancellationToken ct)
+    internal async Task DeliverBatchAsync(CancellationToken ct)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var clientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
         var security = scope.ServiceProvider.GetRequiredService<IntegrationSecurityService>();
+        var destinationPolicy = scope.ServiceProvider.GetRequiredService<WebhookDestinationPolicy>();
+        var allowInsecure = configuration.GetValue<bool>("Integrations:AllowInsecureWebhookTargets");
+        var allowPrivate = configuration.GetValue<bool>("Integrations:AllowPrivateWebhookTargets");
         var now = DateTimeOffset.UtcNow;
         var candidates = await db.WebhookDeliveries.Where(x => x.State == WebhookDeliveryState.Pending).Take(50).ToListAsync(ct);
         candidates.AddRange(await db.WebhookDeliveries.Where(x => x.State == WebhookDeliveryState.RetryScheduled).Take(50).ToListAsync(ct));
@@ -110,13 +113,14 @@ public sealed class WebhookDeliveryWorker(IServiceScopeFactory scopeFactory, ICo
             delivery.BeginAttempt(now); await db.SaveChangesAsync(ct);
             try
             {
-                if (!WebhookTargetAllowed(subscription.EndpointUrl, configuration)) throw new InvalidOperationException("Webhook target is blocked by the outbound target policy.");
+                var approved = await destinationPolicy.ValidateAsync(new Uri(subscription.EndpointUrl), allowInsecure, allowPrivate, ct);
                 var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
                 var envelope = JsonSerializer.Serialize(new { id = integrationEvent.Id, type = integrationEvent.EventType, occurredAt = integrationEvent.OccurredAt, projectId = integrationEvent.ProjectId, aggregate = new { type = integrationEvent.AggregateType, id = integrationEvent.AggregateId }, data = JsonDocument.Parse(integrationEvent.PayloadJson).RootElement });
                 var secret = security.UnprotectWebhookSecret(subscription.ProtectedSecret);
                 var signature = Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes($"{timestamp}.{envelope}"))).ToLowerInvariant();
                 using var request = new HttpRequestMessage(HttpMethod.Post, subscription.EndpointUrl) { Content = new StringContent(envelope, Encoding.UTF8, "application/json") };
                 request.Headers.Add("X-AeroLink-Event", integrationEvent.EventType); request.Headers.Add("X-AeroLink-Delivery", delivery.Id.ToString()); request.Headers.Add("X-AeroLink-Timestamp", timestamp); request.Headers.Add("X-AeroLink-Signature", $"v1={signature}");
+                request.Options.Set(WebhookConnectionTransport.ApprovedAddressesOption, approved.Addresses);
                 using var response = await clientFactory.CreateClient("AeroLinkWebhooks").SendAsync(request, ct);
                 if ((int)response.StatusCode is >= 200 and < 300) delivery.Complete((int)response.StatusCode, DateTimeOffset.UtcNow);
                 else delivery.Fail((int)response.StatusCode, $"Endpoint returned HTTP {(int)response.StatusCode}.", 5, DateTimeOffset.UtcNow);
@@ -124,23 +128,5 @@ public sealed class WebhookDeliveryWorker(IServiceScopeFactory scopeFactory, ICo
             catch (Exception ex) { delivery.Fail(null, ex.Message, 5, DateTimeOffset.UtcNow); }
             await db.SaveChangesAsync(ct);
         }
-    }
-
-    private static bool WebhookTargetAllowed(string endpointUrl, IConfiguration configuration)
-    {
-        var uri = new Uri(endpointUrl);
-        var allowInsecure = configuration.GetValue<bool>("Integrations:AllowInsecureWebhookTargets");
-        var allowPrivate = configuration.GetValue<bool>("Integrations:AllowPrivateWebhookTargets");
-        if (uri.Scheme != Uri.UriSchemeHttps && !allowInsecure) return false;
-        if (allowPrivate) return true;
-        if (uri.IsLoopback || uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return false;
-        return !IPAddress.TryParse(uri.Host, out var address) || !IsPrivate(address);
-    }
-
-    private static bool IsPrivate(IPAddress address)
-    {
-        if (IPAddress.IsLoopback(address)) return true;
-        var bytes = address.GetAddressBytes();
-        return address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && (bytes[0] == 10 || bytes[0] == 127 || (bytes[0] == 192 && bytes[1] == 168) || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31));
     }
 }

@@ -189,6 +189,14 @@ Relevant production settings are:
 
 Webhook requests include `X-AeroLink-Event`, `X-AeroLink-Delivery`, `X-AeroLink-Timestamp`, and `X-AeroLink-Signature`. Consumers must reject stale timestamps and verify the `v1=<hex>` HMAC-SHA256 over `<timestamp>.<raw request body>` before parsing the payload. Multi-instance deployments must use a shared, protected ASP.NET Core Data Protection key ring so encrypted webhook secrets and browser mutation tokens remain valid across instances.
 
+### Webhook egress and redirect policy
+
+- Webhook endpoints must use HTTPS. `Integrations__AllowInsecureWebhookTargets=true` may permit plain HTTP only in isolated development.
+- In production, every address a webhook endpoint resolves to must be globally routable. Loopback, private, link-local (including the cloud metadata service), carrier-grade NAT, unique-local and site-local IPv6, multicast, reserved and documentation ranges, and IPv4 ranges embedded in IPv6 (mapped, compatible, NAT64) are refused, whether configured as a literal address or reached through a hostname. An endpoint whose hostname returns any prohibited answer — including a mix of permitted and prohibited answers — or no answers at all, is refused.
+- For every delivery the complete answer set is resolved and classified before the connection is attempted, and the connection is then pinned to an address from that validated set (`SocketsHttpHandler.ConnectCallback`). DNS cannot change between validation and connection to steer the delivery to an unvalidated address. The endpoint hostname, TLS certificate verification, and SNI still use the original hostname, not the pinned address.
+- `Integrations__AllowPrivateWebhookTargets=true` (isolated development only) exempts addresses from the prohibition check, but the endpoint must still resolve to at least one connectable address and the connection remains pinned to a validated address. It does not relax the HTTPS rule.
+- Automatic redirects are disabled. A `3xx` response is recorded as a failed delivery attempt; AeroLink never connects to a redirect target.
+
 ## Production first-install administrator
 
 Production does not seed identities. Before the first API start against an empty database, set `Identity__BootstrapSecret` in the service environment to a randomly generated value of at least 32 characters. Do not place it in `appsettings.json`, source control, a command-line argument, or an operator transcript. `GET /api/setup/status` reports only whether bootstrap is required and enabled.
