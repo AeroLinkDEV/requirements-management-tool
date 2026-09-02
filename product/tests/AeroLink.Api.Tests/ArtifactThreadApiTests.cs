@@ -433,10 +433,10 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
 
         var thread = await ThreadAsync(client, world, "Requirement", world.SystemRevisionId);
         var requirements = Nodes(thread, "Requirement").Select(x => x.GetProperty("id").GetString()).ToList();
-
-        // Direction purity is not narrowing: from the parent, both children are genuinely downstream.
-        Assert.Contains(world.HighLevelRevisionId.ToString(), requirements);
-        Assert.Contains(world.SiblingHighLevelRevisionId.ToString(), requirements);
+        var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList(); var cases = Nodes(thread, "Case").Select(x => x.GetProperty("id").GetString()).ToList();
+        // System keeps incoming HLR trace nodes and its own procedure, but it must not turn around into HLR verification.
+        Assert.Contains(world.HighLevelRevisionId.ToString(), requirements); Assert.Contains(world.SiblingHighLevelRevisionId.ToString(), requirements); Assert.Contains(world.SystemProcedureRevisionId.ToString(), procedures);
+        Assert.DoesNotContain(world.FirstProcedureRevisionId.ToString(), procedures); Assert.DoesNotContain(world.CaseRevisionId.ToString(), cases);
     }
 
     // ---- focal-first, and exact kind --------------------------------------------------------------------
