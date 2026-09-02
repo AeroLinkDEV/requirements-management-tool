@@ -7,6 +7,7 @@ import {
   isIntraLane,
   frameNodes,
   type CanvasEdge,
+  type CanvasFrame,
   type CanvasNode,
   anchorInLane,
   geometryFor,
@@ -415,5 +416,47 @@ test.describe("intra-lane edges", () => {
     const backwards = edgePath({ x: 296, y: 0 }, { x: 0, y: 0 }, geometry)
     expect(backwards.startsWith("M296 ")).toBe(true)
     expect(backwards.endsWith(`,236 ${geometry.anchor}`)).toBe(true)
+  })
+})
+
+/**
+ * Framing measures the records that are actually drawn.
+ *
+ * A lane taller than its window rolls, so a wanted record can sit outside that window and not be rendered at
+ * all. Measuring it anyway stretched the box far above the visible band, and because the pan is clamped to
+ * that box, the whole scene was pushed out of the frame — a thirty-record lane landed with its board below the
+ * viewport.
+ */
+test.describe("framing ignores records rolled out of their lane", () => {
+  const frame: CanvasFrame = { x: 0, y: 0, width: 1280, height: 480 }
+
+  test("a wanted record outside its lane window does not drag the board off screen", () => {
+    // Thirty records in one lane, rolled so the first rows sit far above the band.
+    const nodes: CanvasNode[] = Array.from({ length: 30 }, (_, row) => ({ id: `p${row}`, lane: 1, row }))
+    nodes.push({ id: "sel", lane: 0, row: 0 })
+    const counts = [1, 30]
+    const rolled = [0, -900]
+
+    const framed = frameNodes(
+      ["sel", ...nodes.filter(node => node.lane === 1).map(node => node.id)],
+      nodes,
+      counts,
+      frame,
+      rolled,
+      "sel",
+    )
+
+    expect(framed).not.toBeNull()
+    // The board must land inside the frame rather than being pushed below it by rows nobody can see.
+    expect(framed!.y).toBeLessThan(frame.y + frame.height)
+    expect(framed!.y).toBeGreaterThan(-frame.height)
+  })
+
+  test("with nothing drawn it still frames something rather than giving up", () => {
+    // Every wanted record rolled out of view. Returning null here would leave the camera wherever it was.
+    const nodes: CanvasNode[] = [{ id: "a", lane: 0, row: 40 }, { id: "b", lane: 0, row: 41 }]
+    const framed = frameNodes(["a", "b"], nodes, [2], frame, [-4000], null)
+
+    expect(framed).not.toBeNull()
   })
 })

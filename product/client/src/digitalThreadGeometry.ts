@@ -362,7 +362,22 @@ export const frameNodes = (
   maxZoom = 1.12,
 ): { x: number; y: number; zoom: number } | null => {
   const wanted = new Set(ids)
-  const measure = (result: LayoutResult, room: boolean) => {
+  /**
+   * The box around the wanted records, measured over the ones actually on the board.
+   *
+   * A lane taller than its window rolls, so a wanted record can sit outside that window and not be drawn at
+   * all. Measuring it anyway stretched the box far above the visible band, and because the pan is then clamped
+   * to that box, the whole scene was pushed down out of the frame — a thirty-record lane landed with its board
+   * below the viewport. The selected card is included regardless, matching the canvas, which never hides it.
+   *
+   * `onlyDrawn: false` is the fallback for when nothing is currently drawn, so framing still has something to
+   * aim at rather than giving up.
+   */
+  const measure = (
+    result: LayoutResult,
+    room: boolean,
+    onlyDrawn = true,
+  ): { x: number; y: number; width: number; height: number } | null => {
     let x0 = Infinity
     let y0 = Infinity
     let x1 = -Infinity
@@ -370,12 +385,14 @@ export const frameNodes = (
     for (const node of nodes) {
       if (!wanted.has(node.id)) continue
       const { x, y } = nodePosition(node, result.geometry, offsets)
+      if (onlyDrawn && node.id !== selectedId && !isVisible(y, result.geometry, result.bandHeight)) continue
       x0 = Math.min(x0, x)
       x1 = Math.max(x1, x + result.geometry.laneWidth)
       y0 = Math.min(y0, y)
       y1 = Math.max(y1, y + result.geometry.cardHeight + (room && node.id === selectedId ? 132 : 0))
     }
-    return x0 > x1 ? null : { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
+    if (x0 > x1) return onlyDrawn ? measure(result, room, false) : null
+    return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
   }
 
   const first = layout(laneCounts, frame, 1)

@@ -89,7 +89,7 @@
 /* ---- cards ------------------------------------------------------------- */
 
 .dtaCard { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
-.dtaCardTop { display: flex; align-items: center; gap: 7px; }
+.dtaCardTop { display: flex; align-items: center; gap: 6px; min-width: 0; }
 
 /* Sized to its text, not to a fixed square. A three-letter badge — TCR, HLR, BLD — is wider than 20px at this
    weight, and a fixed box let the letters spill out from under the centring and land on the identifier beside
@@ -120,6 +120,28 @@
   white-space: nowrap;
 }
 
+.dtaPill i { font-style: normal; }
+
+/* At the dense tier an unselected card shows its state as a colour dot, per #880 §6.2. That is also what frees
+   the width for the suspect word beside a long controlled identifier. The state text stays in the DOM for
+   assistive technology, and the detail panel carries it in full, per §10.1. */
+.dtCanvasScene[data-tier="0"] .dtCanvasNode:not(.is-selected) .dtaPill {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.dtCanvasScene[data-tier="0"] .dtCanvasNode:not(.is-selected) .dtaPill i {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .dtaTitle {
   display: -webkit-box;
   overflow: hidden;
@@ -132,18 +154,32 @@
 
 .dtaMeta { display: flex; align-items: baseline; gap: 8px; color: #8493a6; font-size: 10px; }
 
-/* The textual half of the suspect treatment. It sits above the title rather than in the meta row so that it
-   survives the compact tier — see the comment at its use site. */
-.dtaSuspectFlag { display: flex; align-items: center; gap: 5px; }
+/* The textual half of the suspect treatment.
+
+   Anchored to the card rather than placed in a row, for two reasons. It must not sit inside any
+   `data-density` container — every one of those is hidden at some tier, and status text carrying the
+   "never colour alone" rule has to survive all of them. And in the flow it competed for width with a long
+   controlled identifier and pushed the top row into overflow; out of the flow it costs the row nothing at any
+   tier. Same treatment as the hop badge, which is anchored for the same reason. */
+.dtaSuspectFlag {
+  position: absolute;
+  right: -4px;
+  bottom: -7px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+}
 
 .dtaSuspectFlag b {
+  border: 1px solid #e0c17e;
   border-radius: var(--radius-pill);
   background: #fdefcf;
-  padding: 2px 7px;
-  color: #8a5a00;
-  font: var(--weight-bold) 9px var(--font-body);
-  letter-spacing: .04em;
+  padding: 1px 6px;
+  color: #7a4f00;
+  font: var(--weight-bold) 8.5px var(--font-body);
+  letter-spacing: .06em;
   white-space: nowrap;
+  box-shadow: 0 2px 5px rgba(122, 79, 0, .16);
 }
 
 /* Suspect carries its word as well as its colour; colour alone is never the signal (#880 §7). */

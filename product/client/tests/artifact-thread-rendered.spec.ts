@@ -83,12 +83,12 @@ const rollLane = async (page: Page) => {
     if (!box) continue
     const left = Math.max(box.x, canvas.x)
     const right = Math.min(box.x + box.width, canvas.x + canvas.width)
-    const top = Math.max(box.y, canvas.y) + 20
-    const bottom = Math.min(box.y + box.height, canvas.y + canvas.height) - 20
+    const top = Math.max(box.y, canvas.y) + 12
+    const bottom = Math.min(box.y + box.height, canvas.y + canvas.height) - 12
     const area = Math.max(0, right - left) * Math.max(0, bottom - top)
     // The grab must land in the band's side gutter rather than on a card, and inside the viewport.
-    const x = box.x + 8
-    if (area > bestArea && bottom - top > 120 && x > canvas.x && x < canvas.x + canvas.width) {
+    const x = box.x + 4
+    if (area > bestArea && bottom - top > 80 && x > canvas.x && x < canvas.x + canvas.width) {
       bestArea = area
       best = { x, top, bottom }
     }
@@ -266,7 +266,10 @@ test.describe("suspectness", () => {
     // original assertion here and it passes on a `display: none` element, which is how the word ended up
     // hidden at the landing tier with this test still green.
     await expect(suspectCard.locator(".dtaSuspectFlag b")).toBeVisible()
-    await expect(suspectCard.locator(".dtaSuspectFlag b")).toHaveText("Suspect link")
+    await expect(suspectCard.locator(".dtaSuspectFlag b")).toHaveText("SUSPECT")
+    // The short token is what fits beside a controlled identifier at every tier; the full phrase travels with
+    // it for assistive technology.
+    await expect(suspectCard.locator(".dtaSuspectFlag .dtaVisuallyHidden")).toHaveText(/Suspect link/)
     await expect(settledCard.locator(".dtaSuspectFlag")).toHaveCount(0)
 
     // And the edge itself is dashed rather than resting.
@@ -453,13 +456,6 @@ test.describe("shared canvas behaviour", () => {
   test("dragging a lane band rolls that lane", async ({ page }) => {
     await open(page, "dense")
 
-    // At the fit zoom every lane already fits its window — that is the zoom floor doing its job — so nothing
-    // is rollable and there would be nothing to drag. Leaning in shrinks each window in canvas terms, which is
-    // exactly when rolling becomes the way to reach the rest of a lane.
-    await page.locator(".dtCanvas").focus()
-    for (let index = 0; index < 4; index += 1) await page.keyboard.press("=")
-    await page.waitForTimeout(300)
-
     await expect(page.locator(".dtCanvasBand.is-rollable").first()).toBeVisible()
     const before = await cardTransforms(page)
 
@@ -594,7 +590,7 @@ test.describe("suspect meaning survives the density tiers", () => {
     await open(page, "hlr")
     await page.locator(".dtCanvas").focus()
     for (let index = 0; index < 4; index += 1) await page.keyboard.press("=")
-    await page.waitForTimeout(300)
+    await page.waitForTimeout(400)
 
     await expect(page.locator(".dtCanvasScene")).toHaveAttribute("data-tier", "2")
     await expect(
@@ -602,16 +598,52 @@ test.describe("suspect meaning survives the density tiers", () => {
     ).toBeVisible()
   })
 
-  test("at the dense tier the text equivalent survives for assistive technology", async ({ page }) => {
-    await open(page, "hlr")
+  test("it is still visible at the dense tier, to a sighted reader", async ({ page }) => {
+    // The `crowded` board exists for this: the zoom floor stops zooming out once everything already fits, so
+    // on an ordinary thread tier 0 cannot be reached at all. A lane that still overflows its window at the
+    // hard floor is what makes the dense tier reachable and therefore assertable.
+    await open(page, "crowded")
     await page.locator(".dtCanvas").focus()
-    for (let index = 0; index < 8; index += 1) await page.keyboard.press("-")
-    await page.waitForTimeout(300)
+    for (let index = 0; index < 14; index += 1) await page.keyboard.press("-")
+    await page.waitForTimeout(600)
 
-    // The dense tier is reached only by deliberately zooming out, where #880 §10.1 allows the board to shed
-    // detail. What may never happen is the meaning disappearing entirely, so the accessible text remains.
-    const flag = page.locator('.dtCanvasNode:has(.dtaCard:has-text("HLRTP-000120.00")) .dtaSuspectFlag')
-    await expect(flag.locator(".dtaVisuallyHidden")).toHaveText(/relationship recorded against this record/)
+    await expect(page.locator(".dtCanvasScene")).toHaveAttribute("data-tier", "0")
+
+    // An unselected suspect card that is actually on screen. The assertion is visibility to a sighted reader,
+    // not merely the presence of accessible text — status carrying the "never colour alone" rule cannot be
+    // satisfied by screen-reader text alone.
+    const flag = await page.evaluate(() => {
+      const canvas = document.querySelector(".dtCanvas")!.getBoundingClientRect()
+      const cards = [...document.querySelectorAll(".dtCanvasNode:not(.is-offscreen)")].filter(node => {
+        const box = node.getBoundingClientRect()
+        return node.querySelector(".dtaCard.is-suspect:not(.is-selected)") &&
+          box.right > canvas.x && box.left < canvas.right &&
+          box.bottom > canvas.y && box.top < canvas.bottom
+      })
+      const word = cards[0]?.querySelector(".dtaSuspectFlag b")
+      const box = word?.getBoundingClientRect()
+      return {
+        suspectCardsOnScreen: cards.length,
+        text: word?.textContent ?? null,
+        rendered: !!box && box.width > 0 && box.height > 0,
+      }
+    })
+
+    expect(flag.suspectCardsOnScreen).toBeGreaterThan(0)
+    expect(flag.text).toBe("SUSPECT")
+    expect(flag.rendered).toBe(true)
+  })
+
+  test("the suspect word is never inside a density-gated container", async ({ page }) => {
+    // The rule the live #880 correction states directly: status text carrying §7/§9 must not live in a
+    // `data-density` container, because every one of those is hidden at some tier. Asserted structurally so a
+    // future refactor cannot quietly move it back into one.
+    await open(page, "hlr")
+
+    const gated = await page.evaluate(() =>
+      [...document.querySelectorAll(".dtaSuspectFlag")].some(flag => flag.closest("[data-density]") !== null))
+
+    expect(gated).toBe(false)
   })
 })
 
@@ -641,10 +673,6 @@ test.describe("the loading frame", () => {
 test.describe("a rolled lane survives a re-render", () => {
   test("hovering a card does not undo a manual roll", async ({ page }) => {
     await open(page, "dense")
-    await page.locator(".dtCanvas").focus()
-    for (let index = 0; index < 4; index += 1) await page.keyboard.press("=")
-    await page.waitForTimeout(300)
-
     // The helper rolls a lane carrying covering records, so it is a lane the selection-sync routine has an
     // opinion about. A lane with nothing linked to the selection was never at risk, and rolling one of those
     // would have proved nothing.
@@ -673,31 +701,62 @@ test.describe("a rolled lane survives a re-render", () => {
   test("changing the selection still syncs the lanes", async ({ page }) => {
     // The guard above must not have bought roll persistence by disabling the selection-driven sync of §6.4.
     await open(page, "dense")
-    await page.locator(".dtCanvas").focus()
-    for (let index = 0; index < 4; index += 1) await page.keyboard.press("=")
-    await page.waitForTimeout(300)
-
     await rollLane(page)
     await page.waitForTimeout(900)
     expect((await cardPositions(page)).some(card => card.y < 0)).toBe(true)
     const framedBefore = await page.locator(".dtCanvasScene").getAttribute("style")
 
+    // A case the roll has left in view, because a reader can only select what they can see — and because
+    // syncing other lanes onto a record that is itself outside its window would align them to something
+    // nobody can see. The covering procedure shares its number, so the pair is derivable.
+    const identity = await page.evaluate(() => {
+      const card = [...document.querySelectorAll(".dtCanvasNode:not(.is-offscreen)")]
+        .filter(node => {
+          // Comfortably inside its band, not clinging to the top edge. The sync aligns the covering procedure
+          // to the selected case's own height, so anchoring on a card at the very edge would land its partner
+          // exactly on the visibility threshold and assert nothing but rounding.
+          const y = Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/
+            .exec((node as HTMLElement).style.transform)?.[1] ?? NaN)
+          return y > 60
+        })
+        .map(node => node.querySelector(".dtaId")?.textContent ?? "")
+        .find(text => text.startsWith("HLRTC-"))
+      return card ?? null
+    })
+    expect(identity).toBeTruthy()
+    const partner = identity!.replace("HLRTC-", "HLRTP-")
+
     // Selected from the keyboard rather than the pointer: it is deterministic while the board is still easing,
     // and it re-exercises the §6.9 path at the same time.
-    const target = page.locator('.dtCanvasNode:has(.dtaCard:has-text("HLRTC-000104.00"))').first()
-    await target.focus()
+    await page.locator(`.dtCanvasNode:has(.dtaCard:has-text("${identity}"))`).first().focus()
     await page.keyboard.press("Enter")
     await page.waitForTimeout(900)
 
-    await expect(page.locator('.dtaCard.is-selected:has-text("HLRTC-000104.00")')).toHaveCount(1)
+    await expect(page.locator(`.dtaCard.is-selected:has-text("${identity}")`)).toHaveCount(1)
 
-    // The assertion is the outcome §6.4 promises, not merely that something moved: after a selection the
-    // record's linked records are in view in their own lanes. "Something moved" would be unsound here, because
-    // rolling a lane already eases the others into alignment, so the lane can legitimately be where it needs
-    // to be already.
-    await expect(
-      page.locator('.dtCanvasNode:has(.dtaCard:has-text("HLRTP-000104.00"))').first(),
-    ).not.toHaveClass(/is-offscreen/)
+    // The outcome §6.4 promises, in its own words: the records linked to the anchor sit at the anchor's
+    // height. Asserting alignment rather than "something moved", because rolling a lane already eases the
+    // others into place, so a lane can legitimately be where it needs to be already.
+    const aligned = await page.evaluate(([anchorId, partnerId]) => {
+      const yOf = (identity: string) => {
+        const node = [...document.querySelectorAll<HTMLElement>("[data-node-id]")]
+          .find(candidate => candidate.textContent?.includes(identity))
+        if (!node) return null
+        return {
+          y: Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/.exec(node.style.transform)?.[1] ?? NaN),
+          offscreen: node.classList.contains("is-offscreen"),
+        }
+      }
+      return { anchor: yOf(anchorId), partner: yOf(partnerId) }
+    }, [identity!, partner])
+
+    expect(aligned.anchor).not.toBeNull()
+    expect(aligned.partner).not.toBeNull()
+    expect(
+      Math.abs(aligned.anchor!.y - aligned.partner!.y),
+      `${partner} should sit at ${identity}'s height: ` +
+      `anchor ${aligned.anchor!.y}, partner ${aligned.partner!.y} (offscreen: ${aligned.partner!.offscreen})`,
+    ).toBeLessThanOrEqual(4)
 
     // And the camera reframed onto the new selection, which is the direct evidence that the persistence guard
     // did not swallow a real selection change.
@@ -715,5 +774,55 @@ test.describe("a rolled lane survives a re-render", () => {
     await page.waitForTimeout(700)
 
     expect(await page.locator(".dtCanvasScene").getAttribute("style")).not.toBe(before)
+  })
+})
+
+/**
+ * The framing guard must notice a real board change, not only a change of selection.
+ *
+ * Suppressing re-frames on identity-only renders is what stops a hover discarding a rolled lane. Taken too
+ * far it also suppresses genuine graph updates, and then §6.4 leaves a newly linked record outside its lane
+ * window and §6.6 can leave it under the panel — the guard would have bought roll persistence by breaking the
+ * two rules it exists to serve.
+ */
+test.describe("a graph change still re-syncs and re-frames", () => {
+  const FAR_RUN = 'e2000000-0000-4000-8000-000000000023'
+
+  test("re-pointing the selected record's link brings the new record into view", async ({ page }) => {
+    await open(page, "relink")
+
+    // Selection is a procedure, not the thread's focal record, so the view supplies no `frameIds`. That
+    // leaves the framing signature as the only thing that can notice this change.
+    await expect(page.locator(".dtaCard.is-selected .dtaId")).toHaveText("HLRTP-000300.00")
+
+    const before = await page.evaluate(id => {
+      const node = document.querySelector(`[data-node-id="${id}"]`)!
+      return {
+        offscreen: node.classList.contains("is-offscreen"),
+        lanes: [...document.querySelectorAll(".dtCanvasLaneHead")].length,
+        selected: document.querySelector(".dtaCard.is-selected .dtaId")?.textContent,
+      }
+    }, FAR_RUN)
+
+    // It starts rolled well out of its lane window.
+    expect(before.offscreen).toBe(true)
+
+    await page.locator("#relink").click()
+    await page.waitForTimeout(1200)
+
+    const after = await page.evaluate(id => {
+      const node = document.querySelector(`[data-node-id="${id}"]`)!
+      return {
+        offscreen: node.classList.contains("is-offscreen"),
+        lanes: [...document.querySelectorAll(".dtCanvasLaneHead")].length,
+        selected: document.querySelector(".dtaCard.is-selected .dtaId")?.textContent,
+      }
+    }, FAR_RUN)
+
+    // Nothing the old guard looked at changed: same selection, same lanes, same per-lane counts. Only which
+    // record the selection links to. The newly linked run must nonetheless be synced into its lane window.
+    expect(after.selected).toBe(before.selected)
+    expect(after.lanes).toBe(before.lanes)
+    expect(after.offscreen).toBe(false)
   })
 })

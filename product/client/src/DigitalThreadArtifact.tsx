@@ -294,28 +294,27 @@ export default function DigitalThreadArtifact({
                 {node.displayNumber}
               </ExactArtifactLink>
             )}
+            {/* Suspect must never ride on colour alone (#880 §7, §9), and status text carrying that rule must
+                not sit in a `data-density` container at all — every one of those is hidden at some tier. This
+                lives in the card's top row, which no density rule touches, so the word is visible at the
+                detailed, compact AND dense tiers.
+
+                It cannot be folded into the state pill: suspectness is a fact about a relationship, so the
+                pill truthfully reads the artifact's own lifecycle state and must keep doing so. The short
+                visible token is what fits beside a long controlled identifier at the dense tier; the full
+                sentence travels with it for assistive technology. */}
+            {isSuspect ? (
+              <span className="dtaSuspectFlag">
+                <b aria-hidden="true">SUSPECT</b>
+                <span className="dtaVisuallyHidden">
+                  Suspect link — a relationship recorded against this record is suspect
+                </span>
+              </span>
+            ) : null}
             <span className="dtaPill" style={{ background: pill.background, color: pill.color }}>
-              {stateLabel(node.state ?? undefined)}
+              <i>{stateLabel(node.state ?? undefined)}</i>
             </span>
           </div>
-          {/* Suspect must never ride on colour alone (#880 §7, §9). The word is deliberately NOT in the meta
-              row: tier 1 hides meta on unselected cards, and tier 1 is where a full six-lane thread lands, so
-              a suspect record would have arrived carrying nothing but an amber border. Its state pill cannot
-              stand in either — suspectness is a fact about a relationship, so the pill truthfully reads the
-              artifact's own lifecycle state.
-
-              `data-density="title"` keeps it through the detailed and compact tiers, which are the tiers a
-              board can land on. Only the dense tier drops it, and that tier is reached solely by the reader
-              deliberately zooming out, where §10.1 puts the text equivalent in the panel and the accessible
-              table instead. The visually-hidden line below covers assistive technology at every tier. */}
-          {isSuspect ? (
-            <div className="dtaSuspectFlag" data-density="title">
-              <b>Suspect link</b>
-              <span className="dtaVisuallyHidden">
-                — a relationship recorded against this record is suspect
-              </span>
-            </div>
-          ) : null}
           <div className="dtaTitle" data-density="title">
             {node.title}
           </div>

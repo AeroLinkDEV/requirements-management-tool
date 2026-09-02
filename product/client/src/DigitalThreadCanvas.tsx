@@ -165,6 +165,61 @@ export default function DigitalThreadCanvas({
   }, [edges, lanes.length, nodes])
 
   /**
+   * What the camera is being asked to frame, and a signature of it built entirely from values.
+   *
+   * The framing effect must run whenever the thing being framed actually changes, and must not run when only
+   * React identities changed. Those are different questions, and answering the second with `nodes`/`edges`
+   * array identity is what let a hover discard a reader's lane roll.
+   *
+   * So the signature names the real inputs: which record is selected, which records are wanted in shot, and
+   * **where each of those sits** — its lane and row. That makes it notice the cases an identity check cannot
+   * distinguish from noise and a selection check misses entirely: the same selection re-pointed from one
+   * linked record to another, or a linked record moved to a different row while the per-lane counts stay the
+   * same. Both are real board changes that must re-sync and re-frame, or §6.4 leaves the newly linked record
+   * outside its lane window and §6.6 leaves it under the panel.
+   *
+   * `countsKey`, the frame insets and the trailing overhang are in it too, because the geometry and the free
+   * area are equally part of what "framed" means.
+   */
+  const framing = useMemo(() => {
+    if (!selectedId) return null
+
+    const linked = new Set<string>([selectedId])
+    for (const edge of edges) {
+      if (edge.from === selectedId) linked.add(edge.to)
+      else if (edge.to === selectedId) linked.add(edge.from)
+    }
+    // A caller-supplied set wins, but the selection is always in it: framing a set that omits the record the
+    // reader just selected would move the board off the very thing it is about.
+    const wanted = frameIds?.length ? new Set<string>([selectedId, ...frameIds]) : linked
+
+    // Sorted so the signature does not change merely because the projection returned its nodes in a new order.
+    const placement = nodes
+      .filter(node => wanted.has(node.id))
+      .map(node => `${node.id}@${node.lane}:${node.row}`)
+      .sort()
+      .join(",")
+
+    return {
+      selectedId,
+      wanted: [...wanted],
+      key:
+        `${selectedId}|${countsKey}|${placement}` +
+        `|${frameInset?.left ?? 0},${frameInset?.right ?? 0},${frameInset?.bottom ?? 0},${trailingOverhang}`,
+    }
+  }, [
+    countsKey,
+    edges,
+    frameIds,
+    frameInset?.left,
+    frameInset?.right,
+    frameInset?.bottom,
+    nodes,
+    selectedId,
+    trailingOverhang,
+  ])
+
+  /**
    * The frame can be measured before it has settled — inside a preview or a freshly mounted panel the first
    * rect is a fraction of the real size. Laying out from that leaves the board wrongly zoomed and clumped in
    * a corner, so a nonsense rect is refused and the caller re-measures once it is real.
@@ -365,35 +420,17 @@ export default function DigitalThreadCanvas({
    * relation rows somewhere to go — clicking one selects that record and the board comes to it.
    */
   useEffect(() => {
-    if (!selectedId) {
+    if (!framing) {
       framedFor.current = null
       return
     }
-    /**
-     * Re-frame when what is being framed changes, not merely when React re-renders.
-     *
-     * Memoising `counts` removes the common cause, but it cannot remove them all: a caller is free to pass a
-     * new `nodes` or `edges` array identity for unchanged data, and that would again reset a rolled lane on a
-     * hover. Rolling is a deliberate act by the reader and must survive anything that is not a real change to
-     * the selection or the board, so the decision is made from values rather than from identities.
-     */
-    const framingKey =
-      `${selectedId}|${countsKey}|${frameIds?.join(",") ?? ""}` +
-      // The free area is part of what "framed" means. Docking the panel to a different side changes the area
-      // the board must fit into without touching the selection, and skipping the reframe there left the panel
-      // sitting on top of a directly linked record — the §6.6 failure this whole mechanism exists to prevent.
-      `|${frameInset?.left ?? 0},${frameInset?.right ?? 0},${frameInset?.bottom ?? 0},${trailingOverhang}`
-    if (framedFor.current === framingKey) return
-    framedFor.current = framingKey
+    if (framedFor.current === framing.key) return
+    framedFor.current = framing.key
 
     const box = frame()
     const result = geometryRef.current
     if (!box || !result) return
-    const linked = new Set<string>([selectedId])
-    for (const edge of edges) {
-      if (edge.from === selectedId) linked.add(edge.to)
-      else if (edge.to === selectedId) linked.add(edge.from)
-    }
+    const linked = framing.wanted
 
     // Roll every lane to bring the selected record's linked records into their own windows, before framing
     // (#880 §6.4: "the same routine runs on selection"). Panning the camera cannot do this job: a lane scrolls
@@ -401,7 +438,7 @@ export default function DigitalThreadCanvas({
     // framing alone would centre on a card the reader still cannot see. The offsets are applied at once rather
     // than animated into place so the two-pass framing below measures where the cards have actually landed.
     const synced = syncTargets(
-      selectedId,
+      framing.selectedId,
       nodes,
       edges,
       result.geometry,
@@ -413,12 +450,8 @@ export default function DigitalThreadCanvas({
     offsets.current = [...synced]
     targets.current = [...synced]
 
-    // A caller-supplied set wins, but the selection is always in it: framing a set that omits the record the
-    // reader just selected would move the board off the very thing it is about.
-    const wanted = frameIds?.length ? new Set<string>([selectedId, ...frameIds]) : linked
-
     const next = frameNodes(
-      [...wanted],
+      linked,
       nodes,
       counts,
       box,
@@ -431,7 +464,7 @@ export default function DigitalThreadCanvas({
     paint()
     const timer = window.setTimeout(() => sceneRef.current?.classList.remove("is-easing"), 420)
     return () => window.clearTimeout(timer)
-  }, [counts, countsKey, edges, frame, frameIds, frameInset?.left, frameInset?.right, frameInset?.bottom, nodes, paint, selectedId, trailingOverhang])
+  }, [counts, edges, frame, framing, nodes, paint])
 
   useEffect(
     () => () => {

@@ -11,6 +11,7 @@
  *
  * The scenario is chosen by `?case=` so one fixture serves every rendered assertion.
  */
+import { useState } from "react"
 import { createRoot } from "react-dom/client"
 // The product stylesheet, because the card typography is written against its tokens. Without it every
 // `font: var(--weight-strong) 11.5px …` shorthand is invalid at computed-value time and silently falls back to
@@ -239,6 +240,64 @@ const invalidThread = () => {
   return { ...base, nodes: [...base.nodes, node({ id: RETEST, kind: "Widget", lane: 5, displayNumber: "W-1" })] }
 }
 
+/**
+ * A thread too tall to fit even at the zoom floor, so the dense tier is actually reachable.
+ *
+ * On an ordinary board the floor stops zooming out at the point everything already fits, which for the
+ * nine-way fan-out lands on tier 1 — tier 0 simply cannot be reached there. Proving that suspect meaning
+ * survives the dense tier needs a board whose tallest lane still overflows its window at the hard floor.
+ */
+const crowdedThread = () => {
+  const nodes: Node[] = [highLevelRequirement(true)]
+  const edges: Edge[] = []
+  for (let index = 0; index < 30; index += 1) {
+    const suffix = String(index).padStart(2, "0")
+    const procedureId = `d1000000-0000-4000-8000-0000000000${suffix}`
+    nodes.push(node({
+      id: procedureId, kind: "Procedure", lane: 4, displayNumber: `HLRTP-0002${suffix}.00`,
+      title: `Crowded procedure ${index + 1}`, state: "Approved", level: "HighLevel", revision: 0,
+    }))
+    // Every other one is suspect, so an unselected suspect card is always present to inspect.
+    edges.push(edge(HLR_REQ, "Requirement", procedureId, "Procedure", "verified by", index % 2 === 0))
+  }
+  return thread({ focalKind: "Requirement", focalId: HLR_REQ, nodes, edges })
+}
+
+/**
+ * The same board twice, differing only in which record the selection links to.
+ *
+ * Node count, per-lane counts, rows and the selection are all identical between the two; only one edge's far
+ * endpoint moves. That is the case a framing guard keyed on selection and counts alone cannot see, and it is
+ * a real board change: the newly linked record has to be synced into its lane window and framed.
+ */
+const relinkThread = (target: "near" | "far") => {
+  const SELECTED = "d2000000-0000-4000-8000-000000000000"
+  const nodes: Node[] = [
+    node({
+      id: SELECTED, kind: "Procedure", lane: 4, displayNumber: "HLRTP-000300.00",
+      title: "Relink procedure", state: "Approved", level: "HighLevel", revision: 0,
+    }),
+    highLevelRequirement(true),
+  ]
+  const edges: Edge[] = [edge(HLR_REQ, "Requirement", SELECTED, "Procedure", "verified by")]
+  for (let index = 0; index < 24; index += 1) {
+    const suffix = String(index).padStart(2, "0")
+    const executionId = `e2000000-0000-4000-8000-0000000000${suffix}`
+    nodes.push(node({
+      id: executionId, kind: "Execution", lane: 5, displayNumber: null, title: `runner.${suffix}`,
+      state: "Pass", outcome: "Pass", executedBy: `runner.${suffix}`,
+      executedAt: `2026-08-${String((index % 28) + 1).padStart(2, "0")}T09:00:00+00:00`,
+      recordedAt: `2026-08-${String((index % 28) + 1).padStart(2, "0")}T09:05:00+00:00`, evidence: [],
+    }))
+  }
+  // The one edge that moves: the first run, or the last one far down the lane.
+  const linked = target === "near"
+    ? "e2000000-0000-4000-8000-000000000000"
+    : "e2000000-0000-4000-8000-000000000023"
+  edges.push(edge(SELECTED, "Procedure", linked, "Execution", "produced"))
+  return { thread: thread({ focalKind: "Requirement", focalId: HLR_REQ, nodes, edges }), selected: SELECTED }
+}
+
 /** A realistic fan-out: one requirement covered by several procedures, each with its own runs. */
 const denseThread = () => {
   const nodes: Node[] = [problemReport, changeRequest, highLevelRequirement(true), systemRequirement(false)]
@@ -288,8 +347,38 @@ const responses: Record<string, unknown> = {
   solitary: solitaryThread(),
   invalid: invalidThread(),
   dense: denseThread(),
+  crowded: crowdedThread(),
   loading: null,
   error: null,
+}
+
+const shared = {
+  hrefFor: (node: { artifactId?: string | null }) =>
+    node.artifactId ? `/artifacts/${node.artifactId}` : undefined,
+  evidenceHref: (file: { id: string }) => `/api/evidence/${file.id}`,
+  onOpenChange: () => undefined,
+  onRetry: () => undefined,
+}
+
+/**
+ * The relink scenario, which needs to change one edge after mount.
+ *
+ * The selection is a **procedure**, not the thread's focal record, on purpose: the view only supplies
+ * `frameIds` while the focal record is selected, so this leaves that path out and forces the canvas to notice
+ * the change through the framing signature alone — which is exactly the case under test.
+ */
+function Relink() {
+  const [target, setTarget] = useState<"near" | "far">("near")
+  const built = relinkThread(target)
+  return (
+    <>
+      <button type="button" id="relink" style={{ position: "fixed", right: 8, top: 8, zIndex: 99 }}
+        onClick={() => setTarget(current => (current === "near" ? "far" : "near"))}>
+        swap link
+      </button>
+      <DigitalThreadArtifact {...shared} response={built.thread} initialSelectedId={built.selected} />
+    </>
+  )
 }
 
 // `in`, not `??`: the loading and failed scenarios deliberately carry a null response, and `??` treated that
@@ -297,13 +386,14 @@ const responses: Record<string, unknown> = {
 const response = scenario in responses ? responses[scenario] : responses.hlr
 
 createRoot(document.getElementById("root")!).render(
-  <DigitalThreadArtifact
-    response={response}
-    loading={scenario === "loading"}
-    error={scenario === "error" ? "The server did not answer in time." : null}
-    onRetry={() => undefined}
-    hrefFor={node => (node.artifactId ? `/artifacts/${node.artifactId}` : undefined)}
-    evidenceHref={file => `/api/evidence/${file.id}`}
-    onOpenChange={() => undefined}
-  />,
+  scenario === "relink" ? (
+    <Relink />
+  ) : (
+    <DigitalThreadArtifact
+      {...shared}
+      response={response}
+      loading={scenario === "loading"}
+      error={scenario === "error" ? "The server did not answer in time." : null}
+    />
+  ),
 )
