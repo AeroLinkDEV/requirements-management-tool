@@ -101,7 +101,7 @@
   flex: none;
   border-radius: 4px;
   padding: 2px 6px;
-  font: var(--weight-strong) var(--text-2xs) var(--font-body);
+  font: var(--weight-strong) 10.5px var(--font-body);
   letter-spacing: .04em;
 }
 
@@ -112,12 +112,12 @@
 .dticOp-modify { background: #e7effb; color: #3569a8; }
 .dticOp-retire { background: #f1eef2; color: #6c5a74; }
 
-.dticOpWord { margin-left: auto; color: var(--ink-500); font-size: var(--text-2xs); }
+.dticOpWord { margin-left: auto; color: var(--ink-500); font-size: 10.5px; }
 
 .dticId {
   overflow: hidden;
   color: #2b3d54;
-  font: var(--weight-strong) var(--text-xs) var(--font-mono, var(--font-body));
+  font: var(--weight-strong) var(--text-xs) ui-monospace, SFMono-Regular, Consolas, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -127,7 +127,7 @@
   margin-left: auto;
   border-radius: var(--radius-pill);
   padding: 2px 8px;
-  font: var(--weight-strong) var(--text-2xs) var(--font-body);
+  font: var(--weight-strong) 10.5px var(--font-body);
 }
 
 .dticProposedTag {
@@ -137,7 +137,7 @@
   border-radius: var(--radius-pill);
   padding: 1px 7px;
   color: #5d6d82;
-  font: var(--weight-strong) var(--text-2xs) var(--font-body);
+  font: var(--weight-strong) 10.5px var(--font-body);
 }
 
 .dticTitle {
@@ -147,7 +147,7 @@
   line-height: 1.35;
 }
 
-.dticMeta { margin: 0; color: var(--ink-500); font-size: var(--text-2xs); }
+.dticMeta { margin: 0; color: var(--ink-500); font-size: 10.5px; }
 
 /* A retirement and everything it cascades to reads dashed, matching the edge treatment. */
 .dticProposal.is-retire,
@@ -168,7 +168,7 @@
   gap: 2px;
   border-left: 2px solid #dbe3ec;
   padding-left: 7px;
-  font-size: var(--text-2xs);
+  font-size: 10.5px;
   line-height: 1.4;
 }
 
@@ -185,7 +185,7 @@
   background: #f6f8fa;
   padding: 5px 7px;
   color: #5d6d82;
-  font-size: var(--text-2xs);
+  font-size: 10.5px;
   line-height: 1.4;
 }
 
@@ -211,4 +211,26 @@
 @media (prefers-reduced-motion: reduce) {
   .dticTypes button,
   .dticBack { transition: none; }
+}
+
+/* ---- structured verification content ------------------------------------ */
+
+/* A procedure is read by its parts. Rows the artifact does not use are omitted rather than shown empty, so a
+   System Procedure and a software Case each show only what they actually carry. */
+.dticVerification { display: flex; flex-direction: column; gap: 3px; margin: 0; font-size: 10.5px; }
+.dticVerification > div { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 8px; }
+.dticVerification dt { color: #8493a6; }
+.dticVerification dd { margin: 0; overflow: hidden; color: #33475f; line-height: 1.35; text-overflow: ellipsis; }
+
+/* A recorded relationship the server could not resolve. Visible rather than dropped: an omitted reference
+   reads as "nothing is recorded" instead of "something is recorded that could not be read". */
+.dticGap {
+  margin: 0;
+  border-left: 3px solid #d6a33b;
+  border-radius: 8px;
+  background: #fff8e8;
+  padding: 6px 8px;
+  color: #765313;
+  font-size: 10.5px;
+  line-height: 1.4;
 }

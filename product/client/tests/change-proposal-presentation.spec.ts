@@ -1,15 +1,17 @@
 import { expect, test } from "@playwright/test"
+import { levelBadge } from "../src/changeNetworkPresentation"
 import {
   badgeForKind,
   diffFor,
   insideEdges,
   downstreamNotice,
-  downstreamState,
   insideLaneLabels,
   levelBelow,
   levelNoun,
   matchesType,
   type ProposalItem,
+  type RequirementCoverageTarget,
+  type VerificationProposalItem,
 } from "../src/changeProposalPresentation"
 
 // Lane labels, diffs and the downstream-emptiness rule are pure, so they are asserted directly. The rule that
@@ -21,6 +23,7 @@ const item = (over: Partial<ProposalItem> & { id: string; kind: string }): Propo
   level: "System",
   statement: "The FMS shall sequence oceanic waypoints in round-robin order.",
   allocatedDownstream: [],
+  disposition: "Allocated",
   ...over,
 })
 
@@ -94,34 +97,58 @@ test("a Modify with no resolvable before text shows no diff rather than a diff f
   expect(diffFor(item({ id: "SR-4", kind: "Modify", supersededStatement: null }))).toBeNull()
 })
 
-test("an empty downstream lane distinguishes its three causes", () => {
-  const allocated = item({
-    id: "SR-5",
-    kind: "Modify",
-    baseRevisionId: "rev-1",
-    allocatedDownstream: [
-      { id: "h1", displayNumber: "HLR-1.00", level: "HighLevel", statement: "s", isProposed: false },
-    ],
-  })
-  expect(downstreamState(allocated)).toBe("allocated")
-  expect(downstreamNotice(downstreamState(allocated))).toBeNull()
+test("the downstream sentence comes from the server disposition, not from a null base", () => {
+  // Allocated says nothing, because there is nothing to explain.
+  expect(downstreamNotice(item({ id: "SR-5", kind: "Modify", disposition: "Allocated" }))).toBeNull()
 
   // Nothing can allocate to a requirement that is not in the build yet.
-  expect(downstreamState(item({ id: "SR-6", kind: "Introduce" }))).toBe("notYetExisting")
+  expect(downstreamNotice(item({ id: "SR-6", kind: "Introduce", disposition: "TargetNotYetCreated" }))).toContain(
+    "does not exist in the build",
+  )
 
-  // The case #880 §8.5 missed: the allocation exists, but against a later revision than this proposal names.
-  const stale = item({ id: "SR-7", kind: "Modify", baseRevisionId: null })
-  expect(downstreamState(stale)).toBe("behindTarget")
-  expect(downstreamNotice("behindTarget")).toContain("later revision")
+  // A genuine absence, in its own words.
+  expect(downstreamNotice(item({ id: "SR-8", kind: "Modify", disposition: "NoAllocationRecorded" }))).toBe(
+    "Nothing is allocated below this requirement.",
+  )
 
-  // A genuine absence, and it must not borrow either of the other two sentences.
-  expect(downstreamState(item({ id: "SR-8", kind: "Modify", baseRevisionId: "rev-2" }))).toBe("none")
-  expect(downstreamNotice("none")).toBe("Nothing is allocated below this requirement.")
+  // A data gap is not staleness. The old client read a null baseRevisionId as "behind its target, so the
+  // allocation hangs off a later revision" — a traceability claim an unresolvable base does not support.
+  const gap = downstreamNotice(
+    item({ id: "SR-7", kind: "Modify", disposition: "BaseRevisionUnresolved", baseRevisionId: null }),
+  )
+  expect(gap).toContain("could not be resolved")
+  expect(gap).not.toContain("later revision")
 })
 
-test("a change request flagged for rebase reads as behind its target even with a resolved base", () => {
-  const flagged = item({ id: "SR-9", kind: "Modify", baseRevisionId: "rev-3" })
-  expect(downstreamState(flagged, true)).toBe("behindTarget")
+test("behind-target states both revisions and claims nothing about where the allocation sits", () => {
+  const notice = downstreamNotice(
+    item({
+      id: "SR-9",
+      kind: "Modify",
+      disposition: "BehindTarget",
+      supersededRevision: 1,
+      latestRevision: 2,
+      latestRevisionState: "Active",
+    }),
+  )
+
+  // The fact: targets 01, requirement is now at 02. Not a claim that 02 carries the allocation, because
+  // nothing looked there.
+  expect(notice).toContain("revision 01")
+  expect(notice).toContain("revision 02")
+  expect(notice).toContain("active")
+  expect(notice).not.toContain("hangs off")
+})
+
+test("a stale item cannot contaminate a sibling, because each carries its own disposition", () => {
+  // One stale item strands the whole change request. Deciding this from a change-request-wide flag, as the
+  // client used to, would mark every empty item in it as behind its target.
+  const stale = item({ id: "SR-10", kind: "Modify", disposition: "BehindTarget", supersededRevision: 1, latestRevision: 2 })
+  const sibling = item({ id: "SR-11", kind: "Introduce", disposition: "TargetNotYetCreated" })
+
+  expect(downstreamNotice(stale)).toContain("revision 02")
+  expect(downstreamNotice(sibling)).toContain("does not exist in the build")
+  expect(downstreamNotice(sibling)).not.toContain("revision 02")
 })
 
 test("coverage edges are drawn only where the record says what it covers", () => {
@@ -136,7 +163,7 @@ test("coverage edges are drawn only where the record says what it covers", () =>
   // covers. Only the one recorded link may be drawn.
   const covering = [{ id: "tp1", coversIds: ["h1"] }, { id: "tp2" }]
 
-  const edges = insideEdges("SRCR-1", items, covering)
+  const edges = insideEdges("SRCR-1", items, [], covering)
   const coverage = edges.filter(edge => edge.label === "covered by")
 
   expect(coverage).toHaveLength(1)
@@ -166,4 +193,93 @@ test("the opened change links to every item it proposes", () => {
 
   expect(edges.filter(edge => edge.from === "SRCR-9")).toHaveLength(2)
   expect(edges.map(edge => edge.label)).toEqual(["introduce", "modify"])
+})
+
+test.describe("verification proposals are verification content", () => {
+  const vItem = (
+    over: Partial<VerificationProposalItem> & { id: string; kind: string },
+  ): VerificationProposalItem => ({
+    displayNumber: over.id,
+    level: "System",
+    artifactKind: "Procedure",
+    proposedContent: null,
+    finalCoverage: [],
+    addedCoverage: [],
+    removedCoverage: [],
+    parentKind: "Allocated",
+    exactParents: [],
+    referenceGaps: [],
+    ...over,
+  })
+
+  const covered = (revisionId: string, displayNumber: string): RequirementCoverageTarget => ({
+    revisionId,
+    artifactId: `art-${revisionId}`,
+    displayNumber,
+    level: "System",
+    statement: "s",
+  })
+
+  test("a verification proposal links to the exact revision it covers, by revision identity", () => {
+    const items = [
+      vItem({
+        id: "tp-1",
+        kind: "Modify",
+        finalCoverage: [covered("rev-a", "SR-1.00"), covered("rev-b", "SR-2.00")],
+      }),
+    ]
+
+    const edges = insideEdges("TCR-1", [], items)
+
+    // The edge target is the revision id, never the display number and never lane adjacency.
+    const covers = edges.filter(edge => edge.label === "covers")
+    expect(covers.map(edge => edge.to).sort()).toEqual(["rev-a", "rev-b"])
+    expect(covers.every(edge => edge.from === "tp-1")).toBe(true)
+    // And the package links to its own proposal.
+    expect(edges.some(edge => edge.from === "TCR-1" && edge.to === "tp-1")).toBe(true)
+  })
+
+  test("final coverage is what the lane shows, not the added delta", () => {
+    // A Modify that retains A and B, drops C and adds D leaves the successor covering A, B and D. A lane fed
+    // the added delta alone would show D and tell the reader that A and B had stopped being covered.
+    const item = vItem({
+      id: "tp-2",
+      kind: "Modify",
+      finalCoverage: [covered("a", "SR-A.00"), covered("b", "SR-B.00"), covered("d", "SR-D.00")],
+      addedCoverage: [covered("d", "SR-D.00")],
+      removedCoverage: [covered("c", "SR-C.00")],
+    })
+
+    const covers = insideEdges("TCR-1", [], [item]).filter(edge => edge.label === "covers")
+
+    expect(covers.map(edge => edge.to).sort()).toEqual(["a", "b", "d"])
+    expect(covers.map(edge => edge.to)).not.toContain("c")
+  })
+
+  test("a retired verification proposal draws its cascade dashed and proposes no successor body", () => {
+    const item = vItem({
+      id: "tp-3",
+      kind: "Retire",
+      proposedContent: null,
+      finalCoverage: [covered("a", "SR-A.00")],
+    })
+
+    const edges = insideEdges("TCR-1", [], [item])
+
+    expect(edges.every(edge => edge.kind === "retire")).toBe(true)
+    expect(edges.map(edge => edge.label)).toEqual(["retire", "retire cascade"])
+    expect(item.proposedContent).toBeNull()
+  })
+})
+
+test("level badges follow the configured ladder rather than falling back to System", () => {
+  // The regression this guards: an inline ternary that returned SYS for anything it did not recognise, so a
+  // Customer or Interface record read as System.
+  expect(levelBadge("HighLevel")).toBe("HLR")
+  expect(levelBadge("LowLevel")).toBe("LLR")
+  expect(levelBadge("System")).toBe("SYS")
+  expect(levelBadge("Interface")).toBe("IFC")
+  expect(levelBadge("Customer")).toBe("CUS")
+  // A level this table does not name reads as itself, never as System.
+  expect(levelBadge("SafetyCase")).not.toBe("SYS")
 })

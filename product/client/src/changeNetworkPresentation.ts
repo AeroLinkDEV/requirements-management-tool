@@ -311,3 +311,28 @@ export const suspectEndpointIds = (edges: readonly NetworkEdge[]): Set<string> =
   }
   return endpoints
 }
+
+/**
+ * The short level badge for a record whose level the server has stated.
+ *
+ * Shared so no view invents its own. An inline ternary in the inside-a-change view previously fell back to
+ * `SYS` for anything it did not recognise, so a Customer or Interface record read as System — the exact
+ * regression the ladder work in slice 3 existed to prevent. A level this table does not name still reads as
+ * itself rather than as something else.
+ */
+export const levelBadge = (level: string | null | undefined): string => {
+  switch (level) {
+    case "HighLevel":
+      return "HLR"
+    case "LowLevel":
+      return "LLR"
+    case "Interface":
+      return "IFC"
+    case "Customer":
+      return "CUS"
+    case "System":
+      return "SYS"
+    default:
+      return (level ?? "").slice(0, 3).toUpperCase() || "—"
+  }
+}
