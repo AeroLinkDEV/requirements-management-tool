@@ -266,11 +266,11 @@ public static class ArtifactThreadProjection
 
         var seeds = await CoveredRequirementsAsync(db, projectId, anchors.Revisions, ct);
         if (focalKind == ArtifactThreadFocalKind.Requirement) seeds = [focalId];
-        var requirementWalk = await WalkAsync(db, projectId, seeds, focalKind, acc, ct);
+        var requirementIds = await WalkAsync(db, projectId, seeds, focalKind, acc, ct);
 
-        await AddChangeAndProblemAsync(db, projectId, requirementWalk.All, acc, ct);
-        var verification = await AddVerificationAsync(db, projectId, requirementWalk.All,
-            requirementWalk.VerificationSources, anchors, focalKind, focalId, buildIds, builds, acc, ct);
+        await AddChangeAndProblemAsync(db, projectId, requirementIds, acc, ct);
+        var verification = await AddVerificationAsync(db, projectId, requirementIds, anchors, focalKind, focalId,
+            buildIds, builds, acc, ct);
 
         return new ArtifactThreadResult(projectId, baselineId, buildId, focalKind.ToString(), focalId,
             [.. acc.Nodes.Values], acc.Edges, verification);
@@ -512,7 +512,7 @@ public static class ArtifactThreadProjection
     /// has no recorded relationship with.
     /// </para>
     /// </summary>
-    private static async Task<(IReadOnlyCollection<Guid> All, IReadOnlyCollection<Guid> VerificationSources)> WalkAsync(
+    private static async Task<IReadOnlyCollection<Guid>> WalkAsync(
         AeroLinkDbContext db, Guid projectId, IReadOnlyList<Guid> seeds, ArtifactThreadFocalKind focalKind,
         Accumulator acc, CancellationToken ct)
     {
@@ -526,17 +526,12 @@ public static class ArtifactThreadProjection
         var upward = links.ToLookup(x => x.SourceRevisionId);
         var downward = links.ToLookup(x => x.TargetRevisionId);
 
-        // Keep the Source → Target half separate. Verification edges also leave a Requirement, so only the
-        // focal and Requirements reached by continuing this same half may pivot into verification. A Requirement
-        // reached through Target → Source remains a legitimate trace node, but turning around there into its
-        // Case/Procedure branch would be the sideways reversal §6.5 forbids.
-        var verificationSources = new HashSet<Guid>(seeds);
+        var reachable = new HashSet<Guid>(seeds);
         var queue = new Queue<Guid>(seeds);
         while (queue.Count > 0)
             foreach (var link in upward[queue.Dequeue()])
-                if (verificationSources.Add(link.TargetRevisionId)) queue.Enqueue(link.TargetRevisionId);
+                if (reachable.Add(link.TargetRevisionId)) queue.Enqueue(link.TargetRevisionId);
 
-        var reachable = new HashSet<Guid>(verificationSources);
         if (focalKind == ArtifactThreadFocalKind.Requirement)
         {
             var down = new HashSet<Guid>(seeds);
@@ -547,7 +542,7 @@ public static class ArtifactThreadProjection
             reachable.UnionWith(down);
         }
 
-        if (reachable.Count == 0) return ([], []);
+        if (reachable.Count == 0) return [];
 
         // Project-scoped at the seam (§8.6): a revision reached through a link is admitted only if its own
         // artifact belongs to this Project.
@@ -574,9 +569,7 @@ public static class ArtifactThreadProjection
                 KindRequirement, RelationFor(link.Type),
                 SuspectFromLifecycle(link.ExactLinkSuspectLifecycleId, states)));
 
-        var admitted = rows.Select(x => x.Id).ToHashSet();
-        verificationSources.IntersectWith(admitted);
-        return (admitted, verificationSources);
+        return rows.Select(x => x.Id).ToHashSet();
     }
 
     private static async Task<IReadOnlyDictionary<Guid, ExactLinkLifecycleState>> LifecycleStatesAsync(
@@ -646,7 +639,7 @@ public static class ArtifactThreadProjection
     /// <summary>Lanes 3, 4 and 5, plus the applicability statement when the levels have no discipline.</summary>
     private static async Task<ArtifactThreadVerification> AddVerificationAsync(
         AeroLinkDbContext db, Guid projectId, IReadOnlyCollection<Guid> requirementIds,
-        IReadOnlyCollection<Guid> verificationRequirementIds, Anchors anchors,
+        Anchors anchors,
         ArtifactThreadFocalKind focalKind, Guid focalId, IReadOnlyCollection<Guid> buildIds,
         IReadOnlyDictionary<Guid, (string Number, string Description, SoftwareBuildState State)> builds,
         Accumulator acc, CancellationToken ct)
@@ -670,10 +663,10 @@ public static class ArtifactThreadProjection
             }
         }
 
-        var coverage = verificationRequirementIds.Count == 0
+        var coverage = requirementIds.Count == 0
             ? []
             : await db.TestCoverage.AsNoTracking()
-                .Where(x => verificationRequirementIds.Contains(x.RequirementRevisionId))
+                .Where(x => requirementIds.Contains(x.RequirementRevisionId))
                 .Select(x => new { x.ProcedureRevisionId, x.RequirementRevisionId, x.IsSuspect })
                 .ToListAsync(ct);
 

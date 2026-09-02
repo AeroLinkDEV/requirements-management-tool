@@ -433,10 +433,18 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
 
         var thread = await ThreadAsync(client, world, "Requirement", world.SystemRevisionId);
         var requirements = Nodes(thread, "Requirement").Select(x => x.GetProperty("id").GetString()).ToList();
-        var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList(); var cases = Nodes(thread, "Case").Select(x => x.GetProperty("id").GetString()).ToList();
-        // System keeps incoming HLR trace nodes and its own procedure, but it must not turn around into HLR verification.
-        Assert.Contains(world.HighLevelRevisionId.ToString(), requirements); Assert.Contains(world.SiblingHighLevelRevisionId.ToString(), requirements); Assert.Contains(world.SystemProcedureRevisionId.ToString(), procedures);
-        Assert.DoesNotContain(world.FirstProcedureRevisionId.ToString(), procedures); Assert.DoesNotContain(world.CaseRevisionId.ToString(), cases);
+        var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
+        var cases = Nodes(thread, "Case").Select(x => x.GetProperty("id").GetString()).ToList();
+
+        // Direction purity is not narrowing: from the parent, both children are genuinely downstream, and so is
+        // the verification hanging beneath them. The canonical prototype thread is focused on SYSR-000100.01 and
+        // renders HLR-000075.02 and LLR-000220.00 together with HLRTC/HLRTP and LLRTC/LLRTP, all converging on
+        // one execution and build. Descending the ladder and continuing into verification never reverses.
+        Assert.Contains(world.HighLevelRevisionId.ToString(), requirements);
+        Assert.Contains(world.SiblingHighLevelRevisionId.ToString(), requirements);
+        Assert.Contains(world.SystemProcedureRevisionId.ToString(), procedures);
+        Assert.Contains(world.CaseRevisionId.ToString(), cases);
+        Assert.Contains(world.FirstProcedureRevisionId.ToString(), procedures);
     }
 
     // ---- focal-first, and exact kind --------------------------------------------------------------------
