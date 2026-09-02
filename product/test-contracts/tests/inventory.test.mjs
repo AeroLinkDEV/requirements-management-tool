@@ -282,7 +282,7 @@ test('reviewed #563 holds keep every unsafe reusable class out of reuse headroom
   }
   assert.deepEqual(hostArtifact.summary['reusable-host'], { classes: 44, tests: 279, knownCases: 310, unknownCaseTests: 0 })
   assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 46, tests: 295, knownCases: 327, unknownCaseTests: 0 })
-  assert.deepEqual(hostArtifact.summary.converted, { classes: 29, tests: 203, knownCases: 219, unknownCaseTests: 0 })
+  assert.deepEqual(hostArtifact.summary.converted, { classes: 29, tests: 204, knownCases: 220, unknownCaseTests: 0 })
   assert.deepEqual(hostArtifact.summary['migration-candidate'], { classes: 2, tests: 2, knownCases: 7, unknownCaseTests: 0 })
 })
 
@@ -326,7 +326,7 @@ test('host classification CLI distinguishes known cases from unknown-case method
     ], { encoding: 'utf8' })
     assert.match(output, /classification\s+classes\s+methods\s+known cases\s+unknown-case methods\s+share of methods/)
     assert.match(output, /reusable-host\s+44\s+279\s+310\s+0\s+35.8%/)
-    assert.match(output, /fresh-host\s+46\s+295\s+327\s+0\s+37.9%/)
+    assert.match(output, /fresh-host\s+46\s+295\s+327\s+0\s+37.8%/)
     assert.match(output, /Remaining reuse headroom:\s+44 classes, 279 methods, 310 known cases/)
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true })
@@ -335,12 +335,12 @@ test('host classification CLI distinguishes known cases from unknown-case method
 
 test('committed inventories expose per-row case and host evidence', () => {
   assert.equal(intentArtifact.schemaVersion, 'aerolink-api-test-intent/v2')
-  assert.equal(intentArtifact.totals.tests, 779)
-  assert.equal(intentArtifact.totals.cases, 863)
+  assert.equal(intentArtifact.totals.tests, 780)
+  assert.equal(intentArtifact.totals.cases, 864)
   assert.equal(intentArtifact.totals.criterion7, 'unresolved')
   assert.ok(intentArtifact.tests.every((row) => Object.hasOwn(row, 'cases') && Object.hasOwn(row, 'hosted') && Array.isArray(row.hostEvidence) && row.sourceLines.start <= row.sourceLines.end))
   assert.equal(hostArtifact.schemaVersion, 'aerolink-api-host-classification/v3')
-  assert.equal(hostArtifact.totals.knownCases, 863)
+  assert.equal(hostArtifact.totals.knownCases, 864)
   assert.equal(hostArtifact.totals.unknownCaseTests, 0)
   assert.ok(hostArtifact.classes.every((row) => Number.isInteger(row.knownCases) && Number.isInteger(row.unknownCaseTests)))
   for (const cls of ['ReleasedExecutionEvidenceApiTests', 'ReleasedExecutionEvidenceAuthorityMismatchTests', 'ProblemReportPagingApiTests', 'ProductionRoutingTests']) {

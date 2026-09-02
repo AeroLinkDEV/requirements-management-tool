@@ -237,6 +237,79 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
             memberName, outsiderName);
     }
 
+    private sealed record SelectedPackageWorld(Guid SelectedTcrId, string Member);
+
+    /// <summary>
+    /// A package taken through the real selection path: approved, concluding that test work is required,
+    /// carrying a procedure decision, then selected into a candidate baseline by the aggregate itself.
+    ///
+    /// The selection row is never manufactured — <see cref="CandidateBaseline.SelectTestChangeRequest"/>
+    /// creates it, and every precondition it enforces is satisfied honestly. A decoy candidate sits later in
+    /// the same release without selecting the package.
+    /// </summary>
+    private static async Task<SelectedPackageWorld> SeedSelectedPackageAsync(AeroLinkApiFactory factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var memberName = $"tcrsel.member.{tag}";
+        var program = new ProgramRecord($"TCR selection {tag}", $"TS{tag}");
+        var project = new ProjectRecord(program.Id, "Flight management", "TCR selection qualification");
+        var release = new SoftwareRelease(project.Id, "6.1", false);
+        var member = new UserAccount(memberName, memberName, $"{memberName}@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        db.AddRange(program, project, release, member,
+            new ProgramMembership(member.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
+
+        var scr = new SystemChangeRequest("SRCR-94001", 0, project.Id, release.Id, "Carrying change",
+            "Problem", "Analysis", "Solution", memberName, now);
+        db.Add(scr);
+
+        var tcr = new TestChangeReview(project.Id, release.Id, scr.Id,
+            new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Procedure),
+            "SRCR-94001.00", now, "SYSTPCR-94001", 0);
+        // Concludes that test work IS required, which is what makes the package selectable at all.
+        tcr.RecordTestChangeRequired(memberName, now);
+        // A System Procedure must be Allocated to an exact requirement revision before it can be submitted —
+        // the domain refuses an unparented one, so the fixture gives it a real parent rather than working
+        // around the rule.
+        var baseline0 = new CandidateBaseline("SW-94.00", 0, project.Id, release.Id, null, "Build 6.0", "cm", now);
+        var driven = new RequirementArtifact(project.Id, "SR-94001", RequirementLevel.System, now);
+        var drivenRevision = new RequirementRevision(driven.Id, 0,
+            "The FMS shall sequence oceanic waypoints.", "Rationale", "Test",
+            RequirementRevisionState.Active, scr.Id, baseline0.Id, now);
+        db.AddRange(driven, drivenRevision);
+
+        tcr.AddProcedureChange(memberName, new TestProcedureChangeDraft("SYSTP-94001", 0,
+            TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Selected procedure",
+            "Verify selection.", "Configured product.", "Run it.", "It passes.", "Selection qualification.",
+            JsonSerializer.Serialize(new[] { drivenRevision.Id }), "[]", "",
+            VerificationProcedureParentKind.Allocated,
+            JsonSerializer.Serialize(new[] { drivenRevision.Id })),
+            now);
+        tcr.WriteCase(memberName, "Selection package", "Problem", "Analysis", "Solution", now);
+        tcr.SubmitForReview(memberName,
+            [
+                new ApproverSelection("tcr.reviewer", "TCR Reviewer", ProgramRole.Reviewer),
+                new ApproverSelection("tcr.approver", "TCR Approver", ProgramRole.Approver),
+            ], true, now);
+        tcr.ApproveActiveStage("tcr.reviewer", "Reviewed.", now.AddMinutes(1));
+        tcr.ApproveActiveStage("tcr.approver", "Approved.", now.AddMinutes(2));
+        db.Add(tcr);
+
+        var predecessor = baseline0;
+        var selecting = new CandidateBaseline("SW-94.01", 0, project.Id, release.Id, predecessor.Id,
+            "Build 6.1 candidate", "cm", now);
+        selecting.SelectTestChangeRequest(tcr, "cm", now.AddMinutes(3));
+        var decoy = new CandidateBaseline("SW-94.02", 0, project.Id, release.Id, selecting.Id,
+            "Later candidate", "cm", now);
+        db.AddRange(predecessor, selecting, decoy);
+
+        await db.SaveChangesAsync();
+        return new(tcr.Id, memberName);
+    }
+
     private static async Task SignInAsync(HttpClient client, string userName)
     {
         using var login = await client.PostAsJsonAsync("/api/auth/login",
@@ -577,6 +650,27 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
         // Same rule as the requirement side: a candidate existing for the release is not this package being
         // selected into it.
         Assert.Empty((await ContentAsync(client, fixture.SystemTcrId)).GetProperty("buildEffect").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Build_effect_names_the_baseline_that_selected_this_package_and_its_predecessor()
+    {
+        var world = await SeedSelectedPackageAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var effect = (await ContentAsync(client, world.SelectedTcrId))
+            .GetProperty("buildEffect").EnumerateArray().ToList();
+
+        var current = effect.Single(x => !x.GetProperty("isPredecessor").GetBoolean());
+        Assert.Equal("SW-94.01.00", current.GetProperty("displayNumber").GetString());
+
+        var predecessor = effect.Single(x => x.GetProperty("isPredecessor").GetBoolean());
+        Assert.Equal("SW-94.00.00", predecessor.GetProperty("displayNumber").GetString());
+
+        // A later candidate in the same release did not select this package. If lane 4 ever went back to
+        // "newest candidate for the release", this is the assertion that would fail.
+        Assert.DoesNotContain(effect, x => x.GetProperty("displayNumber").GetString() == "SW-94.02.00");
     }
 
     [Fact]
