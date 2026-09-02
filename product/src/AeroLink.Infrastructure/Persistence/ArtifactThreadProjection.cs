@@ -157,6 +157,9 @@ public static class ArtifactThreadProjection
     private const string KindBuild = "Build";
     private const string KindChangeRequest = "ChangeRequest";
     private const string KindProblemReport = "ProblemReport";
+    // The vocabulary ChangeRequestTraceProjection already uses for a controlled test change package. A
+    // TestChangeReview is a different aggregate from a SystemChangeRequest and must not be dressed as one.
+    private const string KindTestChangeRequest = "TestChangeRequest";
 
     /// <summary>
     /// A link is suspect when it carries a lifecycle that is not yet Closed.
@@ -745,6 +748,7 @@ public static class ArtifactThreadProjection
             acc.Link(new ArtifactThreadEdge(link.CaseRevisionId, KindCase, link.ProcedureRevisionId,
                 KindProcedure, "run by", SuspectFromLifecycle(link.LifecycleId, caseStates)));
 
+        await AddTestChangeRequestsAsync(db, projectId, allRevisionIds, acc, ct);
         await AddResultsAsync(db, projectId, allRevisionIds, buildIds, builds, focalKind, focalId, acc, ct);
         return new ArtifactThreadVerification(true, null);
     }
@@ -832,6 +836,50 @@ public static class ArtifactThreadProjection
             if (execution.RetestOfExecutionId is Guid retestOf)
                 acc.Link(new ArtifactThreadEdge(execution.Id, KindExecution, retestOf, KindExecution,
                     "retest of", false));
+    }
+
+    /// <summary>
+    /// Lane 1 for the verification side: the controlled package that produced each exact revision.
+    ///
+    /// <para>
+    /// A requirement revision names its change request through <c>SourceChangeRequestId</c>; a Case or
+    /// Procedure revision names its test change package through <c>SourceTestChangeRequestId</c> in exactly the
+    /// same sense. Reading only the first made the verification side less attributable than the requirement
+    /// side, though the domain stores both — a thread rooted on a controlled Procedure could show the artifact,
+    /// its requirement, its runs and its build while silently omitting the package that produced it.
+    /// </para>
+    /// <para>
+    /// Recorded provenance only. A revision whose source is null is legacy and gets no package invented for it,
+    /// and nothing is inferred from identifier, discipline, display number or lane adjacency.
+    /// </para>
+    /// </summary>
+    private static async Task AddTestChangeRequestsAsync(
+        AeroLinkDbContext db, Guid projectId, IReadOnlyCollection<Guid> verificationRevisionIds,
+        Accumulator acc, CancellationToken ct)
+    {
+        if (verificationRevisionIds.Count == 0) return;
+
+        var sources = await db.TestProcedureRevisions.AsNoTracking()
+            .Where(x => verificationRevisionIds.Contains(x.Id) && x.SourceTestChangeRequestId != null)
+            .Select(x => new { RevisionId = x.Id, PackageId = x.SourceTestChangeRequestId!.Value })
+            .ToListAsync(ct);
+        if (sources.Count == 0) return;
+
+        var packageIds = sources.Select(x => x.PackageId).Distinct().ToList();
+        var packages = await db.TestChangeReviews.AsNoTracking()
+            .Where(x => packageIds.Contains(x.Id) && x.ProjectId == projectId)
+            .Select(x => new { x.Id, x.BaseNumber, x.Revision, x.Title, x.State })
+            .ToListAsync(ct);
+
+        foreach (var package in packages)
+            acc.Place(new ArtifactThreadNode(package.Id, KindTestChangeRequest,
+                ArtifactThreadLane.ChangeRequest, $"{package.BaseNumber}.{package.Revision:D2}",
+                package.Title, package.State.ToString(), Level: null, IsFocal: false));
+
+        foreach (var source in sources)
+            acc.Link(new ArtifactThreadEdge(source.PackageId, KindTestChangeRequest, source.RevisionId,
+                acc.Nodes.TryGetValue(source.RevisionId, out var node) ? node.Kind : KindProcedure,
+                "authored", false));
     }
 
     /// <summary>

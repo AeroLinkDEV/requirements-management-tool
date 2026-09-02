@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 817,
-    "cases": 906,
+    "tests": 820,
+    "cases": 909,
     "classes": 122,
-    "hostedTests": 787,
-    "hostedCases": 862,
+    "hostedTests": 790,
+    "hostedCases": 865,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 8,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 514,
-      "cases": 571,
+      "tests": 517,
+      "cases": 574,
       "unknownCases": 0,
       "classes": 101
     },
@@ -720,6 +720,24 @@
     },
     {
       "cls": "ArtifactThreadApiTests",
+      "test": "A_legacy_revision_with_no_recorded_package_has_none_invented",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 794,
+        "end": 809
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
       "test": "A_named_build_narrows_the_thread_to_that_build_alone",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -734,6 +752,24 @@
       "sourceLines": {
         "start": 381,
         "end": 392
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "A_package_from_another_project_never_reaches_this_thread",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 811,
+        "end": 824
       }
     },
     {
@@ -770,6 +806,24 @@
       "sourceLines": {
         "start": 582,
         "end": 599
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "A_procedure_produced_by_a_test_change_request_names_that_package",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 765,
+        "end": 792
       }
     },
     {

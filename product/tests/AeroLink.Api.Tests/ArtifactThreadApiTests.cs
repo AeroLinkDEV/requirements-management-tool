@@ -760,6 +760,69 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         Assert.DoesNotContain(world.SiblingHighLevelRevisionId.ToString(), requirements);
     }
 
+    // ---- the package that produced a verification revision -----------------------------------------------
+
+    [Fact]
+    public async Task A_procedure_produced_by_a_test_change_request_names_that_package()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Procedure", world.MaterializedProcedureRevisionId);
+
+        // A requirement revision names its change request through SourceChangeRequestId; a Case or Procedure
+        // revision names its package through SourceTestChangeRequestId in the same sense. Reading only the
+        // first left the verification side less attributable than the requirement side, though the domain
+        // records both.
+        var package = Nodes(thread, "TestChangeRequest")
+            .Single(x => x.GetProperty("id").GetString() == world.ProducingTestChangeRequestId.ToString());
+        Assert.Equal(1, package.GetProperty("lane").GetInt32());
+        Assert.Equal("SYSTPCR-97050.00", package.GetProperty("displayNumber").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(package.GetProperty("state").GetString()));
+
+        // Carried as a TestChangeRequest, not dressed as a requirements ChangeRequest — they are different
+        // aggregates and ChangeRequestType has no Test member.
+        Assert.Contains(thread.GetProperty("edges").EnumerateArray(), x =>
+            x.GetProperty("fromId").GetString() == world.ProducingTestChangeRequestId.ToString()
+            && x.GetProperty("toId").GetString() == world.MaterializedProcedureRevisionId.ToString()
+            && x.GetProperty("fromKind").GetString() == "TestChangeRequest"
+            && x.GetProperty("toKind").GetString() == "Procedure"
+            && x.GetProperty("relation").GetString() == "authored");
+    }
+
+    [Fact]
+    public async Task A_legacy_revision_with_no_recorded_package_has_none_invented()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Procedure", world.FirstProcedureRevisionId);
+
+        // SourceTestChangeRequestId is null on this revision. Nothing is inferred from its identifier,
+        // discipline, display number or lane adjacency, so the Change Request lane stays empty rather than
+        // asserting a package that does not exist.
+        Assert.Empty(Nodes(thread, "TestChangeRequest"));
+        Assert.DoesNotContain(thread.GetProperty("edges").EnumerateArray(),
+            x => x.GetProperty("fromKind").GetString() == "TestChangeRequest");
+    }
+
+    [Fact]
+    public async Task A_package_from_another_project_never_reaches_this_thread()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Procedure", world.MaterializedProcedureRevisionId);
+        var raw = thread.GetRawText();
+
+        // The package lookup is Project-scoped at the seam, like every other read here.
+        Assert.DoesNotContain("SYSTPCR-98900", raw);
+        Assert.DoesNotContain(world.ForeignTestChangeRequestId.ToString(), raw);
+    }
+
     // ---- helpers ---------------------------------------------------------------------------------------
 
     private static List<JsonElement> Nodes(JsonElement thread, string kind) =>
@@ -801,6 +864,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         Guid LonelyProcedureRevisionId, Guid LonelyCaseRevisionId, Guid LonelyExecutionId, Guid LonelyBuildId,
         Guid LonelyBaselineId, Guid ForeignBaselineId,
         Guid PeerRunInFirstBuildId, Guid PeerRunInSecondBuildId,
+        Guid MaterializedProcedureRevisionId, Guid ProducingTestChangeRequestId, Guid ForeignTestChangeRequestId,
         Guid UncoveredCaseRevisionId, Guid UncoveredProcedureRevisionId, Guid SystemArtifactId, Guid SystemRevisionId, Guid SupersededSystemRevisionId,
         Guid ClosedProcedureRevisionId, Guid RevisedCaseRevisionId, Guid HighLevelRevisionId, Guid SiblingHighLevelRevisionId,
         Guid InterfaceRevisionId, Guid CaseRevisionId, Guid FirstProcedureRevisionId,
@@ -1003,6 +1067,22 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
             "Uncovered procedure", TestProcedureLevel.HighLevel, VerificationArtifactKind.Procedure, member, now);
         db.Add(new TestCaseProcedureLink(uncoveredCaseRevision.Id, uncoveredProcedureRevision.Id));
 
+        // A System Procedure produced by a controlled test change package. Seeded through the attributed
+        // materializer path the persistence boundary already recognises: an Approved revision 0 that names its
+        // source package and carries an explicit parent classification.
+        var producingPackage = new TestChangeReview(project.Id, release.Id, scr.Id,
+            new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Procedure),
+            "SRCR-97001.00", now, "SYSTPCR-97050", 0);
+        db.Add(producingPackage);
+        var materializedArtifact = new TestProcedure(project.Id, "SYSTP-97050", "Materialized procedure",
+            member, now, TestProcedureLevel.System, null, VerificationArtifactKind.Procedure);
+        var materializedRevision = new TestProcedureRevision(materializedArtifact.Id, 0, "Objective",
+            "Preconditions", "Steps", "Expected", TestProcedureState.Approved, member, now,
+            sourceTestChangeRequestId: producingPackage.Id, effectiveBaselineId: baseline.Id,
+            parentKind: VerificationProcedureParentKind.Allocated);
+        db.AddRange(materializedArtifact, materializedRevision);
+        db.Add(new TestRequirementCoverage(materializedRevision.Id, currentSystem.Id));
+
         // Artifacts with no relationships at all. §6.8 says an unconnected record still renders as a normal
         // card, so each of these must come back as its own thread rather than vanishing from it.
         var (lonelyCase, lonelyCaseRevision) = Verification(db, project.Id, "HLRTC-97009", "Unconnected case",
@@ -1033,6 +1113,10 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         var foreignRevision = new RequirementRevision(foreignArtifact.Id, 0, "Foreign statement.",
             "Rationale", "Test", RequirementRevisionState.Active, foreignScr.Id, foreignBaseline.Id, now);
         db.AddRange(foreignArtifact, foreignRevision);
+        var foreignPackage = new TestChangeReview(foreignProject.Id, foreignRelease.Id, foreignScr.Id,
+            new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Procedure),
+            "SRCR-98001.00", now, "SYSTPCR-98900", 0);
+        db.Add(foreignPackage);
 
         await db.SaveChangesAsync();
 
@@ -1041,6 +1125,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
             lonelyProcedureRevision.Id, lonelyCaseRevision.Id, lonelyExecution.Id, lonelyBuild.Id,
             lonelyBaseline.Id, foreignBaseline.Id,
             peerRunInFirstBuild.Id, peerRunInSecondBuild.Id,
+            materializedRevision.Id, producingPackage.Id, foreignPackage.Id,
             uncoveredCaseRevision.Id, uncoveredProcedureRevision.Id, systemArtifact.Id, currentSystem.Id, supersededSystem.Id,
             closedProcedureRevision.Id, revisedCaseRevision.Id, highLevelRevision.Id, siblingRevision.Id, interfaceRevision.Id,
             caseRevision.Id, firstRevision.Id, secondRevision.Id, systemProcedureRevision.Id,
