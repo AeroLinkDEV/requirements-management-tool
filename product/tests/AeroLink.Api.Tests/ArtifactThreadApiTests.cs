@@ -436,15 +436,16 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
         var cases = Nodes(thread, "Case").Select(x => x.GetProperty("id").GetString()).ToList();
 
-        // Direction purity is not narrowing: from the parent, both children are genuinely downstream, and so is
-        // the verification hanging beneath them. The canonical prototype thread is focused on SYSR-000100.01 and
-        // renders HLR-000075.02 and LLR-000220.00 together with HLRTC/HLRTP and LLRTC/LLRTP, all converging on
-        // one execution and build. Descending the ladder and continuing into verification never reverses.
+        // An HLR is reached from System only on the Target-to-Source half, because a trace edge runs child to
+        // parent. Verification edges leave a requirement in the other orientation, so continuing from that
+        // reached HLR into its case would switch halves mid-walk — the turn-around §6.5 forbids. The HLR stays
+        // as a trace node; it just does not become a new pivot. System keeps its own procedure, which is
+        // reached without changing direction.
         Assert.Contains(world.HighLevelRevisionId.ToString(), requirements);
         Assert.Contains(world.SiblingHighLevelRevisionId.ToString(), requirements);
         Assert.Contains(world.SystemProcedureRevisionId.ToString(), procedures);
-        Assert.Contains(world.CaseRevisionId.ToString(), cases);
-        Assert.Contains(world.FirstProcedureRevisionId.ToString(), procedures);
+        Assert.DoesNotContain(world.CaseRevisionId.ToString(), cases);
+        Assert.DoesNotContain(world.FirstProcedureRevisionId.ToString(), procedures);
     }
 
     // ---- focal-first, and exact kind --------------------------------------------------------------------
@@ -740,13 +741,23 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
+        var requirements = Nodes(thread, "Requirement").Select(x => x.GetProperty("id").GetString()).ToList();
 
-        // The requirement is above all of it, so every covering case and every procedure those cases run is
-        // genuinely downstream. This is the fan-out direction purity must not cost.
+        // Its own fan-out: every covering case and every procedure those cases run. This is what direction
+        // purity must not cost.
         Assert.Contains(world.FirstProcedureRevisionId.ToString(), procedures);
         Assert.Contains(world.SecondProcedureRevisionId.ToString(), procedures);
         Assert.Contains(Nodes(thread, "Case"),
             x => x.GetProperty("id").GetString() == world.CaseRevisionId.ToString());
+
+        // The ancestor's verification also belongs, and for a reason worth stating: a trace edge runs child to
+        // parent and a coverage edge runs requirement to verification, so HLR to System to the System procedure
+        // never changes direction. Ancestor verification is kept where the walk stays on one half, and dropped
+        // where reaching the requirement required the other half — as the System-focal case shows.
+        Assert.Contains(world.SystemProcedureRevisionId.ToString(), procedures);
+
+        // The sibling HLR is reached only by reversing at the shared System parent, and stays out.
+        Assert.DoesNotContain(world.SiblingHighLevelRevisionId.ToString(), requirements);
     }
 
     // ---- helpers ---------------------------------------------------------------------------------------
