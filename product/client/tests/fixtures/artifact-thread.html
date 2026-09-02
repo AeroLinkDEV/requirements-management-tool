@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Artifact thread — rendered test fixture</title>
+  </head>
+  <body>
+    <!--
+      Test-only mount for DigitalThreadArtifact.
+
+      This exists so rendered behaviour — lane geometry, the suspect treatment, evidence identity, an
+      execution's absent display number, the contract-failure state, trace highlighting, rolling and density —
+      can be driven in a real browser without wiring the component into LifecycleExplorer or adding a
+      production route. Page-level integration is slice 6 and is deliberately not done here.
+
+      The scenarios feed the component the raw server response shape, so every assertion runs through the
+      slice-5B0 contract seam exactly as production will.
+
+      Nothing in the product imports this file; it is served by the same Vite dev server the browser journeys
+      already use, and reached only by the Playwright spec that names it.
+    -->
+    <div id="root" style="height: 720px"></div>
+    <script type="module" src="./artifact-thread.tsx"></script>
+  </body>
+</html>
