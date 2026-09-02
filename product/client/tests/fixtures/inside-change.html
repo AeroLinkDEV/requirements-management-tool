@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Inside a change — rendered test fixture</title>
+  </head>
+  <body>
+    <!--
+      Test-only mount for DigitalThreadInsideChange.
+
+      This exists so rendered behaviour — card classes, trace fade, hop badges, structured verification
+      content, retire treatment, in-frame error and loading — can be driven in a real browser without wiring
+      the component into LifecycleExplorer or adding a production route. Page-level integration is slice 6
+      and is deliberately not done here.
+
+      Nothing in the product imports this file; it is served by the same Vite dev server the browser journeys
+      already use, and reached only by the Playwright spec that names it.
+    -->
+    <div id="root" style="height: 720px"></div>
+    <script type="module" src="./inside-change.tsx"></script>
+  </body>
+</html>

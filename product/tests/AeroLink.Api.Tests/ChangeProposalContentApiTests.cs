@@ -2,10 +2,12 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using AeroLink.Domain.Baselines;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Verification;
 using AeroLink.Domain.Traceability;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
@@ -152,6 +154,64 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
         return new(project.Id, subject.Id, modify.Id, introduce.Id, retire.Id, allocatingModify.Id,
             childRevision.Id, proposedChild.Id, otherBuildChild.Id, realRetire.Id, cascadeChild.Id,
             memberName, outsiderName);
+    }
+
+    private sealed record SelectedWorld(
+        Guid SelectedChangeRequestId, Guid ForeignProcedureRevisionId, Guid RequirementRevisionId, string Member);
+
+    /// <summary>
+    /// A world where a baseline genuinely selected the change, a decoy candidate did not, and a coverage row
+    /// points at another Project's verification revision.
+    /// </summary>
+    private static async Task<SelectedWorld> SeedSelectedAsync(AeroLinkApiFactory factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var memberName = $"selected.member.{tag}";
+        var program = new ProgramRecord($"Selected {tag}", $"SL{tag}");
+        var project = new ProjectRecord(program.Id, "Flight management", "Selection qualification");
+        var release = new SoftwareRelease(project.Id, "5.1", false);
+        var member = new UserAccount(memberName, memberName, $"{memberName}@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+        db.AddRange(program, project, release, member,
+            new ProgramMembership(member.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
+
+        var scr = new SystemChangeRequest("SRCR-93001", 0, project.Id, release.Id, "Selected change",
+            "Problem", "Analysis", "Solution", memberName, now);
+        scr.AddRequirementChange(memberName, "SR-93001", 0, RequirementLevel.System,
+            RequirementChangeKind.Modify, "The FMS shall sequence oceanic waypoints.", "Rationale", "Test", now);
+        scr.SubmitForReview(memberName, [new ApproverSelection("reviewer", "Reviewer")], now);
+        scr.ApproveActiveStage("reviewer", now);
+        db.Add(scr);
+
+        var predecessor = new CandidateBaseline("SW-93.00", 0, project.Id, release.Id, null, "Build 5.0", "cm", now);
+        var selecting = new CandidateBaseline("SW-93.01", 0, project.Id, release.Id, predecessor.Id,
+            "Build 5.1 candidate", "cm", now);
+        selecting.Select(scr, "cm", now);
+        // A later candidate that did NOT select this change. "Highest revision wins" would pick this one.
+        var decoy = new CandidateBaseline("SW-93.02", 0, project.Id, release.Id, selecting.Id,
+            "Later candidate", "cm", now);
+        db.AddRange(predecessor, selecting, decoy);
+
+        // This Project's requirement revision, covered by ANOTHER Project's procedure revision.
+        var artifact = new RequirementArtifact(project.Id, "SR-93001", RequirementLevel.System, now);
+        var revision = new RequirementRevision(artifact.Id, 0, "The FMS shall sequence oceanic waypoints.",
+            "Rationale", "Test", RequirementRevisionState.Active, scr.Id, selecting.Id, now);
+        db.AddRange(artifact, revision);
+
+        var foreignProgram = new ProgramRecord($"Foreign {tag}", $"FS{tag}");
+        var foreignProject = new ProjectRecord(foreignProgram.Id, "Other", "Foreign");
+        var foreignProcedure = new TestProcedure(foreignProject.Id, "SYSTP-93900", "Foreign procedure",
+            memberName, now, TestProcedureLevel.System, null, VerificationArtifactKind.Procedure);
+        var foreignRevision = new TestProcedureRevision(foreignProcedure.Id, 0, "Foreign objective",
+            "Foreign preconditions", "Foreign steps", "Foreign expected", TestProcedureState.Approved,
+            memberName, now);
+        db.AddRange(foreignProgram, foreignProject, foreignProcedure, foreignRevision);
+
+        await db.SaveChangesAsync();
+        return new(scr.Id, foreignRevision.Id, revision.Id, memberName);
     }
 
     private static async Task SignInAsync(HttpClient client, string userName)
@@ -350,6 +410,105 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
         Assert.Equal("Allocated", current.GetProperty("disposition").GetString());
         Assert.Equal(0, current.GetProperty("supersededRevision").GetInt32());
         Assert.Equal(0, current.GetProperty("latestRevision").GetInt32());
+    }
+
+    [Fact]
+    public async Task A_materialized_downstream_target_carries_its_exact_revision_as_well_as_its_artifact()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var allocated = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.AllocatingModifyId)
+            .GetProperty("allocatedDownstream").EnumerateArray().ToList();
+        var existing = allocated.Single(x => !x.GetProperty("isProposed").GetBoolean());
+
+        // Two different identities, both needed and not interchangeable. Verification coverage is keyed by
+        // requirement *revision*, so a consumer given only the artifact id would have to re-resolve a display
+        // number or collapse every revision of the artifact into one.
+        Assert.Equal(fixture.MaterializedChildId.ToString(), existing.GetProperty("revisionId").GetString());
+        Assert.Equal(JsonValueKind.String, existing.GetProperty("id").ValueKind);
+        Assert.NotEqual(existing.GetProperty("id").GetString(), existing.GetProperty("revisionId").GetString());
+
+        // A proposed target has no controlled revision yet, and says so rather than borrowing one.
+        var proposed = allocated.Single(x => x.GetProperty("isProposed").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, proposed.GetProperty("revisionId").ValueKind);
+    }
+
+    [Fact]
+    public async Task The_response_carries_the_lane_three_and_four_facts_rather_than_leaving_them_to_the_browser()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var body = await ContentAsync(client, fixture.ChangeRequestId);
+
+        // Lane 3 and lane 4 are served, so the view never has to assemble them from display numbers or from
+        // lane adjacency. Empty is a truthful answer here; the point is that the fields exist and are the
+        // server's to state.
+        Assert.True(body.TryGetProperty("covering", out var covering));
+        Assert.Equal(JsonValueKind.Array, covering.ValueKind);
+
+        // Empty here, and truthfully so: a candidate baseline exists for this release but nothing selected
+        // this change into it. The populated case is covered by
+        // Build_effect_names_the_baseline_that_selected_this_change_and_its_predecessor.
+        Assert.True(body.TryGetProperty("buildEffect", out var effect));
+        Assert.Equal(JsonValueKind.Array, effect.ValueKind);
+        Assert.Empty(effect.EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Build_effect_is_empty_when_no_baseline_selected_this_change()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var effect = (await ContentAsync(client, fixture.ChangeRequestId))
+            .GetProperty("buildEffect").EnumerateArray().ToList();
+
+        // A candidate baseline exists for this release, but nothing selected this change into it. "A candidate
+        // exists" and "this change is in it" are different claims, and the second is the one §5.2 asks for —
+        // taking the newest candidate for the release would show an opened change affecting a baseline that
+        // never selected it.
+        Assert.Empty(effect);
+    }
+
+    [Fact]
+    public async Task Build_effect_names_the_baseline_that_selected_this_change_and_its_predecessor()
+    {
+        var world = await SeedSelectedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var effect = (await ContentAsync(client, world.SelectedChangeRequestId))
+            .GetProperty("buildEffect").EnumerateArray().ToList();
+
+        var current = effect.Single(x => !x.GetProperty("isPredecessor").GetBoolean());
+        Assert.Equal("SW-93.01.00", current.GetProperty("displayNumber").GetString());
+        // Not the release's highest-revision candidate: SW-93.02 exists and did not select this change.
+        Assert.DoesNotContain(effect, x => x.GetProperty("displayNumber").GetString() == "SW-93.02.00");
+
+        var predecessor = effect.Single(x => x.GetProperty("isPredecessor").GetBoolean());
+        Assert.Equal("SW-93.00.00", predecessor.GetProperty("displayNumber").GetString());
+    }
+
+    [Fact]
+    public async Task A_cross_project_coverage_link_cannot_be_persisted_in_the_first_place()
+    {
+        var world = await SeedSelectedAsync(_host.Factory);
+        using var scope = _host.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+
+        // The read is Project-scoped as defence in depth, but the row it would defend against cannot exist:
+        // the persistence boundary refuses a coverage link whose procedure and requirement are in different
+        // Projects. Recorded as a test rather than asserted by inspection, and deliberately not worked around
+        // by weakening the invariant to manufacture the scenario.
+        db.Add(new TestRequirementCoverage(world.ForeignProcedureRevisionId, world.RequirementRevisionId));
+
+        var refused = await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
+        Assert.Contains("cannot cross projects", refused.Message);
     }
 
     [Fact]

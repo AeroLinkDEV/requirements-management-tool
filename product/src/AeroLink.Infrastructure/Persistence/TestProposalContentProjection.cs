@@ -118,6 +118,25 @@ public sealed record VerificationProposalItem(
     IReadOnlyList<ProposalReferenceGap> ReferenceGaps);
 
 /// <summary>
+/// One recorded run of a procedure revision this package proposes to change, for lane 3.
+///
+/// A verification package's lane 3 is EXECUTIONS, not covering artifacts — the prototype is explicit, and it
+/// follows from what the lanes mean: a requirement change asks "what verifies this?", while a test change
+/// asks "what happened when this was run?". Serving covering artifacts here would answer the wrong question
+/// in the right-shaped box.
+///
+/// Executions are read against the exact predecessor revision each proposal names, so a run of a different
+/// revision of the same procedure is never presented as evidence for this one.
+/// </summary>
+public sealed record VerificationExecution(
+    Guid Id,
+    Guid ProcedureRevisionId,
+    string Outcome,
+    string ExecutedBy,
+    DateTimeOffset ExecutedAt,
+    string Determination);
+
+/// <summary>
 /// The proposed content of one controlled Test Change Request.
 ///
 /// A sibling of <see cref="ChangeProposalContentResult"/> rather than a variant of it. Both answer "what does
@@ -134,7 +153,11 @@ public sealed record VerificationProposalContent(
     string DisplayNumber,
     string Discipline,
     string ArtifactKind,
-    IReadOnlyList<VerificationProposalItem> Items);
+    IReadOnlyList<VerificationProposalItem> Items,
+    /// <summary>Lane 3: recorded runs of the exact predecessor revisions this package changes.</summary>
+    IReadOnlyList<VerificationExecution> Executions,
+    /// <summary>Lane 4: the candidate baseline this package's build carries, and the one it supersedes.</summary>
+    IReadOnlyList<ProposalBaselineEffect> BuildEffect);
 
 /// <summary>
 /// Reads what a Test Change Request proposes, at the revision each proposal was written against.
@@ -352,6 +375,29 @@ public static class TestProposalContentProjection
                     .ThenBy(x => x.RevisionId ?? Guid.Empty).ToList()));
         }
 
+        // Lane 3: runs of the exact predecessor revisions, keyed by revision so a run of another revision of
+        // the same procedure is never shown as evidence for this one.
+        var predecessorIds = items.Select(x => x.BaseRevisionId).OfType<Guid>().Distinct().ToList();
+        var executions = predecessorIds.Count == 0
+            ? []
+            // Materialised before the enum is stringified: the projection is translated to SQL, and calling
+            // ToString() on a converted enum inside the query is not.
+            : (await db.TestExecutions.AsNoTracking()
+                    .Where(x => x.ProjectId == projectId && predecessorIds.Contains(x.ProcedureRevisionId))
+                    .Select(x => new { x.Id, x.ProcedureRevisionId, x.Outcome, x.ExecutedBy, x.ExecutedAt, x.Determination })
+                    .ToListAsync(ct))
+                // Ordered here rather than in the query: SQLite cannot ORDER BY a DateTimeOffset, and the
+                // disposable test fixtures run on SQLite while the product runs on PostgreSQL. Sorting a
+                // materialised list keeps both hosts on the same code path instead of the read working only
+                // where the provider happens to allow it.
+                .OrderByDescending(x => x.ExecutedAt)
+                .Select(x => new VerificationExecution(x.Id, x.ProcedureRevisionId, x.Outcome.ToString(),
+                    x.ExecutedBy, x.ExecutedAt, x.Determination))
+                .ToList();
+
+        var effect = await ChangeProposalContentProjection.BuildEffectAsync(
+            db, projectId, "TestChangeRequest", review.Id, ct);
+
         return new VerificationProposalContent(
             "TestChangeRequest",
             review.Id,
@@ -360,7 +406,9 @@ public static class TestProposalContentProjection
             Display(review.BaseNumber, review.Revision),
             discipline.ToString(),
             review.ArtifactKind.ToString(),
-            items);
+            items,
+            executions,
+            effect);
     }
 
     private static string Display(string baseNumber, int revision) =>

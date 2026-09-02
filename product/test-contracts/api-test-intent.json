@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 772,
-    "cases": 856,
+    "tests": 780,
+    "cases": 864,
     "classes": 121,
-    "hostedTests": 742,
-    "hostedCases": 812,
+    "hostedTests": 750,
+    "hostedCases": 820,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 8,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 471,
-      "cases": 523,
+      "tests": 478,
+      "cases": 530,
       "unknownCases": 0,
       "classes": 100
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 158,
-      "cases": 172,
+      "tests": 159,
+      "cases": 173,
       "unknownCases": 0,
-      "classes": 56
+      "classes": 57
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -1927,6 +1927,41 @@
     },
     {
       "cls": "ChangeProposalContentApiTests",
+      "test": "A_cross_project_coverage_link_cannot_be_persisted_in_the_first_place",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 497,
+        "end": 512
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "A_materialized_downstream_target_carries_its_exact_revision_as_well_as_its_artifact",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 415,
+        "end": 436
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
       "test": "A_proposal_written_against_a_superseded_revision_shows_nothing_allocated_below_it",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -1939,8 +1974,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 294,
-        "end": 308
+        "start": 354,
+        "end": 368
       }
     },
     {
@@ -1957,8 +1992,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 310,
-        "end": 337
+        "start": 370,
+        "end": 397
       }
     },
     {
@@ -1975,8 +2010,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 339,
-        "end": 353
+        "start": 399,
+        "end": 413
       }
     },
     {
@@ -1993,8 +2028,44 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 368,
-        "end": 379
+        "start": 527,
+        "end": 538
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "Build_effect_is_empty_when_no_baseline_selected_this_change",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 461,
+        "end": 476
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "Build_effect_names_the_baseline_that_selected_this_change_and_its_predecessor",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 478,
+        "end": 495
       }
     },
     {
@@ -2011,8 +2082,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 263,
-        "end": 278
+        "start": 323,
+        "end": 338
       }
     },
     {
@@ -2029,8 +2100,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 247,
-        "end": 261
+        "start": 307,
+        "end": 321
       }
     },
     {
@@ -2047,8 +2118,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 280,
-        "end": 292
+        "start": 340,
+        "end": 352
       }
     },
     {
@@ -2065,8 +2136,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 190,
-        "end": 204
+        "start": 250,
+        "end": 264
       }
     },
     {
@@ -2083,8 +2154,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 175,
-        "end": 188
+        "start": 235,
+        "end": 248
       }
     },
     {
@@ -2101,8 +2172,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 355,
-        "end": 366
+        "start": 514,
+        "end": 525
       }
     },
     {
@@ -2119,8 +2190,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 229,
-        "end": 245
+        "start": 289,
+        "end": 305
       }
     },
     {
@@ -2137,8 +2208,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 206,
-        "end": 227
+        "start": 266,
+        "end": 287
+      }
+    },
+    {
+      "cls": "ChangeProposalContentApiTests",
+      "test": "The_response_carries_the_lane_three_and_four_facts_rather_than_leaving_them_to_the_browser",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 438,
+        "end": 459
       }
     },
     {
@@ -12342,8 +12431,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 569,
-        "end": 584
+        "start": 702,
+        "end": 717
       }
     },
     {
@@ -12360,8 +12449,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 495,
-        "end": 509
+        "start": 578,
+        "end": 592
       }
     },
     {
@@ -12378,8 +12467,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 474,
-        "end": 493
+        "start": 557,
+        "end": 576
       }
     },
     {
@@ -12396,8 +12485,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 332,
-        "end": 357
+        "start": 415,
+        "end": 440
       }
     },
     {
@@ -12414,8 +12503,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 286,
-        "end": 302
+        "start": 369,
+        "end": 385
       }
     },
     {
@@ -12432,8 +12521,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 511,
-        "end": 539
+        "start": 594,
+        "end": 622
       }
     },
     {
@@ -12450,8 +12539,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 359,
-        "end": 375
+        "start": 442,
+        "end": 458
       }
     },
     {
@@ -12468,8 +12557,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 304,
-        "end": 330
+        "start": 387,
+        "end": 413
       }
     },
     {
@@ -12486,8 +12575,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 434,
-        "end": 446
+        "start": 517,
+        "end": 529
       }
     },
     {
@@ -12504,8 +12593,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 448,
-        "end": 472
+        "start": 531,
+        "end": 555
       }
     },
     {
@@ -12522,8 +12611,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 248,
-        "end": 271
+        "start": 331,
+        "end": 354
       }
     },
     {
@@ -12540,8 +12629,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 377,
-        "end": 397
+        "start": 460,
+        "end": 480
       }
     },
     {
@@ -12558,8 +12647,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 273,
-        "end": 284
+        "start": 356,
+        "end": 367
       }
     },
     {
@@ -12576,8 +12665,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 556,
-        "end": 567
+        "start": 689,
+        "end": 700
       }
     },
     {
@@ -12594,8 +12683,62 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 399,
-        "end": 432
+        "start": 482,
+        "end": 515
+      }
+    },
+    {
+      "cls": "TestProposalContentApiTests",
+      "test": "Build_effect_is_empty_when_no_baseline_selected_this_package",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 643,
+        "end": 653
+      }
+    },
+    {
+      "cls": "TestProposalContentApiTests",
+      "test": "Build_effect_names_the_baseline_that_selected_this_package_and_its_predecessor",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 655,
+        "end": 674
+      }
+    },
+    {
+      "cls": "TestProposalContentApiTests",
+      "test": "Executions_are_only_those_of_the_exact_predecessor_revision",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 626,
+        "end": 641
       }
     },
     {
@@ -12612,8 +12755,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 543,
-        "end": 554
+        "start": 676,
+        "end": 687
       }
     },
     {

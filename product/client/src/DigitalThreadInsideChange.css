@@ -1,0 +1,362 @@
+/* Inside one change: the register, what it proposes, what that allocates to, and what it does to the build.
+   Tokens come from index.css; card, badge and pill treatments match DigitalThreadNetwork.css so the two views
+   read as one canvas rather than as two products. */
+
+.dticRoot { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 520px; }
+
+.dticToolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  border-bottom: 1px solid #e0e7ee;
+  background: var(--surface);
+}
+
+.dticBack {
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  padding: 4px 12px;
+  color: #5d6d82;
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
+  cursor: pointer;
+}
+
+.dticBack:hover { border-color: #a9bccd; }
+
+.dticTypes { display: flex; gap: 5px; }
+
+.dticTypes button {
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  padding: 4px 11px;
+  color: #5d6d82;
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
+  cursor: pointer;
+  transition: border-color .14s ease, background .14s ease, color .14s ease;
+}
+
+.dticTypes button:hover { border-color: #a9bccd; }
+.dticTypes button.is-on { border-color: var(--teal-700); background: var(--teal-700); color: #fff; }
+
+.dticOpened {
+  margin: 0 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-500);
+  font-size: var(--text-xs);
+}
+
+.dticOpened b { color: #2b3d54; }
+
+/* The rebase flag is what makes an empty downstream lane legible, so it is stated in the toolbar as well as
+   on the card that is affected. Colour never carries it alone. */
+.dticRebase {
+  border-radius: var(--radius-pill);
+  background: #fdefcf;
+  padding: 3px 9px;
+  color: #8a5a00;
+  font-weight: var(--weight-strong);
+}
+
+.dticStage { position: relative; flex: 1; min-height: 0; }
+.dticStage > .dtCanvas { position: absolute; inset: 0; }
+
+.dticLoading {
+  position: absolute;
+  left: 50%;
+  top: 44px;
+  transform: translateX(-50%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .94);
+  padding: 7px 15px;
+  color: var(--ink-500);
+  font-size: var(--text-xs);
+}
+
+/* ---- cards ------------------------------------------------------------- */
+
+.dticCard {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.dticTop { display: flex; align-items: center; gap: 7px; min-width: 0; }
+
+.dticBadge {
+  flex: none;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font: var(--weight-strong) 10.5px var(--font-body);
+  letter-spacing: .04em;
+}
+
+.dticLevel { background: #eef1f6; color: #566579; }
+
+/* Operation badges carry their word next to them, so the operation is never colour alone. */
+.dticOp-introduce { background: #e8f4ef; color: #28735f; }
+.dticOp-modify { background: #e7effb; color: #3569a8; }
+.dticOp-retire { background: #f1eef2; color: #6c5a74; }
+
+.dticOpWord { margin-left: auto; color: var(--ink-500); font-size: 10.5px; }
+
+.dticId {
+  overflow: hidden;
+  color: #2b3d54;
+  font: var(--weight-strong) var(--text-xs) ui-monospace, SFMono-Regular, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dticPill {
+  flex: none;
+  margin-left: auto;
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  font: var(--weight-strong) 10.5px var(--font-body);
+}
+
+.dticProposedTag {
+  flex: none;
+  margin-left: auto;
+  border: 1px dashed #a9bccd;
+  border-radius: var(--radius-pill);
+  padding: 1px 7px;
+  color: #5d6d82;
+  font: var(--weight-strong) 10.5px var(--font-body);
+}
+
+.dticTitle {
+  overflow: hidden;
+  color: #33475f;
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
+.dticMeta { margin: 0; color: var(--ink-500); font-size: 10.5px; }
+
+/* A retirement and everything it cascades to reads dashed, matching the edge treatment. */
+.dticProposal.is-retire,
+.dticAllocation.is-proposed { border-style: dashed; }
+
+.dticRegister.is-open {
+  border-color: var(--teal-700);
+  box-shadow: 0 0 0 2px rgba(23, 111, 104, .18);
+}
+
+.dticTrace.is-suspect { border-color: #e5c07a; background: #fffcf4; }
+
+/* ---- the before/after on a Modify --------------------------------------- */
+
+.dticDiff {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-left: 2px solid #dbe3ec;
+  padding-left: 7px;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.dticDiff del { color: #8a6a6a; text-decoration: line-through; }
+.dticDiff ins { color: #28735f; text-decoration: none; }
+
+/* ---- notices ------------------------------------------------------------ */
+
+/* An empty downstream lane still says something true. This is the sentence that distinguishes
+   "nothing is allocated" from "the allocation hangs off a later revision" — see #880 §8.5.1. */
+.dticNotice {
+  margin: 0;
+  border-radius: var(--radius-sm);
+  background: #f6f8fa;
+  padding: 5px 7px;
+  color: #5d6d82;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.dticEmpty,
+.dticState {
+  margin: 0;
+  padding: 18px;
+  color: var(--ink-500);
+  font-size: var(--text-sm);
+}
+
+.dticState b { display: block; margin-bottom: 6px; color: #2b3d54; }
+
+.dticVisuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dticTypes button,
+  .dticBack { transition: none; }
+}
+
+/* ---- structured verification content ------------------------------------ */
+
+/* A procedure is read by its parts. Rows the artifact does not use are omitted rather than shown empty, so a
+   System Procedure and a software Case each show only what they actually carry. */
+.dticVerification { display: flex; flex-direction: column; gap: 3px; margin: 0; font-size: 10.5px; }
+.dticVerification > div { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 8px; }
+.dticVerification dt { color: #8493a6; }
+.dticVerification dd { margin: 0; overflow: hidden; color: #33475f; line-height: 1.35; text-overflow: ellipsis; }
+
+/* A recorded relationship the server could not resolve. Visible rather than dropped: an omitted reference
+   reads as "nothing is recorded" instead of "something is recorded that could not be read". */
+.dticGap {
+  margin: 0;
+  border-left: 3px solid #d6a33b;
+  border-radius: 8px;
+  background: #fff8e8;
+  padding: 6px 8px;
+  color: #765313;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+/* ---- trace, panel and cascade ------------------------------------------- */
+
+/* Untraced records recede rather than vanish, so the shape of the change stays readable around the selection.
+   17% matches the change network, because both views are the same board. */
+.dticCard.is-untraced { opacity: .17; }
+
+.dticHop {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  min-width: 15px;
+  border-radius: 999px;
+  background: #2a8e83;
+  padding: 1px 4px;
+  color: #fff;
+  font: var(--weight-strong) 9px var(--font-body);
+  text-align: center;
+}
+
+.dticCard { position: relative; }
+
+/* A retirement cascade is dashed along the path the record actually holds. A target reachable from a live
+   proposal too is deliberately left undashed: dashing it would claim the artifact is being retired. */
+.dticAllocation.is-retire-cascade { border-style: dashed; border-color: #c0aab0; background: #fbf8f9; }
+
+.dticPanel {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 18px;
+  z-index: 70;
+  height: 150px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 18px 44px rgba(15, 35, 58, .16);
+  padding: 14px 16px;
+}
+
+.dticPanelTools { position: absolute; right: 10px; top: 8px; }
+
+.dticPanelTools button {
+  min-height: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 2px 8px;
+  color: #5d6d82;
+  cursor: pointer;
+}
+
+.dticEyebrow { margin: 0; color: var(--teal-600); font: var(--weight-bold) 9px var(--font-body); letter-spacing: .13em; }
+.dticPanelIdentity { margin: 5px 0 8px; color: #2b3d54; font: var(--weight-strong) 13px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.dticPanelWeb { margin: 8px 0 0; color: var(--ink-500); font-size: 10.5px; }
+
+/* State messages live inside the frame, so a failed refresh does not cost the reader their zoom, lane
+   positions or selection (#880 §6.8). */
+.dticInFrame {
+  position: absolute;
+  left: 50%;
+  top: 92px;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: 420px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, .97);
+  box-shadow: 0 12px 30px rgba(15, 35, 58, .12);
+  padding: 14px 18px;
+  text-align: center;
+}
+
+.dticInFrame b { display: block; margin-bottom: 4px; color: #2b3d54; font-size: var(--text-sm); }
+.dticInFrame p { margin: 0; color: var(--ink-500); font-size: var(--text-xs); }
+.dticInFrame-error { border-color: #e3b7b7; background: rgba(255, 250, 250, .97); }
+
+.dticInFrame button {
+  margin-top: 10px;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  padding: 4px 14px;
+  color: #5d6d82;
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
+  cursor: pointer;
+}
+
+/* Field-by-field before/after, so a Modify that changed the objective or the environment is visible as such. */
+.dticDiffRow { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 2px 8px; }
+.dticDiffRow i { grid-row: span 2; color: #8493a6; font-style: normal; }
+
+/* Panel placement modes (#880 §6.6). The reserved frame follows the resolved dock, so the canvas never lays
+   a record out underneath whichever edge the panel took. */
+.dticPanel-bottom { left: 16px; right: 16px; bottom: 18px; height: 150px; }
+.dticPanel-right { right: 16px; top: 70px; bottom: 22px; left: auto; width: 300px; height: auto; overflow: auto; }
+.dticPanel-left { left: 16px; top: 70px; bottom: 22px; right: auto; width: 300px; height: auto; overflow: auto; }
+
+.dticPanel-bottom { display: grid; grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+
+.dticPanelTools { display: flex; gap: 4px; }
+
+.dticPanelTools button.is-on { border-color: var(--teal-700); background: var(--teal-700); color: #fff; }
+
+.dticPanelCol { min-width: 0; display: flex; flex-direction: column; }
+.dticRel { display: grid; gap: 4px; overflow-y: auto; max-height: 96px; }
+
+.dticRel button {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 3px 7px;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Deeper than one hop reads dashed, so a direct relationship is never mistaken for a distant one. */
+.dticRel button.is-far { border-style: dashed; }
+.dticRel button small { color: #8fa0b2; font-size: 9px; font-weight: var(--weight-strong); }
+.dticRel button span { overflow: hidden; color: #17324d; font: var(--weight-strong) 10px ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; }
+.dticRelEmpty { margin: 0; color: #8fa0b2; font-size: 10.5px; }
