@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Text;
 using AeroLink.Domain.Integrations;
@@ -86,8 +87,36 @@ public sealed class WebhookDestinationPolicyTests
     [InlineData("2606:4700::1111")]
     [InlineData("2001:4860:4860::8888")]
     [InlineData("2606:2800:220:1:248:1893:25c8:1946")]
+    [InlineData("2001:200::5")]
+    [InlineData("2001:3::5")]
+    [InlineData("2001:4:112::7")]
+    [InlineData("2001:20::5")]
+    [InlineData("2001:30::5")]
+    [InlineData("2620:4f:8000::9")]
+    [InlineData("192.31.196.5")]
+    [InlineData("192.52.193.7")]
+    [InlineData("192.175.48.9")]
     public void Globally_routable_addresses_are_permitted(string candidate) =>
         Assert.False(WebhookDestinationPolicy.IsProhibitedOutboundAddress(IPAddress.Parse(candidate)), candidate);
+
+    /// <summary>
+    /// Regression proof for the IANA special-purpose registry audit: every registered non-global block fails
+    /// closed, including blocks the previous classifier's byte checks missed. Each of these addresses was
+    /// incorrectly permitted by the reviewed classifier.
+    /// </summary>
+    [Theory]
+    [InlineData("100::1")]
+    [InlineData("100:0:0:1::5")]
+    [InlineData("2001:2::1")]
+    [InlineData("2001:10::20")]
+    [InlineData("3fff::1")]
+    [InlineData("3fff:000f::1")]
+    [InlineData("5f00::1")]
+    [InlineData("64:ff9b:1::a00:1")]
+    [InlineData("64:ff9b:1:abcd::1")]
+    [InlineData("192.88.99.5")]
+    public void Registered_non_global_blocks_fail_closed(string candidate) =>
+        Assert.True(WebhookDestinationPolicy.IsProhibitedOutboundAddress(IPAddress.Parse(candidate)), candidate);
 
     [Fact]
     public async Task Valid_public_literal_ipv4_is_accepted_without_consulting_dns()
@@ -150,6 +179,14 @@ public sealed class WebhookDestinationPolicyTests
     }
 
     [Fact]
+    public async Task Non_http_schemes_are_rejected_even_with_the_insecure_override()
+    {
+        await Assert.ThrowsAsync<WebhookDestinationPolicyException>(() => Validate("ftp://93.184.216.34/hook", allowInsecure: true));
+        await Assert.ThrowsAsync<WebhookDestinationPolicyException>(() => Validate("file:///hook", allowInsecure: true, allowPrivate: true));
+        await Assert.ThrowsAsync<WebhookDestinationPolicyException>(() => Validate("gopher://93.184.216.34/hook"));
+    }
+
+    [Fact]
     public async Task Development_private_override_permits_only_its_intended_exception()
     {
         var privateResolver = new FakeResolver([IPAddress.Parse("10.0.0.5")]);
@@ -166,6 +203,14 @@ public sealed class WebhookDestinationPolicyTests
     [Fact]
     public void Redirects_are_disabled_on_the_webhook_transport() =>
         Assert.False(WebhookConnectionTransport.CreateHandler(TimeSpan.FromSeconds(5)).AllowAutoRedirect);
+
+    [Fact]
+    public void Connection_reuse_is_disabled_and_http_is_restricted_on_the_webhook_transport()
+    {
+        using var handler = WebhookConnectionTransport.CreateHandler(TimeSpan.FromSeconds(5));
+        Assert.Equal(TimeSpan.Zero, handler.PooledConnectionLifetime);
+        Assert.Equal([SslApplicationProtocol.Http11], handler.SslOptions.ApplicationProtocols);
+    }
 
     [Fact]
     public async Task Valid_delivery_reaches_only_the_approved_address_and_completes()
@@ -194,6 +239,44 @@ public sealed class WebhookDestinationPolicyTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(1, responder.ConnectionCount);
         Assert.Contains("hooks.example.test", responder.FirstRequest);
+    }
+
+    /// <summary>
+    /// Pooled-reuse regression proof: two sequential same-origin requests over one client, where the first
+    /// connection is genuinely reusable (no Connection: close) and the second request carries a different
+    /// approved address set. The second request must open a fresh pinned connection to the newly approved
+    /// address; riding the pooled socket to the first address would mean ConnectCallback never evaluated the
+    /// second delivery's approved set.
+    /// </summary>
+    [Fact]
+    public async Task Pooled_connection_is_never_reused_for_a_request_approved_for_a_different_address()
+    {
+        var (primary, secondary) = await LoopbackWebhookResponder.StartSamePortPairAsync("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        await using var primaryScope = primary;
+        await using var secondaryScope = secondary;
+        using var handler = WebhookConnectionTransport.CreateHandler(TimeSpan.FromSeconds(5));
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+        var uri = $"http://hooks.pin.test:{primary.Port}/hook";
+
+        using (var request = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new StringContent("{}", Encoding.UTF8, "application/json") })
+        {
+            request.Options.Set(WebhookConnectionTransport.ApprovedAddressesOption, [IPAddress.Loopback]);
+            using var response = await client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("", await response.Content.ReadAsStringAsync());
+        }
+        Assert.Equal(1, primary.ConnectionCount);
+        Assert.Equal(0, secondary.ConnectionCount);
+
+        using (var request = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new StringContent("{}", Encoding.UTF8, "application/json") })
+        {
+            request.Options.Set(WebhookConnectionTransport.ApprovedAddressesOption, [IPAddress.Parse("127.0.0.2")]);
+            using var response = await client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("", await response.Content.ReadAsStringAsync());
+        }
+        Assert.Equal(1, primary.ConnectionCount);
+        Assert.Equal(1, secondary.ConnectionCount);
     }
 
     [Fact]
@@ -271,22 +354,40 @@ public sealed class WebhookDestinationPolicyTests
 
     private sealed class LoopbackWebhookResponder(string response) : IAsyncDisposable
     {
-        private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+        private TcpListener _listener = new(IPAddress.Loopback, 0);
         private CancellationTokenSource? _cancellation;
 
         public int Port { get; private set; }
         public int ConnectionCount { get; private set; }
         public string FirstRequest { get; private set; } = "";
 
-        public static async Task<LoopbackWebhookResponder> StartAsync(string response)
+        public static Task<LoopbackWebhookResponder> StartAsync(string response) => StartOnAsync(IPAddress.Loopback, response);
+
+        public static async Task<LoopbackWebhookResponder> StartOnAsync(IPAddress address, string response)
         {
-            var responder = new LoopbackWebhookResponder(response);
+            var responder = new LoopbackWebhookResponder(response) { _listener = new TcpListener(address, 0) };
             responder._listener.Start();
             responder.Port = ((IPEndPoint)responder._listener.LocalEndpoint).Port;
             responder._cancellation = new CancellationTokenSource();
             _ = responder.AcceptLoopAsync(responder._cancellation.Token);
             await Task.Yield();
             return responder;
+        }
+
+        /// <summary>
+        /// Two loopback listeners on the same numeric port but different specific addresses (127.0.0.1 and
+        /// 127.0.0.2), so a connection's peer address identifies which listener served it.
+        /// </summary>
+        public static async Task<(LoopbackWebhookResponder Primary, LoopbackWebhookResponder Secondary)> StartSamePortPairAsync(string response)
+        {
+            var primary = await StartOnAsync(IPAddress.Loopback, response);
+            var secondary = new LoopbackWebhookResponder(response) { _listener = new TcpListener(IPAddress.Parse("127.0.0.2"), primary.Port) };
+            secondary._listener.Start();
+            secondary.Port = primary.Port;
+            secondary._cancellation = new CancellationTokenSource();
+            _ = secondary.AcceptLoopAsync(secondary._cancellation.Token);
+            await Task.Yield();
+            return (primary, secondary);
         }
 
         private async Task AcceptLoopAsync(CancellationToken cancellationToken)
@@ -305,36 +406,43 @@ public sealed class WebhookDestinationPolicyTests
         {
             await using var stream = client.GetStream();
             var buffer = new byte[8192];
-            var received = new MemoryStream();
-            int headerEnd;
-            while (!Encoding.ASCII.GetString(received.ToArray()).Contains("\r\n\r\n"))
+            while (true)
             {
-                var read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken);
-                if (read == 0) return;
-                received.Write(buffer, 0, read);
+                var received = new MemoryStream();
+                int headerEnd;
+                while (true)
+                {
+                    headerEnd = received.ToArray().AsSpan().IndexOf("\r\n\r\n"u8);
+                    if (headerEnd >= 0) break;
+                    var read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken);
+                    if (read == 0) return;
+                    received.Write(buffer, 0, read);
+                }
+                var headersText = Encoding.ASCII.GetString(received.ToArray()[..headerEnd]);
+                var contentLength = 0;
+                foreach (var line in headersText.Split("\r\n"))
+                {
+                    var separator = line.IndexOf(':');
+                    if (separator > 0 && line[..separator].Trim().Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
+                        contentLength = int.Parse(line[(separator + 1)..].Trim());
+                }
+                var body = received.ToArray()[(headerEnd + 4)..];
+                while (body.Length < contentLength)
+                {
+                    var read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken);
+                    if (read == 0) break;
+                    received.Write(buffer, 0, read);
+                    body = received.ToArray()[(headerEnd + 4)..];
+                }
+                var requestText = Encoding.UTF8.GetString(received.ToArray());
+                await stream.WriteAsync(Encoding.ASCII.GetBytes(response), cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+                PublishFirst(requestText);
+                // Responses marked "Connection: close" end the connection; otherwise the connection stays open
+                // and subsequent requests on the same socket are served, so keep-alive connections handed to a
+                // client are genuinely reusable.
+                if (response.Contains("Connection: close", StringComparison.OrdinalIgnoreCase)) return;
             }
-            headerEnd = received.ToArray().AsSpan().IndexOf("\r\n\r\n"u8);
-            var headersText = Encoding.ASCII.GetString(received.ToArray()[..headerEnd]);
-            var contentLength = 0;
-            foreach (var line in headersText.Split("\r\n"))
-            {
-                var separator = line.IndexOf(':');
-                if (separator > 0 && line[..separator].Trim().Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
-                    contentLength = int.Parse(line[(separator + 1)..].Trim());
-            }
-            var body = received.ToArray()[(headerEnd + 4)..];
-            while (body.Length < contentLength)
-            {
-                var read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken);
-                if (read == 0) break;
-                received.Write(buffer, 0, read);
-                body = received.ToArray()[(headerEnd + 4)..];
-            }
-            var requestText = Encoding.UTF8.GetString(received.ToArray());
-            await stream.WriteAsync(Encoding.ASCII.GetBytes(response), cancellationToken);
-            await stream.FlushAsync(cancellationToken);
-            if (string.IsNullOrEmpty(requestText)) return;
-            PublishFirst(requestText);
         }
 
         private static readonly object Gate = new();

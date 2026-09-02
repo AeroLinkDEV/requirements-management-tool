@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -34,8 +35,10 @@ public sealed class WebhookDestinationPolicy(IWebhookDnsResolver resolver)
     public async Task<ApprovedWebhookDestination> ValidateAsync(Uri endpointUri, bool allowInsecure, bool allowPrivate, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(endpointUri);
-        if (endpointUri.Scheme != Uri.UriSchemeHttps && !allowInsecure)
+        if (endpointUri.Scheme == Uri.UriSchemeHttp && !allowInsecure)
             throw new WebhookDestinationPolicyException("Webhook target is blocked by the outbound target policy: HTTPS is required.");
+        if (endpointUri.Scheme != Uri.UriSchemeHttps && endpointUri.Scheme != Uri.UriSchemeHttp)
+            throw new WebhookDestinationPolicyException($"Webhook target is blocked by the outbound target policy: the endpoint scheme '{endpointUri.Scheme}' is not supported; only HTTP and HTTPS are permitted.");
         IReadOnlyList<IPAddress> addresses;
         if (IPAddress.TryParse(endpointUri.Host, out var literal))
         {
@@ -53,54 +56,132 @@ public sealed class WebhookDestinationPolicy(IWebhookDnsResolver resolver)
         return new(endpointUri, addresses);
     }
 
-    /// <summary>False only when the address is globally routable unicast space.</summary>
+    /// <summary>
+    /// False only when the address is globally routable unicast space. The prefix tables below are a static
+    /// snapshot of the IANA IPv4 and IPv6 special-purpose registries, classified with registry semantics: the
+    /// most specific (longest) matching row decides, so a globally reachable refinement carved out of a
+    /// covering block is permitted while the rest of the covering block fails closed, and any address no row
+    /// matches is permitted. Deprecated translation/compatibility prefixes whose reachability is that of an
+    /// embedded IPv4 destination (::/96, ::ffff:0:0/96, 64:ff9b::/96) are classified through that embedded
+    /// address. The local-use translation prefix 64:ff9b:1::/48 is non-global in its entirety and is
+    /// table-driven. The IETF-protocol-assignments block 2001::/23 is refused except for the registry's
+    /// globally reachable refinements inside it (2001:3::/32 AMT, 2001:4:112::/48 AS112-v6, 2001:20::/28
+    /// ORCHIDv2, 2001:30::/28 DETs), so only the three globally reachable protocol anycast /128s inside it
+    /// are refused conservatively.
+    /// </summary>
     public static bool IsProhibitedOutboundAddress(IPAddress address)
     {
         ArgumentNullException.ThrowIfNull(address);
         var bytes = address.GetAddressBytes();
-        if (address.AddressFamily == AddressFamily.InterNetworkV6 && bytes[0..10].All(x => x == 0) && bytes[10] == 0xff && bytes[11] == 0xff)
-            return IsProhibitedOutboundAddress(new IPAddress(bytes[12..]));
-        if (address.AddressFamily == AddressFamily.InterNetwork)
+        if (address.AddressFamily == AddressFamily.InterNetworkV6)
         {
-            return bytes[0] == 0
-                || bytes[0] == 10
-                || bytes[0] == 127
-                || (bytes[0] == 100 && bytes[1] is >= 64 and <= 127)
-                || (bytes[0] == 169 && bytes[1] == 254)
-                || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
-                || (bytes[0] == 192 && bytes[1] == 0 && bytes[2] is 0 or 2)
-                || (bytes[0] == 192 && bytes[1] == 168)
-                || (bytes[0] == 198 && (bytes[1] == 18 || bytes[1] == 19 || (bytes[1] == 51 && bytes[2] == 100)))
-                || (bytes[0] == 203 && bytes[1] == 0 && bytes[2] == 113)
-                || bytes[0] >= 224;
+            if (bytes[0..10].All(x => x == 0) && bytes[10] == 0xff && bytes[11] == 0xff)
+                return IsProhibitedOutboundAddress(new IPAddress(bytes[12..]));
+            if (bytes[0..12].All(x => x == 0))
+                return IsProhibitedOutboundAddress(new IPAddress(bytes[12..]));
+            if (bytes[0] == 0 && bytes[1] == 0x64 && bytes[2] == 0xff && bytes[3] == 0x9b
+                && bytes[4..12].All(x => x == 0))
+                return IsProhibitedOutboundAddress(new IPAddress(bytes[12..]));
+            return ClassifyByLongestPrefix(bytes, Ipv6PrefixRules);
         }
-        if (address.AddressFamily != AddressFamily.InterNetworkV6) return true;
-        if (IPAddress.IsLoopback(address)) return true;
-        if (address.IsIPv6LinkLocal || address.IsIPv6SiteLocal || address.IsIPv6Multicast || address.IsIPv6Teredo) return true;
-        if (bytes.All(x => x == 0)) return true;
-        if (bytes[0] == 0xff) return true;
-        if ((bytes[0] & 0xfe) == 0xfc) return true;
-        if (bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80) return true;
-        if (bytes[0] == 0x20 && bytes[1] == 0x02) return true;
-        if (bytes[0] == 0x20 && bytes[1] == 0x01 && (bytes[2] | bytes[3]) == 0) return true;
-        if (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0d && bytes[3] == 0xb8) return true;
-        if (bytes[0] == 0 && bytes[1] == 0x64 && bytes[2] == 0xff && bytes[3] == 0x9b
-            && bytes[4..11].All(x => x == 0))
-            return IsProhibitedOutboundAddress(new IPAddress(bytes[12..]));
-        if (bytes[0] == 0 && bytes[1] == 0x64 && bytes[2] == 0xff && bytes[3] == 0x9b && bytes[4] == 0 && bytes[5] == 1
-            && bytes[6..11].All(x => x == 0))
-            return IsProhibitedOutboundAddress(new IPAddress(bytes[12..]));
-        if (bytes[0..11].All(x => x == 0)) return IsProhibitedOutboundAddress(new IPAddress(bytes[12..]));
-        return false;
+        if (address.AddressFamily == AddressFamily.InterNetwork)
+            return ClassifyByLongestPrefix(bytes, Ipv4PrefixRules);
+        return true;
     }
+
+    private static bool ClassifyByLongestPrefix(ReadOnlySpan<byte> address, (byte[] Prefix, int Bits, bool Prohibited)[] rules)
+    {
+        var bestBits = -1;
+        var prohibited = false;
+        foreach (var (prefix, bits, isProhibited) in rules)
+        {
+            if (bits <= bestBits || !MatchesPrefix(address, prefix, bits)) continue;
+            bestBits = bits;
+            prohibited = isProhibited;
+        }
+        return prohibited;
+    }
+
+    private static bool MatchesPrefix(ReadOnlySpan<byte> address, ReadOnlySpan<byte> prefix, int prefixBits)
+    {
+        var fullBytes = prefixBits / 8;
+        if (!address[..fullBytes].SequenceEqual(prefix[..fullBytes])) return false;
+        var remainderBits = prefixBits % 8;
+        if (remainderBits == 0) return true;
+        var mask = (byte)(0xff << (8 - remainderBits));
+        return (address[fullBytes] & mask) == (prefix[fullBytes] & mask);
+    }
+
+    // Static snapshot of the IANA IPv4 special-purpose registry plus multicast. Blocks the registry marks
+    // globally reachable (AS112-v4 192.31.196.0/24, AMT 192.52.193.0/24, direct-delegation AS112
+    // 192.175.48.0/24) match no rule and are permitted; the PCP and TURN anycast /32s inside the IETF
+    // protocol-assignments /24 are explicit permitted refinements, as the registry classifies them.
+    private static readonly (byte[] Prefix, int Bits, bool Prohibited)[] Ipv4PrefixRules =
+    [
+        (PrefixBytes("0.0.0.0"), 8, true),        // "This network"
+        (PrefixBytes("10.0.0.0"), 8, true),       // Private-use
+        (PrefixBytes("100.64.0.0"), 10, true),    // Shared address space (carrier-grade NAT)
+        (PrefixBytes("127.0.0.0"), 8, true),      // Loopback
+        (PrefixBytes("169.254.0.0"), 16, true),   // Link-local (includes cloud metadata services)
+        (PrefixBytes("172.16.0.0"), 12, true),    // Private-use
+        (PrefixBytes("192.0.0.0"), 24, true),     // IETF protocol assignments
+        (PrefixBytes("192.0.0.9"), 32, false),    // Port Control Protocol anycast (globally reachable refinement)
+        (PrefixBytes("192.0.0.10"), 32, false),   // TURN anycast (globally reachable refinement)
+        (PrefixBytes("192.0.2.0"), 24, true),     // Documentation (TEST-NET-1)
+        (PrefixBytes("192.88.99.0"), 24, true),   // Deprecated (previously 6to4 relay anycast)
+        (PrefixBytes("192.168.0.0"), 16, true),   // Private-use
+        (PrefixBytes("198.18.0.0"), 15, true),    // Benchmarking
+        (PrefixBytes("198.51.100.0"), 24, true),  // Documentation (TEST-NET-2)
+        (PrefixBytes("203.0.113.0"), 24, true),   // Documentation (TEST-NET-3)
+        (PrefixBytes("224.0.0.0"), 4, true),      // Multicast
+        (PrefixBytes("240.0.0.0"), 4, true),      // Reserved (includes limited broadcast)
+    ];
+
+    // Static snapshot of the IANA IPv6 special-purpose registry plus multicast, with the registry's globally
+    // reachable refinements inside the covering IETF-protocol-assignments /23 recorded as permitted. Blocks
+    // the registry marks globally reachable outside it (AS112 service 2620:4f:8000::/48) match no rule and
+    // are permitted. The deprecated 6to4 prefix 2002::/16 is refused outright rather than recursing into its
+    // embedded IPv4 destination.
+    private static readonly (byte[] Prefix, int Bits, bool Prohibited)[] Ipv6PrefixRules =
+    [
+        (PrefixBytes("::"), 128, true),           // Unspecified
+        (PrefixBytes("::1"), 128, true),          // Loopback
+        (PrefixBytes("64:ff9b:1::"), 48, true),   // Local-use IPv4/IPv6 translation
+        (PrefixBytes("100::"), 64, true),         // Discard-only
+        (PrefixBytes("100:0:0:1::"), 64, true),   // Dummy IPv6 prefix
+        (PrefixBytes("2001::"), 23, true),        // IETF protocol assignments (Teredo, protocol anycasts)
+        (PrefixBytes("2001:2::"), 48, true),      // Benchmarking
+        (PrefixBytes("2001:3::"), 32, false),     // AMT (globally reachable refinement)
+        (PrefixBytes("2001:4:112::"), 48, false), // AS112-v6 (globally reachable refinement)
+        (PrefixBytes("2001:10::"), 28, true),     // ORCHID (deprecated)
+        (PrefixBytes("2001:20::"), 28, false),    // ORCHIDv2 (globally reachable refinement)
+        (PrefixBytes("2001:30::"), 28, false),    // Drone Remote ID Protocol DETs (globally reachable refinement)
+        (PrefixBytes("2001:db8::"), 32, true),    // Documentation
+        (PrefixBytes("2002::"), 16, true),        // 6to4 (deprecated)
+        (PrefixBytes("3fff::"), 20, true),        // Documentation
+        (PrefixBytes("5f00::"), 16, true),        // Segment Routing (SRv6) SIDs
+        (PrefixBytes("fc00::"), 7, true),         // Unique-local
+        (PrefixBytes("fec0::"), 10, true),        // Site-local (deprecated, refused conservatively)
+        (PrefixBytes("fe80::"), 10, true),        // Link-local
+        (PrefixBytes("ff00::"), 8, true),         // Multicast
+    ];
+
+    private static byte[] PrefixBytes(string prefix) => IPAddress.Parse(prefix).GetAddressBytes();
 }
 
 /// <summary>
 /// Primary HTTP transport for webhook delivery. Automatic redirects are disabled so a 3xx is returned to the
-/// delivery worker as a failed attempt rather than followed. The connect callback pins every socket to an
-/// address from the destination policy's approved set carried on the request options; without that set the
-/// connection fails closed. The request URI and hostname are untouched, so TLS certificate verification and
-/// SNI still validate against the original hostname, never the pinned IP.
+/// delivery worker as a failed attempt rather than followed. Connection reuse is disabled: a pooled connection
+/// is handed to a later request to the same origin without running the connect callback again, so reuse could
+/// put a delivery on a socket whose peer address was approved for a different delivery. With a zero pooled
+/// connection lifetime every connection is disposed when its response completes instead of pooled, so each
+/// delivery's socket is established by the connect callback against that delivery's own approved address set.
+/// TLS ALPN is restricted to HTTP/1.1 because an HTTP/2 connection stays available to other requests while in
+/// use and is only gated on a coarse age check, which leaves a same-millisecond multiplexing path open; webhook
+/// delivery needs no HTTP/2 features. The connect callback pins every socket to an address from the
+/// destination policy's approved set carried on the request options; without that set the connection fails
+/// closed. The request URI and hostname are untouched, so TLS certificate verification and SNI still validate
+/// against the original hostname, never the pinned IP.
 /// </summary>
 public static class WebhookConnectionTransport
 {
@@ -113,6 +194,8 @@ public static class WebhookConnectionTransport
         AutomaticDecompression = DecompressionMethods.None,
         ConnectTimeout = connectTimeout,
         ConnectCallback = ConnectToApprovedDestinationAsync,
+        PooledConnectionLifetime = TimeSpan.Zero,
+        SslOptions = new SslClientAuthenticationOptions { ApplicationProtocols = [SslApplicationProtocol.Http11] },
     };
 
     private static async ValueTask<Stream> ConnectToApprovedDestinationAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
