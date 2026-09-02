@@ -358,11 +358,60 @@ const pad = (revision: number): string => String(revision).padStart(2, "0")
  * could never have been correct, and the component rightly never used it.
  */
 
-/** A record that verifies or receives proposed content, as the rooted trace supplies it. */
+/**
+ * One exact edge of the rooted trace, as `/api/change-requests/{id}/trace` returns it.
+ *
+ * The 4B boundary takes trace *edges*, not a pre-digested list of ids, because an id alone does not say which
+ * kind of thing it names. A revision id, an artifact id and a proposal id are different identities that must
+ * never be interchanged, and the only place their meaning is stated is the edge that carries them.
+ */
+export type TraceEdgeFact = {
+  fromId: string
+  fromKind: string
+  toId: string
+  toKind: string
+  relation: string
+}
+
+/** A verification or build record the trace names, with the exact node identity the projection gave it. */
 export type CoveringRecord = {
+  /** The exact node id the rooted trace uses for this record — the same identity its edges reference. */
   id: string
-  /** What this record covers, as recorded. Absent means nothing is known, not "covers everything nearby". */
+  /**
+   * What this record covers, derived from real trace edges by {@link coveringRelations}.
+   *
+   * Never populated by guesswork. Absent or empty means the trace recorded no such relation, which draws no
+   * edge at all — not "covers everything in the lane beside it".
+   */
   coversIds?: readonly string[]
+}
+
+/**
+ * The records a covering artifact actually covers, read off the rooted trace's own edges.
+ *
+ * This exists so the join is stated once and can be tested, rather than being assembled ad hoc by whatever
+ * composes the view. Three rules it enforces, each of which has a plausible-looking wrong alternative:
+ *
+ * - the relation must be one the trace recorded — adjacency in a lane is not a relationship;
+ * - the endpoint used is the exact id the edge names, so a revision is never conflated with its artifact, nor
+ *   one revision of an artifact with another;
+ * - nothing is matched by display number, which is a label for people and not an identity.
+ */
+export const coveringRelations = (
+  coveringId: string,
+  edges: readonly TraceEdgeFact[],
+  relations: readonly string[] = ["VerificationCoverage", "CoveredByTestChangeRequest"],
+): string[] => {
+  const wanted = new Set(relations)
+  const covered: string[] = []
+  for (const edge of edges) {
+    if (!wanted.has(edge.relation)) continue
+    // The covering record may sit on either end depending on how the projection oriented the relation; the
+    // covered record is whichever end is not this one.
+    if (edge.toId === coveringId) covered.push(edge.fromId)
+    else if (edge.fromId === coveringId) covered.push(edge.toId)
+  }
+  return [...new Set(covered)]
 }
 
 /** `kind` stays narrow so it drops straight into the canvas edge type without a cast. */

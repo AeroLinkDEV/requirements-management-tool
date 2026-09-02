@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react"
 import DigitalThreadCanvas from "./DigitalThreadCanvas"
 import ExactArtifactLink from "./ExactArtifactLink"
-import { type CanvasEdge, type CanvasNode, compactLanes } from "./digitalThreadGeometry"
+import { type CanvasEdge, type CanvasNode, compactLanes, trace } from "./digitalThreadGeometry"
 import { stateLabel } from "./presentation"
 import { type NetworkNode, badgeOf, badgeTintFor, levelBadge, pillFor } from "./changeNetworkPresentation"
 import {
@@ -60,8 +60,11 @@ export type DigitalThreadInsideChangeProps = {
   /** The project's configured ladder, highest layer first. Drives the level-aware lane labels. */
   orderedLevels?: readonly string[]
   /**
-   * Set when the server has flagged this change request for rebase. It is what lets an empty downstream lane
-   * say "behind its target" rather than "nothing allocated" — see #880 §8.5.1.
+   * Whether the server has flagged the change request as a whole for rebase.
+   *
+   * A status about the change request, shown in the toolbar. It deliberately drives nothing per item: one
+   * stale item strands the whole change request, and reading this as though every empty item were stale is
+   * exactly the inference #880 §8.5.1 removed. Per-item meaning comes from each item's own `disposition`.
    */
   rebaseRequired?: boolean
   loading?: boolean
@@ -104,6 +107,7 @@ export default function DigitalThreadInsideChange({
 }: DigitalThreadInsideChangeProps) {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all")
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
   const liveRegion = useRef<HTMLDivElement | null>(null)
 
   const isTestChange = opened.kind === "TestChangeRequest"
@@ -140,7 +144,26 @@ export default function DigitalThreadInsideChange({
     [opened.id, register, typeFilter],
   )
 
-/** Lane 2 for a requirement change: what its proposals allocate to, de-duplicated. */
+/**
+   * Downstream records reached only through a Retire, so the cascade can be drawn dashed along its real path.
+   *
+   * A record reachable from both a Retire and a live proposal is deliberately excluded: dashing it would say
+   * the artifact itself is being retired, which is a claim about its lifecycle rather than about this path.
+   */
+  const retireCascadeIds = useMemo(() => {
+    const retiring = new Set<string>()
+    const live = new Set<string>()
+    for (const item of requirementItems)
+      for (const target of item.allocatedDownstream)
+        (item.kind === "Retire" ? retiring : live).add(target.id)
+    for (const item of verificationItems)
+      for (const target of item.finalCoverage)
+        (item.kind === "Retire" ? retiring : live).add(target.revisionId)
+    for (const id of live) retiring.delete(id)
+    return retiring
+  }, [requirementItems, verificationItems])
+
+  /** Lane 2 for a requirement change: what its proposals allocate to, de-duplicated. */
   const allocations = useMemo(() => {
     const seen = new Map<string, AllocationTarget>()
     for (const item of requirementItems) {
@@ -225,10 +248,50 @@ export default function DigitalThreadInsideChange({
       .filter(edge => present.has(edge.from) && present.has(edge.to))
   }, [canvasNodes, opened.id, requirementItems, verification, verificationItems])
 
+  /**
+   * The focus is what the reader is looking at: a selection if there is one, otherwise a hover.
+   *
+   * Selection owns the trace once it exists, so moving the pointer afterwards cannot pull the web away from
+   * the record the reader deliberately chose (#880 §6.5).
+   */
+  const focusId = selectedId ?? hoveredId
+  const selectedCard = selectedId ? cards.get(selectedId) ?? null : null
+
+  /**
+   * The traced web, walked over the real edges this view drew.
+   *
+   * `trace` is the same directed traversal the change network uses — not a second graph algorithm, and never
+   * an inference from lane adjacency or from an identifier.
+   */
+  const web = useMemo(() => (focusId ? trace(focusId, canvasEdges) : null), [canvasEdges, focusId])
+
+  /**
+   * Which side the panel takes, and how much frame it costs the board.
+   *
+   * The same non-occlusion principle as the network: the canvas must not lay records out underneath the
+   * panel, so the frame it may use shrinks by the docked edge. Bottom by default, matching §6.6.
+   */
+  const frameInset = useMemo(
+    () => (selectedId ? { bottom: PANEL_HEIGHT } : undefined),
+    [selectedId],
+  )
+
   const renderCard = useCallback(
     (canvasNode: CanvasNode) => {
       const card = cards.get(canvasNode.id)
       if (!card) return null
+
+      // Untraced records recede rather than vanish, so the shape of the change stays readable around what
+      // the reader selected. The hop badge says how far a record is from the focus.
+      const hop = web?.hops.get(canvasNode.id)
+      const traced = web?.nodes.has(canvasNode.id) ?? false
+      const traceClass = web && !traced ? " is-untraced" : ""
+      const hopBadge =
+        traced && hop ? (
+          <span className="dticHop" title={`${hop} hop${hop === 1 ? "" : "s"} from the selected record`}>
+            {hop}
+          </span>
+        ) : null
 
       if (card.kind === "register") {
         const node = card.node
@@ -236,7 +299,8 @@ export default function DigitalThreadInsideChange({
         const tint = badgeTintFor(node)
         const pill = pillFor(node.state)
         return (
-          <div className={`dticCard dticRegister${isOpen ? " is-open" : ""}`}>
+          <div className={`dticCard dticRegister${isOpen ? " is-open" : ""}${traceClass}`}>
+            {hopBadge}
             <div className="dticTop">
               <span className="dticBadge" style={{ background: tint.background, color: tint.color }}>
                 {badgeOf(node)}
@@ -261,7 +325,8 @@ export default function DigitalThreadInsideChange({
         const diff = diffFor(item)
         const notice = downstreamNotices.get(item.id)
         return (
-          <div className={`dticCard dticProposal${item.kind === "Retire" ? " is-retire" : ""}`}>
+          <div className={`dticCard dticProposal${item.kind === "Retire" ? " is-retire" : ""}${traceClass}`}>
+            {hopBadge}
             <div className="dticTop">
               <span className={`dticBadge dticOp dticOp-${item.kind.toLowerCase()}`}>
                 {badgeForKind(item.kind)}
@@ -295,7 +360,8 @@ export default function DigitalThreadInsideChange({
         const content = item.proposedContent
         const before = item.supersededContent
         return (
-          <div className={`dticCard dticProposal${item.kind === "Retire" ? " is-retire" : ""}`}>
+          <div className={`dticCard dticProposal${item.kind === "Retire" ? " is-retire" : ""}${traceClass}`}>
+            {hopBadge}
             <div className="dticTop">
               <span className={`dticBadge dticOp dticOp-${item.kind.toLowerCase()}`}>
                 {badgeForKind(item.kind)}
@@ -323,15 +389,45 @@ export default function DigitalThreadInsideChange({
               // A Retire proposes no successor body. Rendering an empty one would read as a procedure
               // emptied of its steps rather than one being withdrawn.
               <p className="dticNotice" data-density="meta">
-                This procedure is being retired. No successor content is proposed.
+                This {item.artifactKind.toLowerCase()} is being retired. No successor content is proposed.
               </p>
             )}
 
-            {before && item.kind === "Modify" ? (
-              <div className="dticDiff" data-density="meta">
-                <del>{before.steps}</del>
-                <ins>{content?.steps ?? ""}</ins>
-              </div>
+            {/* A Modify shows what it changes against the exact predecessor 4A resolves — every field, not
+                just the steps. Comparing only `steps` reported "nothing changed" for a proposal that reworked
+                the objective, the environment or the expected observations. */}
+            {before && content && item.kind === "Modify"
+              ? (() => {
+                  const changes = verificationChanges(before, content)
+                  if (!changes.length) return null
+                  return (
+                    <div className="dticDiff" data-density="meta">
+                      {changes.map(row => (
+                        <div className="dticDiffRow" key={row.label}>
+                          <i>{row.label}</i>
+                          <del>{row.before || "—"}</del>
+                          <ins>{row.after || "—"}</ins>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()
+              : null}
+
+            {/* Exact parents, kept out of the coverage lists. For a software Procedure the parent is a Case
+                revision; calling it requirement coverage would assert a relationship nobody recorded. An
+                unresolved parent states no kind, because nothing located it. */}
+            {item.exactParents.length ? (
+              <p className="dticMeta" data-density="meta">
+                {item.parentKind} from{" "}
+                {item.exactParents
+                  .map(parent =>
+                    parent.resolved && parent.displayNumber
+                      ? `${parent.displayNumber} (${parent.kind})`
+                      : "an unresolved reference",
+                  )
+                  .join(", ")}
+              </p>
             ) : null}
 
             {item.removedCoverage.length ? (
@@ -351,8 +447,10 @@ export default function DigitalThreadInsideChange({
 
       if (card.kind === "coverage") {
         const target = card.target
+        const inCascade = retireCascadeIds.has(target.revisionId)
         return (
-          <div className="dticCard dticAllocation">
+          <div className={`dticCard dticAllocation${inCascade ? " is-retire-cascade" : ""}${traceClass}`}>
+            {hopBadge}
             <div className="dticTop">
               <span className="dticBadge dticLevel">{levelBadge(target.level)}</span>
               <ExactArtifactLink href={hrefFor?.({ id: target.artifactId, displayNumber: target.displayNumber })} className="dticId">
@@ -371,8 +469,12 @@ export default function DigitalThreadInsideChange({
 
       if (card.kind === "allocation") {
         const target = card.target
+        const inCascade = retireCascadeIds.has(target.id)
         return (
-          <div className={`dticCard dticAllocation${target.isProposed ? " is-proposed" : ""}`}>
+          <div
+            className={`dticCard dticAllocation${target.isProposed ? " is-proposed" : ""}${inCascade ? " is-retire-cascade" : ""}${traceClass}`}
+          >
+            {hopBadge}
             <div className="dticTop">
               {/* Level vocabulary comes from the shared helper, which knows the configured ladder. An inline
                   ternary here previously fell back to SYS, so an Interface or Customer record read as System. */}
@@ -406,7 +508,8 @@ export default function DigitalThreadInsideChange({
       const record = card.record
       const pill = pillFor(record.state)
       return (
-        <div className={`dticCard dticTrace${record.state === "Suspect" ? " is-suspect" : ""}`}>
+        <div className={`dticCard dticTrace${record.state === "Suspect" ? " is-suspect" : ""}${traceClass}`}>
+          {hopBadge}
           <div className="dticTop">
             <span className="dticBadge dticLevel">{record.badge}</span>
             <ExactArtifactLink href={hrefFor?.(record)} className="dticId">
@@ -422,7 +525,7 @@ export default function DigitalThreadInsideChange({
         </div>
       )
     },
-    [cards, downstreamNotices, hrefFor, opened.id],
+    [cards, downstreamNotices, hrefFor, opened.id, retireCascadeIds, web],
   )
 
   const handleSelect = useCallback(
@@ -459,20 +562,6 @@ export default function DigitalThreadInsideChange({
     [cards, onOpenChange, opened.id],
   )
 
-  if (error) {
-    return (
-      <div className="dticState" role="alert">
-        <b>This change could not be opened.</b>
-        <p>{error}</p>
-        {onRetry ? (
-          <button type="button" onClick={onRetry}>
-            Try again
-          </button>
-        ) : null}
-      </div>
-    )
-  }
-
   return (
     <div className="dticRoot">
       <div className="dticToolbar">
@@ -508,15 +597,54 @@ export default function DigitalThreadInsideChange({
           renderCard={renderCard}
           selectedId={selectedId}
           onSelect={handleSelect}
+          onHover={setHoveredId}
+          tracedEdges={web?.edges}
+          frameInset={frameInset}
           ariaLabel={`Inside ${opened.displayNumber}`}
         />
         {loading ? <div className="dticLoading">Loading what this change proposes…</div> : null}
+
+        {/* Failure renders inside the frame rather than replacing it (#880 §6.8). Swapping the canvas out for
+            a message discards the transform, the zoom, the lane offsets and the selection, so recovering from
+            a failed refresh would cost the reader the view they had built. */}
+        {error ? (
+          <div className="dticInFrame dticInFrame-error" role="alert">
+            <b>This change could not be opened.</b>
+            <p>{error}</p>
+            {onRetry ? (
+              <button type="button" onClick={onRetry}>
+                Try again
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {!loading && !error && content && itemCount === 0 ? (
+          <div className="dticInFrame" role="status">
+            <b>{emptyHeading(content)}</b>
+          </div>
+        ) : null}
       </div>
 
-      {!loading && content && itemCount === 0 ? (
-        <p className="dticEmpty" role="status">
-          This change request proposes no requirement changes yet.
-        </p>
+      {selectedCard ? (
+        <aside className="dticPanel" aria-label={`Detail for ${panelTitle(selectedCard)}`}>
+          <div className="dticPanelTools">
+            <button type="button" onClick={() => setSelectedId(null)} aria-label="Close detail">
+              ×
+            </button>
+          </div>
+          <p className="dticEyebrow">SELECTED RECORD</p>
+          <div className="dticPanelIdentity">{panelTitle(selectedCard)}</div>
+          {panelRows(selectedCard).map(row => (
+            <div className="dticKv" key={row.label}>
+              <i>{row.label}</i>
+              <b>{row.value}</b>
+            </div>
+          ))}
+          <p className="dticPanelWeb">
+            {web ? `${web.up.size} upstream and ${web.down.size} downstream, all hops.` : ""}
+          </p>
+        </aside>
       ) : null}
 
       <div className="dticVisuallyHidden" aria-live="polite" ref={liveRegion} />
@@ -524,19 +652,108 @@ export default function DigitalThreadInsideChange({
   )
 }
 
+const PANEL_HEIGHT = 150 + 18 + 16
+
+/** The identity a panel names, taken from whichever card kind is selected. */
+const panelTitle = (card: Card): string => {
+  switch (card.kind) {
+    case "register":
+      return card.node.displayNumber
+    case "proposal":
+    case "verification":
+      return card.item.displayNumber
+    case "allocation":
+      return card.target.displayNumber || "Unnamed proposal"
+    case "coverage":
+      return card.target.displayNumber
+    case "trace":
+      return card.record.displayNumber
+  }
+}
+
+/** Facts the selected record actually has. Nothing is invented to fill the panel. */
+const panelRows = (card: Card): { label: string; value: string }[] => {
+  switch (card.kind) {
+    case "register":
+      return [
+        { label: "Level", value: card.node.level ?? "" },
+        { label: "State", value: stateLabel(card.node.state ?? undefined) },
+      ].filter(row => row.value)
+    case "proposal":
+      return [
+        { label: "Operation", value: operationLabel(card.item.kind) },
+        { label: "Level", value: card.item.level },
+        { label: "Downstream", value: card.item.disposition },
+      ]
+    case "verification":
+      return [
+        { label: "Operation", value: operationLabel(card.item.kind) },
+        { label: "Artifact", value: card.item.artifactKind },
+        { label: "Covers", value: String(card.item.finalCoverage.length) },
+      ]
+    case "allocation":
+      return [
+        { label: "Level", value: card.target.level },
+        { label: "In the build", value: card.target.isProposed ? "Proposed" : "Yes" },
+      ]
+    case "coverage":
+      return [{ label: "Level", value: card.target.level }]
+    case "trace":
+      return [{ label: "State", value: stateLabel(card.record.state ?? undefined) }]
+  }
+}
+
+/** The loaded-and-empty sentence, in the vocabulary of whichever aggregate was opened. */
+const emptyHeading = (content: ProposalContent): string =>
+  isVerificationContent(content)
+    ? "This test change request proposes no cases or procedures yet."
+    : "This change request proposes no requirement changes yet."
+
 
 /** The parts of a verification body worth showing on a card, skipping the ones this artifact does not use. */
+const VERIFICATION_FIELDS: { key: keyof VerificationArtifactContent; label: string }[] = [
+  { key: "title", label: "Title" },
+  { key: "objective", label: "Objective" },
+  { key: "preconditions", label: "Preconditions" },
+  { key: "steps", label: "Steps" },
+  { key: "orderedSteps", label: "Ordered steps" },
+  { key: "expectedResult", label: "Expected result" },
+  { key: "expectedObservations", label: "Expected observations" },
+  { key: "environmentSetup", label: "Environment" },
+  { key: "testData", label: "Test data" },
+  { key: "cleanup", label: "Cleanup" },
+  { key: "toolingAutomation", label: "Tooling" },
+]
+
+/**
+ * The parts of a verification body worth showing, one row per field the artifact actually uses.
+ *
+ * Each of the eleven fields stands on its own. An earlier version collapsed `orderedSteps || steps` and
+ * `expectedObservations || expectedResult`, which silently discarded one of each pair whenever both were
+ * populated — the reader would have seen a procedure that said less than the record holds. Genuinely empty
+ * fields are omitted; populated ones are never merged.
+ */
 const verificationRows = (content: VerificationArtifactContent): { label: string; value: string }[] =>
-  [
-    { label: "Objective", value: content.objective },
-    { label: "Preconditions", value: content.preconditions },
-    { label: "Steps", value: content.orderedSteps || content.steps },
-    { label: "Expected", value: content.expectedObservations || content.expectedResult },
-    { label: "Environment", value: content.environmentSetup ?? "" },
-    { label: "Test data", value: content.testData ?? "" },
-    { label: "Cleanup", value: content.cleanup ?? "" },
-    { label: "Tooling", value: content.toolingAutomation ?? "" },
-  ].filter(row => row.value.trim().length > 0)
+  VERIFICATION_FIELDS.map(field => ({ label: field.label, value: (content[field.key] ?? "").trim() })).filter(
+    row => row.value.length > 0,
+  )
+
+/**
+ * What a Modify actually changes, field by field against its exact predecessor.
+ *
+ * Structured rather than a text diff: the record is structured, and comparing whole bodies as prose would
+ * report a moved sentence as a rewrite. Only fields that differ are listed — an unchanged field repeated as
+ * "before → after" is noise that hides the change.
+ */
+const verificationChanges = (
+  before: VerificationArtifactContent,
+  after: VerificationArtifactContent,
+): { label: string; before: string; after: string }[] =>
+  VERIFICATION_FIELDS.map(field => ({
+    label: field.label,
+    before: (before[field.key] ?? "").trim(),
+    after: (after[field.key] ?? "").trim(),
+  })).filter(row => row.before !== row.after)
 
 /**
  * What a card says about relationships the record names but the server could not resolve.
