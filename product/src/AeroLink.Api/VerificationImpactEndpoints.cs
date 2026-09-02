@@ -556,6 +556,27 @@ public static class VerificationImpactEndpoints
             return projection is null ? Results.NotFound() : Results.Ok(projection);
         });
 
+        // What a controlled Test Change Request proposes, for the Digital Thread inside-a-change view.
+        //
+        // Its own resource rather than a branch inside /api/change-requests/{id}/proposal-content. A
+        // TestChangeReview is a different aggregate from a SystemChangeRequest, and an endpoint that took a
+        // GUID and went looking for it in two tables would leave the path silently ambiguous about what it
+        // reads. The client already knows the record kind from the network projection and picks the resource.
+        //
+        // The review is resolved first and its Project authorized before any content is projected, so a
+        // TestChangeReview identifier cannot pull proposal content out of a Project the caller cannot see. An
+        // identifier that is not a TestChangeReview is Not Found here; it is never looked for elsewhere.
+        app.MapGet("/api/test-change-reviews/{id:guid}/proposal-content", async (Guid id, HttpContext http,
+            AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var projectId = await db.TestChangeReviews.AsNoTracking()
+                .Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
+            var content = await TestProposalContentProjection.ForTestChangeReviewAsync(db, projectId.Value, id, ct);
+            return content is null ? Results.NotFound() : Results.Ok(content);
+        });
+
         // The procedure decisions a test change request carries — what the workspace reads and writes, and the
         // test-side counterpart of the requirement changes a change request carries.
         app.MapGet("/api/test-change-reviews/{id:guid}/{artifactRoute:regex(procedure-changes|case-changes)}", async (Guid id, string artifactRoute,

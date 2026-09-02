@@ -211,6 +211,22 @@ public static class ChangeRequestEndpoints
             return Results.Ok(network);
         });
 
+        // What a change request proposes, for the Digital Thread's inside-a-change view: the before text of
+        // every Modify and what each proposal allocates to downstream. Both are resolved at the revision the
+        // proposal was written against rather than the requirement's latest, which is the same exact-revision
+        // discipline the rest of the projection holds. The owning Project is resolved and authorized first, so
+        // a change-request identifier cannot pull proposal content out of a Project the caller cannot see.
+        app.MapGet("/api/change-requests/{id:guid}/proposal-content", async (Guid id, HttpContext http,
+            AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var projectId = await db.SystemChangeRequests.AsNoTracking()
+                .Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
+            var content = await ChangeProposalContentProjection.ForChangeRequestAsync(db, projectId.Value, id, ct);
+            return content is null ? Results.NotFound() : Results.Ok(content);
+        });
+
         app.MapGet("/api/change-requests/{id:guid}/upstream-candidates", async (Guid id, string? search,
             bool? includeEarlierBuilds, int? limit, HttpContext http, IChangeRequestRepository repository,
             AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
