@@ -292,9 +292,13 @@ const responses: Record<string, unknown> = {
   error: null,
 }
 
+// `in`, not `??`: the loading and failed scenarios deliberately carry a null response, and `??` treated that
+// as an unknown scenario and fell back to the populated thread — so both states silently rendered a full board.
+const response = scenario in responses ? responses[scenario] : responses.hlr
+
 createRoot(document.getElementById("root")!).render(
   <DigitalThreadArtifact
-    response={responses[scenario] ?? responses.hlr}
+    response={response}
     loading={scenario === "loading"}
     error={scenario === "error" ? "The server did not answer in time." : null}
     onRetry={() => undefined}

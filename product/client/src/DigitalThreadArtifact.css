@@ -131,7 +131,20 @@
 }
 
 .dtaMeta { display: flex; align-items: baseline; gap: 8px; color: #8493a6; font-size: 10px; }
-.dtaSuspectWord { margin-left: auto; color: #8a5a00; font-weight: var(--weight-bold); white-space: nowrap; }
+
+/* The textual half of the suspect treatment. It sits above the title rather than in the meta row so that it
+   survives the compact tier — see the comment at its use site. */
+.dtaSuspectFlag { display: flex; align-items: center; gap: 5px; }
+
+.dtaSuspectFlag b {
+  border-radius: var(--radius-pill);
+  background: #fdefcf;
+  padding: 2px 7px;
+  color: #8a5a00;
+  font: var(--weight-bold) 9px var(--font-body);
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
 
 /* Suspect carries its word as well as its colour; colour alone is never the signal (#880 §7). */
 .dtCanvasNode:has(.dtaCard.is-suspect) { border-color: #e0c17e; background: #fffdf6; }

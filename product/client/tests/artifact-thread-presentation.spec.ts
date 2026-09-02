@@ -372,3 +372,58 @@ test.describe("verification applicability", () => {
     expect(model.lanes).toEqual(["CHANGE REQUEST", "REQUIREMENT"])
   })
 })
+
+test.describe("within-lane ordering is fully deterministic", () => {
+  /** Two runs of one procedure recorded at the same instant: equal kind, equal sort key, distinct identity. */
+  const tiedRuns = (order: "forward" | "reverse") => {
+    const runs = [
+      node({
+        id: "aaaaaaaa-0000-4000-8000-000000000001", kind: "Execution", lane: 5, displayNumber: null,
+        title: "first.runner", state: "Pass", outcome: "Pass", executedBy: "first.runner",
+        executedAt: "2026-08-14T09:00:00+00:00", recordedAt: "2026-08-14T09:00:00+00:00", evidence: [],
+      }),
+      node({
+        id: "bbbbbbbb-0000-4000-8000-000000000002", kind: "Execution", lane: 5, displayNumber: null,
+        title: "second.runner", state: "Fail", outcome: "Fail", executedBy: "second.runner",
+        executedAt: "2026-08-14T09:00:00+00:00", recordedAt: "2026-08-14T09:00:00+00:00", evidence: [],
+      }),
+    ]
+    return fullResponse({
+      focalKind: "Procedure",
+      focalId: PROC,
+      nodes: [
+        node({ id: PROC, kind: "Procedure", lane: 4, displayNumber: "HLRTP-000120.00", state: "Approved", level: "HighLevel", isFocal: true, revision: 0 }),
+        ...(order === "forward" ? runs : [...runs].reverse()),
+      ],
+      edges: [
+        edge(PROC, "Procedure", "aaaaaaaa-0000-4000-8000-000000000001", "Execution", "produced"),
+        edge(PROC, "Procedure", "bbbbbbbb-0000-4000-8000-000000000002", "Execution", "produced"),
+      ],
+    })
+  }
+
+  test("equal sort keys still land in the same rows whichever order the server sent them", () => {
+    // `executedAt` is not unique — two runs written in one transaction, or brought in by an import, share it.
+    // Without an identity tie-breaker the comparator returns 0 and a stable sort leaves them in the order the
+    // server's dictionary happened to enumerate, which is the non-determinism the ordering exists to remove.
+    const forward = artifactThreadCanvasModel(read(tiedRuns("forward")))
+    const reverse = artifactThreadCanvasModel(read(tiedRuns("reverse")))
+
+    const rows = (model: typeof forward) =>
+      [...model.rows.entries()].sort(([left], [right]) => left.localeCompare(right))
+
+    expect(rows(reverse)).toEqual(rows(forward))
+    // And the order is the exact-identity one, not whichever arrived first.
+    expect(forward.rows.get("aaaaaaaa-0000-4000-8000-000000000001")).toBe(0)
+    expect(forward.rows.get("bbbbbbbb-0000-4000-8000-000000000002")).toBe(1)
+  })
+
+  test("the two runs keep distinct rows rather than collapsing", () => {
+    const model = artifactThreadCanvasModel(read(tiedRuns("forward")))
+    const first = model.nodes.find(item => item.id === "aaaaaaaa-0000-4000-8000-000000000001")!
+    const second = model.nodes.find(item => item.id === "bbbbbbbb-0000-4000-8000-000000000002")!
+
+    expect(first.lane).toBe(second.lane)
+    expect(first.row).not.toBe(second.row)
+  })
+})

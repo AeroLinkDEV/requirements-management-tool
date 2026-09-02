@@ -5,6 +5,7 @@ import { type CanvasNode, resolveDockByLane, trace } from "./digitalThreadGeomet
 import { stateLabel } from "./presentation"
 import { traceRelationLabel } from "./tracePresentation"
 import {
+  ARTIFACT_THREAD_LANES,
   type ArtifactThread,
   type ArtifactThreadEvidence,
   type ArtifactThreadNode,
@@ -113,12 +114,32 @@ export default function DigitalThreadArtifact({
   const edges = useMemo(() => thread?.edges ?? [], [thread])
   const byId = useMemo(() => new Map(nodes.map(node => [node.id, node])), [nodes])
 
+  /**
+   * The board, and while it is still arriving, the frame it will arrive into.
+   *
+   * #880 §6.8 is explicit: lane bands and headers render immediately with their counts unknown and cards fade
+   * in — never a spinner over a discarded frame. So a load with no response yet lays out the full six lanes
+   * and no cards, rather than handing the canvas an empty lane set and overlaying a message on nothing.
+   *
+   * Structural compaction waits until the content is actually known. Compacting an empty board would drop
+   * every lane and then put them back as the response landed, which is the jump this rule exists to stop. A
+   * thread that turns out to bypass Test Case still closes that one lane on arrival, which is a single lane
+   * settling rather than the whole board reappearing — and it is the honest maximum, because which lanes a
+   * thread populates cannot be known before the server answers.
+   */
+  const contentKnown = !loading || thread !== null || contractError !== null
+
   const model = useMemo(
     () =>
       thread
         ? artifactThreadCanvasModel(thread)
-        : { lanes: [] as string[], nodes: [] as CanvasNode[], edges: [], rows: new Map<string, number>() },
-    [thread],
+        : {
+            lanes: contentKnown ? [] : [...ARTIFACT_THREAD_LANES],
+            nodes: [] as CanvasNode[],
+            edges: [],
+            rows: new Map<string, number>(),
+          },
+    [contentKnown, thread],
   )
   const laneOfNode = useMemo(
     () => new Map(model.nodes.map(node => [node.id, node.lane])),
@@ -277,14 +298,29 @@ export default function DigitalThreadArtifact({
               {stateLabel(node.state ?? undefined)}
             </span>
           </div>
+          {/* Suspect must never ride on colour alone (#880 §7, §9). The word is deliberately NOT in the meta
+              row: tier 1 hides meta on unselected cards, and tier 1 is where a full six-lane thread lands, so
+              a suspect record would have arrived carrying nothing but an amber border. Its state pill cannot
+              stand in either — suspectness is a fact about a relationship, so the pill truthfully reads the
+              artifact's own lifecycle state.
+
+              `data-density="title"` keeps it through the detailed and compact tiers, which are the tiers a
+              board can land on. Only the dense tier drops it, and that tier is reached solely by the reader
+              deliberately zooming out, where §10.1 puts the text equivalent in the panel and the accessible
+              table instead. The visually-hidden line below covers assistive technology at every tier. */}
+          {isSuspect ? (
+            <div className="dtaSuspectFlag" data-density="title">
+              <b>Suspect link</b>
+              <span className="dtaVisuallyHidden">
+                — a relationship recorded against this record is suspect
+              </span>
+            </div>
+          ) : null}
           <div className="dtaTitle" data-density="title">
             {node.title}
           </div>
           <div className="dtaMeta" data-density="meta">
             <span>{metaLine(node)}</span>
-            {/* Suspect never rides on colour alone: the word travels with the card at every tier that shows
-                meta, and the expanded body and panel carry the whole statement. */}
-            {isSuspect ? <b className="dtaSuspectWord">Suspect link</b> : null}
           </div>
 
           {selectedId === node.id ? (

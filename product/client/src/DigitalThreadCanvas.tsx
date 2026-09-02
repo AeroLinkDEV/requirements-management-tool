@@ -121,11 +121,26 @@ export default function DigitalThreadCanvas({
   const frameSignature = useRef("")
   const animation = useRef<number | null>(null)
   const scrubbing = useRef(false)
+  /** The framing key the selection effect last acted on, so a re-render alone cannot reset a rolled lane. */
+  const framedFor = useRef<string | null>(null)
 
-  const counts = lanes.map((_, lane) =>
+  const measuredCounts = lanes.map((_, lane) =>
     laneCount ? laneCount(lane) : nodes.filter(node => node.lane === lane).length,
   )
-  const countsKey = counts.join(",")
+  const countsKey = measuredCounts.join(",")
+
+  /**
+   * The same numbers, but with an identity that only changes when the numbers do.
+   *
+   * `counts` feeds `paint`, and `paint` feeds the selection-framing effect. Rebuilt inline it was a fresh
+   * array on every render, so both were too, and the effect below re-ran for any state change at all —
+   * including hover, which every view routes into React state. That effect rewrites the lane offsets, so
+   * moving the pointer across the board silently threw away a lane the reader had rolled by hand, against
+   * #880 §6.3 and §6.4. Keying on the joined counts is enough: two boards with the same per-lane totals are
+   * interchangeable everywhere this value is used.
+   */
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- countsKey is the value identity of measuredCounts
+  const counts = useMemo(() => measuredCounts, [countsKey])
 
   /**
    * Room kept to the right of the board for an intra-lane edge inside the **final** lane.
@@ -350,7 +365,27 @@ export default function DigitalThreadCanvas({
    * relation rows somewhere to go — clicking one selects that record and the board comes to it.
    */
   useEffect(() => {
-    if (!selectedId) return
+    if (!selectedId) {
+      framedFor.current = null
+      return
+    }
+    /**
+     * Re-frame when what is being framed changes, not merely when React re-renders.
+     *
+     * Memoising `counts` removes the common cause, but it cannot remove them all: a caller is free to pass a
+     * new `nodes` or `edges` array identity for unchanged data, and that would again reset a rolled lane on a
+     * hover. Rolling is a deliberate act by the reader and must survive anything that is not a real change to
+     * the selection or the board, so the decision is made from values rather than from identities.
+     */
+    const framingKey =
+      `${selectedId}|${countsKey}|${frameIds?.join(",") ?? ""}` +
+      // The free area is part of what "framed" means. Docking the panel to a different side changes the area
+      // the board must fit into without touching the selection, and skipping the reframe there left the panel
+      // sitting on top of a directly linked record — the §6.6 failure this whole mechanism exists to prevent.
+      `|${frameInset?.left ?? 0},${frameInset?.right ?? 0},${frameInset?.bottom ?? 0},${trailingOverhang}`
+    if (framedFor.current === framingKey) return
+    framedFor.current = framingKey
+
     const box = frame()
     const result = geometryRef.current
     if (!box || !result) return
@@ -396,7 +431,7 @@ export default function DigitalThreadCanvas({
     paint()
     const timer = window.setTimeout(() => sceneRef.current?.classList.remove("is-easing"), 420)
     return () => window.clearTimeout(timer)
-  }, [counts, edges, frame, frameIds, nodes, paint, selectedId])
+  }, [counts, countsKey, edges, frame, frameIds, frameInset?.left, frameInset?.right, frameInset?.bottom, nodes, paint, selectedId, trailingOverhang])
 
   useEffect(
     () => () => {

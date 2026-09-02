@@ -252,7 +252,13 @@ export const artifactThreadCanvasModel = (
     bucket.sort(
       (a, b) =>
         (KIND_ORDER.get(a.kind) ?? 0) - (KIND_ORDER.get(b.kind) ?? 0) ||
-        sortKey(a).localeCompare(sortKey(b)),
+        sortKey(a).localeCompare(sortKey(b)) ||
+        // Exact identity, last. `sortKey` is not unique — two executions of one procedure can share an
+        // `executedAt`, which is ordinary for runs written in the same transaction or brought in by an
+        // import. Without this the comparator returns 0 for them and a stable sort leaves them in the order
+        // the server's dictionary happened to enumerate, which is exactly the non-determinism the ordering
+        // exists to remove. The id is unique by contract, so this always decides.
+        a.id.localeCompare(b.id),
     )
     bucket.forEach((node, row) => rows.set(node.id, row))
   }
