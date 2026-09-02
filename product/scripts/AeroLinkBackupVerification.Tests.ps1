@@ -3,6 +3,13 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1') -Force
 $root=Join-Path ([IO.Path]::GetTempPath()) ('aerolink-relocated-backup-'+[Guid]::NewGuid().ToString('N'))
 $verificationRoot=Join-Path $root 'verification';$staging=Join-Path $root 'source';$relocated=Join-Path $root 'relocated backup Ω';New-Item -ItemType Directory -Path (Join-Path $staging 'evidence\ab') -Force|Out-Null;New-Item -ItemType Directory -Path $relocated -Force|Out-Null;New-Item -ItemType Directory -Path $verificationRoot -Force|Out-Null
 $verifyScript=Join-Path $PSScriptRoot 'Verify-AeroLinkBackup.ps1'
+$verifySource=[IO.File]::ReadAllText($verifyScript)
+if(@([regex]::Matches($verifySource,'\[pscustomobject\]@\{Valid=\$true')).Count -ne 1 -or $verifySource -notmatch '\$verificationResult=\[pscustomobject\]@\{Valid=\$true'){throw 'Verification success must be stored in $verificationResult, never emitted before cleanup resolves.'}
+$primaryPrecedence=$verifySource.IndexOf('if($verificationError){throw $verificationError}')
+$cleanupFailure=$verifySource.IndexOf('cleanup of the temporary verification copy failed')
+if($primaryPrecedence -lt 0 -or $cleanupFailure -lt 0 -or $primaryPrecedence -gt $cleanupFailure){throw 'The primary verification failure must precede and outrank the cleanup failure.'}
+if($verifySource.IndexOf('if($cleanupError){throw "Backup archive content verification succeeded') -lt 0){throw 'A successful verification with failed cleanup must fail the invocation.'}
+if($verifySource -notlike '*Write-Warning "Backup verification cleanup failed; the temporary directory remains at*'){throw 'Cleanup failure must warn with the retained temporary path.'}
 try{
  $object=Join-Path $staging 'evidence\ab\object.docx';[IO.File]::WriteAllText($object,'controlled backup object');$hash=(Get-FileHash -LiteralPath $object -Algorithm SHA256).Hash.ToLowerInvariant();$size=(Get-Item -LiteralPath $object).Length
  [IO.File]::WriteAllText((Join-Path $staging 'aerolink-postgresql.dump'),'disposable dump fixture')

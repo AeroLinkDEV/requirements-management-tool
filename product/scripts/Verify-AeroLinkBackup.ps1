@@ -13,6 +13,7 @@ $expected=((Get-Content -LiteralPath $sidecar -Raw).Trim() -split '\s+')[0].ToLo
 if($expected -ne $actual){throw "Backup archive hash mismatch. Expected $expected; calculated $actual."}
 $verificationRoot=if($VerificationRoot){[IO.Path]::GetFullPath($VerificationRoot)}else{Join-Path $productRoot '.local\backup-verification'};New-Item -ItemType Directory -Path $verificationRoot -Force|Out-Null
 $temporary=Join-Path $verificationRoot ([Guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $temporary|Out-Null
+$verificationResult=$null;$verificationError=$null;$cleanupError=$null
 try{
  Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1') -Force
  Expand-AeroLinkBackupArchive -ArchivePath $archive -DestinationDirectory $temporary
@@ -27,5 +28,9 @@ try{
  Import-Module (Join-Path $PSScriptRoot 'AeroLinkEvidenceStore.psm1') -Force
  $verified=Test-AeroLinkAttachmentInventory -Inventory $inventory -EvidenceRoot (Join-Path $temporary ([string]$manifestObject.Storage.ArchiveRoot))
  if($verified.ReferencedObjects -ne [int]$manifestObject.Storage.ObjectCount -or $verified.ReferencedAttachments -ne [int]$manifestObject.Storage.AttachmentCount -or $verified.VerifiedBytes -ne [long]$manifestObject.Storage.ReferencedBytes -or $verified.UnreferencedObjects.Count -ne [int]$manifestObject.Storage.UnreferencedObjectCount){throw 'Backup storage counts do not match the verified attachment inventory.'}
- [pscustomobject]@{Valid=$true;Archive=$archive;ArchiveSha256=$actual;ManifestEntries=$manifest.Count;ReferencedAttachments=$verified.ReferencedAttachments;ReferencedObjects=$verified.ReferencedObjects;ReferencedBytes=$verified.VerifiedBytes;UnreferencedObjects=$verified.UnreferencedObjects;VerifiedAt=(Get-Date).ToUniversalTime().ToString('o')}
-}finally{if(Test-Path -LiteralPath $temporary){try{Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction Stop}catch{Write-Warning "Backup verification cleanup failed; the temporary directory remains at ${temporary}: $($_.Exception.Message)"}}}
+ $verificationResult=[pscustomobject]@{Valid=$true;Archive=$archive;ArchiveSha256=$actual;ManifestEntries=$manifest.Count;ReferencedAttachments=$verified.ReferencedAttachments;ReferencedObjects=$verified.ReferencedObjects;ReferencedBytes=$verified.VerifiedBytes;UnreferencedObjects=$verified.UnreferencedObjects;VerifiedAt=(Get-Date).ToUniversalTime().ToString('o')}
+}catch{$verificationError=$_}
+if(Test-Path -LiteralPath $temporary){try{Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction Stop}catch{$cleanupError=$_;Write-Warning "Backup verification cleanup failed; the temporary directory remains at ${temporary}: $($cleanupError.Exception.Message)"}}
+if($verificationError){throw $verificationError}
+if($cleanupError){throw "Backup archive content verification succeeded, but cleanup of the temporary verification copy failed and the extracted backup remains at ${temporary}: $($cleanupError.Exception.Message)"}
+$verificationResult
