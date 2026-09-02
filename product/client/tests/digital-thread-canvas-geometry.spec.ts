@@ -7,6 +7,8 @@ import {
   type CanvasNode,
   anchorInLane,
   geometryFor,
+  isVisible,
+  offsetToReveal,
   laneHeight,
   layout,
   minimumZoom,
@@ -101,6 +103,41 @@ test.describe("digital thread canvas geometry", () => {
     expect(targets[3]).toBe(0)
     // The scrubbed lane is driven by the pointer, not by the sync.
     expect(targets[1]).toBe(0)
+  })
+
+  test("selection fetches back a linked record that had been rolled out of its lane", () => {
+    // The case camera framing cannot cover. The linked record is not merely off-centre: its lane has been
+    // rolled so far that the record is outside the lane window entirely. Panning or zooming the board moves
+    // every lane together and can never bring it back — only rolling that lane can. #880 §6.4 requires the
+    // same routine to run on selection, and a selection that only reframed would leave the reader looking at
+    // a highlighted edge pointing into an empty band.
+    const nodes: CanvasNode[] = [
+      { id: "sys-2", lane: 1, row: 4 },
+      { id: "hlr-1", lane: 2, row: 6 },
+    ]
+    const edges: CanvasEdge[] = [{ from: "sys-2", to: "hlr-1", label: "allocates to" }]
+    const result = layout([0, 5, 40, 0, 0], FRAME, 1)
+
+    // Roll lane 2 a long way, so hlr-1 is well outside its window.
+    const rolledAway = [0, 0, -1400, 0, 0]
+    const before = 6 * result.geometry.rowPitch + result.geometry.pad + rolledAway[2]
+    expect(isVisible(before, result.geometry, result.bandHeight)).toBe(false)
+
+    // Selecting sys-2 runs the sync across every lane (exceptLane -1, as selection does).
+    const targets = syncTargets(
+      "sys-2",
+      nodes,
+      edges,
+      result.geometry,
+      rolledAway,
+      result.laneMinimums,
+      5,
+      -1,
+    )
+
+    const after = 6 * result.geometry.rowPitch + result.geometry.pad + targets[2]
+    expect(targets[2]).not.toBe(rolledAway[2])
+    expect(isVisible(after, result.geometry, result.bandHeight)).toBe(true)
   })
 
   test("the anchor is the record nearest the middle of the rolled lane", () => {
@@ -224,5 +261,104 @@ test.describe("digital thread canvas framing and lanes", () => {
       expect(y).toBeGreaterThanOrEqual(free.y - 1)
       expect(bottom).toBeLessThanOrEqual(free.y + free.height + 1)
     }
+  })
+})
+
+test.describe("keyboard reveal", () => {
+  const geometry = geometryFor(2)
+  const band = 400
+
+  test("a row already in the window does not move its lane", () => {
+    // Nothing to fetch, so the lane must hold still — rolling a settled lane under a keyboard user is its own
+    // kind of disorientation.
+    expect(offsetToReveal(1, geometry, band, 0)).toBe(0)
+  })
+
+  test("a row below the window rolls the lane up to reach it", () => {
+    // Row 20 sits far below a 400px band, so the lane must roll (a negative offset) to bring it in.
+    const offset = offsetToReveal(20, geometry, band, 0)
+    expect(offset).toBeLessThan(0)
+
+    const y = 20 * geometry.rowPitch + geometry.pad + offset
+    expect(y).toBeGreaterThan(-geometry.cardHeight)
+    expect(y).toBeLessThan(band)
+  })
+
+  test("a row above the window rolls the lane back down to reach it", () => {
+    // The lane has already been rolled a long way; row 0 is now off the top.
+    const rolled = -1200
+    const offset = offsetToReveal(0, geometry, band, rolled)
+    expect(offset).toBeGreaterThan(rolled)
+
+    const y = 0 * geometry.rowPitch + geometry.pad + offset
+    expect(y).toBeGreaterThan(-geometry.cardHeight)
+    expect(y).toBeLessThan(band)
+  })
+
+  test("a lane is never rolled below its own first row", () => {
+    // Offsets are zero-or-negative. A short lane must not be pulled into positive territory chasing row 0.
+    expect(offsetToReveal(0, geometry, band, 0)).toBeLessThanOrEqual(0)
+  })
+})
+
+test.describe("keyboard tab stops and lane order", () => {
+  // The tab stop is authored from real visibility during the geometry pass, so these assert the rule that pass
+  // applies: the stop is the remembered card when it is visible, otherwise the first visible card in the lane.
+  const stopFor = (
+    bucket: readonly CanvasNode[],
+    remembered: string | undefined,
+    isCardVisible: (node: CanvasNode) => boolean,
+  ): string | null => {
+    const visible = bucket.filter(isCardVisible)
+    return (
+      (remembered && visible.some(candidate => candidate.id === remembered) ? remembered : null) ??
+      visible[0]?.id ??
+      null
+    )
+  }
+
+  test("a card rolled out of its lane loses the tab stop to a visible one", () => {
+    const bucket: CanvasNode[] = [
+      { id: "a", lane: 1, row: 0 },
+      { id: "b", lane: 1, row: 1 },
+      { id: "c", lane: 1, row: 2 },
+    ]
+    // Before rolling, the lane's first card holds the stop.
+    expect(stopFor(bucket, undefined, () => true)).toBe("a")
+
+    // The pointer rolls the lane and "a" leaves the window. Opacity and pointer-events do not remove an
+    // element from the tab order, so if the stop stayed on "a" a keyboard user would tab into a card they
+    // cannot see — the focus trap §6.9 forbids.
+    const rolledAway = (node: CanvasNode) => node.id !== "a"
+    expect(stopFor(bucket, "a", rolledAway)).toBe("b")
+  })
+
+  test("a remembered card keeps the stop while it stays visible", () => {
+    const bucket: CanvasNode[] = [
+      { id: "a", lane: 1, row: 0 },
+      { id: "b", lane: 1, row: 1 },
+    ]
+    // Arrowing to "b" must not be undone by the next geometry pass.
+    expect(stopFor(bucket, "b", () => true)).toBe("b")
+  })
+
+  test("a lane with nothing visible offers no tab stop at all", () => {
+    const bucket: CanvasNode[] = [{ id: "a", lane: 1, row: 0 }]
+    expect(stopFor(bucket, "a", () => false)).toBeNull()
+  })
+
+  test("cards are ordered lane first, then row, so Tab walks the ladder in order", () => {
+    // DOM order is tab order, and the projection supplies nodes in whatever order it produced them.
+    const produced: CanvasNode[] = [
+      { id: "llr-1", lane: 3, row: 1 },
+      { id: "pr-1", lane: 0, row: 0 },
+      { id: "sys-2", lane: 1, row: 1 },
+      { id: "sys-1", lane: 1, row: 0 },
+      { id: "hlr-1", lane: 2, row: 0 },
+    ]
+
+    const ordered = [...produced].sort((a, b) => a.lane - b.lane || a.row - b.row)
+
+    expect(ordered.map(node => node.id)).toEqual(["pr-1", "sys-1", "sys-2", "hlr-1", "llr-1"])
   })
 })

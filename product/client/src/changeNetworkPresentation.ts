@@ -28,6 +28,19 @@ export type NetworkEdge = {
   toKind: string
   relation: string
   provenance: { kind: string; sourceId?: string | null; isLive?: boolean; status?: string | null }[]
+  /**
+   * Whether this relationship is suspect, as the server states it.
+   *
+   * Required, not optional: the projection states it on every edge, so the client never has to read absence as
+   * a value. It is never derived here — relation and provenance carry display vocabulary, and deciding
+   * lifecycle state by looking for a word inside them would make any wording containing "suspect" a suspect
+   * edge and hide a genuinely suspect one whose wording does not.
+   *
+   * On the change-network board it is currently always false, and that is the truth rather than a stub: a
+   * suspect lifecycle exists only for requirement-trace and case-procedure links, and this board renders
+   * neither. Requirement-trace suspectness becomes reachable in the artifact thread (§5.3, slice 5).
+   */
+  isSuspect: boolean
 }
 
 export type NetworkProjection = {
@@ -195,10 +208,16 @@ export const badgeTintFor = (node: NetworkNode): Pill => {
   return { background: "#e7effb", color: "#3569a8" }
 }
 
-/** True when this edge is one the server has flagged as suspect. */
-export const isSuspectEdge = (edge: NetworkEdge): boolean =>
-  edge.provenance.some(fact => fact.status?.toLowerCase().includes("suspect") === true) ||
-  edge.relation.toLowerCase().includes("suspect")
+/**
+ * True when the server has stated this edge is suspect.
+ *
+ * A plain read of a served fact, deliberately. An earlier version searched the relation and provenance status
+ * text for the word "suspect", which reconstructed lifecycle meaning from display vocabulary in the browser:
+ * it made any relation whose wording happened to contain the word read as suspect, and left a genuinely
+ * suspect edge looking settled whenever its wording did not. Suspect state and relation vocabulary are
+ * separate facts and are kept separate.
+ */
+export const isSuspectEdge = (edge: NetworkEdge): boolean => edge.isSuspect
 
 /**
  * Which side the detail panel takes for a selected record.
@@ -252,4 +271,43 @@ export const assignRows = (
       .forEach((node, index) => rows.set(node.id, index))
   }
   return rows
+}
+
+/**
+ * Whether a view's relation vocabulary can carry suspect lifecycle at all.
+ *
+ * A view capability, not a data accident. The change network renders ProblemReportResolution,
+ * change-to-upstream-change and CoveredByTestChangeRequest between ChangeRequest, TestChangeRequest and
+ * ProblemReport nodes. A suspect lifecycle governs only `RequirementTrace` and `CaseProcedure` links, so none
+ * of those relations can ever be suspect — the answer is structural, not "zero today". A view that decided
+ * this by counting suspect edges in the current response would show the control whenever a fixture happened
+ * to contain one and hide it otherwise, which is a control that flickers rather than one that means something.
+ *
+ * The artifact thread (#880 §5.3) is the first planned view that renders requirement revisions and their
+ * traces, so it is the first that may set this true. See #880 §10.2.
+ */
+export const supportsSuspectRelations = (relations: readonly string[]): boolean =>
+  relations.some(relation => SUSPECT_CAPABLE_RELATIONS.has(relation))
+
+/** The relation kinds an exact-link suspect lifecycle can attach to, mirroring `ExactLinkKind` on the server. */
+export const SUSPECT_CAPABLE_RELATIONS: ReadonlySet<string> = new Set([
+  "RequirementTrace",
+  "CaseProcedure",
+])
+
+/**
+ * The records a Suspect filter keeps: those at either end of a server-stated suspect relationship.
+ *
+ * Presentation filtering over a fact the server already decided, not lifecycle derivation. Nothing here reads
+ * node state, an identifier prefix, relation wording, provenance wording, or a revision comparison — only
+ * `edge.isSuspect`, which the projection states.
+ */
+export const suspectEndpointIds = (edges: readonly NetworkEdge[]): Set<string> => {
+  const endpoints = new Set<string>()
+  for (const edge of edges) {
+    if (!edge.isSuspect) continue
+    endpoints.add(edge.fromId)
+    endpoints.add(edge.toId)
+  }
+  return endpoints
 }

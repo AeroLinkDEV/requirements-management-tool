@@ -81,6 +81,34 @@
 .dtCanvasEdgeDot { fill: #7fb3ab; }
 .dtCanvasEdgeDot.is-suspect { fill: #d6a33b; }
 
+/* A traced edge carries the teal and weight of the approved prototype, so the selected web reads as one shape
+   rather than as a set of separately highlighted cards. Suspect keeps its own amber and dash: an edge that is
+   both traced and suspect must still say suspect, so that rule wins on colour. */
+.dtCanvasEdge.is-traced { stroke: #2a8e83; stroke-width: 2.6; }
+.dtCanvasEdge.is-traced.is-suspect { stroke: #d6a33b; stroke-width: 2.6; }
+.dtCanvasEdgeDot.is-traced { fill: #2a8e83; }
+.dtCanvasEdgeDot.is-traced.is-suspect { fill: #d6a33b; }
+
+/* Untraced edges recede while a trace is active rather than vanishing, so the build keeps its shape. */
+.dtCanvasEdge.is-untraced,
+.dtCanvasEdgeDot.is-untraced { opacity: .17; }
+
+/* Labels rest hidden; the canvas reveals them on traced edges and past zoom 1.05. Inline opacity from the
+   geometry pass drives visibility, so this only styles them. */
+.dtCanvasEdgeLabel {
+  fill: #5d7f88;
+  font: var(--weight-strong) 9px var(--font-body);
+  letter-spacing: .04em;
+  pointer-events: none;
+  transition: opacity .14s ease;
+}
+
+.dtCanvasEdge.is-traced ~ .dtCanvasEdgeLabel { fill: #2a8e83; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dtCanvasEdgeLabel { transition: none; }
+}
+
 .dtCanvasNodes { position: absolute; inset: 0; }
 
 .dtCanvasNode {
@@ -115,4 +143,19 @@
 
 @media (prefers-reduced-motion: reduce) {
   .dtCanvasScene.is-easing { transition: none; }
+}
+
+/* A lane whose records are all hidden by a filter keeps its place and says so, greyed rather than collapsed
+   (#880 §6.8). Collapsing would slide every other lane sideways while the reader is mid-search. */
+.dtCanvasBand.is-filtered-empty { background: #f4f6f8; }
+
+.dtCanvasBandNotice {
+  position: absolute;
+  left: 50%;
+  top: 22px;
+  transform: translateX(-50%);
+  margin: 0;
+  white-space: nowrap;
+  color: #8a9bad;
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
 }

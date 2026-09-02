@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   type CanvasEdge,
   type CanvasFrame,
@@ -6,7 +6,9 @@ import {
   type LayoutResult,
   anchorInLane,
   clampOffsets,
+  edgeKey,
   edgePath,
+  offsetToReveal,
   fitTransform,
   frameNodes,
   isVisible,
@@ -32,13 +34,30 @@ export type DigitalThreadCanvasProps = {
   renderCard: (node: CanvasNode) => React.ReactNode
   /** Count shown beside a lane heading, when the lane holds more than one record. */
   laneCount?: (lane: number) => number
+  /**
+   * A sentence a lane shows in place of cards, when it has records but none the reader can currently see.
+   *
+   * A lane emptied by a filter keeps its place and says so (#880 §6.8). Collapsing it would slide every other
+   * lane sideways mid-search, and leaving it silently blank would read as a lane with nothing in it, which is
+   * a different fact from a lane whose records the filter is hiding.
+   */
+  laneNotice?: (lane: number) => string | null
   selectedId?: string | null
   onSelect?: (id: string | null) => void
   onHover?: (id: string | null) => void
   /** Area the board may use, in viewport pixels. Shrink it when a detail panel is docked. */
   frameInset?: { right?: number; left?: number; bottom?: number }
+  /**
+   * The edges of the currently traced web, keyed `from>to`.
+   *
+   * The canvas owns edge appearance for every view, so the traced treatment lives here rather than being
+   * rebuilt per view. Undefined means no trace is active and every edge rests; an empty set means a trace is
+   * active and reaches no edge, which is a different picture and must not read as the resting one.
+   */
+  tracedEdges?: ReadonlySet<string>
   ariaLabel?: string
 }
+
 
 /**
  * The canvas shell: lanes of cards that pan, zoom, change density with zoom, roll independently, and follow
@@ -54,19 +73,34 @@ export default function DigitalThreadCanvas({
   edges,
   renderCard,
   laneCount,
+  laneNotice,
   selectedId = null,
   onSelect,
   onHover,
   frameInset,
+  tracedEdges,
   ariaLabel = "Digital Thread canvas",
 }: DigitalThreadCanvasProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const sceneRef = useRef<HTMLDivElement | null>(null)
   const edgeLayerRef = useRef<SVGSVGElement | null>(null)
   const cardRefs = useRef(new Map<string, HTMLDivElement>())
-  const edgeRefs = useRef<{ path: SVGPathElement; dot: SVGCircleElement; edge: CanvasEdge }[]>([])
+  const edgeRefs = useRef<
+    { path: SVGPathElement; dot: SVGCircleElement; label: SVGTextElement | null; edge: CanvasEdge }[]
+  >([])
 
   const transform = useRef({ x: 0, y: 0, zoom: 1 })
+  /**
+   * The card that carries the tab stop in each lane (#880 §6.9).
+   *
+   * A roving tab index, not a tabbable card per record. With hundreds of cards in a build, making every one a
+   * tab stop turns Tab into an unusable crawl and lets focus land on cards rolled out of their lane window.
+   * One stop per lane means Tab moves between lanes and the arrows move within one, which is the contract.
+   */
+  const [roving, setRoving] = useState<Record<number, string>>({})
+  // paint() runs outside React on every pointer move, so it reads these rather than the closed-over state.
+  const rovingRef = useRef<Record<number, string>>({})
+  const byLaneRef = useRef<Map<number, CanvasNode[]>>(new Map())
   const offsets = useRef<number[]>([])
   const targets = useRef<number[]>([])
   const geometryRef = useRef<LayoutResult | null>(null)
@@ -143,6 +177,29 @@ export default function DigitalThreadCanvas({
         "is-offscreen",
         !isVisible(position.y, geometry, bandHeight) && selectedId !== node.id,
       )
+      // The density rules exempt the selected card from compaction, and they key off this class on the node
+      // element. Without it the exemption silently never applied and a selected card compacted with the rest.
+      card.classList.toggle("is-selected", selectedId === node.id)
+    }
+
+    // Tab stops are authored here, from the positions just written, because a lane rolls under the pointer
+    // without React re-rendering. React's tabIndex is the starting point; a card that has since been rolled
+    // out of its window must lose the stop, or a keyboard user tabs into something faded out and unreachable
+    // by eye. Opacity and pointer-events do not remove an element from the tab order — only tabindex does.
+    for (const [lane, bucket] of byLaneRef.current) {
+      const visible = bucket.filter(candidate => {
+        const position = positions.get(candidate.id)
+        return position ? isVisible(position.y, geometry, bandHeight) : false
+      })
+      const remembered = rovingRef.current[lane]
+      const stop =
+        (remembered && visible.some(candidate => candidate.id === remembered) ? remembered : null) ??
+        visible[0]?.id ??
+        null
+      for (const candidate of bucket) {
+        const card = cardRefs.current.get(candidate.id)
+        if (card) card.tabIndex = candidate.id === stop ? 0 : -1
+      }
     }
 
     const svg = edgeLayerRef.current
@@ -153,7 +210,11 @@ export default function DigitalThreadCanvas({
       svg.style.left = "-26px"
       svg.style.top = "-56px"
     }
-    for (const { path, dot, edge } of edgeRefs.current) {
+    // Edge labels rest hidden and appear on a traced edge, or once the board is zoomed past 1.05 (#880 §6.7).
+    // At the default fit the canvas stays calm; a reader who has selected something, or leaned in, gets the
+    // relation words.
+    const labelsAtRest = transform.current.zoom > 1.05
+    for (const { path, dot, label, edge } of edgeRefs.current) {
       const from = positions.get(edge.from)
       const to = positions.get(edge.to)
       if (!from || !to) continue
@@ -166,10 +227,29 @@ export default function DigitalThreadCanvas({
         from.y + geometry.anchor < bandHeight + 20 &&
         to.y + geometry.anchor > -20 &&
         to.y + geometry.anchor < bandHeight + 20
+
+      // A trace is active only when the caller passes a set. Undefined leaves every edge at rest, which is a
+      // different state from a trace that reaches nothing.
+      const traced = tracedEdges?.has(edgeKey(edge.from, edge.to)) ?? false
+      const traceActive = tracedEdges !== undefined
+      path.classList.toggle("is-traced", traced)
+      dot.classList.toggle("is-traced", traced)
+      // Untraced edges recede while a trace is active rather than disappearing: the reader keeps the shape of
+      // the build around what they selected.
+      path.classList.toggle("is-untraced", traceActive && !traced)
+      dot.classList.toggle("is-untraced", traceActive && !traced)
+
       path.style.opacity = inWindow ? "" : "0.06"
       dot.style.opacity = path.style.opacity
+      if (label) {
+        const midX = (from.x + geometry.laneWidth + to.x) / 2
+        const midY = (from.y + to.y) / 2 + geometry.anchor - 6
+        label.setAttribute("x", String(midX))
+        label.setAttribute("y", String(midY))
+        label.style.opacity = inWindow && (traced || labelsAtRest) ? "" : "0"
+      }
     }
-  }, [counts, frame, lanes.length, nodes, selectedId])
+  }, [counts, frame, lanes.length, nodes, selectedId, tracedEdges])
 
   const settle = useCallback(() => {
     if (animation.current !== null) return
@@ -234,6 +314,25 @@ export default function DigitalThreadCanvas({
       if (edge.from === selectedId) linked.add(edge.to)
       else if (edge.to === selectedId) linked.add(edge.from)
     }
+
+    // Roll every lane to bring the selected record's linked records into their own windows, before framing
+    // (#880 §6.4: "the same routine runs on selection"). Panning the camera cannot do this job: a lane scrolls
+    // independently, so a linked record can sit outside its lane window no matter where the camera is, and
+    // framing alone would centre on a card the reader still cannot see. The offsets are applied at once rather
+    // than animated into place so the two-pass framing below measures where the cards have actually landed.
+    const synced = syncTargets(
+      selectedId,
+      nodes,
+      edges,
+      result.geometry,
+      offsets.current,
+      result.laneMinimums,
+      counts.length,
+      -1,
+    )
+    offsets.current = [...synced]
+    targets.current = [...synced]
+
     const next = frameNodes(
       [...linked],
       nodes,
@@ -359,6 +458,68 @@ export default function DigitalThreadCanvas({
     [edges, lanes.length, nodes, onSelect, paint, settle],
   )
 
+  /** Cards per lane in row order: the sequence the arrow keys walk. */
+  const byLane = useMemo(() => {
+    const map = new Map<number, CanvasNode[]>()
+    for (const node of nodes) {
+      const bucket = map.get(node.lane)
+      if (bucket) bucket.push(node)
+      else map.set(node.lane, [node])
+    }
+    for (const bucket of map.values()) bucket.sort((a, b) => a.row - b.row)
+    return map
+  }, [nodes])
+
+  /** Cards in lane-then-row order: the sequence Tab and the arrows follow. */
+  const domOrdered = useMemo(
+    () => [...nodes].sort((a, b) => a.lane - b.lane || a.row - b.row),
+    [nodes],
+  )
+
+  rovingRef.current = roving
+  byLaneRef.current = byLane
+
+  /** The card holding this lane's tab stop: the remembered one, else the lane's first. */
+  const rovingFor = useCallback(
+    (lane: number): string | undefined => {
+      const bucket = byLane.get(lane)
+      if (!bucket?.length) return undefined
+      const remembered = roving[lane]
+      return remembered && bucket.some((node: CanvasNode) => node.id === remembered) ? remembered : bucket[0].id
+    },
+    [byLane, roving],
+  )
+
+  /**
+   * Arrow navigation within a lane, rolling the lane so the newly focused card is actually visible.
+   *
+   * Moving focus without rolling would leave a keyboard user on a card that is faded out and unreachable by
+   * eye, which is the failure #880 §6.9 calls out.
+   */
+  const moveWithinLane = useCallback(
+    (node: CanvasNode, delta: number) => {
+      const bucket = byLane.get(node.lane)
+      if (!bucket?.length) return
+      const index = bucket.findIndex((candidate: CanvasNode) => candidate.id === node.id)
+      const next = bucket[Math.min(bucket.length - 1, Math.max(0, index + delta))]
+      if (!next || next.id === node.id) return
+      setRoving(current => ({ ...current, [node.lane]: next.id }))
+      const result = geometryRef.current
+      if (result) {
+        const revealed = offsetToReveal(
+          next.row,
+          result.geometry,
+          result.bandHeight,
+          offsets.current[node.lane] ?? 0,
+        )
+        // Never past what the lane can actually roll, or the lane would scroll off its own content.
+        targets.current[node.lane] = Math.max(result.laneMinimums[node.lane] ?? 0, revealed)
+      }
+      cardRefs.current.get(next.id)?.focus()
+    },
+    [byLane],
+  )
+
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       const box = frame()
@@ -402,12 +563,24 @@ export default function DigitalThreadCanvas({
     >
       <div className="dtCanvasScene" ref={sceneRef}>
         <div className="dtCanvasBands">
-          {lanes.map((title, lane) => (
-            <div className="dtCanvasBand" data-band={lane} key={`band-${title}`}>
-              <i className="dtCanvasFadeTop" />
-              <i className="dtCanvasFadeBottom" />
-            </div>
-          ))}
+          {lanes.map((title, lane) => {
+            const notice = laneNotice?.(lane) ?? null
+            return (
+              <div
+                className={`dtCanvasBand${notice ? " is-filtered-empty" : ""}`}
+                data-band={lane}
+                key={`band-${title}`}
+              >
+                <i className="dtCanvasFadeTop" />
+                <i className="dtCanvasFadeBottom" />
+                {notice ? (
+                  <p className="dtCanvasBandNotice" role="status">
+                    {notice}
+                  </p>
+                ) : null}
+              </div>
+            )
+          })}
           {lanes.map((title, lane) => (
             <div className="dtCanvasLaneHead" data-lane-head={lane} key={`head-${title}`}>
               {title}
@@ -425,23 +598,42 @@ export default function DigitalThreadCanvas({
                 ref={element => {
                   if (!element) return
                   const dot = element.nextElementSibling as SVGCircleElement | null
-                  if (dot) edgeRefs.current.push({ path: element, dot, edge })
+                  const label = dot?.nextElementSibling as SVGTextElement | null
+                  if (dot) edgeRefs.current.push({ path: element, dot, label, edge })
                 }}
               />
               <circle r="3" className={`dtCanvasEdgeDot${edge.kind ? ` is-${edge.kind}` : ""}`} />
+              {edge.label ? (
+                <text className="dtCanvasEdgeLabel" textAnchor="middle">
+                  {edge.label}
+                </text>
+              ) : null}
             </g>
           ))}
         </svg>
         <div className="dtCanvasNodes">
-          {nodes.map(node => (
+          {/* Rendered in lane then row order, because DOM order is tab order. The caller supplies nodes in
+              whatever order its projection produced, and #880 §6.9 promises Tab moves between lanes in lane
+              order — left to right along the ladder. Positions are written by the geometry pass, so ordering
+              here costs nothing visually and makes the keyboard path deterministic. */}
+          {domOrdered.map(node => (
             <div
               className="dtCanvasNode"
               key={node.id}
               data-node-id={node.id}
-              tabIndex={0}
+              // One tab stop per lane: Tab crosses lanes, the arrows walk within one. A card rolled out of its
+              // lane window is never the stop, so focus cannot land somewhere the reader cannot see.
+              tabIndex={rovingFor(node.lane) === node.id ? 0 : -1}
               role="button"
               aria-pressed={selectedId === node.id}
+              onFocus={() => setRoving(current => ({ ...current, [node.lane]: node.id }))}
               onKeyDown={event => {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  moveWithinLane(node, event.key === "ArrowDown" ? 1 : -1)
+                  return
+                }
                 if (event.key !== "Enter" && event.key !== " ") return
                 event.preventDefault()
                 event.stopPropagation()

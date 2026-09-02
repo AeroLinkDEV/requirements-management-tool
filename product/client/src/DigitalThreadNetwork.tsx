@@ -28,14 +28,27 @@ export type PanelDock = "auto" | "left" | "right" | "bottom"
 /** `auto` resolved to a real side. */
 export type ResolvedDock = Exclude<PanelDock, "auto">
 
-const PANEL_WIDTH = 330
-const PANEL_HEIGHT = 226
+// Derived from what the panel actually renders, so the reserved free area is the panel plus its margins and
+// not a guess with slack in it. Slack reads as correctness — the board simply never uses the spare band — while
+// hiding whether the real rule holds. Right/left: 300px wide at a 16px offset. Bottom: 150px (#880 §6.6) at an
+// 18px offset. The remainder in each case is the gap between the panel edge and the nearest card.
+const PANEL_WIDTH = 300 + 16 + 14
+const PANEL_HEIGHT = 150 + 18 + 16
 
 export type DigitalThreadNetworkProps = {
   projection: NetworkProjection | null
   loading?: boolean
   error?: string | null
   onRetry?: () => void
+  /**
+   * The Project ladder, when the page already knows it.
+   *
+   * Only used before the projection arrives. Without it the skeleton falls back to the default ladder, which
+   * carries Customer and Interface; FMS configures neither, so the first paint would show seven lanes and the
+   * response would collapse it to five — the structural jump the loading rule exists to prevent. The page has
+   * this from Project context already, so it is passed rather than fetched again.
+   */
+  orderedLevels?: readonly string[]
   /** Exact route for a record, when the current workspace can open it. Absent renders non-openable. */
   hrefFor?: (node: NetworkNode) => string | undefined
   /** Opens the change inside its own view. Slice 4 supplies this. */
@@ -54,6 +67,7 @@ export default function DigitalThreadNetwork({
   loading = false,
   error = null,
   onRetry,
+  orderedLevels,
   hrefFor,
   onOpenChange,
   buildLabel,
@@ -76,13 +90,27 @@ export default function DigitalThreadNetwork({
    * Compaction is on real emptiness only. A lane emptied by the filter chips keeps its place — collapsing it
    * would slide every other lane sideways while the reader is mid-search.
    */
-  const model = useMemo(() => laneModel(projection?.orderedLevels), [projection?.orderedLevels])
+  // The projection is authoritative once it lands; the caller-supplied ladder only holds the frame until then.
+  const model = useMemo(
+    () => laneModel(projection?.orderedLevels ?? orderedLevels),
+    [orderedLevels, projection?.orderedLevels],
+  )
 
   // Records at a level this project does not configure get no lane. They are counted so the canvas can say
   // how many exist rather than quietly showing a smaller build than there is.
   const offLadder = useMemo(() => offLadderLevels(nodes, model), [model, nodes])
 
+  /**
+   * Structural compaction runs only once the content is known (#880 §6.8).
+   *
+   * While a build is still loading there are no nodes, so compacting would drop every lane and then put them
+   * back as the response lands — the whole board jumping under the reader at the moment they start looking at
+   * it. The lane bands and headers render immediately with counts unknown, and cards fade into them.
+   */
+  const contentKnown = !loading || nodes.length > 0
+
   const { lanes, canvasNodes } = useMemo(() => {
+    if (!contentKnown) return { lanes: [...model.labels], canvasNodes: [] as CanvasNode[] }
     const rows = assignRows(nodes, model)
     const placed: CanvasNode[] = nodes
       .filter(node => laneOf(node, model) !== OFF_LADDER)
@@ -93,7 +121,7 @@ export default function DigitalThreadNetwork({
       }))
     const compacted = compactLanes(model.labels, placed)
     return { lanes: compacted.lanes, canvasNodes: compacted.nodes }
-  }, [model, nodes])
+  }, [contentKnown, model, nodes])
 
   const canvasEdges = useMemo<CanvasEdge[]>(
     () =>
@@ -152,15 +180,9 @@ export default function DigitalThreadNetwork({
 
   const matchesFilters = useCallback(
     (node: NetworkNode): boolean => {
-      if (groups.size) {
-        const suspectOnly = groups.size === 1 && groups.has("suspect")
-        const isSuspect = node.state === "Suspect"
-        if (suspectOnly) {
-          if (!isSuspect) return false
-        } else if (!groups.has(groupOf(node)) && !(groups.has("suspect") && isSuspect)) {
-          return false
-        }
-      }
+      // Level chips only. Suspect is a property of a relationship, not of these records, and no relation
+      // this board draws can carry it.
+      if (groups.size && !groups.has(groupOf(node))) return false
       if (query) {
         const haystack = `${node.displayNumber} ${node.title ?? ""}`.toLowerCase()
         if (!haystack.includes(query.toLowerCase())) return false
@@ -168,6 +190,25 @@ export default function DigitalThreadNetwork({
       return true
     },
     [groups, query],
+  )
+
+  /**
+   * A lane that holds records but is showing none of them, because the chips or the search hid them all.
+   *
+   * Per lane, not per board: with the SYS chip active the System lane is full while HLR and LLR are empty, so
+   * a board-wide message would never appear and those two lanes would sit blank with nothing to explain them.
+   */
+  const laneNotice = useCallback(
+    (lane: number): string | null => {
+      const inLane = canvasNodes.filter(node => node.lane === lane)
+      if (!inLane.length) return null
+      const visible = inLane.filter(node => {
+        const record = byId.get(node.id)
+        return record ? matchesFilters(record) : false
+      })
+      return visible.length ? null : "No records match"
+    },
+    [byId, canvasNodes, matchesFilters],
   )
 
   const renderCard = useCallback(
@@ -180,7 +221,6 @@ export default function DigitalThreadNetwork({
       const traced = web?.nodes.has(node.id) ?? false
       const classes = [
         "dtnCard",
-        node.state === "Suspect" ? "is-suspect" : "",
         selectedId === node.id ? "is-selected" : "",
         web && !traced ? "is-untraced" : "",
         matchesFilters(node) ? "" : "is-filtered",
@@ -211,34 +251,50 @@ export default function DigitalThreadNetwork({
           <div className="dtnMeta" data-density="meta">
             <span>{node.buildVersion ? `Build ${node.buildVersion}` : "No target build"}</span>
           </div>
+
+          {/* The selected card expands in place (#880 §6.5), showing only rows it actually has. A record with
+              no revision or no build simply does not show that row; nothing here is invented to fill the box,
+              and the panel remains the place for the whole traced web. */}
+          {selectedId === node.id ? (
+            <div className="dtnCardBody">
+              {node.level ? (
+                <div className="dtnKv">
+                  <i>Level</i>
+                  <b>{node.level}</b>
+                </div>
+              ) : null}
+              {node.revision !== null && node.revision !== undefined ? (
+                <div className="dtnKv">
+                  <i>Revision</i>
+                  <b>{String(node.revision).padStart(2, "0")}</b>
+                </div>
+              ) : null}
+              {node.buildVersion ? (
+                <div className="dtnKv">
+                  <i>In build</i>
+                  <b>{node.buildVersion}</b>
+                </div>
+              ) : null}
+              {node.kind !== "ProblemReport" && onOpenChange ? (
+                <div className="dtnCardActs">
+                  <button
+                    type="button"
+                    onClick={event => {
+                      event.stopPropagation()
+                      onOpenChange(node)
+                    }}
+                  >
+                    Open this change
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       )
     },
-    [byId, hrefFor, matchesFilters, selectedId, web],
+    [byId, hrefFor, matchesFilters, onOpenChange, selectedId, web],
   )
-
-  if (error) {
-    return (
-      <div className="dtnState dtnState-error" role="alert">
-        <b>The change network could not be loaded.</b>
-        <p>{error}</p>
-        {onRetry ? (
-          <button type="button" onClick={onRetry}>
-            Try again
-          </button>
-        ) : null}
-      </div>
-    )
-  }
-
-  if (!loading && projection && !nodes.length) {
-    return (
-      <div className="dtnState">
-        <b>No change requests in {buildLabel ?? "this build"}.</b>
-        <p>Change requests appear here as soon as one targets this build.</p>
-      </div>
-    )
-  }
 
   return (
     <div className="dtnRoot">
@@ -249,7 +305,11 @@ export default function DigitalThreadNetwork({
             ["hlr", "HLR"],
             ["llr", "LLR"],
             ["ver", "Test"],
-            ["suspect", "Suspect"],
+            // No Suspect chip here, and not because today's data happens to hold none. A suspect lifecycle
+            // governs RequirementTrace and CaseProcedure links; this board renders ProblemReportResolution,
+            // change-to-upstream-change and CoveredByTestChangeRequest between ChangeRequest,
+            // TestChangeRequest and ProblemReport nodes, none of which those lifecycles attach to. The chip
+            // could only ever return nothing, so it is absent rather than dead. See #880 section 10.2.
           ].map(([key, label]) => (
             <button
               type="button"
@@ -303,13 +363,46 @@ export default function DigitalThreadNetwork({
           nodes={canvasNodes}
           edges={canvasEdges}
           renderCard={renderCard}
+          laneNotice={laneNotice}
           selectedId={selectedId}
           onSelect={setSelectedId}
           onHover={setHoveredId}
           frameInset={frameInset}
+          tracedEdges={web?.edges}
           ariaLabel="Change network for this build"
         />
         {loading ? <div className="dtnLoading">Loading the change network…</div> : null}
+
+        {/* Every state below sits inside the frame rather than replacing it (#880 §6.8). Swapping the canvas
+            out for a message discards the transform, the zoom and the selection, so recovering from a failed
+            refresh would cost the reader the view they had built up. */}
+        {error ? (
+          <div className="dtnInFrame dtnInFrame-error" role="alert">
+            <b>The change network could not be loaded.</b>
+            <p>{error}</p>
+            {onRetry ? (
+              <button type="button" onClick={onRetry}>
+                Try again
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {!loading && !error && projection && !nodes.length ? (
+          <div className="dtnInFrame" role="status">
+            <b>No change requests in {buildLabel ?? "this build"}.</b>
+            <p>Change requests appear here as soon as one targets this build.</p>
+          </div>
+        ) : null}
+
+        {/* Every lane empty at once earns a board-level line as well, because at that point the reader is
+            looking at a board with nothing on it and needs the way out, not one label per lane. */}
+        {!loading && !error && nodes.length > 0 && !nodes.some(matchesFilters) ? (
+          <div className="dtnInFrame" role="status">
+            <b>No records match.</b>
+            <p>Clear a filter chip or the search box to bring records back.</p>
+          </div>
+        ) : null}
       </div>
 
       <div className="dtnVisuallyHidden" aria-live="polite" ref={liveRegion} />

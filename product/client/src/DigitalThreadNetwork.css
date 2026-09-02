@@ -68,32 +68,6 @@
   font-size: var(--text-sm);
 }
 
-.dtnState {
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 6px;
-  min-height: 320px;
-  padding: 40px;
-  color: var(--ink-500);
-  text-align: center;
-}
-
-.dtnState b { color: var(--ink-900); font-size: var(--text-lg); }
-.dtnState p { margin: 0; font-size: var(--text-sm); }
-.dtnState-error b { color: #8a2f2f; }
-
-.dtnState button {
-  margin-top: 8px;
-  min-height: 36px;
-  border: 1px solid var(--teal-700);
-  border-radius: var(--radius-sm);
-  background: var(--teal-700);
-  padding: 8px 15px;
-  color: #fff;
-  font: var(--weight-strong) var(--text-control) var(--font-body);
-  cursor: pointer;
-}
 
 /* ---- cards ------------------------------------------------------------- */
 
@@ -175,7 +149,7 @@
 
 .dtnPanel-right { right: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
 .dtnPanel-left { left: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
-.dtnPanel-bottom { left: 16px; right: 16px; bottom: 18px; height: 190px; overflow: hidden; }
+.dtnPanel-bottom { left: 16px; right: 16px; bottom: 18px; height: 150px; overflow: hidden; }
 
 .dtnPanelTools { position: absolute; right: 10px; top: 10px; display: flex; gap: 4px; z-index: 2; }
 
@@ -264,4 +238,77 @@
 
 @media (prefers-reduced-motion: reduce) {
   .dtnFilters button { transition: none; }
+}
+
+/* State messages sit inside the lane frame rather than replacing the canvas, so the reader keeps their zoom,
+   pan and selection through a failed refresh or an empty filter (#880 §6.8). */
+.dtnInFrame {
+  position: absolute;
+  left: 50%;
+  top: 96px;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: 420px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, .97);
+  box-shadow: 0 12px 30px rgba(15, 35, 58, .12);
+  padding: 14px 18px;
+  text-align: center;
+}
+
+.dtnInFrame b { display: block; margin-bottom: 4px; color: #2b3d54; font-size: var(--text-sm); }
+.dtnInFrame p { margin: 0; color: var(--ink-500); font-size: var(--text-xs); }
+
+.dtnInFrame-error { border-color: #e3b7b7; background: rgba(255, 250, 250, .97); }
+
+.dtnInFrame button {
+  margin-top: 10px;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  padding: 4px 14px;
+  color: #5d6d82;
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
+  cursor: pointer;
+}
+
+/* The selected card expands in place (#880 §6.5), matching the approved prototype's .dtBody. The detail panel
+   carries the whole traced web; this carries the record's own facts without the reader looking away. */
+.dtnCardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 2px;
+  border-top: 1px solid #edf1f5;
+  padding-top: 9px;
+}
+
+.dtnKv { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 10.5px; }
+.dtnKv i { color: #8493a6; font-style: normal; }
+.dtnKv b { color: #26425e; font: var(--weight-strong) 10.5px ui-monospace, SFMono-Regular, Consolas, monospace; }
+
+.dtnNote {
+  margin: 0;
+  border-left: 3px solid #d6a33b;
+  border-radius: 8px;
+  background: #fff8e8;
+  padding: 8px 9px;
+  color: #765313;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.dtnCardActs { display: flex; gap: 6px; }
+
+.dtnCardActs button {
+  min-height: 28px;
+  border: 1px solid var(--teal-700);
+  border-radius: var(--radius-sm);
+  background: var(--teal-700);
+  padding: 5px 11px;
+  color: #fff;
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
+  cursor: pointer;
 }

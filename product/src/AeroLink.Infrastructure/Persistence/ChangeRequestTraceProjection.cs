@@ -56,7 +56,16 @@ public sealed record ChangeRequestTraceEdge(
     Guid ToId,
     string ToKind,
     string Relation,
-    IReadOnlyList<ChangeRequestTraceProvenance> Provenance);
+    IReadOnlyList<ChangeRequestTraceProvenance> Provenance,
+    /// <summary>
+    /// Whether this relationship is suspect, stated by the server from the exact-link suspect lifecycle.
+    ///
+    /// Served rather than left to the reader. A client deciding it by looking for the word "suspect" in the
+    /// relation or a provenance status is reconstructing lifecycle meaning out of display vocabulary: it turns
+    /// any wording that happens to contain the word into a suspect edge, and hides a genuinely suspect one
+    /// whose wording does not. Suspect state and relation vocabulary are separate facts and stay separate.
+    /// </summary>
+    bool IsSuspect = false);
 
 public sealed record ChangeRequestTraceState(
     string Upstream,
@@ -114,13 +123,15 @@ public static class ChangeRequestTraceProjection
     private sealed record CrIdentity(Guid ProjectId, Guid TargetReleaseId, ChangeRequestType Type,
         RequirementLevel? SoftwareLevel, ChangeRequestState State);
     private sealed record PairKey(Guid ChildId, Guid ParentId);
-    private sealed class EdgeBuilder(Guid fromId, string fromKind, Guid toId, string toKind, string relation)
+    private sealed class EdgeBuilder(Guid fromId, string fromKind, Guid toId, string toKind, string relation,
+        bool isSuspect = false)
     {
         public Guid FromId { get; } = fromId;
         public string FromKind { get; } = fromKind;
         public Guid ToId { get; } = toId;
         public string ToKind { get; } = toKind;
         public string Relation { get; } = relation;
+        public bool IsSuspect { get; set; } = isSuspect;
         public List<ChangeRequestTraceProvenance> Provenance { get; } = [];
     }
     private sealed record FrozenTrace(Guid UpstreamId, string Kind, Guid? SourceId, Guid? AssessmentId,
@@ -435,18 +446,33 @@ public static class ChangeRequestTraceProjection
         var membershipsByRevision = baselineMemberships
             .GroupBy(x => x.RevisionId)
             .ToDictionary(x => x.Key, x => (IReadOnlyList<Guid>)x.Select(y => y.BaselineId).Distinct().OrderBy(y => y).ToList());
+        // Suspect links are excluded from both reads, and the reason is worth stating because it looks like an
+        // omission.
+        //
+        // A suspect lifecycle exists only for ExactLinkKind.RequirementTrace and ExactLinkKind.CaseProcedure.
+        // Neither is a relation the change network draws: that board renders ProblemReportResolution, change to
+        // upstream change, and CoveredByTestChangeRequest, between ChangeRequest, TestChangeRequest and
+        // ProblemReport nodes only. So widening this set for the network would change nothing there — the
+        // RequirementRevision endpoints are not in its visited set and the edges are dropped anyway.
+        //
+        // Requirement-trace suspectness becomes visible when a view actually shows requirement revisions, which
+        // is the artifact thread of §5.3 in slice 5. That slice owns the decision, because showing suspect links
+        // in the rooted trace would also change what the register inspector shows, and #866 decision 4 fixed
+        // that deliberately.
+        var liveOnly = true;
         var allRequirementLinks = await db.RequirementTraces.AsNoTracking()
-            .Where(x => x.ProjectId == projectId
-                && (x.ExactLinkSuspectLifecycleId == null
-                    || db.ExactLinkSuspectLifecycles.Any(lifecycle =>
+            .Where(x => x.ProjectId == projectId)
+            .Select(x => new { x.Id, x.SourceRevisionId, x.TargetRevisionId, x.Type,
+                x.ExactLinkSuspectLifecycleId,
+                IsSuspect = x.ExactLinkSuspectLifecycleId != null
+                    && db.ExactLinkSuspectLifecycles.Any(lifecycle =>
                         lifecycle.Id == x.ExactLinkSuspectLifecycleId
                         && lifecycle.ProjectId == projectId
                         && lifecycle.LinkKind == ExactLinkKind.RequirementTrace
                         && lifecycle.LinkId == x.Id
-                        && lifecycle.State == ExactLinkLifecycleState.Closed)))
-            .Select(x => new { x.Id, x.SourceRevisionId, x.TargetRevisionId, x.Type,
-                x.ExactLinkSuspectLifecycleId })
+                        && lifecycle.State != ExactLinkLifecycleState.Closed) })
             .ToListAsync(ct);
+        if (liveOnly) allRequirementLinks = allRequirementLinks.Where(x => !x.IsSuspect).ToList();
         foreach (var requirement in requirementRevisions)
         {
             nodes[("RequirementRevision", requirement.Id)] = new(requirement.Id, "RequirementRevision",
@@ -464,7 +490,7 @@ public static class ChangeRequestTraceProjection
         foreach (var link in allRequirementLinks)
         {
             var edge = new EdgeBuilder(link.SourceRevisionId, "RequirementRevision", link.TargetRevisionId,
-                "RequirementRevision", "RequirementTrace");
+                "RequirementRevision", "RequirementTrace", link.IsSuspect);
             edge.Provenance.Add(new("RequirementTrace", link.Id));
             edgeBuilders.Add(edge);
         }
@@ -564,7 +590,8 @@ public static class ChangeRequestTraceProjection
             .GroupBy(x => (x.FromId, x.FromKind, x.ToId, x.ToKind, x.Relation))
             .Select(group => new ChangeRequestTraceEdge(group.Key.FromId, group.Key.FromKind, group.Key.ToId,
                 group.Key.ToKind, group.Key.Relation, group.SelectMany(x => x.Provenance)
-                    .Distinct().OrderBy(x => x.Kind).ThenBy(x => x.SourceId).ToList()))
+                    .Distinct().OrderBy(x => x.Kind).ThenBy(x => x.SourceId).ToList(),
+                    group.Any(x => x.IsSuspect)))
             .OrderBy(x => x.FromKind).ThenBy(x => x.FromId).ThenBy(x => x.ToKind).ThenBy(x => x.ToId)
             .ThenBy(x => x.Relation).ToList();
         return new(projectId, rootKind == "ChangeRequest" ? rootCr : Guid.Empty,

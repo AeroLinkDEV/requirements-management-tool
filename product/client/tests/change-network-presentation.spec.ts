@@ -12,6 +12,8 @@ import {
   laneOf,
   pillFor,
   resolveDock,
+  supportsSuspectRelations,
+  suspectEndpointIds,
 } from "../src/changeNetworkPresentation"
 import { stateLabel } from "../src/presentation"
 import { compactLanes } from "../src/digitalThreadGeometry"
@@ -73,18 +75,34 @@ test.describe("change network presentation", () => {
     expect(["left", "right"]).toContain(resolveDock(selected, [], map))
   })
 
-  test("suspect is stated by the server and always carries its word", () => {
-    const suspect: NetworkEdge = {
+  test("suspect is read from the served field, never from wording", () => {
+    const base: NetworkEdge = {
       fromId: "a",
       toId: "b",
       fromKind: "ChangeRequest",
       toKind: "ChangeRequest",
       relation: "Upstream",
-      provenance: [{ kind: "AssessmentDerived", status: "Suspect link pending reassessment" }],
+      provenance: [{ kind: "AuthorStated" }],
+      isSuspect: false,
     }
-    const settled: NetworkEdge = { ...suspect, provenance: [{ kind: "AuthorStated" }] }
-    expect(isSuspectEdge(suspect)).toBe(true)
-    expect(isSuspectEdge(settled)).toBe(false)
+
+    expect(isSuspectEdge({ ...base, isSuspect: true })).toBe(true)
+    expect(isSuspectEdge(base)).toBe(false)
+
+    // The two cases an earlier string-matching version got wrong, in both directions. Wording that happens to
+    // contain the word must not manufacture a suspect edge...
+    expect(
+      isSuspectEdge({
+        ...base,
+        isSuspect: false,
+        relation: "SupersededBySuspectReassessment",
+        provenance: [{ kind: "AssessmentDerived", status: "Suspect link pending reassessment" }],
+      }),
+    ).toBe(false)
+    // ...and wording that does not contain it must not hide a genuinely suspect one.
+    expect(
+      isSuspectEdge({ ...base, isSuspect: true, relation: "Upstream", provenance: [{ kind: "AuthorStated" }] }),
+    ).toBe(true)
 
     // The pill is amber, and the text says so too — status is never colour alone.
     expect(pillFor("Suspect").color).toBe("#8a5a00")
@@ -214,5 +232,76 @@ test.describe("records at a level the ladder does not configure", () => {
     expect(model.labels).toContain("INTERFACE / ICD CHANGE")
     // Higher in the ladder means further left: it derives down into System.
     expect(laneOf(nodes[0], model)).toBeLessThan(laneOf(nodes[1], model))
+  })
+})
+
+test("the loading frame uses the project's own ladder, so the lane set does not change when data arrives", () => {
+  // FMS configures [System, HighLevel, LowLevel]. The default ladder carries Customer and Interface as well,
+  // so falling back to it during loading would paint seven lanes and then collapse to five — the structural
+  // jump the loading rule exists to prevent.
+  const fms = ["System", "HighLevel", "LowLevel"]
+
+  const whileLoading = laneModel(fms).labels
+  const whenLoaded = laneModel(fms).labels
+
+  expect(whileLoading).toEqual([
+    "PROBLEM REPORT",
+    "SYSTEM CHANGE",
+    "SOFTWARE HLR CHANGE",
+    "SOFTWARE LLR CHANGE",
+    "VERIFICATION CHANGE",
+  ])
+  expect(whenLoaded).toEqual(whileLoading)
+
+  // And the fallback really is different, which is why the caller has to supply the ladder rather than let it
+  // default: this is the seven-lane frame FMS would otherwise flash before its response landed.
+  expect(laneModel().labels).toHaveLength(7)
+  expect(laneModel().labels).toContain("CUSTOMER CHANGE")
+  expect(laneModel().labels).toContain("INTERFACE / ICD CHANGE")
+})
+
+test.describe("suspect is a property of relationships, not of these records", () => {
+  test("the change network cannot carry suspect relations, structurally", () => {
+    // The relations this board actually draws.
+    const networkRelations = [
+      "ProblemReportResolution",
+      "UpstreamChangeRequest",
+      "CoveredByTestChangeRequest",
+    ]
+    expect(supportsSuspectRelations(networkRelations)).toBe(false)
+
+    // The artifact thread renders requirement revisions and their traces, so it may legitimately offer it.
+    expect(supportsSuspectRelations(["RequirementTrace"])).toBe(true)
+    expect(supportsSuspectRelations(["CaseProcedure"])).toBe(true)
+  })
+
+  test("a Suspect filter keeps records incident to a server-stated suspect edge", () => {
+    const edges: NetworkEdge[] = [
+      {
+        fromId: "a",
+        toId: "b",
+        fromKind: "RequirementRevision",
+        toKind: "RequirementRevision",
+        relation: "RequirementTrace",
+        provenance: [],
+        isSuspect: true,
+      },
+      {
+        fromId: "c",
+        toId: "d",
+        fromKind: "RequirementRevision",
+        toKind: "RequirementRevision",
+        // Wording containing the word must not pull settled records into the filter.
+        relation: "SupersededBySuspectReassessment",
+        provenance: [{ kind: "AssessmentDerived", status: "Suspect pending reassessment" }],
+        isSuspect: false,
+      },
+    ]
+
+    const endpoints = suspectEndpointIds(edges)
+
+    expect([...endpoints].sort()).toEqual(["a", "b"])
+    expect(endpoints.has("c")).toBe(false)
+    expect(endpoints.has("d")).toBe(false)
   })
 })
