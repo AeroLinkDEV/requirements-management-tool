@@ -147,7 +147,10 @@ public static class DependencyInjection
         services.AddHostedService<ManagedDocumentIntegrityWorker>();
         services.AddHostedService<EnterpriseJobWorker>();
         services.AddDataProtection();
-        services.AddHttpClient("AeroLinkWebhooks", client => client.Timeout = TimeSpan.FromSeconds(15));
+        services.AddSingleton<IWebhookDnsResolver, SystemWebhookDnsResolver>();
+        services.AddSingleton<WebhookDestinationPolicy>();
+        services.AddHttpClient("AeroLinkWebhooks", client => client.Timeout = TimeSpan.FromSeconds(15))
+            .ConfigurePrimaryHttpMessageHandler(() => WebhookConnectionTransport.CreateHandler(TimeSpan.FromSeconds(15)));
         services.AddHostedService<WebhookDeliveryWorker>();
         services.AddScoped<IntegrationSecurityService>();
         services.AddHttpClient("jira", client => client.Timeout = TimeSpan.FromSeconds(20));
