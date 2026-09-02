@@ -16,6 +16,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkEvidenceStore.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1') -Force
 if ($TargetDatabase -notmatch '^[a-zA-Z][a-zA-Z0-9_]{0,62}$') { throw 'The target database name is unsafe.' }
 $production = $TargetDatabase -eq 'aerolink'
 if ($production -and (-not $AllowProductionRestore -or $Confirmation -ne 'RESTORE-AEROLINK')) { throw 'Production restore requires -AllowProductionRestore and -Confirmation RESTORE-AEROLINK.' }
@@ -86,7 +87,7 @@ $resolvedTarget = $null; $incoming = $null; $retained = $null
 $originalDatabaseRenamed = $false; $databaseActivated = $false; $evidenceActivated = $false; $activationPassed = $false
 
 try {
-    Expand-Archive -LiteralPath $archive -DestinationPath $temporary
+    Expand-AeroLinkBackupArchive -ArchivePath $archive -DestinationDirectory $temporary
     $manifest = ConvertFrom-Json -InputObject (Get-Content -LiteralPath (Join-Path $temporary 'manifest.json') -Raw)
     $archiveInventoryObject = ConvertFrom-Json -InputObject (Get-Content -LiteralPath (Join-Path $temporary ([string]$manifest.AttachmentInventory)) -Raw)
     $archiveInventory = @($archiveInventoryObject | ForEach-Object { $_ })

@@ -21,6 +21,7 @@ $PostgresBin = [IO.Path]::GetFullPath($PostgresBin)
 $pgDump = Join-Path $PostgresBin 'pg_dump.exe'
 $storageModule = Join-Path $PSScriptRoot 'AeroLinkEvidenceStore.psm1'
 Import-Module $storageModule -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1') -Force
 $evidence = Get-AeroLinkEvidenceRoot -ProductRoot $productRoot
 
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
@@ -51,9 +52,7 @@ try {
     $config = Join-Path $staging 'configuration'; New-Item -ItemType Directory -Path $config | Out-Null
     Copy-Item -LiteralPath (Join-Path $productRoot 'src\AeroLink.Api\appsettings.json') -Destination $config
     Copy-Item -LiteralPath (Join-Path $productRoot 'src\AeroLink.Api\appsettings.Development.json') -Destination $config
-    $files = @(Get-ChildItem -LiteralPath $staging -File -Recurse | ForEach-Object {
-        [pscustomobject]@{ Path = $_.FullName.Substring($staging.Length + 1); Size = $_.Length; Sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
-    })
+    $files = Get-AeroLinkBackupFileInventory -StagingRoot $staging
     $applicationSha = try { (& git -C $repositoryRoot rev-parse HEAD 2>$null).Trim() } catch { 'unknown' }
     $schemaVersion = (Get-ChildItem -LiteralPath (Join-Path $productRoot 'src\AeroLink.Infrastructure\Persistence\Migrations') -Filter '*.cs' -File | Where-Object Name -notmatch 'Designer|Snapshot' | Sort-Object Name | Select-Object -Last 1).BaseName
     $manifest = [ordered]@{
@@ -66,7 +65,7 @@ try {
         Files = $files
     }
     $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $staging 'manifest.json') -Encoding UTF8
-    Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $archive -CompressionLevel Optimal
+    Compress-AeroLinkBackupArchive -SourceDirectory $staging -DestinationArchive $archive
     $archiveHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
     "$archiveHash  $(Split-Path $archive -Leaf)" | Set-Content -LiteralPath "$archive.sha256" -Encoding ASCII
 }
