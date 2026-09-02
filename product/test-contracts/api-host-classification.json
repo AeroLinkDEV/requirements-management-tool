@@ -2,15 +2,15 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 121,
-    "tests": 772,
-    "knownCases": 856,
+    "tests": 774,
+    "knownCases": 858,
     "unknownCaseTests": 0
   },
   "summary": {
     "converted": {
       "classes": 29,
-      "tests": 196,
-      "knownCases": 212,
+      "tests": 198,
+      "knownCases": 214,
       "unknownCaseTests": 0
     },
     "fresh-host": {
@@ -59,6 +59,18 @@
       ]
     },
     {
+      "cls": "ChangeProposalContentApiTests",
+      "tests": 14,
+      "knownCases": 14,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
+        "auth-policy",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ProjectPersonnelApiTests",
       "tests": 14,
       "knownCases": 14,
@@ -68,18 +80,6 @@
       "intents": [
         "auth-policy",
         "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ChangeProposalContentApiTests",
-      "tests": 12,
-      "knownCases": 12,
-      "unknownCaseTests": 0,
-      "classification": "converted",
-      "reason": "Already sharing a host through the #563 pilot.",
-      "intents": [
-        "auth-policy",
         "http-boundary"
       ]
     },

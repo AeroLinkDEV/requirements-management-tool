@@ -12,14 +12,59 @@ namespace AeroLink.Infrastructure.Persistence;
 /// a lane that drew them identically would say the coverage is real when half of it is still under review.
 /// </summary>
 public sealed record ProposalAllocationTarget(
+    /// <summary>
+    /// The record's own identity: the controlled artifact for a materialized target, the proposal row for one
+    /// that is only proposed. Two different kinds of thing, which is why <see cref="IsProposed"/> exists.
+    /// </summary>
     Guid Id,
     string DisplayNumber,
     string Level,
     string Statement,
     bool IsProposed,
+    /// <summary>
+    /// The exact revision this target is at, for a materialized one. Null for a proposal, which has no
+    /// controlled revision yet.
+    ///
+    /// Carried separately from <see cref="Id"/> because the two answer different questions and are not
+    /// interchangeable. Verification coverage is keyed by requirement <em>revision</em>, so a consumer given
+    /// only the artifact id would have to re-resolve a display number or collapse every revision of the
+    /// artifact into one — both of which would state a relationship the record does not hold.
+    /// </summary>
+    Guid? RevisionId = null,
     string? LinkType = null,
     Guid? ChangeRequestId = null,
     string? ChangeRequestDisplayNumber = null);
+
+/// <summary>
+/// One verification artifact covering an exact requirement revision, for lane 3 of the inside-a-change view.
+///
+/// <paramref name="CoverageState"/> is the server's, from the single coverage definition the release gate and
+/// the requirements workspace already read. A product that answers "is this covered?" in two places must not
+/// answer it two ways, and the browser must never decide it at all.
+/// </summary>
+public sealed record ProposalCoveringArtifact(
+    Guid RequirementRevisionId,
+    Guid ArtifactId,
+    Guid ArtifactRevisionId,
+    string DisplayNumber,
+    string Title,
+    string Level,
+    string ArtifactKind,
+    string ArtifactState,
+    string CoverageState);
+
+/// <summary>
+/// One baseline this change's content sits in, for lane 4 — the effect on the build.
+///
+/// Real candidate/predecessor baseline records, not labels assembled in the browser.
+/// <paramref name="IsPredecessor"/> separates the baseline being built from the one it supersedes.
+/// </summary>
+public sealed record ProposalBaselineEffect(
+    Guid BaselineId,
+    string DisplayNumber,
+    string Name,
+    string State,
+    bool IsPredecessor);
 
 /// <summary>
 /// One proposed item, with the text it supersedes and what allocates below it.
@@ -97,7 +142,11 @@ public sealed record ChangeProposalContentResult(
     Guid ChangeRequestId,
     Guid ProjectId,
     string DisplayNumber,
-    IReadOnlyList<ChangeProposalItem> Items);
+    IReadOnlyList<ChangeProposalItem> Items,
+    /// <summary>Lane 3: what covers the requirement revisions this change allocates to.</summary>
+    IReadOnlyList<ProposalCoveringArtifact> Covering,
+    /// <summary>Lane 4: the candidate baseline this content sits in, and the one it supersedes.</summary>
+    IReadOnlyList<ProposalBaselineEffect> BuildEffect);
 
 /// <summary>
 /// Reads what a change request proposes, resolved at the revision the proposal was actually written against.
@@ -114,7 +163,8 @@ public static class ChangeProposalContentProjection
     private sealed record BaseRevision(string BaseNumber, int Revision, Guid Id, string Statement, string State);
 
     private sealed record MaterializedChild(
-        Guid TargetRevisionId, Guid Id, string BaseNumber, int Revision, string Level, string Statement, string Type);
+        Guid TargetRevisionId, Guid Id, Guid RevisionId, string BaseNumber, int Revision, string Level,
+        string Statement, string Type);
 
     private sealed record ProposedChild(
         Guid Id, string BaseNumber, int Revision, string Level, string Statement,
@@ -181,6 +231,7 @@ public static class ChangeProposalContentProjection
                                   select new MaterializedChild(
                                       link.TargetRevisionId,
                                       child.Id,
+                                      revision.Id,
                                       child.BaseNumber,
                                       revision.Revision,
                                       child.Level.ToString(),
@@ -235,6 +286,7 @@ public static class ChangeProposalContentProjection
                         x.Level,
                         x.Statement,
                         IsProposed: false,
+                        RevisionId: x.RevisionId,
                         LinkType: x.Type)));
 
                 allocated.AddRange(proposedChildren
@@ -279,11 +331,71 @@ public static class ChangeProposalContentProjection
                 newest?.State));
         }
 
-        return new ChangeProposalContentResult("ChangeRequest", scr.Id, scr.ProjectId, scr.DisplayNumber, items);
+        // Lane 3: the single coverage definition, read for the exact revisions this change allocates to.
+        // Reusing it rather than writing a second one is the point — the release gate and the requirements
+        // workspace already answer "is this covered?" from here.
+        var coveredRevisionIds = items
+            .SelectMany(x => x.AllocatedDownstream)
+            .Select(x => x.RevisionId)
+            .OfType<Guid>()
+            .Distinct()
+            .ToList();
+
+        var covering = coveredRevisionIds.Count == 0
+            ? []
+            : (await VerificationCoverageProjection.ForRequirementRevisionsAsync(db, coveredRevisionIds, ct))
+                .Select(x => new ProposalCoveringArtifact(x.RequirementRevisionId, x.ArtifactId,
+                    x.ArtifactRevisionId, x.DisplayNumber, x.Title, x.Level, x.ArtifactKind, x.ArtifactState,
+                    x.CoverageState))
+                .OrderBy(x => x.DisplayNumber, StringComparer.Ordinal)
+                .ToList();
+
+        var effect = await BuildEffectAsync(db, scr.ProjectId, scr.TargetReleaseId, ct);
+
+        return new ChangeProposalContentResult("ChangeRequest", scr.Id, scr.ProjectId, scr.DisplayNumber,
+            items, covering, effect);
     }
 
     private static string Display(string baseNumber, int revision)
         => $"{baseNumber}.{revision:D2}";
+
+    /// <summary>
+    /// The candidate baseline for a build and the one it supersedes, from real records.
+    ///
+    /// Shared by both proposal resources because "what does this change do to the build" is the same question
+    /// whichever aggregate asked it. Nothing here is constructed from a label: the display number, the name
+    /// and the state all come off the baseline row.
+    /// </summary>
+    internal static async Task<IReadOnlyList<ProposalBaselineEffect>> BuildEffectAsync(
+        AeroLinkDbContext db, Guid projectId, Guid releaseId, CancellationToken ct)
+    {
+        var candidates = await db.CandidateBaselines.AsNoTracking()
+            .Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId)
+            .OrderByDescending(x => x.Revision)
+            .Select(x => new { x.Id, x.BaseNumber, x.Revision, x.Name, x.State, x.PredecessorBaselineId })
+            .ToListAsync(ct);
+        if (candidates.Count == 0) return [];
+
+        var current = candidates[0];
+        var effect = new List<ProposalBaselineEffect>
+        {
+            new(current.Id, Display(current.BaseNumber, current.Revision), current.Name,
+                current.State.ToString(), IsPredecessor: false),
+        };
+
+        if (current.PredecessorBaselineId is Guid predecessorId)
+        {
+            var predecessor = await db.CandidateBaselines.AsNoTracking()
+                .Where(x => x.Id == predecessorId && x.ProjectId == projectId)
+                .Select(x => new { x.Id, x.BaseNumber, x.Revision, x.Name, x.State })
+                .SingleOrDefaultAsync(ct);
+            if (predecessor is not null)
+                effect.Add(new(predecessor.Id, Display(predecessor.BaseNumber, predecessor.Revision),
+                    predecessor.Name, predecessor.State.ToString(), IsPredecessor: true));
+        }
+
+        return effect;
+    }
 
     private static IReadOnlyList<Guid> Upstream(string json)
     {

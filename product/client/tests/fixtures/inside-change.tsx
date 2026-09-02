@@ -77,6 +77,7 @@ const requirementModify: ProposalContent = {
       allocatedDownstream: [
         {
           id: "hlr-1",
+          revisionId: "hlr-1-rev",
           displayNumber: "HLR-00020.00",
           level: "HighLevel",
           statement: "The FMS shall compute the next waypoint.",
@@ -93,6 +94,7 @@ const requirementModify: ProposalContent = {
       allocatedDownstream: [
         {
           id: "hlr-2",
+          revisionId: "hlr-2-rev",
           displayNumber: "HLR-00021.00",
           level: "HighLevel",
           statement: "Fixed-order behaviour.",
@@ -108,6 +110,23 @@ const requirementModify: ProposalContent = {
       latestRevision: 2,
       latestRevisionState: "Active",
     }),
+  ],
+  covering: [
+    {
+      requirementRevisionId: "hlr-1-rev",
+      artifactId: "tp-art",
+      artifactRevisionId: "tp-rev",
+      displayNumber: "HLRTP-00090.00",
+      title: "Waypoint computation procedure",
+      level: "HighLevel",
+      artifactKind: "Procedure",
+      artifactState: "Approved",
+      coverageState: "Suspect",
+    },
+  ],
+  buildEffect: [
+    { baselineId: "bl-1", displayNumber: "SW-91.00.00", name: "Build 1.6 candidate", state: "Draft", isPredecessor: false },
+    { baselineId: "bl-0", displayNumber: "SW-90.00.00", name: "Build 1.5", state: "Released", isPredecessor: true },
   ],
 }
 
@@ -164,8 +183,60 @@ const verificationContent: ProposalContent = {
         { revisionId: null, role: "AddedCoverage", expectedKind: "Requirement", reason: "MalformedReferenceList" },
       ],
     }),
-    verificationItem({ id: "SYSTP-00031.00", kind: "Retire", artifactKind: "Case", baseRevisionId: "vrev-1" }),
+    verificationItem({ id: "SYSTP-00031.00", kind: "Retire", baseRevisionId: "vrev-1" }),
   ],
+  executions: [
+    {
+      id: "run-1",
+      procedureRevisionId: "vrev-0",
+      outcome: "Pass",
+      executedBy: "verification.engineer",
+      executedAt: "2026-08-30T10:00:00.000Z",
+      determination: "Sequencing behaved as specified.",
+    },
+  ],
+  buildEffect: [
+    { baselineId: "bl-1", displayNumber: "SW-91.00.00", name: "Build 1.6 candidate", state: "Draft", isPredecessor: false },
+    { baselineId: "bl-0", displayNumber: "SW-90.00.00", name: "Build 1.5", state: "Released", isPredecessor: true },
+  ],
+}
+
+/**
+ * A Case package, in its own envelope.
+ *
+ * The server sets every item's artifact kind from the owning TestChangeReview, so one review cannot emit a
+ * Procedure envelope containing a Case item. An earlier fixture did exactly that, which meant the Case-retire
+ * assertion passed on data production could never return.
+ */
+const caseContent: ProposalContent = {
+  ownerKind: "TestChangeRequest",
+  ownerId: "tcr-2",
+  projectId: "p-1",
+  releaseId: "r-1",
+  displayNumber: "HLRTCCR-00300.00",
+  discipline: "HighLevelSoftware",
+  artifactKind: "Case",
+  items: [
+    verificationItem({
+      id: "HLRTC-00050.00",
+      kind: "Retire",
+      artifactKind: "Case",
+      level: "HighLevel",
+      baseRevisionId: "crev-1",
+    }),
+  ],
+  executions: [],
+  buildEffect: [],
+}
+
+const openedCaseTcr: NetworkNode = {
+  id: "tcr-2",
+  kind: "TestChangeRequest",
+  displayNumber: "HLRTCCR-00300.00",
+  title: "Waypoint case retirement",
+  state: "Draft",
+  level: "HighLevel",
+  buildVersion: "1.6",
 }
 
 /**
@@ -217,6 +288,13 @@ root.render(
       opened={openedTcr}
       register={[opened, sibling, openedTcr]}
       content={verificationContent}
+    />
+  ) : scenario === "case" ? (
+    <DigitalThreadInsideChange
+      {...shared}
+      opened={openedCaseTcr}
+      register={[opened, sibling, openedCaseTcr]}
+      content={caseContent}
     />
   ) : scenario === "loading" ? (
     <DigitalThreadInsideChange {...shared} content={null} loading />

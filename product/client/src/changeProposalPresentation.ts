@@ -17,6 +17,13 @@ export type AllocationTarget = {
   statement: string
   /** True when the target is itself only proposed in another change request, rather than in the build today. */
   isProposed: boolean
+  /**
+   * The exact revision a materialized target is at; null for a proposal, which has no controlled revision.
+   *
+   * This is what lane 3 joins on. The artifact id above answers "which requirement", this answers "which
+   * revision of it", and coverage is recorded against the second.
+   */
+  revisionId?: string | null
   linkType?: string | null
   changeRequestId?: string | null
   changeRequestDisplayNumber?: string | null
@@ -60,6 +67,10 @@ export type RequirementProposalContent = {
   projectId: string
   displayNumber: string
   items: ProposalItem[]
+  /** Lane 3: what covers the requirement revisions this change allocates to. */
+  covering: CoveringArtifact[]
+  /** Lane 4: the candidate baseline this content sits in, and the one it supersedes. */
+  buildEffect: BaselineEffect[]
 }
 
 /**
@@ -146,6 +157,10 @@ export type VerificationProposalContent = {
   discipline: string
   artifactKind: "Case" | "Procedure"
   items: VerificationProposalItem[]
+  /** Lane 3: recorded runs of the exact predecessor revisions this package changes. */
+  executions: VerificationExecution[]
+  /** Lane 4: the candidate baseline this package's build carries, and the one it supersedes. */
+  buildEffect: BaselineEffect[]
 }
 
 /**
@@ -359,73 +374,47 @@ const pad = (revision: number): string => String(revision).padStart(2, "0")
  */
 
 /**
- * One exact edge of the rooted trace, as `/api/change-requests/{id}/trace` returns it.
+ * One verification artifact covering an exact requirement revision — lane 3 for a requirement change.
  *
- * The 4B boundary takes trace *edges*, not a pre-digested list of ids, because an id alone does not say which
- * kind of thing it names. A revision id, an artifact id and a proposal id are different identities that must
- * never be interchanged, and the only place their meaning is stated is the edge that carries them.
+ * Served by the requirement proposal resource, which reads the single coverage definition the release gate
+ * and the requirements workspace already use. `coverageState` is the server's; the browser never decides it.
  */
-export type TraceEdgeFact = {
-  fromId: string
-  fromKind: string
-  toId: string
-  toKind: string
-  relation: string
-}
-
-/** A verification or build record the trace names, with the exact node identity the projection gave it. */
-export type CoveringRecord = {
-  /** The exact node id the rooted trace uses for this record — the same identity its edges reference. */
-  id: string
-  /**
-   * What this record covers, derived from real trace edges by {@link coveringRelations}.
-   *
-   * Never populated by guesswork. Absent or empty means the trace recorded no such relation, which draws no
-   * edge at all — not "covers everything in the lane beside it".
-   */
-  coversIds?: readonly string[]
+export type CoveringArtifact = {
+  requirementRevisionId: string
+  artifactId: string
+  artifactRevisionId: string
+  displayNumber: string
+  title: string
+  level: string
+  artifactKind: string
+  artifactState: string
+  coverageState: string
 }
 
 /**
- * The records a covering artifact actually covers, read off the rooted trace's own edges.
+ * One recorded run of a procedure revision — lane 3 for a verification package.
  *
- * This exists so the join is stated once and can be tested, rather than being assembled ad hoc by whatever
- * composes the view. Three rules it enforces, each of which has a plausible-looking wrong alternative:
- *
- * - the relation must be one the trace recorded — adjacency in a lane is not a relationship;
- * - the endpoint used is the exact id the edge names, so a revision is never conflated with its artifact, nor
- *   one revision of an artifact with another;
- * - nothing is matched by display number, which is a label for people and not an identity.
- *
- * `relations` has **no default**, deliberately. An earlier version defaulted to
- * `["VerificationCoverage", "CoveredByTestChangeRequest"]`; the first of those does not exist in any
- * projection — it was invented here — and the second relates a ChangeRequest to a TestChangeRequest, which is
- * not a statement that some verification artifact covers some requirement revision. A default would let a
- * fixture supply its own vocabulary and then appear to prove the production projection supports it.
- *
- * The caller must therefore name relations the authoritative projection actually emits. Today those are:
- * `CoveredByTestChangeRequest`, `CaseToProcedureOrigin`, `OwnsRequirementRevision`, `RequirementTrace`,
- * `RequirementCodeEvidence` and `ProblemReportResolution`. None of them expresses lane-2-to-lane-3
- * verification coverage — see the note on `InsideTraceRecord` in the view.
+ * A test change's lane 3 is EXECUTIONS, not covering artifacts: a requirement change asks "what verifies
+ * this?", a test change asks "what happened when this was run?".
  */
-export const coveringRelations = (
-  coveringId: string,
-  edges: readonly TraceEdgeFact[],
-  relations: readonly string[],
-): string[] => {
-  const wanted = new Set(relations)
-  const covered: string[] = []
-  for (const edge of edges) {
-    if (!wanted.has(edge.relation)) continue
-    // The covering record may sit on either end depending on how the projection oriented the relation; the
-    // covered record is whichever end is not this one.
-    if (edge.toId === coveringId) covered.push(edge.fromId)
-    else if (edge.fromId === coveringId) covered.push(edge.toId)
-  }
-  return [...new Set(covered)]
+export type VerificationExecution = {
+  id: string
+  procedureRevisionId: string
+  outcome: string
+  executedBy: string
+  executedAt: string
+  determination: string
 }
 
-/** `kind` stays narrow so it drops straight into the canvas edge type without a cast. */
+/** One baseline this change's content sits in — lane 4, from real candidate/predecessor baseline records. */
+export type BaselineEffect = {
+  baselineId: string
+  displayNumber: string
+  name: string
+  state: string
+  isPredecessor: boolean
+}
+
 export type InsideEdge = { from: string; to: string; label: string; kind: "" | "retire" }
 
 /**
@@ -441,7 +430,8 @@ export const insideEdges = (
   openedId: string,
   items: readonly ProposalItem[],
   verificationItems: readonly VerificationProposalItem[] = [],
-  covering: readonly CoveringRecord[] = [],
+  covering: readonly CoveringArtifact[] = [],
+  executions: readonly VerificationExecution[] = [],
 ): InsideEdge[] => {
   const edges: InsideEdge[] = []
   for (const item of items) {
@@ -453,9 +443,11 @@ export const insideEdges = (
       kind: retiring ? "retire" : "",
     })
     for (const target of item.allocatedDownstream) {
+      // A materialized target is identified on the canvas by its exact revision, because that is what lane 3
+      // joins to. A proposal has no controlled revision and keeps its own identity.
       edges.push({
         from: item.id,
-        to: target.id,
+        to: target.revisionId ?? target.id,
         label: retiring ? "retire cascade" : "allocates to",
         kind: retiring ? "retire" : "",
       })
@@ -482,10 +474,28 @@ export const insideEdges = (
     }
   }
 
+  // Lane 2 to lane 3, joined on the exact requirement revision the server recorded coverage against. Not a
+  // display number, not lane adjacency, and not the artifact id — coverage is recorded per revision, so two
+  // revisions of one requirement can and must be told apart.
   for (const record of covering) {
-    for (const coveredId of record.coversIds ?? []) {
-      edges.push({ from: coveredId, to: record.id, label: "covered by", kind: "" })
-    }
+    edges.push({
+      from: record.requirementRevisionId,
+      to: record.artifactRevisionId,
+      label: "covered by",
+      kind: "",
+    })
+  }
+
+  // For a verification package, lane 3 is what was run. The edge is drawn from the exact predecessor revision
+  // the execution names, so a run of a different revision of the same procedure is never shown as evidence
+  // for this one.
+  for (const execution of executions) {
+    edges.push({
+      from: execution.procedureRevisionId,
+      to: execution.id,
+      label: "executed",
+      kind: "",
+    })
   }
   return edges
 }

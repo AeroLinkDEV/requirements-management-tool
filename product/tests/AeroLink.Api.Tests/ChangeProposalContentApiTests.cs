@@ -353,6 +353,52 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     }
 
     [Fact]
+    public async Task A_materialized_downstream_target_carries_its_exact_revision_as_well_as_its_artifact()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var allocated = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.AllocatingModifyId)
+            .GetProperty("allocatedDownstream").EnumerateArray().ToList();
+        var existing = allocated.Single(x => !x.GetProperty("isProposed").GetBoolean());
+
+        // Two different identities, both needed and not interchangeable. Verification coverage is keyed by
+        // requirement *revision*, so a consumer given only the artifact id would have to re-resolve a display
+        // number or collapse every revision of the artifact into one.
+        Assert.Equal(fixture.MaterializedChildId.ToString(), existing.GetProperty("revisionId").GetString());
+        Assert.Equal(JsonValueKind.String, existing.GetProperty("id").ValueKind);
+        Assert.NotEqual(existing.GetProperty("id").GetString(), existing.GetProperty("revisionId").GetString());
+
+        // A proposed target has no controlled revision yet, and says so rather than borrowing one.
+        var proposed = allocated.Single(x => x.GetProperty("isProposed").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, proposed.GetProperty("revisionId").ValueKind);
+    }
+
+    [Fact]
+    public async Task The_response_carries_the_lane_three_and_four_facts_rather_than_leaving_them_to_the_browser()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var body = await ContentAsync(client, fixture.ChangeRequestId);
+
+        // Lane 3 and lane 4 are served, so the view never has to assemble them from display numbers or from
+        // lane adjacency. Empty is a truthful answer here; the point is that the fields exist and are the
+        // server's to state.
+        Assert.True(body.TryGetProperty("covering", out var covering));
+        Assert.Equal(JsonValueKind.Array, covering.ValueKind);
+
+        Assert.True(body.TryGetProperty("buildEffect", out var effect));
+        var current = effect.EnumerateArray().Single(x => !x.GetProperty("isPredecessor").GetBoolean());
+        // A real baseline record: its number, name and state come off the row, not from a label built here.
+        // The number follows the same base-plus-revision form BaselineEndpoints already renders.
+        Assert.Equal("SW-91.00.00", current.GetProperty("displayNumber").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(current.GetProperty("state").GetString()));
+    }
+
+    [Fact]
     public async Task Proposal_content_is_refused_to_a_caller_outside_the_project()
     {
         var fixture = await SeedAsync(_host.Factory);

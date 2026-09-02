@@ -83,8 +83,10 @@ test.describe("verification proposals", () => {
   })
 
   test("a retired Case says Case, and proposes no successor body", async ({ page }) => {
-    await page.goto(fixture("verification"))
-    const retire = page.locator('.dticProposal:has-text("SYSTP-00031.00")')
+    // A Case package has its own envelope: one review emits one artifact kind, so a Procedure envelope can
+    // never contain a Case item and a fixture that mixed them proved nothing about production.
+    await page.goto(fixture("case"))
+    const retire = page.locator('.dticProposal:has-text("HLRTC-00050.00")')
 
     // The wording follows the authoritative artifact kind rather than assuming "procedure".
     await expect(retire.locator(".dticNotice")).toContainText("case is being retired")
@@ -165,15 +167,20 @@ test.describe("frame behaviour", () => {
       "SYSTEM PROCEDURES",
       "EFFECT ON THE BUILD",
     ])
-    expect(after).toEqual(["CHANGE REQUEST", "PROPOSED SYSTEM REQUIREMENTS", "ALLOCATED HLRs"])
+    // Every lane now has content, so nothing compacts here — the point is that the set never grew.
+    expect(after).toEqual(before.map(label))
   })
 
   test("a genuinely empty lane still compacts once the content is known", async ({ page }) => {
-    await page.goto(fixture("requirement"))
-
-    // The loaded requirement scenario has no verification or effect records, so those lanes are absent —
-    // structural compaction still works; it is only deferred until the answer is in.
-    await expect(page.locator(".dtCanvasLaneHead")).toHaveCount(3)
+    // The Case package has no executions and no baseline records, so those two lanes are genuinely empty and
+    // are dropped. Compaction still works; it is only deferred until the answer is in.
+    await page.goto(fixture("case"))
+    const heads = page.locator(".dtCanvasLaneHead")
+    // Only the register and the proposed content have records: coverage, executions and baselines are all
+    // genuinely empty for this package, so those three lanes are dropped rather than shown blank.
+    await expect(heads).toHaveCount(2)
+    await expect(heads.nth(0)).toContainText("CHANGE REQUEST")
+    await expect(heads.nth(1)).toContainText("PROPOSED CASES AND PROCEDURES")
   })
 })
 
@@ -239,5 +246,54 @@ test.describe("panel placement", () => {
     await expect(rows.first()).toBeVisible()
     // A direct link says so; a deeper one would carry its hop count and a dashed border instead.
     await expect(page.locator(".dticRel").first()).toContainText("DIRECT")
+  })
+})
+
+test.describe("lanes three and four", () => {
+  test("a requirement change shows covering artifacts with the server's coverage state", async ({ page }) => {
+    await page.goto(fixture("requirement"))
+
+    const covering = page.locator('.dticTrace:has-text("HLRTP-00090.00")')
+    await expect(covering).toBeVisible()
+    // The state is the server's word, shown as a word and not only as a colour.
+    await expect(covering).toContainText("Suspect")
+    await expect(covering).toHaveClass(/is-suspect/)
+  })
+
+  test("coverage joins on the exact requirement revision, not the artifact", async ({ page }) => {
+    await page.goto(fixture("requirement"))
+    // The covering artifact sits in lane 3 and the requirement it covers in lane 2. The edge between them
+    // exists only because the server recorded coverage against that exact revision id.
+    await page.locator('.dticAllocation:has-text("HLR-00020.00")').click()
+
+    // Its covering artifact is in the traced web; the unrelated retire-cascade target is not.
+    await expect(page.locator('.dticTrace:has-text("HLRTP-00090.00")')).not.toHaveClass(/is-untraced/)
+    await expect(page.locator('.dticAllocation:has-text("HLR-00021.00")')).toHaveClass(/is-untraced/)
+  })
+
+  test("a verification package shows executions rather than covering artifacts", async ({ page }) => {
+    await page.goto(fixture("verification"))
+
+    // Lane 3 for a test change is EXECUTIONS: what happened when the procedure was run.
+    const run = page.locator('.dticTrace:has-text("verification.engineer")')
+    await expect(run).toBeVisible()
+    await expect(run).toContainText("Pass")
+    await expect(run).toContainText("Sequencing behaved as specified.")
+  })
+
+  test("the build lane names the candidate baseline and the one it supersedes", async ({ page }) => {
+    await page.goto(fixture("requirement"))
+
+    await expect(page.locator('.dticTrace:has-text("SW-91.00.00")')).toContainText("Candidate baseline")
+    const predecessor = page.locator('.dticTrace:has-text("SW-90.00.00")')
+    await expect(predecessor).toContainText("Predecessor baseline")
+    await expect(predecessor).toHaveClass(/is-predecessor/)
+  })
+
+  test("all five lanes are populated once the content is known", async ({ page }) => {
+    await page.goto(fixture("requirement"))
+    // §5.2's five lanes, none of them impossible to fill any more.
+    const heads = page.locator(".dtCanvasLaneHead")
+    await expect(heads).toHaveCount(5)
   })
 })

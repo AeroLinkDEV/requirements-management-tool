@@ -16,10 +16,13 @@ import {
   type AllocationTarget,
   type ProposalContent,
   type ProposalItem,
+  type BaselineEffect,
+  type CoveringArtifact,
   type ProposalReferenceGap,
   type RequirementCoverageTarget,
   type TypeFilter,
   type VerificationArtifactContent,
+  type VerificationExecution,
   type VerificationProposalItem,
   badgeForKind,
   diffFor,
@@ -32,48 +35,20 @@ import {
 } from "./changeProposalPresentation"
 import "./DigitalThreadInsideChange.css"
 
-/**
- * One record in the verification or build lane.
- *
- * These two lanes are supplied by the caller rather than fetched here. Absent means the lane is dropped, not
- * that it is empty.
- *
- * **No production producer exists yet, and that is a recorded blocker rather than an oversight.** The rooted
- * trace emits exactly six relations — `CoveredByTestChangeRequest` (ChangeRequest → TestChangeRequest),
- * `CaseToProcedureOrigin`, `OwnsRequirementRevision`, `RequirementTrace`, `RequirementCodeEvidence` and
- * `ProblemReportResolution` — over five node kinds: ChangeRequest, TestChangeRequest, ProblemReport,
- * RequirementRevision and CodeTraceability.
- *
- * None of those states that a verification artifact covers a requirement revision, and no procedure-revision
- * node exists in that projection at all. The facts do exist in the domain —
- * `VerificationCoverageProjection` carries requirement revision to artifact revision with an
- * `ArtifactKind` and a server-stated `CoverageState` — but nothing exposes them for a change request's
- * proposal items. Populating these lanes therefore needs a server read, which is not this slice's to invent.
- */
-export type InsideTraceRecord = {
-  id: string
-  displayNumber: string
-  title?: string | null
-  state?: string | null
-  badge: string
-  /**
-   * The records this one covers, as the trace recorded them. Absent or empty draws no coverage edge at all,
-   * which is the honest rendering: the alternative — assuming it covers everything in the lane beside it —
-   * would make a verification artifact that covers one requirement indistinguishable from one that covers ten.
-   */
-  coversIds?: readonly string[]
-}
-
 export type DigitalThreadInsideChangeProps = {
   /** The opened change request, as the register knows it. */
   opened: NetworkNode
   /** Every change request in the build, for the rollable lane-0 register. */
   register: readonly NetworkNode[]
+  /**
+   * Everything the view draws for the opened change, in one response.
+   *
+   * Lanes 3 and 4 arrive with it rather than as separate caller-supplied facts. That is not only tidier: with
+   * two sources the board could compact after the first landed and expand when the second did — the same
+   * structural jump §6.8 forbids, moved to a second read. One response means one moment at which the content
+   * becomes known.
+   */
   content: ProposalContent | null
-  /** Covering verification artifacts (lane 3), from the rooted trace. */
-  verification?: readonly InsideTraceRecord[]
-  /** Candidate-baseline selection and predecessor baseline (lane 4), from the rooted trace. */
-  effect?: readonly InsideTraceRecord[]
   /** The project's configured ladder, highest layer first. Drives the level-aware lane labels. */
   orderedLevels?: readonly string[]
   /**
@@ -99,7 +74,9 @@ type Card =
   | { kind: "verification"; item: VerificationProposalItem }
   | { kind: "allocation"; target: AllocationTarget }
   | { kind: "coverage"; target: RequirementCoverageTarget }
-  | { kind: "trace"; record: InsideTraceRecord }
+  | { kind: "covering"; record: CoveringArtifact }
+  | { kind: "execution"; record: VerificationExecution }
+  | { kind: "baseline"; record: BaselineEffect }
 
 /**
  * Inside one change: what it proposes, what that allocates to, what verifies it, and what it does to the build.
@@ -111,8 +88,6 @@ export default function DigitalThreadInsideChange({
   opened,
   register,
   content,
-  verification = [],
-  effect = [],
   orderedLevels,
   rebaseRequired = false,
   loading = false,
@@ -173,7 +148,7 @@ export default function DigitalThreadInsideChange({
     const live = new Set<string>()
     for (const item of requirementItems)
       for (const target of item.allocatedDownstream)
-        (item.kind === "Retire" ? retiring : live).add(target.id)
+        (item.kind === "Retire" ? retiring : live).add(allocationNodeId(target))
     for (const item of verificationItems)
       for (const target of item.finalCoverage)
         (item.kind === "Retire" ? retiring : live).add(target.revisionId)
@@ -228,17 +203,42 @@ export default function DigitalThreadInsideChange({
     return notices
   }, [requirementItems])
 
+  /** Lane 3: covering artifacts for a requirement change, recorded runs for a verification package. */
+  const covering = useMemo(
+    () => (content && !isVerificationContent(content) ? content.covering : []),
+    [content],
+  )
+  const executions = useMemo(
+    () => (content && isVerificationContent(content) ? content.executions : []),
+    [content],
+  )
+
+  /** Lane 4: the candidate baseline and the one it supersedes, from real records. */
+  const buildEffect = useMemo(() => content?.buildEffect ?? [], [content])
+
   const cards = useMemo(() => {
     const byId = new Map<string, Card>()
     for (const node of registerNodes) byId.set(node.id, { kind: "register", node })
     for (const item of requirementItems) byId.set(item.id, { kind: "proposal", item })
     for (const item of verificationItems) byId.set(item.id, { kind: "verification", item })
-    for (const target of allocations) byId.set(target.id, { kind: "allocation", target })
+    // Keyed by the identity the canvas uses for it: the exact revision for a materialized target, because
+    // that is what lane 3 joins to, and its own id for a proposal that has no controlled revision.
+    for (const target of allocations) byId.set(allocationNodeId(target), { kind: "allocation", target })
     for (const target of coverage) byId.set(target.revisionId, { kind: "coverage", target })
-    for (const record of verification) byId.set(record.id, { kind: "trace", record })
-    for (const record of effect) byId.set(record.id, { kind: "trace", record })
+    for (const record of covering) byId.set(record.artifactRevisionId, { kind: "covering", record })
+    for (const record of executions) byId.set(record.id, { kind: "execution", record })
+    for (const record of buildEffect) byId.set(record.baselineId, { kind: "baseline", record })
     return byId
-  }, [allocations, coverage, effect, registerNodes, requirementItems, verification, verificationItems])
+  }, [
+    allocations,
+    buildEffect,
+    coverage,
+    covering,
+    executions,
+    registerNodes,
+    requirementItems,
+    verificationItems,
+  ])
 
   /**
    * Whether the proposal payload has actually been answered.
@@ -256,10 +256,11 @@ export default function DigitalThreadInsideChange({
     registerNodes.forEach((node, row) => placed.push({ id: node.id, lane: 0, row }))
     requirementItems.forEach((item, row) => placed.push({ id: item.id, lane: 1, row }))
     verificationItems.forEach((item, row) => placed.push({ id: item.id, lane: 1, row }))
-    allocations.forEach((target, row) => placed.push({ id: target.id, lane: 2, row }))
+    allocations.forEach((target, row) => placed.push({ id: allocationNodeId(target), lane: 2, row }))
     coverage.forEach((target, row) => placed.push({ id: target.revisionId, lane: 2, row }))
-    verification.forEach((record, row) => placed.push({ id: record.id, lane: 3, row }))
-    effect.forEach((record, row) => placed.push({ id: record.id, lane: 4, row }))
+    covering.forEach((record, row) => placed.push({ id: record.artifactRevisionId, lane: 3, row }))
+    executions.forEach((record, row) => placed.push({ id: record.id, lane: 3, row }))
+    buildEffect.forEach((record, row) => placed.push({ id: record.baselineId, lane: 4, row }))
 
     // Structural compaction runs only once the content is known. Until then the conceptual frame stands, so
     // the lane bands and headings the reader is looking at do not move when the answer arrives.
@@ -269,13 +270,14 @@ export default function DigitalThreadInsideChange({
     return { lanes: compacted.lanes, canvasNodes: compacted.nodes }
   }, [
     allocations,
+    buildEffect,
     contentKnown,
     coverage,
-    effect,
+    covering,
+    executions,
     labels,
     registerNodes,
     requirementItems,
-    verification,
     verificationItems,
   ])
 
@@ -285,9 +287,9 @@ export default function DigitalThreadInsideChange({
    */
   const canvasEdges = useMemo<CanvasEdge[]>(() => {
     const present = new Set(canvasNodes.map(node => node.id))
-    return insideEdges(opened.id, requirementItems, verificationItems, verification)
+    return insideEdges(opened.id, requirementItems, verificationItems, covering, executions)
       .filter(edge => present.has(edge.from) && present.has(edge.to))
-  }, [canvasNodes, opened.id, requirementItems, verification, verificationItems])
+  }, [canvasNodes, covering, executions, opened.id, requirementItems, verificationItems])
 
   /**
    * The focus is what the reader is looking at: a selection if there is one, otherwise a hover.
@@ -538,7 +540,7 @@ export default function DigitalThreadInsideChange({
 
       if (card.kind === "allocation") {
         const target = card.target
-        const inCascade = retireCascadeIds.has(target.id)
+        const inCascade = retireCascadeIds.has(allocationNodeId(target))
         return (
           <div
             className={`dticCard dticAllocation${target.isProposed ? " is-proposed" : ""}${inCascade ? " is-retire-cascade" : ""}${traceClass}`}
@@ -574,23 +576,73 @@ export default function DigitalThreadInsideChange({
         )
       }
 
+      if (card.kind === "covering") {
+        const record = card.record
+        const pill = pillFor(record.coverageState)
+        return (
+          <div className={`dticCard dticTrace${record.coverageState === "Suspect" ? " is-suspect" : ""}${traceClass}`}>
+            {hopBadge}
+            <div className="dticTop">
+              <span className="dticBadge dticLevel">{record.artifactKind === "Case" ? "TC" : "TP"}</span>
+              <ExactArtifactLink
+                href={hrefFor?.({ id: record.artifactId, displayNumber: record.displayNumber })}
+                className="dticId"
+              >
+                {record.displayNumber}
+              </ExactArtifactLink>
+              {/* Coverage state is the server's, and it carries its word as well as its colour. */}
+              <span className="dticPill" style={{ background: pill.background, color: pill.color }}>
+                {record.coverageState}
+              </span>
+            </div>
+            <div className="dticTitle" data-density="title">
+              {record.title}
+            </div>
+          </div>
+        )
+      }
+
+      if (card.kind === "execution") {
+        const record = card.record
+        const pill = pillFor(record.outcome)
+        return (
+          <div className={`dticCard dticTrace${traceClass}`}>
+            {hopBadge}
+            <div className="dticTop">
+              <span className="dticBadge dticLevel">RUN</span>
+              <span className="dticId">{record.executedBy}</span>
+              <span className="dticPill" style={{ background: pill.background, color: pill.color }}>
+                {record.outcome}
+              </span>
+            </div>
+            <div className="dticTitle" data-density="title">
+              {record.determination}
+            </div>
+            <p className="dticMeta" data-density="meta">
+              {new Date(record.executedAt).toISOString().slice(0, 10)}
+            </p>
+          </div>
+        )
+      }
+
       const record = card.record
       const pill = pillFor(record.state)
       return (
-        <div className={`dticCard dticTrace${record.state === "Suspect" ? " is-suspect" : ""}${traceClass}`}>
+        <div className={`dticCard dticTrace${record.isPredecessor ? " is-predecessor" : ""}${traceClass}`}>
           {hopBadge}
           <div className="dticTop">
-            <span className="dticBadge dticLevel">{record.badge}</span>
-            <ExactArtifactLink href={hrefFor?.(record)} className="dticId">
-              {record.displayNumber}
-            </ExactArtifactLink>
+            <span className="dticBadge dticLevel">BLD</span>
+            <span className="dticId">{record.displayNumber}</span>
             <span className="dticPill" style={{ background: pill.background, color: pill.color }}>
-              {stateLabel(record.state ?? undefined)}
+              {stateLabel(record.state)}
             </span>
           </div>
           <div className="dticTitle" data-density="title">
-            {record.title}
+            {record.name}
           </div>
+          <p className="dticMeta" data-density="meta">
+            {record.isPredecessor ? "Predecessor baseline" : "Candidate baseline for this build"}
+          </p>
         </div>
       )
     },
@@ -619,8 +671,12 @@ export default function DigitalThreadInsideChange({
               return `${card.target.displayNumber}, ${card.target.isProposed ? "proposed" : "in the build"}`
             case "coverage":
               return `${card.target.displayNumber}, covered by this package`
-            case "trace":
-              return `${card.record.displayNumber}, ${stateLabel(card.record.state ?? undefined)}`
+            case "covering":
+              return `${card.record.displayNumber}, ${card.record.coverageState}`
+            case "execution":
+              return `Run by ${card.record.executedBy}, ${card.record.outcome}`
+            case "baseline":
+              return `${card.record.displayNumber}, ${card.record.state}`
             case "register":
               return card.node.displayNumber
           }
@@ -768,6 +824,15 @@ export type ResolvedDock = Exclude<PanelDock, "auto">
 
 // Derived from what the panel renders, so the reserved area is the panel plus its margins rather than a
 // guess with slack in it. Bottom is 150px at an 18px offset (§6.6); right/left are 300px at 16px.
+/**
+ * The identity the canvas uses for a downstream target.
+ *
+ * A materialized target is identified by its exact revision, because verification coverage is recorded per
+ * revision and lane 3 joins to it. A proposal has no controlled revision and keeps its own id. Card, lane
+ * placement and edge all use this one function, so an edge can never point at an identity no card carries.
+ */
+const allocationNodeId = (target: AllocationTarget): string => target.revisionId ?? target.id
+
 const PANEL_HEIGHT = 150 + 18 + 16
 const PANEL_WIDTH = 300 + 16 + 14
 
@@ -783,7 +848,11 @@ const panelTitle = (card: Card): string => {
       return card.target.displayNumber || "Unnamed proposal"
     case "coverage":
       return card.target.displayNumber
-    case "trace":
+    case "covering":
+      return card.record.displayNumber
+    case "execution":
+      return card.record.executedBy
+    case "baseline":
       return card.record.displayNumber
   }
 }
@@ -815,8 +884,15 @@ const panelRows = (card: Card): { label: string; value: string }[] => {
       ]
     case "coverage":
       return [{ label: "Level", value: card.target.level }]
-    case "trace":
-      return [{ label: "State", value: stateLabel(card.record.state ?? undefined) }]
+    case "covering":
+      return [
+        { label: "Kind", value: card.record.artifactKind },
+        { label: "Coverage", value: card.record.coverageState },
+      ]
+    case "execution":
+      return [{ label: "Outcome", value: card.record.outcome }]
+    case "baseline":
+      return [{ label: "State", value: card.record.state }]
   }
 }
 

@@ -151,23 +151,81 @@ test("a stale item cannot contaminate a sibling, because each carries its own di
   expect(downstreamNotice(sibling)).not.toContain("revision 02")
 })
 
-test("coverage edges are drawn only where the record says what it covers", () => {
+test("coverage joins on the exact requirement revision the server recorded it against", () => {
   const items = [
-    item({ id: "SR-10", kind: "Modify", allocatedDownstream: [
-      { id: "h1", displayNumber: "HLR-1.00", level: "HighLevel", statement: "s", isProposed: false },
-      { id: "h2", displayNumber: "HLR-2.00", level: "HighLevel", statement: "s", isProposed: false },
-    ] }),
+    item({
+      id: "SR-10",
+      kind: "Modify",
+      allocatedDownstream: [
+        { id: "art-1", revisionId: "rev-1", displayNumber: "HLR-1.00", level: "HighLevel", statement: "s", isProposed: false },
+        { id: "art-1", revisionId: "rev-2", displayNumber: "HLR-1.01", level: "HighLevel", statement: "s", isProposed: false },
+      ],
+    }),
   ]
-  // Two allocations and two procedures. Pairing them all would produce four "covered by" edges and claim
-  // coverage nothing recorded — a requirement three procedures cover would look the same as one nothing
-  // covers. Only the one recorded link may be drawn.
-  const covering = [{ id: "tp1", coversIds: ["h1"] }, { id: "tp2" }]
 
-  const edges = insideEdges("SRCR-1", items, [], covering)
-  const coverage = edges.filter(edge => edge.label === "covered by")
+  // Two revisions of the SAME artifact. Coverage is recorded against one of them, so joining on the artifact
+  // id — or on a display number — would attach the procedure to both and claim coverage that does not exist.
+  const covering = [
+    {
+      requirementRevisionId: "rev-2",
+      artifactId: "tp-art",
+      artifactRevisionId: "tp-rev",
+      displayNumber: "HLRTP-1.00",
+      title: "t",
+      level: "HighLevel",
+      artifactKind: "Procedure",
+      artifactState: "Approved",
+      coverageState: "Covered",
+    },
+  ]
+
+  const coverage = insideEdges("SRCR-1", items, [], covering).filter(edge => edge.label === "covered by")
 
   expect(coverage).toHaveLength(1)
-  expect(coverage[0]).toMatchObject({ from: "h1", to: "tp1" })
+  expect(coverage[0]).toMatchObject({ from: "rev-2", to: "tp-rev" })
+  // The other revision of the same artifact is untouched.
+  expect(coverage.some(edge => edge.from === "rev-1")).toBe(false)
+})
+
+test("a downstream allocation is identified by its revision, and a proposal by its own id", () => {
+  const items = [
+    item({
+      id: "SR-11",
+      kind: "Modify",
+      allocatedDownstream: [
+        { id: "art-9", revisionId: "rev-9", displayNumber: "HLR-9.00", level: "HighLevel", statement: "s", isProposed: false },
+        { id: "prop-9", displayNumber: "HLR-10.00", level: "HighLevel", statement: "s", isProposed: true },
+      ],
+    }),
+  ]
+
+  const allocates = insideEdges("SRCR-1", items).filter(edge => edge.label === "allocates to")
+
+  // Materialized: the exact revision, because that is what coverage is recorded against.
+  expect(allocates.some(edge => edge.to === "rev-9")).toBe(true)
+  expect(allocates.some(edge => edge.to === "art-9")).toBe(false)
+  // Proposed: no controlled revision exists, so it keeps its own identity.
+  expect(allocates.some(edge => edge.to === "prop-9")).toBe(true)
+})
+
+test("an execution is joined to the exact procedure revision that was run", () => {
+  const executions = [
+    {
+      id: "run-1",
+      procedureRevisionId: "vrev-1",
+      outcome: "Pass",
+      executedBy: "e",
+      executedAt: "2026-08-30T10:00:00.000Z",
+      determination: "d",
+    },
+  ]
+
+  // Lane 3 for a verification package is what was run, joined by revision so a run of another revision of
+  // the same procedure is never presented as evidence for this one.
+  const edges = insideEdges("TCR-1", [], [], [], executions).filter(edge => edge.label === "executed")
+
+  expect(edges).toHaveLength(1)
+  expect(edges[0]).toMatchObject({ from: "vrev-1", to: "run-1" })
 })
 
 test("a retirement and its cascade are marked so they can be drawn dashed", () => {
