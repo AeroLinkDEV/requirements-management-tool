@@ -497,3 +497,26 @@ export const offsetToReveal = (
       : currentOffset - (y - (bandHeight - geometry.cardHeight - 12))
   return Math.min(0, desired)
 }
+
+/**
+ * Which side a detail panel should take, from the lanes the selected record's direct links occupy.
+ *
+ * Generic over lane numbers rather than over any view's node type, so every view can share the one rule
+ * (#880 §6.6 mechanism 1) instead of each re-deriving it. The panel docks on the emptier side, which is what
+ * stops it coming to rest on top of the record a highlighted edge points at.
+ *
+ * Ties go left, matching the change network: a record with work on both sides is more often read left to
+ * right, so the left gutter is the less costly place to spend.
+ */
+export const resolveDockByLane = (
+  selectedLane: number,
+  linkedLanes: readonly number[],
+): "left" | "right" => {
+  let right = 0
+  let left = 0
+  for (const lane of linkedLanes) {
+    if (lane > selectedLane) right += 1
+    else if (lane < selectedLane) left += 1
+  }
+  return right >= left ? "left" : "right"
+}

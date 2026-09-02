@@ -127,14 +127,53 @@ test.describe("frame behaviour", () => {
     await expect(page.locator(".dtCanvas")).toBeVisible()
   })
 
-  test("loading keeps the lane frame rather than collapsing to one lane", async ({ page }) => {
+  test("loading holds the five-lane frame, and content arriving does not move it", async ({ page }) => {
     await page.goto(fixture("loading"))
 
-    await expect(page.locator(".dtCanvas")).toBeVisible()
+    // The whole conceptual frame stands while the payload is unknown. Asserting only that one lane head
+    // exists would pass on a board that had collapsed to the register lane alone.
+    const heads = page.locator(".dtCanvasLaneHead")
+    await expect(heads).toHaveCount(5)
+    const before = await heads.allTextContents()
     await expect(page.locator(".dticLoading")).toBeVisible()
-    // The register lane is populated and the frame is present; the board must not be a single lane that
-    // expands once content lands.
-    await expect(page.locator(".dtCanvasLaneHead").first()).toBeVisible()
+
+    // Identify the canvas element so we can prove it was updated rather than rebuilt.
+    await page.evaluate(() => document.querySelector(".dtCanvas")?.setAttribute("data-probe", "same"))
+
+    // Flip to loaded in the same React root — no remount.
+    await page.evaluate(() => (window as unknown as { __loadInsideChange: () => void }).__loadInsideChange())
+
+    await expect(page.locator(".dticLoading")).toHaveCount(0)
+    // Same DOM element: the canvas was never torn down, so transform, lane offsets and selection survive.
+    await expect(page.locator(".dtCanvas")).toHaveAttribute("data-probe", "same")
+
+    // The prohibited behaviour is the other direction: collapsing to the register lane while the payload is
+    // unknown and then expanding as it lands. Contracting to the lanes that genuinely have content once the
+    // answer is in is exactly what §5.2 asks for, so the lane set may shrink here — it may not have started
+    // small. What must hold is that every lane still shown kept its identity and its order.
+    // Lane headings carry a record count, which legitimately changes as content lands, so compare the
+    // labels themselves.
+    const label = (text: string) => text.replace(/[0-9]+$/, "")
+    const after = (await heads.allTextContents()).map(label)
+    expect(after.length).toBeLessThanOrEqual(before.length)
+    expect(before.map(label).filter(head => after.includes(head))).toEqual(after)
+    // Concretely: the full conceptual frame while unknown, then only the lanes that genuinely have content.
+    expect(before.map(label)).toEqual([
+      "CHANGE REQUEST",
+      "PROPOSED SYSTEM REQUIREMENTS",
+      "ALLOCATED HLRs",
+      "SYSTEM PROCEDURES",
+      "EFFECT ON THE BUILD",
+    ])
+    expect(after).toEqual(["CHANGE REQUEST", "PROPOSED SYSTEM REQUIREMENTS", "ALLOCATED HLRs"])
+  })
+
+  test("a genuinely empty lane still compacts once the content is known", async ({ page }) => {
+    await page.goto(fixture("requirement"))
+
+    // The loaded requirement scenario has no verification or effect records, so those lanes are absent —
+    // structural compaction still works; it is only deferred until the answer is in.
+    await expect(page.locator(".dtCanvasLaneHead")).toHaveCount(3)
   })
 })
 
@@ -170,5 +209,35 @@ test.describe("trace and interaction", () => {
     await page.keyboard.press("Enter")
 
     await expect(page.locator(".dticPanel")).toContainText("SR-00010.01")
+  })
+})
+
+test.describe("panel placement", () => {
+  test("the panel offers bottom, right and auto, and auto picks the emptier side", async ({ page }) => {
+    await page.goto(fixture("requirement"))
+    await page.locator('.dticProposal:has-text("SR-00010.01")').click()
+
+    const panel = page.locator(".dticPanel")
+    await expect(panel).toHaveClass(/dticPanel-bottom/)
+
+    await panel.getByRole("button", { name: "Right" }).click()
+    await expect(panel).toHaveClass(/dticPanel-right/)
+
+    // Auto counts where the links sit. This record's only link is downstream, so the panel takes the
+    // emptier left side rather than covering what the highlighted edge points at.
+    await panel.getByRole("button", { name: "Auto" }).click()
+    await expect(panel).toHaveClass(/dticPanel-left/)
+  })
+
+  test("the panel lists the whole traced web, marking deeper hops", async ({ page }) => {
+    await page.goto(fixture("requirement"))
+    await page.locator('.dticProposal:has-text("SR-00010.01")').click()
+
+    // Two columns: upstream and downstream. Each lists the whole traced web, not just the first hop.
+    await expect(page.locator(".dticPanelCol")).toHaveCount(2)
+    const rows = page.locator(".dticRel button")
+    await expect(rows.first()).toBeVisible()
+    // A direct link says so; a deeper one would carry its hop count and a dashed border instead.
+    await expect(page.locator(".dticRel").first()).toContainText("DIRECT")
   })
 })

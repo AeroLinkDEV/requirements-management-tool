@@ -168,6 +168,23 @@ const verificationContent: ProposalContent = {
   ],
 }
 
+/**
+ * The opened record for the verification scenario is a real TestChangeRequest node.
+ *
+ * Using a ChangeRequest here would have left the TEST branches untested: lane labels, the register chip
+ * semantics and the owner shape are all chosen from `opened.kind`, so a mismatched fixture identity would
+ * silently exercise the requirement path while appearing to test the verification one.
+ */
+const openedTcr: NetworkNode = {
+  id: "tcr-1",
+  kind: "TestChangeRequest",
+  displayNumber: "SYSTPCR-00200.00",
+  title: "Sequencing procedure rework",
+  state: "Draft",
+  level: "System",
+  buildVersion: "1.6",
+}
+
 const params = new URLSearchParams(window.location.search)
 const scenario = params.get("case") ?? "requirement"
 
@@ -183,9 +200,24 @@ const shared = {
 
 const root = createRoot(document.getElementById("root")!)
 
+/**
+ * Re-renders into the SAME root so the component is updated rather than remounted.
+ *
+ * That is what makes the loading assertion meaningful: if the fixture tore the tree down and built it again,
+ * a stable-looking frame would prove nothing about whether the board jumped.
+ */
+const renderLoaded = () =>
+  root.render(<DigitalThreadInsideChange {...shared} content={requirementModify} />)
+;(window as unknown as { __loadInsideChange?: () => void }).__loadInsideChange = renderLoaded
+
 root.render(
   scenario === "verification" ? (
-    <DigitalThreadInsideChange {...shared} content={verificationContent} />
+    <DigitalThreadInsideChange
+      {...shared}
+      opened={openedTcr}
+      register={[opened, sibling, openedTcr]}
+      content={verificationContent}
+    />
   ) : scenario === "loading" ? (
     <DigitalThreadInsideChange {...shared} content={null} loading />
   ) : scenario === "error" ? (

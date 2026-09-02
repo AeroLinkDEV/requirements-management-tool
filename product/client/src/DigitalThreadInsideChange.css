@@ -327,3 +327,36 @@
 /* Field-by-field before/after, so a Modify that changed the objective or the environment is visible as such. */
 .dticDiffRow { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 2px 8px; }
 .dticDiffRow i { grid-row: span 2; color: #8493a6; font-style: normal; }
+
+/* Panel placement modes (#880 §6.6). The reserved frame follows the resolved dock, so the canvas never lays
+   a record out underneath whichever edge the panel took. */
+.dticPanel-bottom { left: 16px; right: 16px; bottom: 18px; height: 150px; }
+.dticPanel-right { right: 16px; top: 70px; bottom: 22px; left: auto; width: 300px; height: auto; overflow: auto; }
+.dticPanel-left { left: 16px; top: 70px; bottom: 22px; right: auto; width: 300px; height: auto; overflow: auto; }
+
+.dticPanel-bottom { display: grid; grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+
+.dticPanelTools { display: flex; gap: 4px; }
+
+.dticPanelTools button.is-on { border-color: var(--teal-700); background: var(--teal-700); color: #fff; }
+
+.dticPanelCol { min-width: 0; display: flex; flex-direction: column; }
+.dticRel { display: grid; gap: 4px; overflow-y: auto; max-height: 96px; }
+
+.dticRel button {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 3px 7px;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Deeper than one hop reads dashed, so a direct relationship is never mistaken for a distant one. */
+.dticRel button.is-far { border-style: dashed; }
+.dticRel button small { color: #8fa0b2; font-size: 9px; font-weight: var(--weight-strong); }
+.dticRel button span { overflow: hidden; color: #17324d; font: var(--weight-strong) 10px ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; }
+.dticRelEmpty { margin: 0; color: #8fa0b2; font-size: 10.5px; }

@@ -396,11 +396,22 @@ export type CoveringRecord = {
  * - the endpoint used is the exact id the edge names, so a revision is never conflated with its artifact, nor
  *   one revision of an artifact with another;
  * - nothing is matched by display number, which is a label for people and not an identity.
+ *
+ * `relations` has **no default**, deliberately. An earlier version defaulted to
+ * `["VerificationCoverage", "CoveredByTestChangeRequest"]`; the first of those does not exist in any
+ * projection — it was invented here — and the second relates a ChangeRequest to a TestChangeRequest, which is
+ * not a statement that some verification artifact covers some requirement revision. A default would let a
+ * fixture supply its own vocabulary and then appear to prove the production projection supports it.
+ *
+ * The caller must therefore name relations the authoritative projection actually emits. Today those are:
+ * `CoveredByTestChangeRequest`, `CaseToProcedureOrigin`, `OwnsRequirementRevision`, `RequirementTrace`,
+ * `RequirementCodeEvidence` and `ProblemReportResolution`. None of them expresses lane-2-to-lane-3
+ * verification coverage — see the note on `InsideTraceRecord` in the view.
  */
 export const coveringRelations = (
   coveringId: string,
   edges: readonly TraceEdgeFact[],
-  relations: readonly string[] = ["VerificationCoverage", "CoveredByTestChangeRequest"],
+  relations: readonly string[],
 ): string[] => {
   const wanted = new Set(relations)
   const covered: string[] = []

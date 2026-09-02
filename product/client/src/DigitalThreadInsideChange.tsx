@@ -1,7 +1,13 @@
 import { useCallback, useMemo, useRef, useState } from "react"
 import DigitalThreadCanvas from "./DigitalThreadCanvas"
 import ExactArtifactLink from "./ExactArtifactLink"
-import { type CanvasEdge, type CanvasNode, compactLanes, trace } from "./digitalThreadGeometry"
+import {
+  type CanvasEdge,
+  type CanvasNode,
+  compactLanes,
+  resolveDockByLane,
+  trace,
+} from "./digitalThreadGeometry"
 import { stateLabel } from "./presentation"
 import { type NetworkNode, badgeOf, badgeTintFor, levelBadge, pillFor } from "./changeNetworkPresentation"
 import {
@@ -29,9 +35,20 @@ import "./DigitalThreadInsideChange.css"
 /**
  * One record in the verification or build lane.
  *
- * These two lanes are read from the rooted trace rather than from proposal content — #880 §8.5 records that
- * `/api/change-requests/{id}/trace` already carries the verification and baseline-membership facts — so they
- * arrive as props rather than being fetched here. Absent means the lane is dropped, not that it is empty.
+ * These two lanes are supplied by the caller rather than fetched here. Absent means the lane is dropped, not
+ * that it is empty.
+ *
+ * **No production producer exists yet, and that is a recorded blocker rather than an oversight.** The rooted
+ * trace emits exactly six relations — `CoveredByTestChangeRequest` (ChangeRequest → TestChangeRequest),
+ * `CaseToProcedureOrigin`, `OwnsRequirementRevision`, `RequirementTrace`, `RequirementCodeEvidence` and
+ * `ProblemReportResolution` — over five node kinds: ChangeRequest, TestChangeRequest, ProblemReport,
+ * RequirementRevision and CodeTraceability.
+ *
+ * None of those states that a verification artifact covers a requirement revision, and no procedure-revision
+ * node exists in that projection at all. The facts do exist in the domain —
+ * `VerificationCoverageProjection` carries requirement revision to artifact revision with an
+ * `ArtifactKind` and a server-stated `CoverageState` — but nothing exposes them for a change request's
+ * proposal items. Populating these lanes therefore needs a server read, which is not this slice's to invent.
  */
 export type InsideTraceRecord = {
   id: string
@@ -108,6 +125,7 @@ export default function DigitalThreadInsideChange({
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [dockPreference, setDockPreference] = useState<PanelDock>("bottom")
   const liveRegion = useRef<HTMLDivElement | null>(null)
 
   const isTestChange = opened.kind === "TestChangeRequest"
@@ -222,6 +240,15 @@ export default function DigitalThreadInsideChange({
     return byId
   }, [allocations, coverage, effect, registerNodes, requirementItems, verification, verificationItems])
 
+  /**
+   * Whether the proposal payload has actually been answered.
+   *
+   * "Not loaded yet" and "loaded and empty" are different facts, and only the second may compact a lane away.
+   * While the payload is unknown, the only populated lane is the register, so compaction would collapse the
+   * board to one lane and then expand it as the response landed — the structural jump §6.8 exists to prevent.
+   */
+  const contentKnown = !loading || content !== null
+
   const { lanes, canvasNodes } = useMemo(() => {
     const placed: CanvasNode[] = []
     const laneLabels = [labels.register, labels.proposed, labels.allocated, labels.verification, labels.effect]
@@ -234,9 +261,23 @@ export default function DigitalThreadInsideChange({
     verification.forEach((record, row) => placed.push({ id: record.id, lane: 3, row }))
     effect.forEach((record, row) => placed.push({ id: record.id, lane: 4, row }))
 
+    // Structural compaction runs only once the content is known. Until then the conceptual frame stands, so
+    // the lane bands and headings the reader is looking at do not move when the answer arrives.
+    if (!contentKnown) return { lanes: laneLabels, canvasNodes: placed }
+
     const compacted = compactLanes(laneLabels, placed)
     return { lanes: compacted.lanes, canvasNodes: compacted.nodes }
-  }, [allocations, coverage, effect, labels, registerNodes, requirementItems, verification, verificationItems])
+  }, [
+    allocations,
+    contentKnown,
+    coverage,
+    effect,
+    labels,
+    registerNodes,
+    requirementItems,
+    verification,
+    verificationItems,
+  ])
 
   /**
    * Edges: the opened change to each proposal, each proposal to what it allocates to, and each allocation to
@@ -266,14 +307,42 @@ export default function DigitalThreadInsideChange({
   const web = useMemo(() => (focusId ? trace(focusId, canvasEdges) : null), [canvasEdges, focusId])
 
   /**
-   * Which side the panel takes, and how much frame it costs the board.
+   * Which side the panel takes (#880 §6.6 mechanism 1).
    *
-   * The same non-occlusion principle as the network: the canvas must not lay records out underneath the
-   * panel, so the frame it may use shrinks by the docked edge. Bottom by default, matching §6.6.
+   * In auto mode it counts the lanes the selected record's direct links occupy and docks on the emptier one,
+   * so the panel cannot come to rest on top of the record a highlighted edge points at. The other two
+   * mechanisms — reframing into what is left, and rolling the lanes to fetch linked records — are the shared
+   * canvas's, and it performs both on selection.
+   */
+  const dock: ResolvedDock = useMemo(() => {
+    if (dockPreference !== "auto") return dockPreference
+    if (!selectedId) return "right"
+    const laneOf = new Map(canvasNodes.map(node => [node.id, node.lane]))
+    const selectedLane = laneOf.get(selectedId)
+    if (selectedLane === undefined) return "right"
+    const linked: number[] = []
+    for (const edge of canvasEdges) {
+      const other = edge.from === selectedId ? edge.to : edge.to === selectedId ? edge.from : null
+      const lane = other === null ? undefined : laneOf.get(other)
+      if (lane !== undefined) linked.push(lane)
+    }
+    return resolveDockByLane(selectedLane, linked)
+  }, [canvasEdges, canvasNodes, dockPreference, selectedId])
+
+  /**
+   * The frame the board may use. It shrinks by the docked edge, so the canvas never lays a record out
+   * underneath the panel — the non-occlusion rule, not merely a tidier overlap.
    */
   const frameInset = useMemo(
-    () => (selectedId ? { bottom: PANEL_HEIGHT } : undefined),
-    [selectedId],
+    () =>
+      selectedId
+        ? dock === "bottom"
+          ? { bottom: PANEL_HEIGHT }
+          : dock === "left"
+            ? { left: PANEL_WIDTH }
+            : { right: PANEL_WIDTH }
+        : undefined,
+    [dock, selectedId],
   )
 
   const renderCard = useCallback(
@@ -627,8 +696,19 @@ export default function DigitalThreadInsideChange({
       </div>
 
       {selectedCard ? (
-        <aside className="dticPanel" aria-label={`Detail for ${panelTitle(selectedCard)}`}>
+        <aside className={`dticPanel dticPanel-${dock}`} aria-label={`Detail for ${panelTitle(selectedCard)}`}>
           <div className="dticPanelTools">
+            {(["bottom", "right", "auto"] as PanelDock[]).map(option => (
+              <button
+                type="button"
+                key={option}
+                aria-pressed={dockPreference === option}
+                className={dockPreference === option ? "is-on" : ""}
+                onClick={() => setDockPreference(option)}
+              >
+                {option === "bottom" ? "Bottom" : option === "right" ? "Right" : "Auto"}
+              </button>
+            ))}
             <button type="button" onClick={() => setSelectedId(null)} aria-label="Close detail">
               ×
             </button>
@@ -641,9 +721,37 @@ export default function DigitalThreadInsideChange({
               <b>{row.value}</b>
             </div>
           ))}
-          <p className="dticPanelWeb">
-            {web ? `${web.up.size} upstream and ${web.down.size} downstream, all hops.` : ""}
-          </p>
+          {/* The whole traced web, not the first hop. Deeper records show their hop count and a dashed
+              border, and every row re-centres the board on that record. */}
+          {(["up", "down"] as const).map(direction => {
+            const set = direction === "up" ? web?.up : web?.down
+            const rows = [...(set ?? [])]
+              .map(id => ({ id, hop: web?.hops.get(id) ?? 1, card: cards.get(id) }))
+              .filter(row => row.card)
+              .sort((a, b) => a.hop - b.hop)
+            return (
+              <div className="dticPanelCol" key={direction}>
+                <p className="dticEyebrow">{direction === "up" ? "UPSTREAM" : "DOWNSTREAM"}</p>
+                <div className="dticRel">
+                  {rows.length ? (
+                    rows.map(row => (
+                      <button
+                        type="button"
+                        key={row.id}
+                        className={row.hop > 1 ? "is-far" : ""}
+                        onClick={() => setSelectedId(row.id)}
+                      >
+                        <small>{row.hop === 1 ? "DIRECT" : `${row.hop} HOPS`}</small>
+                        <span>{panelTitle(row.card!)}</span>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="dticRelEmpty">No recorded relationships</p>
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </aside>
       ) : null}
 
@@ -652,7 +760,16 @@ export default function DigitalThreadInsideChange({
   )
 }
 
+/** Where the detail panel sits. `auto` picks the side with less linked content (#880 §6.6). */
+export type PanelDock = "auto" | "left" | "right" | "bottom"
+
+/** `auto` resolved to a real side. */
+export type ResolvedDock = Exclude<PanelDock, "auto">
+
+// Derived from what the panel renders, so the reserved area is the panel plus its margins rather than a
+// guess with slack in it. Bottom is 150px at an 18px offset (§6.6); right/left are 300px at 16px.
 const PANEL_HEIGHT = 150 + 18 + 16
+const PANEL_WIDTH = 300 + 16 + 14
 
 /** The identity a panel names, taken from whichever card kind is selected. */
 const panelTitle = (card: Card): string => {
