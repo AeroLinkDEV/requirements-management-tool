@@ -28,6 +28,7 @@ import {
   diffFor,
   downstreamNotice,
   insideEdges,
+  coveringNodes,
   insideLaneLabels,
   isVerificationContent,
   matchesType,
@@ -161,7 +162,10 @@ export default function DigitalThreadInsideChange({
     const seen = new Map<string, AllocationTarget>()
     for (const item of requirementItems) {
       for (const target of item.allocatedDownstream) {
-        if (!seen.has(target.id)) seen.set(target.id, target)
+        // Keyed by the canvas identity, not the artifact id. Two proposal items can legitimately name
+        // different exact revisions of the same requirement, and keying by artifact would drop one card —
+        // after which the edge to it is filtered out for pointing at an identity no card carries.
+        if (!seen.has(allocationNodeId(target))) seen.set(allocationNodeId(target), target)
       }
     }
     return [...seen.values()]
@@ -213,6 +217,14 @@ export default function DigitalThreadInsideChange({
     [content],
   )
 
+  /**
+   * One lane-3 card per exact verification revision.
+   *
+   * The server returns one row per coverage link, so a procedure covering two requirements arrives twice. The
+   * relationships stay whole as edges; only the node set is collapsed.
+   */
+  const coveringCards = useMemo(() => coveringNodes(covering), [covering])
+
   /** Lane 4: the candidate baseline and the one it supersedes, from real records. */
   const buildEffect = useMemo(() => content?.buildEffect ?? [], [content])
 
@@ -225,7 +237,7 @@ export default function DigitalThreadInsideChange({
     // that is what lane 3 joins to, and its own id for a proposal that has no controlled revision.
     for (const target of allocations) byId.set(allocationNodeId(target), { kind: "allocation", target })
     for (const target of coverage) byId.set(target.revisionId, { kind: "coverage", target })
-    for (const record of covering) byId.set(record.artifactRevisionId, { kind: "covering", record })
+    for (const record of coveringCards) byId.set(record.artifactRevisionId, { kind: "covering", record })
     for (const record of executions) byId.set(record.id, { kind: "execution", record })
     for (const record of buildEffect) byId.set(record.baselineId, { kind: "baseline", record })
     return byId
@@ -233,7 +245,7 @@ export default function DigitalThreadInsideChange({
     allocations,
     buildEffect,
     coverage,
-    covering,
+    coveringCards,
     executions,
     registerNodes,
     requirementItems,
@@ -258,7 +270,7 @@ export default function DigitalThreadInsideChange({
     verificationItems.forEach((item, row) => placed.push({ id: item.id, lane: 1, row }))
     allocations.forEach((target, row) => placed.push({ id: allocationNodeId(target), lane: 2, row }))
     coverage.forEach((target, row) => placed.push({ id: target.revisionId, lane: 2, row }))
-    covering.forEach((record, row) => placed.push({ id: record.artifactRevisionId, lane: 3, row }))
+    coveringCards.forEach((record, row) => placed.push({ id: record.artifactRevisionId, lane: 3, row }))
     executions.forEach((record, row) => placed.push({ id: record.id, lane: 3, row }))
     buildEffect.forEach((record, row) => placed.push({ id: record.baselineId, lane: 4, row }))
 
@@ -273,7 +285,7 @@ export default function DigitalThreadInsideChange({
     buildEffect,
     contentKnown,
     coverage,
-    covering,
+    coveringCards,
     executions,
     labels,
     registerNodes,
@@ -578,9 +590,11 @@ export default function DigitalThreadInsideChange({
 
       if (card.kind === "covering") {
         const record = card.record
-        const pill = pillFor(record.coverageState)
+        const pill = pillFor(record.artifactState)
         return (
-          <div className={`dticCard dticTrace${record.coverageState === "Suspect" ? " is-suspect" : ""}${traceClass}`}>
+          // The card shows the artifact's own state. Coverage state describes a relationship, and this one
+          // revision may hold several with different states, so it travels on the edges instead.
+          <div className={`dticCard dticTrace${traceClass}`}>
             {hopBadge}
             <div className="dticTop">
               <span className="dticBadge dticLevel">{record.artifactKind === "Case" ? "TC" : "TP"}</span>
@@ -590,9 +604,8 @@ export default function DigitalThreadInsideChange({
               >
                 {record.displayNumber}
               </ExactArtifactLink>
-              {/* Coverage state is the server's, and it carries its word as well as its colour. */}
               <span className="dticPill" style={{ background: pill.background, color: pill.color }}>
-                {record.coverageState}
+                {stateLabel(record.artifactState)}
               </span>
             </div>
             <div className="dticTitle" data-density="title">
@@ -672,7 +685,7 @@ export default function DigitalThreadInsideChange({
             case "coverage":
               return `${card.target.displayNumber}, covered by this package`
             case "covering":
-              return `${card.record.displayNumber}, ${card.record.coverageState}`
+              return `${card.record.displayNumber}, ${stateLabel(card.record.artifactState)}`
             case "execution":
               return `Run by ${card.record.executedBy}, ${card.record.outcome}`
             case "baseline":
@@ -887,7 +900,7 @@ const panelRows = (card: Card): { label: string; value: string }[] => {
     case "covering":
       return [
         { label: "Kind", value: card.record.artifactKind },
-        { label: "Coverage", value: card.record.coverageState },
+        { label: "State", value: stateLabel(card.record.artifactState) },
       ]
     case "execution":
       return [{ label: "Outcome", value: card.record.outcome }]

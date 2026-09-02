@@ -395,7 +395,8 @@ public static class TestProposalContentProjection
                     x.ExecutedBy, x.ExecutedAt, x.Determination))
                 .ToList();
 
-        var effect = await ChangeProposalContentProjection.BuildEffectAsync(db, projectId, review.ReleaseId, ct);
+        var effect = await ChangeProposalContentProjection.BuildEffectAsync(
+            db, projectId, "TestChangeRequest", review.Id, ct);
 
         return new VerificationProposalContent(
             "TestChangeRequest",

@@ -100,6 +100,16 @@ const requirementModify: ProposalContent = {
           statement: "Fixed-order behaviour.",
           isProposed: false,
         },
+        {
+          // The SAME controlled artifact as HLR-00020.00 above, at a different exact revision. Keyed by
+          // artifact id, one of these two cards would silently disappear.
+          id: "hlr-1",
+          revisionId: "hlr-1-rev-b",
+          displayNumber: "HLR-00020.01",
+          level: "HighLevel",
+          statement: "The FMS shall compute the next waypoint, revised.",
+          isProposed: false,
+        },
       ],
     }),
     requirementItem({
@@ -112,6 +122,9 @@ const requirementModify: ProposalContent = {
     }),
   ],
   covering: [
+    // One procedure revision covering TWO requirement revisions, with different link states. The server
+    // returns a row per link, so this arrives twice; the board must show one card and keep both edges, and
+    // the differing states must not fight over the node.
     {
       requirementRevisionId: "hlr-1-rev",
       artifactId: "tp-art",
@@ -122,6 +135,17 @@ const requirementModify: ProposalContent = {
       artifactKind: "Procedure",
       artifactState: "Approved",
       coverageState: "Suspect",
+    },
+    {
+      requirementRevisionId: "hlr-2-rev",
+      artifactId: "tp-art",
+      artifactRevisionId: "tp-rev",
+      displayNumber: "HLRTP-00090.00",
+      title: "Waypoint computation procedure",
+      level: "HighLevel",
+      artifactKind: "Procedure",
+      artifactState: "Approved",
+      coverageState: "Covered",
     },
   ],
   buildEffect: [

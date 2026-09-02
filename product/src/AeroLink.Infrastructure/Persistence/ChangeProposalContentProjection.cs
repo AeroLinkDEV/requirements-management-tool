@@ -341,16 +341,8 @@ public static class ChangeProposalContentProjection
             .Distinct()
             .ToList();
 
-        var covering = coveredRevisionIds.Count == 0
-            ? []
-            : (await VerificationCoverageProjection.ForRequirementRevisionsAsync(db, coveredRevisionIds, ct))
-                .Select(x => new ProposalCoveringArtifact(x.RequirementRevisionId, x.ArtifactId,
-                    x.ArtifactRevisionId, x.DisplayNumber, x.Title, x.Level, x.ArtifactKind, x.ArtifactState,
-                    x.CoverageState))
-                .OrderBy(x => x.DisplayNumber, StringComparer.Ordinal)
-                .ToList();
-
-        var effect = await BuildEffectAsync(db, scr.ProjectId, scr.TargetReleaseId, ct);
+        var covering = await CoveringAsync(db, scr.ProjectId, coveredRevisionIds, ct);
+        var effect = await BuildEffectAsync(db, scr.ProjectId, "ChangeRequest", scr.Id, ct);
 
         return new ChangeProposalContentResult("ChangeRequest", scr.Id, scr.ProjectId, scr.DisplayNumber,
             items, covering, effect);
@@ -360,41 +352,89 @@ public static class ChangeProposalContentProjection
         => $"{baseNumber}.{revision:D2}";
 
     /// <summary>
-    /// The candidate baseline for a build and the one it supersedes, from real records.
+    /// The candidate baseline that actually selected this change, and the one it supersedes.
     ///
-    /// Shared by both proposal resources because "what does this change do to the build" is the same question
-    /// whichever aggregate asked it. Nothing here is constructed from a label: the display number, the name
-    /// and the state all come off the baseline row.
+    /// Resolved from the explicit selection row — <c>BaselineChangeRequestSelection</c> for a change request,
+    /// <c>BaselineTestChangeRequestSelection</c> for a verification package — and not from "the newest
+    /// candidate for this release". Those are different claims: a release can hold several candidates, and
+    /// picking the highest revision would show an opened change as affecting a baseline that never selected
+    /// it. #880 asks for candidate-baseline <em>selection</em> state.
+    ///
+    /// No selection means an empty lane, which is the truthful answer. The predecessor is that selected
+    /// baseline's own, not the release's.
     /// </summary>
     internal static async Task<IReadOnlyList<ProposalBaselineEffect>> BuildEffectAsync(
-        AeroLinkDbContext db, Guid projectId, Guid releaseId, CancellationToken ct)
+        AeroLinkDbContext db, Guid projectId, string ownerKind, Guid ownerId, CancellationToken ct)
     {
-        var candidates = await db.CandidateBaselines.AsNoTracking()
-            .Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId)
-            .OrderByDescending(x => x.Revision)
+        var selectedBaselineIds = ownerKind == "TestChangeRequest"
+            ? await db.BaselineTestChangeSelections.AsNoTracking()
+                .Where(x => x.TestChangeRequestId == ownerId).Select(x => x.BaselineId).ToListAsync(ct)
+            : await db.BaselineSelections.AsNoTracking()
+                .Where(x => x.ChangeRequestId == ownerId).Select(x => x.BaselineId).ToListAsync(ct);
+        if (selectedBaselineIds.Count == 0) return [];
+
+        var selected = await db.CandidateBaselines.AsNoTracking()
+            .Where(x => x.ProjectId == projectId && selectedBaselineIds.Contains(x.Id))
             .Select(x => new { x.Id, x.BaseNumber, x.Revision, x.Name, x.State, x.PredecessorBaselineId })
             .ToListAsync(ct);
-        if (candidates.Count == 0) return [];
+        if (selected.Count == 0) return [];
 
-        var current = candidates[0];
-        var effect = new List<ProposalBaselineEffect>
-        {
-            new(current.Id, Display(current.BaseNumber, current.Revision), current.Name,
-                current.State.ToString(), IsPredecessor: false),
-        };
+        var effect = new List<ProposalBaselineEffect>();
+        foreach (var baseline in selected.OrderBy(x => x.BaseNumber, StringComparer.Ordinal).ThenBy(x => x.Revision))
+            effect.Add(new(baseline.Id, Display(baseline.BaseNumber, baseline.Revision), baseline.Name,
+                baseline.State.ToString(), IsPredecessor: false));
 
-        if (current.PredecessorBaselineId is Guid predecessorId)
+        var predecessorIds = selected.Select(x => x.PredecessorBaselineId).OfType<Guid>().Distinct().ToList();
+        if (predecessorIds.Count > 0)
         {
-            var predecessor = await db.CandidateBaselines.AsNoTracking()
-                .Where(x => x.Id == predecessorId && x.ProjectId == projectId)
+            var predecessors = await db.CandidateBaselines.AsNoTracking()
+                .Where(x => x.ProjectId == projectId && predecessorIds.Contains(x.Id))
                 .Select(x => new { x.Id, x.BaseNumber, x.Revision, x.Name, x.State })
-                .SingleOrDefaultAsync(ct);
-            if (predecessor is not null)
+                .ToListAsync(ct);
+            foreach (var predecessor in predecessors.OrderBy(x => x.BaseNumber, StringComparer.Ordinal))
                 effect.Add(new(predecessor.Id, Display(predecessor.BaseNumber, predecessor.Revision),
                     predecessor.Name, predecessor.State.ToString(), IsPredecessor: true));
         }
 
         return effect;
+    }
+
+    /// <summary>
+    /// Verification coverage for these requirement revisions, constrained to the authorized Project.
+    ///
+    /// The reusable coverage projection joins procedure revisions by identity and does not itself constrain
+    /// the joined artifact to a Project — <c>TestRequirementCoverage</c> carries revision ids, not a
+    /// ProjectId. For ordinary data the identities line up, but this is exactly the seam §8.6 says must filter
+    /// server-side: a malformed or imported coverage row pointing at another Project's verification revision
+    /// would otherwise carry that Project's display number, title and state into this response.
+    ///
+    /// Scoped here rather than inside the shared projection so its other callers keep their semantics.
+    /// </summary>
+    private static async Task<IReadOnlyList<ProposalCoveringArtifact>> CoveringAsync(
+        AeroLinkDbContext db, Guid projectId, IReadOnlyCollection<Guid> requirementRevisionIds,
+        CancellationToken ct)
+    {
+        if (requirementRevisionIds.Count == 0) return [];
+
+        var links = await VerificationCoverageProjection.ForRequirementRevisionsAsync(
+            db, requirementRevisionIds, ct);
+        if (links.Count == 0) return [];
+
+        var artifactIds = links.Select(x => x.ArtifactId).Distinct().ToList();
+        var inProject = (await db.TestProcedures.AsNoTracking()
+                .Where(x => x.ProjectId == projectId && artifactIds.Contains(x.Id))
+                .Select(x => x.Id)
+                .ToListAsync(ct))
+            .ToHashSet();
+
+        return links
+            .Where(x => inProject.Contains(x.ArtifactId))
+            .Select(x => new ProposalCoveringArtifact(x.RequirementRevisionId, x.ArtifactId,
+                x.ArtifactRevisionId, x.DisplayNumber, x.Title, x.Level, x.ArtifactKind, x.ArtifactState,
+                x.CoverageState))
+            .OrderBy(x => x.DisplayNumber, StringComparer.Ordinal)
+            .ThenBy(x => x.RequirementRevisionId)
+            .ToList();
     }
 
     private static IReadOnlyList<Guid> Upstream(string json)

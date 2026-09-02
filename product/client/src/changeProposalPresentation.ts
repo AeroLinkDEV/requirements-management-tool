@@ -415,7 +415,7 @@ export type BaselineEffect = {
   isPredecessor: boolean
 }
 
-export type InsideEdge = { from: string; to: string; label: string; kind: "" | "retire" }
+export type InsideEdge = { from: string; to: string; label: string; kind: "" | "retire" | "suspect" }
 
 /**
  * Every edge inside one change: the change to each proposal, each proposal to what it allocates to, and each
@@ -477,12 +477,16 @@ export const insideEdges = (
   // Lane 2 to lane 3, joined on the exact requirement revision the server recorded coverage against. Not a
   // display number, not lane adjacency, and not the artifact id — coverage is recorded per revision, so two
   // revisions of one requirement can and must be told apart.
+  //
+  // The state travels on the edge because it is a fact about the relationship. One procedure revision can
+  // cover two requirements with different coverage states; hanging that on the procedure card would make the
+  // node arbitrarily settled or suspect depending on which row was read last.
   for (const record of covering) {
     edges.push({
       from: record.requirementRevisionId,
       to: record.artifactRevisionId,
-      label: "covered by",
-      kind: "",
+      label: record.coverageState === "Suspect" ? "suspect coverage" : "covered by",
+      kind: record.coverageState === "Suspect" ? "suspect" : "",
     })
   }
 
@@ -498,4 +502,20 @@ export const insideEdges = (
     })
   }
   return edges
+}
+
+/**
+ * One card per exact verification artifact revision, from rows the server returns per coverage link.
+ *
+ * A single procedure revision can cover several requirement revisions, so the coverage read returns it once
+ * per link. Placing every row on the board would put the same revision on the canvas more than once under one
+ * node id, and keying a map by that id would let the last row silently overwrite the others — taking its
+ * coverage state with it. The relationships are kept whole as edges; this is only the node set.
+ */
+export const coveringNodes = (covering: readonly CoveringArtifact[]): CoveringArtifact[] => {
+  const byRevision = new Map<string, CoveringArtifact>()
+  for (const record of covering) {
+    if (!byRevision.has(record.artifactRevisionId)) byRevision.set(record.artifactRevisionId, record)
+  }
+  return [...byRevision.values()]
 }

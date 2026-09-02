@@ -250,14 +250,14 @@ test.describe("panel placement", () => {
 })
 
 test.describe("lanes three and four", () => {
-  test("a requirement change shows covering artifacts with the server's coverage state", async ({ page }) => {
+  test("a requirement change shows the covering artifact with its own state", async ({ page }) => {
     await page.goto(fixture("requirement"))
 
     const covering = page.locator('.dticTrace:has-text("HLRTP-00090.00")')
     await expect(covering).toBeVisible()
-    // The state is the server's word, shown as a word and not only as a colour.
-    await expect(covering).toContainText("Suspect")
-    await expect(covering).toHaveClass(/is-suspect/)
+    // The card carries the artifact's state, as a word and not only as a colour. Coverage state describes a
+    // relationship and travels on the edge — see the exact-identity suite.
+    await expect(covering).toContainText("Approved")
   })
 
   test("coverage joins on the exact requirement revision, not the artifact", async ({ page }) => {
@@ -295,5 +295,35 @@ test.describe("lanes three and four", () => {
     // §5.2's five lanes, none of them impossible to fill any more.
     const heads = page.locator(".dtCanvasLaneHead")
     await expect(heads).toHaveCount(5)
+  })
+})
+
+test.describe("exact identity on the board", () => {
+  test("two revisions of one artifact both keep their card", async ({ page }) => {
+    await page.goto(fixture("requirement"))
+
+    // Same controlled artifact, two exact revisions. De-duplicating by artifact id would drop one card, and
+    // the edge to the dropped revision would then be filtered out for pointing at an identity no card carries.
+    await expect(page.locator('.dticAllocation:has-text("HLR-00020.00")')).toBeVisible()
+    await expect(page.locator('.dticAllocation:has-text("HLR-00020.01")')).toBeVisible()
+  })
+
+  test("one procedure revision covering two requirements is one card, not two", async ({ page }) => {
+    await page.goto(fixture("requirement"))
+
+    // The server returns a row per coverage link, so this revision arrives twice. Placing both would put the
+    // same node id on the canvas twice and let the later row overwrite the earlier one.
+    await expect(page.locator('.dticTrace:has-text("HLRTP-00090.00")')).toHaveCount(1)
+  })
+
+  test("coverage state is not presented as the procedure's own state", async ({ page }) => {
+    await page.goto(fixture("requirement"))
+    const card = page.locator('.dticTrace:has-text("HLRTP-00090.00")')
+
+    // This revision holds one Suspect link and one Covered link. Hanging either on the card would make the
+    // node arbitrarily settled or suspect depending on which row was read last; the card shows the artifact's
+    // own state and the link states travel on the edges.
+    await expect(card).toContainText("Approved")
+    await expect(card).not.toHaveClass(/is-suspect/)
   })
 })

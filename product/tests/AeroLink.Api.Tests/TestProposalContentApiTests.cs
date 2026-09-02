@@ -32,7 +32,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     private sealed record Fixture(Guid ProjectId, Guid SystemTcrId, Guid CaseTcrId, Guid ProcedureTcrId,
         Guid IntroduceId, Guid ModifyId, Guid RetireId, Guid CaseIntroduceId, Guid ProcedureIntroduceId,
         Guid RetainedAId, Guid RetainedBId, Guid RemovedCId, Guid AddedDId,
-        Guid CaseParentRevisionId, Guid RetiredPredecessorId, Guid MissingReferenceId,
+        Guid CaseParentRevisionId, Guid RetiredPredecessorId, Guid MissingReferenceId, Guid PredecessorExecutionId,
         Guid MalformedParentItemId, Guid MalformedCoverageItemId, Guid ForeignItemId, Guid ForeignRevisionId,
         string Member, string Outsider);
 
@@ -212,6 +212,16 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
                 TestProcedureChangeKind.Introduce, "Malformed coverage", "Verify parsing.",
                 "Configured product.", "Observe.", "Parsed.", "Malformed."), now);
 
+        // One run of the exact predecessor revision, and one of a later revision of the same procedure. Only
+        // the first is evidence for the proposal that names revision 0.
+        var predecessorExecution = new TestExecution(project.Id, supersededRevision.Id, null, null,
+            TestOutcome.Pass, memberName, "Bench", "Sequencing behaved as specified.", "evidence://run-0",
+            now, now, release.Id);
+        var laterExecution = new TestExecution(project.Id, latestRevision.Id, null, null,
+            TestOutcome.Fail, memberName, "Bench", "Later revision failed.", "evidence://run-1", now, now,
+            release.Id);
+        db.AddRange(predecessorExecution, laterExecution);
+
         await db.SaveChangesAsync();
 
         // Written through EF rather than the aggregate, because the aggregate is right to refuse it. Production
@@ -223,7 +233,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
         return new(project.Id, systemTcr.Id, caseTcr.Id, procedureTcr.Id, introduce.Id, modify.Id, retire.Id,
             caseIntroduce.Id, procedureIntroduce.Id, retainedA.Id, retainedB.Id, removedC.Id, addedD.Id,
             parentCaseRevision.Id, retiringRevision.Id, missingReferenceId,
-            malformedParent.Id, malformedCoverage.Id, foreignItem.Id, foreignRevision.Id,
+            predecessorExecution.Id, malformedParent.Id, malformedCoverage.Id, foreignItem.Id, foreignRevision.Id,
             memberName, outsiderName);
     }
 
@@ -539,6 +549,35 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     }
 
     private static string body(JsonElement element) => element.GetRawText();
+
+    [Fact]
+    public async Task Executions_are_only_those_of_the_exact_predecessor_revision()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var executions = (await ContentAsync(client, fixture.SystemTcrId))
+            .GetProperty("executions").EnumerateArray().ToList();
+
+        // The Modify names revision 0. Revision 1 of the same procedure has its own run, and it must not be
+        // offered as evidence for the revision this proposal actually changes.
+        Assert.Single(executions);
+        Assert.Equal(fixture.PredecessorExecutionId.ToString(), executions[0].GetProperty("id").GetString());
+        Assert.Equal("Pass", executions[0].GetProperty("outcome").GetString());
+    }
+
+    [Fact]
+    public async Task Build_effect_is_empty_when_no_baseline_selected_this_package()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        // Same rule as the requirement side: a candidate existing for the release is not this package being
+        // selected into it.
+        Assert.Empty((await ContentAsync(client, fixture.SystemTcrId)).GetProperty("buildEffect").EnumerateArray());
+    }
 
     [Fact]
     public async Task Test_proposal_content_is_refused_to_a_caller_outside_the_project()
