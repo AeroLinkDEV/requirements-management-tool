@@ -156,7 +156,7 @@ test("a settled edge stays settled even when its wording sounds alarming", () =>
 
 test("evidence keeps its hash and every identity field", () => {
   const execution = parsed().nodes.find(node => node.kind === "Execution")!
-  const evidence = execution.evidence![0]
+  const evidence = execution.evidence[0]
 
   // The hash is why EvidenceRecord exists. Folding it into free text would drop exactly the immutability
   // facts a certification reviewer follows the thread to reach.
@@ -310,4 +310,149 @@ test("an empty lane is dropped rather than rendered as a placeholder", () => {
   // The prototype filters unused lanes and re-indexes the rest, so structurally empty lanes are not shown.
   // The server lane index is kept on the group so the caller still knows which lane survived.
   expect(groups.map(group => group.lane)).toEqual([2, 5])
+})
+
+/**
+ * The seam publishes `ok: true` as a promise that every field it exposes held what its type says. These
+ * prove the promise is backed rather than cast into existence — a caller must be able to trust the typed
+ * result without re-checking it, which is the entire reason the seam exists.
+ */
+
+test("an edge whose endpoint kind contradicts the node it names is refused", () => {
+  const result = parseArtifactThread(response({
+    edges: [{
+      // Names the Requirement node but calls it a Case. Both are server statements and they disagree.
+      fromId: SYSTEM_REVISION, fromKind: "Case", toId: CASE_REVISION, toKind: "Case",
+      relation: "verified by", isSuspect: false,
+    }],
+  }))
+  expect(result.ok).toBe(false)
+  expect(result.ok === false && result.reason).toContain("but that node is a Requirement")
+})
+
+test("an edge whose target kind contradicts its node is refused", () => {
+  const result = parseArtifactThread(response({
+    edges: [{
+      fromId: SYSTEM_REVISION, fromKind: "Requirement", toId: EXECUTION, toKind: "Build",
+      relation: "produced", isSuspect: false,
+    }],
+  }))
+  expect(result.ok).toBe(false)
+  expect(result.ok === false && result.reason).toContain("but that node is a Execution")
+})
+
+test("a focal node whose kind contradicts the requested focal kind is refused", () => {
+  const result = parseArtifactThread(response({
+    focalKind: "Requirement",
+    focalId: CASE_REVISION,
+    nodes: [{ id: CASE_REVISION, kind: "Case", lane: 3, displayNumber: null, title: null, state: null, level: null, isFocal: true }],
+    edges: [],
+  }))
+  expect(result.ok).toBe(false)
+  expect(result.ok === false && result.reason).toContain("requested as a Requirement but its focal node is a Case")
+})
+
+test("a response with no focal identity at all is refused rather than skipping the check", () => {
+  const raw = response()
+  delete (raw as Record<string, unknown>).focalId
+  const result = parseArtifactThread(raw)
+
+  // A missing focalId previously bypassed the identity comparison entirely and was then cast into the
+  // returned object, so the seam claimed a validated thread it had not actually checked.
+  expect(result.ok).toBe(false)
+  expect(result.ok === false && result.reason).toContain("focal identity")
+})
+
+test("required top-level identities are validated, not assumed", () => {
+  for (const field of ["projectId", "baselineId"]) {
+    const raw = response()
+    delete (raw as Record<string, unknown>)[field]
+    const result = parseArtifactThread(raw)
+    expect(result.ok).toBe(false)
+  }
+})
+
+test("a malformed display number is refused rather than normalized to null", () => {
+  const result = parseArtifactThread(response({
+    nodes: [{ id: SYSTEM_REVISION, kind: "Requirement", lane: 2, displayNumber: 97001, title: null, state: null, level: null, isFocal: true }],
+    edges: [],
+  }))
+
+  // Coercing it to null would hand back a legitimate-looking absence for a value the server did send,
+  // making the typed field untrustworthy in exactly the case where it matters.
+  expect(result.ok).toBe(false)
+  expect(result.ok === false && result.reason).toContain("not text")
+})
+
+test("a malformed verification reason is refused rather than normalized to null", () => {
+  const result = parseArtifactThread(response({ verification: { isApplicable: false, reason: 42 } }))
+  expect(result.ok).toBe(false)
+  expect(result.ok === false && result.reason).toContain("verification reason")
+})
+
+test("a missing verification applicability is refused", () => {
+  const result = parseArtifactThread(response({ verification: { reason: null } }))
+  expect(result.ok).toBe(false)
+  expect(result.ok === false && result.reason).toContain("applicability")
+})
+
+test("evidence missing its hash is refused, not carried through untyped", () => {
+  const result = parseArtifactThread(response({
+    nodes: [{
+      id: EXECUTION, kind: "Execution", lane: 5, displayNumber: null, title: null, state: "Pass", level: null, isFocal: true,
+      evidence: [{ id: EVIDENCE, fileName: "oceanic-run.json", contentType: "application/json", size: 2048, uploadedBy: "test.engineer", uploadedAt: "2026-08-14T09:06:00+00:00" }],
+    }],
+    focalKind: "Execution",
+    focalId: EXECUTION,
+    edges: [],
+  }))
+
+  // The seam publishes sha256 as a string. Casting an object without one would let a caller read undefined
+  // from a field its type says is always present.
+  expect(result.ok).toBe(false)
+  expect(result.ok === false && result.reason).toContain("SHA-256")
+})
+
+test("an execution with no evidence yields an empty list, not a missing field", () => {
+  const thread = parsed({
+    nodes: [{ id: EXECUTION, kind: "Execution", lane: 5, displayNumber: null, title: null, state: "Pass", level: null, isFocal: true }],
+    focalKind: "Execution",
+    focalId: EXECUTION,
+    edges: [],
+  })
+  expect(thread.nodes[0].evidence).toEqual([])
+})
+
+test("a duplicated node identity is refused rather than silently deduplicated", () => {
+  const result = parseArtifactThread(response({
+    nodes: [
+      { id: SYSTEM_REVISION, kind: "Requirement", lane: 2, displayNumber: "SR-97001.01", title: null, state: null, level: null, isFocal: true },
+      { id: SYSTEM_REVISION, kind: "Case", lane: 3, displayNumber: "HLRTC-97001.00", title: null, state: null, level: null, isFocal: false },
+    ],
+    edges: [],
+  }))
+
+  // Exact identity is what this contract is built on. Letting one silently win would attach an edge to
+  // whichever copy the map happened to keep.
+  expect(result.ok).toBe(false)
+  expect(result.ok === false && result.reason).toContain("more than once")
+})
+
+test("a missing focal flag is refused rather than read as false", () => {
+  const result = parseArtifactThread(response({
+    nodes: [{ id: SYSTEM_REVISION, kind: "Requirement", lane: 2, displayNumber: null, title: null, state: null, level: null }],
+    edges: [],
+  }))
+  expect(result.ok).toBe(false)
+})
+
+test("a missing suspect flag is refused rather than read as settled", () => {
+  const result = parseArtifactThread(response({
+    edges: [{ fromId: SYSTEM_REVISION, fromKind: "Requirement", toId: CASE_REVISION, toKind: "Case", relation: "verified by" }],
+  }))
+
+  // Defaulting an absent flag to false would state "not suspect" on the client's own authority, which is
+  // the one thing suspectness must never be.
+  expect(result.ok).toBe(false)
+  expect(result.ok === false && result.reason).toContain("suspect flag")
 })
