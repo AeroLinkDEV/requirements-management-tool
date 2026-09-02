@@ -351,6 +351,7 @@ app.MapBaselineImportEndpoints();
 app.MapRequirementsEndpoints();
 app.MapCodeTraceabilityEndpoints();
 app.MapBaselineEndpoints();
+app.MapArtifactThreadEndpoints();
 app.MapVerificationEndpoints();
 app.MapAeroLinkBuildTestSetEndpoints();
 app.MapReleaseCampaignEndpoints();

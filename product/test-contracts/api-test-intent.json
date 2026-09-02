@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 780,
-    "cases": 864,
-    "classes": 121,
-    "hostedTests": 750,
-    "hostedCases": 820,
+    "tests": 798,
+    "cases": 886,
+    "classes": 122,
+    "hostedTests": 768,
+    "hostedCases": 842,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 8,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 478,
-      "cases": 530,
+      "tests": 495,
+      "cases": 551,
       "unknownCases": 0,
-      "classes": 100
+      "classes": 101
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 88,
-      "cases": 92,
+      "tests": 89,
+      "cases": 93,
       "unknownCases": 0,
-      "classes": 51
+      "classes": 52
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -590,6 +590,330 @@
       "sourceLines": {
         "start": 103,
         "end": 112
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "A_closed_lifecycle_is_not_suspect",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 240,
+        "end": 256
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "A_focal_artifact_in_another_project_is_not_found_rather_than_served",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 346,
+        "end": 358
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "A_high_level_requirement_reaches_its_procedures_through_its_case",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 188,
+        "end": 210
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "A_suspect_coverage_row_and_a_suspect_exact_link_both_arrive_marked",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 214,
+        "end": 238
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "A_system_requirement_reaches_its_procedure_without_a_case",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 171,
+        "end": 186
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "A_verifiable_level_reports_verification_as_applicable",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 320,
+        "end": 330
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "An_execution_and_its_build_share_the_final_lane",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 149,
+        "end": 167
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "An_interface_requirement_states_why_it_has_no_verification_rather_than_fabricating_one",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 299,
+        "end": 318
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "An_unknown_focal_kind_is_refused_rather_than_guessed",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 66,
+        "end": 76
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "Both_covering_procedures_are_returned_not_a_preferred_one",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 80,
+        "end": 94
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "Every_focal_kind_of_section_4_4_can_root_a_thread",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 5,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 34,
+        "end": 64
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "Every_recorded_run_is_returned_not_only_the_latest",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 281,
+        "end": 295
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "Evidence_files_keep_their_identity_and_hash_on_the_execution",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 260,
+        "end": 279
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "No_detail_of_another_project_appears_in_a_thread",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 360,
+        "end": 373
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "Sibling_requirements_under_one_parent_are_both_returned",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 96,
+        "end": 110
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "The_build_is_the_one_the_execution_recorded_not_the_newest_for_the_baseline",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 133,
+        "end": 147
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "The_thread_is_refused_to_a_caller_outside_the_project",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 334,
+        "end": 344
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "Two_revisions_of_one_requirement_are_two_nodes",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 114,
+        "end": 129
       }
     },
     {
