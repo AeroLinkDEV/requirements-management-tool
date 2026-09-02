@@ -1,4 +1,5 @@
 import type { AutosaveStatus } from "./autosave";
+import { formatOrdinaryDateTime, formatOrdinaryTime } from "./presentation";
 import "./DraftNotice.css";
 
 /**
@@ -23,7 +24,7 @@ export function AutosaveState({ status, savedAt, where }: { status: AutosaveStat
       <i aria-hidden="true" />
       <span>
         {wording[status]}
-        {status === "Saved" && savedAt ? ` · ${savedAt.toLocaleTimeString()}` : ""}
+        {status === "Saved" && savedAt ? ` · ${formatOrdinaryTime(savedAt)}` : ""}
       </span>
       {/* Where the draft is held is not a detail: one survives this machine dying and the other does not. */}
       {where && status !== "Idle" && <small>{where}</small>}
@@ -45,7 +46,10 @@ export function DraftRestore({
   return (
     <div className="draftRestore" role="alert">
       <div>
-        <b>Unsaved work from {savedAt.toLocaleString()}</b>
+        <b>
+          Unsaved work from{" "}
+          <time dateTime={savedAt.toISOString()}>{formatOrdinaryDateTime(savedAt)}</time>
+        </b>
         <span>{description}</span>
       </div>
       <div className="draftRestoreActions">

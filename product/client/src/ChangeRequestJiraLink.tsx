@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { formatOrdinaryDateTime } from "./presentation";
 import "./ChangeRequestJiraLink.css";
 
 /**
@@ -92,7 +93,7 @@ export default function ChangeRequestJiraLink({
             <strong>{link.issueStatus || "Status not read yet"}</strong>
             <small>
               {link.statusReadAt
-                ? `Read from the tracker ${new Date(link.statusReadAt).toLocaleString()}`
+                ? <>Read from the tracker <time dateTime={link.statusReadAt}>{formatOrdinaryDateTime(link.statusReadAt)}</time></>
                 : "AeroLink reads status on a timer; the controlled record is unaffected by it."}
             </small>
           </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatEvidentiaryDateTime } from "./presentation";
 import "./ReviewComments.css";
 
 /**
@@ -55,7 +56,7 @@ export function ReviewEndedNotice({ outcome, currentState }: { outcome?: ReviewO
           <dl className="reviewEndedFacts">
             <div><dt>What happened</dt><dd>{outcomeLine(outcome)}</dd></div>
             {outcome?.completedAt && (
-              <div><dt>When</dt><dd>{new Date(outcome.completedAt).toLocaleString()}</dd></div>
+              <div><dt>When</dt><dd><time dateTime={outcome.completedAt}>{formatEvidentiaryDateTime(outcome.completedAt)}</time></dd></div>
             )}
             <div><dt>Where it is now</dt><dd>{currentState}</dd></div>
           </dl>

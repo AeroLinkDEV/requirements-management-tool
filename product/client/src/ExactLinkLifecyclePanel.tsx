@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { PersonName } from './People'
 import { apiRequest, operationError } from './apiClient'
-import { stateLabel } from './presentation'
+import { formatEvidentiaryDateTime, stateLabel } from './presentation'
 
 export type ExactLinkLifecycle = {
   linkId: string
@@ -101,7 +101,7 @@ export default function ExactLinkLifecyclePanel({ api, routeRoot, linkId, initia
       <div className="commentFoot"><button disabled={busy}>Record resolution</button></div>
     </form>}
     {lifecycle?.events.map(item => <article key={item.id ?? `${item.type}-${item.occurredAt}`}>
-      <div><b>{stateLabel(item.type)}</b><span><PersonName userName={item.actorId} /> · {new Date(item.occurredAt).toLocaleString()}</span></div>
+      <div><b>{stateLabel(item.type)}</b><span><PersonName userName={item.actorId} /> · <time dateTime={item.occurredAt}>{formatEvidentiaryDateTime(item.occurredAt)}</time></span></div>
       <p>{item.rationale}</p>
       {item.outcome && <small>Outcome: {stateLabel(item.outcome)}</small>}
     </article>)}

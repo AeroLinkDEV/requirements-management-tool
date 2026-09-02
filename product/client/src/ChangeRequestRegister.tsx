@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { changeRequestAllocation, changeRequestState } from './presentation'
+import { changeRequestAllocation, changeRequestState, formatOrdinaryDateTime } from './presentation'
 import { PersonName } from './People'
 import ChangeRequestInspector from './ChangeRequestInspector'
 import { ControlledArtifactInspectorEmpty } from './ControlledArtifactExplorer'
@@ -158,7 +158,7 @@ export default function ChangeRequestRegister({
       </span>
       <i className={`historyState ${(superseded ? 'superseded' : row.state).toLowerCase()}`}
         data-state={superseded ? 'Superseded' : row.state}>{changeRequestState(facts(row, superseded))}</i>
-      <time>{new Date(row.updatedAt).toLocaleString()}</time>
+      <time dateTime={row.updatedAt}>{formatOrdinaryDateTime(row.updatedAt)}</time>
     </a>
   )
 

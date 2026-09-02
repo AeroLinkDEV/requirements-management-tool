@@ -428,3 +428,72 @@ export const grantableProgramRoles: readonly string[] = [
   'SoftwareQualityAnalyst', 'Airworthiness',
   'ConfigurationManager', 'Administrator',
 ]
+
+/**
+ * Two deliberate timestamp grammars, because a list row and a controlled-history card are read for
+ * different reasons. Before this, surfaces called `new Date(value).toLocaleString()` independently,
+ * so the same instant read "11/14/2024, 9:00:00 AM" on one screen and whatever the visitor's browser
+ * defaulted to on another — verbose on every one of them.
+ *
+ *   ordinary    14 Nov 2024 · 09:00          scan-friendly lists, cards, queues, previews
+ *   evidentiary 14 Nov 2024 · 09:00:37 GMT-05:00   audit, history, signature, controlled evidence
+ *
+ * The grammar is fixed, not the clock: with no explicit zone these format in the visitor's local
+ * timezone, which is what the product showed before and continues to show. What changes is that the
+ * visible shape no longer depends on the browser's locale defaults — the locale and options are
+ * explicit, so a row renders identically on every machine and the evidentiary form always states its
+ * offset rather than leaving a reader to guess which clock produced it.
+ *
+ * This is presentation only. The stored value, the JSON contract, and event ordering are untouched;
+ * a formatted string must never travel anywhere the exact timestamp goes.
+ *
+ * An unparseable value formats as an empty string. Absence wording — "Never", "Not recorded" — is the
+ * calling surface's decision, because what an empty timestamp means differs per screen.
+ */
+const ordinaryDateOptions: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', year: 'numeric' }
+const ordinaryTimeOptions: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hour12: false }
+const evidentiaryTimeOptions: Intl.DateTimeFormatOptions = {
+  hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+}
+const offsetOptions: Intl.DateTimeFormatOptions = { timeZoneName: 'longOffset' }
+
+const dateTimeFormatterCache = new Map<string, Intl.DateTimeFormat>()
+const dateTimeFormatter = (options: Intl.DateTimeFormatOptions, timeZone?: string) => {
+  const key = `${JSON.stringify(options)}|${timeZone ?? ''}`
+  let formatter = dateTimeFormatterCache.get(key)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-GB', timeZone ? { ...options, timeZone } : options)
+    dateTimeFormatterCache.set(key, formatter)
+  }
+  return formatter
+}
+
+const toDate = (value: string | Date) => (value instanceof Date ? value : new Date(value))
+
+const timeZoneOffset = (date: Date, timeZone?: string) =>
+  dateTimeFormatter(offsetOptions, timeZone).formatToParts(date)
+    .find(part => part.type === 'timeZoneName')?.value ?? ''
+
+/** `14 Nov 2024 · 09:00` — minute precision, fixed grammar, the visitor's clock unless told otherwise. */
+export const formatOrdinaryDateTime = (value: string | Date, timeZone?: string) => {
+  const date = toDate(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return `${dateTimeFormatter(ordinaryDateOptions, timeZone).format(date)} · ${dateTimeFormatter(ordinaryTimeOptions, timeZone).format(date)}`
+}
+
+/** `09:00` — the time half alone, for surfaces already labelled by their date context. */
+export const formatOrdinaryTime = (value: string | Date, timeZone?: string) => {
+  const date = toDate(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return dateTimeFormatter(ordinaryTimeOptions, timeZone).format(date)
+}
+
+/**
+ * `14 Nov 2024 · 09:00:37 GMT-05:00` — second precision with the offset stated, for history, audit,
+ * and signature evidence where "which clock" and "which second" are part of the record.
+ */
+export const formatEvidentiaryDateTime = (value: string | Date, timeZone?: string) => {
+  const date = toDate(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return `${dateTimeFormatter(ordinaryDateOptions, timeZone).format(date)} · ${dateTimeFormatter(evidentiaryTimeOptions, timeZone).format(date)} ${timeZoneOffset(date, timeZone)}`.trimEnd()
+}
