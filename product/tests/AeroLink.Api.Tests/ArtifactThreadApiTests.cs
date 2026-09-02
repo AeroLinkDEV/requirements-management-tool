@@ -52,7 +52,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
             _ => world.BuildId,
         };
 
-        var thread = await ThreadAsync(client, world.ProjectId, focalKind, focalId);
+        var thread = await ThreadAsync(client, world, focalKind, focalId);
 
         // Whichever end it is entered from, the same recorded chain is reached. §4.4 lists five entry kinds and
         // the compact path read expresses exactly one of them.
@@ -70,8 +70,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Member);
 
-        using var response = await client.GetAsync(
-            $"/api/artifact-thread?projectId={world.ProjectId}&focalKind=Baseline&focalId={world.BuildId}");
+        using var response = await client.GetAsync(Url(world, "Baseline", world.BuildId));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
@@ -84,29 +83,13 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Member);
 
-        var thread = await ThreadAsync(client, world.ProjectId, "Requirement", world.HighLevelRevisionId);
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
 
         // The case runs two procedures. The compact path read picks one by tie-breaker; a lane canvas that did
         // the same would silently hide a procedure a reviewer is accountable for.
         Assert.Contains(world.FirstProcedureRevisionId.ToString(), procedures);
         Assert.Contains(world.SecondProcedureRevisionId.ToString(), procedures);
-    }
-
-    [Fact]
-    public async Task Sibling_requirements_under_one_parent_are_both_returned()
-    {
-        var world = await SeedAsync(_host.Factory);
-        using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
-
-        var thread = await ThreadAsync(client, world.ProjectId, "Requirement", world.HighLevelRevisionId);
-        var requirements = Nodes(thread, "Requirement").Select(x => x.GetProperty("id").GetString()).ToList();
-
-        Assert.Contains(world.SystemRevisionId.ToString(), requirements);
-        Assert.Contains(world.HighLevelRevisionId.ToString(), requirements);
-        // A second child of the same System parent. Walking one descendant would drop it.
-        Assert.Contains(world.SiblingHighLevelRevisionId.ToString(), requirements);
     }
 
     // ---- 3. exact revisions do not collapse ----------------------------------------------------------
@@ -118,7 +101,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Member);
 
-        var thread = await ThreadAsync(client, world.ProjectId, "Requirement", world.SupersededSystemRevisionId);
+        var thread = await ThreadAsync(client, world, "Requirement", world.SupersededSystemRevisionId);
         var system = Nodes(thread, "Requirement")
             .Where(x => x.GetProperty("artifactId").GetString() == world.SystemArtifactId.ToString()).ToList();
 
@@ -137,7 +120,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Member);
 
-        var thread = await ThreadAsync(client, world.ProjectId, "Requirement", world.HighLevelRevisionId);
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var builds = Nodes(thread, "Build").Select(x => x.GetProperty("id").GetString()).ToList();
 
         // A later build exists for the same baseline and no execution in this thread ran against it. The compact
@@ -153,7 +136,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Member);
 
-        var thread = await ThreadAsync(client, world.ProjectId, "Requirement", world.HighLevelRevisionId);
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var execution = Nodes(thread, "Execution").First();
         var build = Nodes(thread, "Build").First();
 
@@ -175,7 +158,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Member);
 
-        var thread = await ThreadAsync(client, world.ProjectId, "Procedure", world.SystemProcedureRevisionId);
+        var thread = await ThreadAsync(client, world, "Procedure", world.SystemProcedureRevisionId);
 
         // Read from the recorded coverage row, not assumed from the level: a System procedure covers the
         // requirement directly, so no Case node stands between them.
@@ -192,7 +175,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Member);
 
-        var thread = await ThreadAsync(client, world.ProjectId, "Requirement", world.HighLevelRevisionId);
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var edges = thread.GetProperty("edges").EnumerateArray().ToList();
 
         Assert.Contains(edges, edge =>
@@ -218,7 +201,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Member);
 
-        var thread = await ThreadAsync(client, world.ProjectId, "Requirement", world.HighLevelRevisionId);
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var edges = thread.GetProperty("edges").EnumerateArray().ToList();
 
         // Two different mechanisms: TestRequirementCoverage carries a stored IsSuspect flag, while a
@@ -244,7 +227,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Member);
 
-        var thread = await ThreadAsync(client, world.ProjectId, "Requirement", world.HighLevelRevisionId);
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
 
         // Closed is the one state the repository treats as settled everywhere else — the requirements workspace,
         // the controlled output generator and the release readiness gate all filter on exactly this. A lifecycle
@@ -264,7 +247,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Member);
 
-        var thread = await ThreadAsync(client, world.ProjectId, "Execution", world.PassExecutionId);
+        var thread = await ThreadAsync(client, world, "Execution", world.PassExecutionId);
         var execution = Nodes(thread, "Execution")
             .Single(x => x.GetProperty("id").GetString() == world.PassExecutionId.ToString());
         var evidence = execution.GetProperty("evidence").EnumerateArray().ToList();
@@ -285,7 +268,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Member);
 
-        var thread = await ThreadAsync(client, world.ProjectId, "Requirement", world.HighLevelRevisionId);
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var executions = Nodes(thread, "Execution").Select(x => x.GetProperty("id").GetString()).ToList();
 
         // A failed run and the retest that followed it are both part of the certification record. Showing only
@@ -303,7 +286,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Member);
 
-        var thread = await ThreadAsync(client, world.ProjectId, "Requirement", world.InterfaceRevisionId);
+        var thread = await ThreadAsync(client, world, "Requirement", world.InterfaceRevisionId);
         var verification = thread.GetProperty("verification");
 
         // RequirementLevel has five members; VerificationDiscipline has three. ProjectLadderConfiguration throws
@@ -324,7 +307,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Member);
 
-        var thread = await ThreadAsync(client, world.ProjectId, "Requirement", world.HighLevelRevisionId);
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         Assert.True(thread.GetProperty("verification").GetProperty("isApplicable").GetBoolean());
         Assert.Null(thread.GetProperty("verification").GetProperty("reason").GetString());
     }
@@ -338,8 +321,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Outsider);
 
-        using var response = await client.GetAsync(
-            $"/api/artifact-thread?projectId={world.ProjectId}&focalKind=Requirement&focalId={world.HighLevelRevisionId}");
+        using var response = await client.GetAsync(Url(world, "Requirement", world.HighLevelRevisionId));
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
@@ -352,8 +334,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
 
         // Authorized for this Project, asking for another Project's requirement through it. Answering would let
         // an authorized caller read across the boundary by supplying a foreign identity.
-        using var response = await client.GetAsync(
-            $"/api/artifact-thread?projectId={world.ProjectId}&focalKind=Requirement&focalId={world.ForeignRevisionId}");
+        using var response = await client.GetAsync(Url(world, "Requirement", world.ForeignRevisionId));
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
@@ -364,12 +345,209 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SignInAsync(client, world.Member);
 
-        var thread = await ThreadAsync(client, world.ProjectId, "Requirement", world.HighLevelRevisionId);
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var raw = thread.GetRawText();
 
         Assert.DoesNotContain("SR-97900", raw);
         Assert.DoesNotContain("Foreign statement", raw);
         Assert.DoesNotContain(world.ForeignRevisionId.ToString(), raw);
+    }
+
+    // ---- build scoping ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task One_configuration_cannot_reach_a_run_recorded_in_another()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        // The same exact procedure revision was run in two builds under two baselines. Each request now carries
+        // a fact able to choose between them, and neither may return the other's history. Without a
+        // configuration in the contract both runs came back merged, which reports a failure against a build
+        // that never saw it.
+        var first = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
+        var firstRuns = Nodes(first, "Execution").Select(x => x.GetProperty("id").GetString()).ToList();
+        Assert.Contains(world.RunInFirstBuildId.ToString(), firstRuns);
+        Assert.DoesNotContain(world.RunInSecondBuildId.ToString(), firstRuns);
+
+        var second = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId,
+            buildId: world.SecondBuildId, baselineId: world.SecondBaselineId);
+        var secondRuns = Nodes(second, "Execution").Select(x => x.GetProperty("id").GetString()).ToList();
+        Assert.Contains(world.RunInSecondBuildId.ToString(), secondRuns);
+        Assert.DoesNotContain(world.RunInFirstBuildId.ToString(), secondRuns);
+    }
+
+    [Fact]
+    public async Task A_named_build_narrows_the_thread_to_that_build_alone()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId,
+            buildId: world.BuildId);
+        Assert.Equal([world.BuildId.ToString()],
+            Nodes(thread, "Build").Select(x => x.GetProperty("id").GetString()).ToArray());
+    }
+
+    [Fact]
+    public async Task A_baseline_from_another_project_is_not_found()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        using var response = await client.GetAsync(
+            $"/api/artifact-thread?projectId={world.ProjectId}&baselineId={world.ForeignBaselineId}"
+            + $"&focalKind=Requirement&focalId={world.HighLevelRevisionId}");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    // ---- direction purity ------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_sibling_requirement_is_not_pulled_in_through_the_shared_parent()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
+        var requirements = Nodes(thread, "Requirement").Select(x => x.GetProperty("id").GetString()).ToList();
+
+        // The focal HLR reaches its System ancestor. Turning round at that ancestor and walking back down into
+        // its other children would report requirements that are neither upstream nor downstream of what the
+        // reader opened — the connected component, not the thread.
+        Assert.Contains(world.SystemRevisionId.ToString(), requirements);
+        Assert.Contains(world.HighLevelRevisionId.ToString(), requirements);
+        Assert.DoesNotContain(world.SiblingHighLevelRevisionId.ToString(), requirements);
+    }
+
+    [Fact]
+    public async Task A_system_focal_still_reaches_every_child_below_it()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Requirement", world.SystemRevisionId);
+        var requirements = Nodes(thread, "Requirement").Select(x => x.GetProperty("id").GetString()).ToList();
+
+        // Direction purity is not narrowing: from the parent, both children are genuinely downstream.
+        Assert.Contains(world.HighLevelRevisionId.ToString(), requirements);
+        Assert.Contains(world.SiblingHighLevelRevisionId.ToString(), requirements);
+    }
+
+    // ---- focal-first, and exact kind --------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("Case")]
+    [InlineData("Procedure")]
+    [InlineData("Execution")]
+    [InlineData("Build")]
+    public async Task An_unconnected_focal_artifact_is_still_its_own_thread(string focalKind)
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var focalId = focalKind switch
+        {
+            "Case" => world.LonelyCaseRevisionId,
+            "Procedure" => world.LonelyProcedureRevisionId,
+            "Execution" => world.LonelyExecutionId,
+            _ => world.LonelyBuildId,
+        };
+
+        // §6.8: an unconnected record still renders as a normal card. Seeding the thread from relationships
+        // alone made the focal artifact disappear from its own thread whenever it had none.
+        var thread = await ThreadAsync(client, world, focalKind, focalId,
+            baselineId: world.LonelyBaselineId);
+        Assert.Contains(thread.GetProperty("nodes").EnumerateArray(),
+            x => x.GetProperty("id").GetString() == focalId.ToString());
+    }
+
+    [Fact]
+    public async Task A_procedure_revision_asked_for_as_a_case_fails_closed()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        // Existence alone is not identity. Serving a Procedure under the word Case would place it in the wrong
+        // lane and describe it as something the controlled record does not say it is.
+        using var wrongKind = await client.GetAsync(Url(world, "Case", world.FirstProcedureRevisionId));
+        Assert.Equal(HttpStatusCode.NotFound, wrongKind.StatusCode);
+
+        using var alsoWrong = await client.GetAsync(Url(world, "Procedure", world.CaseRevisionId));
+        Assert.Equal(HttpStatusCode.NotFound, alsoWrong.StatusCode);
+    }
+
+    // ---- typed relationships ----------------------------------------------------------------------------
+
+    [Fact]
+    public async Task An_allocated_link_and_a_derived_link_do_not_arrive_as_the_same_relation()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
+        var edges = thread.GetProperty("edges").EnumerateArray().ToList();
+
+        // RequirementTraceType distinguishes these and they are different controlled claims. Collapsing both to
+        // one generic word at a new server boundary loses trace meaning the domain already records.
+        var allocated = edges.Single(x =>
+            x.GetProperty("fromId").GetString() == world.HighLevelRevisionId.ToString()
+            && x.GetProperty("toId").GetString() == world.SystemRevisionId.ToString());
+        Assert.Equal("allocated from", allocated.GetProperty("relation").GetString());
+
+        var derived = edges.Single(x =>
+            x.GetProperty("fromId").GetString() == world.SystemRevisionId.ToString()
+            && x.GetProperty("toId").GetString() == world.SupersededSystemRevisionId.ToString());
+        Assert.Equal("derived from", derived.GetProperty("relation").GetString());
+    }
+
+    [Fact]
+    public async Task Edges_name_the_kind_of_both_endpoints()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
+        var byId = thread.GetProperty("nodes").EnumerateArray()
+            .ToDictionary(x => x.GetProperty("id").GetString()!, x => x.GetProperty("kind").GetString());
+
+        // Mirrors ChangeRequestTraceEdge: an edge can be understood without resolving both endpoints first.
+        Assert.All(thread.GetProperty("edges").EnumerateArray(), edge =>
+        {
+            Assert.Equal(byId[edge.GetProperty("fromId").GetString()!], edge.GetProperty("fromKind").GetString());
+            Assert.Equal(byId[edge.GetProperty("toId").GetString()!], edge.GetProperty("toKind").GetString());
+        });
+    }
+
+    [Fact]
+    public async Task Executions_carry_their_timing_and_builds_carry_their_state()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
+
+        // The prototype shows execution timing and a released build state. Carrying them here stops 5B needing
+        // a second read, or inventing them.
+        var execution = Nodes(thread, "Execution")
+            .Single(x => x.GetProperty("id").GetString() == world.PassExecutionId.ToString());
+        Assert.NotEqual(JsonValueKind.Null, execution.GetProperty("executedAt").ValueKind);
+        Assert.NotEqual(JsonValueKind.Null, execution.GetProperty("recordedAt").ValueKind);
+        Assert.False(string.IsNullOrWhiteSpace(execution.GetProperty("executedBy").GetString()));
+        Assert.Equal(JsonValueKind.Null, execution.GetProperty("displayNumber").ValueKind);
+
+        var build = Nodes(thread, "Build").First();
+        Assert.False(string.IsNullOrWhiteSpace(build.GetProperty("state").GetString()));
     }
 
     // ---- helpers ---------------------------------------------------------------------------------------
@@ -378,12 +556,26 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         thread.GetProperty("nodes").EnumerateArray()
             .Where(x => x.GetProperty("kind").GetString() == kind).ToList();
 
-    private static async Task<JsonElement> ThreadAsync(HttpClient client, Guid projectId, string kind, Guid focalId)
+    private static string Url(World world, string kind, Guid focalId, Guid? buildId = null,
+        Guid? baselineId = null) =>
+        $"/api/artifact-thread?projectId={world.ProjectId}&baselineId={baselineId ?? world.BaselineId}"
+        + (buildId is Guid build ? $"&buildId={build}" : "")
+        + $"&focalKind={kind}&focalId={focalId}";
+
+    private static async Task<JsonElement> ThreadAsync(HttpClient client, World world, string kind, Guid focalId,
+        Guid? buildId = null, Guid? baselineId = null)
     {
-        using var response = await client.GetAsync(
-            $"/api/artifact-thread?projectId={projectId}&focalKind={kind}&focalId={focalId}");
+        using var response = await client.GetAsync(Url(world, kind, focalId, buildId, baselineId));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        return await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        // Every successful thread names exactly one focal node, and it is the artifact that was asked for.
+        // §4.4 lands the reader on that record selected and expanded, which is impossible if it is missing.
+        var focal = body.GetProperty("nodes").EnumerateArray()
+            .Where(x => x.GetProperty("isFocal").GetBoolean()).ToList();
+        Assert.Single(focal);
+        Assert.Equal(focalId.ToString(), focal[0].GetProperty("id").GetString());
+        return body;
     }
 
     private static async Task SignInAsync(HttpClient client, string userName)
@@ -394,7 +586,10 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     }
 
     private sealed record World(
-        Guid ProjectId, Guid SystemArtifactId, Guid SystemRevisionId, Guid SupersededSystemRevisionId,
+        Guid ProjectId, Guid BaselineId, Guid SecondBaselineId, Guid SecondBuildId,
+        Guid SharedProcedureRevisionId, Guid RunInFirstBuildId, Guid RunInSecondBuildId,
+        Guid LonelyProcedureRevisionId, Guid LonelyCaseRevisionId, Guid LonelyExecutionId, Guid LonelyBuildId,
+        Guid LonelyBaselineId, Guid ForeignBaselineId, Guid SystemArtifactId, Guid SystemRevisionId, Guid SupersededSystemRevisionId,
         Guid ClosedProcedureRevisionId, Guid RevisedCaseRevisionId, Guid HighLevelRevisionId, Guid SiblingHighLevelRevisionId,
         Guid InterfaceRevisionId, Guid CaseRevisionId, Guid FirstProcedureRevisionId,
         Guid SecondProcedureRevisionId, Guid SystemProcedureRevisionId, Guid PassExecutionId,
@@ -553,6 +748,45 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         await db.SaveChangesAsync();
         db.AddRange(new TestExecutionEvidence(pass.Id, runFile.Id), new TestExecutionEvidence(pass.Id, traceFile.Id));
 
+        // The same exact procedure revision run in a second build under a second baseline. This is a
+        // legitimate history, and it is the case that proves the thread is pinned rather than merged: nothing
+        // in a request for one configuration may reach the other.
+        var secondBaseline = new CandidateBaseline("SW-97.01", 0, project.Id, release.Id, baseline.Id,
+            "Build 7.1", "cm", now);
+        db.Add(secondBaseline);
+        var secondBuild = new SoftwareBuild(project.Id, release.Id, secondBaseline.Id, "FMS-7.1.0",
+            "Second baseline build", member, now.AddDays(2));
+        db.Add(secondBuild);
+        var (sharedProcedure, sharedRevision) = Verification(db, project.Id, "HLRTP-97004",
+            "Shared across builds", TestProcedureLevel.HighLevel, VerificationArtifactKind.Procedure, member, now);
+        var sharedRun = new TestCaseProcedureLink(caseRevision.Id, sharedRevision.Id);
+        db.Add(sharedRun);
+        // No direct coverage row: a software Procedure is refused a direct requirement link and reaches the
+        // requirement through its Case, which caseRevision already covers.
+        var runInFirstBuild = new TestExecution(project.Id, sharedRevision.Id, build.Id, null, TestOutcome.Pass,
+            member, "FMS rig", "Passed on the first build.", "evidence/first.json", now, now, release.Id);
+        var runInSecondBuild = new TestExecution(project.Id, sharedRevision.Id, secondBuild.Id, null,
+            TestOutcome.Fail, member, "FMS rig", "Failed on the second build.", "evidence/second.json",
+            now.AddDays(2), now.AddDays(2), release.Id);
+        db.AddRange(runInFirstBuild, runInSecondBuild);
+
+        // Artifacts with no relationships at all. §6.8 says an unconnected record still renders as a normal
+        // card, so each of these must come back as its own thread rather than vanishing from it.
+        var (lonelyCase, lonelyCaseRevision) = Verification(db, project.Id, "HLRTC-97009", "Unconnected case",
+            TestProcedureLevel.HighLevel, VerificationArtifactKind.Case, member, now);
+        var (lonelyProcedure, lonelyProcedureRevision) = Verification(db, project.Id, "SYSTP-97009",
+            "Unconnected procedure", TestProcedureLevel.System, VerificationArtifactKind.Procedure, member, now);
+        var lonelyBaseline = new CandidateBaseline("SW-97.09", 0, project.Id, release.Id, null,
+            "Unconnected build baseline", "cm", now);
+        db.Add(lonelyBaseline);
+        var lonelyBuild = new SoftwareBuild(project.Id, release.Id, lonelyBaseline.Id, "FMS-7.9.0",
+            "Build with nothing recorded against it", member, now);
+        db.Add(lonelyBuild);
+        var lonelyExecution = new TestExecution(project.Id, lonelyProcedureRevision.Id, lonelyBuild.Id, null,
+            TestOutcome.Pass, member, "FMS rig", "Ran, but the procedure covers nothing.",
+            "evidence/lonely.json", now, now, release.Id);
+        db.Add(lonelyExecution);
+
         // A second Project whose records must never appear in this Project's thread.
         var foreignProgram = new ProgramRecord($"Foreign {tag}", $"FN{tag}");
         var foreignProject = new ProjectRecord(foreignProgram.Id, "Other", "Foreign");
@@ -569,7 +803,10 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
 
         await db.SaveChangesAsync();
 
-        return new World(project.Id, systemArtifact.Id, currentSystem.Id, supersededSystem.Id,
+        return new World(project.Id, baseline.Id, secondBaseline.Id, secondBuild.Id,
+            sharedRevision.Id, runInFirstBuild.Id, runInSecondBuild.Id,
+            lonelyProcedureRevision.Id, lonelyCaseRevision.Id, lonelyExecution.Id, lonelyBuild.Id,
+            lonelyBaseline.Id, foreignBaseline.Id, systemArtifact.Id, currentSystem.Id, supersededSystem.Id,
             closedProcedureRevision.Id, revisedCaseRevision.Id, highLevelRevision.Id, siblingRevision.Id, interfaceRevision.Id,
             caseRevision.Id, firstRevision.Id, secondRevision.Id, systemProcedureRevision.Id,
             pass.Id, fail.Id, build.Id, laterBuild.Id, foreignRevision.Id, member, outsider);
