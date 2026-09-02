@@ -381,6 +381,30 @@ function Relink() {
   )
 }
 
+/**
+ * The canvas mounted into a container too small to lay out from, which then settles.
+ *
+ * `frame()` refuses a rect under 320x240, because a freshly mounted panel or a preview reports a fraction of
+ * its real size and laying out from that leaves the board wrongly zoomed in a corner. This reproduces that
+ * moment with a selection already made and a directly linked record far down a tall lane, so that a framing
+ * request necessarily arrives before any frame exists.
+ */
+function Unsettled() {
+  const [settled, setSettled] = useState(false)
+  const built = relinkThread("far")
+  return (
+    <>
+      <button type="button" id="settle" style={{ position: "fixed", right: 8, top: 8, zIndex: 99 }}
+        onClick={() => setSettled(true)}>
+        settle viewport
+      </button>
+      <div id="host" style={{ width: settled ? 1240 : 280, height: settled ? 660 : 200, overflow: "hidden" }}>
+        <DigitalThreadArtifact {...shared} response={built.thread} initialSelectedId={built.selected} />
+      </div>
+    </>
+  )
+}
+
 // `in`, not `??`: the loading and failed scenarios deliberately carry a null response, and `??` treated that
 // as an unknown scenario and fell back to the populated thread — so both states silently rendered a full board.
 const response = scenario in responses ? responses[scenario] : responses.hlr
@@ -388,6 +412,8 @@ const response = scenario in responses ? responses[scenario] : responses.hlr
 createRoot(document.getElementById("root")!).render(
   scenario === "relink" ? (
     <Relink />
+  ) : scenario === "unsettled" ? (
+    <Unsettled />
   ) : (
     <DigitalThreadArtifact
       {...shared}

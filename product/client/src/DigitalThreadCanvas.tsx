@@ -123,6 +123,9 @@ export default function DigitalThreadCanvas({
   const scrubbing = useRef(false)
   /** The framing key the selection effect last acted on, so a re-render alone cannot reset a rolled lane. */
   const framedFor = useRef<string | null>(null)
+  /** The latest framing request, so the resize path can retry one that arrived before the frame was real. */
+  const framingRef = useRef<{ selectedId: string; wanted: string[]; key: string } | null>(null)
+  const easeTimer = useRef<number | null>(null)
 
   const measuredCounts = lanes.map((_, lane) =>
     laneCount ? laneCount(lane) : nodes.filter(node => node.lane === lane).length,
@@ -384,6 +387,64 @@ export default function DigitalThreadCanvas({
     paint()
   }, [counts, frame, paint])
 
+  /**
+   * Reframe onto the selection and its direct links.
+   *
+   * This is the half of the panel rule that side-picking cannot do on its own: the board moves into the area
+   * the panel is not covering, so a linked record cannot end up underneath it. It also gives the panel's
+   * relation rows somewhere to go — clicking one selects that record and the board comes to it.
+   *
+   * Returns whether it actually ran. It cannot run before the host frame is real — `frame()` refuses a rect
+   * that has not settled — and the caller uses that answer to decide whether the framing key has been dealt
+   * with. Marking a key handled on a refused frame is how a focal record could land with a linked record still
+   * rolled out of view: the retry path only ever called `fit()`, which moves the camera but does not roll a
+   * lane, and no state change was pending to make the effect run again.
+   */
+  const applyFraming = useCallback(
+    (target: { selectedId: string; wanted: string[] } | null): boolean => {
+      if (!target) return false
+      const box = frame()
+      const result = geometryRef.current
+      if (!box || !result) return false
+
+      // Roll every lane to bring the selected record's linked records into their own windows, before framing
+      // (#880 §6.4: "the same routine runs on selection"). Panning the camera cannot do this job: a lane
+      // scrolls independently, so a linked record can sit outside its lane window no matter where the camera
+      // is, and framing alone would centre on a card the reader still cannot see. The offsets are applied at
+      // once rather than animated into place so the two-pass framing below measures where the cards landed.
+      const synced = syncTargets(
+        target.selectedId,
+        nodes,
+        edges,
+        result.geometry,
+        offsets.current,
+        result.laneMinimums,
+        counts.length,
+        -1,
+      )
+      offsets.current = [...synced]
+      targets.current = [...synced]
+
+      const next = frameNodes(target.wanted, nodes, counts, box, offsets.current, target.selectedId)
+      if (!next) return false
+
+      sceneRef.current?.classList.add("is-easing")
+      transform.current = next
+      paint()
+      if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
+      easeTimer.current = window.setTimeout(() => {
+        sceneRef.current?.classList.remove("is-easing")
+        easeTimer.current = null
+      }, 420)
+      return true
+    },
+    [counts, edges, frame, nodes, paint],
+  )
+
+  // Read by the resize path, which must be able to retry a selection that arrived before the frame was real
+  // without re-subscribing its observer every time the selection changes.
+  framingRef.current = framing
+
   // Lay out once the frame is real, and again whenever it changes size.
   useLayoutEffect(() => {
     const element = viewportRef.current
@@ -392,9 +453,20 @@ export default function DigitalThreadCanvas({
       const rect = element.getBoundingClientRect()
       if (rect.width < 100) return
       const signature = `${Math.round(rect.width)}x${Math.round(rect.height)}x${countsKey}`
-      if (signature === frameSignature.current) return
-      frameSignature.current = signature
-      fit()
+      if (signature !== frameSignature.current) {
+        frameSignature.current = signature
+        fit()
+      }
+
+      // A selection can arrive while the host frame is still unsettled — a freshly mounted panel or a preview
+      // reports a rect a fraction of its real size, and `frame()` refuses it. `fit()` alone is not the repair:
+      // it moves the camera but does not roll a tall lane, so a directly linked record would stay outside its
+      // window after the frame settled. Retried here because the settling resize needs no React state change,
+      // so nothing else would run the framing effect again.
+      const pending = framingRef.current
+      if (pending && framedFor.current !== pending.key && applyFraming(pending)) {
+        framedFor.current = pending.key
+      }
     }
     measure()
     const timers = [window.setTimeout(measure, 50), window.setTimeout(measure, 350)]
@@ -406,65 +478,30 @@ export default function DigitalThreadCanvas({
       observer?.disconnect()
       window.removeEventListener("resize", measure)
     }
-  }, [countsKey, fit])
+  }, [applyFraming, countsKey, fit])
 
   useEffect(() => {
     paint()
   }, [paint])
 
-  /**
-   * Reframe onto the selection and its direct links.
-   *
-   * This is the half of the panel rule that side-picking cannot do on its own: the board moves into the area
-   * the panel is not covering, so a linked record cannot end up underneath it. It also gives the panel's
-   * relation rows somewhere to go — clicking one selects that record and the board comes to it.
-   */
+
   useEffect(() => {
     if (!framing) {
       framedFor.current = null
       return
     }
     if (framedFor.current === framing.key) return
-    framedFor.current = framing.key
+    // Consumed only once the framing has actually applied. If the frame is not usable yet the key stays
+    // pending, and the resize path retries it the moment a real rect arrives.
+    if (applyFraming(framing)) framedFor.current = framing.key
+  }, [applyFraming, framing])
 
-    const box = frame()
-    const result = geometryRef.current
-    if (!box || !result) return
-    const linked = framing.wanted
-
-    // Roll every lane to bring the selected record's linked records into their own windows, before framing
-    // (#880 §6.4: "the same routine runs on selection"). Panning the camera cannot do this job: a lane scrolls
-    // independently, so a linked record can sit outside its lane window no matter where the camera is, and
-    // framing alone would centre on a card the reader still cannot see. The offsets are applied at once rather
-    // than animated into place so the two-pass framing below measures where the cards have actually landed.
-    const synced = syncTargets(
-      framing.selectedId,
-      nodes,
-      edges,
-      result.geometry,
-      offsets.current,
-      result.laneMinimums,
-      counts.length,
-      -1,
-    )
-    offsets.current = [...synced]
-    targets.current = [...synced]
-
-    const next = frameNodes(
-      linked,
-      nodes,
-      counts,
-      box,
-      offsets.current,
-      selectedId,
-    )
-    if (!next) return
-    sceneRef.current?.classList.add("is-easing")
-    transform.current = next
-    paint()
-    const timer = window.setTimeout(() => sceneRef.current?.classList.remove("is-easing"), 420)
-    return () => window.clearTimeout(timer)
-  }, [counts, edges, frame, framing, nodes, paint])
+  useEffect(
+    () => () => {
+      if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
+    },
+    [],
+  )
 
   useEffect(
     () => () => {

@@ -826,3 +826,53 @@ test.describe("a graph change still re-syncs and re-frames", () => {
     expect(after.offscreen).toBe(false)
   })
 })
+
+/**
+ * Recovery from a viewport that had not settled when the selection arrived.
+ *
+ * The canvas refuses to lay out from a rect under 320x240, because a freshly mounted panel or a preview
+ * reports a fraction of its real size and laying out from that leaves the board wrongly zoomed in a corner.
+ * A selection made before that point therefore has no frame to be framed into, and the repair is not `fit()`:
+ * that moves the camera but never rolls a lane, so a directly linked record stays outside its window.
+ */
+test.describe("a selection made before the viewport settled", () => {
+  const FAR_RUN = "e2000000-0000-4000-8000-000000000023"
+
+  test("is synchronised and framed once a real frame arrives", async ({ page }) => {
+    await open(page, "unsettled")
+
+    // The host starts at 280px wide, below the threshold `frame()` accepts, so no framing can have run.
+    const before = await page.evaluate(() => {
+      const canvas = document.querySelector(".dtCanvas")?.getBoundingClientRect()
+      return { width: Math.round(canvas?.width ?? 0) }
+    })
+    expect(before.width).toBeLessThan(320)
+
+    await page.locator("#settle").click()
+    await page.waitForTimeout(1500)
+
+    const after = await page.evaluate(id => {
+      const node = document.querySelector(`[data-node-id="${id}"]`)!
+      const canvas = document.querySelector(".dtCanvas")!.getBoundingClientRect()
+      const card = node.getBoundingClientRect()
+      const panel = document.querySelector(".dtaPanel")?.getBoundingClientRect() ?? null
+      return {
+        width: Math.round(canvas.width),
+        offscreen: node.classList.contains("is-offscreen"),
+        selected: document.querySelector(".dtaCard.is-selected .dtaId")?.textContent ?? null,
+        // Clear of the docked panel, per §6.6.
+        clearOfPanel: !panel || card.bottom <= panel.top + 1 || card.top >= panel.bottom - 1 ||
+          card.right <= panel.left + 1 || card.left >= panel.right - 1,
+      }
+    }, FAR_RUN)
+
+    expect(after.width).toBeGreaterThan(320)
+    // The selection survives the settle...
+    expect(after.selected).toBe("HLRTP-000300.00")
+    // ...and its directly linked record has been rolled into its lane window, not left where it started.
+    // Without the fix this stays `is-offscreen`: the framing key was consumed while the frame was refused,
+    // and the resize path only called `fit()`, which cannot roll a lane.
+    expect(after.offscreen).toBe(false)
+    expect(after.clearOfPanel).toBe(true)
+  })
+})
