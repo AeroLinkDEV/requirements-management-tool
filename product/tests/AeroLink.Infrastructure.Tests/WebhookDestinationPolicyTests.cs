@@ -92,7 +92,10 @@ public sealed class WebhookDestinationPolicyTests
     [InlineData("2001:4:112::7")]
     [InlineData("2001:20::5")]
     [InlineData("2001:30::5")]
+    [InlineData("2001:1::1")]
+    [InlineData("2001:1::2")]
     [InlineData("2620:4f:8000::9")]
+    [InlineData("64:ff9b::8.8.8.8")]
     [InlineData("192.31.196.5")]
     [InlineData("192.52.193.7")]
     [InlineData("192.175.48.9")]
@@ -116,6 +119,24 @@ public sealed class WebhookDestinationPolicyTests
     [InlineData("64:ff9b:1:abcd::1")]
     [InlineData("192.88.99.5")]
     public void Registered_non_global_blocks_fail_closed(string candidate) =>
+        Assert.True(WebhookDestinationPolicy.IsProhibitedOutboundAddress(IPAddress.Parse(candidate)), candidate);
+
+    /// <summary>
+    /// Regression proof that IPv6 classification fails closed outside the 2000::/3 global unicast base and
+    /// that mapped/compatible embedded IPv4 permissions are not inherited. Each of these was incorrectly
+    /// permitted by the previously reviewed classifier.
+    /// </summary>
+    [Theory]
+    [InlineData("4000::1")]
+    [InlineData("6000::1")]
+    [InlineData("8000::1")]
+    [InlineData("a000::1")]
+    [InlineData("c000::1")]
+    [InlineData("e000::1")]
+    [InlineData("f000::1")]
+    [InlineData("::ffff:8.8.8.8")]
+    [InlineData("::8.8.8.8")]
+    public void Reserved_or_non_global_ipv6_space_fails_closed(string candidate) =>
         Assert.True(WebhookDestinationPolicy.IsProhibitedOutboundAddress(IPAddress.Parse(candidate)), candidate);
 
     [Fact]

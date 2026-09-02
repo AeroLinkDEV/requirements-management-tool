@@ -60,14 +60,18 @@ public sealed class WebhookDestinationPolicy(IWebhookDnsResolver resolver)
     /// False only when the address is globally routable unicast space. The prefix tables below are a static
     /// snapshot of the IANA IPv4 and IPv6 special-purpose registries, classified with registry semantics: the
     /// most specific (longest) matching row decides, so a globally reachable refinement carved out of a
-    /// covering block is permitted while the rest of the covering block fails closed, and any address no row
-    /// matches is permitted. Deprecated translation/compatibility prefixes whose reachability is that of an
-    /// embedded IPv4 destination (::/96, ::ffff:0:0/96, 64:ff9b::/96) are classified through that embedded
-    /// address. The local-use translation prefix 64:ff9b:1::/48 is non-global in its entirety and is
+    /// covering block is permitted while the rest of the covering block fails closed. IPv6 fails closed by
+    /// default: outside the global unicast range 2000::/3 — reserved or otherwise unassigned space — nothing
+    /// is permitted except through an explicit permitted row, and inside it every registered non-global
+    /// special-purpose block fails closed. IPv4 remains permitted unless a registered non-global block
+    /// matches. The IPv4-mapped ::ffff:0:0/96 and deprecated IPv4-compatible ::/96 forms fail closed
+    /// regardless of the embedded IPv4 address; the deprecated IPv4-compatible mechanism's routing status is
+    /// not that of the embedded destination. The well-known NAT64 prefix 64:ff9b::/96 is registered as
+    /// globally reachable translation space and is classified through the embedded IPv4 destination it
+    /// translates. The local-use translation prefix 64:ff9b:1::/48 is non-global in its entirety and is
     /// table-driven. The IETF-protocol-assignments block 2001::/23 is refused except for the registry's
-    /// globally reachable refinements inside it (2001:3::/32 AMT, 2001:4:112::/48 AS112-v6, 2001:20::/28
-    /// ORCHIDv2, 2001:30::/28 DETs), so only the three globally reachable protocol anycast /128s inside it
-    /// are refused conservatively.
+    /// globally reachable refinements inside it (2001:1::1, 2001:1::2, 2001:1::3 protocol anycasts,
+    /// 2001:3::/32 AMT, 2001:4:112::/48 AS112-v6, 2001:20::/28 ORCHIDv2, 2001:30::/28 DETs).
     /// </summary>
     public static bool IsProhibitedOutboundAddress(IPAddress address)
     {
@@ -76,23 +80,23 @@ public sealed class WebhookDestinationPolicy(IWebhookDnsResolver resolver)
         if (address.AddressFamily == AddressFamily.InterNetworkV6)
         {
             if (bytes[0..10].All(x => x == 0) && bytes[10] == 0xff && bytes[11] == 0xff)
-                return IsProhibitedOutboundAddress(new IPAddress(bytes[12..]));
+                return true;
             if (bytes[0..12].All(x => x == 0))
-                return IsProhibitedOutboundAddress(new IPAddress(bytes[12..]));
+                return true;
             if (bytes[0] == 0 && bytes[1] == 0x64 && bytes[2] == 0xff && bytes[3] == 0x9b
                 && bytes[4..12].All(x => x == 0))
                 return IsProhibitedOutboundAddress(new IPAddress(bytes[12..]));
-            return ClassifyByLongestPrefix(bytes, Ipv6PrefixRules);
+            return ClassifyByLongestPrefix(bytes, Ipv6PrefixRules, defaultProhibited: true);
         }
         if (address.AddressFamily == AddressFamily.InterNetwork)
-            return ClassifyByLongestPrefix(bytes, Ipv4PrefixRules);
+            return ClassifyByLongestPrefix(bytes, Ipv4PrefixRules, defaultProhibited: false);
         return true;
     }
 
-    private static bool ClassifyByLongestPrefix(ReadOnlySpan<byte> address, (byte[] Prefix, int Bits, bool Prohibited)[] rules)
+    private static bool ClassifyByLongestPrefix(ReadOnlySpan<byte> address, (byte[] Prefix, int Bits, bool Prohibited)[] rules, bool defaultProhibited)
     {
         var bestBits = -1;
-        var prohibited = false;
+        var prohibited = defaultProhibited;
         foreach (var (prefix, bits, isProhibited) in rules)
         {
             if (bits <= bestBits || !MatchesPrefix(address, prefix, bits)) continue;
@@ -112,8 +116,9 @@ public sealed class WebhookDestinationPolicy(IWebhookDnsResolver resolver)
         return (address[fullBytes] & mask) == (prefix[fullBytes] & mask);
     }
 
-    // Static snapshot of the IANA IPv4 special-purpose registry plus multicast. Blocks the registry marks
-    // globally reachable (AS112-v4 192.31.196.0/24, AMT 192.52.193.0/24, direct-delegation AS112
+    // Static snapshot of the IANA IPv4 special-purpose registry plus multicast. IPv4 classification is
+    // permitted by default: the registry rows are the complete set of non-global blocks. Blocks the registry
+    // marks globally reachable (AS112-v4 192.31.196.0/24, AMT 192.52.193.0/24, direct-delegation AS112
     // 192.175.48.0/24) match no rule and are permitted; the PCP and TURN anycast /32s inside the IETF
     // protocol-assignments /24 are explicit permitted refinements, as the registry classifies them.
     private static readonly (byte[] Prefix, int Bits, bool Prohibited)[] Ipv4PrefixRules =
@@ -138,18 +143,24 @@ public sealed class WebhookDestinationPolicy(IWebhookDnsResolver resolver)
     ];
 
     // Static snapshot of the IANA IPv6 special-purpose registry plus multicast, with the registry's globally
-    // reachable refinements inside the covering IETF-protocol-assignments /23 recorded as permitted. Blocks
-    // the registry marks globally reachable outside it (AS112 service 2620:4f:8000::/48) match no rule and
-    // are permitted. The deprecated 6to4 prefix 2002::/16 is refused outright rather than recursing into its
-    // embedded IPv4 destination.
+    // reachable refinements inside the covering IETF-protocol-assignments /23 recorded as permitted. IPv6
+    // classification fails closed by default: the 2000::/3 global unicast base is the ordinary permitted
+    // category, and rows are the registered exceptions to it. Rows outside that base (unique-local,
+    // link-local, multicast, deprecated translation space) are redundant with the fail-closed default but are
+    // kept to document their registry status explicitly. The deprecated 6to4 prefix 2002::/16 is refused
+    // outright rather than recursing into its embedded IPv4 destination.
     private static readonly (byte[] Prefix, int Bits, bool Prohibited)[] Ipv6PrefixRules =
     [
+        (PrefixBytes("2000::"), 3, false),        // Global unicast base: the ordinary permitted category
         (PrefixBytes("::"), 128, true),           // Unspecified
         (PrefixBytes("::1"), 128, true),          // Loopback
         (PrefixBytes("64:ff9b:1::"), 48, true),   // Local-use IPv4/IPv6 translation
         (PrefixBytes("100::"), 64, true),         // Discard-only
         (PrefixBytes("100:0:0:1::"), 64, true),   // Dummy IPv6 prefix
-        (PrefixBytes("2001::"), 23, true),        // IETF protocol assignments (Teredo, protocol anycasts)
+        (PrefixBytes("2001::"), 23, true),        // IETF protocol assignments (Teredo, unlisted assignments)
+        (PrefixBytes("2001:1::1"), 128, false),   // Port Control Protocol anycast (globally reachable refinement)
+        (PrefixBytes("2001:1::2"), 128, false),   // TURN anycast (globally reachable refinement)
+        (PrefixBytes("2001:1::3"), 128, false),   // DNS-SD service registration anycast (globally reachable refinement)
         (PrefixBytes("2001:2::"), 48, true),      // Benchmarking
         (PrefixBytes("2001:3::"), 32, false),     // AMT (globally reachable refinement)
         (PrefixBytes("2001:4:112::"), 48, false), // AS112-v6 (globally reachable refinement)
