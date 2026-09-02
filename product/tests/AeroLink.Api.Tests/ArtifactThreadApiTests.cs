@@ -441,33 +441,6 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
 
     // ---- focal-first, and exact kind --------------------------------------------------------------------
 
-    [Theory]
-    [InlineData("Case")]
-    [InlineData("Procedure")]
-    [InlineData("Execution")]
-    [InlineData("Build")]
-    public async Task An_unconnected_focal_artifact_is_still_its_own_thread(string focalKind)
-    {
-        var world = await SeedAsync(_host.Factory);
-        using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
-
-        var focalId = focalKind switch
-        {
-            "Case" => world.LonelyCaseRevisionId,
-            "Procedure" => world.LonelyProcedureRevisionId,
-            "Execution" => world.LonelyExecutionId,
-            _ => world.LonelyBuildId,
-        };
-
-        // §6.8: an unconnected record still renders as a normal card. Seeding the thread from relationships
-        // alone made the focal artifact disappear from its own thread whenever it had none.
-        var thread = await ThreadAsync(client, world, focalKind, focalId,
-            baselineId: world.LonelyBaselineId);
-        Assert.Contains(thread.GetProperty("nodes").EnumerateArray(),
-            x => x.GetProperty("id").GetString() == focalId.ToString());
-    }
-
     [Fact]
     public async Task A_procedure_revision_asked_for_as_a_case_fails_closed()
     {
@@ -550,6 +523,148 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         Assert.False(string.IsNullOrWhiteSpace(build.GetProperty("state").GetString()));
     }
 
+    // ---- partial chains are not unconnected records -----------------------------------------------------
+
+    [Fact]
+    public async Task An_execution_keeps_its_procedure_and_build_when_the_procedure_covers_nothing()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Execution", world.LonelyExecutionId,
+            baselineId: world.LonelyBaselineId);
+
+        // The execution records its procedure and its build directly. Missing requirement coverage above them
+        // stops the chain going farther upstream; it does not delete the facts the record itself carries.
+        // Growing the thread only through coverage turned a partial chain into a claim of no relationships.
+        Assert.Contains(Nodes(thread, "Procedure"),
+            x => x.GetProperty("id").GetString() == world.LonelyProcedureRevisionId.ToString());
+        Assert.Contains(Nodes(thread, "Build"),
+            x => x.GetProperty("id").GetString() == world.LonelyBuildId.ToString());
+
+        var edges = thread.GetProperty("edges").EnumerateArray().ToList();
+        Assert.Contains(edges, x => x.GetProperty("fromId").GetString() == world.LonelyProcedureRevisionId.ToString()
+            && x.GetProperty("toId").GetString() == world.LonelyExecutionId.ToString()
+            && x.GetProperty("relation").GetString() == "produced");
+        Assert.Contains(edges, x => x.GetProperty("fromId").GetString() == world.LonelyExecutionId.ToString()
+            && x.GetProperty("toId").GetString() == world.LonelyBuildId.ToString());
+
+        // No requirement was reachable, and none is invented to fill the gap.
+        Assert.Empty(Nodes(thread, "Requirement"));
+    }
+
+    [Fact]
+    public async Task A_build_keeps_the_execution_recorded_against_it_when_coverage_stops_short()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Build", world.LonelyBuildId,
+            baselineId: world.LonelyBaselineId);
+
+        Assert.Contains(Nodes(thread, "Execution"),
+            x => x.GetProperty("id").GetString() == world.LonelyExecutionId.ToString());
+        Assert.Contains(Nodes(thread, "Procedure"),
+            x => x.GetProperty("id").GetString() == world.LonelyProcedureRevisionId.ToString());
+    }
+
+    [Fact]
+    public async Task A_procedure_keeps_its_case_link_when_the_case_covers_nothing()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Procedure", world.UncoveredProcedureRevisionId,
+            baselineId: world.LonelyBaselineId);
+
+        // The Case-to-Procedure link is a recorded exact fact. It survives the absence of requirement coverage.
+        Assert.Contains(Nodes(thread, "Case"),
+            x => x.GetProperty("id").GetString() == world.UncoveredCaseRevisionId.ToString());
+        Assert.Contains(thread.GetProperty("edges").EnumerateArray(),
+            x => x.GetProperty("fromId").GetString() == world.UncoveredCaseRevisionId.ToString()
+                && x.GetProperty("toId").GetString() == world.UncoveredProcedureRevisionId.ToString()
+                && x.GetProperty("relation").GetString() == "run by");
+    }
+
+    [Fact]
+    public async Task A_case_with_no_recorded_relationship_at_all_returns_only_itself()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Case", world.LonelyCaseRevisionId,
+            baselineId: world.LonelyBaselineId);
+
+        // The genuine §6.8 unconnected record, and the reason the three tests above matter: this is what a
+        // record with no relationships actually looks like, and the others must not be reported the same way.
+        Assert.Single(thread.GetProperty("nodes").EnumerateArray());
+        Assert.Empty(thread.GetProperty("edges").EnumerateArray());
+    }
+
+    // ---- an execution or build anchors its own configuration ---------------------------------------------
+
+    [Theory]
+    [InlineData("Execution")]
+    [InlineData("Build")]
+    public async Task A_result_focal_stays_in_its_own_build_when_none_is_requested(string focalKind)
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var focalId = focalKind == "Execution" ? world.PeerRunInFirstBuildId : world.BuildId;
+        var thread = await ThreadAsync(client, world, focalKind, focalId);
+
+        // The same procedure revision was run in two builds of this one baseline. An Execution or a Build names
+        // its own configuration, so the peer run must not join the response merely because its build shares the
+        // baseline — the caller should not have to pass buildId redundantly to prevent that.
+        var runs = Nodes(thread, "Execution").Select(x => x.GetProperty("id").GetString()).ToList();
+        Assert.Contains(world.PeerRunInFirstBuildId.ToString(), runs);
+        Assert.DoesNotContain(world.PeerRunInSecondBuildId.ToString(), runs);
+        Assert.Equal([world.BuildId.ToString()],
+            Nodes(thread, "Build").Select(x => x.GetProperty("id").GetString()).ToArray());
+    }
+
+    // ---- the recorded retest relationship ----------------------------------------------------------------
+
+    [Fact]
+    public async Task A_retest_names_the_run_it_repeats()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
+
+        // TestExecution records RetestOfExecutionId. Returning both runs without it leaves two results with no
+        // stated relationship, and a reader inferring one from timestamps would be guessing.
+        var retest = thread.GetProperty("edges").EnumerateArray().Single(x =>
+            x.GetProperty("relation").GetString() == "retest of");
+        Assert.Equal(world.PassExecutionId.ToString(), retest.GetProperty("fromId").GetString());
+        Assert.Equal(world.FailExecutionId.ToString(), retest.GetProperty("toId").GetString());
+        Assert.Equal("Execution", retest.GetProperty("fromKind").GetString());
+        Assert.Equal("Execution", retest.GetProperty("toKind").GetString());
+    }
+
+    [Fact]
+    public async Task A_run_that_repeats_nothing_states_no_retest()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Execution", world.LonelyExecutionId,
+            baselineId: world.LonelyBaselineId);
+
+        // RetestOfExecutionId is null here, and nothing is fabricated to fill it.
+        Assert.DoesNotContain(thread.GetProperty("edges").EnumerateArray(),
+            x => x.GetProperty("relation").GetString() == "retest of");
+    }
+
     // ---- helpers ---------------------------------------------------------------------------------------
 
     private static List<JsonElement> Nodes(JsonElement thread, string kind) =>
@@ -589,7 +704,9 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         Guid ProjectId, Guid BaselineId, Guid SecondBaselineId, Guid SecondBuildId,
         Guid SharedProcedureRevisionId, Guid RunInFirstBuildId, Guid RunInSecondBuildId,
         Guid LonelyProcedureRevisionId, Guid LonelyCaseRevisionId, Guid LonelyExecutionId, Guid LonelyBuildId,
-        Guid LonelyBaselineId, Guid ForeignBaselineId, Guid SystemArtifactId, Guid SystemRevisionId, Guid SupersededSystemRevisionId,
+        Guid LonelyBaselineId, Guid ForeignBaselineId,
+        Guid PeerRunInFirstBuildId, Guid PeerRunInSecondBuildId,
+        Guid UncoveredCaseRevisionId, Guid UncoveredProcedureRevisionId, Guid SystemArtifactId, Guid SystemRevisionId, Guid SupersededSystemRevisionId,
         Guid ClosedProcedureRevisionId, Guid RevisedCaseRevisionId, Guid HighLevelRevisionId, Guid SiblingHighLevelRevisionId,
         Guid InterfaceRevisionId, Guid CaseRevisionId, Guid FirstProcedureRevisionId,
         Guid SecondProcedureRevisionId, Guid SystemProcedureRevisionId, Guid PassExecutionId,
@@ -770,6 +887,27 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
             now.AddDays(2), now.AddDays(2), release.Id);
         db.AddRange(runInFirstBuild, runInSecondBuild);
 
+        // A second build of the SAME baseline, running the same exact procedure revision. This is what proves
+        // an Execution or Build focal anchors its own configuration without the caller passing buildId.
+        var peerBuild = new SoftwareBuild(project.Id, release.Id, baseline.Id, "FMS-7.0.2",
+            "Peer build of the same baseline", member, now.AddDays(3));
+        db.Add(peerBuild);
+        var peerRunInFirstBuild = new TestExecution(project.Id, sharedRevision.Id, build.Id, null,
+            TestOutcome.Pass, member, "FMS rig", "Peer run in the first build.", "evidence/peer-first.json",
+            now, now, release.Id);
+        var peerRunInSecondBuild = new TestExecution(project.Id, sharedRevision.Id, peerBuild.Id, null,
+            TestOutcome.Pass, member, "FMS rig", "Peer run in the peer build.", "evidence/peer-second.json",
+            now.AddDays(3), now.AddDays(3), release.Id);
+        db.AddRange(peerRunInFirstBuild, peerRunInSecondBuild);
+
+        // A Case and Procedure joined by a recorded link, covering no requirement. A partial chain, not an
+        // unconnected record — the distinction the thread has to keep.
+        var (uncoveredCase, uncoveredCaseRevision) = Verification(db, project.Id, "HLRTC-97008",
+            "Uncovered case", TestProcedureLevel.HighLevel, VerificationArtifactKind.Case, member, now);
+        var (uncoveredProcedure, uncoveredProcedureRevision) = Verification(db, project.Id, "HLRTP-97008",
+            "Uncovered procedure", TestProcedureLevel.HighLevel, VerificationArtifactKind.Procedure, member, now);
+        db.Add(new TestCaseProcedureLink(uncoveredCaseRevision.Id, uncoveredProcedureRevision.Id));
+
         // Artifacts with no relationships at all. §6.8 says an unconnected record still renders as a normal
         // card, so each of these must come back as its own thread rather than vanishing from it.
         var (lonelyCase, lonelyCaseRevision) = Verification(db, project.Id, "HLRTC-97009", "Unconnected case",
@@ -806,7 +944,9 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         return new World(project.Id, baseline.Id, secondBaseline.Id, secondBuild.Id,
             sharedRevision.Id, runInFirstBuild.Id, runInSecondBuild.Id,
             lonelyProcedureRevision.Id, lonelyCaseRevision.Id, lonelyExecution.Id, lonelyBuild.Id,
-            lonelyBaseline.Id, foreignBaseline.Id, systemArtifact.Id, currentSystem.Id, supersededSystem.Id,
+            lonelyBaseline.Id, foreignBaseline.Id,
+            peerRunInFirstBuild.Id, peerRunInSecondBuild.Id,
+            uncoveredCaseRevision.Id, uncoveredProcedureRevision.Id, systemArtifact.Id, currentSystem.Id, supersededSystem.Id,
             closedProcedureRevision.Id, revisedCaseRevision.Id, highLevelRevision.Id, siblingRevision.Id, interfaceRevision.Id,
             caseRevision.Id, firstRevision.Id, secondRevision.Id, systemProcedureRevision.Id,
             pass.Id, fail.Id, build.Id, laterBuild.Id, foreignRevision.Id, member, outsider);

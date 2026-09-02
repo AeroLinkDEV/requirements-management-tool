@@ -229,8 +229,9 @@ public static class ArtifactThreadProjection
             scoped = scoped.Where(x => x.Id == named).ToList();
             if (scoped.Count == 0) return null;
         }
-        var buildIds = scoped.Select(x => x.Id).ToHashSet();
-        var builds = scoped.ToDictionary(x => x.Id, x => (x.BuildNumber, x.Description, x.State));
+        IReadOnlyCollection<Guid> buildIds = scoped.Select(x => x.Id).ToHashSet();
+        IReadOnlyDictionary<Guid, (string BuildNumber, string Description, SoftwareBuildState State)> builds =
+            scoped.ToDictionary(x => x.Id, x => (x.BuildNumber, x.Description, x.State));
 
         var acc = new Accumulator();
 
@@ -241,11 +242,34 @@ public static class ArtifactThreadProjection
         if (focal is null) return null;
         acc.Place(focal);
 
-        var seeds = await SeedsAsync(db, projectId, focalKind, focalId, ct);
+        // An Execution or a Build names its own configuration. Left at every build under the baseline, a peer
+        // run of the same procedure in a sibling build would join the response as though it belonged to the
+        // thread the reader opened, so the focal's own build narrows the scope when none was requested.
+        if (buildId is null && focalKind is ArtifactThreadFocalKind.Execution or ArtifactThreadFocalKind.Build)
+        {
+            var anchorBuild = focalKind == ArtifactThreadFocalKind.Build
+                ? focalId
+                : await db.TestExecutions.AsNoTracking().Where(x => x.Id == focalId)
+                    .Select(x => x.SoftwareBuildId).SingleOrDefaultAsync(ct);
+            if (anchorBuild is Guid anchored && buildIds.Contains(anchored))
+            {
+                buildIds = [anchored];
+                builds = builds.Where(x => x.Key == anchored).ToDictionary(x => x.Key, x => x.Value);
+            }
+        }
+
+        // The verification artifacts the focal record itself names, read before any requirement is involved.
+        // Growing the thread only through requirement coverage turned "the chain cannot continue farther
+        // upstream" into "there are no recorded relationships": an execution of a procedure that covers
+        // nothing lost both its procedure and its build, though it records them directly.
+        var anchors = await AnchorsAsync(db, projectId, focalKind, focalId, buildIds, ct);
+
+        var seeds = await CoveredRequirementsAsync(db, projectId, anchors.Count == 0 ? [] : anchors, ct);
+        if (focalKind == ArtifactThreadFocalKind.Requirement) seeds = [focalId];
         var requirementIds = await WalkAsync(db, projectId, seeds, focalKind, acc, ct);
 
         await AddChangeAndProblemAsync(db, projectId, requirementIds, acc, ct);
-        var verification = await AddVerificationAsync(db, projectId, requirementIds, focalKind, focalId,
+        var verification = await AddVerificationAsync(db, projectId, requirementIds, anchors, focalKind, focalId,
             buildIds, builds, acc, ct);
 
         return new ArtifactThreadResult(projectId, baselineId, buildId, focalKind.ToString(), focalId,
@@ -351,27 +375,50 @@ public static class ArtifactThreadProjection
             State: outcome, Level: null, IsFocal: isFocal, ArtifactId: null, Revision: null, Outcome: outcome,
             ExecutedBy: executedBy, ExecutedAt: executedAt, RecordedAt: recordedAt, Evidence: evidence);
 
-    /// <summary>The requirement revisions the focal artifact's own chain hangs from.</summary>
-    private static async Task<IReadOnlyList<Guid>> SeedsAsync(
-        AeroLinkDbContext db, Guid projectId, ArtifactThreadFocalKind kind, Guid focalId, CancellationToken ct)
+    /// <summary>
+    /// The verification revisions the focal record itself names, independent of any requirement coverage.
+    ///
+    /// <para>
+    /// This is what keeps a partial chain distinct from an unconnected record. An execution records its
+    /// procedure; a build records its executions; a procedure records its cases. Those are direct exact facts,
+    /// and a missing requirement above them stops the chain — it does not delete them.
+    /// </para>
+    /// </summary>
+    private static async Task<IReadOnlyList<Guid>> AnchorsAsync(
+        AeroLinkDbContext db, Guid projectId, ArtifactThreadFocalKind kind, Guid focalId,
+        IReadOnlyCollection<Guid> buildIds, CancellationToken ct)
     {
         switch (kind)
         {
             case ArtifactThreadFocalKind.Requirement:
-                return [focalId];
+                return [];
 
             case ArtifactThreadFocalKind.Case:
+            {
+                var procedures = await db.TestCaseProcedureLinks.AsNoTracking()
+                    .Where(x => x.CaseRevisionId == focalId)
+                    .Select(x => x.ProcedureRevisionId).ToListAsync(ct);
+                return [focalId, .. procedures];
+            }
+
             case ArtifactThreadFocalKind.Procedure:
-                return await CoveredRequirementsAsync(db, projectId, [focalId], ct);
+            {
+                var cases = await db.TestCaseProcedureLinks.AsNoTracking()
+                    .Where(x => x.ProcedureRevisionId == focalId)
+                    .Select(x => x.CaseRevisionId).ToListAsync(ct);
+                return [focalId, .. cases];
+            }
 
             case ArtifactThreadFocalKind.Execution:
             {
                 var procedureRevisionId = await db.TestExecutions.AsNoTracking()
                     .Where(x => x.Id == focalId)
                     .Select(x => (Guid?)x.ProcedureRevisionId).SingleOrDefaultAsync(ct);
-                return procedureRevisionId is Guid revisionId
-                    ? await CoveredRequirementsAsync(db, projectId, [revisionId], ct)
-                    : [];
+                if (procedureRevisionId is not Guid revisionId) return [];
+                var cases = await db.TestCaseProcedureLinks.AsNoTracking()
+                    .Where(x => x.ProcedureRevisionId == revisionId)
+                    .Select(x => x.CaseRevisionId).ToListAsync(ct);
+                return [revisionId, .. cases];
             }
 
             case ArtifactThreadFocalKind.Build:
@@ -379,12 +426,15 @@ public static class ArtifactThreadProjection
                 // Driven by what the build actually evidences, not by every requirement in its baseline.
                 // Seeding all baseline members and expanding would turn a thread into a build browser, which
                 // §8.4 rules out, and would imply a relationship to this build that no record states.
-                var procedureRevisionIds = await db.TestExecutions.AsNoTracking()
-                    .Where(x => x.SoftwareBuildId == focalId && x.ProjectId == projectId)
+                var procedures = await db.TestExecutions.AsNoTracking()
+                    .Where(x => x.SoftwareBuildId != null && buildIds.Contains(x.SoftwareBuildId.Value)
+                        && x.ProjectId == projectId)
                     .Select(x => x.ProcedureRevisionId).Distinct().ToListAsync(ct);
-                return procedureRevisionIds.Count == 0
-                    ? []
-                    : await CoveredRequirementsAsync(db, projectId, procedureRevisionIds, ct);
+                if (procedures.Count == 0) return [];
+                var cases = await db.TestCaseProcedureLinks.AsNoTracking()
+                    .Where(x => procedures.Contains(x.ProcedureRevisionId))
+                    .Select(x => x.CaseRevisionId).ToListAsync(ct);
+                return [.. procedures, .. cases];
             }
 
             default:
@@ -398,6 +448,7 @@ public static class ArtifactThreadProjection
     {
         // A Procedure may be reached directly (System covers requirements) or through its Case (HLR and LLR).
         // Both are followed from recorded rows rather than assumed from the level.
+        if (verificationRevisionIds.Count == 0) return [];
         var reach = verificationRevisionIds.ToHashSet();
         var parents = await db.TestCaseProcedureLinks.AsNoTracking()
             .Where(x => reach.Contains(x.ProcedureRevisionId))
@@ -554,6 +605,7 @@ public static class ArtifactThreadProjection
     /// <summary>Lanes 3, 4 and 5, plus the applicability statement when the levels have no discipline.</summary>
     private static async Task<ArtifactThreadVerification> AddVerificationAsync(
         AeroLinkDbContext db, Guid projectId, IReadOnlyCollection<Guid> requirementIds,
+        IReadOnlyCollection<Guid> anchors,
         ArtifactThreadFocalKind focalKind, Guid focalId, IReadOnlyCollection<Guid> buildIds,
         IReadOnlyDictionary<Guid, (string Number, string Description, SoftwareBuildState State)> builds,
         Accumulator acc, CancellationToken ct)
@@ -569,7 +621,7 @@ public static class ArtifactThreadProjection
             // A level either has a verification discipline or it does not; the domain is the authority and is
             // not widened here. Customer and Interface have none, so their chain truthfully stops.
             var without = levels.Where(level => !HasVerificationDiscipline(level)).ToList();
-            if (levels.Count > 0 && without.Count == levels.Count)
+            if (levels.Count > 0 && without.Count == levels.Count && anchors.Count == 0)
             {
                 var named = string.Join(" and ", without.Select(x => x.ToString()).OrderBy(x => x));
                 return new ArtifactThreadVerification(false,
@@ -585,14 +637,23 @@ public static class ArtifactThreadProjection
                 .ToListAsync(ct);
 
         var directIds = coverage.Select(x => x.ProcedureRevisionId).Distinct().ToList();
-        var caseLinks = directIds.Count == 0
+
+        // Case-to-Procedure links are read from the anchor set as well as from coverage. A procedure opened
+        // directly records its case whether or not that case covers a requirement, and deriving these links
+        // from coverage alone silently dropped the one exact relationship such a thread has.
+        var linkScope = directIds.Concat(anchors).Distinct().ToList();
+        var caseLinks = linkScope.Count == 0
             ? []
             : await db.TestCaseProcedureLinks.AsNoTracking()
-                .Where(x => directIds.Contains(x.CaseRevisionId))
+                .Where(x => linkScope.Contains(x.CaseRevisionId) || linkScope.Contains(x.ProcedureRevisionId))
                 .Select(x => new { x.CaseRevisionId, x.ProcedureRevisionId, x.ExactLinkSuspectLifecycleId })
                 .ToListAsync(ct);
 
-        var allRevisionIds = directIds.Concat(caseLinks.Select(x => x.ProcedureRevisionId)).Distinct().ToList();
+        // The focal record's own anchors are always present, whether or not coverage reached them.
+        var allRevisionIds = directIds
+            .Concat(caseLinks.Select(x => x.ProcedureRevisionId))
+            .Concat(caseLinks.Select(x => x.CaseRevisionId))
+            .Concat(anchors).Distinct().ToList();
         var kindByRevision = new Dictionary<Guid, string>();
         if (allRevisionIds.Count > 0)
         {
@@ -667,7 +728,8 @@ public static class ArtifactThreadProjection
                 && x.SoftwareBuildId != null && buildIds.Contains(x.SoftwareBuildId.Value))
             .Select(x => new
             {
-                x.Id, x.ProcedureRevisionId, x.Outcome, x.SoftwareBuildId, x.ExecutedBy, x.ExecutedAt, x.RecordedAt,
+                x.Id, x.ProcedureRevisionId, x.Outcome, x.SoftwareBuildId, x.ExecutedBy, x.ExecutedAt,
+                x.RecordedAt, x.RetestOfExecutionId,
             })
             .ToListAsync(ct);
         if (executions.Count == 0) return;
@@ -715,6 +777,14 @@ public static class ArtifactThreadProjection
             if (execution.SoftwareBuildId is Guid buildId)
                 acc.Link(new ArtifactThreadEdge(execution.Id, KindExecution, buildId, KindBuild,
                     "evidence for", false));
+
+        // A retest is a recorded relationship between two runs, not an ordering the reader should have to infer
+        // from timestamps. Link() drops it when the earlier run is outside the resolved scope, so a retest of a
+        // failure in another build is never asserted here.
+        foreach (var execution in ordered)
+            if (execution.RetestOfExecutionId is Guid retestOf)
+                acc.Link(new ArtifactThreadEdge(execution.Id, KindExecution, retestOf, KindExecution,
+                    "retest of", false));
     }
 
     /// <summary>
