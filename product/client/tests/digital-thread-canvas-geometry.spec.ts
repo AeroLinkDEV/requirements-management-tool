@@ -1,7 +1,10 @@
 import { expect, test } from "@playwright/test"
 import {
   MIN_ZOOM,
+  EDGE_LAYER_OVERHANG,
   compactLanes,
+  edgePath,
+  isIntraLane,
   frameNodes,
   type CanvasEdge,
   type CanvasNode,
@@ -360,5 +363,57 @@ test.describe("keyboard tab stops and lane order", () => {
     const ordered = [...produced].sort((a, b) => a.lane - b.lane || a.row - b.row)
 
     expect(ordered.map(node => node.id)).toEqual(["pr-1", "sys-1", "sys-2", "hlr-1", "llr-1"])
+  })
+})
+
+/**
+ * Intra-lane edges.
+ *
+ * The artifact thread's final lane holds both a result and a build (#880 §5.3), so it is the first board to
+ * carry an edge whose endpoints share a lane — an execution's `evidence for` link to its build, and a
+ * `retest of` link between two runs. Every earlier view was strictly lane-to-lane, so this case had no
+ * coverage and the routing silently treated it as a backwards edge.
+ */
+test.describe("intra-lane edges", () => {
+  const geometry = geometryFor(2)
+
+  test("two endpoints in the same lane are recognised as intra-lane", () => {
+    expect(isIntraLane({ x: 1480 }, { x: 1480 })).toBe(true)
+    // A backwards edge is not an intra-lane one, and must keep its own routing.
+    expect(isIntraLane({ x: 1480 }, { x: 1184 })).toBe(false)
+    expect(isIntraLane({ x: 592 }, { x: 888 })).toBe(false)
+  })
+
+  test("an intra-lane edge bows into the gutter instead of sweeping across its own lane", () => {
+    const path = edgePath({ x: 1480, y: 10 }, { x: 1480, y: 120 }, geometry)
+    const numbers = [...path.matchAll(/-?\d+(?:\.\d+)?/g)].map(match => Number(match[0]))
+    const xs = numbers.filter((_, index) => index % 2 === 0)
+
+    const laneRight = 1480 + geometry.laneWidth
+    // Both ends attach to the lane's right edge, and every control point is at or beyond it. The old routing
+    // started at the card's left edge and finished at the target's right edge, crossing the whole lane.
+    expect(xs[0]).toBe(laneRight)
+    expect(xs[xs.length - 1]).toBe(laneRight)
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(laneRight)
+    expect(Math.max(...xs)).toBeGreaterThan(laneRight)
+  })
+
+  test("the bow stays within the overhang the canvas reserves for it", () => {
+    const path = edgePath({ x: 1480, y: 10 }, { x: 1480, y: 120 }, geometry)
+    const numbers = [...path.matchAll(/-?\d+(?:\.\d+)?/g)].map(match => Number(match[0]))
+    const xs = numbers.filter((_, index) => index % 2 === 0)
+
+    // Reserving less than the bow reaches is what clipped the curve and its label off the right of the board.
+    expect(Math.max(...xs) - (1480 + geometry.laneWidth)).toBeLessThan(EDGE_LAYER_OVERHANG)
+  })
+
+  test("a lane-to-lane edge is unchanged, forwards and backwards", () => {
+    const forwards = edgePath({ x: 0, y: 0 }, { x: 296, y: 0 }, geometry)
+    expect(forwards).toBe(`M236 ${geometry.anchor} C266 ${geometry.anchor},266 ${geometry.anchor},296 ${geometry.anchor}`)
+
+    // A genuinely backwards edge still enters from the target's right-hand side.
+    const backwards = edgePath({ x: 296, y: 0 }, { x: 0, y: 0 }, geometry)
+    expect(backwards.startsWith("M296 ")).toBe(true)
+    expect(backwards.endsWith(`,236 ${geometry.anchor}`)).toBe(true)
   })
 })

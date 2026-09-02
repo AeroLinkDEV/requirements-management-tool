@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
+  EDGE_LAYER_OVERHANG,
   type CanvasEdge,
   type CanvasFrame,
   type CanvasNode,
@@ -11,6 +12,7 @@ import {
   offsetToReveal,
   fitTransform,
   frameNodes,
+  isIntraLane,
   isVisible,
   laneAt,
   layout,
@@ -55,6 +57,17 @@ export type DigitalThreadCanvasProps = {
    * active and reaches no edge, which is a different picture and must not read as the resting one.
    */
   tracedEdges?: ReadonlySet<string>
+  /**
+   * The records the camera should frame when the selection changes, instead of the selection and its direct
+   * links.
+   *
+   * §6.6 frames the selection and one hop, which is right when a reader is stepping through a build: it keeps
+   * the zoom close and the next hop large. It is wrong for the moment an artifact thread first opens, because
+   * the view has selected the focal record on the reader's behalf and one hop is not the answer they asked
+   * for — landing on a six-lane thread framed to three of its lanes puts the result and the build off-screen
+   * before the reader has touched anything. A caller that knows the whole web is the answer passes it here.
+   */
+  frameIds?: readonly string[]
   ariaLabel?: string
 }
 
@@ -79,6 +92,7 @@ export default function DigitalThreadCanvas({
   onHover,
   frameInset,
   tracedEdges,
+  frameIds,
   ariaLabel = "Digital Thread canvas",
 }: DigitalThreadCanvasProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -114,6 +128,28 @@ export default function DigitalThreadCanvas({
   const countsKey = counts.join(",")
 
   /**
+   * Room kept to the right of the board for an intra-lane edge inside the **final** lane.
+   *
+   * Such an edge bows into the gutter beside its lane. Anywhere but the last lane that gutter is board the fit
+   * already accounts for, so nothing is needed; in the last lane it is past the board's own width, and
+   * centring a board that does not include it left the curve and its label hanging off the viewport. The
+   * artifact thread's RESULT · BUILD lane is the case this exists for — an execution's `evidence for` link to
+   * its build, and a `retest of` link between two runs.
+   *
+   * Derived from the edges the canvas was handed rather than declared by the caller, so a view that grows one
+   * of these links later cannot forget to ask for the space.
+   */
+  const trailingOverhang = useMemo(() => {
+    const lastLane = lanes.length - 1
+    const laneById = new Map(nodes.map(node => [node.id, node.lane]))
+    const needsRoom = edges.some(
+      edge =>
+        laneById.get(edge.from) === lastLane && laneById.get(edge.to) === lastLane,
+    )
+    return needsRoom ? EDGE_LAYER_OVERHANG : 0
+  }, [edges, lanes.length, nodes])
+
+  /**
    * The frame can be measured before it has settled — inside a preview or a freshly mounted panel the first
    * rect is a fraction of the real size. Laying out from that leaves the board wrongly zoomed and clumped in
    * a corner, so a nonsense rect is refused and the caller re-measures once it is real.
@@ -126,10 +162,10 @@ export default function DigitalThreadCanvas({
     return {
       x: frameInset?.left ?? 0,
       y: 0,
-      width: rect.width - (frameInset?.left ?? 0) - (frameInset?.right ?? 0),
+      width: rect.width - (frameInset?.left ?? 0) - (frameInset?.right ?? 0) - trailingOverhang,
       height: rect.height - (frameInset?.bottom ?? 0),
     }
-  }, [frameInset?.left, frameInset?.right, frameInset?.bottom])
+  }, [frameInset?.left, frameInset?.right, frameInset?.bottom, trailingOverhang])
 
   /** Write current geometry to the DOM: transform, band sizes, card positions, edge paths. */
   const paint = useCallback(() => {
@@ -204,9 +240,13 @@ export default function DigitalThreadCanvas({
 
     const svg = edgeLayerRef.current
     if (svg) {
-      svg.setAttribute("width", String(result.sceneWidth + 52))
+      // The right margin carries the intra-lane overhang as well as the usual bleed: an edge inside the final
+      // lane bows past the board's own width, and sizing this to the board alone clipped the curve and its
+      // label off the end of the canvas.
+      const width = result.sceneWidth + 26 + EDGE_LAYER_OVERHANG
+      svg.setAttribute("width", String(width))
       svg.setAttribute("height", String(bandHeight + 82))
-      svg.setAttribute("viewBox", `-26 -56 ${result.sceneWidth + 52} ${bandHeight + 82}`)
+      svg.setAttribute("viewBox", `-26 -56 ${width} ${bandHeight + 82}`)
       svg.style.left = "-26px"
       svg.style.top = "-56px"
     }
@@ -242,7 +282,12 @@ export default function DigitalThreadCanvas({
       path.style.opacity = inWindow ? "" : "0.06"
       dot.style.opacity = path.style.opacity
       if (label) {
-        const midX = (from.x + geometry.laneWidth + to.x) / 2
+        // An intra-lane edge bows into the gutter beside its lane, so its label follows it there. Taking the
+        // midpoint of the two endpoints would put the word in the middle of the lane, on top of the very cards
+        // the edge is drawn between.
+        const midX = isIntraLane(from, to)
+          ? from.x + geometry.laneWidth + 30
+          : (from.x + geometry.laneWidth + to.x) / 2
         const midY = (from.y + to.y) / 2 + geometry.anchor - 6
         label.setAttribute("x", String(midX))
         label.setAttribute("y", String(midY))
@@ -333,8 +378,12 @@ export default function DigitalThreadCanvas({
     offsets.current = [...synced]
     targets.current = [...synced]
 
+    // A caller-supplied set wins, but the selection is always in it: framing a set that omits the record the
+    // reader just selected would move the board off the very thing it is about.
+    const wanted = frameIds?.length ? new Set<string>([selectedId, ...frameIds]) : linked
+
     const next = frameNodes(
-      [...linked],
+      [...wanted],
       nodes,
       counts,
       box,
@@ -347,7 +396,7 @@ export default function DigitalThreadCanvas({
     paint()
     const timer = window.setTimeout(() => sceneRef.current?.classList.remove("is-easing"), 420)
     return () => window.clearTimeout(timer)
-  }, [counts, edges, frame, nodes, paint, selectedId])
+  }, [counts, edges, frame, frameIds, nodes, paint, selectedId])
 
   useEffect(
     () => () => {
