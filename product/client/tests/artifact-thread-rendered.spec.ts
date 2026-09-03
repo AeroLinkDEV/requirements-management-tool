@@ -121,19 +121,52 @@ test.describe("the six-lane model on screen", () => {
     await expect(page.locator('.dtaCard:has-text("FMS-1.5.0")')).toBeVisible()
   })
 
-  test("every lane is on screen when the thread first opens", async ({ page }) => {
+  /**
+   * This asserted that every lane was horizontally on screen at the automatic landing. #880 §10.1 — and the
+   * product ruling on this PR — make automatic landing legibility authoritative, and the two cannot both hold:
+   * a six-lane thread is 1716 scene units, so showing every lane at 1280px caps the landing zoom at 0.714,
+   * which renders card type at roughly 10px. The narrow supersession is that automatic landing no longer has
+   * to fit the board horizontally. Everything else this was protecting still does hold, and is asserted here:
+   * every lane exists, in order, and every one of them is reachable.
+   */
+  test("every lane is present and reachable when the thread first opens", async ({ page }) => {
     await open(page, "hlr")
 
-    // The view selects the focal record for the reader, so landing framed to one hop would put the result and
-    // the build off the right edge before they had touched anything.
-    const viewport = await page.locator(".dtCanvas").boundingBox()
     const heads = await page.locator(".dtCanvasLaneHead").all()
     expect(heads.length).toBe(6)
-    for (const head of heads) {
-      const box = await head.boundingBox()
-      expect(box).not.toBeNull()
-      expect(box!.x).toBeGreaterThanOrEqual(viewport!.x - 1)
-      expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.x + viewport!.width + 1)
+
+    // Landing is legible, which is what the horizontal fit was traded for.
+    const tier = await page.locator(".dtCanvasScene").getAttribute("data-tier")
+    expect(tier, "an automatic landing opens in the detailed tier").toBe("2")
+
+    // Every lane is reachable: the board pans, and the last lane comes into view without the reader zooming.
+    const viewport = (await page.locator(".dtCanvas").boundingBox())!
+    const lastHead = page.locator(".dtCanvasLaneHead").last()
+    const before = (await lastHead.boundingBox())!
+    await page.mouse.move(viewport.x + viewport.width - 60, viewport.y + viewport.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(viewport.x + 60, viewport.y + viewport.height / 2, { steps: 12 })
+    await page.mouse.up()
+    await page.waitForTimeout(300)
+    const after = (await lastHead.boundingBox())!
+    expect(after.x, "panning brings the far lanes in").toBeLessThan(before.x)
+    expect(after.x + after.width).toBeLessThanOrEqual(viewport.x + viewport.width + 1)
+  })
+
+  test("an explicit Fit shows the whole board, which automatic landing no longer has to", async ({ page }) => {
+    await open(page, "hlr")
+
+    // §6.1: the reader asking for the whole board gets the whole board, and may go below the landing floor
+    // to get it — that is the deliberate zoom-out §10.1 permits.
+    await page.locator(".dtCanvas").focus()
+    await page.keyboard.press("0")
+    await page.waitForTimeout(400)
+
+    const viewport = (await page.locator(".dtCanvas").boundingBox())!
+    for (const head of await page.locator(".dtCanvasLaneHead").all()) {
+      const box = (await head.boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(viewport.x - 1)
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport.x + viewport.width + 1)
     }
   })
 
@@ -428,13 +461,22 @@ test.describe("shared canvas behaviour", () => {
     expect(await zoomOf()).toBe(out)
     expect(out).toBeGreaterThanOrEqual(0.58)
 
-    // `0` refits the board. It does not return to the landing zoom and should not: landing frames the traced
-    // web inside the area the panel leaves, which is a smaller box than the board itself.
+    // `0` refits the board, and is explicitly *not* held to the landing floor: §6.1 asks it to fit the whole
+    // board and §10.1 permits that to be sub-floor, because the reader asked for it. It therefore need not
+    // return to the landing zoom, and on a wide board it deliberately does not.
     await page.keyboard.press("0")
     await page.waitForTimeout(300)
     const refit = await zoomOf()
     expect(refit).toBeGreaterThan(out)
-    expect(refit).toBeGreaterThanOrEqual(fit)
+    const fitsWidth = await page.evaluate(() => {
+      const scene = document.querySelector(".dtCanvasScene") as HTMLElement
+      const canvas = document.querySelector(".dtCanvas") as HTMLElement
+      const box = scene.getBoundingClientRect()
+      const host = canvas.getBoundingClientRect()
+      return box.left >= host.left - 1 && box.right <= host.right + 1
+    })
+    expect(fitsWidth, "an explicit Fit puts the whole board inside the canvas").toBeTruthy()
+    void fit
   })
 
   test("a density tier drops card content instead of shrinking it", async ({ page }) => {
@@ -491,30 +533,79 @@ test.describe("shared canvas behaviour", () => {
 
       const panel = (await page.locator(".dtaPanel").boundingBox())!
 
-      // Every visible card the panel's own rows name as a **direct** link must sit clear of the panel.
+      /**
+       * Every direct link the panel names must be **drawn** and clear of the panel.
+       *
+       * The prototype's `checks.js` treats an absent direct link as a failure, and so does this. Skipping a
+       * link that is not currently drawn would let the guarantee be satisfied by hiding the record instead of
+       * fitting it — the same failure wearing a different face, and the one that slipped through once the
+       * canvas began fading cards outside the free frame horizontally.
+       */
+      const canvas = (await page.locator(".dtCanvas").boundingBox())!
       const names = await page.locator(".dtaRel button:not(.is-far) > span > span").allInnerTexts()
       expect(names.length).toBeGreaterThan(0)
       for (const name of names) {
-        // A card rolled out of its lane window is drawn at zero opacity, which Playwright still calls visible,
-        // so it is excluded explicitly: it is not something the panel can be covering.
-        const card = page
-          .locator(`.dtCanvasNode:not(.is-offscreen):has(.dtaCard:has-text("${name}"))`)
-          .first()
-        if ((await card.count()) === 0) continue
-        const box = await card.boundingBox()
-        if (!box) continue
+        const card = page.locator(`.dtCanvasNode:has(.dtaCard:has-text("${name}"))`).first()
+        expect(await card.count(), `${name} is a direct link and must be on the board`).toBeGreaterThan(0)
+        await expect(card, `${name} is hidden rather than fitted beside the ${mode} panel`)
+          .not.toHaveClass(/is-offscreen/)
+
+        const box = (await card.boundingBox())!
         const clear =
           box.x + box.width <= panel.x + 1 ||
           box.x >= panel.x + panel.width - 1 ||
           box.y + box.height <= panel.y + 1 ||
           box.y >= panel.y + panel.height - 1
         expect(clear, `${name} is underneath the ${mode} panel`).toBe(true)
+        // And inside the board's own area, so "clear of the panel" cannot be met by being off-canvas.
+        expect(box.x, `${name} starts outside the canvas`).toBeGreaterThanOrEqual(canvas.x - 1)
+        expect(box.x + box.width, `${name} ends outside the canvas`)
+          .toBeLessThanOrEqual(canvas.x + canvas.width + 1)
       }
     }
   })
 })
 
 test.describe("keyboard access", () => {
+  /**
+   * Tab across the lanes of a board that no longer fits.
+   *
+   * #880 §10.1 makes the automatic landing legible rather than width-fitting, so a six-lane thread lands wider
+   * than the viewport and the far lanes start outside the free frame — the same frame `paint()` uses, which
+   * already excludes whatever a docked panel covers. A card outside it is drawn at opacity 0. The tab stop and
+   * the fade are therefore the same question, and answering them differently put a `tabIndex=0` on an
+   * invisible card: §6.9's focus trap exactly. Every lane must stay reachable, and every stop must be visible
+   * by the time focus rests on it.
+   */
+  test("tabbing across lanes never rests focus on a card the canvas has hidden", async ({ page }) => {
+    await open(page, "hlr")
+
+    const canvas = (await page.locator(".dtCanvas").boundingBox())!
+    await page.locator('[data-node-id][tabindex="0"]').first().focus()
+
+    const lanes = new Set<string>()
+    for (let hop = 0; hop < 8; hop += 1) {
+      const focused = page.locator("[data-node-id]:focus")
+      await expect(focused).toHaveCount(1)
+      // Revealed, not merely remembered: the card focus landed on is drawn and inside the canvas.
+      await expect(focused).not.toHaveClass(/is-offscreen/)
+      const box = (await focused.boundingBox())!
+      expect(box.x, "a focused card starts inside the canvas").toBeGreaterThanOrEqual(canvas.x - 1)
+      expect(box.x + box.width, "a focused card ends inside the canvas")
+        .toBeLessThanOrEqual(canvas.x + canvas.width + 1)
+      expect(box.y).toBeGreaterThanOrEqual(canvas.y - 1)
+      expect(box.y + box.height).toBeLessThanOrEqual(canvas.y + canvas.height + 1)
+      lanes.add((await focused.getAttribute("data-node-id"))!)
+
+      await page.keyboard.press("Tab")
+      await page.waitForTimeout(250)
+      if ((await page.locator("[data-node-id]:focus").count()) === 0) break
+    }
+
+    // And Tab really did cross lanes rather than sitting on one card.
+    expect(lanes.size, "Tab should reach more than one lane").toBeGreaterThan(1)
+  })
+
   test("cards are reachable and activate, and each lane holds one tab stop", async ({ page }) => {
     await open(page, "hlr")
 
@@ -574,9 +665,11 @@ test.describe("suspect meaning survives the density tiers", () => {
   test("the suspect word is visible at the tier a six-lane thread lands on", async ({ page }) => {
     await open(page, "hlr")
 
-    // A full six-lane thread lands around 0.642, which is tier 1 — the tier that hides the meta row on
-    // unselected cards. The word must survive that, or a suspect record arrives carrying only amber.
-    await expect(page.locator(".dtCanvasScene")).toHaveAttribute("data-tier", "1")
+    // A six-lane thread used to land at roughly 0.642, in tier 1. Automatic landings are now held to the
+    // §10.1 legibility floor, so it lands in tier 2 instead. The guarantee is unchanged and is what matters:
+    // the suspect *word* survives whatever tier the reader is in, or a suspect record arrives carrying only
+    // amber. Tier 1 and tier 0 are covered by the two tests that follow.
+    await expect(page.locator(".dtCanvasScene")).toHaveAttribute("data-tier", "2")
 
     const suspect = page.locator('.dtCanvasNode:has(.dtaCard:has-text("HLRTP-000120.00"))')
     await expect(suspect.locator(".dtaCard")).not.toHaveClass(/is-selected/)
@@ -584,6 +677,24 @@ test.describe("suspect meaning survives the density tiers", () => {
 
     // Its own state pill is truthful and is not the suspect signal: suspectness is a fact about the link.
     await expect(suspect.locator(".dtaPill")).toHaveText("Approved")
+  })
+
+  /**
+   * The tier that hides the meta row on unselected cards. It used to be the landing tier, so landing covered
+   * it; now that landing is held to the legibility floor it is reached by the reader zooming out, which is
+   * exactly the case §10.1 permits — and the case where the suspect word matters most, because there is less
+   * else on the card.
+   */
+  test("the suspect word survives the compact tier the reader zooms out to", async ({ page }) => {
+    await open(page, "hlr")
+    await page.locator(".dtCanvas").focus()
+    for (let index = 0; index < 3; index += 1) await page.keyboard.press("-")
+    await page.waitForTimeout(400)
+
+    await expect(page.locator(".dtCanvasScene")).toHaveAttribute("data-tier", "1")
+    await expect(
+      page.locator('.dtCanvasNode:has(.dtaCard:has-text("HLRTP-000120.00")) .dtaSuspectFlag b'),
+    ).toBeVisible()
   })
 
   test("it stays visible at the detailed tier too", async ({ page }) => {
@@ -767,13 +878,38 @@ test.describe("a rolled lane survives a re-render", () => {
     // The framing guard keys on what is being framed, and the free area is part of that. Leaving the dock out
     // of that key meant switching sides skipped the reframe, and the panel settled on a linked record — the
     // §6.6 failure the whole mechanism exists to prevent.
+    //
+    // Driven at 1920 deliberately. Since the §10.1 landing floor stopped the board zooming out to fit, a side
+    // dock at 1280 cannot leave room for this thread's direct links, so the panel correctly refuses the side
+    // and stays at the bottom — no dock change, and therefore nothing for a reframe to do. The width where
+    // the side *is* honoured is where this guard can actually be observed.
+    await page.setViewportSize({ width: 1920, height: 900 })
     await open(page, "hlr")
     const before = await page.locator(".dtCanvasScene").getAttribute("style")
 
     await page.locator(".dtaPanelTools button:text-is('Right')").click()
     await page.waitForTimeout(700)
 
+    await expect(page.locator(".dtaPanel")).toHaveClass(/dtaPanel-right/)
     expect(await page.locator(".dtCanvasScene").getAttribute("style")).not.toBe(before)
+  })
+
+  test("a side dock that cannot hold the direct links gives way to one that can", async ({ page }) => {
+    // The other half of the same rule, at a width where the side cannot be honoured. §6.6 outranks the dock
+    // preference: rather than a linked record vanishing to keep the panel on the right, the panel moves.
+    await open(page, "hlr")
+
+    await page.locator(".dtaPanelTools button:text-is('Right')").click()
+    await page.waitForTimeout(700)
+
+    await expect(page.locator(".dtaPanel")).toHaveClass(/dtaPanel-bottom/)
+    // And the direct links are drawn, which is the thing the dock moved to protect.
+    const names = await page.locator(".dtaRel button:not(.is-far) > span > span").allInnerTexts()
+    expect(names.length).toBeGreaterThan(0)
+    for (const name of names) {
+      await expect(page.locator(`.dtCanvasNode:has(.dtaCard:has-text("${name}"))`).first())
+        .not.toHaveClass(/is-offscreen/)
+    }
   })
 })
 

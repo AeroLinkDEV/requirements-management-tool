@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react"
 import DigitalThreadCanvas from "./DigitalThreadCanvas"
+import { usePanelDock } from "./digitalThreadPanelDock"
 import ExactArtifactLink from "./ExactArtifactLink"
 import {
   type CanvasEdge,
@@ -63,7 +64,17 @@ export type DigitalThreadInsideChangeProps = {
   loading?: boolean
   error?: string | null
   onRetry?: () => void
-  hrefFor?: (record: { id: string; displayNumber: string }) => string | undefined
+  /**
+   * Exact route for one card.
+   *
+   * Takes the card's authoritative kind and both identities, not a bare id: #880 §11.3 requires every
+   * identifier the canvas renders to keep exact-revision behaviour, and a route chosen without the kind
+   * addresses a Case, an execution and a change request as though they were the same record.
+   */
+  hrefFor?: (record: {
+    id: string; kind: string; displayNumber?: string | null; level?: string | null
+    artifactId?: string | null; buildId?: string | null
+  }) => string | undefined
   /** Opens a different change request in place, from the lane-0 register. */
   onOpenChange?: (node: NetworkNode) => void
   onBackToNetwork?: () => void
@@ -258,6 +269,11 @@ export default function DigitalThreadInsideChange({
    * "Not loaded yet" and "loaded and empty" are different facts, and only the second may compact a lane away.
    * While the payload is unknown, the only populated lane is the register, so compaction would collapse the
    * board to one lane and then expand it as the response landed — the structural jump §6.8 exists to prevent.
+   *
+   * `content` is the content of *this* opened record or nothing: the page resolves it against the record's
+   * own key before handing it over, so a non-null value here can never be the previously opened change's
+   * proposal. That is what makes this test safe to make — it was not, when content and its owner were two
+   * pieces of state that could disagree for a frame.
    */
   const contentKnown = !loading || content !== null
 
@@ -328,7 +344,7 @@ export default function DigitalThreadInsideChange({
    * mechanisms — reframing into what is left, and rolling the lanes to fetch linked records — are the shared
    * canvas's, and it performs both on selection.
    */
-  const dock: ResolvedDock = useMemo(() => {
+  const preferredDock: ResolvedDock = useMemo(() => {
     if (dockPreference !== "auto") return dockPreference
     if (!selectedId) return "right"
     const laneOf = new Map(canvasNodes.map(node => [node.id, node.lane]))
@@ -342,6 +358,9 @@ export default function DigitalThreadInsideChange({
     }
     return resolveDockByLane(selectedLane, linked)
   }, [canvasEdges, canvasNodes, dockPreference, selectedId])
+
+  // Non-occlusion outranks the preference (§6.6), the same contract the other two views keep.
+  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${selectedId ?? ""}:${dockPreference}`)
 
   /**
    * The frame the board may use. It shrinks by the docked edge, so the canvas never lays a record out
@@ -536,7 +555,7 @@ export default function DigitalThreadInsideChange({
             {hopBadge}
             <div className="dticTop">
               <span className="dticBadge dticLevel">{levelBadge(target.level)}</span>
-              <ExactArtifactLink href={hrefFor?.({ id: target.artifactId, displayNumber: target.displayNumber })} className="dticId">
+              <ExactArtifactLink href={hrefFor?.({ id: target.revisionId, kind: "Requirement", displayNumber: target.displayNumber, level: target.level, artifactId: target.artifactId })} className="dticId">
                 {target.displayNumber}
               </ExactArtifactLink>
             </div>
@@ -567,7 +586,7 @@ export default function DigitalThreadInsideChange({
                 // controlled artifact, so it is rendered as text rather than as an exact link.
                 <span className="dticId">{target.displayNumber || "Unnamed proposal"}</span>
               ) : (
-                <ExactArtifactLink href={hrefFor?.(target)} className="dticId">
+                <ExactArtifactLink href={hrefFor?.({ id: target.revisionId ?? "", kind: "Requirement", displayNumber: target.displayNumber, level: target.level, artifactId: target.id })} className="dticId">
                   {target.displayNumber}
                 </ExactArtifactLink>
               )}
@@ -599,7 +618,7 @@ export default function DigitalThreadInsideChange({
             <div className="dticTop">
               <span className="dticBadge dticLevel">{record.artifactKind === "Case" ? "TC" : "TP"}</span>
               <ExactArtifactLink
-                href={hrefFor?.({ id: record.artifactId, displayNumber: record.displayNumber })}
+                href={hrefFor?.({ id: record.artifactRevisionId, kind: record.artifactKind, displayNumber: record.displayNumber, artifactId: record.artifactId })}
                 className="dticId"
               >
                 {record.displayNumber}
@@ -738,6 +757,7 @@ export default function DigitalThreadInsideChange({
           onHover={setHoveredId}
           tracedEdges={web?.edges}
           frameInset={frameInset}
+          onFramingNeedsRoom={reportNeedsRoom}
           ariaLabel={`Inside ${opened.displayNumber}`}
         />
         {loading ? <div className="dticLoading">Loading what this change proposes…</div> : null}

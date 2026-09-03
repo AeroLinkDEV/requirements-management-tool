@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import DigitalThreadCanvas from "./DigitalThreadCanvas"
 import ExactArtifactLink from "./ExactArtifactLink"
 import { type CanvasNode, resolveDockByLane, trace } from "./digitalThreadGeometry"
+import { usePanelDock } from "./digitalThreadPanelDock"
 import { stateLabel } from "./presentation"
 import { traceRelationLabel } from "./tracePresentation"
 import {
@@ -187,7 +188,7 @@ export default function DigitalThreadArtifact({
   )
 
   /** The panel docks on the side holding fewer of the selected record's direct links, per #880 §6.6. */
-  const dock: ResolvedDock = useMemo(() => {
+  const preferredDock: ResolvedDock = useMemo(() => {
     if (dockPreference !== "auto") return dockPreference
     if (!selected) return "right"
     const lane = laneOfNode.get(selected.id) ?? 0
@@ -196,6 +197,9 @@ export default function DigitalThreadArtifact({
       .filter((value): value is number => value !== undefined)
     return resolveDockByLane(lane, linkedLanes)
   }, [directLinks, dockPreference, laneOfNode, selected])
+
+  // Non-occlusion outranks the preference: a linked record must not vanish to honour a side (§6.6).
+  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${selectedId ?? ""}:${dockPreference}`)
 
   // The canvas must not lay records out under the panel, so the frame it may use shrinks by the dock.
   const frameInset = useMemo(
@@ -478,6 +482,7 @@ export default function DigitalThreadArtifact({
           frameInset={frameInset}
           tracedEdges={web?.edges}
           frameIds={framedForFocal}
+          onFramingNeedsRoom={reportNeedsRoom}
           ariaLabel={
             focal ? `Artifact thread for ${identityLabel(focal)}` : "Artifact thread"
           }

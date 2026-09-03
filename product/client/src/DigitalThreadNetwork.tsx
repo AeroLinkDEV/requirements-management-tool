@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import DigitalThreadCanvas from "./DigitalThreadCanvas"
+import { usePanelDock } from "./digitalThreadPanelDock"
 import ExactArtifactLink from "./ExactArtifactLink"
 import { type CanvasEdge, type CanvasNode, compactLanes, trace } from "./digitalThreadGeometry"
 import { stateLabel } from "./presentation"
@@ -49,6 +50,15 @@ export type DigitalThreadNetworkProps = {
    * this from Project context already, so it is passed rather than fetched again.
    */
   orderedLevels?: readonly string[]
+  /**
+   * The record the address names, which the board must arrive already showing.
+   *
+   * #880 §4.4 is explicit that a deep link lands in the same state as if the reader had clicked the card
+   * themselves: selected, its whole web traced, the detail panel open and its lane rolled into view. Merely
+   * drawing the named card somewhere on the board is not arrival. Adopted only when this build's projection
+   * actually contains it, so a record this build does not carry stays unselected rather than being guessed at.
+   */
+  focalId?: string
   /** Exact route for a record, when the current workspace can open it. Absent renders non-openable. */
   hrefFor?: (node: NetworkNode) => string | undefined
   /** Opens the change inside its own view. Slice 4 supplies this. */
@@ -68,11 +78,18 @@ export default function DigitalThreadNetwork({
   error = null,
   onRetry,
   orderedLevels,
+  focalId,
   hrefFor,
   onOpenChange,
   buildLabel,
 }: DigitalThreadNetworkProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focalId) return
+    // Membership decides. A well-formed id that belongs to nothing in this build must not select a card, and
+    // must not select some *other* card either — the board says nothing rather than something wrong.
+    setSelectedId(projection?.nodes.some(node => node.id === focalId) ? focalId : null)
+  }, [focalId, projection])
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [dockPreference, setDockPreference] = useState<PanelDock>("bottom")
   const [query, setQuery] = useState("")
@@ -151,10 +168,15 @@ export default function DigitalThreadNetwork({
    * Which side the panel takes. It counts where the selected record's direct links actually are and docks on
    * the emptier one, so the panel is never covering the thing the highlighted edge points at.
    */
-  const dock: ResolvedDock = useMemo(() => {
+  const preferredDock: ResolvedDock = useMemo(() => {
     if (dockPreference !== "auto") return dockPreference
     return selected ? resolveDock(selected, directLinks, byId, model) : "right"
   }, [byId, directLinks, dockPreference, model, selected])
+
+  // Non-occlusion outranks the preference (§6.6), the same contract the artifact thread keeps: when a side
+  // cannot leave room for the selection and its direct links at the landing floor, the panel moves rather
+  // than a linked record being hidden.
+  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${selectedId ?? ""}:${dockPreference}`)
 
   // The canvas must not lay records out under the panel, so the frame it may use shrinks by the dock.
   const frameInset = useMemo(
@@ -368,6 +390,7 @@ export default function DigitalThreadNetwork({
           onSelect={setSelectedId}
           onHover={setHoveredId}
           frameInset={frameInset}
+          onFramingNeedsRoom={reportNeedsRoom}
           tracedEdges={web?.edges}
           ariaLabel="Change network for this build"
         />

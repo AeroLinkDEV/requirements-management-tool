@@ -68,6 +68,13 @@ export type DigitalThreadCanvasProps = {
    * before the reader has touched anything. A caller that knows the whole web is the answer passes it here.
    */
   frameIds?: readonly string[]
+  /**
+   * The free area this dock leaves cannot hold the selection and its direct links at the legibility floor.
+   *
+   * The view answers by re-docking the panel somewhere that can. §6.6 requires every direct link to be drawn
+   * and clear of the panel; when the two cannot both hold on this side, the panel is what moves.
+   */
+  onFramingNeedsRoom?: () => void
   ariaLabel?: string
 }
 
@@ -93,6 +100,7 @@ export default function DigitalThreadCanvas({
   frameInset,
   tracedEdges,
   frameIds,
+  onFramingNeedsRoom,
   ariaLabel = "Digital Thread canvas",
 }: DigitalThreadCanvasProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -282,9 +290,24 @@ export default function DigitalThreadCanvas({
       if (!card) continue
       card.style.transform = `translate(${position.x}px,${position.y}px)`
       card.style.width = `${geometry.laneWidth}px`
+      /**
+       * A card is drawn while it is inside its lane's window *and* inside the area the board actually has.
+       *
+       * The horizontal half of this is new, and it is the same rule rather than a second one. `box` already
+       * excludes whatever a docked detail panel is covering, so a card outside it horizontally is a card the
+       * reader cannot use — and leaving it drawn is precisely the §6.6 failure of a linked record sitting
+       * underneath the panel. Since the §10.1 landing floor forbids zooming out to make a wide web fit beside
+       * the panel, some cards genuinely cannot be brought into that area, and the honest treatment is the one
+       * a rolled-out card already gets: faded, not tabbable, not pretending to be readable.
+       */
+      const left = position.x * transform.current.zoom + transform.current.x
+      const right = left + geometry.laneWidth * transform.current.zoom
+      // Wholly inside, not merely overlapping: a card straddling the panel edge is still a card the panel is
+      // covering, and §6.6 admits no partial version of that.
+      const inFrame = left >= box.x - 1 && right <= box.x + box.width + 1
       card.classList.toggle(
         "is-offscreen",
-        !isVisible(position.y, geometry, bandHeight) && selectedId !== node.id,
+        (!isVisible(position.y, geometry, bandHeight) || !inFrame) && selectedId !== node.id,
       )
       // The density rules exempt the selected card from compaction, and they key off this class on the node
       // element. Without it the exemption silently never applied and a selected card compacted with the rest.
@@ -296,14 +319,26 @@ export default function DigitalThreadCanvas({
     // out of its window must lose the stop, or a keyboard user tabs into something faded out and unreachable
     // by eye. Opacity and pointer-events do not remove an element from the tab order — only tabindex does.
     for (const [lane, bucket] of byLaneRef.current) {
-      const visible = bucket.filter(candidate => {
+      /**
+       * Drawn means vertically inside the lane window *and* horizontally inside the free frame, the same
+       * two-part rule the fade above uses. Using only the vertical half let Tab land on a card the canvas had
+       * hidden horizontally — a stop at opacity 0, which is the focus trap §6.9 forbids.
+       */
+      const drawn = bucket.filter(candidate => {
         const position = positions.get(candidate.id)
-        return position ? isVisible(position.y, geometry, bandHeight) : false
+        if (!position) return false
+        const left = position.x * transform.current.zoom + transform.current.x
+        const right = left + geometry.laneWidth * transform.current.zoom
+        return isVisible(position.y, geometry, bandHeight)
+          && left >= box.x - 1 && right <= box.x + box.width + 1
       })
       const remembered = rovingRef.current[lane]
       const stop =
-        (remembered && visible.some(candidate => candidate.id === remembered) ? remembered : null) ??
-        visible[0]?.id ??
+        (remembered && drawn.some(candidate => candidate.id === remembered) ? remembered : null) ??
+        drawn[0]?.id ??
+        // A lane entirely outside the free frame keeps a stop rather than losing it: dropping it would make
+        // that lane unreachable by keyboard, and `onFocus` reveals the card before focus rests on it.
+        bucket[0]?.id ??
         null
       for (const candidate of bucket) {
         const card = cardRefs.current.get(candidate.id)
@@ -380,10 +415,26 @@ export default function DigitalThreadCanvas({
     animation.current = requestAnimationFrame(tick)
   }, [paint])
 
-  const fit = useCallback(() => {
+  /**
+   * Land the board.
+   *
+   * Two callers with different rules, so they are two functions rather than one with a hidden meaning.
+   * `land()` is what the product does on arrival and on a re-fit the reader did not ask for, and #880 §10.1
+   * holds it to the legibility floor. `fitAll()` is the reader explicitly asking to see the whole board —
+   * keyboard `0`, or double-clicking empty canvas — and may pull back past that floor into the compact and
+   * dense tiers, because shedding detail is exactly what they asked for.
+   */
+  const land = useCallback(() => {
     const box = frame()
     if (!box) return
     transform.current = fitTransform(box, counts)
+    paint()
+  }, [counts, frame, paint])
+
+  const fitAll = useCallback(() => {
+    const box = frame()
+    if (!box) return
+    transform.current = fitTransform(box, counts, false)
     paint()
   }, [counts, frame, paint])
 
@@ -425,8 +476,51 @@ export default function DigitalThreadCanvas({
       offsets.current = [...synced]
       targets.current = [...synced]
 
-      const next = frameNodes(target.wanted, nodes, counts, box, offsets.current, target.selectedId)
+      /**
+       * Frame the requested set, and fall back to the selection and one hop when it will not fit.
+       *
+       * Framing may no longer zoom out past the §10.1 landing floor to make a wide web fit, so on a narrow
+       * viewport — or with the panel docked to a side — the whole traced web can be wider than the area the
+       * panel leaves. Pinning it anyway pushes its far cards under the panel, which is exactly what §6.6
+       * forbids. The wide-web framing is a landing convenience; non-occlusion is a guarantee, so when the two
+       * cannot both hold the convenience gives way and the board frames the smaller set that does fit.
+       */
+      const fits = (transform: { x: number; zoom: number }, ids: readonly string[]): boolean => {
+        const wanted = new Set(ids)
+        for (const node of nodes) {
+          if (!wanted.has(node.id)) continue
+          const { x } = nodePosition(node, result.geometry, offsets.current)
+          const left = x * transform.zoom + transform.x
+          const right = left + result.geometry.laneWidth * transform.zoom
+          if (left < box.x - 1 || right > box.x + box.width + 1) return false
+        }
+        return true
+      }
+
+      const hop = new Set<string>([target.selectedId])
+      for (const edge of edges) {
+        if (edge.from === target.selectedId) hop.add(edge.to)
+        if (edge.to === target.selectedId) hop.add(edge.from)
+      }
+
+      let next = frameNodes(target.wanted, nodes, counts, box, offsets.current, target.selectedId)
+      if (next && target.wanted.length > 1 && !fits(next, target.wanted)) {
+        const narrower = frameNodes([...hop], nodes, counts, box, offsets.current, target.selectedId)
+        if (narrower) next = narrower
+      }
       if (!next) return false
+
+      /**
+       * The selection and every direct link must actually be drawn, wholly inside the free area.
+       *
+       * §6.6 is a guarantee, not a preference, and it survived the Option-A ruling untouched. Hiding a linked
+       * record that will not fit satisfies "not underneath the panel" only by making it not present, which is
+       * the same failure wearing a different face. When the free area this dock leaves cannot hold the
+       * one-hop set at the legibility floor, the panel has to move rather than the record disappear — so the
+       * canvas says so and the view re-docks. Reported rather than decided here: the canvas owns geometry,
+       * the view owns where its own panel may go.
+       */
+      if (!fits(next, [...hop])) onFramingNeedsRoom?.()
 
       sceneRef.current?.classList.add("is-easing")
       transform.current = next
@@ -455,7 +549,7 @@ export default function DigitalThreadCanvas({
       const signature = `${Math.round(rect.width)}x${Math.round(rect.height)}x${countsKey}`
       if (signature !== frameSignature.current) {
         frameSignature.current = signature
-        fit()
+        land()
       }
 
       // A selection can arrive while the host frame is still unsettled — a freshly mounted panel or a preview
@@ -478,7 +572,7 @@ export default function DigitalThreadCanvas({
       observer?.disconnect()
       window.removeEventListener("resize", measure)
     }
-  }, [applyFraming, countsKey, fit])
+  }, [applyFraming, countsKey, land])
 
   useEffect(() => {
     paint()
@@ -650,6 +744,46 @@ export default function DigitalThreadCanvas({
    * Moving focus without rolling would leave a keyboard user on a card that is faded out and unreachable by
    * eye, which is the failure #880 §6.9 calls out.
    */
+  /**
+   * Bring one card fully into view: roll its lane, and pan the camera to its lane.
+   *
+   * Both halves are needed, and each was missing once. Rolling answers "is it inside its lane window";
+   * since #880 §10.1 holds automatic landings to the legibility floor, a board can be wider than the
+   * viewport, so the lane itself can sit outside the free frame and the camera has to travel as well. §6.9
+   * is that focus never rests on a card the reader cannot see, and that has to hold however focus arrived —
+   * by arrow within a lane, or by Tab across lanes.
+   */
+  const reveal = useCallback(
+    (node: CanvasNode) => {
+      const result = geometryRef.current
+      if (!result) return
+      const revealed = offsetToReveal(
+        node.row,
+        result.geometry,
+        result.bandHeight,
+        offsets.current[node.lane] ?? 0,
+      )
+      // Never past what the lane can actually roll, or the lane would scroll off its own content.
+      targets.current[node.lane] = Math.max(result.laneMinimums[node.lane] ?? 0, revealed)
+      // Setting the target is not moving the lane. The easing loop was only ever started by the pointer
+      // scrub, so keyboard navigation set a target nothing consumed — rolling appeared to work only while
+      // the card it moved to happened to need no roll at all.
+      settle()
+
+      const box = frame()
+      if (!box) return
+      const { x } = nodePosition(node, result.geometry, offsets.current)
+      const left = x * transform.current.zoom + transform.current.x
+      const right = left + result.geometry.laneWidth * transform.current.zoom
+      const margin = 16
+      if (left < box.x + margin) transform.current.x += box.x + margin - left
+      else if (right > box.x + box.width - margin) transform.current.x -= right - (box.x + box.width - margin)
+      paint()
+    },
+    [frame, paint, settle],
+  )
+
+  /** Arrow navigation within a lane, revealing the card it moves to. */
   const moveWithinLane = useCallback(
     (node: CanvasNode, delta: number) => {
       const bucket = byLane.get(node.lane)
@@ -658,20 +792,10 @@ export default function DigitalThreadCanvas({
       const next = bucket[Math.min(bucket.length - 1, Math.max(0, index + delta))]
       if (!next || next.id === node.id) return
       setRoving(current => ({ ...current, [node.lane]: next.id }))
-      const result = geometryRef.current
-      if (result) {
-        const revealed = offsetToReveal(
-          next.row,
-          result.geometry,
-          result.bandHeight,
-          offsets.current[node.lane] ?? 0,
-        )
-        // Never past what the lane can actually roll, or the lane would scroll off its own content.
-        targets.current[node.lane] = Math.max(result.laneMinimums[node.lane] ?? 0, revealed)
-      }
+      reveal(next)
       cardRefs.current.get(next.id)?.focus()
     },
-    [byLane],
+    [byLane, reveal],
   )
 
   const onKeyDown = useCallback(
@@ -679,7 +803,7 @@ export default function DigitalThreadCanvas({
       const box = frame()
       if (!box) return
       if (event.key === "0") {
-        fit()
+        fitAll()
       } else if (event.key === "+" || event.key === "=" || event.key === "-") {
         transform.current = zoomAbout(
           transform.current,
@@ -696,7 +820,7 @@ export default function DigitalThreadCanvas({
       }
       event.preventDefault()
     },
-    [counts, fit, frame, onSelect, paint],
+    [counts, fitAll, frame, onSelect, paint],
   )
 
   edgeRefs.current = []
@@ -712,7 +836,7 @@ export default function DigitalThreadCanvas({
       onPointerDown={onPointerDown}
       onKeyDown={onKeyDown}
       onDoubleClick={event => {
-        if (!(event.target as HTMLElement).closest("[data-node-id]")) fit()
+        if (!(event.target as HTMLElement).closest("[data-node-id]")) fitAll()
       }}
     >
       <div className="dtCanvasScene" ref={sceneRef}>
@@ -780,7 +904,14 @@ export default function DigitalThreadCanvas({
               tabIndex={rovingFor(node.lane) === node.id ? 0 : -1}
               role="button"
               aria-pressed={selectedId === node.id}
-              onFocus={() => setRoving(current => ({ ...current, [node.lane]: node.id }))}
+              // Tab across lanes reveals too, not only arrows within one. A lane's stop can be outside the
+              // free frame on a board wider than the viewport, and #880 §6.9 does not care how focus got
+              // there: it must not rest on a card the reader cannot see. Revealing rather than dropping the
+              // stop keeps every lane reachable by keyboard, which removing it would not.
+              onFocus={() => {
+                setRoving(current => ({ ...current, [node.lane]: node.id }))
+                reveal(node)
+              }}
               onKeyDown={event => {
                 if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                   event.preventDefault()

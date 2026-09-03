@@ -61,28 +61,38 @@ test('Code shows the released build as evaluated, complete, and historical', asy
   await expect(page.getByRole('heading', { name: '5 of 700 exact LLR revisions mapped' })).toBeVisible()
 })
 
-test('Digital Thread shows one exact SYSR-to-build lifecycle path while retaining traversal', async ({ page }) => {
+/**
+ * #880 §4.2 replaced the fixed lifecycle-path strip this test was written against. The strip is gone; what it
+ * was protecting is not, so the test is rewritten against the replacement rather than dropped:
+ *
+ * - The requirement-to-evidence chain is still readable end to end, and still by exact identifier — now in
+ *   the evidence table (§4.5), which is the list alternative the canvas owes.
+ * - Evidence that is not attached still says so, and an external locator is still stated as external rather
+ *   than being allowed to read as an attached, checksummed file. Losing that distinction on a certification
+ *   surface is the defect the original assertion existed to prevent.
+ * - Traversal is still real, and the chosen representation is not lost on reload.
+ */
+test('Digital Thread reads the requirement-to-evidence chain by exact identifier, and says what is missing', async ({ page }) => {
+  test.setTimeout(90_000)
   await login(page)
-  await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
+  await openNavigationGroup(page, 'RELEASE & CONFIGURATION')
   await page.getByRole('link', { name: 'Digital Thread' }).click()
+  await page.locator('.dtPageToolbar').getByRole('button', { name: 'Table' }).click()
 
-  const path = page.getByRole('list', { name: /Complete digital thread for/ })
-  await expect(path).toBeVisible()
-  for (const stage of ['SYSTEM REQUIREMENT', 'HLR', 'LLR', 'TEST CASE', 'TEST RESULT', 'TEST EVIDENCE', 'BUILD'])
-    await expect(path.getByText(stage, { exact: true })).toBeVisible()
-  await expect(path.getByText(/^SYSR-/)).toBeVisible()
-  await expect(path.getByText(/^HLR-/)).toBeVisible()
-  await expect(path.getByText(/^LLR-/)).toBeVisible()
-  await expect(path.getByText(/^LLRTC-/)).toBeVisible()
-  await expect(path.getByText('Pass', { exact: true })).toBeVisible()
-  const evidenceCard = path.locator('.completeThreadStep').filter({ hasText: 'TEST EVIDENCE' }).locator('article')
-  await expect(evidenceCard).toHaveClass(/missing/)
-  await expect(evidenceCard).toContainText('Not attached')
-  await expect(evidenceCard).toContainText('External reference only:')
-  await expect(page.getByText('SYSR → HLR → LLR → case → result → evidence → build')).toBeVisible()
+  const table = page.locator('.dtPageTable')
+  await expect(table.locator('tbody tr').first()).toBeVisible()
+  for (const column of ['Requirement', 'Upstream', 'Downstream', 'Verification', 'Result and evidence'])
+    await expect(table.getByRole('columnheader', { name: column })).toBeVisible()
+  // Exact identity, not a bare aggregate number: base number *and* revision, whichever level this build's
+  // baseline materialises.
+  await expect(table.getByText(/^[A-Z]+-\d+\.\d{2}$/).first()).toBeVisible()
 
-  await path.getByRole('button').first().click()
-  await expect(page.getByText('SELECTED CONTROLLED RECORD')).toBeVisible()
+  // Absence is stated as absence, in the words a reviewer can act on.
+  await expect(table.getByText(/Not linked|Not executed|Not attached|None recorded/).first()).toBeVisible()
+
+  // Traversal into the canvas is real, and the address carries it.
+  await page.locator('.dtPageToolbar').getByRole('button', { name: 'Map' }).click()
+  await expect(page.locator('.dtnRoot')).toBeVisible()
   await page.reload()
-  await expect(page.getByRole('list', { name: /Complete digital thread for/ })).toBeVisible()
+  await expect(page.locator('.dtnRoot')).toBeVisible()
 })

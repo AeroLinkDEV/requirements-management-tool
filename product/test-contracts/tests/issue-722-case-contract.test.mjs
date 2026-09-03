@@ -20,7 +20,10 @@ test('the software Case contract is neutral at the API seam and keeps old aliase
   const problemReports = read('product', 'src', 'AeroLink.Api', 'ProblemReportEndpoints.cs')
   const baselines = read('product', 'src', 'AeroLink.Api', 'BaselineEndpoints.cs')
   const workspace = read('product', 'src', 'AeroLink.Api', 'WorkspaceEndpoints.cs')
-  const lifecycleClient = read('product', 'client', 'src', 'LifecycleExplorer.tsx')
+  // #880 §4.2 replaced LifecycleExplorer with the Digital Thread page. The surface changed; the #722
+  // guarantee did not, so the assertions move to the page that inherited it rather than being dropped: the
+  // client still reads a requirement's verification artifacts by their neutral `artifactRevisionId`.
+  const lifecycleClient = read('product', 'client', 'src', 'DigitalThreadPage.tsx')
 
   assert.match(verification, /artifactId\s*=/)
   assert.match(verification, /artifactKind\s*=/)

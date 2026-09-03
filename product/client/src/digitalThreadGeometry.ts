@@ -55,7 +55,9 @@ export interface CanvasFrame {
 }
 
 const TIERS: Record<DensityTier, { rowPitch: number; cardHeight: number }> = {
-  2: { rowPitch: 112, cardHeight: 82 },
+  // Detailed tier grew to hold a wrapped top row at the 14px landing type (#880 §10.1): identifier and a
+  // long state label on separate lines above a two-line title, rather than one row that overflows.
+  2: { rowPitch: 138, cardHeight: 108 },
   1: { rowPitch: 86, cardHeight: 62 },
   0: { rowPitch: 54, cardHeight: 38 },
 }
@@ -292,12 +294,41 @@ export const wheelFactor = (deltaY: number): number => Math.pow(0.9988, deltaY)
  * Fit reads the width. The vertical is a rolling window, so this deliberately does not try to squeeze a lane
  * of thirty records onto one screen — that is what rolling is for.
  */
+/**
+ * The lowest zoom the board is allowed to *land* at.
+ *
+ * #880 §10.1, as DEC-117 records it, requires every identifier, title and state label to be legible when the
+ * page opens, before the reader has touched anything; text may fall below the readable floor only as a
+ * consequence of the reader deliberately zooming out, where shedding detail is the point.
+ *
+ * Fitting the whole board into the viewport and landing legibly are in direct tension: a seven-lane board is
+ * 2012 scene units wide, so width-fit alone lands near 0.61 at 1280px and renders card text at roughly
+ * two-thirds of its authored size. Legibility wins. The board lands in the detailed tier at a zoom where the
+ * authored card type clears the readable floor, and a board wider than the viewport is panned — which is an
+ * ordinary canvas affordance, and cheaper for a reader than text they cannot read. Double-click still calls
+ * `fit()` for a reader who wants the whole board at once.
+ *
+ * This is the landing floor only. `MIN_ZOOM` remains the floor for zooming the reader performs themselves.
+ */
+export const LANDING_MIN_ZOOM = 0.86
+
 export const fitTransform = (
   frame: CanvasFrame,
   laneCounts: readonly number[],
+  /**
+   * Whether this is a landing or a Fit the reader asked for.
+   *
+   * A landing is held to the legibility floor. An explicit Fit — keyboard `0`, double-clicking empty canvas —
+   * is the reader deliberately choosing to see the whole board, which is precisely the case §10.1 permits to
+   * go below the floor, and the case §6.1 requires actually to fit.
+   */
+  landing = true,
 ): { x: number; y: number; zoom: number } => {
   const width = sceneWidth(laneCounts.length)
-  const zoom = Math.max(minimumZoom(frame, laneCounts), Math.min(1.05, (frame.width - 56) / width))
+  const zoom = Math.max(
+    landing ? LANDING_MIN_ZOOM : MIN_ZOOM,
+    Math.max(minimumZoom(frame, laneCounts), Math.min(1.05, (frame.width - 56) / width)),
+  )
   const { bandHeight } = layout(laneCounts, frame, zoom)
   return {
     zoom,
@@ -360,6 +391,14 @@ export const frameNodes = (
   offsets: readonly number[],
   selectedId: string | null,
   maxZoom = 1.12,
+  /**
+   * Whether this framing is something the product is doing to the reader, or something they asked for.
+   *
+   * Programmatic framing — a deep link arriving, a selection being traced — is a landing, and #880 §10.1
+   * holds landings to the legibility floor. A reader who has explicitly asked to see the whole board is a
+   * different case, and is allowed the wider view.
+   */
+  programmatic = true,
 ): { x: number; y: number; zoom: number } | null => {
   const wanted = new Set(ids)
   /**
@@ -400,6 +439,7 @@ export const frameNodes = (
   if (!want) return null
   const pad = 46
   const zoom = Math.max(
+    programmatic ? LANDING_MIN_ZOOM : MIN_ZOOM,
     minimumZoom(frame, laneCounts),
     Math.min(maxZoom, Math.min((frame.width - pad * 2) / (want.width + 52), (frame.height - pad * 2) / (want.height + 52))),
   )

@@ -58,16 +58,21 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy()
 
   await page.getByRole('link',{name:/Command Center/}).click()
-  await openNavigationGroup(page,'SYSTEMS ENGINEERING')
+  // #880 §4.3 moved the Digital Thread into RELEASE, beside the release and configuration views it belongs
+  // with, and §4.2 reclaimed the header: no eyebrow, no H1, no description sentence, no one-tab strip. The
+  // canvas is the page now, so what is checked here is the canvas and its toolbar rather than the replaced
+  // lifecycle-path strip.
+  await openNavigationGroup(page,'RELEASE & CONFIGURATION')
   await page.getByRole('link',{name:'Digital Thread'}).click()
+  await expect(page.locator('.dtPage')).toBeVisible()
+  await expect(page.getByRole('heading',{name:'Digital Thread'})).toHaveCount(0)
+  await expect(page.locator('.dtnRoot')).toBeVisible()
+  // The evidence table survives the replacement as the list alternative a graph view owes (§4.5), reached
+  // from the representation toggle rather than from a second tab.
+  await page.locator('.dtPageToolbar').getByRole('button',{name:'Table'}).click()
+  await expect(page.locator('.dtPageTable table')).toBeVisible()
+  await expect(page.locator('.dtPageTable tbody tr').first()).toBeVisible()
   await expect(page.getByText('1,250 requirements')).toBeVisible()
-  await expect(page.getByRole('heading',{name:'Digital Thread'})).toBeVisible()
-  await expect(page.locator('.digitalThreadStage')).toBeVisible()
-  await expect(page.getByText('THE QUESTION THIS ANSWERS')).toBeVisible()
-  await page.getByRole('button',{name:'Evidence table'}).click()
-  const traceDetails=page.locator('details.traceDetails')
-  expect(await traceDetails.count()).toBeGreaterThan(0)
-  await expect(traceDetails.first()).not.toHaveAttribute('open','')
 
   // Verification is a fork between pages rather than a workspace with tabs: the question a reader
   // arrives with decides which page they open, and both are named on the way in.

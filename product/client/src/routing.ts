@@ -43,6 +43,33 @@ const historyStateIntent = (value: string | null): HistoryStateIntent | undefine
     ? (value as HistoryStateIntent)
     : undefined;
 
+/** The three views of the one Digital Thread canvas (#880 §5). */
+export type ThreadView = "network" | "inside" | "artifact";
+
+/**
+ * The URL segment that names each artifact-thread focal kind.
+ *
+ * A requirement deliberately has no segment: `/traceability/{id}` already meant a requirement before #880, and
+ * every link in circulation depends on it continuing to. The kind is carried in the address rather than
+ * inferred from the identifier, because #880 forbids reading a record's kind out of its display number and an
+ * opaque id says nothing at all.
+ */
+const THREAD_FOCAL_SEGMENTS: Record<string, string> = {
+  cases: "case",
+  procedures: "procedure",
+  executions: "execution",
+  builds: "build",
+};
+
+const THREAD_SEGMENT_FOR_KIND: Record<string, string> = Object.fromEntries(
+  Object.entries(THREAD_FOCAL_SEGMENTS).map(([segment, kind]) => [kind, segment]),
+);
+
+const threadViewFrom = (query: URLSearchParams): ThreadView | undefined => {
+  const value = query.get("view");
+  return value === "network" || value === "inside" || value === "artifact" ? value : undefined;
+};
+
 export type AppRoute = {
   view: View;
   discipline: Discipline;
@@ -53,6 +80,12 @@ export type AppRoute = {
   releaseId?: string;
   artifactId?: string;
   artifactKind?: string;
+  /// Which of the Digital Thread's three views the address names (#880 §6.5).
+  ///
+  /// In the URL because #880 §6.4 requires the view to survive refresh, back, forward and Copy link, and
+  /// state held only in component memory survives none of them. Absent means "whatever the focal artifact
+  /// implies", so every address that predates the view switch still resolves to the same view it always did.
+  threadView?: ThreadView;
   /// The exact verification artifact revision a trace deep link opens. Immutable, so a procedure/case link
   /// cannot silently fall forward to the release-effective or latest revision after later revisions exist.
   artifactRevisionId?: string;
@@ -203,13 +236,30 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (tail[0] === "documentation-center" && tail[1]) return { ...base, view: "managedDocuments", discipline: "system", artifactId: decoded(tail[1]) };
   if (path === "problem-reports") return { ...base, view: "problemReports", discipline: "system", historicalProblemReportSnapshotId: query.get("snapshotId") || undefined };
   if (tail[0] === "problem-reports" && tail[1]) return { ...base, view: "problemReports", discipline: "system", artifactId: decoded(tail[1]), historicalProblemReportSnapshotId: query.get("snapshotId") || undefined };
-  if (path === "traceability") return { ...base, view: "lifecycle", discipline: "system" };
+  if (path === "traceability")
+    return { ...base, view: "lifecycle", discipline: "system", threadView: threadViewFrom(query) };
   if (tail[0] === "traceability" && tail[1] === "change-requests" && tail[2])
-    return { ...base, view: "lifecycle", discipline: "system", artifactId: decoded(tail[2]), artifactKind: "change-request" };
+    return {
+      ...base, view: "lifecycle", discipline: "system", artifactId: decoded(tail[2]),
+      artifactKind: "change-request", threadView: threadViewFrom(query),
+    };
+  // The five artifact-thread focal kinds of #880 §4.4, each on its own segment so the kind is part of the
+  // address rather than guessed from the identifier. Added beside the two segments that already existed
+  // rather than replacing them: /traceability/{id} keeps meaning a requirement, so every bookmark and every
+  // `Open Digital Thread` link already in circulation resolves exactly as before.
+  if (tail[0] === "traceability" && tail[2] && THREAD_FOCAL_SEGMENTS[tail[1]])
+    return {
+      ...base, view: "lifecycle", discipline: "system", artifactId: decoded(tail[2]),
+      artifactKind: THREAD_FOCAL_SEGMENTS[tail[1]], threadView: threadViewFrom(query),
+    };
   // The focused artifact is part of the address, not just component state. Without it the route rewrote
   // itself to a bare /traceability, the app re-read that URL, and the requirement the reader arrived from
   // was cleared before the thread could open on it.
-  if (tail[0] === "traceability" && tail[1]) return { ...base, view: "lifecycle", discipline: "system", artifactId: decoded(tail[1]) };
+  if (tail[0] === "traceability" && tail[1])
+    return {
+      ...base, view: "lifecycle", discipline: "system", artifactId: decoded(tail[1]),
+      threadView: threadViewFrom(query),
+    };
   if (path === "release-planning") return { ...base, view: "notFound", discipline: "system" };
   if (path === "baselines") return { ...base, view: "baselines", discipline: "system" };
   if (path === "release-readiness" || path === "release-campaign") return { ...base, view: "release", discipline: "system" };
@@ -258,7 +308,7 @@ export const projectConfigurationApprovalsPath = (slug: string) =>
 export const projectConfigurationAssurancePath = (slug: string) =>
   `${projectAreaPath(slug, "projectConfiguration")}/assurance`;
 
-export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent, selectionId?: string, proposalId?: string, artifactRevisionId?: string) {
+export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent, selectionId?: string, proposalId?: string, artifactRevisionId?: string, threadView?: ThreadView) {
   const root = `/programs/${context.programId}/projects/${context.projectId}/releases/${context.releaseId}`;
   const historyPath = (scope: "systems" | "software" | "interfaces") => {
     const path = `${root}/${scope}/change-requests`;
@@ -322,11 +372,22 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "problemReports": return `${root}/problem-reports${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
     case "managedDocuments": return `/programs/${context.programId}/projects/${context.projectId}/documentation-center${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
     case "code": return `${root}/code`;
-    case "lifecycle": return artifactId
-      ? artifactKind === "change-request"
-        ? `${root}/traceability/change-requests/${encodeURIComponent(artifactId)}`
-        : `${root}/traceability/${encodeURIComponent(artifactId)}`
-      : `${root}/traceability`;
+    case "lifecycle": {
+      const segment = artifactKind && artifactKind !== "change-request"
+        ? THREAD_SEGMENT_FOR_KIND[artifactKind]
+        : undefined;
+      const focal = !artifactId
+        ? `${root}/traceability`
+        : artifactKind === "change-request"
+          ? `${root}/traceability/change-requests/${encodeURIComponent(artifactId)}`
+          // A requirement keeps the bare segment it has always had; the other kinds take their own.
+          : segment
+            ? `${root}/traceability/${segment}/${encodeURIComponent(artifactId)}`
+            : `${root}/traceability/${encodeURIComponent(artifactId)}`;
+      // Appended only when the caller names a view, so an address that does not care about it stays exactly
+      // the string it was before the view switch existed.
+      return threadView ? `${focal}?view=${threadView}` : focal;
+    }
     case "planning": return `${root}/release-planning`;
     case "baselines": return `${root}/baselines`;
     case "release": return `${root}/release-readiness`;

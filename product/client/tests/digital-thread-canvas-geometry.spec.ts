@@ -35,11 +35,14 @@ test.describe("digital thread canvas geometry", () => {
     expect(tierFor(1.2)).toBe(2)
     expect(tierFor(0.7)).toBe(1)
     expect(tierFor(0.4)).toBe(0)
-    expect(geometryFor(2).rowPitch).toBe(112)
+    // The detailed tier grew with the #880 §10.1 landing type: a wrapped top row carrying a 14px identifier
+    // and a long state label needs the height. The tiers still differ by pitch rather than by type size,
+    // which is the property this asserts.
+    expect(geometryFor(2).rowPitch).toBe(138)
     expect(geometryFor(1).rowPitch).toBe(86)
     expect(geometryFor(0).rowPitch).toBe(54)
     // The anchor sits at the card's middle so an expanded card cannot drag its edges with it.
-    expect(geometryFor(2).anchor).toBe(41)
+    expect(geometryFor(2).anchor).toBe(54)
   })
 
   test("pulling back fills the freed space with records instead of background", () => {

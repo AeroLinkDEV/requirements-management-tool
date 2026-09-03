@@ -2011,6 +2011,80 @@ Future entries use:
 Findings that cost real time, recorded so they cost it once. These are about how the work is done rather than
 what the product does.
 
+### DEC-117 - The Digital Thread Canvas Is Measured for Legibility at Its Default Zoom, Not in CSS Pixels
+
+- **Date:** 2026-09-03
+- **Status:** Accepted
+- **Decision:** The Digital Thread canvas is a narrow, recorded exception to the product's 12px readability
+  floor. Text inside the scaled canvas subtree — identifiers, titles, meta lines and status pills on the cards
+  — may be authored below 12px. Everything else on the Digital Thread page, and every other surface in the
+  product, remains held to the floor exactly as before.
+- **Rationale:** The product owner accepted the smaller type on 2026-08-31, on the reasoning that this surface
+  can be zoomed. The canvas is drawn at a zoom the reader controls, so a CSS pixel is not what a reader sees:
+  the same 11.5px identifier renders larger or smaller depending on where they have put the board. Its three
+  density tiers deliberately *shed content* as the reader pulls back rather than shrinking the type, so the
+  size a reader encounters is a function of their own zoom, not of the stylesheet. Measuring this surface with
+  a flat CSS-pixel rule would therefore measure the wrong thing, while forcing 12px into a lane of 236px cards
+  would cost the density the whole design exists to provide.
+- **The rule that replaces it:** legibility at the default fit zoom on landing. Every identifier, title and
+  state label must be legible when the page opens, before the reader touches anything. Text may fall below
+  12px effective size only as a consequence of the reader deliberately zooming out, where less detail is the
+  point and the compact and dense tiers have already dropped content. Status meaning — suspect above all —
+  must remain non-colour-coded and readable at every tier, which is why the suspect indicator on a card is
+  anchored outside every density-gated container and carries its word rather than only its amber.
+- **Scope of the exception, deliberately narrow:** `design-system.spec.ts` exempts only elements inside
+  `.dtCanvasScene`. The Digital Thread page's own toolbar, view switch, export control, evidence table, state
+  messages and detail panel are all still audited at 12px, as is every other surface in the product. This is
+  an exception for one scaled subtree, not a licence for small type anywhere. `AGENTS.md` forbids weakening a
+  test to land work; this is an approved product exception with a stated replacement rule, and this record is
+  what makes it one.
+- **Consequences:**
+  - A future change that moves canvas text out of the scaled subtree loses the exception automatically, which
+    is the intended behaviour rather than an oversight.
+  - The list alternative is not optional. `DESIGN_VISION_AND_DASHBOARDS.md` and WCAG 2.2 require a
+    keyboard-accessible list or table beside any graph view, and the evidence table is that alternative; it is
+    audited at the full floor and must stay.
+  - **Fitting the whole board on landing and landing legibly cannot both hold, and legibility wins.** Pure
+    width-fit landed a fully populated six-lane thread at roughly 0.61 zoom at 1280px, rendering 11.5px
+    identifiers at about 7px — below what this decision calls legible, and reached without the reader having
+    chosen anything. That is the condition this decision exists to forbid, so it is resolved rather than
+    recorded: the board now lands at `LANDING_MIN_ZOOM` (0.86, the detailed-tier boundary), and card
+    identifiers, titles and state labels are authored at 14px so they arrive at 12.04px effective — at or
+    above the product floor, at every supported enterprise desktop width. A board wider than the viewport is
+    panned on arrival, which is an ordinary canvas affordance and costs a reader far less than text they
+    cannot read.
+  - **Landing and Fit are different operations with different floors.** Every landing is floored: the initial
+    fit, a re-fit after a resize, and the selection framing a deep link triggers — that last one matters most,
+    because a focal deep link arrives selected and the framing path immediately replaces the landing
+    transform, so flooring only the initial fit would have left every §4.4 landing unprotected. An explicit
+    Fit the reader asks for — keyboard `0`, or double-clicking empty canvas — is *not* floored: §6.1 requires
+    it actually to fit the whole board, and §10.1 permits sub-floor text precisely when the reader has chosen
+    to pull back. `land()` and `fitAll()` are separate for this reason.
+  - `MIN_ZOOM` (0.58) is unchanged and still governs zooming the reader performs themselves.
+  - The detailed tier grew to `rowPitch 138 / cardHeight 108` and card top rows wrap. At 14px an identifier
+    and a long state label such as `Selected for baseline` do not share a 236px row, and the answer to a
+    spill is geometry — never type back below the floor, and never an ellipsis that would cost a controlled
+    state label its words.
+  - **A board that no longer fits changed three behaviours that assumed it did**, each corrected rather than
+    left to be discovered: a card is drawn only while it is inside its lane's window **and** wholly inside the
+    area the board has (so §6.6's "the panel never rests on a linked record" holds without zooming out past
+    the floor); arrow navigation pans the camera as well as rolling the lane, since a lane can now be off to
+    one side; and selection framing falls back from the whole traced web to the selection and one hop when
+    the web cannot fit beside a docked panel — the wide framing is a landing convenience, non-occlusion is a
+    guarantee.
+  - Product ruling of 2026-09-03 on PR #907: the later, specific §10.1 landing rule supersedes **only** the
+    older assumption that every lane must be horizontally visible on an automatic landing. Lane identity and
+    order, rolling, pan and zoom, the density tiers, trace behaviour, panel non-occlusion, cross-lane sync and
+    explicit Fit are all unchanged.
+  - `digital-thread-page.spec.ts` asserts the replacement rule directly, measuring **effective** size —
+    computed font size multiplied by the scene's own transform scale — for every identifier, title and state
+    label at 1280, 1440 and 1920 wide, on three landings: the unselected change network, a deep-linked
+    artifact thread, and a deep-linked change request. It also asserts that an explicit Fit goes below the
+    floor and genuinely fits, and that no card's identifier or state label spills outside its card.
+- **Supersedes:** nothing. It records the exception #880 section 10.1 required to be written down rather than
+  quietly applied.
+
+
 ### LES-001 - A New API Route Inherits Middleware Guards by Prefix Match
 
 `primaryMutationPrefixes` in `Program.cs` matches with `StartsWith`, and its entries are deliberately loose —

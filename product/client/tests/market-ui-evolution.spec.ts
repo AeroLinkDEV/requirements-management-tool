@@ -8,6 +8,10 @@ async function expectLegibleAndContained(page: import("@playwright/test").Page, 
     [...element.querySelectorAll("p,span,small,button,input,select,label,a,b,i,code,dt,dd")]
       .filter((candidate) => {
         const box = candidate.getBoundingClientRect();
+        // The Digital Thread canvas is a scaled scene (#880 §10.1, DEC-117): its computed font-size is
+        // authored in scene units, not the size the reader sees, so a CSS-pixel floor measures the wrong
+        // number there. Legibility of the canvas is asserted at default zoom by the Digital Thread specs.
+        if (candidate.closest(".dtCanvasScene")) return false;
         return box.width > 0 && box.height > 0 && (candidate.textContent ?? "").trim() && Number.parseFloat(getComputedStyle(candidate).fontSize) < 10;
       })
       .map((candidate) => ({ text: (candidate.textContent ?? "").trim().slice(0, 40), size: getComputedStyle(candidate).fontSize })),
@@ -28,10 +32,11 @@ test("market evolution views stay live, legible, and visually contained", async 
   await expect(page.locator(".requirementInspector")).toBeVisible();
   await testInfo.attach("concept-a-precision-workbench", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
 
-  await openNavigationGroup(page, "VERIFICATION");
+  // #880 §4.3 moved the Digital Thread into RELEASE, and §4.2 made the canvas the page.
+  await openNavigationGroup(page, "RELEASE & CONFIGURATION");
   await page.getByRole("link", { name: "Digital Thread" }).click();
-  await expect(page.locator(".digitalThreadStage")).toBeVisible();
-  await expectLegibleAndContained(page, ".lifecyclePage");
+  await expect(page.locator(".dtPage .dtnRoot")).toBeVisible();
+  await expectLegibleAndContained(page, ".dtPage");
   await testInfo.attach("concept-b-digital-thread", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
 
   await openNavigationGroup(page, "RELEASE & CONFIGURATION");

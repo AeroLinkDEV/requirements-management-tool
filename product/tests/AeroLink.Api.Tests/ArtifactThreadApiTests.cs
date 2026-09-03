@@ -825,6 +825,63 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
 
     // ---- helpers ---------------------------------------------------------------------------------------
 
+    // ---- every edge agrees with the node it names ------------------------------------------------------
+
+    /// <summary>
+    /// Each edge states the kind of both endpoints, and the client refuses a whole response where an edge and
+    /// the node beside it disagree — it cannot resolve two contradictory server statements without guessing.
+    ///
+    /// <para>
+    /// Asserted as one invariant over the entire payload rather than per edge builder, because that is the
+    /// shape of the promise and because three separate builders broke it the same way: a coverage row, a
+    /// case-to-procedure link and an execution's parent each named their endpoint <c>Procedure</c> when
+    /// <c>VerificationArtifactKind</c> allows a <b>Case</b> there too. Every unit test passed throughout; the
+    /// FMS showcase records coverage and runs directly against cases, so the first real page load refused the
+    /// entire thread. A per-site assertion would have grown a fourth gap the next time a builder was added.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData("Requirement")]
+    [InlineData("Case")]
+    [InlineData("Procedure")]
+    [InlineData("Execution")]
+    [InlineData("Build")]
+    public async Task Every_edge_states_the_same_kind_as_the_node_it_names(string focalKind)
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var focalId = focalKind switch
+        {
+            "Requirement" => world.HighLevelRevisionId,
+            "Case" => world.CaseRevisionId,
+            "Procedure" => world.FirstProcedureRevisionId,
+            "Execution" => world.PassExecutionId,
+            _ => world.BuildId,
+        };
+
+        var thread = await ThreadAsync(client, world, focalKind, focalId);
+        var kindById = thread.GetProperty("nodes").EnumerateArray()
+            .ToDictionary(x => x.GetProperty("id").GetString()!, x => x.GetProperty("kind").GetString()!);
+
+        var edges = thread.GetProperty("edges").EnumerateArray().ToList();
+        Assert.NotEmpty(edges);
+        foreach (var edge in edges)
+        {
+            var fromId = edge.GetProperty("fromId").GetString()!;
+            var toId = edge.GetProperty("toId").GetString()!;
+
+            // An endpoint is never synthesized either: an edge naming a node the response did not return
+            // describes a thread it did not actually send.
+            Assert.True(kindById.ContainsKey(fromId), $"edge source {fromId} is not a node in this thread");
+            Assert.True(kindById.ContainsKey(toId), $"edge target {toId} is not a node in this thread");
+
+            Assert.Equal(kindById[fromId], edge.GetProperty("fromKind").GetString());
+            Assert.Equal(kindById[toId], edge.GetProperty("toKind").GetString());
+        }
+    }
+
     private static List<JsonElement> Nodes(JsonElement thread, string kind) =>
         thread.GetProperty("nodes").EnumerateArray()
             .Where(x => x.GetProperty("kind").GetString() == kind).ToList();

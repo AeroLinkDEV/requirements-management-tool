@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 820,
-    "cases": 909,
+    "tests": 823,
+    "cases": 916,
     "classes": 122,
-    "hostedTests": 790,
-    "hostedCases": 865,
+    "hostedTests": 793,
+    "hostedCases": 872,
     "nonHostedTests": 22,
     "nonHostedCases": 36,
     "unknownHostTests": 8,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 517,
-      "cases": 574,
+      "tests": 520,
+      "cases": 581,
       "unknownCases": 0,
       "classes": 101
     },
@@ -1148,6 +1148,24 @@
       "sourceLines": {
         "start": 494,
         "end": 511
+      }
+    },
+    {
+      "cls": "ArtifactThreadApiTests",
+      "test": "Every_edge_states_the_same_kind_as_the_node_it_names",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 5,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 843,
+        "end": 883
       }
     },
     {
@@ -10030,6 +10048,40 @@
       "sourceLines": {
         "start": 144,
         "end": 160
+      }
+    },
+    {
+      "cls": "RequirementFilterExactnessApiTests",
+      "test": "Hydration_answers_an_artifact_id_with_the_revision_the_baseline_carries",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 212,
+        "end": 228
+      }
+    },
+    {
+      "cls": "RequirementFilterExactnessApiTests",
+      "test": "Hydration_still_answers_a_revision_id_with_itself",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 230,
+        "end": 247
       }
     },
     {

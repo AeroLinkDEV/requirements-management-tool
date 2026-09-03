@@ -37,10 +37,13 @@ test('Digital Thread reuses projected lifecycle data and the shared exact-link c
   })
 
   await login(page)
-  await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
+  // #880 §4.3 moved the Digital Thread into RELEASE and §4.5 kept the evidence table as the list
+  // alternative, reached from the representation toggle. The exact-link lifecycle controls are a function
+  // rather than chrome, so they came with it: the relationship is still acknowledged where it is read.
+  await openNavigationGroup(page, 'RELEASE & CONFIGURATION')
   await page.getByRole('link', { name: 'Digital Thread' }).click()
-  await page.getByRole('button', { name: 'Evidence table' }).click()
-  await page.getByText('Explore relationships and evidence').first().click()
+  await page.locator('.dtPageToolbar').getByRole('button', { name: 'Table' }).click()
+  await expect(page.locator('.dtPageTable tbody tr').first()).toBeVisible()
   await expect(page.getByRole('link', { name: 'SYSR-000001.00 · System' }))
     .toHaveAttribute('href', /\/requirements\/parent-artifact\?discipline=system&requirementRevisionId=parent-revision$/)
   await expect(page.getByLabel('Exact link lifecycle Suspect')).toBeVisible()
