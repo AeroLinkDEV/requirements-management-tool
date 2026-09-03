@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
-import { formatEvidentiaryDateTime, formatOrdinaryDateTime, formatOrdinaryTime } from '../src/presentation'
-import { login } from './auth'
+import { formatEvidentiaryDateTime, formatOrdinaryDateTime, formatOrdinaryTime, invalidTimestampText } from '../src/presentation'
+import { apiBase, login } from './auth'
 
 /**
  * Two deliberate timestamp grammars, proven against fixed instants rather than whatever the runner's
@@ -42,10 +42,18 @@ test.describe('ordinary date/time presentation', () => {
     expect(formatOrdinaryTime(new Date(instant), 'UTC')).toBe('14:00')
   })
 
-  test('an unparseable value formats as empty so the surface can own its absence wording', () => {
-    expect(formatOrdinaryDateTime('not a timestamp')).toBe('')
-    expect(formatOrdinaryTime('not a timestamp')).toBe('')
-    expect(formatEvidentiaryDateTime('not a timestamp')).toBe('')
+  test('absence stays empty so the surface can own its wording, but a present invalid value fails closed', () => {
+    // Genuine absence is the caller's wording decision ("Never", "Not recorded"): the helper stays silent.
+    expect(formatOrdinaryDateTime(null)).toBe('')
+    expect(formatOrdinaryDateTime(undefined)).toBe('')
+    expect(formatOrdinaryDateTime('')).toBe('')
+    expect(formatOrdinaryDateTime('   ')).toBe('')
+    expect(formatOrdinaryTime(null)).toBe('')
+    expect(formatEvidentiaryDateTime(undefined)).toBe('')
+    // A present-but-unparseable controlled instant must never silently vanish from the evidence.
+    expect(formatOrdinaryDateTime('not a timestamp')).toBe(invalidTimestampText)
+    expect(formatOrdinaryTime('not a timestamp')).toBe(invalidTimestampText)
+    expect(formatEvidentiaryDateTime('not a timestamp')).toBe(invalidTimestampText)
   })
 })
 
@@ -60,6 +68,8 @@ test.describe('evidentiary date/time presentation', () => {
     // 37 seconds and 123 milliseconds survive: an evidentiary display must never invent a new instant.
     const formatted = formatEvidentiaryDateTime('2024-11-14T14:00:37.123Z', 'UTC')
     expect(formatted).toContain('14:00:37')
+    // The visible evidentiary grammar is minute/second precision by design; the machine-readable instant
+    // travels in the semantic <time datetime> attribute, so this asserts the formatter never invents one.
     expect(new Date('2024-11-14T14:00:37.123Z').toISOString()).toBe('2024-11-14T14:00:37.123Z')
   })
 })
@@ -84,8 +94,30 @@ test.describe('rendered surfaces', () => {
     for (const text of await registerTimes.allTextContents()) {
       expect(text).toMatch(/^\d{2} [A-Z][a-z]{2} \d{4} · \d{2}:\d{2}$/)
     }
+    // The page's own authenticated API session is the source of truth, but the list endpoint is
+    // filtered by release/type/level while the rendered row carries its own id: capture the first row's
+    // id and instant first, then look the same id up through the release-scoped list the surface reads.
+    const firstRowId = await rows.first().getAttribute('data-register-id')
     const registerAttribute = await registerTimes.first().getAttribute('datetime')
-    expect(registerAttribute).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/)
+    const workspacesResponse = await page.request.get(`${apiBase}/api/workspaces`)
+    expect(workspacesResponse.ok(), await workspacesResponse.text()).toBeTruthy()
+    const workspaces = await workspacesResponse.json() as {
+      projects: { project: { id: string }; releases: { id: string; isReleased: boolean }[] }[]
+    }[]
+    const workspaceProjectId = workspaces[0].projects[0].project.id
+    const activeReleaseId = workspaces[0].projects[0].releases.find(item => !item.isReleased)?.id
+      ?? workspaces[0].projects[0].releases[0].id
+    const sourceRow = await page.evaluate(async ({ api, projectId, releaseId, rowId }) => {
+      const params = new URLSearchParams({ projectId, page: '1', pageSize: '50', releaseId, type: 'System' })
+      const response = await fetch(`${api}/api/history/change-requests?${params}`)
+      if (!response.ok) return null
+      const body = await response.json() as { items: { id: string; updatedAt: string }[] }
+      return body.items.find(item => item.id === rowId) ?? null
+    }, { api: apiBase, projectId: workspaceProjectId, releaseId: activeReleaseId, rowId: firstRowId })
+    expect(sourceRow, 'register source row for the first rendered row').toBeTruthy()
+    // The semantic instant must be the EXACT source timestamp, not a re-serialized minute truncation:
+    // a `2024-11-14T14:00:37.123Z` → `2024-11-14T14:00:37Z` truncation must fail this regression.
+    expect(registerAttribute).toBe(sourceRow!.updatedAt)
 
     // Evidentiary mode: the selected record's immutable history keeps seconds and states its offset.
     await rows.first().click()
@@ -94,8 +126,21 @@ test.describe('rendered surfaces', () => {
     await expect(historyTimes.first()).toBeVisible({ timeout: 30_000 })
     const historyText = await historyTimes.first().textContent()
     expect(historyText).toMatch(/^\d{2} [A-Z][a-z]{2} \d{4} · \d{2}:\d{2}:\d{2} GMT[-+]\d{2}:\d{2}$/)
-    const historyAttribute = await historyTimes.first().getAttribute('datetime')
-    expect(Number.isNaN(new Date(historyAttribute!).getTime())).toBe(false)
+    // The history instant must be the EXACT controlled source timestamp: capture the detail record from
+    // the same API the inspector reads and require byte equality, including fractional seconds/offset.
+    // The first rendered history card is a review cycle when cycles exist, else the first audit event.
+    const detailResponse = await page.request.get(`${apiBase}/api/change-requests/${firstRowId}`)
+    expect(detailResponse.ok(), await detailResponse.text()).toBeTruthy()
+    const detailBody = await detailResponse.json() as {
+      audit?: { occurredAt: string }[]
+      reviewCycles?: { startedAt: string; completedAt?: string }[]
+    }
+    const sourceHistory = detailBody.reviewCycles?.[0]?.startedAt ?? detailBody.audit?.[0]?.occurredAt
+    expect(sourceHistory, 'controlled history source instant').toBeTruthy()
+    const historyCards = page.locator('.inspectorBody .revisionCard time[datetime]')
+    await expect(historyCards.first()).toBeVisible()
+    const historyAttribute = await historyCards.first().getAttribute('datetime')
+    expect(historyAttribute).toBe(sourceHistory)
     // The zone is pinned, so the rendered offset must be Toronto's, not the runner's guess.
     expect(historyText).toContain('GMT-05:00')
   })

@@ -24,7 +24,7 @@ export function AutosaveState({ status, savedAt, where }: { status: AutosaveStat
       <i aria-hidden="true" />
       <span>
         {wording[status]}
-        {status === "Saved" && savedAt ? ` · ${formatOrdinaryTime(savedAt)}` : ""}
+        {status === "Saved" && savedAt ? <> · <time dateTime={savedAt.toISOString()}>{formatOrdinaryTime(savedAt)}</time></> : ""}
       </span>
       {/* Where the draft is held is not a detail: one survives this machine dying and the other does not. */}
       {where && status !== "Idle" && <small>{where}</small>}

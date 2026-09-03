@@ -447,9 +447,17 @@ export const grantableProgramRoles: readonly string[] = [
  * This is presentation only. The stored value, the JSON contract, and event ordering are untouched;
  * a formatted string must never travel anywhere the exact timestamp goes.
  *
- * An unparseable value formats as an empty string. Absence wording — "Never", "Not recorded" — is the
- * calling surface's decision, because what an empty timestamp means differs per screen.
+ * Absence and invalid data are different facts and stay different. A missing timestamp (null, undefined,
+ * or blank) formats as an empty string so the calling surface can own its absence wording — "Never",
+ * "Not recorded" — because what an empty timestamp means differs per screen. A present-but-unparseable
+ * value formats as `Invalid timestamp`, never as blank: a malformed controlled/audit instant must remain
+ * visibly recognizable as a data fault rather than silently disappearing from the evidence.
  */
+export const invalidTimestampText = 'Invalid timestamp'
+
+const isAbsentTimestamp = (value: string | Date | null | undefined) =>
+  value === null || value === undefined || (typeof value === 'string' && value.trim() === '')
+
 const ordinaryDateOptions: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', year: 'numeric' }
 const ordinaryTimeOptions: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hour12: false }
 const evidentiaryTimeOptions: Intl.DateTimeFormatOptions = {
@@ -475,16 +483,18 @@ const timeZoneOffset = (date: Date, timeZone?: string) =>
     .find(part => part.type === 'timeZoneName')?.value ?? ''
 
 /** `14 Nov 2024 · 09:00` — minute precision, fixed grammar, the visitor's clock unless told otherwise. */
-export const formatOrdinaryDateTime = (value: string | Date, timeZone?: string) => {
-  const date = toDate(value)
-  if (Number.isNaN(date.getTime())) return ''
+export const formatOrdinaryDateTime = (value: string | Date | null | undefined, timeZone?: string) => {
+  if (isAbsentTimestamp(value)) return ''
+  const date = toDate(value as string | Date)
+  if (Number.isNaN(date.getTime())) return invalidTimestampText
   return `${dateTimeFormatter(ordinaryDateOptions, timeZone).format(date)} · ${dateTimeFormatter(ordinaryTimeOptions, timeZone).format(date)}`
 }
 
 /** `09:00` — the time half alone, for surfaces already labelled by their date context. */
-export const formatOrdinaryTime = (value: string | Date, timeZone?: string) => {
-  const date = toDate(value)
-  if (Number.isNaN(date.getTime())) return ''
+export const formatOrdinaryTime = (value: string | Date | null | undefined, timeZone?: string) => {
+  if (isAbsentTimestamp(value)) return ''
+  const date = toDate(value as string | Date)
+  if (Number.isNaN(date.getTime())) return invalidTimestampText
   return dateTimeFormatter(ordinaryTimeOptions, timeZone).format(date)
 }
 
@@ -492,8 +502,9 @@ export const formatOrdinaryTime = (value: string | Date, timeZone?: string) => {
  * `14 Nov 2024 · 09:00:37 GMT-05:00` — second precision with the offset stated, for history, audit,
  * and signature evidence where "which clock" and "which second" are part of the record.
  */
-export const formatEvidentiaryDateTime = (value: string | Date, timeZone?: string) => {
-  const date = toDate(value)
-  if (Number.isNaN(date.getTime())) return ''
+export const formatEvidentiaryDateTime = (value: string | Date | null | undefined, timeZone?: string) => {
+  if (isAbsentTimestamp(value)) return ''
+  const date = toDate(value as string | Date)
+  if (Number.isNaN(date.getTime())) return invalidTimestampText
   return `${dateTimeFormatter(ordinaryDateOptions, timeZone).format(date)} · ${dateTimeFormatter(evidentiaryTimeOptions, timeZone).format(date)} ${timeZoneOffset(date, timeZone)}`.trimEnd()
 }
