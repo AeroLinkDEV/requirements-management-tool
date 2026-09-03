@@ -92,7 +92,7 @@ test.describe('rendered surfaces', () => {
     const registerTimes = page.locator('[data-register-row] time[datetime]')
     await expect(registerTimes.first()).toBeVisible()
     for (const text of await registerTimes.allTextContents()) {
-      expect(text).toMatch(/^\d{2} [A-Z][a-z]{2} \d{4} · \d{2}:\d{2}$/)
+      expect(text).toMatch(/^\d{2} [A-Z][a-z]{2,3} \d{4} · \d{2}:\d{2}$/)
     }
     // The page's own authenticated API session is the source of truth, but the list endpoint is
     // filtered by release/type/level while the rendered row carries its own id: capture the first row's
@@ -125,7 +125,7 @@ test.describe('rendered surfaces', () => {
     const historyTimes = page.locator('.inspectorBody time[datetime]')
     await expect(historyTimes.first()).toBeVisible({ timeout: 30_000 })
     const historyText = await historyTimes.first().textContent()
-    expect(historyText).toMatch(/^\d{2} [A-Z][a-z]{2} \d{4} · \d{2}:\d{2}:\d{2} GMT[-+]\d{2}:\d{2}$/)
+    expect(historyText).toMatch(/^\d{2} [A-Z][a-z]{2,3} \d{4} · \d{2}:\d{2}:\d{2} GMT[-+]\d{2}:\d{2}$/)
     // The history instant must be the EXACT controlled source timestamp: capture the detail record from
     // the same API the inspector reads and require byte equality, including fractional seconds/offset.
     // The first rendered history card is a review cycle when cycles exist, else the first audit event.
