@@ -74,10 +74,12 @@ if ($production -and -not $DisposableQualification) {
 }
 if ($PostgresPort -eq 54329) { & (Join-Path $PSScriptRoot 'Start-Postgres.ps1') }
 
-if (-not $PostgresBin) { $PostgresBin = Join-Path $productRoot '.local\postgresql\pgsql\bin' }
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+if (-not $PostgresBin) { $PostgresBin = $installation.PostgresBin }
 $bin = [IO.Path]::GetFullPath($PostgresBin)
 $archive = (Resolve-Path -LiteralPath $BackupArchive).Path
-$restoreRoot = Join-Path $productRoot '.local\restore-work'; New-Item -ItemType Directory -Path $restoreRoot -Force | Out-Null
+$restoreRoot = $installation.RestoreWork; New-Item -ItemType Directory -Path $restoreRoot -Force | Out-Null
 $temporary = Join-Path $restoreRoot ([Guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $temporary | Out-Null
 $token = [Guid]::NewGuid().ToString('N').Substring(0, 12)
 $restoreDatabase = if ($production) { "aerolink_restore_stage_$token" } else { $TargetDatabase }
@@ -103,10 +105,10 @@ try {
     if ($restoredInventory.Count -gt 0 -and -not (Test-Path -LiteralPath $evidenceSource)) { throw 'The archive contains attachment rows but no evidence directory.' }
     [void](Test-AeroLinkAttachmentInventory -Inventory $restoredInventory -EvidenceRoot $evidenceSource)
 
-    if (-not $EvidenceTarget) { $EvidenceTarget = if ($production) { Get-AeroLinkEvidenceRoot -ProductRoot $productRoot } else { Join-Path $productRoot ".local\restore-validation\$TargetDatabase\evidence" } }
+    if (-not $EvidenceTarget) { $EvidenceTarget = if ($production) { Get-AeroLinkEvidenceRoot -ProductRoot $productRoot } else { Join-Path $installation.RestoreValidation "$TargetDatabase\evidence" } }
     $resolvedTarget = [IO.Path]::GetFullPath($EvidenceTarget)
-    $validationRoot = [IO.Path]::GetFullPath((Join-Path $productRoot '.local\restore-validation')) + [IO.Path]::DirectorySeparatorChar
-    if (-not $production -and -not ($resolvedTarget + [IO.Path]::DirectorySeparatorChar).StartsWith($validationRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'The isolated evidence target must remain under product\.local\restore-validation.' }
+    $validationRoot = [IO.Path]::GetFullPath($installation.RestoreValidation) + [IO.Path]::DirectorySeparatorChar
+    if (-not $production -and -not ($resolvedTarget + [IO.Path]::DirectorySeparatorChar).StartsWith($validationRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'The isolated evidence target must remain under the installation restore-validation root.' }
     $parent = Split-Path $resolvedTarget -Parent; New-Item -ItemType Directory -Path $parent -Force | Out-Null
     $incoming = Join-Path $parent ('.restore-incoming-' + $token)
     if (Test-Path -LiteralPath $incoming) { Remove-Item -LiteralPath $incoming -Recurse -Force }

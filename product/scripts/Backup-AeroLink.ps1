@@ -11,12 +11,14 @@ param(
 $ErrorActionPreference = 'Stop'
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
-if (-not $BackupRoot) { $BackupRoot = Join-Path $productRoot '.local\backups' }
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+if (-not $BackupRoot) { $BackupRoot = $installation.Backups }
 $backupRoot = [IO.Path]::GetFullPath($BackupRoot)
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $staging = Join-Path $backupRoot "aerolink-$timestamp"
 $archive = "$staging.zip"
-if (-not $PostgresBin) { $PostgresBin = Join-Path $productRoot '.local\postgresql\pgsql\bin' }
+if (-not $PostgresBin) { $PostgresBin = $installation.PostgresBin }
 $PostgresBin = [IO.Path]::GetFullPath($PostgresBin)
 $pgDump = Join-Path $PostgresBin 'pg_dump.exe'
 $storageModule = Join-Path $PSScriptRoot 'AeroLinkEvidenceStore.psm1'
@@ -28,8 +30,8 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
 if (-not $PostgresAlreadyRunning) {
     if ($PostgresPort -ne 54329 -or $Database -ne 'aerolink') { throw 'A non-default backup target requires -PostgresAlreadyRunning and must be isolated qualification infrastructure.' }
     $start = Invoke-AeroLinkChildScript -ScriptPath (Join-Path $PSScriptRoot 'Start-Postgres.ps1') `
-        -StandardOutput (Join-Path $productRoot '.local\logs\backup-postgres-start.stdout.log') `
-        -StandardError (Join-Path $productRoot '.local\logs\backup-postgres-start.stderr.log') `
+        -StandardOutput (Join-Path $installation.Logs 'backup-postgres-start.stdout.log') `
+        -StandardError (Join-Path $installation.Logs 'backup-postgres-start.stderr.log') `
         -TimeoutSeconds 420 -StepName 'Start-Postgres.ps1 (backup)'
     if ($start.ExitCode -ne 0) { throw "PostgreSQL is not available for backup: $($start.Detail)" }
 }

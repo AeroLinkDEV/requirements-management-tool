@@ -16,6 +16,7 @@
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 
 function Test-HttpEndpoint {
     <#
@@ -145,12 +146,16 @@ function Assert-AeroLinkPostgres {
         later and further away, with an error about the database rather than about the install.
     #>
     param([Parameter(Mandatory)][string]$ProductRoot)
-    $catalogue = Join-Path $ProductRoot '.local\postgresql\pgsql\share\postgres.bki'
+    # Installation paths, not source-relative paths: a dedicated production checkout runs the canonical HOME
+    # cluster rather than one of its own (#881).
+    $installation = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot
+    New-Item -ItemType Directory -Path $installation.Logs -Force | Out-Null
+    $catalogue = $installation.PostgresCatalogue
     if (-not (Test-Path $catalogue)) {
         Write-Host '      PostgreSQL is not installed on this machine yet. Installing it once (about 320 MB).' -ForegroundColor Yellow
         $setup = Invoke-AeroLinkChildScript -ScriptPath (Join-Path $PSScriptRoot 'Setup-Postgres.ps1') `
-            -StandardOutput (Join-Path $ProductRoot '.local\logs\setup-postgres.stdout.log') `
-            -StandardError (Join-Path $ProductRoot '.local\logs\setup-postgres.stderr.log') `
+            -StandardOutput (Join-Path $installation.Logs 'setup-postgres.stdout.log') `
+            -StandardError (Join-Path $installation.Logs 'setup-postgres.stderr.log') `
             -TimeoutSeconds 900 -StepName 'Setup-Postgres.ps1'
         if ($setup.ExitCode -ne 0) { throw "PostgreSQL could not be installed: $($setup.Detail)" }
         return
@@ -159,8 +164,8 @@ function Assert-AeroLinkPostgres {
     # this process's stdio pipes (the #483 scheduled-task hang) and the wait must
     # never be indefinite (crash recovery is bounded inside Start-Postgres.ps1).
     $start = Invoke-AeroLinkChildScript -ScriptPath (Join-Path $PSScriptRoot 'Start-Postgres.ps1') `
-        -StandardOutput (Join-Path $ProductRoot '.local\logs\postgres-start.stdout.log') `
-        -StandardError (Join-Path $ProductRoot '.local\logs\postgres-start.stderr.log') `
+        -StandardOutput (Join-Path $installation.Logs 'postgres-start.stdout.log') `
+        -StandardError (Join-Path $installation.Logs 'postgres-start.stderr.log') `
         -TimeoutSeconds 420 -StepName 'Start-Postgres.ps1'
     if ($start.ExitCode -ne 0) { throw "PostgreSQL could not be started: $($start.Detail)" }
 }

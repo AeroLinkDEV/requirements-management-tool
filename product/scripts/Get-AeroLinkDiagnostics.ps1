@@ -15,11 +15,13 @@ param(
 
 $ErrorActionPreference = 'Continue'
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$postgresBin = Join-Path $productRoot '.local\postgresql\pgsql\bin'
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+$postgresBin = $installation.PostgresBin
 $checks = @()
 
 if (-not $ClientUri) { $ClientUri = $ApiBaseUri }
-if (-not $BackupRoot) { $BackupRoot = Join-Path $productRoot '.local\backups' }
+if (-not $BackupRoot) { $BackupRoot = $installation.Backups }
 if (-not $EvidenceRoot) {
     $EvidenceRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AeroLink\evidence'
 }

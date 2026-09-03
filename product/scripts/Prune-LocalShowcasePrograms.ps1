@@ -9,7 +9,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$postgresBin = Join-Path $productRoot '.local\postgresql\pgsql\bin'
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+$postgresBin = (Get-AeroLinkInstallationPaths -ProductRoot $productRoot).PostgresBin
 $psql = Join-Path $postgresBin 'psql.exe'
 
 if ($KeepProgramCode -notmatch '^[A-Za-z0-9 _-]{1,30}$') { throw 'The retained Program code is unsafe.' }

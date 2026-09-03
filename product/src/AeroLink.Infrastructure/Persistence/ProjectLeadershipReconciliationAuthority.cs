@@ -1,4 +1,5 @@
 using AeroLink.Domain.Identity;
+using AeroLink.Infrastructure.Persistence.Maintenance;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -98,14 +99,14 @@ public sealed class ProjectLeadershipReconciliationAuthority(AeroLinkDbContext d
 
         // Validate first. A refusal must name what a human has to decide, and must not have written anything
         // by the time it is raised.
-        var conflicts = new List<string>();
+        var conflicts = new List<AeroLinkUpgradeConflict>();
         foreach (var programId in programIds)
             conflicts.AddRange(await ConflictsAsync(programId, ct));
         if (conflicts.Count > 0)
             throw new InvalidOperationException(
                 "Conflicting legacy Project Leadership authority. The upgrade will not choose between these; "
                 + "resolve each explicitly and restart:" + Environment.NewLine
-                + string.Join(Environment.NewLine, conflicts.Select(x => "  - " + x)));
+                + string.Join(Environment.NewLine, conflicts.Select(x => "  - " + x.Summary)));
 
         foreach (var programId in programIds)
         {
@@ -118,9 +119,33 @@ public sealed class ProjectLeadershipReconciliationAuthority(AeroLinkDbContext d
     /// What this program cannot repair without somebody deciding. Reported all at once so an operator fixes
     /// the whole set in one pass rather than discovering them one restart at a time.
     /// </summary>
-    private async Task<IReadOnlyList<string>> ConflictsAsync(Guid programId, CancellationToken ct)
+    /// <summary>
+    /// Read-only analysis of every program, for the maintenance host.
+    ///
+    /// This is the same code the upgrade runs, asked to report rather than to act — which is the whole point.
+    /// A second implementation that "checks what the upgrade would do" is a second opinion, and #881 exists
+    /// partly because AeroLink already had one of those written in ad-hoc SQL.
+    /// </summary>
+    public async Task<IReadOnlyList<AeroLinkUpgradeConflict>> AnalyzeConflictsAsync(CancellationToken ct = default)
     {
-        var problems = new List<string>();
+        var conflicts = new List<AeroLinkUpgradeConflict>();
+        var programIds = await db.Programs.AsNoTracking().Select(x => x.Id).ToListAsync(ct);
+        foreach (var programId in programIds)
+            conflicts.AddRange(await ConflictsAsync(programId, ct));
+        return conflicts;
+    }
+
+    /// <summary>The display name and sign-in name of a person, for conflict text an operator has to act on.</summary>
+    private async Task<(string Display, string UserName)> PersonAsync(Guid userId, CancellationToken ct)
+    {
+        var account = await db.UserAccounts.AsNoTracking().Where(x => x.Id == userId)
+            .Select(x => new { x.DisplayName, x.UserName }).SingleOrDefaultAsync(ct);
+        return account is null ? (userId.ToString(), "") : (account.DisplayName, account.UserName);
+    }
+
+    private async Task<IReadOnlyList<AeroLinkUpgradeConflict>> ConflictsAsync(Guid programId, CancellationToken ct)
+    {
+        var problems = new List<AeroLinkUpgradeConflict>();
         var name = await db.Programs.AsNoTracking().Where(x => x.Id == programId)
             .Select(x => x.Name).SingleOrDefaultAsync(ct) ?? programId.ToString();
 
@@ -137,17 +162,39 @@ public sealed class ProjectLeadershipReconciliationAuthority(AeroLinkDbContext d
                 .Select(x => x.HolderUserId).ToListAsync(ct);
             if (assigned.Count == 0)
             {
-                problems.Add($"{name}: an active {role} membership has no {position} leadership assignment to "
-                    + "take over from it. Assign the position, or end the membership, then restart.");
+                var holder = await PersonAsync(holders[0], ct);
+                problems.Add(new AeroLinkUpgradeConflict(
+                    AeroLinkUpgradeConflict.LegacyMembershipUnassignedCode, MigrationMarker,
+                    $"{name}: an active {role} membership has no {position} leadership assignment to "
+                    + "take over from it. Assign the position, or end the membership, then restart.",
+                    new Dictionary<string, string?>
+                    {
+                        ["programId"] = programId.ToString(), ["program"] = name,
+                        ["position"] = position.ToString(), ["legacyRole"] = role.ToString(),
+                        ["personId"] = holders[0].ToString(), ["person"] = holder.Display, ["personUserName"] = holder.UserName,
+                    },
+                    []));
                 continue;
             }
             // The assignment exists, but for somebody else. Ending this membership would revoke authority
             // from a person the new model never gave anything to — a silent choice, not a reconciliation.
             var stranded = holders.Where(x => !assigned.Contains(x)).ToList();
             if (stranded.Count > 0)
-                problems.Add($"{name}: an active {role} membership is held by somebody who does not hold the "
+            {
+                var strandedPerson = await PersonAsync(stranded[0], ct);
+                problems.Add(new AeroLinkUpgradeConflict(
+                    AeroLinkUpgradeConflict.LegacyMembershipStrandedCode, MigrationMarker,
+                    $"{name}: an active {role} membership is held by somebody who does not hold the "
                     + $"{position} position. Retiring it would revoke their authority without replacing it. "
-                    + "End the membership deliberately, or assign them the position, then restart.");
+                    + "End the membership deliberately, or assign them the position, then restart.",
+                    new Dictionary<string, string?>
+                    {
+                        ["programId"] = programId.ToString(), ["program"] = name,
+                        ["position"] = position.ToString(), ["legacyRole"] = role.ToString(),
+                        ["personId"] = stranded[0].ToString(), ["person"] = strandedPerson.Display, ["personUserName"] = strandedPerson.UserName,
+                    },
+                    []));
+            }
         }
 
         // A legacy role-keyed backup is repairable only when one unambiguous person is eligible for the
@@ -156,9 +203,9 @@ public sealed class ProjectLeadershipReconciliationAuthority(AeroLinkDbContext d
         // backup would silently choose Bob and destroy the evidence of the unresolved conflict.
         var positionBackups = await db.ProjectRoleBackups.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.RemovedAt == null)
-            .Select(x => new { x.Role, x.BackupUserId }).ToListAsync(ct);
+            .Select(x => new { x.Id, x.Role, x.BackupUserId }).ToListAsync(ct);
         var mappedBackups = positionBackups
-            .Select(x => new { x.Role, x.BackupUserId, Position = PositionForBackup(x.Role) })
+            .Select(x => new { x.Id, x.Role, x.BackupUserId, Position = PositionForBackup(x.Role) })
             .Where(x => x.Position is not null)
             .GroupBy(x => x.Position!.Value);
         foreach (var group in mappedBackups)
@@ -167,39 +214,101 @@ public sealed class ProjectLeadershipReconciliationAuthority(AeroLinkDbContext d
             var legacyHolders = group.Select(x => x.BackupUserId).Distinct().ToList();
             if (legacyHolders.Count != 1)
             {
-                problems.Add($"{name}: legacy standing backups that map to {position} name different people. "
-                    + "Decide who backs the position and remove the other legacy designation, then restart.");
+                problems.Add(new AeroLinkUpgradeConflict(
+                    AeroLinkUpgradeConflict.LegacyBackupAmbiguousCode, MigrationMarker,
+                    $"{name}: legacy standing backups that map to {position} name different people. "
+                    + "Decide who backs the position and remove the other legacy designation, then restart.",
+                    new Dictionary<string, string?>
+                    {
+                        ["programId"] = programId.ToString(), ["program"] = name,
+                        ["position"] = position.ToString(),
+                        ["legacyBackupIds"] = string.Join(",", group.Select(x => x.Id)),
+                    },
+                    []));
                 continue;
             }
             var legacyHolder = legacyHolders[0];
+            var legacyRow = group.First(x => x.BackupUserId == legacyHolder);
+            var person = await PersonAsync(legacyHolder, ct);
             var requiredRole = ProjectLeadership.RequiredBaseRole(position);
-            var eligible = await db.ProgramMemberships.AsNoTracking().AnyAsync(
-                x => x.UserId == legacyHolder && x.ProgramId == programId && x.EndedAt == null
-                     && x.Role == requiredRole, ct);
-            if (!eligible)
+            var heldRoles = await db.ProgramMemberships.AsNoTracking()
+                .Where(x => x.UserId == legacyHolder && x.ProgramId == programId && x.EndedAt == null)
+                .Select(x => x.Role).ToListAsync(ct);
+            var primaryHolderId = await db.ProjectLeadershipAssignments.AsNoTracking()
+                .Where(x => x.ProgramId == programId && x.Position == position && x.EndedAt == null)
+                .Select(x => (Guid?)x.HolderUserId).FirstOrDefaultAsync(ct);
+            var primary = primaryHolderId is null ? (Display: "", UserName: "") : await PersonAsync(primaryHolderId.Value, ct);
+
+            // The exact subject of the #816 / Avery Chen conflict. Every value here is a precondition the
+            // resolver re-asserts immediately before it writes, so an operator can only act on the conflict
+            // they actually reviewed.
+            var subject = new Dictionary<string, string?>
             {
-                problems.Add($"{name}: the legacy {position} standing backup does not hold the required "
+                ["programId"] = programId.ToString(),
+                ["program"] = name,
+                ["position"] = position.ToString(),
+                ["legacyRole"] = legacyRow.Role.ToString(),
+                ["legacyBackupId"] = legacyRow.Id.ToString(),
+                ["personId"] = legacyHolder.ToString(),
+                ["person"] = person.Display,
+                ["personUserName"] = person.UserName,
+                ["requiredBaseRole"] = requiredRole.ToString(),
+                ["heldBaseRoles"] = string.Join(",", heldRoles.Select(x => x.ToString()).OrderBy(x => x)),
+                ["currentPrimaryId"] = primaryHolderId?.ToString(),
+                ["currentPrimary"] = primaryHolderId is null ? null : primary.Display,
+            };
+
+            if (!heldRoles.Contains(requiredRole))
+            {
+                problems.Add(new AeroLinkUpgradeConflict(
+                    AeroLinkUpgradeConflict.LegacyBackupIneligibleCode, MigrationMarker,
+                    $"{name}: the legacy {position} standing backup does not hold the required "
                     + $"{requiredRole} base role. Grant the role if they should keep backing the position, "
-                    + "or remove the legacy backup, then restart.");
+                    + "or remove the legacy backup, then restart.",
+                    subject,
+                    [
+                        // Granting authority and retiring a historical designation are opposite answers to
+                        // the same question, and AeroLink has never been entitled to pick. Both are offered;
+                        // neither is default.
+                        new AeroLinkUpgradeChoice(AeroLinkUpgradeConflict.ChoiceGrantAndKeep,
+                            $"Grant {person.Display} the {requiredRole} base role on {name} and keep them as the standing {position} backup.",
+                            GrantsNewAuthority: true),
+                        new AeroLinkUpgradeChoice(AeroLinkUpgradeConflict.ChoiceRetireBackup,
+                            $"Retire the legacy {position} standing backup designation for {person.Display}, preserving it as ended history.",
+                            GrantsNewAuthority: false),
+                    ]));
                 continue;
             }
-            var isPrimary = await db.ProjectLeadershipAssignments.AsNoTracking().AnyAsync(x =>
-                x.ProgramId == programId && x.Position == position && x.HolderUserId == legacyHolder
-                && x.EndedAt == null, ct);
-            if (isPrimary)
+            if (primaryHolderId == legacyHolder)
             {
-                problems.Add($"{name}: the legacy {position} standing backup names the active primary for "
+                problems.Add(new AeroLinkUpgradeConflict(
+                    AeroLinkUpgradeConflict.LegacyBackupIsPrimaryCode, MigrationMarker,
+                    $"{name}: the legacy {position} standing backup names the active primary for "
                     + "that position. A primary cannot be their own backup; remove the legacy backup, name "
-                    + "a different eligible backup, or replace the primary, then restart.");
+                    + "a different eligible backup, or replace the primary, then restart.",
+                    subject,
+                    [
+                        new AeroLinkUpgradeChoice(AeroLinkUpgradeConflict.ChoiceRetireBackup,
+                            $"Retire the legacy {position} standing backup designation for {person.Display}, preserving it as ended history.",
+                            GrantsNewAuthority: false),
+                    ]));
                 continue;
             }
             var currentHolders = await db.ProjectLeadershipBackups.AsNoTracking()
                 .Where(x => x.ProgramId == programId && x.Position == position && x.RemovedAt == null)
                 .Select(x => x.BackupUserId).Distinct().ToListAsync(ct);
             if (currentHolders.Any(x => x != legacyHolder))
-                problems.Add($"{name}: the legacy {position} standing backup and the current leadership "
+                problems.Add(new AeroLinkUpgradeConflict(
+                    AeroLinkUpgradeConflict.LegacyBackupSupersededCode, MigrationMarker,
+                    $"{name}: the legacy {position} standing backup and the current leadership "
                     + "backup name different people. Decide who backs the position and remove the other "
-                    + "designation, then restart.");
+                    + "designation, then restart.",
+                    subject,
+                    [
+                        new AeroLinkUpgradeChoice(AeroLinkUpgradeConflict.ChoiceRetireBackup,
+                            $"Retire the legacy {position} standing backup designation for {person.Display}, preserving it as ended history.",
+                            GrantsNewAuthority: false),
+                    ]));
         }
 
         return problems;

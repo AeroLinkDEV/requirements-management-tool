@@ -11,17 +11,22 @@
 # "corrupted installation", which tells an operator nothing they can act on.
 
 $ErrorActionPreference = 'Stop'
-$root = Resolve-Path (Join-Path $PSScriptRoot '..')
-$local = Join-Path $root '.local'
-$archive = Join-Path $local 'postgresql-18.4.zip'
-$destination = Join-Path $local 'postgresql'
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+# The installation this source belongs to, which for a dedicated production checkout is the canonical HOME
+# installation rather than this folder (#881). Installing into the wrong one would produce a second, empty
+# AeroLink that starts perfectly and holds nothing.
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $root
+$local = $installation.InstallationRoot
+$archive = $installation.PostgresArchive
+$destination = $installation.PostgresHome
 $source = 'https://get.enterprisedb.com/postgresql/postgresql-18.4-1-windows-x64-binaries.zip'
 
 # Two files, because either alone can be present without the other. postgres.exe proves something was
 # extracted; postgres.bki is what initdb reads to create a cluster, and is the file whose absence produced the
 # unhelpful error. Checking the one the next step actually needs is the point.
-$binary = Join-Path $destination 'pgsql\bin\postgres.exe'
-$catalogue = Join-Path $destination 'pgsql\share\postgres.bki'
+$binary = Join-Path $installation.PostgresBin 'postgres.exe'
+$catalogue = $installation.PostgresCatalogue
 function Test-PostgresInstalled { (Test-Path $binary) -and (Test-Path $catalogue) }
 
 New-Item -ItemType Directory -Force -Path $local | Out-Null

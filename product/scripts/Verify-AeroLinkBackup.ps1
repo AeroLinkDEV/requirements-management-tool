@@ -3,7 +3,9 @@ param([string]$BackupArchive,[string]$VerificationRoot)
 
 $ErrorActionPreference='Stop'
 $productRoot=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$backupRoot=Join-Path $productRoot '.local\backups'
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+$installationPaths=Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+$backupRoot=$installationPaths.Backups
 if(-not $BackupArchive){$BackupArchive=(Get-ChildItem -LiteralPath $backupRoot -Filter 'aerolink-*.zip' -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName}
 if(-not $BackupArchive -or -not (Test-Path -LiteralPath $BackupArchive)){throw 'No AeroLink backup archive was found.'}
 $archive=(Resolve-Path -LiteralPath $BackupArchive).Path
@@ -11,7 +13,7 @@ if([IO.Path]::GetExtension($archive) -ne '.zip'){throw 'The selected backup is n
 $sidecar="$archive.sha256";if(-not(Test-Path -LiteralPath $sidecar)){throw 'The archive SHA-256 sidecar is missing.'}
 $expected=((Get-Content -LiteralPath $sidecar -Raw).Trim() -split '\s+')[0].ToLowerInvariant();$actual=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 if($expected -ne $actual){throw "Backup archive hash mismatch. Expected $expected; calculated $actual."}
-$verificationRoot=if($VerificationRoot){[IO.Path]::GetFullPath($VerificationRoot)}else{Join-Path $productRoot '.local\backup-verification'};New-Item -ItemType Directory -Path $verificationRoot -Force|Out-Null
+$verificationRoot=if($VerificationRoot){[IO.Path]::GetFullPath($VerificationRoot)}else{$installationPaths.BackupVerification};New-Item -ItemType Directory -Path $verificationRoot -Force|Out-Null
 $temporary=Join-Path $verificationRoot ([Guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $temporary|Out-Null
 $verificationResult=$null;$verificationError=$null;$cleanupError=$null
 try{

@@ -41,6 +41,12 @@ using System.Net;
 // scope run *before* endpoint routing, which means they decide reachability from the path alone and cannot
 // see anything declared on an endpoint.
 
+// Maintenance mode, decided before anything else exists. #881: an operator with a database several weeks
+// behind must be able to ask "what needs to happen here?" and get the answer in seconds — not after a client
+// build, an API start and a readiness timeout that ends in a stack trace. No web server, no port, no worker.
+if (AeroLinkMaintenanceHost.IsMaintenanceInvocation(args))
+    return await AeroLinkMaintenanceHost.RunAsync(args);
+
 var builder = WebApplication.CreateBuilder(args);
 var restoreValidationReadOnly = builder.Configuration.GetValue<bool>("RestoreValidation:ReadOnly");
 var restoreValidationToken = builder.Configuration["RestoreValidation:Token"] ?? "";
@@ -335,6 +341,9 @@ app.Use(async (context, next) =>
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
 app.MapGet("/health/live", () => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
+// Who is listening, and what source is it running? Readiness cannot answer that, and #816 proved a launcher
+// needs the answer before it may reuse a healthy process. Non-secret by construction (RuntimeIdentity.cs).
+app.MapRuntimeIdentityEndpoint();
 app.MapGet("/health/ready", async (AeroLinkDbContext db,CancellationToken ct) => await db.Database.CanConnectAsync(ct)?Results.Ok(new{status="ready",service="AeroLink API",database="connected"}):Results.Json(new{status="not_ready",service="AeroLink API",database="unavailable"},statusCode:StatusCodes.Status503ServiceUnavailable));
 // The API surface, one module per part of the lifecycle. Registration order does not decide which route
 // matches — routing resolves that by precedence — so these read in the order somebody meets the product:
@@ -377,6 +386,9 @@ app.MapAeroLinkReqIfEndpoints();
 app.MapProductLineConfigurationEndpoints();
 
 app.Run();
+// Top-level statements need one return type: maintenance mode above returns its own exit code, so the web
+// host's ordinary completion is an explicit success.
+return 0;
 
 public partial class Program { }
 

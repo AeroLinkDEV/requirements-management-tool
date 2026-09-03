@@ -1,0 +1,170 @@
+using AeroLink.Domain.Identity;
+using AeroLink.Infrastructure;
+using AeroLink.Infrastructure.Persistence;
+using AeroLink.Infrastructure.Persistence.Maintenance;
+using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+
+namespace AeroLink.Api;
+
+/// <summary>
+/// The maintenance mode of the AeroLink application host: <c>AeroLink.Api maintenance &lt;command&gt;</c>.
+///
+/// #881 allows either a separate console host or a deliberate mode of the existing one. This is the second,
+/// on purpose. The analysis and the resolution have to use the same domain, the same persistence
+/// configuration and the same migration authorities that startup uses, and the surest way to guarantee that
+/// is for them to be the same executable with the same composition — not a sibling project that shares an
+/// assembly reference and drifts in configuration.
+///
+/// No web server is started, no port is bound and no hosted worker runs. That is the point: an operator with
+/// an old database gets an answer in seconds instead of after a readiness timeout.
+///
+/// Commands:
+///   maintenance analyze [--json]
+///       Read-only. Reports pending schema migrations, pending semantic upgrades, and every modelled
+///       conflict, with the supported decisions for each. Writes nothing.
+///
+///   maintenance resolve --conflict &lt;code&gt; --choice &lt;key&gt; --program &lt;guid&gt; --position &lt;name&gt;
+///                       --person &lt;guid&gt; --legacy-backup &lt;guid&gt; --operator &lt;reference&gt;
+///                       [--expect-primary &lt;guid|none&gt;] [--apply]
+///       Dry run unless --apply is given. Preconditions are re-read immediately before any write.
+/// </summary>
+public static class AeroLinkMaintenanceHost
+{
+    /// <summary>True when the process was invoked as the maintenance host rather than as the web API.</summary>
+    public static bool IsMaintenanceInvocation(string[] args) =>
+        args.Length > 0 && string.Equals(args[0], "maintenance", StringComparison.OrdinalIgnoreCase);
+
+    public static async Task<int> RunAsync(string[] args)
+    {
+        var command = args.Length > 1 ? args[1].ToLowerInvariant() : "help";
+        if (command is "help" or "--help" or "-h")
+        {
+            Console.WriteLine("AeroLink maintenance host");
+            Console.WriteLine("  maintenance analyze [--json]");
+            Console.WriteLine("  maintenance resolve --conflict <code> --choice <key> --program <guid> --position <name> --person <guid> --legacy-backup <guid> --operator <reference> [--expect-primary <guid|none>] [--apply]");
+            return 0;
+        }
+
+        var builder = Host.CreateApplicationBuilder(args);
+        builder.Services.AddAeroLinkInfrastructure(builder.Configuration);
+        // Every hosted worker is removed: maintenance must not dispatch notifications, reconcile documents,
+        // or run integrity sweeps against a database whose posture is the very thing in question.
+        foreach (var worker in builder.Services.Where(x => x.ServiceType == typeof(IHostedService)).ToList())
+            builder.Services.Remove(worker);
+        builder.Services.AddScoped<AeroLinkUpgradeAnalyzer>();
+        builder.Services.AddScoped<ProjectLeadershipMaintenanceResolver>();
+        builder.Services.AddScoped<ProjectLeadershipReconciliationAuthority>();
+
+        using var host = builder.Build();
+        await using var scope = host.Services.CreateAsyncScope();
+
+        return command switch
+        {
+            "analyze" => await AnalyzeAsync(scope.ServiceProvider, args),
+            "resolve" => await ResolveAsync(scope.ServiceProvider, args),
+            _ => Fail($"Unknown maintenance command '{command}'. Run 'maintenance help'."),
+        };
+    }
+
+    private static int Fail(string message)
+    {
+        Console.Error.WriteLine(message);
+        return 2;
+    }
+
+    /// <summary>
+    /// Exit codes are the launcher's contract, and they are the reason a known refusal no longer costs
+    /// fifteen minutes: the caller branches on the code rather than polling a port that will never open.
+    ///   0 current, 10 deterministic upgrade required, 20 conflict, 30 database unreachable.
+    /// </summary>
+    private static async Task<int> AnalyzeAsync(IServiceProvider services, string[] args)
+    {
+        var analysis = await services.GetRequiredService<AeroLinkUpgradeAnalyzer>().AnalyzeAsync();
+        if (args.Contains("--json", StringComparer.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                status = analysis.Status,
+                databaseReachable = analysis.DatabaseReachable,
+                unreachableReason = analysis.UnreachableReason,
+                databaseName = analysis.DatabaseName,
+                pendingEfMigrations = analysis.PendingEfMigrations,
+                semanticUpgrades = analysis.SemanticUpgrades,
+                pendingSemanticUpgrades = analysis.PendingSemanticUpgrades,
+                conflicts = analysis.Conflicts,
+                upgradeRequired = analysis.UpgradeRequired,
+                deterministicUpgrade = analysis.DeterministicUpgrade,
+                databaseModified = analysis.DatabaseModified,
+            }, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        else
+        {
+            foreach (var line in AeroLinkUpgradeAnalyzer.Render(analysis)) Console.WriteLine(line);
+        }
+        return analysis.Status switch
+        {
+            "current" => 0,
+            "upgrade-required" => 10,
+            "conflict" => 20,
+            _ => 30,
+        };
+    }
+
+    private static async Task<int> ResolveAsync(IServiceProvider services, string[] args)
+    {
+        string? Value(string name)
+        {
+            var index = Array.FindIndex(args, x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase));
+            return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+        }
+
+        var conflict = Value("--conflict");
+        var choice = Value("--choice");
+        var operatorReference = Value("--operator");
+        var apply = args.Contains("--apply", StringComparer.OrdinalIgnoreCase);
+
+        if (conflict is null || choice is null || operatorReference is null)
+            return Fail("--conflict, --choice and --operator are required.");
+        if (!Guid.TryParse(Value("--program"), out var programId)) return Fail("--program must be a GUID.");
+        if (!Guid.TryParse(Value("--person"), out var personId)) return Fail("--person must be a GUID.");
+        if (!Guid.TryParse(Value("--legacy-backup"), out var legacyBackupId)) return Fail("--legacy-backup must be a GUID.");
+        if (!Enum.TryParse<ProjectLeadershipPosition>(Value("--position"), ignoreCase: true, out var position))
+            return Fail("--position must be one of: " + string.Join(", ", ProjectLeadership.All));
+
+        Guid? expectedPrimary = null;
+        var rawExpectedPrimary = Value("--expect-primary");
+        if (!string.IsNullOrWhiteSpace(rawExpectedPrimary) && !rawExpectedPrimary.Equals("none", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!Guid.TryParse(rawExpectedPrimary, out var parsedPrimary)) return Fail("--expect-primary must be a GUID or 'none'.");
+            expectedPrimary = parsedPrimary;
+        }
+
+        var supported = new[]
+        {
+            AeroLinkUpgradeConflict.LegacyBackupIneligibleCode,
+            AeroLinkUpgradeConflict.LegacyBackupIsPrimaryCode,
+            AeroLinkUpgradeConflict.LegacyBackupSupersededCode,
+        };
+        if (!supported.Contains(conflict))
+            return Fail($"Conflict '{conflict}' has no supported automated resolution. Resolve it in AeroLink, then analyze again.");
+
+        var result = await services.GetRequiredService<ProjectLeadershipMaintenanceResolver>()
+            .ResolveLegacyBackupAsync(programId, legacyBackupId, position, personId, choice, expectedPrimary,
+                operatorReference, apply);
+
+        Console.WriteLine(result.Applied ? "MAINTENANCE DECISION APPLIED" : $"MAINTENANCE DECISION NOT APPLIED ({result.Outcome})");
+        Console.WriteLine(result.Detail);
+        foreach (var change in result.Changes) Console.WriteLine("  " + change);
+        if (!result.Applied && result.Outcome != AeroLinkResolutionResult.DryRunOutcome)
+            Console.WriteLine("No persistent data was changed.");
+
+        return result.Outcome switch
+        {
+            AeroLinkResolutionResult.AppliedOutcome => 0,
+            AeroLinkResolutionResult.DryRunOutcome => 0,
+            AeroLinkResolutionResult.PreconditionFailedOutcome => 21,
+            _ => 22,
+        };
+    }
+}

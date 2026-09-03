@@ -1,5 +1,6 @@
 #Requires -Version 5.1
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1')
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1')
 <#
     AeroLink protected remote-demo operator mode.
 
@@ -373,8 +374,15 @@ function Write-AeroLinkRemoteDemoLog {
 }
 
 function Get-AeroLinkRemoteDemoPostgresBin {
+    <#
+      .SYNOPSIS The PostgreSQL client binaries of the installation this source root belongs to.
+      .DESCRIPTION
+        Resolved through the installation authority rather than composed from the source root, so the
+        dedicated HOME production checkout probes the canonical HOME cluster instead of an empty one beside
+        its own source. Without a pointer the answer is the historical <root>\product\.local location.
+    #>
     param([Parameter(Mandatory)]$Config)
-    return Join-Path $Config.AeroLinkRoot 'product\.local\postgresql\pgsql\bin'
+    return (Get-AeroLinkInstallationPaths -ProductRoot (Join-Path $Config.AeroLinkRoot 'product')).PostgresBin
 }
 
 function Test-AeroLinkRemoteDemoPostgresReady {
