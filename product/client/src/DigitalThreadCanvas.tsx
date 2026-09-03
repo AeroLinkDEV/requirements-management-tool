@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
+  EDGE_LAYER_OVERHANG,
   type CanvasEdge,
   type CanvasFrame,
   type CanvasNode,
@@ -11,6 +12,7 @@ import {
   offsetToReveal,
   fitTransform,
   frameNodes,
+  isIntraLane,
   isVisible,
   laneAt,
   layout,
@@ -55,6 +57,17 @@ export type DigitalThreadCanvasProps = {
    * active and reaches no edge, which is a different picture and must not read as the resting one.
    */
   tracedEdges?: ReadonlySet<string>
+  /**
+   * The records the camera should frame when the selection changes, instead of the selection and its direct
+   * links.
+   *
+   * §6.6 frames the selection and one hop, which is right when a reader is stepping through a build: it keeps
+   * the zoom close and the next hop large. It is wrong for the moment an artifact thread first opens, because
+   * the view has selected the focal record on the reader's behalf and one hop is not the answer they asked
+   * for — landing on a six-lane thread framed to three of its lanes puts the result and the build off-screen
+   * before the reader has touched anything. A caller that knows the whole web is the answer passes it here.
+   */
+  frameIds?: readonly string[]
   ariaLabel?: string
 }
 
@@ -79,6 +92,7 @@ export default function DigitalThreadCanvas({
   onHover,
   frameInset,
   tracedEdges,
+  frameIds,
   ariaLabel = "Digital Thread canvas",
 }: DigitalThreadCanvasProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -107,11 +121,106 @@ export default function DigitalThreadCanvas({
   const frameSignature = useRef("")
   const animation = useRef<number | null>(null)
   const scrubbing = useRef(false)
+  /** The framing key the selection effect last acted on, so a re-render alone cannot reset a rolled lane. */
+  const framedFor = useRef<string | null>(null)
+  /** The latest framing request, so the resize path can retry one that arrived before the frame was real. */
+  const framingRef = useRef<{ selectedId: string; wanted: string[]; key: string } | null>(null)
+  const easeTimer = useRef<number | null>(null)
 
-  const counts = lanes.map((_, lane) =>
+  const measuredCounts = lanes.map((_, lane) =>
     laneCount ? laneCount(lane) : nodes.filter(node => node.lane === lane).length,
   )
-  const countsKey = counts.join(",")
+  const countsKey = measuredCounts.join(",")
+
+  /**
+   * The same numbers, but with an identity that only changes when the numbers do.
+   *
+   * `counts` feeds `paint`, and `paint` feeds the selection-framing effect. Rebuilt inline it was a fresh
+   * array on every render, so both were too, and the effect below re-ran for any state change at all —
+   * including hover, which every view routes into React state. That effect rewrites the lane offsets, so
+   * moving the pointer across the board silently threw away a lane the reader had rolled by hand, against
+   * #880 §6.3 and §6.4. Keying on the joined counts is enough: two boards with the same per-lane totals are
+   * interchangeable everywhere this value is used.
+   */
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- countsKey is the value identity of measuredCounts
+  const counts = useMemo(() => measuredCounts, [countsKey])
+
+  /**
+   * Room kept to the right of the board for an intra-lane edge inside the **final** lane.
+   *
+   * Such an edge bows into the gutter beside its lane. Anywhere but the last lane that gutter is board the fit
+   * already accounts for, so nothing is needed; in the last lane it is past the board's own width, and
+   * centring a board that does not include it left the curve and its label hanging off the viewport. The
+   * artifact thread's RESULT · BUILD lane is the case this exists for — an execution's `evidence for` link to
+   * its build, and a `retest of` link between two runs.
+   *
+   * Derived from the edges the canvas was handed rather than declared by the caller, so a view that grows one
+   * of these links later cannot forget to ask for the space.
+   */
+  const trailingOverhang = useMemo(() => {
+    const lastLane = lanes.length - 1
+    const laneById = new Map(nodes.map(node => [node.id, node.lane]))
+    const needsRoom = edges.some(
+      edge =>
+        laneById.get(edge.from) === lastLane && laneById.get(edge.to) === lastLane,
+    )
+    return needsRoom ? EDGE_LAYER_OVERHANG : 0
+  }, [edges, lanes.length, nodes])
+
+  /**
+   * What the camera is being asked to frame, and a signature of it built entirely from values.
+   *
+   * The framing effect must run whenever the thing being framed actually changes, and must not run when only
+   * React identities changed. Those are different questions, and answering the second with `nodes`/`edges`
+   * array identity is what let a hover discard a reader's lane roll.
+   *
+   * So the signature names the real inputs: which record is selected, which records are wanted in shot, and
+   * **where each of those sits** — its lane and row. That makes it notice the cases an identity check cannot
+   * distinguish from noise and a selection check misses entirely: the same selection re-pointed from one
+   * linked record to another, or a linked record moved to a different row while the per-lane counts stay the
+   * same. Both are real board changes that must re-sync and re-frame, or §6.4 leaves the newly linked record
+   * outside its lane window and §6.6 leaves it under the panel.
+   *
+   * `countsKey`, the frame insets and the trailing overhang are in it too, because the geometry and the free
+   * area are equally part of what "framed" means.
+   */
+  const framing = useMemo(() => {
+    if (!selectedId) return null
+
+    const linked = new Set<string>([selectedId])
+    for (const edge of edges) {
+      if (edge.from === selectedId) linked.add(edge.to)
+      else if (edge.to === selectedId) linked.add(edge.from)
+    }
+    // A caller-supplied set wins, but the selection is always in it: framing a set that omits the record the
+    // reader just selected would move the board off the very thing it is about.
+    const wanted = frameIds?.length ? new Set<string>([selectedId, ...frameIds]) : linked
+
+    // Sorted so the signature does not change merely because the projection returned its nodes in a new order.
+    const placement = nodes
+      .filter(node => wanted.has(node.id))
+      .map(node => `${node.id}@${node.lane}:${node.row}`)
+      .sort()
+      .join(",")
+
+    return {
+      selectedId,
+      wanted: [...wanted],
+      key:
+        `${selectedId}|${countsKey}|${placement}` +
+        `|${frameInset?.left ?? 0},${frameInset?.right ?? 0},${frameInset?.bottom ?? 0},${trailingOverhang}`,
+    }
+  }, [
+    countsKey,
+    edges,
+    frameIds,
+    frameInset?.left,
+    frameInset?.right,
+    frameInset?.bottom,
+    nodes,
+    selectedId,
+    trailingOverhang,
+  ])
 
   /**
    * The frame can be measured before it has settled — inside a preview or a freshly mounted panel the first
@@ -126,10 +235,10 @@ export default function DigitalThreadCanvas({
     return {
       x: frameInset?.left ?? 0,
       y: 0,
-      width: rect.width - (frameInset?.left ?? 0) - (frameInset?.right ?? 0),
+      width: rect.width - (frameInset?.left ?? 0) - (frameInset?.right ?? 0) - trailingOverhang,
       height: rect.height - (frameInset?.bottom ?? 0),
     }
-  }, [frameInset?.left, frameInset?.right, frameInset?.bottom])
+  }, [frameInset?.left, frameInset?.right, frameInset?.bottom, trailingOverhang])
 
   /** Write current geometry to the DOM: transform, band sizes, card positions, edge paths. */
   const paint = useCallback(() => {
@@ -204,9 +313,13 @@ export default function DigitalThreadCanvas({
 
     const svg = edgeLayerRef.current
     if (svg) {
-      svg.setAttribute("width", String(result.sceneWidth + 52))
+      // The right margin carries the intra-lane overhang as well as the usual bleed: an edge inside the final
+      // lane bows past the board's own width, and sizing this to the board alone clipped the curve and its
+      // label off the end of the canvas.
+      const width = result.sceneWidth + 26 + EDGE_LAYER_OVERHANG
+      svg.setAttribute("width", String(width))
       svg.setAttribute("height", String(bandHeight + 82))
-      svg.setAttribute("viewBox", `-26 -56 ${result.sceneWidth + 52} ${bandHeight + 82}`)
+      svg.setAttribute("viewBox", `-26 -56 ${width} ${bandHeight + 82}`)
       svg.style.left = "-26px"
       svg.style.top = "-56px"
     }
@@ -242,7 +355,12 @@ export default function DigitalThreadCanvas({
       path.style.opacity = inWindow ? "" : "0.06"
       dot.style.opacity = path.style.opacity
       if (label) {
-        const midX = (from.x + geometry.laneWidth + to.x) / 2
+        // An intra-lane edge bows into the gutter beside its lane, so its label follows it there. Taking the
+        // midpoint of the two endpoints would put the word in the middle of the lane, on top of the very cards
+        // the edge is drawn between.
+        const midX = isIntraLane(from, to)
+          ? from.x + geometry.laneWidth + 30
+          : (from.x + geometry.laneWidth + to.x) / 2
         const midY = (from.y + to.y) / 2 + geometry.anchor - 6
         label.setAttribute("x", String(midX))
         label.setAttribute("y", String(midY))
@@ -269,6 +387,64 @@ export default function DigitalThreadCanvas({
     paint()
   }, [counts, frame, paint])
 
+  /**
+   * Reframe onto the selection and its direct links.
+   *
+   * This is the half of the panel rule that side-picking cannot do on its own: the board moves into the area
+   * the panel is not covering, so a linked record cannot end up underneath it. It also gives the panel's
+   * relation rows somewhere to go — clicking one selects that record and the board comes to it.
+   *
+   * Returns whether it actually ran. It cannot run before the host frame is real — `frame()` refuses a rect
+   * that has not settled — and the caller uses that answer to decide whether the framing key has been dealt
+   * with. Marking a key handled on a refused frame is how a focal record could land with a linked record still
+   * rolled out of view: the retry path only ever called `fit()`, which moves the camera but does not roll a
+   * lane, and no state change was pending to make the effect run again.
+   */
+  const applyFraming = useCallback(
+    (target: { selectedId: string; wanted: string[] } | null): boolean => {
+      if (!target) return false
+      const box = frame()
+      const result = geometryRef.current
+      if (!box || !result) return false
+
+      // Roll every lane to bring the selected record's linked records into their own windows, before framing
+      // (#880 §6.4: "the same routine runs on selection"). Panning the camera cannot do this job: a lane
+      // scrolls independently, so a linked record can sit outside its lane window no matter where the camera
+      // is, and framing alone would centre on a card the reader still cannot see. The offsets are applied at
+      // once rather than animated into place so the two-pass framing below measures where the cards landed.
+      const synced = syncTargets(
+        target.selectedId,
+        nodes,
+        edges,
+        result.geometry,
+        offsets.current,
+        result.laneMinimums,
+        counts.length,
+        -1,
+      )
+      offsets.current = [...synced]
+      targets.current = [...synced]
+
+      const next = frameNodes(target.wanted, nodes, counts, box, offsets.current, target.selectedId)
+      if (!next) return false
+
+      sceneRef.current?.classList.add("is-easing")
+      transform.current = next
+      paint()
+      if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
+      easeTimer.current = window.setTimeout(() => {
+        sceneRef.current?.classList.remove("is-easing")
+        easeTimer.current = null
+      }, 420)
+      return true
+    },
+    [counts, edges, frame, nodes, paint],
+  )
+
+  // Read by the resize path, which must be able to retry a selection that arrived before the frame was real
+  // without re-subscribing its observer every time the selection changes.
+  framingRef.current = framing
+
   // Lay out once the frame is real, and again whenever it changes size.
   useLayoutEffect(() => {
     const element = viewportRef.current
@@ -277,9 +453,20 @@ export default function DigitalThreadCanvas({
       const rect = element.getBoundingClientRect()
       if (rect.width < 100) return
       const signature = `${Math.round(rect.width)}x${Math.round(rect.height)}x${countsKey}`
-      if (signature === frameSignature.current) return
-      frameSignature.current = signature
-      fit()
+      if (signature !== frameSignature.current) {
+        frameSignature.current = signature
+        fit()
+      }
+
+      // A selection can arrive while the host frame is still unsettled — a freshly mounted panel or a preview
+      // reports a rect a fraction of its real size, and `frame()` refuses it. `fit()` alone is not the repair:
+      // it moves the camera but does not roll a tall lane, so a directly linked record would stay outside its
+      // window after the frame settled. Retried here because the settling resize needs no React state change,
+      // so nothing else would run the framing effect again.
+      const pending = framingRef.current
+      if (pending && framedFor.current !== pending.key && applyFraming(pending)) {
+        framedFor.current = pending.key
+      }
     }
     measure()
     const timers = [window.setTimeout(measure, 50), window.setTimeout(measure, 350)]
@@ -291,63 +478,30 @@ export default function DigitalThreadCanvas({
       observer?.disconnect()
       window.removeEventListener("resize", measure)
     }
-  }, [countsKey, fit])
+  }, [applyFraming, countsKey, fit])
 
   useEffect(() => {
     paint()
   }, [paint])
 
-  /**
-   * Reframe onto the selection and its direct links.
-   *
-   * This is the half of the panel rule that side-picking cannot do on its own: the board moves into the area
-   * the panel is not covering, so a linked record cannot end up underneath it. It also gives the panel's
-   * relation rows somewhere to go — clicking one selects that record and the board comes to it.
-   */
+
   useEffect(() => {
-    if (!selectedId) return
-    const box = frame()
-    const result = geometryRef.current
-    if (!box || !result) return
-    const linked = new Set<string>([selectedId])
-    for (const edge of edges) {
-      if (edge.from === selectedId) linked.add(edge.to)
-      else if (edge.to === selectedId) linked.add(edge.from)
+    if (!framing) {
+      framedFor.current = null
+      return
     }
+    if (framedFor.current === framing.key) return
+    // Consumed only once the framing has actually applied. If the frame is not usable yet the key stays
+    // pending, and the resize path retries it the moment a real rect arrives.
+    if (applyFraming(framing)) framedFor.current = framing.key
+  }, [applyFraming, framing])
 
-    // Roll every lane to bring the selected record's linked records into their own windows, before framing
-    // (#880 §6.4: "the same routine runs on selection"). Panning the camera cannot do this job: a lane scrolls
-    // independently, so a linked record can sit outside its lane window no matter where the camera is, and
-    // framing alone would centre on a card the reader still cannot see. The offsets are applied at once rather
-    // than animated into place so the two-pass framing below measures where the cards have actually landed.
-    const synced = syncTargets(
-      selectedId,
-      nodes,
-      edges,
-      result.geometry,
-      offsets.current,
-      result.laneMinimums,
-      counts.length,
-      -1,
-    )
-    offsets.current = [...synced]
-    targets.current = [...synced]
-
-    const next = frameNodes(
-      [...linked],
-      nodes,
-      counts,
-      box,
-      offsets.current,
-      selectedId,
-    )
-    if (!next) return
-    sceneRef.current?.classList.add("is-easing")
-    transform.current = next
-    paint()
-    const timer = window.setTimeout(() => sceneRef.current?.classList.remove("is-easing"), 420)
-    return () => window.clearTimeout(timer)
-  }, [counts, edges, frame, nodes, paint, selectedId])
+  useEffect(
+    () => () => {
+      if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
+    },
+    [],
+  )
 
   useEffect(
     () => () => {

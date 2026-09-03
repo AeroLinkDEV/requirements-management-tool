@@ -362,7 +362,22 @@ export const frameNodes = (
   maxZoom = 1.12,
 ): { x: number; y: number; zoom: number } | null => {
   const wanted = new Set(ids)
-  const measure = (result: LayoutResult, room: boolean) => {
+  /**
+   * The box around the wanted records, measured over the ones actually on the board.
+   *
+   * A lane taller than its window rolls, so a wanted record can sit outside that window and not be drawn at
+   * all. Measuring it anyway stretched the box far above the visible band, and because the pan is then clamped
+   * to that box, the whole scene was pushed down out of the frame — a thirty-record lane landed with its board
+   * below the viewport. The selected card is included regardless, matching the canvas, which never hides it.
+   *
+   * `onlyDrawn: false` is the fallback for when nothing is currently drawn, so framing still has something to
+   * aim at rather than giving up.
+   */
+  const measure = (
+    result: LayoutResult,
+    room: boolean,
+    onlyDrawn = true,
+  ): { x: number; y: number; width: number; height: number } | null => {
     let x0 = Infinity
     let y0 = Infinity
     let x1 = -Infinity
@@ -370,12 +385,14 @@ export const frameNodes = (
     for (const node of nodes) {
       if (!wanted.has(node.id)) continue
       const { x, y } = nodePosition(node, result.geometry, offsets)
+      if (onlyDrawn && node.id !== selectedId && !isVisible(y, result.geometry, result.bandHeight)) continue
       x0 = Math.min(x0, x)
       x1 = Math.max(x1, x + result.geometry.laneWidth)
       y0 = Math.min(y0, y)
       y1 = Math.max(y1, y + result.geometry.cardHeight + (room && node.id === selectedId ? 132 : 0))
     }
-    return x0 > x1 ? null : { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
+    if (x0 > x1) return onlyDrawn ? measure(result, room, false) : null
+    return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
   }
 
   const first = layout(laneCounts, frame, 1)
@@ -412,17 +429,50 @@ export const frameNodes = (
   return { x, y, zoom }
 }
 
-/** The cubic path for an edge, routed from the source's right edge to the target's left edge. */
+/**
+ * True when both endpoints sit in the same lane.
+ *
+ * The artifact thread's final lane holds both a result and a build (#880 §5.3), so it carries edges whose
+ * endpoints share a lane: an execution's `evidence for` link to its build, and a `retest of` link between two
+ * runs. Every other view is strictly lane-to-lane, which is why this case needed naming rather than assuming.
+ */
+export const isIntraLane = (from: { x: number }, to: { x: number }): boolean => Math.abs(to.x - from.x) < 1
+
+/** How far an intra-lane edge bulges into the gutter beside its lane. */
+const INTRA_LANE_BOW = 46
+
+/**
+ * Room the edge layer must leave to the right of the last lane.
+ *
+ * The final lane can carry an intra-lane edge — the artifact thread's execution-to-build link — whose bow and
+ * label sit past the board's own width. Sizing the layer to the board alone clipped both, so the overhang is
+ * stated here and the canvas reads it rather than the two drifting apart.
+ */
+export const EDGE_LAYER_OVERHANG = INTRA_LANE_BOW + 30
+
+/**
+ * The cubic path for an edge, routed from the source's right edge to the target's left edge.
+ *
+ * An intra-lane edge is routed differently, as a bow out into the right-hand gutter and back. Treating it as a
+ * backwards edge — which is what an equal x otherwise reads as — sent the curve out of the card's left side and
+ * back into the target's right side, sweeping straight across the lane and over every card between them. The
+ * gutter bow says "these two are linked" without crossing the records it is drawn beside.
+ */
 export const edgePath = (
   from: { x: number; y: number },
   to: { x: number; y: number },
   geometry: CanvasGeometry,
 ): string => {
-  const backwards = to.x <= from.x
-  const x1 = backwards ? from.x : from.x + geometry.laneWidth
   const y1 = from.y + geometry.anchor
-  const x2 = backwards ? to.x + geometry.laneWidth : to.x
   const y2 = to.y + geometry.anchor
+  if (isIntraLane(from, to)) {
+    const edge = from.x + geometry.laneWidth
+    const bow = edge + INTRA_LANE_BOW
+    return `M${edge} ${y1} C${bow} ${y1},${bow} ${y2},${edge} ${y2}`
+  }
+  const backwards = to.x < from.x
+  const x1 = backwards ? from.x : from.x + geometry.laneWidth
+  const x2 = backwards ? to.x + geometry.laneWidth : to.x
   const bend = Math.max(30, Math.abs(x2 - x1) * 0.42) * (backwards ? -1 : 1)
   return `M${x1} ${y1} C${x1 + bend} ${y1},${x2 - bend} ${y2},${x2} ${y2}`
 }

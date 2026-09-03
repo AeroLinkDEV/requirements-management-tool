@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Change network — rendered test fixture</title>
+  </head>
+  <body>
+    <!--
+      Test-only mount for DigitalThreadNetwork.
+
+      Added while fixing #905 in the slice 5B PR: the change network had only pure-logic coverage, so a purely
+      visual defect — three-letter badges overflowing a fixed 20px box and landing on the identifier beside
+      them — had nowhere to be caught. Card geometry is not something a presentation spec can assert.
+
+      Nothing in the product imports this file; it is served by the same Vite dev server the browser journeys
+      already use, and reached only by the Playwright spec that names it. Page integration remains slice 6.
+    -->
+    <div id="root" style="height: 720px"></div>
+    <script type="module" src="./change-network.tsx"></script>
+  </body>
+</html>
