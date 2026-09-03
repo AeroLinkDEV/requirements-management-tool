@@ -1050,42 +1050,56 @@ function Get-AeroLinkRemoteDemoTaskXml {
     param(
         [Parameter(Mandatory)]$Config,
         [string]$TaskName = $script:RemoteDemoTaskName,
-        # S4U runs at boot with no interactive session and no stored password. InteractiveToken exists as a
-        # fallback for machines whose policy refuses to register an S4U principal; it recovers at logon only,
-        # which is the behaviour #881 is replacing, so it is never the default.
-        [ValidateSet('S4U', 'InteractiveToken')][string]$LogonType = 'S4U'
+        # Two coherent shapes, not four combinations.
+        #
+        # Unattended is a boot trigger under an S4U principal, which is what makes a reboot with nobody
+        # signed in recover the demo. Measured on the HOME machine: Windows refuses BOTH a boot trigger and
+        # an S4U principal to a non-elevated caller, so this shape needs one elevated install. Attended is
+        # the shape that installs without administrator - a logon trigger under an interactive token, which
+        # is the pre-#881 behaviour. It recovers after sign-in and NOT after an unattended reboot, so it is
+        # a fallback that must be said out loud, never a default.
+        [switch]$Attended
     )
     $scriptPath = Join-Path $Config.AeroLinkRoot 'product\scripts\AeroLinkRemoteDemo.ps1'
-    # Boot AND logon, both firing the same idempotent start.
+    # Boot AND logon in the unattended shape, both firing the same idempotent start.
     #
     # A LogonTrigger alone recovers after Sean signs in, which is not what "the machine rebooted" means. On
-    # 2026-09-03 the reboot happened while nobody was at the keyboard. The boot trigger is the primary path
-    # now; the logon trigger stays as a second chance for the case where boot recovery could not complete
-    # (no network yet, credentials not available), and overlapping runs are harmless because
+    # 2026-09-03 the reboot happened while nobody was at the keyboard. The boot trigger is the primary path;
+    # the logon trigger stays as a second chance for the case where boot recovery could not complete (no
+    # network yet, credentials not available), and overlapping runs are harmless because
     # MultipleInstancesPolicy is IgnoreNew and Start-AeroLinkRemoteDemo reports READY without creating a
     # duplicate API or a second tunnel.
     #
-    # LogonType stays InteractiveToken under the operator's own account rather than becoming SYSTEM: ngrok's
-    # agent configuration and its credential store are per-user, and a SYSTEM task would find neither. That
-    # is why S4U is used for the boot trigger — it runs without a stored password and without an interactive
-    # session, in the operator's own profile.
+    # The principal stays the operator's own account rather than becoming SYSTEM: ngrok's agent
+    # configuration and its credential store are per-user, and a SYSTEM task would find neither. S4U is the
+    # way to run in that account without an interactive session and without storing a password.
     #
-    # PT1M start delay, and Delay on the boot trigger: at fifteen seconds after boot the network stack, the
-    # user profile and the disk are all still settling, and every prerequisite check would fail for reasons
-    # that resolve themselves a minute later.
-    return @"
-<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo>
-    <Description>AeroLink protected remote-demo recovery (boot and logon, current user, no admin).</Description>
-    <URI>\$TaskName</URI>
-  </RegistrationInfo>
-  <Triggers>
+    # PT1M delay on the boot trigger: at fifteen seconds after boot the network stack, the user profile and
+    # the disk are all still settling, and every prerequisite check would fail for reasons that resolve
+    # themselves a minute later.
+    $logonType = if ($Attended) { 'InteractiveToken' } else { 'S4U' }
+    $bootTrigger = if ($Attended) { '' } else {
+        @"
     <BootTrigger>
       <Enabled>true</Enabled>
       <Delay>PT1M</Delay>
     </BootTrigger>
-    <LogonTrigger>
+"@
+    }
+    $description = if ($Attended) {
+        'AeroLink protected remote-demo recovery (logon only, current user, no admin). Does NOT recover an unattended reboot.'
+    } else {
+        'AeroLink protected remote-demo recovery (boot and logon, current user).'
+    }
+    return @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>$description</Description>
+    <URI>\$TaskName</URI>
+  </RegistrationInfo>
+  <Triggers>
+$bootTrigger    <LogonTrigger>
       <Enabled>true</Enabled>
       <UserId>$env:USERDOMAIN\$env:USERNAME</UserId>
     </LogonTrigger>
@@ -1093,7 +1107,7 @@ function Get-AeroLinkRemoteDemoTaskXml {
   <Principals>
     <Principal id="Author">
       <UserId>$env:USERDOMAIN\$env:USERNAME</UserId>
-      <LogonType>$LogonType</LogonType>
+      <LogonType>$logonType</LogonType>
       <RunLevel>LeastPrivilege</RunLevel>
     </Principal>
   </Principals>
@@ -1217,6 +1231,9 @@ function Install-AeroLinkReconcileTask {
     if (-not $AllowNonDedicatedSource) { Assert-AeroLinkDedicatedProductionSource -SourceRoot $Config.AeroLinkRoot | Out-Null }
     if (-not (Test-Path -LiteralPath $Config.StatePath)) { New-Item -ItemType Directory -Path $Config.StatePath -Force | Out-Null }
     $xmlPath = Join-Path $Config.StatePath 'production-source-reconcile-task.xml'
+    # Unlike recovery, reconciliation loses nothing by falling back: a time trigger under an interactive
+    # token registers without administrator and still polls while the operator is signed in, which is when a
+    # HOME machine is running anyway. S4U is preferred only so it keeps polling across a lock or sign-out.
     $logonType = 'S4U'
     Set-Content -LiteralPath $xmlPath -Encoding Unicode -Value (Get-AeroLinkReconcileTaskXml -Config $Config -TaskName $TaskName -IntervalMinutes $IntervalMinutes -LogonType $logonType)
     & schtasks.exe /Create /TN $TaskName /XML $xmlPath /F
@@ -1277,9 +1294,9 @@ function Save-AeroLinkRemoteDemoTaskXml {
         [Parameter(Mandatory)]$Config,
         [Parameter(Mandatory)][string]$Path,
         [string]$TaskName = $script:RemoteDemoTaskName,
-        [ValidateSet('S4U', 'InteractiveToken')][string]$LogonType = 'S4U'
+        [switch]$Attended
     )
-    $xml = Get-AeroLinkRemoteDemoTaskXml -Config $Config -TaskName $TaskName -LogonType $LogonType
+    $xml = Get-AeroLinkRemoteDemoTaskXml -Config $Config -TaskName $TaskName -Attended:$Attended
     Set-Content -LiteralPath $Path -Value $xml -Encoding Unicode
     return $Path
 }
@@ -1295,8 +1312,15 @@ function Install-AeroLinkRemoteDemoTask {
         well-meant edit.
 
         -TaskName exists so the installer can be qualified against a disposable task without touching the
-        real one. S4U falls back to InteractiveToken only when the machine refuses to register an S4U
-        principal, and says so rather than silently accepting logon-only recovery.
+        real one.
+
+        The unattended shape is attempted first and the attended one is the fallback, because Windows will
+        not register a boot trigger or an S4U principal for a non-elevated caller - measured on the HOME
+        machine, where every combination involving either was refused with "Access is denied" while logon
+        and time triggers under an interactive token registered fine. Falling back keeps the installer
+        working without administrator, at the cost of the very property #881 is adding; the result says so
+        in as many words rather than reporting success and leaving the operator to discover it at the next
+        reboot.
     #>
     [CmdletBinding()]
     param(
@@ -1309,20 +1333,24 @@ function Install-AeroLinkRemoteDemoTask {
     }
     if (-not (Test-Path -LiteralPath $Config.StatePath)) { New-Item -ItemType Directory -Path $Config.StatePath -Force | Out-Null }
     $xmlPath = Join-Path $Config.StatePath 'remote-demo-task.xml'
-    $logonType = 'S4U'
-    Save-AeroLinkRemoteDemoTaskXml -Config $Config -Path $xmlPath -TaskName $TaskName -LogonType $logonType
+    $unattended = $true
+    Save-AeroLinkRemoteDemoTaskXml -Config $Config -Path $xmlPath -TaskName $TaskName
     & schtasks.exe /Create /TN $TaskName /XML $xmlPath /F
     if ($LASTEXITCODE -ne 0) {
-        Write-Host 'This machine refused to register the unattended (S4U) recovery principal. Falling back to' -ForegroundColor Yellow
-        Write-Host 'interactive-token recovery, which recovers after sign-in but NOT after an unattended reboot.' -ForegroundColor Yellow
-        $logonType = 'InteractiveToken'
-        Save-AeroLinkRemoteDemoTaskXml -Config $Config -Path $xmlPath -TaskName $TaskName -LogonType $logonType
+        Write-Host '' -ForegroundColor Yellow
+        Write-Host 'Windows refused to register unattended recovery. A boot trigger and a password-less (S4U)' -ForegroundColor Yellow
+        Write-Host 'principal both require an elevated install; this one was not elevated.' -ForegroundColor Yellow
+        Write-Host 'Falling back to logon recovery, which recovers after you sign in and NOT after a reboot' -ForegroundColor Yellow
+        Write-Host 'with nobody logged in. To get unattended recovery, run this configuration once from an' -ForegroundColor Yellow
+        Write-Host 'elevated PowerShell.' -ForegroundColor Yellow
+        $unattended = $false
+        Save-AeroLinkRemoteDemoTaskXml -Config $Config -Path $xmlPath -TaskName $TaskName -Attended
         & schtasks.exe /Create /TN $TaskName /XML $xmlPath /F
         if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed with exit code $LASTEXITCODE." }
     }
     $status = Get-AeroLinkRemoteDemoTaskStatus -TaskName $TaskName
-    $status | Add-Member -MemberType NoteProperty -Name LogonType -Value $logonType -Force
-    $status | Add-Member -MemberType NoteProperty -Name UnattendedBootRecovery -Value ($logonType -eq 'S4U') -Force
+    $status | Add-Member -MemberType NoteProperty -Name LogonType -Value $(if ($unattended) { 'S4U' } else { 'InteractiveToken' }) -Force
+    $status | Add-Member -MemberType NoteProperty -Name UnattendedBootRecovery -Value $unattended -Force
     $status | Add-Member -MemberType NoteProperty -Name SourceRoot -Value $Config.AeroLinkRoot -Force
     return $status
 }

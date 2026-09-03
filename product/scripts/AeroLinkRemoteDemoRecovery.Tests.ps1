@@ -273,6 +273,16 @@ Assert-True ($xml -notmatch 'S-1-5-18|SYSTEM') 'Scenario 13: recovery must not r
 Assert-True ($xml -match 'MultipleInstancesPolicy>IgnoreNew') 'Scenario 13: boot and logon both firing must not start two recoveries.'
 Assert-True ($xml -notmatch '(?i)authtoken|password|secret|basic-auth') 'Scenario 13: the task definition must carry no secret.'
 
+# The attended fallback is a coherent shape, not the unattended one with a different principal. Measured on
+# the HOME machine: Windows refuses a boot trigger AND an S4U principal to a non-elevated caller, so the
+# fallback must drop both or it cannot register either. It must also say what it costs.
+$attendedXml = Get-AeroLinkRemoteDemoTaskXml -Config $productionConfig -Attended
+Assert-True ($attendedXml -notmatch '<BootTrigger>') 'Scenario 13: the attended fallback must drop the boot trigger, which a non-elevated install cannot register.'
+Assert-True ($attendedXml -match '<LogonType>InteractiveToken</LogonType>') 'Scenario 13: the attended fallback runs under an interactive token, which registers without administrator.'
+Assert-True ($attendedXml -match '<LogonTrigger>') 'Scenario 13: the attended fallback still recovers at sign-in.'
+Assert-True ($attendedXml -match '(?i)does NOT recover an unattended reboot') 'Scenario 13: the attended fallback must declare in the task itself that it does not recover an unattended reboot.'
+Assert-True ($attendedXml -match [regex]::Escape('C:\Sean Project\AeroLink Production')) 'Scenario 13: the attended fallback is still bound to the dedicated production source.'
+
 # --- 14. The bounded reconciliation task polls, and only restarts when origin/main actually moved ---
 $reconcileXml = Get-AeroLinkReconcileTaskXml -Config $productionConfig -IntervalMinutes 30
 Assert-True ($reconcileXml -match '<Interval>PT30M</Interval>') 'Scenario 14: reconciliation runs on a low-overhead cadence, not every thirty seconds.'

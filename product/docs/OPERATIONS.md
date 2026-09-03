@@ -122,9 +122,15 @@ credentials are per-user), and neither carrying a secret:
 
 * `AeroLinkRemoteDemoRecovery` — boot trigger with a one-minute delay, plus a logon trigger as a second
   chance. `MultipleInstancesPolicy=IgnoreNew` and an idempotent start mean both firing produces no duplicate
-  API and no duplicate tunnel. The boot trigger uses an S4U principal so a reboot recovers without an
-  interactive sign-in; where a machine refuses to register S4U the installer falls back to a logon-token
-  principal and says plainly that an unattended reboot will **not** recover the demo.
+  API and no duplicate tunnel. The principal is S4U, so a reboot recovers without an interactive sign-in.
+
+  **Run `CONFIGURE_AEROLINK_REMOTE_DEMO.bat Install` once from an elevated PowerShell.** Windows will not
+  register a boot trigger or an S4U principal for a non-elevated caller — measured on the HOME machine,
+  where both were refused with "Access is denied" while logon and time triggers under an interactive token
+  registered fine. Without elevation the installer falls back to the logon-only shape, which recovers after
+  you sign in and **not** after a reboot with nobody logged in; it prints that in as many words, and
+  `UnattendedBootRecovery` in its result and `Configure Status` report which shape is installed. Everything
+  else about the task is unchanged by the fallback, including its binding to the dedicated production source.
 * `AeroLinkProductionSourceReconcile` — every 30 minutes, so a machine that never reboots does not run last
   week's `main`. It does nothing unless `origin/main` actually moved; when it has, the source is
   fast-forwarded and production is restarted into it through the ordinary start path, which re-proves the
