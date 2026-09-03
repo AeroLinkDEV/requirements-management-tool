@@ -394,11 +394,24 @@ test('every workspace chunk arrives and keeps the design contract in both densit
           const box = element.getBoundingClientRect()
           return box.width > 0 && box.height > 0
         }
+        // The Digital Thread canvas is a scaled scene (#880 §10.1, DEC-117): text inside it is authored in
+        // scene units and drawn at the reader's zoom, so a CSS-pixel floor measures the wrong number there.
+        // Its legibility is asserted at default landing zoom by the Digital Thread specs instead. The floor
+        // still applies to that page's toolbar, table, panel and messages, and to every other surface.
         const leaves = [...document.querySelectorAll('main *, body > div > *')].filter(
-          element => visible(element) && !element.children.length && (element.textContent || '').trim().length > 0,
+          element =>
+            visible(element) &&
+            !element.children.length &&
+            (element.textContent || '').trim().length > 0 &&
+            !element.closest('.dtCanvasScene'),
         )
         return {
           heading: [...document.querySelectorAll('h1, h2, h3')].some(visible),
+          // A page is allowed to have no heading. #880 §4.2 reclaimed the Digital Thread header deliberately —
+          // the canvas is the page, and the shell breadcrumb above it carries the context an H1 used to. What
+          // this check is really asking is whether the chunk arrived and rendered, so a labelled main landmark
+          // answers it just as well; the text-length floor below still catches an empty one.
+          landmark: !!document.querySelector('main[aria-label]'),
           // A chunk that fails to load leaves the surface empty. Dev cannot have this failure because dev
           // never chunks; the error boundary is the other thing that would show here.
           text: (document.querySelector('main')?.textContent || document.body.textContent || '').trim().length,
@@ -422,7 +435,7 @@ test('every workspace chunk arrives and keeps the design contract in both densit
       })
 
       if (report.boundary) failures.push(`${where}: the workspace rendered its error boundary`)
-      else if (!report.heading || report.text < 120) failures.push(`${where}: rendered nothing substantial — the chunk did not arrive`)
+      else if ((!report.heading && !report.landmark) || report.text < 120) failures.push(`${where}: rendered nothing substantial — the chunk did not arrive`)
       // The readability floor and the density system are the two things an extracted, concatenated stylesheet
       // is most likely to change, because both are documented as depending on the order rules load in.
       if (report.tiny.length) failures.push(`${where}: ${report.tiny.length} element(s) under 12px — ${report.tiny.slice(0, 4).join('; ')}`)
