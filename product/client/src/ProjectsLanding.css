@@ -36,7 +36,10 @@ body:has(.projectsPage) { min-width: 0; }
   letter-spacing: .01em;
 }
 
-.projectsBrand span {
+/* The logo glyph only. A bare element selector here also claimed the instance badge beside the wordmark and
+   beat it on specificity, so the badge rendered as a 23px accent-coloured heading. This file duplicates the
+   brand block from PortalHeader.css; both were corrected. */
+.projectsBrand > span[aria-hidden="true"] {
   color: #70d8c9;
   font-size: 23px;
   transform: skewX(-10deg);

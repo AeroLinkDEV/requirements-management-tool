@@ -41,6 +41,12 @@
   .instanceBadgeSnapshot { display: none; }
 }
 
+/* The workspace sidebar is a fixed narrow column, so the snapshot suffix is dropped there regardless of
+   viewport width: with it the badge measured 262px against a 160px column and the age was clipped
+   mid-word. The label alone still answers the question the badge exists for, and the tooltip still carries
+   the age for anyone who wants it. */
+.brand .instanceBadgeSnapshot { display: none; }
+
 @media (max-width: 560px) {
   /* The label alone still answers the question the badge exists for. */
   .instanceBadge { margin-left: 9px; padding: 3px 7px; letter-spacing: .04em; }

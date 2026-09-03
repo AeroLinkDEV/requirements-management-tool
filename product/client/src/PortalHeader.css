@@ -24,7 +24,10 @@
   letter-spacing: .01em;
 }
 
-.projectsBrand span { color: #70d8c9; font-size: 23px; transform: skewX(-10deg); }
+/* The logo glyph, not "any span in the brand". Written as a bare element selector it also claimed the
+   instance badge that now sits beside the wordmark, and beat it on specificity: the badge inherited a 23px
+   display glyph size and the brand's accent colour, which looked like a heading rather than a chip. */
+.projectsBrand > span[aria-hidden="true"] { color: #70d8c9; font-size: 23px; transform: skewX(-10deg); }
 .projectsAccount { display: flex; align-items: center; gap: 11px; }
 .projectsAccount > div:not(.personAvatar) { min-width: 135px; display: flex; flex-direction: column; gap: 2px; }
 .projectsAccount b { font-size: 13px; }
