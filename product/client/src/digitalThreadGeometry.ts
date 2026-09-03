@@ -292,12 +292,33 @@ export const wheelFactor = (deltaY: number): number => Math.pow(0.9988, deltaY)
  * Fit reads the width. The vertical is a rolling window, so this deliberately does not try to squeeze a lane
  * of thirty records onto one screen — that is what rolling is for.
  */
+/**
+ * The lowest zoom the board is allowed to *land* at.
+ *
+ * #880 §10.1, as DEC-117 records it, requires every identifier, title and state label to be legible when the
+ * page opens, before the reader has touched anything; text may fall below the readable floor only as a
+ * consequence of the reader deliberately zooming out, where shedding detail is the point.
+ *
+ * Fitting the whole board into the viewport and landing legibly are in direct tension: a seven-lane board is
+ * 2012 scene units wide, so width-fit alone lands near 0.61 at 1280px and renders card text at roughly
+ * two-thirds of its authored size. Legibility wins. The board lands in the detailed tier at a zoom where the
+ * authored card type clears the readable floor, and a board wider than the viewport is panned — which is an
+ * ordinary canvas affordance, and cheaper for a reader than text they cannot read. Double-click still calls
+ * `fit()` for a reader who wants the whole board at once.
+ *
+ * This is the landing floor only. `MIN_ZOOM` remains the floor for zooming the reader performs themselves.
+ */
+export const LANDING_MIN_ZOOM = 0.86
+
 export const fitTransform = (
   frame: CanvasFrame,
   laneCounts: readonly number[],
 ): { x: number; y: number; zoom: number } => {
   const width = sceneWidth(laneCounts.length)
-  const zoom = Math.max(minimumZoom(frame, laneCounts), Math.min(1.05, (frame.width - 56) / width))
+  const zoom = Math.max(
+    LANDING_MIN_ZOOM,
+    Math.max(minimumZoom(frame, laneCounts), Math.min(1.05, (frame.width - 56) / width)),
+  )
   const { bandHeight } = layout(laneCounts, frame, zoom)
   return {
     zoom,

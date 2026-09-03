@@ -7,7 +7,7 @@ import ExactLinkLifecyclePanel, { type ExactLinkLifecycle } from "./ExactLinkLif
 import { stateLabel } from "./presentation"
 import { traceRelationLabel } from "./tracePresentation"
 import type { ExactTraceArtifact, ThreadView } from "./routing"
-import type { NetworkNode, NetworkProjection } from "./changeNetworkPresentation"
+import type { NetworkProjection } from "./changeNetworkPresentation"
 import type { ProposalContent } from "./changeProposalPresentation"
 import { artifactThreadUrl, type ArtifactThreadFocalKind, type ArtifactThreadNode } from "./artifactThreadContract"
 import "./DigitalThreadPage.css"
@@ -84,6 +84,55 @@ const relationHref = (
     : undefined
 }
 
+/**
+ * A canvas card's identity, in the vocabulary the shared exact-route helper speaks.
+ *
+ * #880 §11.3 requires every identifier the canvas renders to keep `ExactArtifactLink`'s exact-revision
+ * behaviour, which means each card must hand over its **authoritative** kind and revision rather than a bare
+ * id. Routing every card through a requirement-shaped Digital Thread path, as the first cut did, took a
+ * change request, a test case, an execution or a build and addressed all of them as though they were the same
+ * kind of record — losing both the native destination and the exact revision.
+ *
+ * The kind comes from the projection, never from the display number. A `Build` and a `ProblemReport` map to
+ * nothing on purpose: neither has an exact authorized artifact route today, and a non-openable identifier is
+ * the correct outcome rather than an invented URL.
+ */
+const EXACT_KIND: Record<string, string> = {
+  ChangeRequest: "ChangeRequest",
+  TestChangeRequest: "TestChangeRequest",
+  Requirement: "RequirementRevision",
+  RequirementRevision: "RequirementRevision",
+  Case: "TestCase",
+  TestCase: "TestCase",
+  Procedure: "TestProcedure",
+  TestProcedure: "TestProcedure",
+  Execution: "TestExecution",
+  TestExecution: "TestExecution",
+  Evidence: "Evidence",
+}
+
+/** The exact identity for a canvas card, or nothing when its kind has no authorized exact route. */
+export const exactCardIdentity = (node: {
+  id: string; kind: string; displayNumber?: string | null; level?: string | null
+  artifactId?: string | null; buildId?: string | null
+}): ExactTraceArtifact | undefined => {
+  const kind = EXACT_KIND[node.kind]
+  if (!kind) return undefined
+  // Verification artifacts are addressed by their aggregate with the exact revision alongside; requirements
+  // and changes are addressed by the revision itself. Both identities come off the same card.
+  const byAggregate = kind === "TestCase" || kind === "TestProcedure"
+  if (byAggregate && !node.artifactId) return undefined
+  return {
+    id: byAggregate ? node.artifactId! : node.id,
+    kind,
+    displayNumber: node.displayNumber ?? null,
+    level: node.level ?? null,
+    buildId: node.buildId ?? null,
+    artifactId: node.artifactId ?? null,
+    revisionId: byAggregate ? node.id : null,
+  }
+}
+
 /** Which view an address resolves to when it does not name one. */
 export const viewForFocal = (focalKind: ThreadFocalKind, focalId?: string): ThreadView =>
   // A change request lands on the network, not inside itself: #880 §4.4 wants the change seen in the context
@@ -105,6 +154,9 @@ const ARTIFACT_FOCAL_KIND: Record<string, ArtifactThreadFocalKind> = {
   execution: "Execution",
   build: "Build",
 }
+
+/** One bounded page of the evidence table. */
+const ROW_PAGE_SIZE = 100
 
 type Baseline = { id: string; displayNumber: string; name: string; requirementsMaterializedAt?: string }
 
@@ -180,6 +232,7 @@ export default function DigitalThreadPage({
   const [thread, setThread] = useState<unknown>(null)
   const [rows, setRows] = useState<TraceRow[]>([])
   const [rowTotal, setRowTotal] = useState(0)
+  const [rowPage, setRowPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -251,23 +304,59 @@ export default function DigitalThreadPage({
     return () => { cancelled = true }
   }, [api, attempt, projectId, releaseId])
 
-  /** The opened change's proposal content, for the inside-a-change lanes. */
+  const register = useMemo(
+    () => (network?.nodes ?? []).filter(node => node.kind !== "ProblemReport"),
+    [network],
+  )
+  const opened = useMemo(
+    () => (focalId ? register.find(node => node.id === focalId) ?? null : null),
+    [focalId, register],
+  )
+
+  /**
+   * The opened change's proposal content, for the inside-a-change lanes.
+   *
+   * Three rules this read has to keep, each of which was got wrong once:
+   *
+   * 1. **The resource depends on the record's kind.** Slices 4A/4B established two authoritative resources: a
+   *    Change Request's proposal lives at `/api/change-requests/{id}/proposal-content`, and a Test Change
+   *    Request's at `/api/test-change-reviews/{id}/proposal-content`. The register carries both kinds. Asking
+   *    the Change Request resource for a TCR is asking the wrong authority about a controlled record.
+   * 2. **Membership comes first.** The kind is taken from the record this build's network actually placed —
+   *    never guessed from the address, and never defaulted. A focal the build does not carry opens nothing.
+   * 3. **The content is keyed to the record it belongs to.** Content is cleared the instant the key moves, so
+   *    a new change is never rendered over the previous change's proposed facts. On a traceability surface a
+   *    brief false attribution is still a false attribution.
+   */
+  const proposalKey = opened ? `${opened.kind}:${opened.id}` : ""
+  const [proposalFor, setProposalFor] = useState("")
+  const proposalReady = proposalKey !== "" && proposalFor === proposalKey
   useEffect(() => {
-    if (active !== "inside" || !focalId) { setProposal(null); return undefined }
+    if (active !== "inside" || !proposalKey || !opened) {
+      setProposal(null)
+      setProposalFor("")
+      return undefined
+    }
+    // Synchronously, before the fetch: nothing of the previous record survives into this one's view.
+    setProposal(null)
+    setProposalFor("")
     let cancelled = false
     const run = async () => {
       try {
-        const response = await fetch(`${api}/api/change-requests/${focalId}/proposal-content`)
+        const root = opened.kind === "TestChangeRequest" ? "test-change-reviews" : "change-requests"
+        const response = await fetch(`${api}/api/${root}/${opened.id}/proposal-content`)
         if (!response.ok) throw new Error("The proposed content for this change could not be loaded.")
         const content = await response.json() as ProposalContent
-        if (!cancelled) setProposal(content)
+        if (cancelled) return
+        setProposal(content)
+        setProposalFor(proposalKey)
       } catch (failure) {
         if (!cancelled) setError(failure instanceof Error ? failure.message : "The change could not be opened.")
       }
     }
     void run()
     return () => { cancelled = true }
-  }, [active, api, attempt, focalId])
+  }, [active, api, attempt, opened, proposalKey])
 
   /**
    * The exact revision a requirement focal names.
@@ -343,6 +432,11 @@ export default function DigitalThreadPage({
    * the accessible alternative to the canvas, not a secondary screen, so it should be ready when it is asked
    * for — and gating the read on the toggle made the fetch depend on the order two pieces of state happened to
    * settle in, which is how it came up empty against a baseline holding 1,250 requirements.
+   *
+   * Paged, not truncated. §4.5 and §6.9 require the table to expose the *same* relationships the canvas draws;
+   * a fixed first hundred of a 1,250-requirement baseline leaves most of them unreachable, and saying "showing
+   * the first 100" makes that honest without making it equivalent. One bounded page is read at a time and the
+   * reader moves between pages — pages are never concatenated and presented as one.
    */
   useEffect(() => {
     if (!baselineId) return undefined
@@ -350,7 +444,7 @@ export default function DigitalThreadPage({
     const run = async () => {
       try {
         const response = await fetch(
-          `${api}/api/traceability?projectId=${projectId}&baselineId=${baselineId}&page=1&pageSize=100`)
+          `${api}/api/traceability?projectId=${projectId}&baselineId=${baselineId}&page=${rowPage}&pageSize=${ROW_PAGE_SIZE}`)
         if (!response.ok) throw new Error(`The evidence table could not be loaded (${response.status}).`)
         const body = await response.json() as { items?: TraceRow[]; totalCount?: number } | TraceRow[]
         const items = Array.isArray(body) ? body : body.items ?? []
@@ -366,7 +460,11 @@ export default function DigitalThreadPage({
     }
     void run()
     return () => { cancelled = true }
-  }, [api, attempt, baselineId, projectId])
+  }, [api, attempt, baselineId, projectId, rowPage])
+
+  // A different configuration is a different population, so the reader is returned to its first page rather
+  // than left on a page number that means something else now.
+  useEffect(() => { setRowPage(1) }, [baselineId])
 
   useEffect(() => {
     if (!exportOpen) return undefined
@@ -377,18 +475,24 @@ export default function DigitalThreadPage({
     return () => document.removeEventListener("mousedown", close)
   }, [exportOpen])
 
-  const register = useMemo(
-    () => (network?.nodes ?? []).filter(node => node.kind !== "ProblemReport"),
-    [network],
-  )
-  const opened = useMemo(
-    () => (focalId ? register.find(node => node.id === focalId) ?? null : null),
-    [focalId, register],
-  )
-
   const go = useCallback(
     (next: ThreadView, id?: string, kind?: ThreadFocalKind) => onRoute({ view: next, focalId: id, focalKind: kind }),
     [onRoute],
+  )
+
+  /**
+   * Every identifier a canvas card renders, routed to its own native controlled record at its exact revision.
+   *
+   * `traceArtifactHref` is the shared helper the rest of the product already uses for exactly this; `hrefFor`
+   * remains only as the fallback for a caller that supplies no exact router, and never re-shapes a card of one
+   * kind into the route of another.
+   */
+  const cardHref = useCallback(
+    (node: { id: string; kind: string; displayNumber?: string | null; level?: string | null; artifactId?: string | null; buildId?: string | null }) => {
+      const identity = exactCardIdentity(node)
+      return identity ? traceArtifactHref?.(identity) : undefined
+    },
+    [traceArtifactHref],
   )
 
   /** Opening a change request from any view lands inside it, keeping the address honest about where you are. */
@@ -482,19 +586,37 @@ export default function DigitalThreadPage({
       </div>
 
       {representation === "table" ? (
-        <EvidenceTable api={api} rows={rows} total={rowTotal} baselines={baselines} baselineId={baselineId}
+        <EvidenceTable api={api} rows={rows} total={rowTotal} page={rowPage} pageSize={ROW_PAGE_SIZE}
+          onPage={setRowPage} baselines={baselines} baselineId={baselineId}
           hrefFor={hrefFor} traceArtifactHref={traceArtifactHref} error={error} onRetry={retry}
           onRelationChanged={retry} />
-      ) : active === "inside" ? (
+      ) : active === "inside" && !opened && !loading ? (
+        /**
+         * A direct `?view=inside` address whose change this build does not carry.
+         *
+         * The previous shape fabricated `{ kind: "ChangeRequest" }` for the named id and let the proposal read
+         * proceed on it. That guesses a controlled record's kind and then fetches its content by id, having
+         * never established that the build contains it — a membership claim made by omission. Not in this
+         * build is stated as exactly that.
+         */
+        <div className="dtPageTableEmpty" role="alert">
+          <b>This build does not contain the change you asked for.</b> Nothing is opened, because the record
+          named by this address is not part of this build's change network.
+          <button type="button" onClick={() => go("network")}>Back to the change network</button>
+        </div>
+      ) : active === "inside" && opened ? (
         <DigitalThreadInsideChange
-          opened={opened ?? ({ id: focalId ?? "", kind: "ChangeRequest", displayNumber: "" } as NetworkNode)}
+          opened={opened}
           register={register}
           content={proposal}
           orderedLevels={network?.orderedLevels ?? orderedLevels}
-          loading={loading}
+          // The proposal read has its own pending state. Folding it into the page-level `loading` — which
+          // belongs to the context, network and baseline reads — let the child paint a one-lane "known" board
+          // and then expand when content landed, the structural jump §6.8 forbids.
+          loading={loading || !proposalReady}
           error={error}
           onRetry={retry}
-          hrefFor={hrefFor}
+          hrefFor={node => cardHref(node)}
           onOpenChange={node => openChange(node)}
           onBackToNetwork={() => go("network")}
         />
@@ -504,8 +626,7 @@ export default function DigitalThreadPage({
           loading={loading || (!!focalId && !thread && !error)}
           error={error}
           onRetry={retry}
-          hrefFor={(node: ArtifactThreadNode) =>
-            hrefFor?.({ id: node.artifactId ?? node.id, displayNumber: node.displayNumber ?? "" })}
+          hrefFor={(node: ArtifactThreadNode) => cardHref(node)}
           evidenceHref={file => `${api}/api/evidence/${file.id}`}
           onOpenChange={node => openChange(node)}
         />
@@ -517,7 +638,8 @@ export default function DigitalThreadPage({
           onRetry={retry}
           orderedLevels={orderedLevels}
           buildLabel={buildLabel}
-          hrefFor={node => hrefFor?.({ id: node.artifactId ?? node.id, displayNumber: node.displayNumber })}
+          focalId={focalId}
+          hrefFor={node => cardHref(node)}
           onOpenChange={node => openChange(node)}
         />
       )}
@@ -537,6 +659,9 @@ function EvidenceTable({
   api,
   rows,
   total,
+  page,
+  pageSize,
+  onPage,
   baselines,
   baselineId,
   hrefFor,
@@ -548,6 +673,9 @@ function EvidenceTable({
   api: string
   rows: TraceRow[]
   total: number
+  page: number
+  pageSize: number
+  onPage: (next: number) => void
   baselines: Baseline[]
   baselineId: string
   hrefFor?: (record: { id: string; displayNumber: string }) => string | undefined
@@ -577,12 +705,15 @@ function EvidenceTable({
     </span>
   )
   const baseline = baselines.find(item => item.id === baselineId)
+  const pages = Math.max(1, Math.ceil(total / pageSize))
+  const first = rows.length ? (page - 1) * pageSize + 1 : 0
+  const last = (page - 1) * pageSize + rows.length
   return (
     <section className="dtPageTable" aria-label="Digital Thread evidence table">
       <p className="dtPageTableContext">
         {baseline ? `${baseline.displayNumber} · ${baseline.name}` : "Controlled baseline"} ·{" "}
         {total.toLocaleString()} requirement{total === 1 ? "" : "s"}
-        {rows.length < total ? ` · showing the first ${rows.length.toLocaleString()}` : ""}
+        {total > pageSize ? ` · showing ${first.toLocaleString()}–${last.toLocaleString()}` : ""}
       </p>
       <div className="dtPageTableScroll">
         <table>
@@ -653,6 +784,16 @@ function EvidenceTable({
           </tbody>
         </table>
       </div>
+      {/* Bounded paging, so every relationship in the baseline is reachable without entering the canvas
+          (§4.5, §6.9). The reader is told which page of how many they are on rather than being left to infer
+          it from a row count. */}
+      {pages > 1 ? (
+        <nav className="dtPageTablePager" aria-label="Evidence table pages">
+          <button type="button" disabled={page <= 1} onClick={() => onPage(page - 1)}>Previous</button>
+          <span aria-live="polite">Page {page.toLocaleString()} of {pages.toLocaleString()}</span>
+          <button type="button" disabled={page >= pages} onClick={() => onPage(page + 1)}>Next</button>
+        </nav>
+      ) : null}
       {error ? (
         <div className="dtPageTableEmpty" role="alert">
           <b>The evidence table could not be loaded.</b> {error}

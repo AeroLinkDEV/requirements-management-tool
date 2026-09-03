@@ -49,6 +49,15 @@ export type DigitalThreadNetworkProps = {
    * this from Project context already, so it is passed rather than fetched again.
    */
   orderedLevels?: readonly string[]
+  /**
+   * The record the address names, which the board must arrive already showing.
+   *
+   * #880 §4.4 is explicit that a deep link lands in the same state as if the reader had clicked the card
+   * themselves: selected, its whole web traced, the detail panel open and its lane rolled into view. Merely
+   * drawing the named card somewhere on the board is not arrival. Adopted only when this build's projection
+   * actually contains it, so a record this build does not carry stays unselected rather than being guessed at.
+   */
+  focalId?: string
   /** Exact route for a record, when the current workspace can open it. Absent renders non-openable. */
   hrefFor?: (node: NetworkNode) => string | undefined
   /** Opens the change inside its own view. Slice 4 supplies this. */
@@ -68,11 +77,18 @@ export default function DigitalThreadNetwork({
   error = null,
   onRetry,
   orderedLevels,
+  focalId,
   hrefFor,
   onOpenChange,
   buildLabel,
 }: DigitalThreadNetworkProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focalId) return
+    // Membership decides. A well-formed id that belongs to nothing in this build must not select a card, and
+    // must not select some *other* card either — the board says nothing rather than something wrong.
+    setSelectedId(projection?.nodes.some(node => node.id === focalId) ? focalId : null)
+  }, [focalId, projection])
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [dockPreference, setDockPreference] = useState<PanelDock>("bottom")
   const [query, setQuery] = useState("")

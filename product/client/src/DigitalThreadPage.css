@@ -217,3 +217,26 @@ html .workspaceView > main.dtPage { padding: 0; }
 }
 
 .dtPageExportEmpty { margin: 0; padding: 7px 10px; color: var(--ink-500); font-size: var(--text-xs); }
+
+/* Bounded paging for the evidence table. Deliberately plain and always in the same place: it is a navigation
+   control for a certification reader, not a flourish. */
+.dtPageTablePager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 10px 16px 14px;
+  font-size: 13px;
+  color: #334155;
+}
+.dtPageTablePager button {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 13px;
+  cursor: pointer;
+}
+.dtPageTablePager button:disabled { color: #94a3b8; cursor: default; }

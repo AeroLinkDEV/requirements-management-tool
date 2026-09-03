@@ -63,7 +63,17 @@ export type DigitalThreadInsideChangeProps = {
   loading?: boolean
   error?: string | null
   onRetry?: () => void
-  hrefFor?: (record: { id: string; displayNumber: string }) => string | undefined
+  /**
+   * Exact route for one card.
+   *
+   * Takes the card's authoritative kind and both identities, not a bare id: #880 §11.3 requires every
+   * identifier the canvas renders to keep exact-revision behaviour, and a route chosen without the kind
+   * addresses a Case, an execution and a change request as though they were the same record.
+   */
+  hrefFor?: (record: {
+    id: string; kind: string; displayNumber?: string | null; level?: string | null
+    artifactId?: string | null; buildId?: string | null
+  }) => string | undefined
   /** Opens a different change request in place, from the lane-0 register. */
   onOpenChange?: (node: NetworkNode) => void
   onBackToNetwork?: () => void
@@ -536,7 +546,7 @@ export default function DigitalThreadInsideChange({
             {hopBadge}
             <div className="dticTop">
               <span className="dticBadge dticLevel">{levelBadge(target.level)}</span>
-              <ExactArtifactLink href={hrefFor?.({ id: target.artifactId, displayNumber: target.displayNumber })} className="dticId">
+              <ExactArtifactLink href={hrefFor?.({ id: target.revisionId, kind: "Requirement", displayNumber: target.displayNumber, level: target.level, artifactId: target.artifactId })} className="dticId">
                 {target.displayNumber}
               </ExactArtifactLink>
             </div>
@@ -567,7 +577,7 @@ export default function DigitalThreadInsideChange({
                 // controlled artifact, so it is rendered as text rather than as an exact link.
                 <span className="dticId">{target.displayNumber || "Unnamed proposal"}</span>
               ) : (
-                <ExactArtifactLink href={hrefFor?.(target)} className="dticId">
+                <ExactArtifactLink href={hrefFor?.({ id: target.revisionId ?? "", kind: "Requirement", displayNumber: target.displayNumber, level: target.level, artifactId: target.id })} className="dticId">
                   {target.displayNumber}
                 </ExactArtifactLink>
               )}
@@ -599,7 +609,7 @@ export default function DigitalThreadInsideChange({
             <div className="dticTop">
               <span className="dticBadge dticLevel">{record.artifactKind === "Case" ? "TC" : "TP"}</span>
               <ExactArtifactLink
-                href={hrefFor?.({ id: record.artifactId, displayNumber: record.displayNumber })}
+                href={hrefFor?.({ id: record.artifactRevisionId, kind: record.artifactKind, displayNumber: record.displayNumber, artifactId: record.artifactId })}
                 className="dticId"
               >
                 {record.displayNumber}

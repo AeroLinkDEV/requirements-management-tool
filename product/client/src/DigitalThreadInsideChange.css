@@ -1,3 +1,6 @@
+/* Landing legibility (#880 §10.1, DEC-117): the board lands at LANDING_MIN_ZOOM (0.86), so card
+   identifiers, titles and state labels are authored at 14px to clear the 12px readable floor on arrival
+   (0.86 x 14 = 12.04). Smaller text remains only on the meta lines the compact and dense tiers drop. */
 /* Inside one change: the register, what it proposes, what that allocates to, and what it does to the build.
    Tokens come from index.css; card, badge and pill treatments match DigitalThreadNetwork.css so the two views
    read as one canvas rather than as two products. */
@@ -117,7 +120,7 @@
 .dticId {
   overflow: hidden;
   color: #2b3d54;
-  font: var(--weight-strong) var(--text-xs) ui-monospace, SFMono-Regular, Consolas, monospace;
+  font: var(--weight-strong) 14px ui-monospace, SFMono-Regular, Consolas, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -127,7 +130,7 @@
   margin-left: auto;
   border-radius: var(--radius-pill);
   padding: 2px 8px;
-  font: var(--weight-strong) 10.5px var(--font-body);
+  font: var(--weight-strong) 14px var(--font-body);
 }
 
 .dticProposedTag {
@@ -143,7 +146,7 @@
 .dticTitle {
   overflow: hidden;
   color: #33475f;
-  font-size: var(--text-xs);
+  font-size: 14px;
   line-height: 1.35;
 }
 

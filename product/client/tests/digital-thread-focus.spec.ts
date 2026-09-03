@@ -76,10 +76,13 @@ test("a change request opens in the change network, in context rather than insid
   // the context of everything around it, with `Open this change` one click away.
   await expect(page.locator(".dtnRoot")).toBeVisible();
   await expect(page.locator(".dtPageViews button[aria-pressed='true']")).toHaveText("Change network");
-  await expect(page.locator(`.dtnCard:has-text("${change.displayNumber}")`)).toBeVisible();
 
-  // And that one click is real.
-  await page.locator(`.dtnCard:has-text("${change.displayNumber}")`).click();
+  // Landing is arrival, not merely presence: the named card is already the selected one, with its panel open,
+  // exactly as if the reader had clicked it (§4.4). Nothing is clicked before this is asserted.
+  await expect(page.locator(".dtnCard.is-selected")).toHaveCount(1);
+  await expect(page.locator(".dtnCard.is-selected")).toContainText(change.displayNumber);
+
+  // And `Open this change` is the one click away that §4.4 promises.
   await page.locator(".dtnPanel").getByRole("button", { name: "Open this change" }).click();
   await expect(page.locator(".dticRoot")).toBeVisible();
   expect(page.url()).toContain("view=inside");

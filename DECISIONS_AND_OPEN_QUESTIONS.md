@@ -2044,12 +2044,21 @@ what the product does.
   - The list alternative is not optional. `DESIGN_VISION_AND_DASHBOARDS.md` and WCAG 2.2 require a
     keyboard-accessible list or table beside any graph view, and the evidence table is that alternative; it is
     audited at the full floor and must stay.
-  - A fully populated six-lane artifact thread at 1280x900 lands at approximately 0.64 zoom, which renders
-    11.5px identifiers at roughly 7.4px on screen. That is below what this decision calls legible on landing.
-    The canonical prototype lands at approximately 0.71 by the same formula, so this is a property of the
-    approved design at narrow widths rather than a regression introduced by the port, and roughly 1530px of
-    width is needed for the widest board to land in the detailed tier. Recorded here as a known limit of the
-    accepted design rather than left to be rediscovered.
+  - **Fitting the whole board on landing and landing legibly cannot both hold, and legibility wins.** Pure
+    width-fit landed a fully populated six-lane thread at roughly 0.61 zoom at 1280px, rendering 11.5px
+    identifiers at about 7px — below what this decision calls legible, and reached without the reader having
+    chosen anything. That is the condition this decision exists to forbid, so it is resolved rather than
+    recorded: the board now lands at `LANDING_MIN_ZOOM` (0.86, the detailed-tier boundary), and card
+    identifiers, titles and state labels are authored at 14px so they arrive at 12.04px effective — at or
+    above the product floor, at every supported enterprise desktop width. A board wider than the viewport is
+    panned on arrival, which is an ordinary canvas affordance and costs a reader far less than text they
+    cannot read; double-click still calls `fit()` for a reader who wants the whole board at once.
+  - `MIN_ZOOM` (0.58) is unchanged and still governs zooming the reader performs themselves. Sub-floor
+    effective text below the landing zoom therefore remains exactly what this decision permits: a consequence
+    of the reader deliberately pulling back, where the compact and dense tiers have already shed content.
+  - `digital-thread-page.spec.ts` asserts the replacement rule directly, measuring **effective** size —
+    computed font size multiplied by the scene's own transform scale — for every identifier, title and state
+    label on the landing board, at 1280, 1440 and 1920 wide.
 - **Supersedes:** nothing. It records the exception #880 section 10.1 required to be written down rather than
   quietly applied.
 
