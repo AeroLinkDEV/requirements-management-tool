@@ -29,13 +29,20 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
 . (Join-Path $PSScriptRoot 'AeroLinkLaunch.ps1')
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkBootstrap.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkUpgrade.psm1') -Force
 
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
 $apiProject = Join-Path $productRoot 'src\AeroLink.Api\AeroLink.Api.csproj'
 $clientRoot = Join-Path $productRoot 'client'
 $distRoot = Join-Path $clientRoot 'dist'
-$logs = Join-Path $productRoot '.local\logs'
+# The persistent installation this source belongs to. On HOME that is the canonical installation, whether
+# this source is the development checkout or the dedicated production clone beside it (#881).
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+$logs = $installation.Logs
+$launcherMode = 'HOME-PRODUCTION'
 
 # Source posture first, before any prerequisite, build, or PostgreSQL start. The canonical HOME database must
 # only ever be exercised by a clean, current main — clean also means no untracked, non-ignored source, which
@@ -61,9 +68,18 @@ $bootstrapResult = Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical `
         'product\scripts\AeroLinkPrerequisites.ps1',
         'product\scripts\AeroLinkLaunch.ps1',
         'product\scripts\AeroLinkNativeRunner.psm1',
-        'product\scripts\AeroLinkBootstrap.psm1'
+        'product\scripts\AeroLinkBootstrap.psm1',
+        'product\scripts\AeroLinkInstallation.psm1',
+        'product\scripts\AeroLinkRuntimeIdentity.psm1',
+        'product\scripts\AeroLinkUpgrade.psm1'
     )
 if ($bootstrapResult.Action -eq 'Reentered') { exit $bootstrapResult.ExitCode }
+
+# The verified source identity this launch runs. HOME canonical refuses a dirty tree outright, so this is
+# always a bare commit SHA here — and it is the value the runtime publishes and remote demo checks before it
+# will put a public tunnel in front of this process.
+$sourceFingerprint = Get-AeroLinkSourceFingerprint -RepositoryRoot $repositoryRoot
+$instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode HomeCanonical
 
 # Reaching this machine from another one takes two changes, not one, and the second is the one nobody expects.
 #
@@ -142,6 +158,34 @@ Write-Host "      .NET SDK: $dotnet" -ForegroundColor Green
 Write-Host '[1/4] Checking PostgreSQL...' -ForegroundColor Cyan
 Assert-AeroLinkPostgres -ProductRoot $productRoot
 
+# Upgrade posture before the client build, so a database this build cannot operate on costs seconds rather
+# than a build plus a readiness timeout. HOME canonical is the same contract as development: a conflict is
+# reported with its supported decisions and nothing is guessed; a deterministic upgrade is backed up,
+# validated on an isolated restored copy, and only then applied.
+Write-Host '      Checking database upgrade posture...' -ForegroundColor Cyan
+$upgradePosture = Get-AeroLinkUpgradeAnalysis -ProductRoot $productRoot -DotnetPath $dotnet
+switch ($upgradePosture.Status) {
+    'current' { Write-Host '      Database is current; no upgrade is pending.' -ForegroundColor Green }
+    'upgrade-required' {
+        Write-Host "      Upgrade pending: $(@($upgradePosture.Analysis.pendingEfMigrations).Count) schema migration(s), $(@($upgradePosture.Analysis.pendingSemanticUpgrades).Count) semantic upgrade(s)." -ForegroundColor Yellow
+        $upgrade = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -DotnetPath $dotnet
+        if (-not $upgrade.Applied) {
+            Write-Host ''
+            Write-Host 'DATABASE UPGRADE NOT APPLIED' -ForegroundColor Red
+            Write-Host $upgrade.Detail -ForegroundColor Red
+            throw 'AeroLink was not started because the canonical database could not be safely upgraded.'
+        }
+        Write-Host "      $($upgrade.Detail)" -ForegroundColor Green
+    }
+    'conflict' {
+        Write-AeroLinkUpgradeConflictReport -Analysis $upgradePosture.Analysis
+        throw 'AeroLink was not started: the canonical database needs an explicit decision that AeroLink is not entitled to make.'
+    }
+    default {
+        Write-Host "      Database upgrade posture could not be established: $($upgradePosture.Detail)" -ForegroundColor Yellow
+    }
+}
+
 Write-Host '[2/4] Building the client...' -ForegroundColor Cyan
 if ($SkipClientBuild) {
     if (-not (Test-Path (Join-Path $distRoot 'index.html'))) {
@@ -165,7 +209,21 @@ else {
 }
 
 Write-Host '[3/4] Starting AeroLink...' -ForegroundColor Cyan
-Clear-StaleAeroLinkPort -Port 5080 -ExpectedCommandFragments @('AeroLink.Api', $apiProject)
+# Ownership, mode and exact source identity, in that order, before anything is reused or stopped. A healthy
+# production API from an older revision is stale; a development API answering here is a mode mismatch; and a
+# process this repository does not own is a refusal with its PID, never a casualty.
+$disposition = Resolve-AeroLinkRuntimeDisposition -Port 5080 -BaseUri $url `
+    -ExpectedMode $launcherMode -ExpectedSourceIdentity $sourceFingerprint.Identity `
+    -OwnershipFragments @('AeroLink.Api', $apiProject)
+if ($disposition.Disposition -eq 'Refuse') { throw $disposition.Detail }
+$reuseExisting = ($disposition.Disposition -eq 'Reuse')
+if ($reuseExisting) {
+    Write-Host "      $($disposition.Detail)" -ForegroundColor Green
+}
+elseif ($disposition.Disposition -ne 'Free') {
+    Write-Host "      $($disposition.Detail)" -ForegroundColor Yellow
+    Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @('AeroLink.Api', $apiProject) | Out-Null
+}
 
 Write-Host '[4/4] Waiting for AeroLink to be ready...' -ForegroundColor Cyan
 # Release, and --no-launch-profile so launchSettings.json cannot quietly substitute development configuration.
@@ -174,20 +232,38 @@ Write-Host '[4/4] Waiting for AeroLink to be ready...' -ForegroundColor Cyan
 # Readiness is /health/ready, not /health. Liveness answers "is the process up", which it is even when the
 # database is unreachable — so waiting on it reports a working product over a dead database. Readiness opens a
 # connection, which is the question an operator is actually asking.
-Start-AeroLinkService `
-    -FilePath $dotnet `
-    -ArgumentList "run --configuration Release --no-launch-profile --project `"$apiProject`" --urls `"$bindUrl`"" `
-    -WorkingDirectory $repositoryRoot `
-    -StandardOutput (Join-Path $logs 'production.stdout.log') `
-    -StandardError (Join-Path $logs 'production.stderr.log') `
-    -ReadyUri "$url/health/ready" `
-    -ServiceName 'AeroLink' `
-    -Environment @{
-        ASPNETCORE_ENVIRONMENT = 'Development'
-        Client__StaticFiles    = $distRoot
-        AllowedHosts           = $allowedHosts
-        Notifications__BaseUrl = $effectiveNotificationBaseUrl
+if ($reuseExisting) {
+    Write-Host '      Reusing the matching AeroLink already running on this port.' -ForegroundColor Green
+}
+else {
+    # Runtime identity travels with the process, so a later launcher, remote-demo recovery, or an operator
+    # can ask what source it is running rather than inferring it from a healthy port.
+    $runtimeEnvironment = @{
+        ASPNETCORE_ENVIRONMENT   = 'Development'
+        Client__StaticFiles      = $distRoot
+        AllowedHosts             = $allowedHosts
+        Notifications__BaseUrl   = $effectiveNotificationBaseUrl
+        Runtime__SourceSha       = $sourceFingerprint.Sha
+        Runtime__SourceIdentity  = $sourceFingerprint.Identity
+        Runtime__Mode            = $launcherMode
+        Instance__Label          = $instance.Label
+        Instance__Classification = $instance.Classification
     }
+    if ($instance.SnapshotSourceLabel) { $runtimeEnvironment['Instance__SnapshotSourceLabel'] = $instance.SnapshotSourceLabel }
+    if ($instance.SnapshotSourceSha) { $runtimeEnvironment['Instance__SnapshotSourceSha'] = $instance.SnapshotSourceSha }
+    if ($instance.SnapshotCreatedAtUtc) { $runtimeEnvironment['Instance__SnapshotCreatedAtUtc'] = $instance.SnapshotCreatedAtUtc }
+    if ($instance.SnapshotActivatedAtUtc) { $runtimeEnvironment['Instance__SnapshotActivatedAtUtc'] = $instance.SnapshotActivatedAtUtc }
+
+    Start-AeroLinkService `
+        -FilePath $dotnet `
+        -ArgumentList "run --configuration Release --no-launch-profile --project `"$apiProject`" --urls `"$bindUrl`"" `
+        -WorkingDirectory $repositoryRoot `
+        -StandardOutput (Join-Path $logs 'production.stdout.log') `
+        -StandardError (Join-Path $logs 'production.stderr.log') `
+        -ReadyUri "$url/health/ready" `
+        -ServiceName 'AeroLink' `
+        -Environment $runtimeEnvironment
+}
 
 # The document itself, because a ready API that serves no client is the failure this script was written to
 # prevent: the previous launcher reported success while the site behind it was unusable.
@@ -200,7 +276,9 @@ Write-Host '      Ready, and serving the built client.' -ForegroundColor Green
 if (-not $DoNotOpenBrowser) { Start-Process $url }
 
 Write-Host ''
-Write-Host 'AeroLink is ready.' -ForegroundColor Green
+Write-Host "AeroLink - $($instance.Label)" -ForegroundColor Green
+Write-Host "Source: main @ $($sourceFingerprint.Sha.Substring(0, 8))"
+Write-Host "Production source: $repositoryRoot"
 Write-Host "Website and API: $url  (one origin, production build)"
 Write-Host "Sign in: admin / AeroLink!2026"
 Write-Host "Logs: $logs"

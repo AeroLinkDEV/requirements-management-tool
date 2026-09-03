@@ -15,14 +15,19 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
 . (Join-Path $PSScriptRoot 'AeroLinkLaunch.ps1')
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkBootstrap.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkUpgrade.psm1') -Force
 
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
 $apiProject = Join-Path $productRoot 'src\AeroLink.Api\AeroLink.Api.csproj'
 $clientRoot = Join-Path $productRoot 'client'
-$logs = Join-Path $productRoot '.local\logs'
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+$logs = $installation.Logs
 $apiUrl = 'http://127.0.0.1:5080'
 $websiteUrl = 'http://127.0.0.1:5173'
+$launcherMode = 'LOCAL-DEV'
 
 # Source posture before anything else. Development mode preserves deliberate local work — feature branches,
 # dirt, local-only commits, untracked files — and only fast-forwards a clean main; it never polices the
@@ -43,9 +48,28 @@ $bootstrapResult = Invoke-AeroLinkSourceBootstrap -Mode Development `
         'product\scripts\AeroLinkPrerequisites.ps1',
         'product\scripts\AeroLinkLaunch.ps1',
         'product\scripts\AeroLinkNativeRunner.psm1',
-        'product\scripts\AeroLinkBootstrap.psm1'
+        'product\scripts\AeroLinkBootstrap.psm1',
+        'product\scripts\AeroLinkInstallation.psm1',
+        'product\scripts\AeroLinkRuntimeIdentity.psm1'
     )
 if ($bootstrapResult.Action -eq 'Reentered') { exit $bootstrapResult.ExitCode }
+
+# The source identity this launch runs, computed AFTER any update so it describes the files that will
+# actually execute. For a dirty development tree it folds in a bounded worktree fingerprint, because a SHA
+# says nothing about uncommitted bytes and claiming otherwise is how a stale process survives an edit.
+$sourceFingerprint = Get-AeroLinkSourceFingerprint -RepositoryRoot $repositoryRoot
+$instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode Development
+$runtimeEnvironment = @{
+    Runtime__SourceSha        = $sourceFingerprint.Sha
+    Runtime__SourceIdentity   = $sourceFingerprint.Identity
+    Runtime__Mode             = $launcherMode
+    Instance__Label           = $instance.Label
+    Instance__Classification  = $instance.Classification
+}
+if ($instance.SnapshotSourceLabel) { $runtimeEnvironment['Instance__SnapshotSourceLabel'] = $instance.SnapshotSourceLabel }
+if ($instance.SnapshotSourceSha) { $runtimeEnvironment['Instance__SnapshotSourceSha'] = $instance.SnapshotSourceSha }
+if ($instance.SnapshotCreatedAtUtc) { $runtimeEnvironment['Instance__SnapshotCreatedAtUtc'] = $instance.SnapshotCreatedAtUtc }
+if ($instance.SnapshotActivatedAtUtc) { $runtimeEnvironment['Instance__SnapshotActivatedAtUtc'] = $instance.SnapshotActivatedAtUtc }
 
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 
@@ -63,13 +87,63 @@ Update-AeroLinkClientDependencies -ClientRoot $clientRoot -StateDirectory (Join-
 Write-Host '[1/4] Checking PostgreSQL...' -ForegroundColor Cyan
 Assert-AeroLinkPostgres -ProductRoot $productRoot
 
+# Upgrade posture before the API, not through it.
+#
+# #747 and #816 both ended the same way: dependencies installed, a client built, an API started, seventy-five
+# seconds of readiness polling, and then a stack trace about persisted data that had been knowable the moment
+# PostgreSQL accepted a connection. This asks first. A conflict stops here with the exact records and the
+# supported decisions; a deterministic upgrade is backed up, validated on an isolated copy, and only then
+# applied.
+Write-Host '      Checking database upgrade posture...' -ForegroundColor Cyan
+$upgradePosture = Get-AeroLinkUpgradeAnalysis -ProductRoot $productRoot -DotnetPath $dotnet
+switch ($upgradePosture.Status) {
+    'current' {
+        Write-Host '      Database is current; no upgrade is pending.' -ForegroundColor Green
+    }
+    'upgrade-required' {
+        $pendingMigrations = @($upgradePosture.Analysis.pendingEfMigrations).Count
+        $pendingSemantic = @($upgradePosture.Analysis.pendingSemanticUpgrades).Count
+        Write-Host "      Upgrade pending: $pendingMigrations schema migration(s), $pendingSemantic semantic upgrade(s)." -ForegroundColor Yellow
+        $upgrade = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -DotnetPath $dotnet
+        if (-not $upgrade.Applied) {
+            Write-Host ''
+            Write-Host 'DATABASE UPGRADE NOT APPLIED' -ForegroundColor Red
+            Write-Host $upgrade.Detail -ForegroundColor Red
+            throw 'AeroLink was not started because the local database could not be safely upgraded.'
+        }
+        Write-Host "      $($upgrade.Detail)" -ForegroundColor Green
+    }
+    'conflict' {
+        Write-AeroLinkUpgradeConflictReport -Analysis $upgradePosture.Analysis
+        throw 'AeroLink was not started: the local database needs an explicit decision that AeroLink is not entitled to make.'
+    }
+    default {
+        Write-Host "      Database upgrade posture could not be established: $($upgradePosture.Detail)" -ForegroundColor Yellow
+        Write-Host '      Continuing; the API will report the database problem directly.' -ForegroundColor Yellow
+    }
+}
+
 Write-Host '[2/4] Checking AeroLink API...' -ForegroundColor Cyan
-# /health/ready, not /health. Liveness answers "is the process listening", which it is even when PostgreSQL is
-# unreachable — so this launcher used to print "AeroLink is ready" over a database that was not there, and the
-# only sign was an 8 MB log of connection failures. Readiness opens a connection, which is the question being
-# asked. The endpoint already existed and returns 503 until the database answers.
-if (-not (Test-HttpEndpoint -Uri "$apiUrl/health/ready")) {
-    Clear-StaleAeroLinkPort -Port 5080 -ExpectedCommandFragments @('AeroLink.Api', $apiProject)
+# Readiness is necessary and not sufficient.
+#
+# This used to be "/health/ready answers 200, therefore reuse". Liveness alone was worse still — it reported
+# a working product over a database that was not there — but readiness only proves the process can reach a
+# database, not that it was built from the source about to be launched. #816 is the case: a healthy API from
+# an older revision survived a repository update while the client moved forward, and this launcher declared
+# success. Ownership, mode and exact source identity all have to agree before a process is reused, and a
+# process this repository does not own is a refusal rather than a casualty.
+$disposition = Resolve-AeroLinkRuntimeDisposition -Port 5080 -BaseUri $apiUrl `
+    -ExpectedMode $launcherMode -ExpectedSourceIdentity $sourceFingerprint.Identity `
+    -OwnershipFragments @('AeroLink.Api', $apiProject)
+if ($disposition.Disposition -eq 'Refuse') { throw $disposition.Detail }
+if ($disposition.Disposition -eq 'Reuse') {
+    Write-Host "      $($disposition.Detail)" -ForegroundColor Green
+}
+else {
+    if ($disposition.Disposition -ne 'Free') {
+        Write-Host "      $($disposition.Detail)" -ForegroundColor Yellow
+        Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @('AeroLink.Api', $apiProject) | Out-Null
+    }
     # Windows PowerShell flattens ArgumentList into a single command line, so paths containing spaces must be
     # quoted explicitly.
     Start-AeroLinkService `
@@ -80,14 +154,28 @@ if (-not (Test-HttpEndpoint -Uri "$apiUrl/health/ready")) {
         -StandardError (Join-Path $logs 'api.stderr.log') `
         -ReadyUri "$apiUrl/health/ready" `
         -ServiceName 'AeroLink API' `
-        -TailLines 20
+        -TailLines 20 `
+        -Environment $runtimeEnvironment
 }
 Write-Host '      API ready on 127.0.0.1:5080, database reachable.' -ForegroundColor Green
 
 Write-Host '[3/4] Checking website...' -ForegroundColor Cyan
+# The Vite dev server publishes no identity of its own, so its freshness is judged by the source identity
+# recorded at the last successful launch. #881 is explicit that the alternative to a real fingerprint is an
+# honest restart, not a claim: if the source moved since this machine last launched successfully, the dev
+# server is restarted rather than assumed to have kept up.
+$launchStatePath = Join-Path $installation.BootstrapState 'last-launch.json'
+$lastLaunch = $null
+if (Test-Path -LiteralPath $launchStatePath -PathType Leaf) {
+    try { $lastLaunch = Get-Content -LiteralPath $launchStatePath -Raw | ConvertFrom-Json } catch { $lastLaunch = $null }
+}
+$clientSourceMoved = (-not $lastLaunch) -or ([string]$lastLaunch.sourceIdentity -ne $sourceFingerprint.Identity)
+if ($clientSourceMoved -and (Test-HttpEndpoint -Uri $websiteUrl -SuccessBelow 500)) {
+    Write-Host '      Source changed since the last successful launch; restarting the development website.' -ForegroundColor Yellow
+}
 # SuccessBelow 500 here, unlike the readiness probes: this asks whether the dev server is up and serving at all,
 # and any answer that is not a server error means it is. The API checks above want 2xx and nothing else.
-if (-not (Test-HttpEndpoint -Uri $websiteUrl -SuccessBelow 500)) {
+if ($clientSourceMoved -or -not (Test-HttpEndpoint -Uri $websiteUrl -SuccessBelow 500)) {
     Clear-StaleAeroLinkPort -Port 5173 -ExpectedCommandFragments @('vite', $clientRoot)
     Start-AeroLinkService `
         -FilePath 'npm.cmd' `
@@ -129,8 +217,23 @@ if (-not $DoNotOpenBrowser) {
     Start-Process $websiteUrl
 }
 
+# Operational metadata, never proof. It answers "did the source move since AeroLink last worked here?" and
+# nothing about whether the database is healthy, which is verified directly above every time.
+if (-not (Test-Path -LiteralPath $installation.BootstrapState -PathType Container)) {
+    New-Item -ItemType Directory -Path $installation.BootstrapState -Force | Out-Null
+}
+[pscustomobject]@{
+    sourceSha       = $sourceFingerprint.Sha
+    sourceIdentity  = $sourceFingerprint.Identity
+    mode            = $launcherMode
+    instanceLabel   = $instance.Label
+    succeededAtUtc  = (Get-Date).ToUniversalTime().ToString('o')
+} | ConvertTo-Json | Set-Content -LiteralPath $launchStatePath -Encoding UTF8
+
 Write-Host ''
-Write-Host 'AeroLink is ready.' -ForegroundColor Green
+Write-Host "AeroLink - $($instance.Label)" -ForegroundColor Green
+Write-Host "Source: $($sourceFingerprint.Detail)"
+Write-Host "Database: $($installation.PostgresData)"
 Write-Host "Website: $websiteUrl"
 Write-Host "Sign in: admin / AeroLink!2026"
 Write-Host "Logs: $logs"

@@ -42,6 +42,7 @@ public static class AeroLinkMaintenanceHost
         {
             Console.WriteLine("AeroLink maintenance host");
             Console.WriteLine("  maintenance analyze [--json]");
+            Console.WriteLine("  maintenance upgrade [--apply]");
             Console.WriteLine("  maintenance resolve --conflict <code> --choice <key> --program <guid> --position <name> --person <guid> --legacy-backup <guid> --operator <reference> [--expect-primary <guid|none>] [--apply]");
             return 0;
         }
@@ -62,6 +63,7 @@ public static class AeroLinkMaintenanceHost
         return command switch
         {
             "analyze" => await AnalyzeAsync(scope.ServiceProvider, args),
+            "upgrade" => await UpgradeAsync(scope.ServiceProvider, args),
             "resolve" => await ResolveAsync(scope.ServiceProvider, args),
             _ => Fail($"Unknown maintenance command '{command}'. Run 'maintenance help'."),
         };
@@ -109,6 +111,53 @@ public static class AeroLinkMaintenanceHost
             "conflict" => 20,
             _ => 30,
         };
+    }
+
+    /// <summary>
+    /// Applies the schema and semantic upgrade this build implies, using the same authorities startup uses.
+    ///
+    /// It exists so the clone-validation path can apply the real upgrade to an isolated restored copy and
+    /// then, only if that passed, to the real database — both times through the identical code. A second
+    /// upgrade implementation "for maintenance" would defeat the whole point of validating on a clone.
+    ///
+    /// Requires --apply. Without it this reports what would happen and writes nothing.
+    /// </summary>
+    private static async Task<int> UpgradeAsync(IServiceProvider services, string[] args)
+    {
+        var apply = args.Contains("--apply", StringComparer.OrdinalIgnoreCase);
+        var analyzer = services.GetRequiredService<AeroLinkUpgradeAnalyzer>();
+        var before = await analyzer.AnalyzeAsync();
+        if (!before.DatabaseReachable) return Fail(before.UnreachableReason ?? "The database could not be reached.");
+        if (before.Conflicts.Count > 0)
+        {
+            foreach (var line in AeroLinkUpgradeAnalyzer.Render(before)) Console.WriteLine(line);
+            return 20;
+        }
+        if (!before.UpgradeRequired)
+        {
+            Console.WriteLine($"DATABASE CURRENT: {before.DatabaseName} needs no schema or semantic upgrade.");
+            return 0;
+        }
+        if (!apply)
+        {
+            foreach (var line in AeroLinkUpgradeAnalyzer.Render(before)) Console.WriteLine(line);
+            Console.WriteLine("Nothing was written. Re-run with --apply to perform this upgrade.");
+            return 10;
+        }
+
+        var db = services.GetRequiredService<AeroLinkDbContext>();
+        Console.WriteLine($"Applying {before.PendingEfMigrations.Count} schema migration(s) to {before.DatabaseName}...");
+        await db.Database.MigrateAsync();
+        Console.WriteLine("Applying semantic upgrades...");
+        await services.GetRequiredService<SoftwareVerificationCaseMigrationAuthority>().EnsureCompletedAsync();
+        await services.GetRequiredService<ProjectLeadershipMigrationAuthority>().EnsureCompletedAsync();
+        await services.GetRequiredService<ProjectLeadershipReconciliationAuthority>().EnsureCompletedAsync();
+        await services.GetRequiredService<TestChangeRequestPrefixMigrationAuthority>().EnsureCompletedAsync();
+        await services.GetRequiredService<SoftwareProcedureExecutionCutoverAuthority>().EnsureCompletedAsync();
+
+        var after = await analyzer.AnalyzeAsync();
+        foreach (var line in AeroLinkUpgradeAnalyzer.Render(after)) Console.WriteLine(line);
+        return after.Status switch { "current" => 0, "conflict" => 20, "upgrade-required" => 10, _ => 30 };
     }
 
     private static async Task<int> ResolveAsync(IServiceProvider services, string[] args)

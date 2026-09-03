@@ -188,7 +188,8 @@ $requiredLaunchers = @(
     'SCHEDULE_AEROLINK_BACKUP.bat', 'START_AEROLINK_PRODUCTION.bat', 'START_AEROLINK_REMOTE_DEMO.bat',
     'START_AEROLINK_SHARED.bat', 'START_AEROLINK.bat', 'STOP_AEROLINK_REMOTE_DEMO.bat', 'STOP_AEROLINK.bat',
     'START_AEROLINK_EMAIL_DEMO.bat', 'START_AEROLINK_SMTP4DEV.bat', 'AEROLINK_SMTP4DEV_STATUS.bat',
-    'STOP_AEROLINK_SMTP4DEV.bat', 'TEST_AEROLINK_CHANGED.bat', 'VERIFY_AEROLINK_BACKUP.bat'
+    'STOP_AEROLINK_SMTP4DEV.bat', 'TEST_AEROLINK_CHANGED.bat', 'VERIFY_AEROLINK_BACKUP.bat',
+    'CONFIGURE_AEROLINK_PRODUCTION_SOURCE.bat', 'REFRESH_AEROLINK_FROM_HOME.bat'
 )
 $actualBatCmd = @(Get-ChildItem -LiteralPath $RepositoryRoot -File | Where-Object { $_.Extension -in '.bat', '.cmd' } | ForEach-Object Name)
 foreach ($name in $requiredLaunchers) { if ($name -notin $actualBatCmd) { Fail "Required root launcher is missing: $name" } }
@@ -197,6 +198,23 @@ $operations = Join-Path $RepositoryRoot 'product\docs\OPERATIONS.md'
 if (Test-Path -LiteralPath $operations -PathType Leaf) {
     $operationsText = [IO.File]::ReadAllText($operations)
     foreach ($name in $requiredLaunchers) { if ($operationsText -notmatch [regex]::Escape($name)) { Fail "product/docs/OPERATIONS.md does not mention launcher $name" } }
+}
+
+# Every launcher script must parse in the host that will run it.
+#
+# The supported launcher chain is Windows PowerShell 5.1, which reads a .ps1 with no byte-order mark as
+# ANSI. A UTF-8 em dash inside a STRING LITERAL therefore decodes to three CP1252 characters, one of which
+# is a smart quote — and the string silently runs to the end of the file. The failure appears as an
+# unrelated syntax error hundreds of lines away, in a file whose author's editor showed nothing wrong. The
+# same character in a comment is harmless, which is why the trap survives review. Parsing every script here
+# catches it in CI rather than on the machine that was trying to recover a demo.
+foreach ($script in @(Get-ChildItem -LiteralPath (Join-Path $RepositoryRoot 'product\scripts') -File |
+        Where-Object { $_.Extension -in '.ps1', '.psm1' })) {
+    $parseErrors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$null, [ref]$parseErrors)
+    if ($parseErrors -and $parseErrors.Count -gt 0) {
+        Fail "product/scripts/$($script.Name) does not parse in this PowerShell host: $($parseErrors[0].Message) (line $($parseErrors[0].Extent.StartLineNumber))"
+    }
 }
 
 if ($failures.Count -gt 0) {

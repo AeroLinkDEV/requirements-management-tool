@@ -1,6 +1,8 @@
 #Requires -Version 5.1
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1')
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1')
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkProductionSource.psm1')
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1')
 <#
     AeroLink protected remote-demo operator mode.
 
@@ -17,6 +19,7 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1')
 #>
 
 $script:RemoteDemoTaskName = 'AeroLinkRemoteDemoRecovery'
+$script:ReconcileTaskName = 'AeroLinkProductionSourceReconcile'
 
 function Get-AeroLinkRemoteDemoConfigPath {
     return Join-Path $env:LOCALAPPDATA 'AeroLink\RemoteDemo\remote-demo.config.psd1'
@@ -90,13 +93,36 @@ function Get-AeroLinkRemoteDemoConfig {
     $defaultRoot = $moduleRoot
     $defaultLocal = Join-Path $env:LOCALAPPDATA 'AeroLink\RemoteDemo'
 
+    # The dedicated production source wins over any AeroLinkRoot recorded here.
+    #
+    # On 2026-09-03 the recovery task ran from the only checkout on the machine, which was mid-#880 with
+    # dirty WIP on a feature branch, and the canonical guard correctly refused. Resolving the source from the
+    # production-source authority rather than from this file means a stale AeroLinkRoot — or a copy of the
+    # configuration made before the split — cannot quietly aim recovery back at the development checkout.
+    $productionSourceRoot = $null
+    $productionSourceReason = 'No dedicated production source is configured; the source root came from the remote-demo configuration.'
+    try {
+        $productionConfig = Get-AeroLinkProductionSourceConfig
+        $productionPosture = Get-AeroLinkProductionSourcePosture -SourceRoot $productionConfig.SourceRoot -RemoteName $productionConfig.RemoteName
+        if ($productionPosture.Dedicated) {
+            $productionSourceRoot = $productionConfig.SourceRoot
+            $productionSourceReason = "The dedicated production source at $($productionConfig.SourceRoot) is authoritative for remote demo."
+        }
+        else {
+            $productionSourceReason = "The configured production source at $($productionConfig.SourceRoot) is not marked as a dedicated AeroLink production source."
+        }
+    }
+    catch { $productionSourceReason = "No usable dedicated production source: $($_.Exception.Message)" }
+
     return [pscustomobject]@{
+        ProductionSourceRoot = $productionSourceRoot
+        ProductionSourceReason = $productionSourceReason
         NgrokExecutable = [string]$values['NgrokExecutable']
         PublicUrl = $publicUri.GetLeftPart([System.UriPartial]::Authority).TrimEnd('/')
         TrafficPolicyPath = [string]$values['TrafficPolicyPath']
         Upstream = if ($values.ContainsKey('Upstream')) { [string]$values['Upstream'] } else { 'http://127.0.0.1:5080' }
         LocalApiBaseUri = if ($values.ContainsKey('LocalApiBaseUri')) { [string]$values['LocalApiBaseUri'] } else { 'http://127.0.0.1:5080' }
-        AeroLinkRoot = if ($values.ContainsKey('AeroLinkRoot')) { [string]$values['AeroLinkRoot'] } else { $defaultRoot }
+        AeroLinkRoot = if ($productionSourceRoot) { $productionSourceRoot } elseif ($values.ContainsKey('AeroLinkRoot')) { [string]$values['AeroLinkRoot'] } else { $defaultRoot }
         LogsPath = if ($values.ContainsKey('LogsPath')) { [string]$values['LogsPath'] } else { Join-Path $defaultLocal 'logs' }
         StatePath = if ($values.ContainsKey('StatePath')) { [string]$values['StatePath'] } else { Join-Path $defaultLocal 'state' }
         VaultName = if ($values.ContainsKey('VaultName')) { [string]$values['VaultName'] } else { 'aerolink-demo' }
@@ -608,6 +634,34 @@ function Start-AeroLinkRemoteDemoProductionHelper {
     return $helper
 }
 
+function Get-AeroLinkProductionLauncherRefusal {
+    <#
+      .SYNOPSIS The launcher's own refusal line from a helper's captured output, or $null.
+      .DESCRIPTION
+        Bounded and redacted. Only lines the launcher writes as refusals are considered, and any line that
+        could carry a credential, token or connection string is dropped rather than quoted — a diagnostic is
+        not worth leaking a secret into a log an operator may paste into an issue.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$StandardOutputPath,
+        [AllowNull()][string]$StandardErrorPath,
+        [int]$TailLines = 40
+    )
+    foreach ($path in @($StandardOutputPath, $StandardErrorPath)) {
+        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $lines = @(Get-Content -LiteralPath $path -Tail $TailLines -ErrorAction SilentlyContinue)
+        foreach ($line in $lines) {
+            if ($line -notmatch '(?i)refus|not canonical|cannot characterize|identity mismatch') { continue }
+            if ($line -match '(?i)(password|secret|token|authorization|authtoken|connectionstrings|connection string|postgresql://|User Id=|Password=)') { continue }
+            $trimmed = ([string]$line).Trim()
+            if ($trimmed.Length -gt 300) { $trimmed = $trimmed.Substring(0, 300) + '...' }
+            if ($trimmed) { return $trimmed }
+        }
+    }
+    return $null
+}
+
 function Invoke-AeroLinkProductionLauncher {
     <#
       .SYNOPSIS Bounded production-launcher invocation for one recovery attempt.
@@ -626,7 +680,11 @@ function Invoke-AeroLinkProductionLauncher {
         [scriptblock]$HelperStopper,
         [int]$TimeoutSeconds = 900,
         [int]$PollIntervalSeconds = 3,
-        [int]$GraceSeconds = 5
+        [int]$GraceSeconds = 5,
+        # How long to keep polling readiness AFTER the launcher child has exited. A launcher that has already
+        # exited will not open a port; the only reason to wait at all is that a process it started may still
+        # be finishing its own startup, and that is seconds, not minutes.
+        [int]$PostExitGraceSeconds = 20
     )
     if ($null -eq $LocalReadyTest) { $LocalReadyTest = { param($C) Test-AeroLinkRemoteDemoLocalReady -Config $C } }
     if ($null -eq $HelperLauncher) { $HelperLauncher = { param($C, $R) Start-AeroLinkRemoteDemoProductionHelper -Config $C -Run $R } }
@@ -642,6 +700,7 @@ function Invoke-AeroLinkProductionLauncher {
     Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Production launcher helper started (PID $($helper.Id), step production-launcher, stdout $($helper.StdOutPath), stderr $($helper.StdErrPath))."
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $helperExited = $false
+    $exitDeadline = $null
     $local = $null
     do {
         Start-Sleep -Seconds $PollIntervalSeconds
@@ -649,6 +708,12 @@ function Invoke-AeroLinkProductionLauncher {
         if ($helper.HasExited -and -not $helperExited) {
             $helperExited = $true
             Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Production launcher helper exited with code $($helper.ExitCode)."
+            # The 2026-09-03 defect, in one line. The child had already exited with a canonical-source
+            # refusal within seconds, and the parent went on polling port 5080 for the full 900. A launcher
+            # that has exited is not going to open a port: the wait now ends shortly after it does, and the
+            # reason it gave is the reason reported.
+            $exitDeadline = (Get-Date).AddSeconds($PostExitGraceSeconds)
+            if ($exitDeadline -lt $deadline) { $deadline = $exitDeadline }
         }
         $local = & $LocalReadyTest $Config
     } while (-not $local.Ready -and (Get-Date) -lt $deadline)
@@ -668,7 +733,11 @@ function Invoke-AeroLinkProductionLauncher {
         & $HelperStopper $Config $Run $helper.Id
     }
     $detail = if ($helperExited) {
-        "Production launcher exited with code $($helper.ExitCode) but AeroLink never became ready within $TimeoutSeconds seconds. Step: production-launcher. Helper PID: $($helper.Id). Logs: $($helper.StdOutPath), $($helper.StdErrPath), $(Join-Path $Config.LogsPath 'remote-demo.log')"
+        # The reason the child gave, not just the fact that it stopped. A refusal is printed by the launcher
+        # and is exactly what the operator needs; "never became ready" is true and useless.
+        $refusal = Get-AeroLinkProductionLauncherRefusal -StandardOutputPath $helper.StdOutPath -StandardErrorPath $helper.StdErrPath
+        $reason = if ($refusal) { " Reason: $refusal" } else { '' }
+        "Production launcher exited with code $($helper.ExitCode) and AeroLink did not become ready.$reason Step: production-launcher. Helper PID: $($helper.Id). Logs: $($helper.StdOutPath), $($helper.StdErrPath), $(Join-Path $Config.LogsPath 'remote-demo.log')"
     }
     else {
         "Production launcher helper PID $($helper.Id) exceeded $TimeoutSeconds seconds and was terminated; AeroLink never became ready. Step: production-launcher. Logs: $($helper.StdOutPath), $($helper.StdErrPath), $(Join-Path $Config.LogsPath 'remote-demo.log')"
@@ -697,6 +766,36 @@ function Start-AeroLinkRemoteDemoNgrok {
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
 }
 
+function Test-AeroLinkRemoteDemoRuntimeMatchesSource {
+    <#
+      .SYNOPSIS Whether the API on the configured local port is running the verified production source, in
+        HOME production mode.
+      .DESCRIPTION
+        Fails closed. A process that publishes no identity is an older build and cannot be proven to be the
+        right one; a process reporting another mode or another source identity is not the one the public
+        tunnel should be put in front of.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$ExpectedSourceIdentity,
+        [scriptblock]$RuntimeIdentityProbe
+    )
+    $identity = if ($RuntimeIdentityProbe) { & $RuntimeIdentityProbe $Config } else { Get-AeroLinkRuntimeIdentity -BaseUri $Config.LocalApiBaseUri }
+    if ($null -eq $identity) {
+        return [pscustomobject]@{ Matches = $false; Detail = 'The local AeroLink publishes no runtime identity, so it cannot be proven to be the verified production source. It will be restarted rather than exposed.' }
+    }
+    if ([string]$identity.mode -ne 'HOME-PRODUCTION') {
+        return [pscustomobject]@{ Matches = $false; Detail = "The local AeroLink reports mode $($identity.mode); HOME-PRODUCTION was required before the public tunnel may be started." }
+    }
+    if ([string]$identity.sourceIdentity -ne $ExpectedSourceIdentity) {
+        $running = [string]$identity.sourceShortSha
+        $expected = $ExpectedSourceIdentity.Substring(0, [Math]::Min(8, $ExpectedSourceIdentity.Length))
+        return [pscustomobject]@{ Matches = $false; Detail = "The local AeroLink is running source $running; the verified production source is $expected." }
+    }
+    return [pscustomobject]@{ Matches = $true; Detail = "Local AeroLink runs the verified production source $($identity.sourceShortSha) in $($identity.mode) mode." }
+}
+
 function Start-AeroLinkRemoteDemo {
     <#
       .SYNOPSIS Starts the local production AeroLink (if needed) and the protected ngrok tunnel.
@@ -719,6 +818,12 @@ function Start-AeroLinkRemoteDemo {
         [scriptblock]$NgrokLauncher,
         [scriptblock]$PublicProbe,
         [scriptblock]$LocalRuntimeProbe,
+        # Brings the dedicated production source to current approved origin/main before anything is started.
+        # Injectable so the contract suite can drive every source outcome without a clone or a network.
+        [scriptblock]$SourceReconciler,
+        # Reads /health/identity from the running local API. Injectable for the same reason.
+        [scriptblock]$RuntimeIdentityProbe,
+        [switch]$SkipSourceReconciliation,
         [int]$PostgresRecoveryTimeoutSeconds = 300,
         [int]$ProductionTimeoutSeconds = 900,
         [int]$NgrokProtectionWaitSeconds = 120
@@ -728,8 +833,37 @@ function Start-AeroLinkRemoteDemo {
     Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'Remote demo start requested.'
     if ($null -eq $LocalReadyTest) { $LocalReadyTest = { param($C) Test-AeroLinkRemoteDemoLocalReady -Config $C } }
 
+    # Source first, before PostgreSQL and long before ngrok.
+    #
+    # This is the whole 2026-09-03 correction: the source a recovery runs is the dedicated production
+    # checkout, reconciled to current approved origin/main by strict fast-forward and revalidated — never
+    # whichever branch the development checkout happens to be on, and never repaired into shape.
+    $expectedSourceIdentity = $null
+    if (-not $SkipSourceReconciliation) {
+        $reconcile = if ($SourceReconciler) { & $SourceReconciler $Config } else {
+            Assert-AeroLinkDedicatedProductionSource -SourceRoot $Config.AeroLinkRoot | Out-Null
+            Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot
+        }
+        if (-not $reconcile.Canonical) {
+            Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: $($reconcile.Reason)"
+            throw "AEROLINK REMOTE DEMO NOT READY: $($reconcile.Reason)"
+        }
+        $expectedSourceIdentity = [string]$reconcile.HeadSha
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production source: $($reconcile.Action) - $($reconcile.Reason)"
+    }
+
     $startedLocalForThisRun = $false
     $local = & $LocalReadyTest $Config
+    if ($local.Ready -and $expectedSourceIdentity) {
+        # A ready API is not necessarily THIS API. A healthy process from a previous revision is stale, and
+        # reusing it would put the public tunnel in front of source nobody asked for; treating it as not-ready
+        # sends it through the launcher, which stops only the process it owns and starts the right one.
+        $match = Test-AeroLinkRemoteDemoRuntimeMatchesSource -Config $Config -ExpectedSourceIdentity $expectedSourceIdentity -RuntimeIdentityProbe $RuntimeIdentityProbe
+        if (-not $match.Matches) {
+            Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Local AeroLink is ready but does not match the production source: $($match.Detail)"
+            $local = [pscustomobject]@{ Ready = $false; Detail = $match.Detail }
+        }
+    }
     if (-not $local.Ready) {
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'Local AeroLink not ready; starting/confirming PostgreSQL with a bounded recovery window.'
         $postgres = Start-AeroLinkRemoteDemoPostgres -Config $Config -Run $run `
@@ -754,6 +888,16 @@ function Start-AeroLinkRemoteDemo {
             Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'AEROLINK REMOTE DEMO NOT READY: local AeroLink readiness lost after launcher.'
             throw 'AEROLINK REMOTE DEMO NOT READY: local AeroLink readiness lost after launcher.'
         }
+    }
+    # The last gate before the tunnel: the API that is about to be exposed publicly must be provably the
+    # production source, in production mode. Readiness alone has never proven either.
+    if ($expectedSourceIdentity) {
+        $match = Test-AeroLinkRemoteDemoRuntimeMatchesSource -Config $Config -ExpectedSourceIdentity $expectedSourceIdentity -RuntimeIdentityProbe $RuntimeIdentityProbe
+        if (-not $match.Matches) {
+            Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: $($match.Detail)"
+            throw "AEROLINK REMOTE DEMO NOT READY: $($match.Detail)"
+        }
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Runtime identity verified: $($match.Detail)"
     }
     Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Local AeroLink ready: $($local.Detail)"
 
@@ -893,23 +1037,49 @@ function Stop-AeroLinkRemoteDemo {
 function Get-AeroLinkRemoteDemoTaskXml {
     <#
       .SYNOPSIS The current-user Scheduled Task XML for automatic recovery.
-      .DESCRIPTION Contains no secrets: only the task identity, logon trigger,
+      .DESCRIPTION Contains no secrets: only the task identity, triggers,
         start-when-available settings, and the command that invokes the same
         tested start implementation.
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]$Config
+        [Parameter(Mandatory)]$Config,
+        [string]$TaskName = $script:RemoteDemoTaskName,
+        # S4U runs at boot with no interactive session and no stored password. InteractiveToken exists as a
+        # fallback for machines whose policy refuses to register an S4U principal; it recovers at logon only,
+        # which is the behaviour #881 is replacing, so it is never the default.
+        [ValidateSet('S4U', 'InteractiveToken')][string]$LogonType = 'S4U'
     )
     $scriptPath = Join-Path $Config.AeroLinkRoot 'product\scripts\AeroLinkRemoteDemo.ps1'
+    # Boot AND logon, both firing the same idempotent start.
+    #
+    # A LogonTrigger alone recovers after Sean signs in, which is not what "the machine rebooted" means. On
+    # 2026-09-03 the reboot happened while nobody was at the keyboard. The boot trigger is the primary path
+    # now; the logon trigger stays as a second chance for the case where boot recovery could not complete
+    # (no network yet, credentials not available), and overlapping runs are harmless because
+    # MultipleInstancesPolicy is IgnoreNew and Start-AeroLinkRemoteDemo reports READY without creating a
+    # duplicate API or a second tunnel.
+    #
+    # LogonType stays InteractiveToken under the operator's own account rather than becoming SYSTEM: ngrok's
+    # agent configuration and its credential store are per-user, and a SYSTEM task would find neither. That
+    # is why S4U is used for the boot trigger — it runs without a stored password and without an interactive
+    # session, in the operator's own profile.
+    #
+    # PT1M start delay, and Delay on the boot trigger: at fifteen seconds after boot the network stack, the
+    # user profile and the disk are all still settling, and every prerequisite check would fail for reasons
+    # that resolve themselves a minute later.
     return @"
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>AeroLink protected remote-demo recovery (current user, no admin).</Description>
-    <URI>\$script:RemoteDemoTaskName</URI>
+    <Description>AeroLink protected remote-demo recovery (boot and logon, current user, no admin).</Description>
+    <URI>\$TaskName</URI>
   </RegistrationInfo>
   <Triggers>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+      <Delay>PT1M</Delay>
+    </BootTrigger>
     <LogonTrigger>
       <Enabled>true</Enabled>
       <UserId>$env:USERDOMAIN\$env:USERNAME</UserId>
@@ -918,12 +1088,16 @@ function Get-AeroLinkRemoteDemoTaskXml {
   <Principals>
     <Principal id="Author">
       <UserId>$env:USERDOMAIN\$env:USERNAME</UserId>
-      <LogonType>InteractiveToken</LogonType>
+      <LogonType>$LogonType</LogonType>
       <RunLevel>LeastPrivilege</RunLevel>
     </Principal>
   </Principals>
   <Settings>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <RestartOnFailure>
+      <Interval>PT5M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <AllowHardTerminate>true</AllowHardTerminate>
@@ -949,6 +1123,142 @@ function Get-AeroLinkRemoteDemoTaskXml {
 "@
 }
 
+function Get-AeroLinkReconcileTaskXml {
+    <#
+      .SYNOPSIS Scheduled Task XML for bounded production-source reconciliation while HOME stays up.
+      .DESCRIPTION
+        A machine that never reboots would otherwise run yesterday's main forever. This polls on a low-
+        frequency cadence - thirty minutes by default, which is far below the rate at which anybody notices a
+        demo is a merge behind, and far above the rate at which polling is a cost - and does nothing at all
+        when origin/main has not moved.
+
+        Polling rather than a webhook, deliberately: an inbound public endpoint to learn about a merge would
+        be a far larger security surface than the problem justifies, and #881 rules it out.
+
+        The reconcile action never modifies files underneath a running process without then restarting it:
+        it fast-forwards the dedicated source, and the start it invokes sees a runtime whose source identity
+        no longer matches and restarts the API it owns before re-proving the protected endpoint.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [string]$TaskName = $script:ReconcileTaskName,
+        [ValidateRange(5, 1440)][int]$IntervalMinutes = 30,
+        [ValidateSet('S4U', 'InteractiveToken')][string]$LogonType = 'S4U'
+    )
+    $scriptPath = Join-Path $Config.AeroLinkRoot 'product\scripts\AeroLinkRemoteDemo.ps1'
+    return @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>AeroLink production-source reconciliation (bounded polling, current user, no admin).</Description>
+    <URI>\$TaskName</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <TimeTrigger>
+      <Enabled>true</Enabled>
+      <StartBoundary>2026-01-01T03:00:00</StartBoundary>
+      <Repetition>
+        <Interval>PT${IntervalMinutes}M</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+    </TimeTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>$env:USERDOMAIN\$env:USERNAME</UserId>
+      <LogonType>$LogonType</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>false</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <ExecutionTimeLimit>PT30M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-NoProfile -ExecutionPolicy Bypass -File "$scriptPath" -Action Reconcile -Scheduled</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"@
+}
+
+function Install-AeroLinkReconcileTask {
+    <#
+      .SYNOPSIS Registers the bounded reconciliation task against the dedicated production source, or refuses.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [string]$TaskName = $script:ReconcileTaskName,
+        [ValidateRange(5, 1440)][int]$IntervalMinutes = 30,
+        [switch]$AllowNonDedicatedSource
+    )
+    if (-not $AllowNonDedicatedSource) { Assert-AeroLinkDedicatedProductionSource -SourceRoot $Config.AeroLinkRoot | Out-Null }
+    if (-not (Test-Path -LiteralPath $Config.StatePath)) { New-Item -ItemType Directory -Path $Config.StatePath -Force | Out-Null }
+    $xmlPath = Join-Path $Config.StatePath 'production-source-reconcile-task.xml'
+    $logonType = 'S4U'
+    Set-Content -LiteralPath $xmlPath -Encoding Unicode -Value (Get-AeroLinkReconcileTaskXml -Config $Config -TaskName $TaskName -IntervalMinutes $IntervalMinutes -LogonType $logonType)
+    & schtasks.exe /Create /TN $TaskName /XML $xmlPath /F
+    if ($LASTEXITCODE -ne 0) {
+        $logonType = 'InteractiveToken'
+        Set-Content -LiteralPath $xmlPath -Encoding Unicode -Value (Get-AeroLinkReconcileTaskXml -Config $Config -TaskName $TaskName -IntervalMinutes $IntervalMinutes -LogonType $logonType)
+        & schtasks.exe /Create /TN $TaskName /XML $xmlPath /F
+        if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed for the reconciliation task with exit code $LASTEXITCODE." }
+    }
+    return [pscustomobject]@{ TaskName = $TaskName; IntervalMinutes = $IntervalMinutes; LogonType = $logonType; SourceRoot = $Config.AeroLinkRoot }
+}
+
+function Invoke-AeroLinkProductionSourceReconciliation {
+    <#
+      .SYNOPSIS One bounded reconciliation pass: advance the production source, and restart into it if it moved.
+      .DESCRIPTION
+        Does nothing when origin/main has not moved, which is the overwhelmingly common case and the reason
+        this can afford to run on a timer at all. When it has moved, the restart goes through the ordinary
+        start path so every existing gate still applies - canonical source, database upgrade posture, runtime
+        identity, and the 401 proof before the tunnel is declared ready.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [switch]$Scheduled,
+        [scriptblock]$SourceReconciler,
+        [scriptblock]$Restarter
+    )
+    $run = New-AeroLinkRemoteDemoRun -Scheduled:$Scheduled
+    $reconcile = if ($SourceReconciler) { & $SourceReconciler $Config } else {
+        Assert-AeroLinkDedicatedProductionSource -SourceRoot $Config.AeroLinkRoot | Out-Null
+        Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot
+    }
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production-source reconciliation: $($reconcile.Action) - $($reconcile.Reason)"
+    if (-not $reconcile.Canonical) {
+        return [pscustomobject]@{ Action = $reconcile.Action; Restarted = $false; HeadSha = $reconcile.HeadSha; Detail = $reconcile.Reason }
+    }
+    if ($reconcile.Action -ne 'Updated') {
+        return [pscustomobject]@{ Action = $reconcile.Action; Restarted = $false; HeadSha = $reconcile.HeadSha; Detail = $reconcile.Reason }
+    }
+    # The full start, not a shortcut: it re-runs reconciliation (now a no-op), finds a runtime whose source
+    # identity no longer matches, restarts only the process it owns, and re-proves the protected endpoint.
+    $result = if ($Restarter) { & $Restarter $Config $reconcile } else { Start-AeroLinkRemoteDemo -Config $Config -Scheduled:$Scheduled }
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production restarted onto $($reconcile.HeadSha)."
+    return [pscustomobject]@{ Action = 'Updated'; Restarted = $true; HeadSha = $reconcile.HeadSha; Detail = "Production now runs $($reconcile.HeadSha). $($result.Detail)" }
+}
+
 function Save-AeroLinkRemoteDemoTaskXml {
     <#
       .SYNOPSIS Writes the task XML in the encoding its declaration promises.
@@ -960,42 +1270,78 @@ function Save-AeroLinkRemoteDemoTaskXml {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Config,
-        [Parameter(Mandatory)][string]$Path
+        [Parameter(Mandatory)][string]$Path,
+        [string]$TaskName = $script:RemoteDemoTaskName,
+        [ValidateSet('S4U', 'InteractiveToken')][string]$LogonType = 'S4U'
     )
-    $xml = Get-AeroLinkRemoteDemoTaskXml -Config $Config
+    $xml = Get-AeroLinkRemoteDemoTaskXml -Config $Config -TaskName $TaskName -LogonType $LogonType
     Set-Content -LiteralPath $Path -Value $xml -Encoding Unicode
     return $Path
 }
 
 function Install-AeroLinkRemoteDemoTask {
+    <#
+      .SYNOPSIS Registers the recovery task against the DEDICATED production source, or refuses.
+      .DESCRIPTION
+        The assertion is the point. The 2026-09-03 outage was possible because the task's script path and
+        source root both pointed at the one checkout on the machine, which was mid-feature with dirty WIP.
+        A task may now be registered only against a checkout that declares itself the dedicated production
+        source, so it cannot be aimed back at the development checkout by a stale configuration or a
+        well-meant edit.
+
+        -TaskName exists so the installer can be qualified against a disposable task without touching the
+        real one. S4U falls back to InteractiveToken only when the machine refuses to register an S4U
+        principal, and says so rather than silently accepting logon-only recovery.
+    #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]$Config
+        [Parameter(Mandatory)]$Config,
+        [string]$TaskName = $script:RemoteDemoTaskName,
+        [switch]$AllowNonDedicatedSource
     )
+    if (-not $AllowNonDedicatedSource) {
+        Assert-AeroLinkDedicatedProductionSource -SourceRoot $Config.AeroLinkRoot | Out-Null
+    }
     if (-not (Test-Path -LiteralPath $Config.StatePath)) { New-Item -ItemType Directory -Path $Config.StatePath -Force | Out-Null }
     $xmlPath = Join-Path $Config.StatePath 'remote-demo-task.xml'
-    Save-AeroLinkRemoteDemoTaskXml -Config $Config -Path $xmlPath
-    & schtasks.exe /Create /TN $script:RemoteDemoTaskName /XML $xmlPath /F
-    if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed with exit code $LASTEXITCODE." }
-    return Get-AeroLinkRemoteDemoTaskStatus
+    $logonType = 'S4U'
+    Save-AeroLinkRemoteDemoTaskXml -Config $Config -Path $xmlPath -TaskName $TaskName -LogonType $logonType
+    & schtasks.exe /Create /TN $TaskName /XML $xmlPath /F
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'This machine refused to register the unattended (S4U) recovery principal. Falling back to' -ForegroundColor Yellow
+        Write-Host 'interactive-token recovery, which recovers after sign-in but NOT after an unattended reboot.' -ForegroundColor Yellow
+        $logonType = 'InteractiveToken'
+        Save-AeroLinkRemoteDemoTaskXml -Config $Config -Path $xmlPath -TaskName $TaskName -LogonType $logonType
+        & schtasks.exe /Create /TN $TaskName /XML $xmlPath /F
+        if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed with exit code $LASTEXITCODE." }
+    }
+    $status = Get-AeroLinkRemoteDemoTaskStatus -TaskName $TaskName
+    $status | Add-Member -MemberType NoteProperty -Name LogonType -Value $logonType -Force
+    $status | Add-Member -MemberType NoteProperty -Name UnattendedBootRecovery -Value ($logonType -eq 'S4U') -Force
+    $status | Add-Member -MemberType NoteProperty -Name SourceRoot -Value $Config.AeroLinkRoot -Force
+    return $status
 }
 
 function Remove-AeroLinkRemoteDemoTask {
-    & schtasks.exe /Delete /TN $script:RemoteDemoTaskName /F
+    [CmdletBinding()]
+    param([string]$TaskName = $script:RemoteDemoTaskName)
+    & schtasks.exe /Delete /TN $TaskName /F
     if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 267011) {
         throw "schtasks /Delete failed with exit code $LASTEXITCODE."
     }
-    return [pscustomobject]@{ TaskName = $script:RemoteDemoTaskName; State = 'Removed' }
+    return [pscustomobject]@{ TaskName = $TaskName; State = 'Removed' }
 }
 
 function Get-AeroLinkRemoteDemoTaskStatus {
-    $task = Get-ScheduledTask -TaskName $script:RemoteDemoTaskName -ErrorAction SilentlyContinue
+    [CmdletBinding()]
+    param([string]$TaskName = $script:RemoteDemoTaskName)
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if (-not $task) {
-        return [pscustomobject]@{ TaskName = $script:RemoteDemoTaskName; Installed = $false; State = 'NotInstalled'; Detail = 'The AeroLink remote-demo recovery task is not installed.' }
+        return [pscustomobject]@{ TaskName = $TaskName; Installed = $false; State = 'NotInstalled'; Detail = 'The AeroLink remote-demo recovery task is not installed.' }
     }
     $info = $task | Get-ScheduledTaskInfo
     return [pscustomobject]@{
-        TaskName = $script:RemoteDemoTaskName
+        TaskName = $TaskName
         Installed = $true
         State = $task.State.ToString()
         LastRunTime = $info.LastRunTime
@@ -1033,8 +1379,24 @@ function Get-AeroLinkRemoteDemoStatus {
         }
     }
 
+    # Where the source came from is a status question, not an implementation detail: on 2026-09-03 every
+    # other check would have looked fine, and the answer to "why is the demo down" was the source root.
+    $sourcePosture = Get-AeroLinkProductionSourcePosture -SourceRoot $Config.AeroLinkRoot
+    $checks.Add([pscustomobject]@{
+        Name = 'Dedicated canonical production source'
+        Healthy = ($sourcePosture.Dedicated -and $sourcePosture.Canonical)
+        Detail = "$($Config.AeroLinkRoot): $($sourcePosture.Reason)"
+    })
+
     $local = Test-AeroLinkRemoteDemoLocalReady -Config $Config
     $checks.Add([pscustomobject]@{ Name = 'Local AeroLink ready + built client'; Healthy = $local.Ready; Detail = $local.Detail })
+
+    if ($sourcePosture.Canonical -and $sourcePosture.Posture) {
+        # Deliberately not $LocalRuntimeProbe: that seam attributes the listening PROCESS, while this one
+        # reads the process's published identity. Two different questions, two different probes.
+        $runtimeMatch = Test-AeroLinkRemoteDemoRuntimeMatchesSource -Config $Config -ExpectedSourceIdentity $sourcePosture.Posture.HeadSha
+        $checks.Add([pscustomobject]@{ Name = 'Runtime matches production source and mode'; Healthy = $runtimeMatch.Matches; Detail = $runtimeMatch.Detail })
+    }
 
     $processes = Get-AeroLinkRemoteDemoNgrokProcess -Config $Config
     $ownedCount = @($processes.Owned).Count
@@ -1079,12 +1441,17 @@ Export-ModuleMember -Function `
     Stop-AeroLinkRemoteDemoOwnedProcess, `
     Start-AeroLinkRemoteDemoProductionHelper, `
     Invoke-AeroLinkProductionLauncher, `
+    Get-AeroLinkProductionLauncherRefusal, `
+    Test-AeroLinkRemoteDemoRuntimeMatchesSource, `
     Start-AeroLinkRemoteDemoNgrok, `
     Get-AeroLinkRemoteDemoStartDecision, `
     Write-AeroLinkRemoteDemoLog, `
     Start-AeroLinkRemoteDemo, `
     Stop-AeroLinkRemoteDemo, `
     Get-AeroLinkRemoteDemoTaskXml, `
+    Get-AeroLinkReconcileTaskXml, `
+    Install-AeroLinkReconcileTask, `
+    Invoke-AeroLinkProductionSourceReconciliation, `
     Save-AeroLinkRemoteDemoTaskXml, `
     Install-AeroLinkRemoteDemoTask, `
     Remove-AeroLinkRemoteDemoTask, `
