@@ -96,8 +96,15 @@ function Get-AeroLinkUpgradeAnalysis {
     $run = if ($CommandRunner) { & $CommandRunner @('maintenance', 'analyze', '--json') $ConnectionString } else {
         Invoke-AeroLinkMaintenanceCommand -ProductRoot $ProductRoot -Arguments @('maintenance', 'analyze', '--json') -ConnectionString $ConnectionString -DotnetPath $DotnetPath
     }
-    # The host prints build noise before its JSON; take the object, not the transcript.
-    $jsonStart = $run.StdOut.IndexOf('{')
+    # The host may print build or startup noise before its JSON, so take the object rather than the whole
+    # transcript. Anchored on a line that is exactly an opening brace: an IndexOf('{') would be satisfied by
+    # a brace inside any log line that happened to be emitted first, and would then parse nothing.
+    $lines = $run.StdOut -split "`r?`n"
+    $jsonLineIndex = -1
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        if ($lines[$index].Trim() -eq '{') { $jsonLineIndex = $index; break }
+    }
+    $jsonStart = if ($jsonLineIndex -ge 0) { $run.StdOut.IndexOf($lines[$jsonLineIndex]) } else { -1 }
     if ($jsonStart -lt 0) {
         return [pscustomobject]@{
             Status = 'unreachable'; Analysis = $null; ExitCode = $run.ExitCode

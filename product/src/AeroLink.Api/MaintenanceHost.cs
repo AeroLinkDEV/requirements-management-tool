@@ -47,8 +47,43 @@ public static class AeroLinkMaintenanceHost
             return 0;
         }
 
-        var builder = Host.CreateApplicationBuilder(args);
+        // The web host and the generic host disagree about two things, and both matter here.
+        //
+        // WebApplication.CreateBuilder reads ASPNETCORE_ENVIRONMENT and takes the current directory as its
+        // content root; Host.CreateApplicationBuilder reads DOTNET_ENVIRONMENT and takes the application
+        // directory. Left alone, maintenance would run as "Production" from a directory with no
+        // appsettings.Development.json, find no connection string, and report a perfectly healthy database
+        // as unreachable — a wrong answer that reads exactly like a real one. The environment the launchers
+        // set is honoured explicitly, and configuration is read from beside the assembly, where the build
+        // puts the settings files.
+        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+            ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
+            ?? "Development";
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            Args = args,
+            EnvironmentName = environment,
+            ContentRootPath = AppContext.BaseDirectory,
+        });
+        // Maintenance output is read by an operator and parsed by a launcher. Entity Framework's Information
+        // level narrates every command it runs, which buries a three-line answer in a page of SQL and puts
+        // arbitrary text in front of the JSON a caller has to parse. Warnings and errors still surface.
+        //
+        // Applied as configuration rather than through builder.Logging.SetMinimumLevel, because the
+        // configuration-driven filters from appsettings.Development.json win over a programmatic minimum —
+        // which is exactly what happened on the first attempt, and looked like the call had no effect.
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Logging:LogLevel:Default"] = "Warning",
+            ["Logging:LogLevel:Microsoft"] = "Warning",
+            ["Logging:LogLevel:Microsoft.EntityFrameworkCore"] = "Warning",
+        });
         builder.Services.AddAeroLinkInfrastructure(builder.Configuration);
+        // Registered in Program.cs beside the web composition, and required by infrastructure services the
+        // container validates whether maintenance resolves them or not. Development turns on validate-on-
+        // build, so an unregistered dependency is a startup failure rather than a lazy one — which is how
+        // this was found, and is the behaviour worth keeping.
+        builder.Services.AddSingleton<AeroLink.Domain.Hierarchy.ILadderPolicy, AeroLink.Domain.Hierarchy.LegacyLadderPolicy>();
         // Every hosted worker is removed: maintenance must not dispatch notifications, reconcile documents,
         // or run integrity sweeps against a database whose posture is the very thing in question.
         foreach (var worker in builder.Services.Where(x => x.ServiceType == typeof(IHostedService)).ToList())

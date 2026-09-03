@@ -549,6 +549,53 @@ public sealed class AeroLinkMaintenanceQualificationTests
     }
 
     /// <summary>
+    /// The analyzer's authority list and the startup sequence in Program.cs must name the same authorities.
+    ///
+    /// They are two lists in two files, and the failure mode when they drift is silent under-reporting: an
+    /// authority that startup runs but the analyzer does not know about is a pending upgrade the operator is
+    /// never told is pending, and a conflict they meet as a stack trace instead. Source-derived rather than
+    /// hand-maintained, so adding one in Program.cs fails here rather than shipping.
+    /// </summary>
+    [Fact]
+    public void The_analyzer_knows_every_semantic_authority_startup_runs()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        string? programPath = null;
+        while (directory is not null && programPath is null)
+        {
+            var candidate = Path.Combine(directory.FullName, "product", "src", "AeroLink.Api", "Program.cs");
+            if (File.Exists(candidate)) programPath = candidate;
+            directory = directory.Parent;
+        }
+        Assert.True(programPath is not null, "Program.cs was not found above the test assembly.");
+
+        var program = File.ReadAllText(programPath!);
+        // Every authority resolved in the startup scope, by the exact type name Program.cs asks for.
+        var startupAuthorities = System.Text.RegularExpressions.Regex
+            .Matches(program, @"GetRequiredService<(\w+(?:Migration|Reconciliation|Cutover)Authority)>")
+            .Select(x => x.Groups[1].Value)
+            .Distinct()
+            .OrderBy(x => x)
+            .ToList();
+        Assert.NotEmpty(startupAuthorities);
+
+        var analyzerAuthorities = AeroLinkUpgradeAnalyzer.SemanticAuthorities
+            .Select(x => x.Marker switch
+            {
+                var m when m == SoftwareVerificationCaseMigrationAuthority.MigrationMarker => nameof(SoftwareVerificationCaseMigrationAuthority),
+                var m when m == ProjectLeadershipMigrationAuthority.MigrationMarker => nameof(ProjectLeadershipMigrationAuthority),
+                var m when m == ProjectLeadershipReconciliationAuthority.MigrationMarker => nameof(ProjectLeadershipReconciliationAuthority),
+                var m when m == TestChangeRequestPrefixMigrationAuthority.MigrationMarker => nameof(TestChangeRequestPrefixMigrationAuthority),
+                var m when m == SoftwareProcedureExecutionCutoverAuthority.MigrationMarker => nameof(SoftwareProcedureExecutionCutoverAuthority),
+                _ => x.Marker,
+            })
+            .OrderBy(x => x)
+            .ToList();
+
+        Assert.Equal(startupAuthorities, analyzerAuthorities);
+    }
+
+    /// <summary>
     /// Records the completion markers named authorities write, for a database that has already run them.
     /// The audit target must match what the authority itself records, because that is what the analyzer
     /// matches on — a marker with the wrong target would read as still pending.
