@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react"
 import DigitalThreadCanvas from "./DigitalThreadCanvas"
+import { usePanelDock } from "./digitalThreadPanelDock"
 import ExactArtifactLink from "./ExactArtifactLink"
 import {
   type CanvasEdge,
@@ -343,7 +344,7 @@ export default function DigitalThreadInsideChange({
    * mechanisms — reframing into what is left, and rolling the lanes to fetch linked records — are the shared
    * canvas's, and it performs both on selection.
    */
-  const dock: ResolvedDock = useMemo(() => {
+  const preferredDock: ResolvedDock = useMemo(() => {
     if (dockPreference !== "auto") return dockPreference
     if (!selectedId) return "right"
     const laneOf = new Map(canvasNodes.map(node => [node.id, node.lane]))
@@ -357,6 +358,9 @@ export default function DigitalThreadInsideChange({
     }
     return resolveDockByLane(selectedLane, linked)
   }, [canvasEdges, canvasNodes, dockPreference, selectedId])
+
+  // Non-occlusion outranks the preference (§6.6), the same contract the other two views keep.
+  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${selectedId ?? ""}:${dockPreference}`)
 
   /**
    * The frame the board may use. It shrinks by the docked edge, so the canvas never lays a record out
@@ -753,6 +757,7 @@ export default function DigitalThreadInsideChange({
           onHover={setHoveredId}
           tracedEdges={web?.edges}
           frameInset={frameInset}
+          onFramingNeedsRoom={reportNeedsRoom}
           ariaLabel={`Inside ${opened.displayNumber}`}
         />
         {loading ? <div className="dticLoading">Loading what this change proposes…</div> : null}

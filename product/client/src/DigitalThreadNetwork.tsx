@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import DigitalThreadCanvas from "./DigitalThreadCanvas"
+import { usePanelDock } from "./digitalThreadPanelDock"
 import ExactArtifactLink from "./ExactArtifactLink"
 import { type CanvasEdge, type CanvasNode, compactLanes, trace } from "./digitalThreadGeometry"
 import { stateLabel } from "./presentation"
@@ -167,10 +168,15 @@ export default function DigitalThreadNetwork({
    * Which side the panel takes. It counts where the selected record's direct links actually are and docks on
    * the emptier one, so the panel is never covering the thing the highlighted edge points at.
    */
-  const dock: ResolvedDock = useMemo(() => {
+  const preferredDock: ResolvedDock = useMemo(() => {
     if (dockPreference !== "auto") return dockPreference
     return selected ? resolveDock(selected, directLinks, byId, model) : "right"
   }, [byId, directLinks, dockPreference, model, selected])
+
+  // Non-occlusion outranks the preference (§6.6), the same contract the artifact thread keeps: when a side
+  // cannot leave room for the selection and its direct links at the landing floor, the panel moves rather
+  // than a linked record being hidden.
+  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${selectedId ?? ""}:${dockPreference}`)
 
   // The canvas must not lay records out under the panel, so the frame it may use shrinks by the dock.
   const frameInset = useMemo(
@@ -384,6 +390,7 @@ export default function DigitalThreadNetwork({
           onSelect={setSelectedId}
           onHover={setHoveredId}
           frameInset={frameInset}
+          onFramingNeedsRoom={reportNeedsRoom}
           tracedEdges={web?.edges}
           ariaLabel="Change network for this build"
         />

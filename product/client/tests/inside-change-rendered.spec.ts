@@ -327,3 +327,59 @@ test.describe("exact identity on the board", () => {
     await expect(card).not.toHaveClass(/is-suspect/)
   })
 })
+
+/**
+ * The same §6.6 guarantee, asserted for this view in its own right.
+ *
+ * Non-occlusion is a shared-canvas rule. #880 §10.1 stopped the board zooming out past the legibility floor to
+ * make a wide one-hop set fit beside a side dock, so the panel is what gives way — and a linked record must
+ * never be hidden to keep the panel where it was. The fail-safe was wired into one view first, which is how
+ * the other two kept the defect; each view that renders the panel now proves it.
+ */
+test.describe("the detail panel never rests on a directly linked record", () => {
+  for (const mode of ["Bottom", "Right", "Auto"]) {
+    test(`with the panel docked ${mode}`, async ({ page }) => {
+      test.setTimeout(120_000)
+      await page.goto(fixture("requirement"))
+      await expect(page.locator(".dtCanvas")).toBeVisible()
+      await page.waitForTimeout(700)
+
+      // Select a card the board is actually drawing, and one that has direct links to check — a card with
+      // none would let this pass without exercising anything.
+      const drawn = page.locator(`.dtCanvasNode:not(.is-offscreen):has(.dticCard)`)
+      const total = await drawn.count()
+      let chosen = 0
+      for (; chosen < Math.min(total, 8); chosen += 1) {
+        await drawn.nth(chosen).click()
+        await page.waitForTimeout(500)
+        if (await page.locator(".dticRel button:not(.is-far)").count()) break
+      }
+      expect(chosen, "no drawn card had a direct link to check").toBeLessThan(Math.min(total, 8))
+
+      await page.locator(`.dticPanelTools button:text-is("${mode}")`).click()
+      await page.waitForTimeout(700)
+
+      const panel = (await page.locator(".dticPanel").boundingBox())!
+      const canvas = (await page.locator(".dtCanvas").boundingBox())!
+      const names = await page.locator(".dticRel button:not(.is-far) > span").allInnerTexts()
+      expect(names.length, "the selected record should have direct links to check").toBeGreaterThan(0)
+
+      for (const name of names) {
+        const card = page.locator(`.dtCanvasNode:has(.dticCard:has-text("${name}"))`).first()
+        expect(await card.count(), `${name} is a direct link and must be on the board`).toBeGreaterThan(0)
+        await expect(card, `${name} is hidden rather than fitted beside the ${mode} panel`)
+          .not.toHaveClass(/is-offscreen/)
+
+        const box = (await card.boundingBox())!
+        const clear =
+          box.x + box.width <= panel.x + 1 ||
+          box.x >= panel.x + panel.width - 1 ||
+          box.y + box.height <= panel.y + 1 ||
+          box.y >= panel.y + panel.height - 1
+        expect(clear, `${name} is underneath the ${mode} panel`).toBe(true)
+        expect(box.x).toBeGreaterThanOrEqual(canvas.x - 1)
+        expect(box.x + box.width).toBeLessThanOrEqual(canvas.x + canvas.width + 1)
+      }
+    })
+  }
+})
