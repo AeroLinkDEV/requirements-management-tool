@@ -222,6 +222,19 @@ function Get-AeroLinkInstallationIdentity {
     }
 }
 
+function ConvertTo-AeroLinkRoundTripUtc {
+    <#
+        .SYNOPSIS One UTC instant in round-trip form, whichever way the host deserialized it.
+    #>
+    param([AllowNull()]$Value)
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [datetime]) { return ([datetime]$Value).ToUniversalTime().ToString('o') }
+    if ($Value -is [datetimeoffset]) { return ([datetimeoffset]$Value).UtcDateTime.ToString('o') }
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+    return $text
+}
+
 function Get-AeroLinkInstanceConfig {
     <#
         .SYNOPSIS The operator-declared identity of this installation, or an honest mode-derived default.
@@ -262,8 +275,11 @@ function Get-AeroLinkInstanceConfig {
         Classification       = $classification
         SnapshotSourceLabel  = if ($snapshot -and $snapshot.PSObject.Properties['sourceLabel']) { [string]$snapshot.sourceLabel } else { $null }
         SnapshotSourceSha    = if ($snapshot -and $snapshot.PSObject.Properties['sourceSha']) { [string]$snapshot.sourceSha } else { $null }
-        SnapshotCreatedAtUtc = if ($snapshot -and $snapshot.PSObject.Properties['createdAtUtc']) { [string]$snapshot.createdAtUtc } else { $null }
-        SnapshotActivatedAtUtc = if ($snapshot -and $snapshot.PSObject.Properties['activatedAtUtc']) { [string]$snapshot.activatedAtUtc } else { $null }
+        # PowerShell 7 deserializes an ISO 8601 string in JSON as a DateTime while Windows PowerShell leaves
+        # it as text, so a plain cast produces a locale-formatted string on one host and the original on the
+        # other. Normalize to a round-trip UTC instant, which is what every consumer of this actually wants.
+        SnapshotCreatedAtUtc = if ($snapshot -and $snapshot.PSObject.Properties['createdAtUtc']) { ConvertTo-AeroLinkRoundTripUtc $snapshot.createdAtUtc } else { $null }
+        SnapshotActivatedAtUtc = if ($snapshot -and $snapshot.PSObject.Properties['activatedAtUtc']) { ConvertTo-AeroLinkRoundTripUtc $snapshot.activatedAtUtc } else { $null }
     }
 }
 

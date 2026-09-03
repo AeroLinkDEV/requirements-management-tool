@@ -208,8 +208,11 @@ if (Test-Path -LiteralPath $operations -PathType Leaf) {
 # unrelated syntax error hundreds of lines away, in a file whose author's editor showed nothing wrong. The
 # same character in a comment is harmless, which is why the trap survives review. Parsing every script here
 # catches it in CI rather than on the machine that was trying to recover a demo.
-foreach ($script in @(Get-ChildItem -LiteralPath (Join-Path $RepositoryRoot 'product\scripts') -File |
-        Where-Object { $_.Extension -in '.ps1', '.psm1' })) {
+$scriptsRoot = Join-Path $RepositoryRoot 'product\scripts'
+$launcherScripts = if (Test-Path -LiteralPath $scriptsRoot -PathType Container) {
+    @(Get-ChildItem -LiteralPath $scriptsRoot -File | Where-Object { $_.Extension -in '.ps1', '.psm1' })
+} else { @() }
+foreach ($script in $launcherScripts) {
     $parseErrors = $null
     [void][System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$null, [ref]$parseErrors)
     if ($parseErrors -and $parseErrors.Count -gt 0) {

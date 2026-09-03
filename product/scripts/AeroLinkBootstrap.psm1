@@ -743,5 +743,8 @@ Export-ModuleMember -Function @(
     'Compare-AeroLinkBootstrapFileSet',
     'Invoke-AeroLinkBootstrapReentry',
     'Update-AeroLinkClientDependencies',
+    # Exported so the dedicated production source (#881) validates against this exact policy rather than a
+    # second implementation of "is this source canonical" that could disagree with the launcher's.
+    'Assert-AeroLinkHomeCanonicalSourcePolicy',
     'Invoke-AeroLinkSourceBootstrap'
 )

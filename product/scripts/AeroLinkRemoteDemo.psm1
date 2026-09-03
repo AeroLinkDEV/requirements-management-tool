@@ -648,6 +648,7 @@ function Get-AeroLinkProductionLauncherRefusal {
         [AllowNull()][string]$StandardErrorPath,
         [int]$TailLines = 40
     )
+    $banner = $null
     foreach ($path in @($StandardOutputPath, $StandardErrorPath)) {
         if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
         $lines = @(Get-Content -LiteralPath $path -Tail $TailLines -ErrorAction SilentlyContinue)
@@ -655,11 +656,15 @@ function Get-AeroLinkProductionLauncherRefusal {
             if ($line -notmatch '(?i)refus|not canonical|cannot characterize|identity mismatch') { continue }
             if ($line -match '(?i)(password|secret|token|authorization|authtoken|connectionstrings|connection string|postgresql://|User Id=|Password=)') { continue }
             $trimmed = ([string]$line).Trim()
+            if (-not $trimmed) { continue }
             if ($trimmed.Length -gt 300) { $trimmed = $trimmed.Substring(0, 300) + '...' }
-            if ($trimmed) { return $trimmed }
+            # "AEROLINK PRODUCTION START REFUSED" is the heading, not the reason. The line after it names the
+            # branch, the dirt or the divergence, and that is the only part an operator can act on.
+            if ($trimmed -cmatch '^[A-Z0-9 ]+$') { if (-not $banner) { $banner = $trimmed }; continue }
+            return $trimmed
         }
     }
-    return $null
+    return $banner
 }
 
 function Invoke-AeroLinkProductionLauncher {

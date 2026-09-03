@@ -16,6 +16,8 @@
 .brand {
   display: flex;
   align-items: center;
+  /* The instance badge wraps under the wordmark in the narrow sidebar rather than squeezing it. */
+  flex-wrap: wrap;
   gap: 12px;
   font-family: var(--font-display);
   font-size: 20px;

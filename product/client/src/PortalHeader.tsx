@@ -1,5 +1,6 @@
 import type { AuthUser } from "./IdentityCenter";
 import { PersonAvatar } from "./People";
+import InstanceBadge from "./InstanceBadge";
 import "./PortalHeader.css";
 
 export default function PortalHeader({
@@ -17,7 +18,7 @@ export default function PortalHeader({
   return (
       <header className="projectsTopBar">
         <div className="projectsTopBarInner">
-          <div className="projectsBrand"><span aria-hidden="true">▲</span><b>AeroLink</b></div>
+          <div className="projectsBrand"><span aria-hidden="true">▲</span><b>AeroLink</b><InstanceBadge/></div>
           <div className="projectsAccount">
             <PersonAvatar userName={user.userName} displayName={user.displayName} size="small"/>
             <div><b>{user.displayName}</b><small>{role}</small></div>

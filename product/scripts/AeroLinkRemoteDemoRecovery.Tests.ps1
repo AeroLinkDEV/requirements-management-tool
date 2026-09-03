@@ -140,7 +140,9 @@ $productionHelper = { param($C, $R) $script:helperCalls++; New-FakeHelper -Stuck
 $ngrokSeam = { param($C, $R) $script:ngrokCalls++; New-FakeHelper -Stuck $false }
 $threw = $false
 try {
-    Start-AeroLinkRemoteDemo -Config $config -Scheduled -PostgresReadyTest $postgresReady -LocalReadyTest $localNeverReady -ProductionHelperLauncher $productionHelper -ProductionHelperStopper $stopper -ProductionTimeoutSeconds 2 -PostgresRecoveryTimeoutSeconds 10 -NgrokLauncher $ngrokSeam -PublicProbe $publicProbe401 | Out-Null
+    # -SkipSourceReconciliation: this scenario is about local readiness, and the source gate has its own
+    # coverage below. Without it the start would refuse on the fixture's absent production source first.
+    Start-AeroLinkRemoteDemo -Config $config -Scheduled -SkipSourceReconciliation -PostgresReadyTest $postgresReady -LocalReadyTest $localNeverReady -ProductionHelperLauncher $productionHelper -ProductionHelperStopper $stopper -ProductionTimeoutSeconds 2 -PostgresRecoveryTimeoutSeconds 10 -NgrokLauncher $ngrokSeam -PublicProbe $publicProbe401 | Out-Null
 } catch {
     $threw = $true
     Assert-True ($_.Exception.Message -match 'NOT READY') 'Scenario 7: failure message must say NOT READY.'
@@ -187,6 +189,139 @@ $binCaptureProbe = {
 $binConfig = New-TestConfig
 $null = Test-AeroLinkRemoteDemoPostgresReady -Config $binConfig -PgIsreadyProbe $binCaptureProbe -QueryProbe $queryOk
 Assert-True ($script:capturedBin -eq (Join-Path $binConfig.AeroLinkRoot 'product\.local\postgresql\pgsql\bin')) "Default PostgresBin must resolve inside the function to the repository runtime; got '$script:capturedBin'."
+
+# =========================================================================================================
+# 2026-09-03 regressions. Each of these is a step of the real outage.
+# =========================================================================================================
+
+# --- 9. A terminal launcher refusal ends the wait promptly, and reports the reason the child gave ---
+#
+# The defect exactly: the production helper exited within seconds with a canonical-source refusal, and the
+# parent went on polling port 5080 for the full 900 seconds before reporting NOT READY.
+$config = New-TestConfig
+New-Item -ItemType Directory -Path $config.LogsPath -Force | Out-Null
+$refusalStdout = Join-Path $tempRoot 'production-helper.stdout.log'
+@(
+    'AEROLINK PRODUCTION START REFUSED',
+    'Repository is on feat/880-slice6-digital-thread-page, not canonical main.',
+    'No Git files or database state were changed.'
+) | Set-Content -LiteralPath $refusalStdout -Encoding UTF8
+
+$exitedHelper = [pscustomobject]@{
+    Id = 555; HasExited = $true; ExitCode = 1
+    StdOutPath = $refusalStdout; StdErrPath = (Join-Path $tempRoot 'production-helper.stderr.log')
+}
+$exitedHelper | Add-Member -MemberType ScriptMethod -Name Refresh -Value { }
+$neverReady = { param($C) [pscustomobject]@{ Ready = $false; Detail = 'not ready' } }
+$startedAt = Get-Date
+$launcher = Invoke-AeroLinkProductionLauncher -Config $config -Run (New-TestRun) `
+    -LocalReadyTest $neverReady -HelperLauncher { param($C, $R) $exitedHelper } -HelperStopper $stopper `
+    -TimeoutSeconds 900 -PollIntervalSeconds 1 -GraceSeconds 0 -PostExitGraceSeconds 2
+$elapsed = ((Get-Date) - $startedAt).TotalSeconds
+Assert-True (-not $launcher.Healthy) 'Scenario 9: a launcher that refused must not be reported healthy.'
+Assert-True ($elapsed -lt 60) "Scenario 9: a terminal child exit must end the wait promptly, not after the full timeout (waited $([int]$elapsed)s)."
+Assert-True ($launcher.Detail -match 'not canonical main') 'Scenario 9: the failure must quote the refusal the child actually gave.'
+Assert-True ($launcher.Detail -match 'feat/880-slice6') 'Scenario 9: the failure must name the branch that caused the refusal.'
+
+# The refusal reader is bounded and redacted: it will not lift a line carrying a credential.
+$secretLog = Join-Path $tempRoot 'refusal-with-secret.log'
+@('Production launch refused: connection string Host=127.0.0.1;Password=hunter2 was rejected') |
+    Set-Content -LiteralPath $secretLog -Encoding UTF8
+Assert-True ($null -eq (Get-AeroLinkProductionLauncherRefusal -StandardOutputPath $secretLog -StandardErrorPath $null)) `
+    'Scenario 9: a refusal line carrying a credential must be dropped rather than quoted into an operator log.'
+
+# --- 10. A genuine slow start still gets its bounded readiness window ---
+$slowHelper = New-FakeHelper -Stuck $true
+$readyAfter = 0
+$slowReady = { param($C) $script:readyAfter++; if ($script:readyAfter -lt 3) { [pscustomobject]@{ Ready = $false; Detail = 'starting' } } else { [pscustomobject]@{ Ready = $true; Detail = 'ready' } } }
+$slow = Invoke-AeroLinkProductionLauncher -Config $config -Run (New-TestRun) `
+    -LocalReadyTest $slowReady -HelperLauncher { param($C, $R) $slowHelper } -HelperStopper $stopper `
+    -TimeoutSeconds 60 -PollIntervalSeconds 1 -GraceSeconds 0
+Assert-True ($slow.Healthy) 'Scenario 10: a slow but genuine startup must still be allowed its bounded readiness window.'
+
+# --- 11. A stale remote-demo state file must not false-block a fresh start ---
+#
+# The 2026-09-03 state file recorded a LocalApiPid from before the reboot. It was not the blocker, and it
+# must never become one: state is advisory metadata, and the live checks are the truth.
+New-Item -ItemType Directory -Path $config.StatePath -Force | Out-Null
+[pscustomobject]@{
+    Pid = 999999; LocalApiPid = 999998; LocalApiStartedAt = '2026-09-03T09:00:00.0000000Z'
+    PublicUrl = $config.PublicUrl; NotificationBaseUrl = $config.PublicUrl
+} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $config.StatePath 'remote-demo-state.json') -Encoding UTF8
+
+$deadRuntime = { param($C) [pscustomobject]@{ Found = $false; Detail = 'Local API port 5080 has no owner.' } }
+$proof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $config -RuntimeProbe $deadRuntime
+Assert-True (-not $proof.Valid) 'Scenario 11: a state file naming a dead PID must not be accepted as proof.'
+$decision = Get-AeroLinkRemoteDemoStartDecision -LocalReady $true -OwnedProcessPresent $false -Protected $false -ProbeStatusCode 404
+Assert-True ($decision.Decision -eq 'CanStart') 'Scenario 11: a stale state file must not block a fresh start when no owned process is live.'
+
+# --- 12. The recovery task is bound to the DEDICATED production source, in both places ---
+$productionConfig = New-TestConfig
+$productionConfig | Add-Member -MemberType NoteProperty -Name AeroLinkRoot -Value 'C:\Sean Project\AeroLink Production' -Force
+$xml = Get-AeroLinkRemoteDemoTaskXml -Config $productionConfig
+Assert-True ($xml -match [regex]::Escape('C:\Sean Project\AeroLink Production\product\scripts\AeroLinkRemoteDemo.ps1')) `
+    'Scenario 12: the task must invoke the recovery script FROM the dedicated production source, not from the development checkout.'
+Assert-True ($xml -notmatch 'Requirements Management Tool') `
+    'Scenario 12: no part of the task may reference the development checkout.'
+
+# --- 13. Unattended boot recovery, with logon kept as a second chance, and no duplicates ---
+Assert-True ($xml -match '<BootTrigger>') 'Scenario 13: recovery must be triggered by machine boot, not only by an interactive logon.'
+Assert-True ($xml -match '<Delay>PT1M</Delay>') 'Scenario 13: the boot trigger must wait for the machine to settle before checking prerequisites.'
+Assert-True ($xml -match '<LogonTrigger>') 'Scenario 13: the logon trigger stays as a second chance.'
+Assert-True ($xml -match '<LogonType>S4U</LogonType>') 'Scenario 13: boot recovery runs without an interactive session and without a stored password.'
+Assert-True ($xml -notmatch 'S-1-5-18|SYSTEM') 'Scenario 13: recovery must not run as SYSTEM; ngrok configuration and credentials are per-user.'
+Assert-True ($xml -match 'MultipleInstancesPolicy>IgnoreNew') 'Scenario 13: boot and logon both firing must not start two recoveries.'
+Assert-True ($xml -notmatch '(?i)authtoken|password|secret|basic-auth') 'Scenario 13: the task definition must carry no secret.'
+
+# --- 14. The bounded reconciliation task polls, and only restarts when origin/main actually moved ---
+$reconcileXml = Get-AeroLinkReconcileTaskXml -Config $productionConfig -IntervalMinutes 30
+Assert-True ($reconcileXml -match '<Interval>PT30M</Interval>') 'Scenario 14: reconciliation runs on a low-overhead cadence, not every thirty seconds.'
+Assert-True ($reconcileXml -match '-Action Reconcile') 'Scenario 14: the reconciliation task runs the reconciliation action.'
+Assert-True ($reconcileXml -match [regex]::Escape('C:\Sean Project\AeroLink Production')) 'Scenario 14: reconciliation is bound to the dedicated production source.'
+
+$restarts = 0
+$noMovement = { param($C) [pscustomobject]@{ Action = 'AlreadyCurrent'; Canonical = $true; HeadSha = 'aaaaaaaa'; Reason = 'current' } }
+$restart = { param($C, $R) $script:restarts++; [pscustomobject]@{ Detail = 'restarted' } }
+$quiet = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceReconciler $noMovement -Restarter $restart
+Assert-True (-not $quiet.Restarted -and $script:restarts -eq 0) 'Scenario 14: reconciliation must do nothing when origin/main has not moved.'
+
+$moved = { param($C) [pscustomobject]@{ Action = 'Updated'; Canonical = $true; HeadSha = 'bbbbbbbb'; Reason = 'advanced' } }
+$advanced = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceReconciler $moved -Restarter $restart
+Assert-True ($advanced.Restarted -and $script:restarts -eq 1) 'Scenario 14: a real main advance must restart production into the new source.'
+Assert-True ($advanced.HeadSha -eq 'bbbbbbbb') 'Scenario 14: the new running revision must be reported.'
+
+$refused = { param($C) [pscustomobject]@{ Action = 'Refused'; Canonical = $false; HeadSha = $null; Reason = 'untracked source present' } }
+$blocked = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceReconciler $refused -Restarter $restart
+Assert-True (-not $blocked.Restarted -and $script:restarts -eq 1) 'Scenario 14: a refused source must never be started.'
+
+# --- 15. Ngrok is never started in front of a runtime that is not the verified production source ---
+$wrongSource = { param($C) [pscustomobject]@{ sourceIdentity = 'oldoldoldoldoldoldoldoldoldoldoldoldoldo'; sourceShortSha = 'oldoldol'; mode = 'HOME-PRODUCTION' } }
+$mismatch = Test-AeroLinkRemoteDemoRuntimeMatchesSource -Config $config -ExpectedSourceIdentity 'newnewnewnewnewnewnewnewnewnewnewnewnewn' -RuntimeIdentityProbe $wrongSource
+Assert-True (-not $mismatch.Matches) 'Scenario 15: a healthy API from another revision must not be exposed as the production demo.'
+$wrongMode = { param($C) [pscustomobject]@{ sourceIdentity = 'newnewnewnewnewnewnewnewnewnewnewnewnewn'; sourceShortSha = 'newnewne'; mode = 'LOCAL-DEV' } }
+Assert-True (-not (Test-AeroLinkRemoteDemoRuntimeMatchesSource -Config $config -ExpectedSourceIdentity 'newnewnewnewnewnewnewnewnewnewnewnewnewn' -RuntimeIdentityProbe $wrongMode).Matches) `
+    'Scenario 15: a development-mode API on 5080 must not be exposed as the production demo.'
+Assert-True (-not (Test-AeroLinkRemoteDemoRuntimeMatchesSource -Config $config -ExpectedSourceIdentity 'newnewnewnewnewnewnewnewnewnewnewnewnewn' -RuntimeIdentityProbe { param($C) $null }).Matches) `
+    'Scenario 15: a process that publishes no identity must not be exposed as the production demo.'
+$right = { param($C) [pscustomobject]@{ sourceIdentity = 'newnewnewnewnewnewnewnewnewnewnewnewnewn'; sourceShortSha = 'newnewne'; mode = 'HOME-PRODUCTION' } }
+Assert-True (Test-AeroLinkRemoteDemoRuntimeMatchesSource -Config $config -ExpectedSourceIdentity 'newnewnewnewnewnewnewnewnewnewnewnewnewn' -RuntimeIdentityProbe $right).Matches `
+    'Scenario 15: the verified production source in production mode is what may be exposed.'
+
+# --- 16. A non-canonical source stops the start before PostgreSQL, the API, or ngrok ---
+$script:ngrokCalls = 0
+$refusedSource = { param($C) [pscustomobject]@{ Action = 'Refused'; Canonical = $false; HeadSha = $null; Reason = 'Repository is on feat/880-slice6-digital-thread-page, not canonical main.' } }
+$threw = $false
+try {
+    Start-AeroLinkRemoteDemo -Config $config -Scheduled -SourceReconciler $refusedSource `
+        -PostgresReadyTest { param($C, $R) throw 'PostgreSQL must not be started when the source is refused.' } `
+        -NgrokLauncher { param($C, $R) $script:ngrokCalls++; New-FakeHelper -Stuck $false } | Out-Null
+}
+catch {
+    $threw = $true
+    Assert-True ($_.Exception.Message -match 'not canonical main') 'Scenario 16: the refusal reason must reach the operator.'
+}
+Assert-True $threw 'Scenario 16: a non-canonical production source must stop the remote-demo start.'
+Assert-True ($script:ngrokCalls -eq 0) 'Scenario 16: ngrok must never be started when the production source was refused.'
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }

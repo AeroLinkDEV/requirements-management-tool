@@ -20,7 +20,182 @@ Both are safe to run again while AeroLink is already running.
 
 Use `STOP_AEROLINK.bat` for a controlled stop. The script only stops listeners whose command line resolves to this repository, then stops the repository-owned PostgreSQL instance. Use `AEROLINK_DIAGNOSTICS.bat` to check PostgreSQL, API health, a real local sign-in, client response, applied migrations, disk space, backup age, and evidence storage.
 
-Logs are under `product/.local/logs`. The authoritative database is `aerolink`; controlled evidence is under `%LOCALAPPDATA%\AeroLink\evidence`.
+Logs are under the installation's `logs` directory (see *Installation identity* below). The authoritative
+database is `aerolink`; controlled evidence is under `%LOCALAPPDATA%\AeroLink\evidence`.
+
+### Installation identity: source is not data
+
+A checkout of this repository is **source**. The persistent AeroLink **installation** — the PostgreSQL
+binaries and the `pgdata` cluster behind `127.0.0.1:54329/aerolink`, backups, restore working space,
+dependency stamps and operator logs — is a separate thing that a checkout points at.
+
+For an ordinary clone the two coincide: the installation is that checkout's `product/.local`, exactly as it
+always was. A checkout may instead carry `product/.local/installation.json` naming another installation root,
+and then it uses that one. `product/.local` is Git-ignored, so the pointer is never repository content and
+cannot make a canonical source posture dirty.
+
+This exists so HOME can have a second checkout without acquiring a second AeroLink. A pointer naming a path
+that does not exist is refused rather than falling back, because the fallback is precisely the failure being
+guarded against: a second, empty installation that starts perfectly and holds none of the operator's data.
+
+`AEROLINK_INSTALLATION_ROOT` overrides both, and is for disposable qualification only.
+
+Each installation may declare who it is, in `instance.json` under the installation root:
+
+```json
+{ "label": "HOME CANONICAL", "classification": "HomeCanonical" }
+```
+
+The launchers pass that to the API, which publishes it at `/health/identity`, and the client shows it beside
+the wordmark on every screen. Canonical status is **declared, never inferred from the hostname**: an
+installation that has declared nothing is labelled `LOCAL DEVELOPMENT` or `LOCAL PRODUCTION` and classified
+`Undeclared`. Set it with `Set-AeroLinkInstanceConfig` from `product/scripts/AeroLinkInstallation.psm1`.
+
+### Runtime identity: what /health/ready cannot tell you
+
+`/health/ready` proves a process can reach a database. It says nothing about which source that process was
+built from, and treating it as sufficient is how a healthy API from an older revision survived a repository
+update in #816 while the client moved on.
+
+`/health/identity` is the non-secret answer: source SHA, source identity, launcher mode, instance label and
+classification, database **name** (never host, port, user or password), snapshot origin and age where one
+exists, and the latest applied schema migration. It is anonymous, because a launcher has to be able to ask
+who is listening before it holds a session.
+
+A launcher reuses an existing process only when ownership, mode and exact source identity all agree and it is
+ready. Otherwise it stops **only** a process it positively owns and starts the right one. A process AeroLink
+does not own on an AeroLink port is a refusal naming the PID — never a casualty. For a dirty development tree
+the identity folds in a bounded fingerprint of the changed and untracked files, so editing a file invalidates
+a running process instead of a commit SHA pretending nothing changed.
+
+### The three supported operating modes
+
+| Mode | Entry point | Source | Database |
+| --- | --- | --- | --- |
+| HOME canonical / production | `START_AEROLINK_PRODUCTION.bat` on HOME | dedicated production checkout, clean canonical `main` | HOME canonical `aerolink` |
+| Work-laptop local development | `START_AEROLINK.bat` on the laptop | that laptop's development checkout, any deliberate branch | that laptop's own `aerolink` |
+| Protected remote demo | `START_AEROLINK_REMOTE_DEMO.bat` on HOME, or its recovery task | dedicated production checkout | HOME canonical `aerolink` |
+
+A remote-demo browser session is a view of HOME. The work-laptop repository and work-laptop database are
+irrelevant to it, and it never writes to them.
+
+### Dedicated HOME production source
+
+HOME production and the protected remote demo run from a **separate clone**, used by nothing else:
+
+```text
+C:\Sean Project\Requirements Management Tool   development: any branch, dirty WIP, agents, Playwright
+C:\Sean Project\AeroLink Production            production only: clean source at an approved origin/main
+```
+
+On 2026-09-03 the HOME PC rebooted while the only checkout on the machine was mid-feature with dirty and
+untracked work. Recovery ran, PostgreSQL came up, and the canonical-source guard correctly refused to
+exercise the canonical database from it — so port 5080 never opened, ngrok was never started, and the demo
+answered `ERR_NGROK_3200`. The guard was right; the architecture was wrong.
+
+A clone rather than a worktree, deliberately: one repository cannot have `main` checked out in two worktrees,
+and the development checkout must stay free to use `main`. The clone carries an installation pointer to the
+canonical HOME installation, so **source is separated and data is not** — same cluster, same evidence, same
+backups.
+
+Set it up once per HOME machine:
+
+```text
+CONFIGURE_AEROLINK_PRODUCTION_SOURCE.bat Preview
+CONFIGURE_AEROLINK_PRODUCTION_SOURCE.bat Install
+CONFIGURE_AEROLINK_REMOTE_DEMO.bat Install
+```
+
+Configuration lives in `%LOCALAPPDATA%\AeroLink\Production\production-source.config.psd1` and holds no
+secret. `Status` reports where the production source is and whether it is canonical; `Update` fast-forwards
+it. A production source that has acquired a tracked modification, an untracked file, a local-only commit, a
+feature branch, or divergence is reported and refused **exactly as found** — never stashed, reset, rebased or
+cleaned. When GitHub is unreachable a previously verified clean cached `main` runs with an explicit "the
+latest remote revision could not be verified" diagnostic.
+
+Recovery is registered against that source in both of the places the 2026-09-03 amendment named: the source
+root it launches, and the `AeroLinkRemoteDemo.ps1` path the Scheduled Task executes. Registration refuses any
+checkout not marked as dedicated production source, so it cannot be aimed back at the development checkout.
+
+Two tasks are installed, both under the operator's own account, neither as SYSTEM (ngrok's configuration and
+credentials are per-user), and neither carrying a secret:
+
+* `AeroLinkRemoteDemoRecovery` — boot trigger with a one-minute delay, plus a logon trigger as a second
+  chance. `MultipleInstancesPolicy=IgnoreNew` and an idempotent start mean both firing produces no duplicate
+  API and no duplicate tunnel. The boot trigger uses an S4U principal so a reboot recovers without an
+  interactive sign-in; where a machine refuses to register S4U the installer falls back to a logon-token
+  principal and says plainly that an unattended reboot will **not** recover the demo.
+* `AeroLinkProductionSourceReconcile` — every 30 minutes, so a machine that never reboots does not run last
+  week's `main`. It does nothing unless `origin/main` actually moved; when it has, the source is
+  fast-forwarded and production is restarted into it through the ordinary start path, which re-proves the
+  protected endpoint. Polling rather than a webhook: an inbound public endpoint to learn about a merge would
+  be a far larger security surface than the problem justifies.
+
+`remote-demo-state.json` is advisory operational metadata, not process truth. A recorded PID from before a
+reboot can never block a fresh start; live ownership, port, runtime identity and readiness decide.
+
+If the production launcher exits with a terminal refusal, recovery reports that refusal within seconds and
+quotes the reason the launcher gave. It no longer waits out the readiness timeout for a port that cannot open.
+
+### Database upgrade posture, before the web server
+
+Both launchers ask what this build would do to this database **before** building a client or starting an API:
+
+```text
+dotnet run --project product/src/AeroLink.Api -- maintenance analyze [--json]
+dotnet run --project product/src/AeroLink.Api -- maintenance upgrade [--apply]
+dotnet run --project product/src/AeroLink.Api -- maintenance resolve  ...
+```
+
+This is a mode of the application host, not a separate tool, so it uses the same domain, the same persistence
+configuration and the same migration authorities that startup uses. `analyze` writes nothing. Exit codes are
+the launcher's contract: `0` current, `10` deterministic upgrade required, `20` conflict, `30` unreachable.
+
+When an upgrade is pending and deterministic, the launcher takes a verified backup, restores an **isolated
+copy** through the supported `Restore-AeroLink.ps1` path, applies this build's upgrade to that copy, proves
+the copy is then current, and only then upgrades the real database. The ordering is the safety property: a
+failure at any earlier step leaves the persistent database and evidence untouched because nothing had reached
+them.
+
+When the database presents a genuine ambiguity — the #816 legacy leadership backup that no longer holds the
+position's required base role is the modelled case — every conflict in the database is reported at once, in
+seconds, naming the program, the person, the role required and the role held, with the supported decisions
+and which of them would grant authority somebody does not have today. AeroLink makes no such decision itself.
+
+To act on one:
+
+```text
+dotnet run --project product/src/AeroLink.Api -- maintenance resolve ^
+  --conflict project-leadership.legacy-backup-base-role-missing ^
+  --choice retire-legacy-backup ^
+  --program <guid> --position SoftwareEngineeringLead --person <guid> ^
+  --legacy-backup <guid> --expect-primary <guid|none> ^
+  --operator "Sean, issue #816" [--apply]
+```
+
+Dry run without `--apply`. Preconditions are re-read inside the transaction immediately before the write, so
+a decision reviewed against state that has since moved cannot land. History is ended, never deleted, and both
+decisions and refusals write a maintenance audit event under one formal attribution
+(`aerolink-maintenance`).
+
+### Explicit HOME to work-laptop snapshot refresh
+
+One-way, operator-initiated, and never part of startup. HOME being unreachable does not affect a work-laptop
+launch, and there is no bidirectional synchronization of any kind.
+
+Take a supported backup on HOME with `BACKUP_AEROLINK.bat`, carry the archive to the laptop by whatever means
+already carries controlled data there, then:
+
+```text
+REFRESH_AEROLINK_FROM_HOME.bat "D:\transfer\aerolink-20260903-120000.zip"
+REFRESH_AEROLINK_FROM_HOME.bat "D:\transfer\aerolink-20260903-120000.zip" Import REFRESH-FROM-HOME
+```
+
+The archive is verified, the laptop's current state is backed up first, the snapshot is restored to an
+isolated staging copy, upgraded with this build and proven current — and only then activated through the
+supported production restore, which keeps its own rollback contract. Snapshot origin and age are recorded in
+`instance.json` and shown in the instance badge. Refused outright on an installation declared
+`HomeCanonical`.
 
 ### Email delivery operability
 
@@ -58,7 +233,7 @@ therefore invalidates the proof instead of letting an old tunnel state claim tha
 
 ### Root Windows launcher inventory
 
-The root launchers are deliberate operator compatibility surfaces. There are **19 root `.bat` launchers and
+The root launchers are deliberate operator compatibility surfaces. There are **21 root `.bat` launchers and
 zero root `.cmd` launchers**; the only `.cmd` implementation is `product/scripts/launch.cmd`. A launcher may be a
 very small wrapper, but its exact path can be held by a
 Task Scheduler task, desktop shortcut, remote-demo recovery configuration, or another Windows machine that Git
@@ -72,6 +247,8 @@ separately proven transition plan.
 | `AEROLINK_REMOTE_DEMO_STATUS.bat` | Protected remote-demo status | `product/scripts/AeroLinkRemoteDemo.ps1 -Action Status` | `docs/REMOTE_DEMO_OPERATOR.md` | Remote operator shortcut/recovery risk; keep stable root entry point. |
 | `BACKUP_AEROLINK.bat` | Backup/recovery | `product/scripts/Backup-AeroLink.ps1` | `README.md`, this document, Managed Documentation; scheduled runner calls the PowerShell script directly | Backup automation and operator shortcuts may retain the path; keep stable root entry point. |
 | `CONFIGURE_AEROLINK_REMOTE_DEMO.bat` | Protected remote-demo scheduled recovery setup | `product/scripts/AeroLinkRemoteDemo.ps1 -Action Configure` with forwarded action/arguments | `docs/REMOTE_DEMO_OPERATOR.md`; remote-demo module error guidance | Recovery setup instructions may be copied to another host; keep stable root entry point. |
+| `CONFIGURE_AEROLINK_PRODUCTION_SOURCE.bat` | Dedicated HOME production source setup | `product/scripts/Configure-AeroLinkProductionSource.ps1` with forwarded action/arguments | This document; `docs/REMOTE_DEMO_OPERATOR.md` | Run once per HOME machine; the resulting configuration is per-user and outside source control. Keep stable root entry point. |
+| `REFRESH_AEROLINK_FROM_HOME.bat` | Explicit one-way HOME to work-laptop snapshot refresh | `product/scripts/Import-AeroLinkHomeSnapshot.ps1` | This document | Work-laptop operator action only; never invoked by startup, and refused on a HOME canonical installation. Keep stable root entry point. |
 | `INSTALL_AEROLINK_DOCUMENT_CONNECTOR.bat` | Connector/install/setup | `product/scripts/Install-AeroLinkDocumentConnector.ps1` | This document; `MANAGED_DOCUMENTATION_CENTER.md` | Per-user installation instructions and shortcuts may retain the path; keep stable root entry point. |
 | `RESTORE_AEROLINK.bat` | Backup/recovery and isolated restore validation | `product/scripts/Restore-AeroLink.ps1 -BackupArchive ... -TargetDatabase ...` | This document; usage text; historical delivery report | Recovery runbooks and desktop shortcuts may retain the path; keep stable root entry point. |
 | `SCHEDULE_AEROLINK_BACKUP.bat` | Backup scheduler configuration | `product/scripts/Configure-AeroLinkBackupSchedule.ps1` | This document; historical handoffs | The installed task invokes `Invoke-AeroLinkScheduledBackup.ps1` directly, but operator setup paths remain externally visible; keep stable root entry point. |

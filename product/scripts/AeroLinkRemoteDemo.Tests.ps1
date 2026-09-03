@@ -197,7 +197,13 @@ Assert-True ($xml -match 'AeroLinkRemoteDemoRecovery') 'Task XML must name the r
 Assert-True ($xml -match 'encoding="UTF-16"') 'Task XML must declare UTF-16 encoding.'
 Assert-True ($xml -match 'LogonTrigger') 'Task XML must use a logon trigger.'
 Assert-True ($xml -match 'StartWhenAvailable') 'Task XML must enable StartWhenAvailable.'
-Assert-True ($xml -match 'InteractiveToken') 'Task XML must run as the interactive current user.'
+# S4U, not InteractiveToken, since #881: a logon-token task recovers after Sean signs in, which is not what
+# "the machine rebooted" means - and on 2026-09-03 nobody was at the keyboard. S4U runs in the operator's own
+# account with no interactive session and no stored password. Still the current user, and still not SYSTEM:
+# ngrok's agent configuration and credential store are per-user.
+Assert-True ($xml -match '<LogonType>S4U</LogonType>') 'Task XML must run unattended in the current user account, not only after an interactive logon.'
+Assert-True ($xml -match [regex]::Escape("$env:USERDOMAIN\$env:USERNAME")) 'Task XML must run as the current user.'
+Assert-True ($xml -notmatch 'S-1-5-18') 'Task XML must not run as SYSTEM; ngrok configuration and credentials are per-user.'
 Assert-True ($xml -match 'LeastPrivilege') 'Task XML must run with least privilege.'
 Assert-True ($xml -match 'AeroLinkRemoteDemo\.ps1" -Action Start -Scheduled') 'Task XML must invoke the same tested start implementation.'
 Assert-True ($xml -notmatch 'SUPERSECRET|hunter2|AeroLink!2026|authtoken') 'Task XML must not contain secrets.'

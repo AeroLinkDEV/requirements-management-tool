@@ -108,11 +108,14 @@ function Get-AeroLinkUpgradeAnalysis {
     catch {
         return [pscustomobject]@{ Status = 'unreachable'; Analysis = $null; ExitCode = $run.ExitCode; Detail = "The maintenance analysis could not be read: $($_.Exception.Message)" }
     }
+    # Strict mode: read through PSObject.Properties so a host that omits an optional field is a missing
+    # detail rather than a launcher crash.
+    $reason = if ($analysis.PSObject.Properties['unreachableReason']) { [string]$analysis.unreachableReason } else { $null }
     return [pscustomobject]@{
         Status   = [string]$analysis.status
         Analysis = $analysis
         ExitCode = $run.ExitCode
-        Detail   = if ($analysis.unreachableReason) { [string]$analysis.unreachableReason } else { "Upgrade posture: $($analysis.status)." }
+        Detail   = if ($reason) { $reason } else { "Upgrade posture: $($analysis.status)." }
     }
 }
 
