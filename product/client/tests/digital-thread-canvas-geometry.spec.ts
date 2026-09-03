@@ -1,9 +1,13 @@
 import { expect, test } from "@playwright/test"
 import {
   MIN_ZOOM,
+  EDGE_LAYER_OVERHANG,
   compactLanes,
+  edgePath,
+  isIntraLane,
   frameNodes,
   type CanvasEdge,
+  type CanvasFrame,
   type CanvasNode,
   anchorInLane,
   geometryFor,
@@ -360,5 +364,99 @@ test.describe("keyboard tab stops and lane order", () => {
     const ordered = [...produced].sort((a, b) => a.lane - b.lane || a.row - b.row)
 
     expect(ordered.map(node => node.id)).toEqual(["pr-1", "sys-1", "sys-2", "hlr-1", "llr-1"])
+  })
+})
+
+/**
+ * Intra-lane edges.
+ *
+ * The artifact thread's final lane holds both a result and a build (#880 §5.3), so it is the first board to
+ * carry an edge whose endpoints share a lane — an execution's `evidence for` link to its build, and a
+ * `retest of` link between two runs. Every earlier view was strictly lane-to-lane, so this case had no
+ * coverage and the routing silently treated it as a backwards edge.
+ */
+test.describe("intra-lane edges", () => {
+  const geometry = geometryFor(2)
+
+  test("two endpoints in the same lane are recognised as intra-lane", () => {
+    expect(isIntraLane({ x: 1480 }, { x: 1480 })).toBe(true)
+    // A backwards edge is not an intra-lane one, and must keep its own routing.
+    expect(isIntraLane({ x: 1480 }, { x: 1184 })).toBe(false)
+    expect(isIntraLane({ x: 592 }, { x: 888 })).toBe(false)
+  })
+
+  test("an intra-lane edge bows into the gutter instead of sweeping across its own lane", () => {
+    const path = edgePath({ x: 1480, y: 10 }, { x: 1480, y: 120 }, geometry)
+    const numbers = [...path.matchAll(/-?\d+(?:\.\d+)?/g)].map(match => Number(match[0]))
+    const xs = numbers.filter((_, index) => index % 2 === 0)
+
+    const laneRight = 1480 + geometry.laneWidth
+    // Both ends attach to the lane's right edge, and every control point is at or beyond it. The old routing
+    // started at the card's left edge and finished at the target's right edge, crossing the whole lane.
+    expect(xs[0]).toBe(laneRight)
+    expect(xs[xs.length - 1]).toBe(laneRight)
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(laneRight)
+    expect(Math.max(...xs)).toBeGreaterThan(laneRight)
+  })
+
+  test("the bow stays within the overhang the canvas reserves for it", () => {
+    const path = edgePath({ x: 1480, y: 10 }, { x: 1480, y: 120 }, geometry)
+    const numbers = [...path.matchAll(/-?\d+(?:\.\d+)?/g)].map(match => Number(match[0]))
+    const xs = numbers.filter((_, index) => index % 2 === 0)
+
+    // Reserving less than the bow reaches is what clipped the curve and its label off the right of the board.
+    expect(Math.max(...xs) - (1480 + geometry.laneWidth)).toBeLessThan(EDGE_LAYER_OVERHANG)
+  })
+
+  test("a lane-to-lane edge is unchanged, forwards and backwards", () => {
+    const forwards = edgePath({ x: 0, y: 0 }, { x: 296, y: 0 }, geometry)
+    expect(forwards).toBe(`M236 ${geometry.anchor} C266 ${geometry.anchor},266 ${geometry.anchor},296 ${geometry.anchor}`)
+
+    // A genuinely backwards edge still enters from the target's right-hand side.
+    const backwards = edgePath({ x: 296, y: 0 }, { x: 0, y: 0 }, geometry)
+    expect(backwards.startsWith("M296 ")).toBe(true)
+    expect(backwards.endsWith(`,236 ${geometry.anchor}`)).toBe(true)
+  })
+})
+
+/**
+ * Framing measures the records that are actually drawn.
+ *
+ * A lane taller than its window rolls, so a wanted record can sit outside that window and not be rendered at
+ * all. Measuring it anyway stretched the box far above the visible band, and because the pan is clamped to
+ * that box, the whole scene was pushed out of the frame — a thirty-record lane landed with its board below the
+ * viewport.
+ */
+test.describe("framing ignores records rolled out of their lane", () => {
+  const frame: CanvasFrame = { x: 0, y: 0, width: 1280, height: 480 }
+
+  test("a wanted record outside its lane window does not drag the board off screen", () => {
+    // Thirty records in one lane, rolled so the first rows sit far above the band.
+    const nodes: CanvasNode[] = Array.from({ length: 30 }, (_, row) => ({ id: `p${row}`, lane: 1, row }))
+    nodes.push({ id: "sel", lane: 0, row: 0 })
+    const counts = [1, 30]
+    const rolled = [0, -900]
+
+    const framed = frameNodes(
+      ["sel", ...nodes.filter(node => node.lane === 1).map(node => node.id)],
+      nodes,
+      counts,
+      frame,
+      rolled,
+      "sel",
+    )
+
+    expect(framed).not.toBeNull()
+    // The board must land inside the frame rather than being pushed below it by rows nobody can see.
+    expect(framed!.y).toBeLessThan(frame.y + frame.height)
+    expect(framed!.y).toBeGreaterThan(-frame.height)
+  })
+
+  test("with nothing drawn it still frames something rather than giving up", () => {
+    // Every wanted record rolled out of view. Returning null here would leave the camera wherever it was.
+    const nodes: CanvasNode[] = [{ id: "a", lane: 0, row: 40 }, { id: "b", lane: 0, row: 41 }]
+    const framed = frameNodes(["a", "b"], nodes, [2], frame, [-4000], null)
+
+    expect(framed).not.toBeNull()
   })
 })

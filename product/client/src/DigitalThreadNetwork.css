@@ -74,14 +74,19 @@
 .dtnCard { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
 .dtnCardTop { display: flex; align-items: center; gap: 7px; }
 
+/* Sized to its text, not to a fixed square. `badgeOf` returns three-letter badges — TCR, HLR, LLR, IFC, CUS,
+   SYS — which are wider than 20px at this weight, and a fixed box let the letters spill out from under the
+   centring and land on the identifier beside them. The minimum keeps the two-letter badges square. */
 .dtnBadge {
-  width: 20px;
+  min-width: 20px;
   height: 20px;
-  flex: 0 0 20px;
+  flex: 0 0 auto;
   display: grid;
   place-items: center;
   border-radius: 6px;
+  padding: 0 4px;
   font: var(--weight-bold) 8.5px var(--font-body);
+  letter-spacing: .02em;
 }
 
 .dtnId { font: var(--weight-strong) 11.5px ui-monospace, SFMono-Regular, Consolas, monospace; color: #17324d; white-space: nowrap; }
