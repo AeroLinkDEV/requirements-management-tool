@@ -62,6 +62,19 @@ public sealed class AeroLinkUpgradeAnalyzer(
                 databaseName, [], [], [], DatabaseModified: false);
         }
 
+        // A database with schema migrations pending cannot be interrogated for semantic state: the tables
+        // those markers live in may not exist yet, and asking would fail with a PostgreSQL error rather
+        // than an answer. Report the schema work, and say plainly that the semantic posture is not yet
+        // knowable — the clone-validation path migrates the isolated copy and asks again there, before the
+        // real database is touched.
+        if (pending.Count > 0)
+        {
+            var unknown = SemanticAuthorities
+                .Select(x => new AeroLinkSemanticUpgradeState(x.Marker, x.Target, Completed: false)).ToList();
+            return new AeroLinkUpgradeAnalysis(true, null, databaseName, pending, unknown, [],
+                DatabaseModified: false);
+        }
+
         var completedEvents = await db.SecurityAuditEvents.AsNoTracking()
             .Where(x => x.EventType.EndsWith(".Completed"))
             .Select(x => new { x.EventType, x.Target }).ToListAsync(ct);
@@ -73,16 +86,22 @@ public sealed class AeroLinkUpgradeAnalyzer(
             semantic.Add(new AeroLinkSemanticUpgradeState(marker, target, completed));
         }
 
-        // Conflicts are only meaningful for authorities that have not already completed: a completed marker
-        // makes its authority a permanent no-op for this database, so reporting its historical ambiguity
-        // would send an operator to resolve something that cannot block anything.
+        // Conflicts are analyzed in the order the authorities run, and only for the one that would run next.
+        //
+        // Two reasons. A completed marker makes its authority a permanent no-op for this database, so its
+        // historical ambiguity cannot block anything and reporting it would send an operator to resolve
+        // nothing. And v2's questions presuppose v1: before v1 backfills the assignments, every legacy lead
+        // membership looks to v2 like a membership with no assignment to take over from it — a conflict the
+        // upgrade itself is about to resolve. Reporting that would be a false alarm on the ordinary path.
         var conflicts = new List<AeroLinkUpgradeConflict>();
-        if (pending.Count == 0)
+        var backfillCompleted = semantic.Single(x => x.Marker == ProjectLeadershipMigrationAuthority.MigrationMarker).Completed;
+        if (!backfillCompleted)
         {
-            if (!semantic.Single(x => x.Marker == ProjectLeadershipMigrationAuthority.MigrationMarker).Completed)
-                conflicts.AddRange(await ProjectEngineerContestedAsync(ct));
-            if (!semantic.Single(x => x.Marker == ProjectLeadershipReconciliationAuthority.MigrationMarker).Completed)
-                conflicts.AddRange(await leadershipReconciliation.AnalyzeConflictsAsync(ct));
+            conflicts.AddRange(await ProjectEngineerContestedAsync(ct));
+        }
+        else if (!semantic.Single(x => x.Marker == ProjectLeadershipReconciliationAuthority.MigrationMarker).Completed)
+        {
+            conflicts.AddRange(await leadershipReconciliation.AnalyzeConflictsAsync(ct));
         }
 
         return new AeroLinkUpgradeAnalysis(true, null, databaseName, pending, semantic, conflicts,

@@ -1,13 +1,13 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 823,
-    "cases": 916,
-    "classes": 122,
+    "tests": 829,
+    "cases": 922,
+    "classes": 123,
     "hostedTests": 793,
     "hostedCases": 872,
-    "nonHostedTests": 22,
-    "nonHostedCases": 36,
+    "nonHostedTests": 28,
+    "nonHostedCases": 42,
     "unknownHostTests": 8,
     "unknownHostCases": 8,
     "hostedCandidateTests": 16,
@@ -45,10 +45,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 29,
-      "cases": 29,
+      "tests": 35,
+      "cases": 35,
       "unknownCases": 0,
-      "classes": 11
+      "classes": 12
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -10621,6 +10621,90 @@
       "sourceLines": {
         "start": 101,
         "end": 112
+      }
+    },
+    {
+      "cls": "RuntimeIdentityTests",
+      "test": "A_worktree_identity_is_published_in_preference_to_the_bare_commit_sha",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 78,
+        "end": 87
+      }
+    },
+    {
+      "cls": "RuntimeIdentityTests",
+      "test": "An_undeclared_runtime_reports_unknown_rather_than_a_guess",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 61,
+        "end": 71
+      }
+    },
+    {
+      "cls": "RuntimeIdentityTests",
+      "test": "Only_the_database_name_is_taken_from_the_connection_string",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 42,
+        "end": 54
+      }
+    },
+    {
+      "cls": "RuntimeIdentityTests",
+      "test": "Snapshot_provenance_is_reported_when_the_installation_was_refreshed_from_another",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 93,
+        "end": 106
+      }
+    },
+    {
+      "cls": "RuntimeIdentityTests",
+      "test": "The_launcher_declared_source_mode_and_instance_are_reported_exactly",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 20,
+        "end": 36
+      }
+    },
+    {
+      "cls": "RuntimeIdentityTests",
+      "test": "Whitespace_configuration_is_treated_as_undeclared",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 109,
+        "end": 118
       }
     },
     {

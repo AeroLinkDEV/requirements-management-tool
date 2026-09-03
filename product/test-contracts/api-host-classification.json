@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 122,
-    "tests": 823,
-    "knownCases": 916,
+    "classes": 123,
+    "tests": 829,
+    "knownCases": 922,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -20,9 +20,9 @@
       "unknownCaseTests": 0
     },
     "migration-candidate": {
-      "classes": 2,
-      "tests": 2,
-      "knownCases": 7,
+      "classes": 3,
+      "tests": 8,
+      "knownCases": 13,
       "unknownCaseTests": 0
     },
     "reusable-host": {
@@ -951,6 +951,17 @@
       "reason": "Customizes host state (factory-host-options); sharing could change the subject or leak configuration.",
       "intents": [
         "http-boundary"
+      ]
+    },
+    {
+      "cls": "RuntimeIdentityTests",
+      "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
+      "classification": "migration-candidate",
+      "reason": "Every test is in-process logic or a rule matrix; it needs a database or nothing, not a host.",
+      "intents": [
+        "in-process-logic"
       ]
     },
     {
