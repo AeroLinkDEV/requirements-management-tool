@@ -2,7 +2,7 @@
 
    Tokens come from index.css and the card metrics from the shared canvas, so this view reads as the same
    surface as the change network and inside-a-change rather than a second visual framework. The amber suspect
-   family matches LifecycleExplorer.css, and it is the first Digital Thread view able to use it. */
+   family is the one the replaced page used, and this is the first Digital Thread view able to carry it. */
 
 .dtaRoot { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 520px; }
 

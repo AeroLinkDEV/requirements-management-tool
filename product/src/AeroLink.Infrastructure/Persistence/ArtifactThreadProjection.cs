@@ -175,6 +175,31 @@ public static class ArtifactThreadProjection
         lifecycleId is Guid id && states.TryGetValue(id, out var state) && state != ExactLinkLifecycleState.Closed;
 
     /// <summary>The authoritative word for a recorded requirement trace, never flattened to one generic term.</summary>
+    /// <summary>
+    /// The kind of a verification revision, read from the node that was actually placed on the board.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every edge states the kind of both its endpoints, and the client refuses a response where an edge and
+    /// the node it names disagree — deliberately, because two contradictory server statements in one payload
+    /// cannot be resolved in favour of either without guessing.
+    /// </para>
+    /// <para>
+    /// Assuming <c>Procedure</c> here was wrong twice over. A <c>CaseProcedure</c> link and a coverage row
+    /// both name a verification revision that may be a <b>Case</b> — <c>VerificationArtifactKind</c> has both
+    /// members, and the FMS showcase carries coverage recorded directly against cases. So the edge claimed
+    /// Procedure while the node beside it said Case, and the whole thread was refused. It was invisible until
+    /// the page was pointed at real data: synthetic fixtures had only ever paired the two the tidy way.
+    /// </para>
+    /// <para>
+    /// Reading the placed node keeps one statement of the kind rather than two that can drift. A revision that
+    /// was never placed cannot be an endpoint anyway — <c>Link</c> drops an edge whose endpoints are absent —
+    /// so the fallback only has to be a value, not a guess anyone will read.
+    /// </para>
+    /// </remarks>
+    private static string VerificationKindOf(Accumulator acc, Guid revisionId) =>
+        acc.Nodes.TryGetValue(revisionId, out var node) ? node.Kind : KindProcedure;
+
     private static string RelationFor(RequirementTraceType type) => type switch
     {
         RequirementTraceType.AllocatedFrom => "allocated from",
@@ -704,7 +729,6 @@ public static class ArtifactThreadProjection
             .Concat(caseLinks.Select(x => x.ProcedureRevisionId))
             .Concat(caseLinks.Select(x => x.CaseRevisionId))
             .Concat(anchors.Revisions).Distinct().ToList();
-        var kindByRevision = new Dictionary<Guid, string>();
         if (allRevisionIds.Count > 0)
         {
             var artifacts = await (from revision in db.TestProcedureRevisions.AsNoTracking()
@@ -723,7 +747,6 @@ public static class ArtifactThreadProjection
             foreach (var artifact in artifacts)
             {
                 var isCase = artifact.ArtifactKind == VerificationArtifactKind.Case;
-                kindByRevision[artifact.Id] = isCase ? KindCase : KindProcedure;
                 acc.Place(new ArtifactThreadNode(artifact.Id, isCase ? KindCase : KindProcedure,
                     isCase ? ArtifactThreadLane.Case : ArtifactThreadLane.Procedure,
                     $"{artifact.BaseNumber}.{artifact.Revision:D2}",
@@ -737,16 +760,16 @@ public static class ArtifactThreadProjection
 
         foreach (var row in coverage)
             acc.Link(new ArtifactThreadEdge(row.RequirementRevisionId, KindRequirement, row.ProcedureRevisionId,
-                kindByRevision.TryGetValue(row.ProcedureRevisionId, out var covering) ? covering : KindProcedure,
-                "verified by", row.IsSuspect));
+                VerificationKindOf(acc, row.ProcedureRevisionId), "verified by", row.IsSuspect));
 
         var caseStates = await LifecycleStatesAsync(db, projectId,
             caseLinks.Where(x => x.LifecycleId is not null)
                 .Select(x => x.LifecycleId!.Value).ToList(), ct);
 
         foreach (var link in caseLinks)
-            acc.Link(new ArtifactThreadEdge(link.CaseRevisionId, KindCase, link.ProcedureRevisionId,
-                KindProcedure, "run by", SuspectFromLifecycle(link.LifecycleId, caseStates)));
+            acc.Link(new ArtifactThreadEdge(link.CaseRevisionId, VerificationKindOf(acc, link.CaseRevisionId),
+                link.ProcedureRevisionId, VerificationKindOf(acc, link.ProcedureRevisionId),
+                "run by", SuspectFromLifecycle(link.LifecycleId, caseStates)));
 
         await AddTestChangeRequestsAsync(db, projectId, allRevisionIds, acc, ct);
         await AddResultsAsync(db, projectId, allRevisionIds, buildIds, builds, focalKind, focalId, acc, ct);
@@ -811,7 +834,11 @@ public static class ArtifactThreadProjection
                 execution.ExecutedAt, execution.RecordedAt,
                 byExecution.TryGetValue(execution.Id, out var files) ? files : [],
                 isFocal: focalKind == ArtifactThreadFocalKind.Execution && execution.Id == focalId));
-            acc.Link(new ArtifactThreadEdge(execution.ProcedureRevisionId, KindProcedure, execution.Id,
+            // The revision a run was recorded against is not always a Procedure: a Case can carry executions
+            // too, and naming the endpoint Procedure regardless put a second, contradicting statement of that
+            // node's kind into the same response.
+            acc.Link(new ArtifactThreadEdge(execution.ProcedureRevisionId,
+                VerificationKindOf(acc, execution.ProcedureRevisionId), execution.Id,
                 KindExecution, "produced", false));
         }
 

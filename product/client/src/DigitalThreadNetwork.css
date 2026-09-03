@@ -1,5 +1,5 @@
 /* The build change network. Cards, the trace treatment, and the detail panel.
-   Tokens come from index.css; the amber suspect family matches LifecycleExplorer.css. */
+   Tokens come from index.css; the amber suspect family is the one the replaced page used. */
 
 .dtnRoot { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 520px; }
 

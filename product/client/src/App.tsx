@@ -5,7 +5,8 @@ import { officialBuildName, verificationArtifactLevel, verificationArtifactRoute
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
 import { coverageExplorerPath, exactTraceArtifactPath, problemReportSnapshotPath, projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectSlugOf, readRoute, routePath } from "./routing";
-import type { AppRoute, Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, View } from "./routing";
+import type { AppRoute, Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, ThreadView, View } from "./routing";
+import type { ThreadFocalKind } from "./DigitalThreadPage";
 import { usePasswordVisibilityControls } from "./PasswordVisibility";
 import {
   AdministrationCenter,
@@ -71,7 +72,7 @@ const DocumentCenter = lazyView(() => import("./DocumentCenter"));
 const ManagedDocumentationCenter = lazyView(() => import("./ManagedDocumentationCenter"));
 const ProblemReportCenter = lazyView(() => import("./ProblemReportCenter"));
 const CodeTraceabilityCenter = lazyView(() => import("./CodeTraceabilityCenter"));
-const LifecycleExplorer = lazyView(() => import("./LifecycleExplorer"));
+const DigitalThreadPage = lazyView(() => import("./DigitalThreadPage"));
 const ReleaseCampaignCenter = lazyView(() => import("./ReleaseCampaignCenter"));
 const LifecycleDecisionRoom = lazyView(() => import("./LifecycleDecisionRoom"));
 const ReleasePlanningCenter = lazyView(() => import("./ReleasePlanningCenter"));
@@ -103,7 +104,7 @@ const viewCode: Partial<Record<View, { warm: () => void }>> = {
   managedDocuments: ManagedDocumentationCenter,
   problemReports: ProblemReportCenter,
   code: CodeTraceabilityCenter,
-  lifecycle: LifecycleExplorer,
+  lifecycle: DigitalThreadPage,
   release: LifecycleDecisionRoom,
   releaseImpact: LifecycleDecisionRoom,
   releaseDecision: LifecycleDecisionRoom,
@@ -224,10 +225,10 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
       <i aria-hidden="true">⊞</i><span>{label}</span>
     </a>;
   };
-  const engineeringView = ["createSystemScr","createSoftwareChange","createInterfaceChange","history","requirements","scr","lifecycle"].includes(view)
+  const engineeringView = ["createSystemScr","createSoftwareChange","createInterfaceChange","history","requirements","scr"].includes(view)
     || (view === "documents" && (discipline === "system" || discipline === "software"));
   const engineeringTargetView: View = view === "history" || view === "requirements" || view === "documents" ? view : "history";
-  const releaseView = ["release","releaseImpact","releaseDecision","releaseOperations","enterprise","baselines"].includes(view);
+  const releaseView = ["release","releaseImpact","releaseDecision","releaseOperations","enterprise","baselines","lifecycle"].includes(view);
   const engineeringScope:Discipline = discipline==="software" && hasSoftware ? "software" : hasSystem ? "system" : "software";
   const verificationScope:Discipline = (discipline==="softwareTest"||discipline==="software") && hasSoftwareVerification
     ? "softwareTest" : hasSystemVerification ? "systemTest" : "softwareTest";
@@ -254,7 +255,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
       </div>
       <nav className="primaryNavigation" aria-label="Primary navigation">
         <div className="navHome">{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}{item("Team Work","teamwork","◍")}</div>
-         {hasRequirements && <details className="navGroup" open={engineeringView}><summary>REQUIREMENTS</summary><div className="navScopeSwitch" role="group" aria-label="Requirements scope">{hasSystem && <button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(engineeringTargetView,"system")}>System</button>}{hasSoftware && <button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(engineeringTargetView,"software",undefined,engineeringTargetView==="history"?defaultSoftwareChangeLevel:undefined)}>Software</button>}</div>{(engineeringScope==="system" ? hasSystemChange : hasSoftwareChange) && item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests",engineeringScope==="software"?defaultSoftwareChangeLevel:undefined)}{hasInterfaceChange && item("Interface / ICD Change Requests","history","◇","system","Interface / ICD Change Requests","Interface")}{hasInterfaceChange && item("New Interface / ICD Change Request","createInterfaceChange","◇","system","New Interface / ICD Change Request","Interface")}{(engineeringScope==="system" ? hasSystem : hasSoftware) && item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{(engineeringScope==="system" ? hasSystemRequirementsDocument : hasSoftwareRequirementsDocument) && item("Generated Documents","documents","▤",engineeringScope,engineeringScope==="software"?"Generated Software Requirements Documents":"Generated System Requirements Documents")}{hasRequirements && item("Digital Thread","lifecycle","↗","system","Digital Thread")}</details>}
+         {hasRequirements && <details className="navGroup" open={engineeringView}><summary>REQUIREMENTS</summary><div className="navScopeSwitch" role="group" aria-label="Requirements scope">{hasSystem && <button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(engineeringTargetView,"system")}>System</button>}{hasSoftware && <button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(engineeringTargetView,"software",undefined,engineeringTargetView==="history"?defaultSoftwareChangeLevel:undefined)}>Software</button>}</div>{(engineeringScope==="system" ? hasSystemChange : hasSoftwareChange) && item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests",engineeringScope==="software"?defaultSoftwareChangeLevel:undefined)}{hasInterfaceChange && item("Interface / ICD Change Requests","history","◇","system","Interface / ICD Change Requests","Interface")}{hasInterfaceChange && item("New Interface / ICD Change Request","createInterfaceChange","◇","system","New Interface / ICD Change Request","Interface")}{(engineeringScope==="system" ? hasSystem : hasSoftware) && item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{(engineeringScope==="system" ? hasSystemRequirementsDocument : hasSoftwareRequirementsDocument) && item("Generated Documents","documents","▤",engineeringScope,engineeringScope==="software"?"Generated Software Requirements Documents":"Generated System Requirements Documents")}</details>}
          {(hasSystemVerification || hasSoftwareVerification) && <details className="navGroup" open={view==="verification"||view==="testingCoverage"||view==="testChangeRequests"||view==="testChangeRequest"||view==="createTestChangeRequest"||view==="procedureExplorer"||view==="testResults"||(view==="documents"&&(discipline==="systemTest"||discipline==="softwareTest"))}>
           <summary>VERIFICATION</summary>
           <div className="navScopeSwitch" role="group" aria-label="Verification scope">
@@ -281,7 +282,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
          {hasCodeTraceability && <div className="navStandalone">{item("Code","code","{ }","software","Code traceability",undefined,true)}</div>}
         <div className="navStandalone">{item("Documentation Center","managedDocuments","▤","system","Documentation Center",undefined,true)}</div>
         <div className="navStandalone">{item("Problem Reports","problemReports","!","system","Problem Reports",undefined,true)}</div>
-        <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}{item("Configuration Baselines","baselines","▦","system","Configuration Baselines / Legacy Verification Bootstrap")}</details>
+        <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}{item("Configuration Baselines","baselines","▦","system","Configuration Baselines / Legacy Verification Bootstrap")}{item("Digital Thread","lifecycle","↗","system","Digital Thread")}</details>
         {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"||view==="reviewWorkflows"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}{item("Review Workflows","reviewWorkflows","⇉","system","Review Workflows / Change Review Procedure")}{item("Integration Center","integrations","↗","system","Integration Command Center")}{item("System Operations","enterprise","◈","system","System Operations / Enterprise Control")}</details>}
       </nav>
       <footer><PersonAvatar userName={user.userName} displayName={user.displayName} size="large"/><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button><button className="workspaceDisplay" onClick={onDisplay} aria-label="Open workspace display settings"><span>Aa</span><div><b>Workspace display</b><small>{density} density</small></div><i aria-hidden="true">›</i></button></footer>
@@ -315,6 +316,7 @@ function App() {
     [selectedScrId, setSelectedScrId] = useState(initialRoute.view === "scr" ? initialRoute.artifactId ?? "" : ""),
     [selectedArtifactId,setSelectedArtifactId]=useState(initialRoute.artifactId ?? ""),
     [selectedArtifactKind,setSelectedArtifactKind]=useState(initialRoute.artifactKind ?? ""),
+    [threadView,setThreadView]=useState(initialRoute.threadView),
     [selectedArtifactRevisionId,setSelectedArtifactRevisionId]=useState(initialRoute.artifactRevisionId ?? ""),
     [requirementRevisionId,setRequirementRevisionId]=useState(initialRoute.requirementRevisionId ?? ""),
      [requirementProposalId,setRequirementProposalId]=useState(initialRoute.requirementProposalId ?? ""),
@@ -410,7 +412,7 @@ function App() {
     if (release && release.id !== selectedReleaseId)
       setSelectedReleaseId(release.id);
   }, [release, selectedReleaseId]);
-   useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setCoverageReport(route.coverageReport??false);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setHistorySelectionId(route.historySelectionId??"");setTestChangeRequestSelectionId(route.testChangeRequestSelectionId??"");setTestChangeRequestProposalId(route.testChangeRequestProposalId??"");setHistoricalProblemReportSnapshotId(route.historicalProblemReportSnapshotId??"");setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setSelectedArtifactRevisionId(route.artifactRevisionId??"");setRequirementRevisionId(route.requirementRevisionId??"");setRequirementProposalId(route.requirementProposalId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
+   useEffect(()=>{const handler=()=>{const route=readRoute();setView(route.view);setDiscipline(route.discipline);setCoverageReport(route.coverageReport??false);setHistoryStateIntent(route.historyStateIntent);setHistoryTypeIntent(route.historyTypeIntent);setHistorySelectionId(route.historySelectionId??"");setTestChangeRequestSelectionId(route.testChangeRequestSelectionId??"");setTestChangeRequestProposalId(route.testChangeRequestProposalId??"");setHistoricalProblemReportSnapshotId(route.historicalProblemReportSnapshotId??"");setProjectConfigurationSection(route.projectConfigurationSection??"ladder");if(route.programId)setActiveId(route.programId);if(route.projectId)setSelectedProjectId(route.projectId);if(route.releaseId)setSelectedReleaseId(route.releaseId);setSelectedArtifactId(route.artifactId??"");setSelectedArtifactKind(route.artifactKind??"");setThreadView(route.threadView);setSelectedArtifactRevisionId(route.artifactRevisionId??"");setRequirementRevisionId(route.requirementRevisionId??"");setRequirementProposalId(route.requirementProposalId??"");setSelectedScrId(route.view==="scr"?route.artifactId??"":"")};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler)},[]);
   const paletteShortcutEnabled = !!context && !projectLevelViews.includes(view);
   useEffect(()=>{const handler=(event:KeyboardEvent)=>{if(paletteShortcutEnabled&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape"){setPaletteOpen(false);setDisplayOpen(false)}};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[paletteShortcutEnabled]);
   useEffect(()=>{document.documentElement.dataset.density=density;localStorage.setItem('aerolink-density',density)},[density]);
@@ -552,7 +554,20 @@ function App() {
       setToast("That link is missing its destination, so nothing was opened. This is a defect — please report it.");
       return;
     }
-    const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(artifactKind==="Interface"?"Interface":area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setHistorySelectionId("");setTestChangeRequestSelectionId("");setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setSelectedArtifactRevisionId("");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+    const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(artifactKind==="Interface"?"Interface":area==="software"?"Software":"System")):undefined;setView(target);setDiscipline(area);setHistoryStateIntent(nextStateIntent);setHistoryTypeIntent(nextTypeIntent);setHistorySelectionId("");setTestChangeRequestSelectionId("");setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");setThreadView(undefined);setSelectedArtifactRevisionId("");setRequirementRevisionId("");setSelectedScrId(target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);history[replace?"replaceState":"pushState"]({},"",path)}};
+  /**
+   * Navigate within the Digital Thread.
+   *
+   * The view and the focal artifact are both part of the address (#880 §6.4): they have to survive refresh,
+   * back, forward and Copy link, and component state survives none of those. This pushes history so the
+   * browser buttons walk the reader back through the views and focals they actually visited.
+   */
+  const navigateThread=(next:ThreadView,artifactId?:string,artifactKind?:ThreadFocalKind)=>{
+    setView("lifecycle");setDiscipline("system");
+    setSelectedArtifactId(artifactId??"");setSelectedArtifactKind(artifactKind??"");
+    setSelectedArtifactRevisionId("");setRequirementRevisionId("");setThreadView(next);
+    if(context)history.pushState({},"",routePath(context,"lifecycle","system",artifactId,artifactKind,undefined,undefined,undefined,undefined,undefined,next));
+  };
   const openProblemReport=(id:string|undefined,snapshotId?:string,targetBuild?:string,replace=false)=>{
     navigate("problemReports","system",id,undefined,replace);
     setHistoricalProblemReportSnapshotId(snapshotId ?? "");
@@ -1117,16 +1132,22 @@ function App() {
     );
   if (view === "lifecycle" && project)
     return inShell(
-      <LifecycleExplorer
+      <DigitalThreadPage
         api={API}
         projectId={project.project.id}
-        releases={release ? [release] : []}
-        activeReleaseId={release?.id??""}
-        initialArtifactId={selectedArtifactId || undefined}
-        initialArtifactKind={selectedArtifactKind || undefined}
-        requirementHref={id => context ? routePath(context, "lifecycle", "system", id) : "#"}
+        releaseId={release?.id ?? ""}
+        buildLabel={release?.version ? `Build ${release.version}` : undefined}
+        focalId={selectedArtifactId || undefined}
+        focalKind={(selectedArtifactKind || undefined) as ThreadFocalKind}
+        view={threadView}
+        // Focal artifact and view are addresses, not component state (#880 §6.4), so every change of either
+        // is a navigation and survives refresh, back, forward and Copy link.
+        onRoute={next => navigateThread(next.view, next.focalId, next.focalKind)}
+        hrefFor={record => context ? routePath(context, "lifecycle", "system", record.id) : undefined}
+        // The evidence table opens a related record at its exact revision, through the same shared helper
+        // every other exact-artifact surface uses. Routing a relation through the aggregate would resolve
+        // whatever revision is current today rather than the one this baseline records.
         traceArtifactHref={node => context ? exactTraceArtifactPath(context, node) : undefined}
-        onBack={() => navigate("dashboard")}
       />
     );
   if (["release","releaseImpact","releaseDecision"].includes(view) && project)

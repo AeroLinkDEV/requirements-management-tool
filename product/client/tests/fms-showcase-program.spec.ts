@@ -26,11 +26,12 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   await page.getByLabel("Search requirements").fill("LLR-000700");
   await expect(page.getByText(/LLR-000700/).first()).toBeVisible();
   await page.getByRole("link", { name: /Command Center/ }).first().click();
-  await openNavigationGroup(page,"SYSTEMS ENGINEERING");
+  // #880 §4.3 moved the Digital Thread into RELEASE and §4.2 reclaimed its header, so arrival is the canvas.
+  // The baseline's real size is stated by the evidence table (§4.5), which is where it is read from now.
+  await openNavigationGroup(page,"RELEASE & CONFIGURATION");
   await page.getByRole("link", { name: "Digital Thread" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Digital Thread" }),
-  ).toBeVisible();
+  await expect(page.locator(".dtPage .dtnRoot")).toBeVisible();
+  await page.locator(".dtPageToolbar").getByRole("button", { name: "Table" }).click();
   await expect(page.getByText("1,250 requirements")).toBeVisible();
   // A Controlled Documents tab here used to prove that inherited 1.5 documents are not offered as current 1.6
   // outputs. The tab is gone: documents belong to the build being read, which document-generation-where-you-are

@@ -2011,6 +2011,49 @@ Future entries use:
 Findings that cost real time, recorded so they cost it once. These are about how the work is done rather than
 what the product does.
 
+### DEC-117 - The Digital Thread Canvas Is Measured for Legibility at Its Default Zoom, Not in CSS Pixels
+
+- **Date:** 2026-09-03
+- **Status:** Accepted
+- **Decision:** The Digital Thread canvas is a narrow, recorded exception to the product's 12px readability
+  floor. Text inside the scaled canvas subtree — identifiers, titles, meta lines and status pills on the cards
+  — may be authored below 12px. Everything else on the Digital Thread page, and every other surface in the
+  product, remains held to the floor exactly as before.
+- **Rationale:** The product owner accepted the smaller type on 2026-08-31, on the reasoning that this surface
+  can be zoomed. The canvas is drawn at a zoom the reader controls, so a CSS pixel is not what a reader sees:
+  the same 11.5px identifier renders larger or smaller depending on where they have put the board. Its three
+  density tiers deliberately *shed content* as the reader pulls back rather than shrinking the type, so the
+  size a reader encounters is a function of their own zoom, not of the stylesheet. Measuring this surface with
+  a flat CSS-pixel rule would therefore measure the wrong thing, while forcing 12px into a lane of 236px cards
+  would cost the density the whole design exists to provide.
+- **The rule that replaces it:** legibility at the default fit zoom on landing. Every identifier, title and
+  state label must be legible when the page opens, before the reader touches anything. Text may fall below
+  12px effective size only as a consequence of the reader deliberately zooming out, where less detail is the
+  point and the compact and dense tiers have already dropped content. Status meaning — suspect above all —
+  must remain non-colour-coded and readable at every tier, which is why the suspect indicator on a card is
+  anchored outside every density-gated container and carries its word rather than only its amber.
+- **Scope of the exception, deliberately narrow:** `design-system.spec.ts` exempts only elements inside
+  `.dtCanvasScene`. The Digital Thread page's own toolbar, view switch, export control, evidence table, state
+  messages and detail panel are all still audited at 12px, as is every other surface in the product. This is
+  an exception for one scaled subtree, not a licence for small type anywhere. `AGENTS.md` forbids weakening a
+  test to land work; this is an approved product exception with a stated replacement rule, and this record is
+  what makes it one.
+- **Consequences:**
+  - A future change that moves canvas text out of the scaled subtree loses the exception automatically, which
+    is the intended behaviour rather than an oversight.
+  - The list alternative is not optional. `DESIGN_VISION_AND_DASHBOARDS.md` and WCAG 2.2 require a
+    keyboard-accessible list or table beside any graph view, and the evidence table is that alternative; it is
+    audited at the full floor and must stay.
+  - A fully populated six-lane artifact thread at 1280x900 lands at approximately 0.64 zoom, which renders
+    11.5px identifiers at roughly 7.4px on screen. That is below what this decision calls legible on landing.
+    The canonical prototype lands at approximately 0.71 by the same formula, so this is a property of the
+    approved design at narrow widths rather than a regression introduced by the port, and roughly 1530px of
+    width is needed for the widest board to land in the detailed tier. Recorded here as a known limit of the
+    accepted design rather than left to be rediscovered.
+- **Supersedes:** nothing. It records the exception #880 section 10.1 required to be written down rather than
+  quietly applied.
+
+
 ### LES-001 - A New API Route Inherits Middleware Guards by Prefix Match
 
 `primaryMutationPrefixes` in `Program.cs` matches with `StartsWith`, and its entries are deliberately loose —

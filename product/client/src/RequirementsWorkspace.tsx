@@ -1486,7 +1486,10 @@ export default function RequirementsWorkspace({
                       reader clicked to get in. */}
                   <article><b>{impact?.tests.filter((item) => item.coverageState === "Confirmed").length ?? 0}</b><span>confirmed tests</span></article>
                 </div>
-                <button className="openDigitalThread" onClick={() => onOpenTraceability(selected?.id)}>
+                {/* #880 §4.4 opens the thread on the exact revision the reader is looking at, so the address
+                    that leaves here names that revision. `/traceability/{artifactId}` still resolves, for the
+                    links written before the thread was rooted on an exact revision. */}
+                <button className="openDigitalThread" onClick={() => onOpenTraceability(selected?.revisionId ?? selected?.id)}>
                   Open complete Digital Thread →
                 </button>
                 <h3>Active controlled changes</h3>

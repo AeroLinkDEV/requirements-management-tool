@@ -60,9 +60,14 @@ public static class RequirementsEndpoints
                 .Select(x => Guid.TryParse(x, out var id) ? id : Guid.Empty).Where(x => x != Guid.Empty).Distinct().ToList();
             var paged = await source.OrderBy(x => x.artifact.BaseNumber).ThenByDescending(x => x.revision.Revision)
                 .Skip((resolvedPage - 1) * resolvedPageSize).Take(resolvedPageSize).ToListAsync(ct);
+            // Hydration answers by revision or by artifact. An address held elsewhere in the product may name
+            // either: the Digital Thread is rooted on an exact revision, while `/traceability/{id}` has always
+            // named a requirement artifact. Matching the artifact resolves that against the scoped source, so
+            // with a baseline in hand the answer is the one revision that configuration materialises — exact,
+            // rather than the newest revision that happens to exist.
             var hydrated = requestedIds.Count == 0
                 ? []
-                : await scoped.Where(x => requestedIds.Contains(x.revision.Id)).ToListAsync(ct);
+                : await scoped.Where(x => requestedIds.Contains(x.revision.Id) || requestedIds.Contains(x.artifact.Id)).ToListAsync(ct);
             var rows = paged.Concat(hydrated).DistinctBy(x => x.revision.Id)
                 .OrderBy(x => x.artifact.BaseNumber).ThenByDescending(x => x.revision.Revision).ToList();
             var items = rows.Select(x => new { x.artifact.Id, x.artifact.BaseNumber, level = x.artifact.Level.ToString(), revisionId = x.revision.Id, x.revision.Revision,

@@ -1,0 +1,219 @@
+/* The Digital Thread page (#880 §4).
+
+   The page deliberately has no header of its own. §4.2 reclaims the ~210px the old page spent on a back link,
+   an eyebrow, an H1, a description sentence and a one-tab strip; the shell's breadcrumb above it already
+   carries the build context, the In work state and Copy link. What remains is one compact toolbar row and
+   then the canvas, which takes every pixel below it. */
+
+.dtPage {
+  display: flex;
+  flex-direction: column;
+  /* The canvas measures itself from this box, so the page fills the workspace rather than growing with the
+     board. Without a bounded height the lane windows have nothing to be derived from. */
+  height: 100%;
+  min-height: 0;
+  background: var(--canvas, #f3f6f9);
+}
+
+/* The shared page frame pads every workspace <main>, which is right for a document page and wrong for this
+   one: #880 §4.2 reclaims that space and puts the canvas directly beneath the breadcrumb. Matched at the same
+   specificity as the rule it overrides, and scoped to this page so no other surface loses its padding. */
+html .workspaceView > main.dtPage { padding: 0; }
+
+/* And the canvas needs a bounded height to derive its lane windows from, which a document page does not.
+   Scoped with :has() so only the stage showing this page becomes a filled column — every other page keeps
+   growing with its content exactly as before. Reading the height from the layout rather than subtracting a
+   hard-coded breadcrumb height keeps it correct if that strip ever changes. */
+.workspaceStage:has(> .workspaceView > main.dtPage) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.workspaceStage:has(> .workspaceView > main.dtPage) > .workspaceView {
+  flex: 1;
+  min-height: 0;
+}
+
+.dtPageToolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid #e0e7ee;
+  background: var(--surface);
+  padding: 8px 18px;
+}
+
+.dtPageViews,
+.dtPageRepresentation {
+  display: flex;
+  gap: 4px;
+}
+
+.dtPageViews button,
+.dtPageRepresentation button {
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  padding: 4px 12px;
+  color: #5d6d82;
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
+  cursor: pointer;
+  transition: border-color .14s ease, background .14s ease, color .14s ease;
+}
+
+.dtPageViews button:hover:not(:disabled),
+.dtPageRepresentation button:hover { border-color: #a9bccd; }
+
+.dtPageViews button.is-on,
+.dtPageRepresentation button.is-on {
+  border-color: var(--teal-700);
+  background: var(--teal-700);
+  color: #fff;
+}
+
+/* Inside-a-change needs a change open. Disabled rather than hidden, so the reader can see the view exists and
+   learn what opens it, which a vanishing control never teaches. */
+.dtPageViews button:disabled { opacity: .45; cursor: not-allowed; }
+
+.dtPageTrailing { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+
+.dtPageExport { position: relative; }
+
+.dtPageExport summary {
+  list-style: none;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  padding: 4px 12px;
+  color: #5d6d82;
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
+  cursor: pointer;
+}
+
+.dtPageExport summary::-webkit-details-marker { display: none; }
+.dtPageExport summary:hover { border-color: #a9bccd; }
+.dtPageExport[open] summary { border-color: var(--teal-700); color: var(--teal-700); }
+
+.dtPageExportMenu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 80;
+  display: grid;
+  gap: 2px;
+  min-width: 160px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: 0 14px 32px rgba(15, 35, 58, .16);
+  padding: 6px;
+}
+
+.dtPageExportMenu a {
+  border-radius: 7px;
+  padding: 7px 10px;
+  color: #2b3d54;
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
+  text-decoration: none;
+}
+
+.dtPageExportMenu a:hover { background: #f2f9f8; color: var(--teal-700); }
+
+/* The three views fill everything below the toolbar. */
+.dtPage > .dtnRoot,
+.dtPage > .dticRoot,
+.dtPage > .dtaRoot { flex: 1; min-height: 0; }
+
+/* ---- evidence table ----------------------------------------------------
+
+   The list alternative required beside a graph view, not decoration: it exposes the same relationships the
+   canvas draws, reachable without entering the canvas at all (#880 §4.5, §6.9). A real table with real
+   headers, so it is announced as one and navigable by row and column. */
+
+.dtPageTable { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 18px 18px; }
+
+.dtPageTableContext { margin: 0 0 10px; color: var(--ink-500); font-size: var(--text-sm); }
+
+.dtPageTableScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.dtPageTable table { width: 100%; border-collapse: collapse; }
+
+.dtPageTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  padding: 10px 12px;
+  color: var(--teal-600);
+  font: var(--weight-bold) var(--text-xs) var(--font-body);
+  letter-spacing: .08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.dtPageTable tbody tr { border-bottom: 1px solid #eef2f6; }
+.dtPageTable tbody tr:hover { background: #fafcfd; }
+
+.dtPageTable td,
+.dtPageTable tbody th {
+  vertical-align: top;
+  padding: 9px 12px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-body);
+  text-align: left;
+}
+
+.dtPageTable tbody th { max-width: 340px; }
+.dtPageTable tbody th .exactArtifactLink { font: var(--weight-strong) var(--text-sm) ui-monospace, SFMono-Regular, Consolas, monospace; }
+.dtPageTable tbody th span { display: block; margin-top: 3px; color: var(--ink-500); font-size: var(--text-xs); }
+
+.dtPageTable td span { display: block; color: #2b3d54; }
+.dtPageTable td span + span { margin-top: 4px; }
+.dtPageTable td small { color: #8493a6; font-size: var(--text-xs); }
+.dtPageTable td code { color: #5f7080; font: var(--text-xs) ui-monospace, SFMono-Regular, Consolas, monospace; }
+.dtPageTable td em { color: #8fa0b2; font-style: normal; font-size: var(--text-xs); }
+
+.dtPageTableEmpty { margin: 12px 0 0; color: var(--ink-500); font-size: var(--text-sm); }
+
+.dtPageVisuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dtPageViews button,
+  .dtPageRepresentation button { transition: none; }
+}
+
+/* Which controlled configuration the page is read against. A function, not chrome: the replaced page carried
+   it, and without it a reader cannot tell which baseline the table, exports and thread are scoped to. */
+.dtPageBaseline select {
+  min-height: 30px;
+  max-width: 260px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+  padding: 4px 8px;
+  color: #2b3d54;
+  font: var(--weight-body) var(--text-control) var(--font-body);
+}
+
+.dtPageExportEmpty { margin: 0; padding: 7px 10px; color: var(--ink-500); font-size: var(--text-xs); }

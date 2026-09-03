@@ -8,6 +8,9 @@ test('primary navigation separates generated data, managed documents, code and p
   const nav=page.getByRole('navigation',{name:'Primary navigation'})
   const engineering=nav.locator('.navGroup').filter({has:page.locator('summary').filter({hasText:'REQUIREMENTS'})})
   const verification=nav.locator('.navGroup').filter({has:page.locator('summary').filter({hasText:'VERIFICATION'})})
+  // #880 §4.3 moved the Digital Thread to RELEASE, beside the release and configuration views whose question
+  // it answers. What this test guards is that exactly one group offers it, which is asserted below.
+  const release=nav.locator('.navGroup').filter({has:page.locator('summary').filter({hasText:'RELEASE'})})
   await expect(engineering).toBeVisible()
   await expect(verification).toBeVisible()
   await expect(nav.locator('summary').filter({hasText:'ASSURANCE'})).toHaveCount(0)
@@ -16,7 +19,9 @@ test('primary navigation separates generated data, managed documents, code and p
   await verification.locator('summary').click()
   await expect(verification.getByRole('group',{name:'Verification scope'})).toBeVisible()
   await expect(nav.getByRole('link',{name:'System Verification',exact:true})).toHaveCount(0)
-  await expect(engineering.getByRole('link',{name:'Digital Thread'})).toBeVisible()
+  await release.locator('summary').click()
+  await expect(release.getByRole('link',{name:'Digital Thread'})).toBeVisible()
+  await expect(engineering.getByRole('link',{name:'Digital Thread'})).toHaveCount(0)
   await expect(verification.getByRole('link',{name:'Digital Thread'})).toHaveCount(0)
   const reports=nav.locator('.navStandalone').getByRole('link',{name:'Problem Reports'})
   const code=nav.locator('.navStandalone').getByRole('link',{name:'Code traceability'})
@@ -41,11 +46,14 @@ test('primary navigation separates generated data, managed documents, code and p
   await expect(page.getByRole('heading',{name:'Problem Reports',exact:true})).toBeVisible()
   await page.reload()
   await expect(page.getByRole('heading',{name:'Problem Reports',exact:true})).toBeVisible()
-  await engineering.locator('summary').click()
-  await engineering.getByRole('link',{name:'Digital Thread'}).click()
-  await expect(page.getByRole('heading',{name:'Digital Thread'})).toBeVisible()
+  await release.locator('summary').click()
+  await release.getByRole('link',{name:'Digital Thread'}).click()
+  // §4.2 reclaimed the header: the canvas is the page, so arrival is asserted by the canvas rather than by
+  // an H1 that no longer exists.
+  await expect(page.locator('.dtPage .dtnRoot')).toBeVisible()
+  await expect(page.getByRole('heading',{name:'Digital Thread'})).toHaveCount(0)
   await page.reload()
-  await expect(page.getByRole('heading',{name:'Digital Thread'})).toBeVisible()
+  await expect(page.locator('.dtPage .dtnRoot')).toBeVisible()
 
   // Compatibility roots remain valid even though the redundant generic entry is gone.
   await page.goto(`/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}/system-verification`)
