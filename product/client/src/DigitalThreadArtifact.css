@@ -92,7 +92,10 @@
 /* ---- cards ------------------------------------------------------------- */
 
 .dtaCard { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
-.dtaCardTop { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* Wraps, for the same reason as the network card: the state label keeps its words rather than losing them
+   to an ellipsis or to type below the landing floor. */
+.dtaCardTop { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.dtaCardTop .dtaPill { max-width: 100%; }
 
 /* Sized to its text, not to a fixed square. A three-letter badge — TCR, HLR, BLD — is wider than 20px at this
    weight, and a fixed box let the letters spill out from under the centring and land on the identifier beside

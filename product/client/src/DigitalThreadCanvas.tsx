@@ -380,10 +380,26 @@ export default function DigitalThreadCanvas({
     animation.current = requestAnimationFrame(tick)
   }, [paint])
 
-  const fit = useCallback(() => {
+  /**
+   * Land the board.
+   *
+   * Two callers with different rules, so they are two functions rather than one with a hidden meaning.
+   * `land()` is what the product does on arrival and on a re-fit the reader did not ask for, and #880 §10.1
+   * holds it to the legibility floor. `fitAll()` is the reader explicitly asking to see the whole board —
+   * keyboard `0`, or double-clicking empty canvas — and may pull back past that floor into the compact and
+   * dense tiers, because shedding detail is exactly what they asked for.
+   */
+  const land = useCallback(() => {
     const box = frame()
     if (!box) return
     transform.current = fitTransform(box, counts)
+    paint()
+  }, [counts, frame, paint])
+
+  const fitAll = useCallback(() => {
+    const box = frame()
+    if (!box) return
+    transform.current = fitTransform(box, counts, false)
     paint()
   }, [counts, frame, paint])
 
@@ -455,7 +471,7 @@ export default function DigitalThreadCanvas({
       const signature = `${Math.round(rect.width)}x${Math.round(rect.height)}x${countsKey}`
       if (signature !== frameSignature.current) {
         frameSignature.current = signature
-        fit()
+        land()
       }
 
       // A selection can arrive while the host frame is still unsettled — a freshly mounted panel or a preview
@@ -478,7 +494,7 @@ export default function DigitalThreadCanvas({
       observer?.disconnect()
       window.removeEventListener("resize", measure)
     }
-  }, [applyFraming, countsKey, fit])
+  }, [applyFraming, countsKey, land])
 
   useEffect(() => {
     paint()
@@ -679,7 +695,7 @@ export default function DigitalThreadCanvas({
       const box = frame()
       if (!box) return
       if (event.key === "0") {
-        fit()
+        fitAll()
       } else if (event.key === "+" || event.key === "=" || event.key === "-") {
         transform.current = zoomAbout(
           transform.current,
@@ -696,7 +712,7 @@ export default function DigitalThreadCanvas({
       }
       event.preventDefault()
     },
-    [counts, fit, frame, onSelect, paint],
+    [counts, fitAll, frame, onSelect, paint],
   )
 
   edgeRefs.current = []
@@ -712,7 +728,7 @@ export default function DigitalThreadCanvas({
       onPointerDown={onPointerDown}
       onKeyDown={onKeyDown}
       onDoubleClick={event => {
-        if (!(event.target as HTMLElement).closest("[data-node-id]")) fit()
+        if (!(event.target as HTMLElement).closest("[data-node-id]")) fitAll()
       }}
     >
       <div className="dtCanvasScene" ref={sceneRef}>

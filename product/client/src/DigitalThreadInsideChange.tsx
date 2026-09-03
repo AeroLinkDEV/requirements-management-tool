@@ -268,6 +268,11 @@ export default function DigitalThreadInsideChange({
    * "Not loaded yet" and "loaded and empty" are different facts, and only the second may compact a lane away.
    * While the payload is unknown, the only populated lane is the register, so compaction would collapse the
    * board to one lane and then expand it as the response landed — the structural jump §6.8 exists to prevent.
+   *
+   * `content` is the content of *this* opened record or nothing: the page resolves it against the record's
+   * own key before handing it over, so a non-null value here can never be the previously opened change's
+   * proposal. That is what makes this test safe to make — it was not, when content and its owner were two
+   * pieces of state that could disagree for a frame.
    */
   const contentKnown = !loading || content !== null
 

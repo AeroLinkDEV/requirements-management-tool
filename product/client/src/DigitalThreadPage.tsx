@@ -228,7 +228,16 @@ export default function DigitalThreadPage({
   const [baselineId, setBaselineId] = useState("")
   const [baselines, setBaselines] = useState<Baseline[]>([])
   const [network, setNetwork] = useState<NetworkProjection | null>(null)
-  const [proposal, setProposal] = useState<ProposalContent | null>(null)
+  /**
+   * Proposal content and the record it belongs to, held as one value.
+   *
+   * Two separate pieces of state could not do this. Clearing content inside an effect clears it *after* the
+   * render that has already handed the previous record's proposal to the new one, so the lanes were laid out
+   * from the old content for a frame — and the child's own "do I know the content?" test saw a non-null
+   * object and believed it. One value, compared against the current key at render time, cannot come apart
+   * that way.
+   */
+  const [proposalState, setProposalState] = useState<{ key: string; content: ProposalContent } | null>(null)
   const [thread, setThread] = useState<unknown>(null)
   const [rows, setRows] = useState<TraceRow[]>([])
   const [rowTotal, setRowTotal] = useState(0)
@@ -324,22 +333,16 @@ export default function DigitalThreadPage({
    *    the Change Request resource for a TCR is asking the wrong authority about a controlled record.
    * 2. **Membership comes first.** The kind is taken from the record this build's network actually placed —
    *    never guessed from the address, and never defaulted. A focal the build does not carry opens nothing.
-   * 3. **The content is keyed to the record it belongs to.** Content is cleared the instant the key moves, so
-   *    a new change is never rendered over the previous change's proposed facts. On a traceability surface a
-   *    brief false attribution is still a false attribution.
+   * 3. **The content is keyed to the record it belongs to, and the key is checked where it is rendered.**
+   *    Content that does not belong to the record now open is not this record's content — it is another
+   *    record's facts, and on a traceability surface a single frame of that is still false attribution.
    */
   const proposalKey = opened ? `${opened.kind}:${opened.id}` : ""
-  const [proposalFor, setProposalFor] = useState("")
-  const proposalReady = proposalKey !== "" && proposalFor === proposalKey
+  // Resolved at render, not remembered: content held under a different key simply is not content here.
+  const proposal = proposalState?.key === proposalKey ? proposalState.content : null
+  const proposalReady = proposalKey !== "" && proposalState?.key === proposalKey
   useEffect(() => {
-    if (active !== "inside" || !proposalKey || !opened) {
-      setProposal(null)
-      setProposalFor("")
-      return undefined
-    }
-    // Synchronously, before the fetch: nothing of the previous record survives into this one's view.
-    setProposal(null)
-    setProposalFor("")
+    if (active !== "inside" || !proposalKey || !opened) { setProposalState(null); return undefined }
     let cancelled = false
     const run = async () => {
       try {
@@ -348,8 +351,7 @@ export default function DigitalThreadPage({
         if (!response.ok) throw new Error("The proposed content for this change could not be loaded.")
         const content = await response.json() as ProposalContent
         if (cancelled) return
-        setProposal(content)
-        setProposalFor(proposalKey)
+        setProposalState({ key: proposalKey, content })
       } catch (failure) {
         if (!cancelled) setError(failure instanceof Error ? failure.message : "The change could not be opened.")
       }

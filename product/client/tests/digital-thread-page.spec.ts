@@ -385,7 +385,15 @@ test.describe("inside a change", () => {
 
     await page.goto(`${threadRoot(page)}/traceability/change-requests/${first.id}?view=inside`)
     await expect(page.locator(".dticRoot")).toBeVisible()
-    await expect(page.locator(".dticOpenedId, .dticRoot")).toContainText(first.displayNumber)
+    await expect(page.locator(".dticRoot")).toContainText(`Inside ${first.displayNumber}`)
+
+    // A fact that belongs to the first change's *proposal* — a card in one of the proposal lanes, not the
+    // register. This is what must not still be on the board under the second change's name; asserting only
+    // that the heading changed would pass while the old lanes were still laid out beneath it.
+    const proposalCards = page.locator(".dticCard:not(.dticRegister) .dticId")
+    await expect(proposalCards.first()).toBeVisible()
+    const firstProposalFact = await proposalCards.first().innerText()
+    expect(firstProposalFact.trim().length, "the first change should propose something to carry over").toBeGreaterThan(0)
 
     // The second change's proposal takes a moment to arrive. During that moment the board must not be showing
     // the first change's proposed facts under the second change's identity — on a traceability surface a
@@ -406,6 +414,10 @@ test.describe("inside a change", () => {
     await expect(page.locator(".dticRoot")).toContainText(`Inside ${second.displayNumber}`)
     await expect(page.locator(".dticRoot")).not.toContainText(`Inside ${first.displayNumber}`)
     await expect(page.getByText("Loading what this change proposes…")).toBeVisible()
+    // The first change's proposed facts are gone, not merely relabelled: no proposal-lane card survives into
+    // the second change's board while its own content is still in flight.
+    await expect(page.locator(".dticCard:not(.dticRegister) .dticId")).toHaveCount(0)
+    await expect(page.locator(".dticRoot")).not.toContainText(firstProposalFact)
     release?.()
     await expect(page.locator(".dticRoot")).toContainText(second.displayNumber)
   })
@@ -459,7 +471,134 @@ test.describe("landing legibility", () => {
       const below = measured!.filter(item => item.effective < FLOOR - 0.05)
       expect(below, `text below ${FLOOR}px effective on landing at ${width}px`).toEqual([])
     })
+
+    /**
+     * The focal landings, which are the ones §4.4 is actually about. A deep link arrives selected, and the
+     * selection-framing path then replaces the landing transform with its own — so the floor has to hold
+     * there too, not only on the unselected board. The widest real case is a full artifact thread, whose
+     * whole web is handed to the framing path at once.
+     */
+    test(`a deep-linked artifact thread lands legibly at ${width}px`, async ({ page, request }) => {
+      test.setTimeout(180_000)
+      await page.setViewportSize({ width, height: 900 })
+      await apiLogin(request)
+      await showcaseSeed(request)
+      await login(page, "admin", { openProject: false })
+      await selectProgram(page, "Flight Management System Live Program")
+      await openThread(page)
+
+      const { projectId, releaseId } = ids(page)
+      const context = await (await request.get(
+        `${apiBase}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)).json()
+      const list = await (await request.get(
+        `${apiBase}/api/traceability?projectId=${projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=1`
+      )).json()
+      const row = (Array.isArray(list) ? list : list.items ?? [])[0]
+
+      await page.goto(`${threadRoot(page)}/traceability/${row.revisionId}`)
+      await expect(page.locator(".dtaCard.is-focal")).toBeVisible()
+      await surfacePainted(page)
+
+      const measured = await smallestOnLanding(page)
+      expect(measured!.length, "the thread should carry cards to measure").toBeGreaterThan(0)
+      expect(measured!.filter(item => item.effective < FLOOR - 0.05),
+        `artifact-thread text below ${FLOOR}px effective on landing at ${width}px`).toEqual([])
+    })
+
+    test(`a deep-linked change request lands legibly at ${width}px`, async ({ page, request }) => {
+      test.setTimeout(180_000)
+      await page.setViewportSize({ width, height: 900 })
+      await apiLogin(request)
+      await showcaseSeed(request)
+      await login(page, "admin", { openProject: false })
+      await selectProgram(page, "Flight Management System Live Program")
+      await openThread(page)
+
+      const { projectId, releaseId } = ids(page)
+      const network = await (await request.get(
+        `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
+      const target = (network.nodes ?? []).find((node: { kind: string }) => node.kind === "ChangeRequest")
+
+      await page.goto(`${threadRoot(page)}/traceability/change-requests/${target.id}`)
+      await expect(page.locator(".dtnCard.is-selected")).toHaveCount(1)
+      await surfacePainted(page)
+
+      const measured = await smallestOnLanding(page)
+      expect(measured!.length, "the network should carry cards to measure").toBeGreaterThan(0)
+      expect(measured!.filter(item => item.effective < FLOOR - 0.05),
+        `selected-network text below ${FLOOR}px effective on landing at ${width}px`).toEqual([])
+    })
   }
+
+  /**
+   * Raising card type to clear the floor put a 14px identifier, a 14px state pill and a badge in the same
+   * 236px top row, and identifiers are `white-space: nowrap`. Legibility must not be bought with text that
+   * spills out of its card — and the fix for a spill is geometry, never smaller type.
+   */
+  test("card top rows contain their identifier, badge and state label", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+    await expect(page.locator(".dtCanvasScene .dtnCard").first()).toBeVisible()
+
+    const spills = await page.evaluate(() => {
+      const out: { id: string; overflow: number }[] = []
+      for (const card of document.querySelectorAll(".dtCanvasScene .dtnCard, .dtCanvasScene .dtaCard")) {
+        const box = card.getBoundingClientRect()
+        for (const child of card.querySelectorAll(".dtnId, .dtnPill, .dtaId, .dtaPill")) {
+          const inner = child.getBoundingClientRect()
+          if (!inner.width) continue
+          // One pixel of tolerance for sub-pixel rounding at fractional scene scales.
+          const overflow = Math.max(box.left - inner.left, inner.right - box.right)
+          if (overflow > 1) out.push({ id: (child.textContent ?? "").trim().slice(0, 30), overflow })
+        }
+      }
+      return out
+    })
+    expect(spills, "card content should stay inside its card").toEqual([])
+  })
+
+  /**
+   * The other half of the same rule: an explicit Fit is the reader deliberately asking to see the whole
+   * board, which #880 §6.1 requires actually to fit and §10.1 permits to go below the floor. Landing and Fit
+   * are different operations, and clamping both to the landing floor broke the second.
+   */
+  test("an explicit Fit really fits the board, and may go below the landing floor", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+    await expect(page.locator(".dtCanvasScene .dtnCard").first()).toBeVisible()
+
+    const zoomOf = () => page.evaluate(() => {
+      const scene = document.querySelector(".dtCanvasScene") as HTMLElement
+      return new DOMMatrixReadOnly(getComputedStyle(scene).transform).a
+    })
+    // Landing is held to the floor.
+    expect(await zoomOf()).toBeGreaterThanOrEqual(0.86 - 0.001)
+
+    // The reader asks for the whole board. Keyboard `0` is the documented control.
+    await page.locator(".dtCanvas").focus()
+    await page.keyboard.press("0")
+    await surfacePainted(page)
+
+    const fitted = await zoomOf()
+    expect(fitted, "an explicit Fit is allowed past the landing floor").toBeLessThan(0.86)
+    // And it genuinely fits: the whole board is inside the viewport it was asked to fit into.
+    const fits = await page.evaluate(() => {
+      const scene = document.querySelector(".dtCanvasScene") as HTMLElement
+      const box = scene.getBoundingClientRect()
+      return box.left >= -1 && box.right <= window.innerWidth + 1
+    })
+    expect(fits, "keyboard 0 should bring the whole board inside the viewport").toBeTruthy()
+  })
 })
 
 test.describe("route state is real state", () => {

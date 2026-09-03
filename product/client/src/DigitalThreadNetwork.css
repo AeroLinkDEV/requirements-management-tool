@@ -75,7 +75,10 @@
 /* ---- cards ------------------------------------------------------------- */
 
 .dtnCard { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
-.dtnCardTop { display: flex; align-items: center; gap: 7px; }
+/* Wraps: a 14px identifier and a long state label such as "Selected for baseline" do not both fit a 236px
+   row, and the fix for a spill is geometry rather than type below the landing floor (#880 §10.1). */
+.dtnCardTop { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; min-width: 0; }
+.dtnCardTop .dtnPill { max-width: 100%; }
 
 /* Sized to its text, not to a fixed square. `badgeOf` returns three-letter badges — TCR, HLR, LLR, IFC, CUS,
    SYS — which are wider than 20px at this weight, and a fixed box let the letters spill out from under the

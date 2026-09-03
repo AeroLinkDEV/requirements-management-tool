@@ -2052,13 +2052,24 @@ what the product does.
     identifiers, titles and state labels are authored at 14px so they arrive at 12.04px effective — at or
     above the product floor, at every supported enterprise desktop width. A board wider than the viewport is
     panned on arrival, which is an ordinary canvas affordance and costs a reader far less than text they
-    cannot read; double-click still calls `fit()` for a reader who wants the whole board at once.
-  - `MIN_ZOOM` (0.58) is unchanged and still governs zooming the reader performs themselves. Sub-floor
-    effective text below the landing zoom therefore remains exactly what this decision permits: a consequence
-    of the reader deliberately pulling back, where the compact and dense tiers have already shed content.
+    cannot read.
+  - **Landing and Fit are different operations with different floors.** Every landing is floored: the initial
+    fit, a re-fit after a resize, and the selection framing a deep link triggers — that last one matters most,
+    because a focal deep link arrives selected and the framing path immediately replaces the landing
+    transform, so flooring only the initial fit would have left every §4.4 landing unprotected. An explicit
+    Fit the reader asks for — keyboard `0`, or double-clicking empty canvas — is *not* floored: §6.1 requires
+    it actually to fit the whole board, and §10.1 permits sub-floor text precisely when the reader has chosen
+    to pull back. `land()` and `fitAll()` are separate for this reason.
+  - `MIN_ZOOM` (0.58) is unchanged and still governs zooming the reader performs themselves.
+  - The detailed tier grew to `rowPitch 138 / cardHeight 108` and card top rows wrap. At 14px an identifier
+    and a long state label such as `Selected for baseline` do not share a 236px row, and the answer to a
+    spill is geometry — never type back below the floor, and never an ellipsis that would cost a controlled
+    state label its words.
   - `digital-thread-page.spec.ts` asserts the replacement rule directly, measuring **effective** size —
     computed font size multiplied by the scene's own transform scale — for every identifier, title and state
-    label on the landing board, at 1280, 1440 and 1920 wide.
+    label at 1280, 1440 and 1920 wide, on three landings: the unselected change network, a deep-linked
+    artifact thread, and a deep-linked change request. It also asserts that an explicit Fit goes below the
+    floor and genuinely fits, and that no card's identifier or state label spills outside its card.
 - **Supersedes:** nothing. It records the exception #880 section 10.1 required to be written down rather than
   quietly applied.
 

@@ -55,7 +55,9 @@ export interface CanvasFrame {
 }
 
 const TIERS: Record<DensityTier, { rowPitch: number; cardHeight: number }> = {
-  2: { rowPitch: 112, cardHeight: 82 },
+  // Detailed tier grew to hold a wrapped top row at the 14px landing type (#880 §10.1): identifier and a
+  // long state label on separate lines above a two-line title, rather than one row that overflows.
+  2: { rowPitch: 138, cardHeight: 108 },
   1: { rowPitch: 86, cardHeight: 62 },
   0: { rowPitch: 54, cardHeight: 38 },
 }
@@ -313,10 +315,18 @@ export const LANDING_MIN_ZOOM = 0.86
 export const fitTransform = (
   frame: CanvasFrame,
   laneCounts: readonly number[],
+  /**
+   * Whether this is a landing or a Fit the reader asked for.
+   *
+   * A landing is held to the legibility floor. An explicit Fit — keyboard `0`, double-clicking empty canvas —
+   * is the reader deliberately choosing to see the whole board, which is precisely the case §10.1 permits to
+   * go below the floor, and the case §6.1 requires actually to fit.
+   */
+  landing = true,
 ): { x: number; y: number; zoom: number } => {
   const width = sceneWidth(laneCounts.length)
   const zoom = Math.max(
-    LANDING_MIN_ZOOM,
+    landing ? LANDING_MIN_ZOOM : MIN_ZOOM,
     Math.max(minimumZoom(frame, laneCounts), Math.min(1.05, (frame.width - 56) / width)),
   )
   const { bandHeight } = layout(laneCounts, frame, zoom)
@@ -381,6 +391,14 @@ export const frameNodes = (
   offsets: readonly number[],
   selectedId: string | null,
   maxZoom = 1.12,
+  /**
+   * Whether this framing is something the product is doing to the reader, or something they asked for.
+   *
+   * Programmatic framing — a deep link arriving, a selection being traced — is a landing, and #880 §10.1
+   * holds landings to the legibility floor. A reader who has explicitly asked to see the whole board is a
+   * different case, and is allowed the wider view.
+   */
+  programmatic = true,
 ): { x: number; y: number; zoom: number } | null => {
   const wanted = new Set(ids)
   /**
@@ -421,6 +439,7 @@ export const frameNodes = (
   if (!want) return null
   const pad = 46
   const zoom = Math.max(
+    programmatic ? LANDING_MIN_ZOOM : MIN_ZOOM,
     minimumZoom(frame, laneCounts),
     Math.min(maxZoom, Math.min((frame.width - pad * 2) / (want.width + 52), (frame.height - pad * 2) / (want.height + 52))),
   )
