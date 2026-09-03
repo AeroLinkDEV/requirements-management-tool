@@ -3,7 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import type { AuthUser } from "./IdentityCenter";
 import { PersonAvatar } from "./People";
-import { stateLabel } from "./presentation";
+import { formatOrdinaryDateTime, stateLabel } from "./presentation";
 import "./TeamWork.css";
 
 type TeamWorkRelease = { id: string; version: string; isReleased: boolean };
@@ -491,7 +491,7 @@ function TeamWorkCard({ item, people }: { item: TeamWorkItem; people: Map<string
         )}
         <div>
           <dt>Last updated</dt>
-          <dd>{new Date(item.updatedAt).toLocaleString()}</dd>
+          <dd><time dateTime={item.updatedAt}>{formatOrdinaryDateTime(item.updatedAt)}</time></dd>
         </div>
       </dl>
     </a>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ControlledArtifactInspector } from './ControlledArtifactExplorer'
 import ExactArtifactLink from './ExactArtifactLink'
 import { PersonName } from './People'
-import { stateLabel } from './presentation'
+import { formatEvidentiaryDateTime, formatOrdinaryDateTime, stateLabel } from './presentation'
 import { traceProvenanceLabel } from './tracePresentation'
 import './RequirementsWorkspace.css'
 
@@ -236,14 +236,14 @@ export default function ChangeRequestInspector({
 
     {tab === 'history' && <div className="inspectorBody">
       <div className="traceRevisionIdentity"><b>{detail.displayNumber}</b><span>Exact controlled revision {detail.revision}</span></div>
-      {detail.reviewCycles?.map(item => <article className="revisionCard" key={item.id}><div><b>Review cycle {item.sequence}</b><i>{item.state}</i></div><small>{new Date(item.startedAt).toLocaleString()}{item.completedAt ? ` · completed ${new Date(item.completedAt).toLocaleString()}` : ''}</small>{item.steps?.map(step => <p key={`${item.id}-${step.stageName}`}><b>{step.stageName || 'Review step'}</b> · {step.state}{step.approverName ? ` · ${step.approverName}` : ''}</p>)}</article>)}
-      {detail.audit?.map(item => <article className="revisionCard" key={`${item.eventType}-${item.occurredAt}`}><div><b>{item.eventType}</b><i>{new Date(item.occurredAt).toLocaleString()}</i></div><p>{item.detail}</p><small>Recorded by <PersonName userName={item.actorId} /></small></article>)}
+      {detail.reviewCycles?.map(item => <article className="revisionCard" key={item.id}><div><b>Review cycle {item.sequence}</b><i>{item.state}</i></div><small><time dateTime={item.startedAt}>{formatEvidentiaryDateTime(item.startedAt)}</time>{item.completedAt ? <> · completed <time dateTime={item.completedAt}>{formatEvidentiaryDateTime(item.completedAt)}</time></> : ''}</small>{item.steps?.map(step => <p key={`${item.id}-${step.stageName}`}><b>{step.stageName || 'Review step'}</b> · {step.state}{step.approverName ? ` · ${step.approverName}` : ''}</p>)}</article>)}
+      {detail.audit?.map(item => <article className="revisionCard" key={`${item.eventType}-${item.occurredAt}`}><div><b>{item.eventType}</b><i><time dateTime={item.occurredAt}>{formatEvidentiaryDateTime(item.occurredAt)}</time></i></div><p>{item.detail}</p><small>Recorded by <PersonName userName={item.actorId} /></small></article>)}
       {!detail.reviewCycles?.length && !detail.audit?.length && cycle && <article className="revisionCard"><div><b>Review cycle {cycle.sequence}</b><i>{cycle.state}</i></div><p>Review evidence is held by the controlled review cycle.</p></article>}
       {!detail.reviewCycles?.length && !detail.audit?.length && !cycle && <div className="traceEmpty"><span>No additional immutable history is recorded for this revision.</span></div>}
     </div>}
 
     {tab === 'discussion' && <div className="inspectorBody discussionPane">
-      {discussionFailure ? <p className="inspectorNote warn">Discussion is unavailable for this controlled record. No discussion content has been inferred.</p> : kind === 'ChangeRequest' && comments.length ? comments.map(comment => <article key={comment.id} className={comment.state.toLowerCase()}><div><b><PersonName userName={comment.authorId} /></b><span>{new Date(comment.createdAt).toLocaleString()}</span></div><p>{comment.body}</p>{comment.disposition && <small>Disposition: {comment.disposition}</small>}<footer><i>{comment.state}</i></footer></article>) : <div className="traceEmpty"><span>{kind === 'TestChangeRequest' ? 'TCR discussion is available on the full controlled package. No separate client-side discussion has been inferred here.' : 'No review discussion is recorded for this change request.'}</span></div>}
+      {discussionFailure ? <p className="inspectorNote warn">Discussion is unavailable for this controlled record. No discussion content has been inferred.</p> : kind === 'ChangeRequest' && comments.length ? comments.map(comment => <article key={comment.id} className={comment.state.toLowerCase()}><div><b><PersonName userName={comment.authorId} /></b><span><time dateTime={comment.createdAt}>{formatOrdinaryDateTime(comment.createdAt)}</time></span></div><p>{comment.body}</p>{comment.disposition && <small>Disposition: {comment.disposition}</small>}<footer><i>{comment.state}</i></footer></article>) : <div className="traceEmpty"><span>{kind === 'TestChangeRequest' ? 'TCR discussion is available on the full controlled package. No separate client-side discussion has been inferred here.' : 'No review discussion is recorded for this change request.'}</span></div>}
     </div>}
   </ControlledArtifactInspector>
 }
