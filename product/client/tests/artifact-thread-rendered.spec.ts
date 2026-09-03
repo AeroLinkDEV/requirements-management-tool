@@ -557,6 +557,45 @@ test.describe("shared canvas behaviour", () => {
 })
 
 test.describe("keyboard access", () => {
+  /**
+   * Tab across the lanes of a board that no longer fits.
+   *
+   * #880 §10.1 makes the automatic landing legible rather than width-fitting, so a six-lane thread lands wider
+   * than the viewport and the far lanes start outside the free frame — the same frame `paint()` uses, which
+   * already excludes whatever a docked panel covers. A card outside it is drawn at opacity 0. The tab stop and
+   * the fade are therefore the same question, and answering them differently put a `tabIndex=0` on an
+   * invisible card: §6.9's focus trap exactly. Every lane must stay reachable, and every stop must be visible
+   * by the time focus rests on it.
+   */
+  test("tabbing across lanes never rests focus on a card the canvas has hidden", async ({ page }) => {
+    await open(page, "hlr")
+
+    const canvas = (await page.locator(".dtCanvas").boundingBox())!
+    await page.locator('[data-node-id][tabindex="0"]').first().focus()
+
+    const lanes = new Set<string>()
+    for (let hop = 0; hop < 8; hop += 1) {
+      const focused = page.locator("[data-node-id]:focus")
+      await expect(focused).toHaveCount(1)
+      // Revealed, not merely remembered: the card focus landed on is drawn and inside the canvas.
+      await expect(focused).not.toHaveClass(/is-offscreen/)
+      const box = (await focused.boundingBox())!
+      expect(box.x, "a focused card starts inside the canvas").toBeGreaterThanOrEqual(canvas.x - 1)
+      expect(box.x + box.width, "a focused card ends inside the canvas")
+        .toBeLessThanOrEqual(canvas.x + canvas.width + 1)
+      expect(box.y).toBeGreaterThanOrEqual(canvas.y - 1)
+      expect(box.y + box.height).toBeLessThanOrEqual(canvas.y + canvas.height + 1)
+      lanes.add((await focused.getAttribute("data-node-id"))!)
+
+      await page.keyboard.press("Tab")
+      await page.waitForTimeout(250)
+      if ((await page.locator("[data-node-id]:focus").count()) === 0) break
+    }
+
+    // And Tab really did cross lanes rather than sitting on one card.
+    expect(lanes.size, "Tab should reach more than one lane").toBeGreaterThan(1)
+  })
+
   test("cards are reachable and activate, and each lane holds one tab stop", async ({ page }) => {
     await open(page, "hlr")
 

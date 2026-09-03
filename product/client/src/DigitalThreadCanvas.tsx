@@ -311,14 +311,26 @@ export default function DigitalThreadCanvas({
     // out of its window must lose the stop, or a keyboard user tabs into something faded out and unreachable
     // by eye. Opacity and pointer-events do not remove an element from the tab order — only tabindex does.
     for (const [lane, bucket] of byLaneRef.current) {
-      const visible = bucket.filter(candidate => {
+      /**
+       * Drawn means vertically inside the lane window *and* horizontally inside the free frame, the same
+       * two-part rule the fade above uses. Using only the vertical half let Tab land on a card the canvas had
+       * hidden horizontally — a stop at opacity 0, which is the focus trap §6.9 forbids.
+       */
+      const drawn = bucket.filter(candidate => {
         const position = positions.get(candidate.id)
-        return position ? isVisible(position.y, geometry, bandHeight) : false
+        if (!position) return false
+        const left = position.x * transform.current.zoom + transform.current.x
+        const right = left + geometry.laneWidth * transform.current.zoom
+        return isVisible(position.y, geometry, bandHeight)
+          && left >= box.x - 1 && right <= box.x + box.width + 1
       })
       const remembered = rovingRef.current[lane]
       const stop =
-        (remembered && visible.some(candidate => candidate.id === remembered) ? remembered : null) ??
-        visible[0]?.id ??
+        (remembered && drawn.some(candidate => candidate.id === remembered) ? remembered : null) ??
+        drawn[0]?.id ??
+        // A lane entirely outside the free frame keeps a stop rather than losing it: dropping it would make
+        // that lane unreachable by keyboard, and `onFocus` reveals the card before focus rests on it.
+        bucket[0]?.id ??
         null
       for (const candidate of bucket) {
         const card = cardRefs.current.get(candidate.id)
@@ -711,6 +723,46 @@ export default function DigitalThreadCanvas({
    * Moving focus without rolling would leave a keyboard user on a card that is faded out and unreachable by
    * eye, which is the failure #880 §6.9 calls out.
    */
+  /**
+   * Bring one card fully into view: roll its lane, and pan the camera to its lane.
+   *
+   * Both halves are needed, and each was missing once. Rolling answers "is it inside its lane window";
+   * since #880 §10.1 holds automatic landings to the legibility floor, a board can be wider than the
+   * viewport, so the lane itself can sit outside the free frame and the camera has to travel as well. §6.9
+   * is that focus never rests on a card the reader cannot see, and that has to hold however focus arrived —
+   * by arrow within a lane, or by Tab across lanes.
+   */
+  const reveal = useCallback(
+    (node: CanvasNode) => {
+      const result = geometryRef.current
+      if (!result) return
+      const revealed = offsetToReveal(
+        node.row,
+        result.geometry,
+        result.bandHeight,
+        offsets.current[node.lane] ?? 0,
+      )
+      // Never past what the lane can actually roll, or the lane would scroll off its own content.
+      targets.current[node.lane] = Math.max(result.laneMinimums[node.lane] ?? 0, revealed)
+      // Setting the target is not moving the lane. The easing loop was only ever started by the pointer
+      // scrub, so keyboard navigation set a target nothing consumed — rolling appeared to work only while
+      // the card it moved to happened to need no roll at all.
+      settle()
+
+      const box = frame()
+      if (!box) return
+      const { x } = nodePosition(node, result.geometry, offsets.current)
+      const left = x * transform.current.zoom + transform.current.x
+      const right = left + result.geometry.laneWidth * transform.current.zoom
+      const margin = 16
+      if (left < box.x + margin) transform.current.x += box.x + margin - left
+      else if (right > box.x + box.width - margin) transform.current.x -= right - (box.x + box.width - margin)
+      paint()
+    },
+    [frame, paint, settle],
+  )
+
+  /** Arrow navigation within a lane, revealing the card it moves to. */
   const moveWithinLane = useCallback(
     (node: CanvasNode, delta: number) => {
       const bucket = byLane.get(node.lane)
@@ -719,44 +771,10 @@ export default function DigitalThreadCanvas({
       const next = bucket[Math.min(bucket.length - 1, Math.max(0, index + delta))]
       if (!next || next.id === node.id) return
       setRoving(current => ({ ...current, [node.lane]: next.id }))
-      const result = geometryRef.current
-      if (result) {
-        const revealed = offsetToReveal(
-          next.row,
-          result.geometry,
-          result.bandHeight,
-          offsets.current[node.lane] ?? 0,
-        )
-        // Never past what the lane can actually roll, or the lane would scroll off its own content.
-        targets.current[node.lane] = Math.max(result.laneMinimums[node.lane] ?? 0, revealed)
-        // Setting the target is not moving the lane. The easing loop was only ever started by the pointer
-        // scrub, so arrow navigation set a target nothing consumed — keyboard rolling appeared to work only
-        // while the card it moved to happened to need no roll at all. §6.9 is that focus never lands on a
-        // card outside its window, and that only holds if the lane actually travels.
-        settle()
-
-        /**
-         * And bring its lane into the frame horizontally.
-         *
-         * Rolling answers "is it inside its lane's window"; on a board wider than the viewport that is only
-         * half the question, because the lane itself can be off to one side. §6.9 is that focus never lands
-         * somewhere the reader cannot see, and since the §10.1 landing floor means a wide board no longer
-         * fits, the camera has to travel too.
-         */
-        const box = frame()
-        if (box) {
-          const { x } = nodePosition(next, result.geometry, offsets.current)
-          const left = x * transform.current.zoom + transform.current.x
-          const right = left + result.geometry.laneWidth * transform.current.zoom
-          const margin = 16
-          if (left < box.x + margin) transform.current.x += box.x + margin - left
-          else if (right > box.x + box.width - margin) transform.current.x -= right - (box.x + box.width - margin)
-          paint()
-        }
-      }
+      reveal(next)
       cardRefs.current.get(next.id)?.focus()
     },
-    [byLane, frame, paint, settle],
+    [byLane, reveal],
   )
 
   const onKeyDown = useCallback(
@@ -865,7 +883,14 @@ export default function DigitalThreadCanvas({
               tabIndex={rovingFor(node.lane) === node.id ? 0 : -1}
               role="button"
               aria-pressed={selectedId === node.id}
-              onFocus={() => setRoving(current => ({ ...current, [node.lane]: node.id }))}
+              // Tab across lanes reveals too, not only arrows within one. A lane's stop can be outside the
+              // free frame on a board wider than the viewport, and #880 §6.9 does not care how focus got
+              // there: it must not rest on a card the reader cannot see. Revealing rather than dropping the
+              // stop keeps every lane reachable by keyboard, which removing it would not.
+              onFocus={() => {
+                setRoving(current => ({ ...current, [node.lane]: node.id }))
+                reveal(node)
+              }}
               onKeyDown={event => {
                 if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                   event.preventDefault()
