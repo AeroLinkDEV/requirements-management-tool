@@ -2065,6 +2065,17 @@ what the product does.
     and a long state label such as `Selected for baseline` do not share a 236px row, and the answer to a
     spill is geometry — never type back below the floor, and never an ellipsis that would cost a controlled
     state label its words.
+  - **A board that no longer fits changed three behaviours that assumed it did**, each corrected rather than
+    left to be discovered: a card is drawn only while it is inside its lane's window **and** wholly inside the
+    area the board has (so §6.6's "the panel never rests on a linked record" holds without zooming out past
+    the floor); arrow navigation pans the camera as well as rolling the lane, since a lane can now be off to
+    one side; and selection framing falls back from the whole traced web to the selection and one hop when
+    the web cannot fit beside a docked panel — the wide framing is a landing convenience, non-occlusion is a
+    guarantee.
+  - Product ruling of 2026-09-03 on PR #907: the later, specific §10.1 landing rule supersedes **only** the
+    older assumption that every lane must be horizontally visible on an automatic landing. Lane identity and
+    order, rolling, pan and zoom, the density tiers, trace behaviour, panel non-occlusion, cross-lane sync and
+    explicit Fit are all unchanged.
   - `digital-thread-page.spec.ts` asserts the replacement rule directly, measuring **effective** size —
     computed font size multiplied by the scene's own transform scale — for every identifier, title and state
     label at 1280, 1440 and 1920 wide, on three landings: the unselected change network, a deep-linked

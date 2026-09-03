@@ -282,9 +282,24 @@ export default function DigitalThreadCanvas({
       if (!card) continue
       card.style.transform = `translate(${position.x}px,${position.y}px)`
       card.style.width = `${geometry.laneWidth}px`
+      /**
+       * A card is drawn while it is inside its lane's window *and* inside the area the board actually has.
+       *
+       * The horizontal half of this is new, and it is the same rule rather than a second one. `box` already
+       * excludes whatever a docked detail panel is covering, so a card outside it horizontally is a card the
+       * reader cannot use — and leaving it drawn is precisely the §6.6 failure of a linked record sitting
+       * underneath the panel. Since the §10.1 landing floor forbids zooming out to make a wide web fit beside
+       * the panel, some cards genuinely cannot be brought into that area, and the honest treatment is the one
+       * a rolled-out card already gets: faded, not tabbable, not pretending to be readable.
+       */
+      const left = position.x * transform.current.zoom + transform.current.x
+      const right = left + geometry.laneWidth * transform.current.zoom
+      // Wholly inside, not merely overlapping: a card straddling the panel edge is still a card the panel is
+      // covering, and §6.6 admits no partial version of that.
+      const inFrame = left >= box.x - 1 && right <= box.x + box.width + 1
       card.classList.toggle(
         "is-offscreen",
-        !isVisible(position.y, geometry, bandHeight) && selectedId !== node.id,
+        (!isVisible(position.y, geometry, bandHeight) || !inFrame) && selectedId !== node.id,
       )
       // The density rules exempt the selected card from compaction, and they key off this class on the node
       // element. Without it the exemption silently never applied and a selected card compacted with the rest.
@@ -441,7 +456,37 @@ export default function DigitalThreadCanvas({
       offsets.current = [...synced]
       targets.current = [...synced]
 
-      const next = frameNodes(target.wanted, nodes, counts, box, offsets.current, target.selectedId)
+      /**
+       * Frame the requested set, and fall back to the selection and one hop when it will not fit.
+       *
+       * Framing may no longer zoom out past the §10.1 landing floor to make a wide web fit, so on a narrow
+       * viewport — or with the panel docked to a side — the whole traced web can be wider than the area the
+       * panel leaves. Pinning it anyway pushes its far cards under the panel, which is exactly what §6.6
+       * forbids. The wide-web framing is a landing convenience; non-occlusion is a guarantee, so when the two
+       * cannot both hold the convenience gives way and the board frames the smaller set that does fit.
+       */
+      const fits = (transform: { x: number; zoom: number }, ids: readonly string[]): boolean => {
+        const wanted = new Set(ids)
+        for (const node of nodes) {
+          if (!wanted.has(node.id)) continue
+          const { x } = nodePosition(node, result.geometry, offsets.current)
+          const left = x * transform.zoom + transform.x
+          const right = left + result.geometry.laneWidth * transform.zoom
+          if (left < box.x - 1 || right > box.x + box.width + 1) return false
+        }
+        return true
+      }
+
+      let next = frameNodes(target.wanted, nodes, counts, box, offsets.current, target.selectedId)
+      if (next && target.wanted.length > 1 && !fits(next, target.wanted)) {
+        const hop = new Set<string>([target.selectedId])
+        for (const edge of edges) {
+          if (edge.from === target.selectedId) hop.add(edge.to)
+          if (edge.to === target.selectedId) hop.add(edge.from)
+        }
+        const narrower = frameNodes([...hop], nodes, counts, box, offsets.current, target.selectedId)
+        if (narrower) next = narrower
+      }
       if (!next) return false
 
       sceneRef.current?.classList.add("is-easing")
@@ -684,10 +729,34 @@ export default function DigitalThreadCanvas({
         )
         // Never past what the lane can actually roll, or the lane would scroll off its own content.
         targets.current[node.lane] = Math.max(result.laneMinimums[node.lane] ?? 0, revealed)
+        // Setting the target is not moving the lane. The easing loop was only ever started by the pointer
+        // scrub, so arrow navigation set a target nothing consumed — keyboard rolling appeared to work only
+        // while the card it moved to happened to need no roll at all. §6.9 is that focus never lands on a
+        // card outside its window, and that only holds if the lane actually travels.
+        settle()
+
+        /**
+         * And bring its lane into the frame horizontally.
+         *
+         * Rolling answers "is it inside its lane's window"; on a board wider than the viewport that is only
+         * half the question, because the lane itself can be off to one side. §6.9 is that focus never lands
+         * somewhere the reader cannot see, and since the §10.1 landing floor means a wide board no longer
+         * fits, the camera has to travel too.
+         */
+        const box = frame()
+        if (box) {
+          const { x } = nodePosition(next, result.geometry, offsets.current)
+          const left = x * transform.current.zoom + transform.current.x
+          const right = left + result.geometry.laneWidth * transform.current.zoom
+          const margin = 16
+          if (left < box.x + margin) transform.current.x += box.x + margin - left
+          else if (right > box.x + box.width - margin) transform.current.x -= right - (box.x + box.width - margin)
+          paint()
+        }
       }
       cardRefs.current.get(next.id)?.focus()
     },
-    [byLane],
+    [byLane, frame, paint, settle],
   )
 
   const onKeyDown = useCallback(

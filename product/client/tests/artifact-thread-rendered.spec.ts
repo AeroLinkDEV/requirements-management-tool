@@ -121,19 +121,52 @@ test.describe("the six-lane model on screen", () => {
     await expect(page.locator('.dtaCard:has-text("FMS-1.5.0")')).toBeVisible()
   })
 
-  test("every lane is on screen when the thread first opens", async ({ page }) => {
+  /**
+   * This asserted that every lane was horizontally on screen at the automatic landing. #880 §10.1 — and the
+   * product ruling on this PR — make automatic landing legibility authoritative, and the two cannot both hold:
+   * a six-lane thread is 1716 scene units, so showing every lane at 1280px caps the landing zoom at 0.714,
+   * which renders card type at roughly 10px. The narrow supersession is that automatic landing no longer has
+   * to fit the board horizontally. Everything else this was protecting still does hold, and is asserted here:
+   * every lane exists, in order, and every one of them is reachable.
+   */
+  test("every lane is present and reachable when the thread first opens", async ({ page }) => {
     await open(page, "hlr")
 
-    // The view selects the focal record for the reader, so landing framed to one hop would put the result and
-    // the build off the right edge before they had touched anything.
-    const viewport = await page.locator(".dtCanvas").boundingBox()
     const heads = await page.locator(".dtCanvasLaneHead").all()
     expect(heads.length).toBe(6)
-    for (const head of heads) {
-      const box = await head.boundingBox()
-      expect(box).not.toBeNull()
-      expect(box!.x).toBeGreaterThanOrEqual(viewport!.x - 1)
-      expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.x + viewport!.width + 1)
+
+    // Landing is legible, which is what the horizontal fit was traded for.
+    const tier = await page.locator(".dtCanvasScene").getAttribute("data-tier")
+    expect(tier, "an automatic landing opens in the detailed tier").toBe("2")
+
+    // Every lane is reachable: the board pans, and the last lane comes into view without the reader zooming.
+    const viewport = (await page.locator(".dtCanvas").boundingBox())!
+    const lastHead = page.locator(".dtCanvasLaneHead").last()
+    const before = (await lastHead.boundingBox())!
+    await page.mouse.move(viewport.x + viewport.width - 60, viewport.y + viewport.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(viewport.x + 60, viewport.y + viewport.height / 2, { steps: 12 })
+    await page.mouse.up()
+    await page.waitForTimeout(300)
+    const after = (await lastHead.boundingBox())!
+    expect(after.x, "panning brings the far lanes in").toBeLessThan(before.x)
+    expect(after.x + after.width).toBeLessThanOrEqual(viewport.x + viewport.width + 1)
+  })
+
+  test("an explicit Fit shows the whole board, which automatic landing no longer has to", async ({ page }) => {
+    await open(page, "hlr")
+
+    // §6.1: the reader asking for the whole board gets the whole board, and may go below the landing floor
+    // to get it — that is the deliberate zoom-out §10.1 permits.
+    await page.locator(".dtCanvas").focus()
+    await page.keyboard.press("0")
+    await page.waitForTimeout(400)
+
+    const viewport = (await page.locator(".dtCanvas").boundingBox())!
+    for (const head of await page.locator(".dtCanvasLaneHead").all()) {
+      const box = (await head.boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(viewport.x - 1)
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport.x + viewport.width + 1)
     }
   })
 
@@ -428,13 +461,22 @@ test.describe("shared canvas behaviour", () => {
     expect(await zoomOf()).toBe(out)
     expect(out).toBeGreaterThanOrEqual(0.58)
 
-    // `0` refits the board. It does not return to the landing zoom and should not: landing frames the traced
-    // web inside the area the panel leaves, which is a smaller box than the board itself.
+    // `0` refits the board, and is explicitly *not* held to the landing floor: §6.1 asks it to fit the whole
+    // board and §10.1 permits that to be sub-floor, because the reader asked for it. It therefore need not
+    // return to the landing zoom, and on a wide board it deliberately does not.
     await page.keyboard.press("0")
     await page.waitForTimeout(300)
     const refit = await zoomOf()
     expect(refit).toBeGreaterThan(out)
-    expect(refit).toBeGreaterThanOrEqual(fit)
+    const fitsWidth = await page.evaluate(() => {
+      const scene = document.querySelector(".dtCanvasScene") as HTMLElement
+      const canvas = document.querySelector(".dtCanvas") as HTMLElement
+      const box = scene.getBoundingClientRect()
+      const host = canvas.getBoundingClientRect()
+      return box.left >= host.left - 1 && box.right <= host.right + 1
+    })
+    expect(fitsWidth, "an explicit Fit puts the whole board inside the canvas").toBeTruthy()
+    void fit
   })
 
   test("a density tier drops card content instead of shrinking it", async ({ page }) => {
@@ -574,9 +616,11 @@ test.describe("suspect meaning survives the density tiers", () => {
   test("the suspect word is visible at the tier a six-lane thread lands on", async ({ page }) => {
     await open(page, "hlr")
 
-    // A full six-lane thread lands around 0.642, which is tier 1 — the tier that hides the meta row on
-    // unselected cards. The word must survive that, or a suspect record arrives carrying only amber.
-    await expect(page.locator(".dtCanvasScene")).toHaveAttribute("data-tier", "1")
+    // A six-lane thread used to land at roughly 0.642, in tier 1. Automatic landings are now held to the
+    // §10.1 legibility floor, so it lands in tier 2 instead. The guarantee is unchanged and is what matters:
+    // the suspect *word* survives whatever tier the reader is in, or a suspect record arrives carrying only
+    // amber. Tier 1 and tier 0 are covered by the two tests that follow.
+    await expect(page.locator(".dtCanvasScene")).toHaveAttribute("data-tier", "2")
 
     const suspect = page.locator('.dtCanvasNode:has(.dtaCard:has-text("HLRTP-000120.00"))')
     await expect(suspect.locator(".dtaCard")).not.toHaveClass(/is-selected/)
@@ -584,6 +628,24 @@ test.describe("suspect meaning survives the density tiers", () => {
 
     // Its own state pill is truthful and is not the suspect signal: suspectness is a fact about the link.
     await expect(suspect.locator(".dtaPill")).toHaveText("Approved")
+  })
+
+  /**
+   * The tier that hides the meta row on unselected cards. It used to be the landing tier, so landing covered
+   * it; now that landing is held to the legibility floor it is reached by the reader zooming out, which is
+   * exactly the case §10.1 permits — and the case where the suspect word matters most, because there is less
+   * else on the card.
+   */
+  test("the suspect word survives the compact tier the reader zooms out to", async ({ page }) => {
+    await open(page, "hlr")
+    await page.locator(".dtCanvas").focus()
+    for (let index = 0; index < 3; index += 1) await page.keyboard.press("-")
+    await page.waitForTimeout(400)
+
+    await expect(page.locator(".dtCanvasScene")).toHaveAttribute("data-tier", "1")
+    await expect(
+      page.locator('.dtCanvasNode:has(.dtaCard:has-text("HLRTP-000120.00")) .dtaSuspectFlag b'),
+    ).toBeVisible()
   })
 
   test("it stays visible at the detailed tier too", async ({ page }) => {
