@@ -186,8 +186,26 @@ export default function DigitalThreadArtifact({
     [edges, selectedId],
   )
 
+  /**
+   * A side dock could not leave room for the selection and all of its direct links.
+   *
+   * Set by the canvas, which is the only thing that knows the geometry. §6.6 requires every direct link to be
+   * drawn and clear of the panel, and since #880 §10.1 forbids zooming out past the legibility floor to make
+   * room, the panel is what gives way: it re-docks to the bottom, where the free area keeps the full width.
+   * Cleared when the selection or the reader's preference changes, so a record whose links do fit beside a
+   * side dock still gets the dock that was asked for.
+   */
+  const dockKey = `${selectedId ?? ""}:${dockPreference}`
+  const [narrowFor, setNarrowFor] = useState<string | null>(null)
+  // Resolved at render against the situation it was observed in, not cleared by an effect. Clearing it in an
+  // effect could not work: child effects run before parent effects, so the reset ran *after* the canvas had
+  // already reported the shortfall in the same commit and silently undid it.
+  const sideTooNarrow = narrowFor === dockKey
+
   /** The panel docks on the side holding fewer of the selected record's direct links, per #880 §6.6. */
   const dock: ResolvedDock = useMemo(() => {
+    // Non-occlusion outranks the dock preference: a linked record must not vanish to honour a side.
+    if (sideTooNarrow) return "bottom"
     if (dockPreference !== "auto") return dockPreference
     if (!selected) return "right"
     const lane = laneOfNode.get(selected.id) ?? 0
@@ -195,7 +213,7 @@ export default function DigitalThreadArtifact({
       .map(edge => laneOfNode.get(edge.fromId === selected.id ? edge.toId : edge.fromId))
       .filter((value): value is number => value !== undefined)
     return resolveDockByLane(lane, linkedLanes)
-  }, [directLinks, dockPreference, laneOfNode, selected])
+  }, [directLinks, dockPreference, laneOfNode, selected, sideTooNarrow])
 
   // The canvas must not lay records out under the panel, so the frame it may use shrinks by the dock.
   const frameInset = useMemo(
@@ -478,6 +496,7 @@ export default function DigitalThreadArtifact({
           frameInset={frameInset}
           tracedEdges={web?.edges}
           frameIds={framedForFocal}
+          onFramingNeedsRoom={() => setNarrowFor(dockKey)}
           ariaLabel={
             focal ? `Artifact thread for ${identityLabel(focal)}` : "Artifact thread"
           }

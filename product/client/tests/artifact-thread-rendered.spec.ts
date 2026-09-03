@@ -533,24 +533,34 @@ test.describe("shared canvas behaviour", () => {
 
       const panel = (await page.locator(".dtaPanel").boundingBox())!
 
-      // Every visible card the panel's own rows name as a **direct** link must sit clear of the panel.
+      /**
+       * Every direct link the panel names must be **drawn** and clear of the panel.
+       *
+       * The prototype's `checks.js` treats an absent direct link as a failure, and so does this. Skipping a
+       * link that is not currently drawn would let the guarantee be satisfied by hiding the record instead of
+       * fitting it — the same failure wearing a different face, and the one that slipped through once the
+       * canvas began fading cards outside the free frame horizontally.
+       */
+      const canvas = (await page.locator(".dtCanvas").boundingBox())!
       const names = await page.locator(".dtaRel button:not(.is-far) > span > span").allInnerTexts()
       expect(names.length).toBeGreaterThan(0)
       for (const name of names) {
-        // A card rolled out of its lane window is drawn at zero opacity, which Playwright still calls visible,
-        // so it is excluded explicitly: it is not something the panel can be covering.
-        const card = page
-          .locator(`.dtCanvasNode:not(.is-offscreen):has(.dtaCard:has-text("${name}"))`)
-          .first()
-        if ((await card.count()) === 0) continue
-        const box = await card.boundingBox()
-        if (!box) continue
+        const card = page.locator(`.dtCanvasNode:has(.dtaCard:has-text("${name}"))`).first()
+        expect(await card.count(), `${name} is a direct link and must be on the board`).toBeGreaterThan(0)
+        await expect(card, `${name} is hidden rather than fitted beside the ${mode} panel`)
+          .not.toHaveClass(/is-offscreen/)
+
+        const box = (await card.boundingBox())!
         const clear =
           box.x + box.width <= panel.x + 1 ||
           box.x >= panel.x + panel.width - 1 ||
           box.y + box.height <= panel.y + 1 ||
           box.y >= panel.y + panel.height - 1
         expect(clear, `${name} is underneath the ${mode} panel`).toBe(true)
+        // And inside the board's own area, so "clear of the panel" cannot be met by being off-canvas.
+        expect(box.x, `${name} starts outside the canvas`).toBeGreaterThanOrEqual(canvas.x - 1)
+        expect(box.x + box.width, `${name} ends outside the canvas`)
+          .toBeLessThanOrEqual(canvas.x + canvas.width + 1)
       }
     }
   })
@@ -868,13 +878,38 @@ test.describe("a rolled lane survives a re-render", () => {
     // The framing guard keys on what is being framed, and the free area is part of that. Leaving the dock out
     // of that key meant switching sides skipped the reframe, and the panel settled on a linked record — the
     // §6.6 failure the whole mechanism exists to prevent.
+    //
+    // Driven at 1920 deliberately. Since the §10.1 landing floor stopped the board zooming out to fit, a side
+    // dock at 1280 cannot leave room for this thread's direct links, so the panel correctly refuses the side
+    // and stays at the bottom — no dock change, and therefore nothing for a reframe to do. The width where
+    // the side *is* honoured is where this guard can actually be observed.
+    await page.setViewportSize({ width: 1920, height: 900 })
     await open(page, "hlr")
     const before = await page.locator(".dtCanvasScene").getAttribute("style")
 
     await page.locator(".dtaPanelTools button:text-is('Right')").click()
     await page.waitForTimeout(700)
 
+    await expect(page.locator(".dtaPanel")).toHaveClass(/dtaPanel-right/)
     expect(await page.locator(".dtCanvasScene").getAttribute("style")).not.toBe(before)
+  })
+
+  test("a side dock that cannot hold the direct links gives way to one that can", async ({ page }) => {
+    // The other half of the same rule, at a width where the side cannot be honoured. §6.6 outranks the dock
+    // preference: rather than a linked record vanishing to keep the panel on the right, the panel moves.
+    await open(page, "hlr")
+
+    await page.locator(".dtaPanelTools button:text-is('Right')").click()
+    await page.waitForTimeout(700)
+
+    await expect(page.locator(".dtaPanel")).toHaveClass(/dtaPanel-bottom/)
+    // And the direct links are drawn, which is the thing the dock moved to protect.
+    const names = await page.locator(".dtaRel button:not(.is-far) > span > span").allInnerTexts()
+    expect(names.length).toBeGreaterThan(0)
+    for (const name of names) {
+      await expect(page.locator(`.dtCanvasNode:has(.dtaCard:has-text("${name}"))`).first())
+        .not.toHaveClass(/is-offscreen/)
+    }
   })
 })
 

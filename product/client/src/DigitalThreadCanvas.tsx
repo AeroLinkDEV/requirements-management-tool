@@ -68,6 +68,13 @@ export type DigitalThreadCanvasProps = {
    * before the reader has touched anything. A caller that knows the whole web is the answer passes it here.
    */
   frameIds?: readonly string[]
+  /**
+   * The free area this dock leaves cannot hold the selection and its direct links at the legibility floor.
+   *
+   * The view answers by re-docking the panel somewhere that can. §6.6 requires every direct link to be drawn
+   * and clear of the panel; when the two cannot both hold on this side, the panel is what moves.
+   */
+  onFramingNeedsRoom?: () => void
   ariaLabel?: string
 }
 
@@ -93,6 +100,7 @@ export default function DigitalThreadCanvas({
   frameInset,
   tracedEdges,
   frameIds,
+  onFramingNeedsRoom,
   ariaLabel = "Digital Thread canvas",
 }: DigitalThreadCanvasProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -489,17 +497,30 @@ export default function DigitalThreadCanvas({
         return true
       }
 
+      const hop = new Set<string>([target.selectedId])
+      for (const edge of edges) {
+        if (edge.from === target.selectedId) hop.add(edge.to)
+        if (edge.to === target.selectedId) hop.add(edge.from)
+      }
+
       let next = frameNodes(target.wanted, nodes, counts, box, offsets.current, target.selectedId)
       if (next && target.wanted.length > 1 && !fits(next, target.wanted)) {
-        const hop = new Set<string>([target.selectedId])
-        for (const edge of edges) {
-          if (edge.from === target.selectedId) hop.add(edge.to)
-          if (edge.to === target.selectedId) hop.add(edge.from)
-        }
         const narrower = frameNodes([...hop], nodes, counts, box, offsets.current, target.selectedId)
         if (narrower) next = narrower
       }
       if (!next) return false
+
+      /**
+       * The selection and every direct link must actually be drawn, wholly inside the free area.
+       *
+       * §6.6 is a guarantee, not a preference, and it survived the Option-A ruling untouched. Hiding a linked
+       * record that will not fit satisfies "not underneath the panel" only by making it not present, which is
+       * the same failure wearing a different face. When the free area this dock leaves cannot hold the
+       * one-hop set at the legibility floor, the panel has to move rather than the record disappear — so the
+       * canvas says so and the view re-docks. Reported rather than decided here: the canvas owns geometry,
+       * the view owns where its own panel may go.
+       */
+      if (!fits(next, [...hop])) onFramingNeedsRoom?.()
 
       sceneRef.current?.classList.add("is-easing")
       transform.current = next
