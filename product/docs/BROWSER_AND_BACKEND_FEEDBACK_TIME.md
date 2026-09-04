@@ -13,10 +13,9 @@ branch protection was **strict** (a branch had to be up to date with `main`), so
 `main` invalidated a passing run and started the whole gate again. On a day when `main` moved six times, one
 parity pull request was re-tested end to end six times and found nothing new on any of them.
 
-Auto-merge first removed the delay from a green run sitting unnoticed. After the staged 4 September
-merge-queue cutover is activated and accepted, GitHub will remove the remaining strict-protection treadmill
-by validating the exact composed candidate against current `main` and entries ahead of it, without a manual
-rebase. See [Merging into main](MERGING.md).
+Auto-merge first removed the delay from a green run sitting unnoticed. The 4 September merge-queue cutover
+removed the remaining strict-protection treadmill: GitHub now validates the exact composed candidate against
+current `main` and entries ahead of it, without a manual rebase. See [Merging into main](MERGING.md).
 
 That makes elapsed time per run the number worth optimizing, and it makes it worth knowing which job actually
 governs it. Optimizing the wrong job costs runners and buys nothing.
@@ -32,7 +31,7 @@ out PR code dispatches the Product gate against the exact same-repository head. 
 API, browser, production-browser, backend/core, client, PostgreSQL and operator lanes; its internal
 `Full Product evidence aggregate` remains the evidence summary. The trusted requester independently proves
 Product's readiness authentication and aggregate success before completing `Report what this run validated`.
-After the merge-queue cutover, that success also causes the dedicated Merge Authority App to publish the
+With the merge queue active, that success also causes the dedicated Merge Authority App to publish the
 required `Trusted merge-queue binding` check on the exact pull-request head. There is no always-green
 placeholder and Fast is not authoritative. That head-bound readiness survives unrelated `main` advancement;
 the queue is responsible for validating the eventual composed candidate.
@@ -42,12 +41,12 @@ different concurrency groups; development feedback cannot cancel final Full evid
 collector remains the source for post-switch full-gates-per-merge, cancellation waste, queue/final-push-to-merge
 timing and regression data; re-measure the new cadence rather than assuming savings.
 
-## Merge-queue cutover staging, 2026-09-04
+## Merge-queue cutover, 2026-09-04
 
-Issue #549 moved the repository to the `AeroLinkDEV` organization and PR #911 stages the trusted repository
-support for a squash merge queue. The queue is not active at this checkpoint: the App credentials, live
-`main` ruleset and acceptance run are deliberately post-merge. After that cutover, a
-pull-request head must first pass the existing trusted Full requester; only then does the dedicated AeroLink
+Issue #549 moved the repository to the `AeroLinkDEV` organization and PR #911 supplied the trusted repository
+support for a squash merge queue. The repository-scoped App is installed only on this repository, its private
+key is held by the main-only `merge-authority` environment, and the active `main` ruleset has no bypass actors.
+A pull-request head must first pass the existing trusted Full requester; only then does the dedicated AeroLink
 Merge Authority App publish `Trusted merge-queue binding` so the pull request can enter the queue. GitHub
 builds a `gh-readonly-queue/main/...` candidate from current `main`, that pull request, and entries ahead of
 it, and runs the complete Product gate on the composed SHA.
@@ -64,9 +63,11 @@ The ruleset separately requires GitHub Actions' `Full Product evidence aggregate
 leaves success as soon as a rerun is queued, covering the earlier interval before `workflow_run` reaches
 `in_progress`. The native Product check and App-bound evidence check are deliberately co-required.
 
-Successful live acceptance will complete the deferred strict-branch-protection item. After activation,
-ordinary behind branches no longer need a manual rebase; real conflicts and deliberately protected
-CI-authority changes still require explicit disposition.
+Live activation is complete. The first docs-only queue delivery remains the next acceptance item after the
+authority-maintenance fix; it must prove both required identities on the PR head and composed queue candidate.
+Ordinary behind branches no longer need a manual rebase; real conflicts and deliberately protected
+CI-authority changes still require explicit disposition. Multi-entry and deliberate-failure qualification
+also stay tracked on issue #549 until their evidence is recorded.
 
 ## Measured, 2026-08-13
 
