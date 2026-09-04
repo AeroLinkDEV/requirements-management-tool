@@ -292,8 +292,8 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   )
   assert.match(
     guardText,
-    /for pair in "backend-api:\$BACKEND_API" "backend-core-domain:\$BACKEND_CORE_DOMAIN" "backend-core-infrastructure:\$BACKEND_CORE_INFRASTRUCTURE" "client:\$CLIENT" "script-contracts:\$CONTRACTS" "browser-pr:\$BROWSER" "browser-production:\$PRODUCTION"; do/,
-    'the merge-group refusal must enumerate the complete seven-gate list — the generic loop additionally admits postgresql-smoke and permits skips, so this exact list is what makes skips impossible for a queue run',
+    /^ {12}for pair in "backend-api:\$BACKEND_API" "backend-core-domain:\$BACKEND_CORE_DOMAIN" "backend-core-infrastructure:\$BACKEND_CORE_INFRASTRUCTURE" "client:\$CLIENT" "script-contracts:\$CONTRACTS" "browser-pr:\$BROWSER" "browser-production:\$PRODUCTION"; do$/m,
+    'the merge-group refusal must enumerate the complete seven-gate list as a line-anchored command — a prefixed or degenerate loop that never runs would vacuously pass, and the generic loop additionally admits postgresql-smoke and permits skips',
   )
   assert.match(
     guardText,
