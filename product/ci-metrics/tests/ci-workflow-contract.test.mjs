@@ -288,8 +288,21 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   assert.equal(
     (guardText.match(/missing=""/g) || []).length,
     1,
-    'the missing set must be initialized exactly once — a reset inside the loop discards earlier collected gates',
+    'the missing set must be initialized exactly once before the loop — additional or equivalent resets discard earlier collected gates',
   )
+  // Any assignment to the missing set inside the loop other than the predicate's collection — under
+  // any quoting or spelling — discards gates collected by earlier iterations, and unset is the same
+  // reset in another costume.
+  const loopStart = guardText.indexOf('for pair in "backend-api:$BACKEND_API"')
+  const loopEnd = guardText.indexOf('\n            done', loopStart)
+  assert.ok(loopEnd > loopStart, 'the collecting loop must terminate with done before the refusal')
+  const loopBody = guardText.slice(loopStart, loopEnd)
+  assert.equal(
+    (loopBody.match(/missing=/g) || []).length,
+    1,
+    'the only assignment to the missing set inside the loop must be the predicate collection',
+  )
+  assert.doesNotMatch(loopBody, /unset missing\b/, 'the missing set must not be unset inside the collecting loop')
   assert.match(
     guardText,
     /^ {12}for pair in "backend-api:\$BACKEND_API" "backend-core-domain:\$BACKEND_CORE_DOMAIN" "backend-core-infrastructure:\$BACKEND_CORE_INFRASTRUCTURE" "client:\$CLIENT" "script-contracts:\$CONTRACTS" "browser-pr:\$BROWSER" "browser-production:\$PRODUCTION"; do$/m,
