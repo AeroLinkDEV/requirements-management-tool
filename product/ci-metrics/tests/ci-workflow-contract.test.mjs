@@ -303,6 +303,11 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
     'the only assignment to the missing set inside the loop must be the predicate collection',
   )
   assert.doesNotMatch(loopBody, /unset missing\b/, 'the missing set must not be unset inside the collecting loop')
+  assert.doesNotMatch(
+    loopBody,
+    /^\s*(break|continue)\b/m,
+    'the collecting loop must not exit early — a break or continue before collection leaves the missing set incomplete and the refusal vacuous',
+  )
   assert.match(
     guardText,
     /^ {12}for pair in "backend-api:\$BACKEND_API" "backend-core-domain:\$BACKEND_CORE_DOMAIN" "backend-core-infrastructure:\$BACKEND_CORE_INFRASTRUCTURE" "client:\$CLIENT" "script-contracts:\$CONTRACTS" "browser-pr:\$BROWSER" "browser-production:\$PRODUCTION"; do$/m,
