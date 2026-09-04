@@ -229,9 +229,13 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
     /name="\$\{pair%%:\*\}"\n\s*result="\$\{pair#\*:\}"\n\s*\[ "\$result" = "success" \] \|\| missing="\$missing \$name"/,
     'each pair must be split into its own name and result before the success predicate populates the missing set — a stale result from an earlier loop would vacuously pass',
   )
+  const initIndex = guardText.indexOf('missing=""')
   const listIndex = guardText.indexOf('for pair in "backend-api:$BACKEND_API"')
   const finalIfIndex = guardText.indexOf('[ -n "$missing" ]; then')
-  assert.ok(listIndex >= 0 && finalIfIndex > listIndex, 'the missing set must be collected by the loop before the refusal fires')
+  assert.ok(
+    initIndex >= 0 && listIndex > initIndex && finalIfIndex > listIndex,
+    'the missing set must be initialized before the collecting loop, and the loop must run before the refusal fires — re-initializing after the loop would erase every collected gate',
+  )
   assert.match(
     guardText,
     /\[ -n "\$missing" \]; then\n\s*echo "::error::A merge-queue run must actually execute the product gates\. These did not run:\$missing"\n\s*exit 1/,
