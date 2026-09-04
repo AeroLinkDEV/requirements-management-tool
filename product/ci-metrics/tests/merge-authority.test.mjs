@@ -28,24 +28,25 @@ import {
 const REPOSITORY = 'AeroLinkDEV/requirements-management-tool'
 const HEAD_SHA = 'a'.repeat(40)
 const RUN_ID = 424242
+const RUN_ATTEMPT = 2
 
-function allJobsSuccess(runId = RUN_ID) {
+function allJobsSuccess(runId = RUN_ID, runAttempt = RUN_ATTEMPT) {
   const jobs = [
-    { name: CLASSIFIER_JOB_NAME, conclusion: 'success', runId },
-    { name: 'API test suite (1/3)', conclusion: 'success', runId },
-    { name: 'API test suite (2/3)', conclusion: 'success', runId },
-    { name: 'API test suite (3/3)', conclusion: 'success', runId },
-    { name: 'Domain test suite', conclusion: 'success', runId },
-    { name: 'Infrastructure test suite', conclusion: 'success', runId },
-    { name: 'Client lint, type-check, and build', conclusion: 'success', runId },
-    { name: 'Operator and recovery script contracts', conclusion: 'success', runId },
-    { name: 'Browser journeys (1/4)', conclusion: 'success', runId },
-    { name: 'Browser journeys (2/4)', conclusion: 'success', runId },
-    { name: 'Browser journeys (3/4)', conclusion: 'success', runId },
-    { name: 'Browser journeys (4/4)', conclusion: 'success', runId },
-    { name: 'Browser journeys on the production build', conclusion: 'success', runId },
-    { name: 'PostgreSQL migrations and secure bootstrap', conclusion: 'success', runId },
-    { name: AGGREGATE_JOB_NAME, conclusion: 'success', runId },
+    { name: CLASSIFIER_JOB_NAME, conclusion: 'success', runId, runAttempt },
+    { name: 'API test suite (1/3)', conclusion: 'success', runId, runAttempt },
+    { name: 'API test suite (2/3)', conclusion: 'success', runId, runAttempt },
+    { name: 'API test suite (3/3)', conclusion: 'success', runId, runAttempt },
+    { name: 'Domain test suite', conclusion: 'success', runId, runAttempt },
+    { name: 'Infrastructure test suite', conclusion: 'success', runId, runAttempt },
+    { name: 'Client lint, type-check, and build', conclusion: 'success', runId, runAttempt },
+    { name: 'Operator and recovery script contracts', conclusion: 'success', runId, runAttempt },
+    { name: 'Browser journeys (1/4)', conclusion: 'success', runId, runAttempt },
+    { name: 'Browser journeys (2/4)', conclusion: 'success', runId, runAttempt },
+    { name: 'Browser journeys (3/4)', conclusion: 'success', runId, runAttempt },
+    { name: 'Browser journeys (4/4)', conclusion: 'success', runId, runAttempt },
+    { name: 'Browser journeys on the production build', conclusion: 'success', runId, runAttempt },
+    { name: 'PostgreSQL migrations and secure bootstrap', conclusion: 'success', runId, runAttempt },
+    { name: AGGREGATE_JOB_NAME, conclusion: 'success', runId, runAttempt },
   ]
   return jobs
 }
@@ -59,6 +60,7 @@ function legitimateRun() {
     headSha: HEAD_SHA,
     headBranch: `${QUEUE_REF_PREFIX}main/909/d4f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9`,
     runId: RUN_ID,
+    runAttempt: RUN_ATTEMPT,
     status: 'completed',
     conclusion: 'success',
   }
@@ -69,7 +71,7 @@ function legitimateCandidate() {
     run: legitimateRun(),
     jobs: allJobsSuccess(),
     changedPaths: [],
-    expected: { repository: REPOSITORY, headSha: HEAD_SHA, baseBranch: 'main', runId: RUN_ID },
+    expected: { repository: REPOSITORY, headSha: HEAD_SHA, baseBranch: 'main', runId: RUN_ID, runAttempt: RUN_ATTEMPT },
   }
 }
 
@@ -151,14 +153,14 @@ test('non-authoritative metrics and reporting failures never veto a valid candid
   // them a merge veto through the run's overall conclusion. Both the run conclusion and every other
   // authoritative input stay intact below except for the named non-authoritative job.
   const withMetricsToolingFailed = {
-    jobs: [...allJobsSuccess(), { name: 'CI metrics tooling tests', conclusion: 'failure', runId: RUN_ID }],
+    jobs: [...allJobsSuccess(), { name: 'CI metrics tooling tests', conclusion: 'failure', runId: RUN_ID, runAttempt: RUN_ATTEMPT }],
   }
   const tooling = reasonsFor(withMetricsToolingFailed)
   assert.equal(tooling.decision, 'PASS', 'a failed metrics-tooling job must not refuse valid product evidence')
   assert.deepEqual(tooling.reasons, [])
 
   const withMetricsReportFailed = {
-    jobs: [...allJobsSuccess(), { name: 'Aggregate CI metrics', conclusion: 'failure', runId: RUN_ID }],
+    jobs: [...allJobsSuccess(), { name: 'Aggregate CI metrics', conclusion: 'failure', runId: RUN_ID, runAttempt: RUN_ATTEMPT }],
   }
   const report = reasonsFor(withMetricsReportFailed)
   assert.equal(report.decision, 'PASS', 'a failed metrics-report job must not refuse valid product evidence')
@@ -168,7 +170,7 @@ test('non-authoritative metrics and reporting failures never veto a valid candid
   // authoritative set succeeded.
   const redConclusion = reasonsFor({
     run: { ...legitimateRun(), conclusion: 'failure' },
-    jobs: [...allJobsSuccess(), { name: 'CI metrics tooling tests', conclusion: 'failure', runId: RUN_ID }],
+    jobs: [...allJobsSuccess(), { name: 'CI metrics tooling tests', conclusion: 'failure', runId: RUN_ID, runAttempt: RUN_ATTEMPT }],
   })
   assert.equal(redConclusion.decision, 'PASS')
   assert.deepEqual(redConclusion.reasons, [])
@@ -264,6 +266,43 @@ test('binds the trusted expected run id, refusing any other run', () => {
   })
   assert.equal(unmappedJob.decision, 'REFUSE')
   assert.ok(unmappedJob.reasons.some((reason) => reason.startsWith('job-run-id-missing') && reason.includes('Domain test suite')))
+})
+
+test('binds the trusted run attempt, refusing first-attempt records for a rerun', () => {
+  // Rerun attempts share a run id, and the run conclusion is not consulted — so first-attempt job
+  // records must not authorize a failed second attempt.
+  const otherAttempt = reasonsFor({ run: { ...legitimateRun(), runAttempt: 3 } })
+  assert.equal(otherAttempt.decision, 'REFUSE')
+  assert.ok(otherAttempt.reasons.some((reason) => reason.startsWith('run-attempt-mismatch')))
+
+  const noAttempt = reasonsFor({ run: { ...legitimateRun(), runAttempt: undefined } })
+  assert.equal(noAttempt.decision, 'REFUSE')
+  assert.ok(noAttempt.reasons.some((reason) => reason.startsWith('run-attempt-missing')))
+
+  const firstAttemptJobs = reasonsFor({
+    expected: { repository: REPOSITORY, headSha: HEAD_SHA, baseBranch: 'main', runId: RUN_ID, runAttempt: 3 },
+    jobs: allJobsSuccess(RUN_ID, 1),
+  })
+  assert.equal(firstAttemptJobs.decision, 'REFUSE')
+  assert.ok(firstAttemptJobs.reasons.some((reason) => reason.startsWith('job-attempt-mismatch')))
+
+  const attemptlessJob = reasonsFor({
+    jobs: allJobsSuccess().map((job) => {
+      const { runAttempt, ...rest } = job
+      return job.name === 'Browser journeys (2/4)' ? rest : job
+    }),
+  })
+  assert.equal(attemptlessJob.decision, 'REFUSE')
+  assert.ok(attemptlessJob.reasons.some((reason) => reason.startsWith('job-attempt-missing') && reason.includes('Browser journeys (2/4)')))
+
+  const noExpectedAttempt = evaluateMergeGroupCandidate({
+    run: legitimateRun(),
+    jobs: allJobsSuccess(),
+    changedPaths: [],
+    expected: { repository: REPOSITORY, headSha: HEAD_SHA, baseBranch: 'main', runId: RUN_ID },
+  })
+  assert.equal(noExpectedAttempt.decision, 'REFUSE')
+  assert.ok(noExpectedAttempt.reasons.some((reason) => reason.startsWith('expected-missing')))
 })
 
 test('refuses an incomplete, over-counted, or inconsistent shard set', () => {

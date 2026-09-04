@@ -121,14 +121,14 @@ function collectShardReasons(jobs, reasons) {
  * @param {object} input.run GitHub metadata for the triggering run: repository, workflowName,
  *   workflowPath, event, headSha, headBranch, runId?, status (conclusion is deliberately unused —
  *   see NON_AUTHORITATIVE_JOB_IDS).
- * @param {Array<{name: string, conclusion: string, runId?: number|string}>} input.jobs the jobs of
+ * @param {Array<{name: string, conclusion: string, runId?: number|string, runAttempt?: number}>} input.jobs the jobs of
  *   exactly this run (caller resolves via the runs API); runId included when known.
  * @param {Array<string|{from: string, to: string}>|undefined} input.changedPaths paths differing
  *   between the candidate queue SHA and the default branch; a rename supplies both sides, because
  *   the FROM side is the one that can remove trusted machinery. Refuses when absent — an unverified
  *   surface is not a trusted one.
  * @param {object} input.expected trusted configuration from the verifier's own context:
- *   { repository, headSha, baseBranch, runId } — all mandatory; omitting any refuses.
+ *   { repository, headSha, baseBranch, runId, runAttempt } — all mandatory; omitting any refuses.
  * @returns {{decision: 'PASS'|'REFUSE', reasons: string[]}}
  */
 export function evaluateMergeGroupCandidate(input) {
@@ -138,8 +138,8 @@ export function evaluateMergeGroupCandidate(input) {
   if (!run || typeof run !== 'object') {
     return { decision: 'REFUSE', reasons: ['run-metadata-missing: no triggering-run metadata was supplied'] }
   }
-  if (!expected || typeof expected !== 'object' || typeof expected.repository !== 'string' || typeof expected.headSha !== 'string' || typeof expected.baseBranch !== 'string' || (typeof expected.runId !== 'string' && typeof expected.runId !== 'number')) {
-    return { decision: 'REFUSE', reasons: ['expected-missing: the verifier must supply its own trusted repository, head SHA, protected base branch, and run id'] }
+  if (!expected || typeof expected !== 'object' || typeof expected.repository !== 'string' || typeof expected.headSha !== 'string' || typeof expected.baseBranch !== 'string' || (typeof expected.runId !== 'string' && typeof expected.runId !== 'number') || typeof expected.runAttempt !== 'number' || expected.runAttempt < 1) {
+    return { decision: 'REFUSE', reasons: ['expected-missing: the verifier must supply its own trusted repository, head SHA, protected base branch, run id, and run attempt'] }
   }
 
   if (run.repository !== expected.repository) {
@@ -166,6 +166,14 @@ export function evaluateMergeGroupCandidate(input) {
   } else if (String(run.runId) !== String(expected.runId)) {
     reasons.push(`run-id-mismatch: run ${run.runId} is not the expected run ${expected.runId}`)
   }
+  // Rerun attempts share a run id, and the run conclusion is deliberately not consulted — so without
+  // attempt binding, job records from a successful first attempt could authorize a failed rerun.
+  // This mirrors the attempt binding provenance.mjs already applies to validated manifests.
+  if (typeof run.runAttempt !== 'number') {
+    reasons.push('run-attempt-missing: the run metadata does not carry its attempt number')
+  } else if (run.runAttempt !== expected.runAttempt) {
+    reasons.push(`run-attempt-mismatch: run attempt ${run.runAttempt} is not the expected attempt ${expected.runAttempt}`)
+  }
   // Queue refs name their base branch, and the workflow subscribes to merge_group for any base:
   // only candidates for the protected default branch may bind evidence here.
   const expectedQueuePrefix = `${QUEUE_REF_PREFIX}${expected.baseBranch}/`
@@ -191,6 +199,10 @@ export function evaluateMergeGroupCandidate(input) {
       reasons.push(`job-run-id-missing: job '${job?.name ?? 'unknown'}' does not carry its run id, so its membership in run ${expected.runId} is unverified`)
     } else if (String(job.runId) !== String(expected.runId)) {
       reasons.push(`job-from-foreign-run: job '${job?.name ?? 'unknown'}' belongs to run ${job.runId}, not the expected run ${expected.runId}`)
+    } else if (typeof job?.runAttempt !== 'number') {
+      reasons.push(`job-attempt-missing: job '${job?.name ?? 'unknown'}' does not carry its run attempt, so it may belong to a different attempt of run ${expected.runId}`)
+    } else if (job.runAttempt !== expected.runAttempt) {
+      reasons.push(`job-attempt-mismatch: job '${job?.name ?? 'unknown'}' belongs to attempt ${job.runAttempt}, not the expected attempt ${expected.runAttempt}`)
     }
   }
 
