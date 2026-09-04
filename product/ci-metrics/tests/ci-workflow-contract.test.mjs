@@ -275,6 +275,11 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   assert.match(gateBody, /^    if: always\(\)$/m, 'the gate must run even when a dependency was skipped — otherwise skipped evidence is never rejected')
   assert.doesNotMatch(enforceText, /continue-on-error:/, 'the enforcement step must propagate failure — continue-on-error would let GitHub swallow the refusal exit')
   assert.doesNotMatch(
+    gateBody,
+    /^ {4}continue-on-error:/m,
+    'the gate job itself must have no failure isolation — a job-level continue-on-error would turn a red refusal into a passing run',
+  )
+  assert.doesNotMatch(
     enforceText,
     /^\s*if:/m,
     'the enforcement step must have no step-level condition — a restrictive if could exclude merge_group runs, and a skipped step never evaluates the refusal where it matters most',
