@@ -7,17 +7,19 @@ on:
     workflows:
       - Product quality gate
     types:
+      - in_progress
       - completed
 
 permissions:
   actions: read
   contents: read
 
-# A rerun of the same Product workflow run supersedes any verifier still processing its prior
-# completion event. Separate queue candidates have separate run ids and never cancel one another.
+# Keep the in-progress invalidation ahead of the completed decision for the same Product run. Cancelling
+# either event can leave an older successful App check authoritative while a rerun is still active.
+# Separate queue candidates have separate run ids and never block one another.
 concurrency:
   group: merge-authority-${{ github.event.workflow_run.id }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   bind:
@@ -42,7 +44,7 @@ jobs:
           private-key: ${{ secrets.MERGE_AUTHORITY_APP_PRIVATE_KEY }}
           permission-checks: write
           permission-contents: read
-      - name: Verify and bind the completed merge-group run
+      - name: Invalidate prior authority or bind the completed merge-group run
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}

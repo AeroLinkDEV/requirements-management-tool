@@ -28,17 +28,41 @@ async function main() {
   const repository = requiredEnv('GITHUB_REPOSITORY')
   const event = JSON.parse(readFileSync(requiredEnv('GITHUB_EVENT_PATH'), 'utf8'))
   const trigger = event?.workflow_run
+  const action = event?.action
   const headSha = trigger?.head_sha
   if (typeof headSha !== 'string' || !SHA_PATTERN.test(headSha)) {
     throw new Error('The workflow_run payload did not contain a publishable candidate head SHA.')
   }
 
-  const evidenceRequest = createGitHubRequest({
-    token: requiredEnv('GITHUB_TOKEN'),
-    apiUrl: env('GITHUB_API_URL') || 'https://api.github.com',
-  })
   const authorityRequest = createGitHubRequest({
     token: requiredEnv('MERGE_AUTHORITY_TOKEN'),
+    apiUrl: env('GITHUB_API_URL') || 'https://api.github.com',
+  })
+
+  // workflow_run emits in_progress for both an initial run and a rerun (requested is omitted for reruns).
+  // Replace any earlier success before reading or waiting on the new attempt, so old authority cannot bridge
+  // the interval in which a newer Product attempt is active.
+  if (action === 'in_progress') {
+    if (trigger?.status !== 'in_progress') {
+      throw new Error('The workflow_run in_progress action did not carry in-progress run status.')
+    }
+    await publishMergeAuthorityCheck({
+      request: authorityRequest,
+      repository,
+      headSha,
+      decision: 'PENDING',
+      reasons: [],
+      detailsUrl: trigger?.html_url,
+    })
+    console.log('[merge-authority] PENDING: a Product attempt is active; prior authority was invalidated')
+    return
+  }
+  if (action !== 'completed') {
+    throw new Error(`Unsupported workflow_run action '${action ?? 'unknown'}'.`)
+  }
+
+  const evidenceRequest = createGitHubRequest({
+    token: requiredEnv('GITHUB_TOKEN'),
     apiUrl: env('GITHUB_API_URL') || 'https://api.github.com',
   })
 

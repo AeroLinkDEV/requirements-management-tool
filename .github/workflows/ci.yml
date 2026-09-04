@@ -131,7 +131,9 @@ jobs:
           if ($pr.state -ne 'open') { throw 'The requested pull request is not open.' }
           if ($pr.head.repo.full_name -ne $env:GITHUB_REPOSITORY) { throw 'Fork pull requests cannot request privileged Full validation.' }
           if ($pr.head.sha -ne $env:REQUESTED_HEAD_SHA -or $env:GITHUB_SHA -ne $env:REQUESTED_HEAD_SHA) { throw 'The requested Full run is not attached to the exact current PR head.' }
-          if ($pr.base.sha -ne $env:REQUESTED_BASE_SHA) { throw 'The requested Full run does not match the current PR base.' }
+          # REQUESTED_BASE_SHA came from the trusted pull_request_target label event and is the immutable
+          # comparison input for this Product run. The live base may advance while the run is queued or active;
+          # the merge queue, not this pre-queue run, validates the final composition against current main.
           if ($env:GITHUB_REF -ne "refs/heads/$($pr.head.ref)") { throw 'Workflow dispatch ref does not match the PR head branch.' }
           if (-not @($pr.labels | ForEach-Object { $_.name }).Contains('ready-for-full-ci')) { throw 'ready-for-full-ci is no longer present on this pull request.' }
       - name: Mark setup complete

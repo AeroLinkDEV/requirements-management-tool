@@ -33,7 +33,8 @@ API, browser, production-browser, backend/core, client, PostgreSQL and operator 
 Product's readiness authentication and aggregate success before completing `Report what this run validated`.
 After the merge-queue cutover, that success also causes the dedicated Merge Authority App to publish the
 required `Trusted merge-queue binding` check on the exact pull-request head. There is no always-green
-placeholder and Fast is not authoritative.
+placeholder and Fast is not authoritative. That head-bound readiness survives unrelated `main` advancement;
+the queue is responsible for validating the eventual composed candidate.
 
 A synchronize event removes stale readiness, so a later SHA must request Full again. Fast and Full use
 different concurrency groups; development feedback cannot cancel final Full evidence. The rolling metrics
@@ -53,7 +54,8 @@ A separate `workflow_run` verifier loaded from protected `main` reads the exact 
 requires the full gate topology, and refuses candidates that differ from `main` under `.github/`,
 `product/test-planner/`, or `product/ci-metrics/`. It publishes the required check with the repository-scoped
 App identity only after those checks pass. The App key is restricted to the main-only `merge-authority`
-environment, and the ruleset pins the required context to that App's integration id.
+environment, and the ruleset pins the required context to that App's integration id. Every initial Product run or rerun first replaces earlier App success
+with an in-progress check, so prior authority cannot bridge a newer attempt.
 
 This completes the deferred strict-branch-protection item. Ordinary behind branches no longer need a manual
 rebase; real conflicts and deliberately protected CI-authority changes still require explicit disposition.

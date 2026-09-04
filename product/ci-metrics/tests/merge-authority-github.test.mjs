@@ -166,17 +166,17 @@ test('default branch resolution binds both its name and current commit SHA', asy
 
 test('check publication binds the fixed context name to the candidate SHA and decision', async () => {
   const calls = []
-  for (const decision of ['PASS', 'REFUSE']) {
+  for (const decision of ['PASS', 'REFUSE', 'PENDING']) {
     await publishMergeAuthorityCheck({
       request: async (path, options) => { calls.push({ path, options }); return { id: calls.length } },
       repository: REPOSITORY,
       headSha: sha('e'),
       decision,
-      reasons: decision === 'PASS' ? [] : ['job-not-success: API'],
+      reasons: decision === 'REFUSE' ? ['job-not-success: API'] : [],
       detailsUrl: 'https://github.example/runs/42',
     })
   }
-  assert.equal(calls.length, 2)
+  assert.equal(calls.length, 3)
   for (const call of calls) {
     assert.equal(call.path, `/repos/${REPOSITORY}/check-runs`)
     assert.equal(call.options.method, 'POST')
@@ -186,6 +186,15 @@ test('check publication binds the fixed context name to the candidate SHA and de
   assert.equal(calls[0].options.body.conclusion, 'success')
   assert.equal(calls[1].options.body.conclusion, 'failure')
   assert.match(calls[1].options.body.output.summary, /job-not-success: API/)
+  assert.equal(calls[2].options.body.status, 'in_progress')
+  assert.equal(Object.hasOwn(calls[2].options.body, 'conclusion'), false)
+  assert.match(calls[2].options.body.output.summary, /earlier authority.*invalid/)
+  await assert.rejects(
+    publishMergeAuthorityCheck({
+      request: async () => ({}), repository: REPOSITORY, headSha: sha('e'), decision: 'UNKNOWN', reasons: [],
+    }),
+    /Unsupported merge-authority decision/,
+  )
 })
 
 test('request authentication is bearer-scoped and API errors never echo the token', async () => {
@@ -213,9 +222,9 @@ test('default-branch workflow keeps authority credentials behind the queue-only 
   const productWorkflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
   const readme = readFileSync(join(repoRoot, 'product/ci-metrics/README.md'), 'utf8')
   const verifier = readFileSync(join(repoRoot, 'product/ci-metrics/bin/verify-merge-authority.mjs'), 'utf8')
-  assert.match(workflow, /workflow_run:\s+workflows:\s+- Product quality gate\s+types:\s+- completed/)
+  assert.match(workflow, /workflow_run:\s+workflows:\s+- Product quality gate\s+types:\s+- in_progress\s+- completed/)
   assert.match(workflow, /permissions:\s+actions: read\s+contents: read/)
-  assert.match(workflow, /group: merge-authority-\$\{\{ github\.event\.workflow_run\.id \}\}\s+cancel-in-progress: true/)
+  assert.match(workflow, /group: merge-authority-\$\{\{ github\.event\.workflow_run\.id \}\}\s+cancel-in-progress: false/)
   assert.match(workflow, /if: github\.event\.workflow_run\.event == 'merge_group'/)
   assert.match(workflow, /environment:\s+name: merge-authority/)
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/)
@@ -227,6 +236,12 @@ test('default-branch workflow keeps authority credentials behind the queue-only 
   assert.match(workflow, /permission-contents: read/)
   assert.match(workflow, /MERGE_AUTHORITY_TOKEN: \$\{\{ steps\.authority-token\.outputs\.token \}\}/)
   assert.match(workflow, /run: node product\/ci-metrics\/bin\/verify-merge-authority\.mjs/)
+  assert.match(verifier, /if \(action === 'in_progress'\)[\s\S]*decision: 'PENDING'[\s\S]*return/)
+  assert.match(verifier, /if \(action !== 'completed'\)/)
+  assert.ok(
+    verifier.indexOf("if (action === 'in_progress')") < verifier.indexOf("token: requiredEnv('GITHUB_TOKEN')"),
+    'the pending App check must replace prior authority before completed-run evidence collection starts',
+  )
   assert.match(requester, /environment:\s+name: merge-authority/)
   assert.match(requester, /actions\/create-github-app-token@[0-9a-f]{40}/)
   assert.match(requester, /client-id: \$\{\{ vars\.MERGE_AUTHORITY_APP_CLIENT_ID \}\}/)

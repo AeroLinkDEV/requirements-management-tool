@@ -165,8 +165,9 @@ observation and a separate review.
 Two protected-default-branch paths publish the same App-bound `Trusted merge-queue binding` check. The
 trusted Full requester publishes it on an exact pull-request head only after the existing Product evidence
 and live readiness checks succeed; GitHub requires that pull-request check before an entry can join the
-queue. `.github/workflows/merge-queue-binding.yml` then observes completed `Product quality gate` runs with
-`workflow_run` and publishes the check on the composed `merge_group` SHA only after the queue-specific
+queue. `.github/workflows/merge-queue-binding.yml` observes `Product quality gate` runs with `workflow_run`.
+Each initial run or rerun first publishes an in-progress replacement so an older success cannot authorize
+the candidate while a newer attempt is active; the completed event publishes on the composed `merge_group` SHA only after the queue-specific
 evidence below passes. Both paths enter the `merge-authority` environment and use a repository-scoped
 AeroLink Merge Authority App token. Their ordinary `GITHUB_TOKEN` cannot publish the authority check.
 

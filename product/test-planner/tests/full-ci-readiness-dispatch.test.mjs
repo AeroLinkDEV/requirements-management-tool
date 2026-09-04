@@ -42,6 +42,16 @@ test('full workflow authenticates exact ready PR state before trusting dispatch 
   assert.match(full, /ready-for-full-ci is no longer present/)
 })
 
+test('immutable head readiness survives harmless base-branch advancement', () => {
+  assert.match(requester, /Readiness belongs to the immutable PR head/)
+  assert.doesNotMatch(requester, /base SHA moved/)
+  assert.doesNotMatch(requester, /pr\.get\("base".*base_sha/)
+  assert.match(full, /REQUESTED_BASE_SHA came from the trusted pull_request_target label event/)
+  assert.doesNotMatch(full, /pr\.base\.sha -ne \$env:REQUESTED_BASE_SHA/)
+  assert.match(requester, /run\.get\("actor".*github-actions\[bot\]/)
+  assert.match(requester, /run\.get\("triggering_actor".*github-actions\[bot\]/)
+})
+
 test('label-dispatched Full reuses PR classification and exact indentation', () => {
   assert.match(full, /inputs\.pull_request_number \|\| github\.event\.pull_request\.number \|\| github\.ref/)
   assert.match(full, /        env:\n          EVENT_NAME: .*inputs\.pull_request_number/)

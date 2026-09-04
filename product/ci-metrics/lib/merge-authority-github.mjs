@@ -167,24 +167,34 @@ export async function fetchDefaultBranch({ request, repository }) {
 
 export async function publishMergeAuthorityCheck({ request, repository, headSha, decision, reasons, detailsUrl }) {
   requireSha(headSha, 'Check-run head SHA')
+  if (!['PASS', 'REFUSE', 'PENDING'].includes(decision)) {
+    throw new Error(`Unsupported merge-authority decision '${decision ?? 'unknown'}'.`)
+  }
+  const pending = decision === 'PENDING'
   const passed = decision === 'PASS'
   const safeReasons = Array.isArray(reasons)
     ? reasons.slice(0, 50).map((reason) => String(reason).replace(/\r?\n/g, ' ').slice(0, 500))
     : ['The verifier returned no reason list.']
-  const summary = passed
-    ? 'Default-branch verification bound the complete Product quality gate evidence to this merge-queue candidate.'
-    : `The trusted verifier refused to bind this merge-queue candidate:\n\n${safeReasons.map((reason) => `- ${reason}`).join('\n')}`
+  const summary = pending
+    ? 'A Product quality gate attempt is in progress. Any earlier authority for this candidate is invalid until the latest attempt completes.'
+    : passed
+      ? 'Default-branch verification bound the complete Product quality gate evidence to this merge-queue candidate.'
+      : `The trusted verifier refused to bind this merge-queue candidate:\n\n${safeReasons.map((reason) => `- ${reason}`).join('\n')}`
   return request(`/repos/${repository}/check-runs`, {
     method: 'POST',
     body: {
       name: 'Trusted merge-queue binding',
       head_sha: headSha,
-      status: 'completed',
-      conclusion: passed ? 'success' : 'failure',
+      status: pending ? 'in_progress' : 'completed',
+      ...(!pending ? { conclusion: passed ? 'success' : 'failure' } : {}),
       ...(detailsUrl ? { details_url: detailsUrl } : {}),
       external_id: `aerolink-merge-authority:${headSha}`,
       output: {
-        title: passed ? 'Trusted merge-queue evidence bound' : 'Trusted merge-queue evidence refused',
+        title: pending
+          ? 'Trusted merge-queue evidence pending'
+          : passed
+            ? 'Trusted merge-queue evidence bound'
+            : 'Trusted merge-queue evidence refused',
         summary,
       },
     },

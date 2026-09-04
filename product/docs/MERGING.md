@@ -14,8 +14,9 @@ the existing Full Product gate by applying the repository label:
 gh pr edit <number> --add-label ready-for-full-ci
 ```
 
-The trusted default-branch requester authenticates the live pull request, exact head SHA, base SHA, head ref,
-same-repository origin and readiness label before dispatching Full validation. Product's internal
+The trusted default-branch requester authenticates the live pull request, exact head SHA, head ref,
+same-repository origin and readiness label before dispatching Full validation. The event-captured base SHA is
+the immutable comparison input for that run; `main` may advance without invalidating the unchanged head. Product's internal
 `Full Product evidence aggregate` must pass, including Product's own readiness-input authentication. Only then
 does the trusted requester complete the protected `Report what this run validated` context for that exact SHA.
 
@@ -45,6 +46,8 @@ pull-request head passes its App-bound readiness check, GitHub composes a tempor
 The complete Product gate runs on that exact composed SHA. A protected-default-branch verifier independently
 reads the completed run and publishes the App-bound `Trusted merge-queue binding` check only when every
 authoritative gate succeeded and the candidate did not replace trusted CI/authority machinery.
+An initial run or rerun first replaces any earlier App success with an in-progress check, so old evidence
+cannot remain authoritative while a newer Product attempt is active.
 
 Do **not** rebase merely because `main` advanced. That discards valid pull-request evidence and restarts the
 pre-queue gate. Check live state before touching the branch:
@@ -84,7 +87,7 @@ supersedes strict "require branches to be up to date" protection: the pull-reque
 the exact composed candidate cannot merge without passing the App-bound authority check.
 
 The required check is pinned to the dedicated AeroLink Merge Authority App, not accepted by name from any
-publisher. Its private key exists only in the `merge-authority` environment, whose deployment policy admits
+publisher. The App's private key exists only in the `merge-authority` environment, whose deployment policy admits
 `main` only. Pull-request readiness and merge-group binding run from protected default-branch definitions;
 candidate code cannot mint that check. Changes to `.github/`, `product/test-planner/`, or
 `product/ci-metrics/` deliberately refuse automatic queue binding and require an explicitly reviewed
