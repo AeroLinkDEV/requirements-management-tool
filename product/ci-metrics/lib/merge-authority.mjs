@@ -201,8 +201,12 @@ export function evaluateMergeGroupCandidate(input) {
       reasons.push(`job-from-foreign-run: job '${job?.name ?? 'unknown'}' belongs to run ${job.runId}, not the expected run ${expected.runId}`)
     } else if (typeof job?.runAttempt !== 'number') {
       reasons.push(`job-attempt-missing: job '${job?.name ?? 'unknown'}' does not carry its run attempt, so it may belong to a different attempt of run ${expected.runId}`)
-    } else if (job.runAttempt !== expected.runAttempt) {
-      reasons.push(`job-attempt-mismatch: job '${job?.name ?? 'unknown'}' belongs to attempt ${job.runAttempt}, not the expected attempt ${expected.runAttempt}`)
+    } else if (job.runAttempt > expected.runAttempt) {
+      // A partial rerun ("Re-run failed jobs") retains successful jobs at their earlier attempt — a
+      // continuation of the same run, per the established partial-rerun model in ci-metrics — so
+      // earlier attempts are accepted as retained evidence. Only records from a LATER attempt than
+      // the one being bound are refused: they cannot belong to the candidate's validation.
+      reasons.push(`job-attempt-mismatch: job '${job?.name ?? 'unknown'}' belongs to attempt ${job.runAttempt}, later than the expected attempt ${expected.runAttempt}`)
     }
   }
 
