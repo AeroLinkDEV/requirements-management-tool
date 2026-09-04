@@ -296,9 +296,26 @@ $stop = { param($C, $I) $script:order += 'stop'; $null }
 $advanceOk = { param($C, $I) $script:order += 'advance'; [pscustomobject]@{ Action = 'Updated'; Canonical = $true; HeadSha = 'bbbbbbbb'; TargetSha = 'bbbbbbbb'; Reason = 'advanced' } }
 $restart = { param($C, $R) $script:order += 'restart'; [pscustomobject]@{ Detail = 'restarted' } }
 
-$quiet = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $noMovement -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
-Assert-True (-not $quiet.Restarted) 'Scenario 14: reconciliation must do nothing when origin/main has not moved.'
+$demoIsUp = { param($C) [pscustomobject]@{ TunnelRunning = $true; RuntimeRunning = $true } }
+$quiet = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $noMovement -ServiceStateProbe $demoIsUp -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
+Assert-True (-not $quiet.Restarted) 'Scenario 14: reconciliation must do nothing when origin/main has not moved and the demo is up.'
 Assert-True (($script:order -join ',') -eq 'inspect') 'Scenario 14: a quiet pass must not stop, advance, or restart anything.'
+
+# "Source current" is not "service up". A transition that failed after teardown - a handoff whose child could
+# not start, most obviously - leaves the source current and the demo down, and a recovery timer that returns
+# on AlreadyCurrent agrees forever that there is nothing to do. Under the keep-ready policy an absent demo is
+# a thing to fix; under an operator update it is still not a thing to create.
+$script:order = @()
+$demoIsDown = { param($C) [pscustomobject]@{ TunnelRunning = $false; RuntimeRunning = $false } }
+$healed = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $noMovement -ServiceStateProbe $demoIsDown -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
+Assert-True ($healed.Restarted) 'Scenario 14: a current source with the demo DOWN must be recovered, not reported as nothing to do.'
+Assert-True (($script:order -join ',') -eq 'inspect,restart') 'Scenario 14: recovery starts the demo without stopping or advancing anything.'
+Assert-True ($healed.Detail -match 'was not running and was recovered') 'Scenario 14: the operator must be told the demo was recovered rather than updated.'
+
+$script:order = @()
+$notHealed = Invoke-AeroLinkProductionSourceReconciliation -Config $config -PreserveServiceState -SourceInspector $noMovement -ServiceStateProbe $demoIsDown -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
+Assert-True (-not $notHealed.Restarted) 'Scenario 14: an operator update must not create a demo that was not running.'
+Assert-True (($script:order -join ',') -eq 'inspect') 'Scenario 14: preserve-state means preserve, including preserving "nothing".'
 
 # The ordering IS the safety property. Advancing the working tree first would rewrite the assemblies,
 # migrations and client bundle out from under the process that is serving the public demo, for as long as

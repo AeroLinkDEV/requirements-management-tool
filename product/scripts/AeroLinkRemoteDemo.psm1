@@ -882,15 +882,28 @@ function Start-AeroLinkRemoteDemo {
                 # down, source unchanged, nothing restored. The obligation, not the call's position, decides
                 # whether anything is owed.
                 $obligation = New-AeroLinkTransitionObligation
+                $priorTopology = Get-AeroLinkServiceTopology -Config $Config
+                $obligation.PriorTunnel = [bool]$priorTopology.TunnelRunning
+                $obligation.PriorRuntime = [bool]$priorTopology.RuntimeRunning
                 $advanced = $null
                 try {
                     Assert-AeroLinkOwnedTunnelStopped -Config $Config -Run $run -Obligation $obligation | Out-Null
                     # Unconditionally, not "if it looks ready". A running process is what the tree is about to
                     # be rewritten under; an owned process that is up but unhealthy is exactly the one that
-                    # must not be left executing deleted files.
-                    & (Join-Path $Config.AeroLinkRoot 'product\scripts\Stop-AeroLink.ps1') | Out-Null
-                    $obligation.TeardownBegan = $true
+                    # must not be left executing deleted files. Each stop is recorded as it succeeds, and
+                    # PostgreSQL is left alone: it does not execute out of the source working tree.
+                    Stop-AeroLinkSourceExecutingProcesses -Config $Config -Obligation $obligation -Run $run | Out-Null
                     $advanced = Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -AdvanceToSha $inspect.TargetSha
+                    if ($advanced.Action -eq 'Updated' -and $advanced.Canonical -and $env:AEROLINK_REMOTE_DEMO_HANDOFF -ne $Config.AeroLinkRoot) {
+                        # The source generation changed, and this module is the old one. Everything after this
+                        # point - readiness, identity, the tunnel, the 401 proof - must run from the updated
+                        # entry point rather than from functions loaded before the advance.
+                        Invoke-AeroLinkRemoteDemoHandoff -Config $Config -Scheduled:$Scheduled -Run $run | Out-Null
+                        return [pscustomobject]@{
+                            Ready = $true; Action = 'HandedOff'
+                            Detail = "The production source was advanced to $($advanced.HeadSha) and the transition was completed by a fresh process running the updated source."
+                        }
+                    }
                 }
                 catch {
                     # Nothing was taken down, so nothing is owed: the tunnel refused to stop, or a mismatched
@@ -1416,7 +1429,130 @@ function New-AeroLinkTransitionObligation {
         TeardownBegan     = $false
         TunnelWasRunning  = $false
         RuntimeWasRunning = $false
+        # Exact prior topology, recorded before anything is touched. Distinct from the "WasRunning" fields
+        # above, which record what teardown ACTUALLY stopped: the two can differ when a stop fails partway,
+        # and discharge needs the prior topology rather than the teardown's own account of itself.
+        PriorTunnel       = $false
+        PriorRuntime      = $false
+        Discharged        = $false
     }
+}
+
+function Get-AeroLinkServiceTopology {
+    <#
+      .SYNOPSIS What is actually RUNNING, by ownership - not what is healthy, and not what is configured.
+      .DESCRIPTION
+        Three things were being confused, and each confusion published or destroyed a service.
+
+        Configuration is not topology: a remote-demo configuration file outlives a demo somebody deliberately
+        stopped, so treating its existence as "a tunnel is up" let an update publish an endpoint nobody asked
+        to publish.
+
+        Readiness is not topology either, and this is the subtler one. The rule that governs a source advance
+        is about a RUNNING process - an owned API that is up but unhealthy or stale is exactly the process
+        that must not be left executing files that have been replaced. Recording topology from a readiness
+        probe meant such a process was stopped while the record said nothing had been running, so discharge
+        then faithfully restored the wrong topology.
+
+        So topology is ownership: is there an AeroLink-owned ngrok matching the contract, and is there an
+        AeroLink-owned listener on the local port attributable to this source's API project directory.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [int]$Port = 5080
+    )
+    $apiProjectDirectory = Join-Path $Config.AeroLinkRoot 'product\src\AeroLink.Api'
+    $owner = Get-AeroLinkPortOwner -Port $Port
+    # Owned means attributable to THIS source's API project directory. A listener that cannot be attributed
+    # is not ours to count as our topology, and is not ours to stop either.
+    $ownedRuntime = $owner.Found -and $owner.Attributable -and
+        (Test-AeroLinkProcessOwnership -CommandLine $owner.CommandLine -ExecutablePath $owner.ExecutablePath -OwnershipFragments @($apiProjectDirectory))
+    return [pscustomobject]@{
+        TunnelRunning  = (@((Get-AeroLinkRemoteDemoNgrokProcess -Config $Config).Owned).Count -gt 0)
+        RuntimeRunning = [bool]$ownedRuntime
+        RuntimeDetail  = $owner.Detail
+    }
+}
+
+function Restore-AeroLinkServiceTopology {
+    <#
+      .SYNOPSIS Puts back exactly what was running, and nothing that was not.
+      .DESCRIPTION
+        The discharge half of the transition obligation, and the only place that decides what "restore" means.
+        It was previously spelled out at each exit path, which is why the failure paths and the success paths
+        disagreed: a failed advance under the preserve policy still called Start-AeroLinkRemoteDemo, so a
+        runtime-only installation came back as runtime + public tunnel, and an installation with nothing
+        running at all could acquire a whole demo from a compensation branch.
+
+        KeepReady is the scheduled recovery policy and is deliberately different: having the demo up is the
+        entire job of a recovery timer, so it starts the demo whatever the prior topology was.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)]$Topology,
+        [switch]$KeepReady,
+        [switch]$Scheduled,
+        $Run
+    )
+    if ($KeepReady -or $Topology.TunnelRunning) {
+        $why = if ($KeepReady) { 'recovery policy is keep-ready' } else { 'a public tunnel was running before this transition' }
+        if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Restoring the protected remote demo ($why)." }
+        return Start-AeroLinkRemoteDemo -Config $Config -Scheduled:$Scheduled
+    }
+    if ($Topology.RuntimeRunning) {
+        if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message 'Restoring the local production runtime only; no public tunnel was running before this transition.' }
+        & (Join-Path $Config.AeroLinkRoot 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser | Out-Null
+        return [pscustomobject]@{ Detail = 'Local production was restarted. No tunnel was running before this transition, so none was started.' }
+    }
+    if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message 'Nothing was running before this transition, so nothing was started.' }
+    return [pscustomobject]@{ Detail = 'Nothing was running before this transition, so nothing was started.' }
+}
+
+function Stop-AeroLinkSourceExecutingProcesses {
+    <#
+      .SYNOPSIS Stops what is executing out of the working tree, recording each stop as it succeeds.
+      .DESCRIPTION
+        Deliberately NOT Stop-AeroLink.ps1. Two reasons, and the second is the interesting one.
+
+        It is not atomic: it stops the listeners and then stops PostgreSQL, so a successful stop of port 5080
+        followed by a PostgreSQL failure meant the caller's obligation - recorded only when the whole script
+        returned - said nothing had been taken down while production was already gone.
+
+        And PostgreSQL does not execute out of the source working tree. Its binaries and cluster live under
+        the INSTALLATION (`product\.local\postgresql`), which the production clone reaches through a pointer;
+        a fast-forward of the source cannot touch either. Stopping it for a source transition was never
+        necessary, and stopping it made the teardown both slower and impossible to compensate cleanly. The
+        thing that must not be executing replaced files is the API - and the Vite server, in development.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        $Obligation,
+        $Run
+    )
+    $apiProjectDirectory = Join-Path $Config.AeroLinkRoot 'product\src\AeroLink.Api'
+    $clientRoot = Join-Path $Config.AeroLinkRoot 'product\client'
+    $stoppedAnything = $false
+
+    $api = Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiProjectDirectory)
+    if ($api.Stopped) {
+        $stoppedAnything = $true
+        # Recorded HERE, not after the last stop below: a later failure must not erase the fact that this one
+        # succeeded and production is already down.
+        if ($Obligation) { $Obligation.RuntimeWasRunning = $true; $Obligation.TeardownBegan = $true }
+        if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Stopped the owned production runtime: $($api.Detail)" }
+    }
+
+    $vite = Stop-AeroLinkOwnedListener -Port 5173 -OwnershipFragments @($clientRoot)
+    if ($vite.Stopped) {
+        $stoppedAnything = $true
+        if ($Obligation) { $Obligation.TeardownBegan = $true }
+        if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Stopped the owned client dev server: $($vite.Detail)" }
+    }
+
+    return [pscustomobject]@{ Stopped = $stoppedAnything; Api = $api; Client = $vite }
 }
 
 function Invoke-AeroLinkRemoteDemoHandoff {
@@ -1516,6 +1652,24 @@ function Invoke-AeroLinkProductionSourceReconciliation {
     }
     Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production-source inspection: $($inspect.Action) - $($inspect.Reason)"
     if ((-not $inspect.Canonical) -or $inspect.Action -ne 'UpdateAvailable') {
+        # "Source current" is not the same as "service up", and the recovery timer must not confuse them.
+        #
+        # A transition that failed after teardown - a handoff whose child could not start, most obviously -
+        # leaves the source current and the demo down. Returning here on AlreadyCurrent meant every later pass
+        # agreed there was nothing to do, and the protected endpoint stayed dark until somebody noticed. Under
+        # the keep-ready policy this pass is a recovery, so an absent demo is a thing to fix, not a thing to
+        # report. Under -PreserveServiceState it is an operator update and must still create nothing.
+        if (-not $PreserveServiceState -and $inspect.Canonical) {
+            $topology = if ($ServiceStateProbe) { & $ServiceStateProbe $Config } else { Get-AeroLinkServiceTopology -Config $Config }
+            if (-not $topology.TunnelRunning) {
+                Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'The source is current but the protected demo is not running; recovering it.'
+                $healed = if ($Restarter) { & $Restarter $Config $inspect } else { Start-AeroLinkRemoteDemo -Config $Config -Scheduled:$Scheduled }
+                return [pscustomobject]@{
+                    Action = $inspect.Action; Restarted = $true; HeadSha = $inspect.HeadSha
+                    Detail = "The source needed no update, but the protected demo was not running and was recovered. $($healed.Detail)"
+                }
+            }
+        }
         return [pscustomobject]@{ Action = $inspect.Action; Restarted = $false; HeadSha = $inspect.HeadSha; Detail = $inspect.Reason }
     }
 
@@ -1540,24 +1694,24 @@ function Invoke-AeroLinkProductionSourceReconciliation {
     # compensation entirely: public endpoint down, source unchanged, restarter never reached. What decides
     # whether anything is owed is the obligation, not where the call sits.
     $obligation = New-AeroLinkTransitionObligation
-    # What was actually up, before anything is touched. Only meaningful for the preserve policy; the
-    # scheduled pass records it for the log and then keeps the demo ready regardless.
-    $priorState = if ($ServiceStateProbe) { & $ServiceStateProbe $Config } else {
-        [pscustomobject]@{
-            TunnelRunning  = (@((Get-AeroLinkRemoteDemoNgrokProcess -Config $Config).Owned).Count -gt 0)
-            RuntimeRunning = (Test-AeroLinkRemoteDemoLocalReady -Config $Config).Ready
-        }
-    }
-    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Before teardown: tunnel $(if ($priorState.TunnelRunning) { 'running' } else { 'not running' }), local runtime $(if ($priorState.RuntimeRunning) { 'ready' } else { 'not ready' })."
+    # Exact prior topology, by OWNERSHIP, before anything is touched. Not readiness: the rule that governs a
+    # source advance is about a running process, and an owned API that is up but unhealthy is precisely the
+    # one that must not be left executing replaced files. Recording topology from a readiness probe meant
+    # such a process was stopped while the record said nothing had been running.
+    $priorState = if ($ServiceStateProbe) { & $ServiceStateProbe $Config } else { Get-AeroLinkServiceTopology -Config $Config }
+    $obligation.PriorTunnel = [bool]$priorState.TunnelRunning
+    $obligation.PriorRuntime = [bool]$priorState.RuntimeRunning
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Before teardown: tunnel $(if ($priorState.TunnelRunning) { 'running' } else { 'not running' }), owned runtime $(if ($priorState.RuntimeRunning) { 'running' } else { 'not running' })."
 
     $advance = $null
     try {
         if ($TunnelStopper) { & $TunnelStopper $Config | Out-Null; $obligation.TeardownBegan = $true }
         else { Assert-AeroLinkOwnedTunnelStopped -Config $Config -Run $run -Obligation $obligation | Out-Null }
 
-        if ($RuntimeStopper) { & $RuntimeStopper $Config $inspect | Out-Null }
-        else { & (Join-Path $Config.AeroLinkRoot 'product\scripts\Stop-AeroLink.ps1') | Out-Null }
-        $obligation.TeardownBegan = $true
+        # Records each stop as it succeeds, and does not touch PostgreSQL: it does not execute out of the
+        # source working tree, and folding it in made teardown non-atomic for no safety gain.
+        if ($RuntimeStopper) { & $RuntimeStopper $Config $inspect | Out-Null; $obligation.TeardownBegan = $true }
+        else { Stop-AeroLinkSourceExecutingProcesses -Config $Config -Obligation $obligation -Run $run | Out-Null }
 
         $advance = if ($SourceAdvancer) { & $SourceAdvancer $Config $inspect } else {
             Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -AdvanceToSha $inspect.TargetSha
@@ -1569,42 +1723,50 @@ function Invoke-AeroLinkProductionSourceReconciliation {
         # the stop refuse. Fail closed and leave the machine exactly as it was.
         if (-not $obligation.TeardownBegan) { throw }
         $failure = $_.Exception.Message
-        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The transition failed after the tunnel was taken down: $failure. Restoring the verified service on disk."
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The transition failed after teardown began: $failure. Restoring the prior topology."
         $restored = $null
-        try { $restored = if ($Restarter) { & $Restarter $Config $null } else { Start-AeroLinkRemoteDemo -Config $Config -Scheduled:$Scheduled } }
+        try {
+            # The SAME discharge as the success path, driven by the same prior topology. Compensation used to
+            # call Start-AeroLinkRemoteDemo unconditionally, so a runtime-only installation came back as
+            # runtime plus a public tunnel, and an installation with nothing running could acquire a whole
+            # demo from a failure branch. "Restore what was running, and only that" has to hold on the paths
+            # nobody watches, or it does not hold.
+            $restored = if ($Restarter) { & $Restarter $Config $null }
+            else { Restore-AeroLinkServiceTopology -Config $Config -Topology $priorState -KeepReady:(-not $PreserveServiceState) -Scheduled:$Scheduled -Run $run }
+            $obligation.Discharged = $true
+        }
         catch {
-            throw "The production source transition failed after the tunnel was stopped ($failure), and the service could not be restored either: $($_.Exception.Message). The source was not advanced."
+            throw "The production source transition failed after teardown began ($failure), and the prior service topology could not be restored either: $($_.Exception.Message). The source was not advanced."
         }
         return [pscustomobject]@{
             Action = 'TransitionFailed'; Restarted = $true; HeadSha = $inspect.HeadSha
-            Detail = "The production source was not advanced because the transition failed after the tunnel was taken down: $failure The verified service on disk was restored. $($restored.Detail)"
+            Detail = "The production source was not advanced because the transition failed after teardown began: $failure The prior service topology was restored. $($restored.Detail)"
         }
     }
 
-    # The full start, not a shortcut: it re-runs the source gate (now a no-op), starts the revision on disk,
-    # proves its runtime identity, and re-proves the protected endpoint.
-    #
-    # Under -PreserveServiceState it starts only what was actually up. A remote-demo configuration file
-    # outlives a deliberately stopped demo, so an operator update that ended by starting the tunnel would
-    # publish an endpoint on the strength of a file existing.
+    # Discharge. One decision, made from the prior topology and the policy, on every path.
     $result = if ($Restarter) { & $Restarter $Config $advance }
-    elseif ($PreserveServiceState -and -not $priorState.TunnelRunning) {
-        if ($priorState.RuntimeRunning) {
-            Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'Restoring the local production runtime only; no public tunnel was running before this update.'
-            & (Join-Path $Config.AeroLinkRoot 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser | Out-Null
-            [pscustomobject]@{ Detail = 'Local production was restarted; no tunnel was running before this update, so none was started.' }
-        }
-        else {
-            Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'Nothing was running before this update, so nothing was started.'
-            [pscustomobject]@{ Detail = 'Nothing was running before this update, so nothing was started.' }
-        }
-    }
-    elseif ($advance.Action -eq 'Updated' -and $env:AEROLINK_REMOTE_DEMO_HANDOFF -ne $Config.AeroLinkRoot) {
-        # The source moved, so this module is stale. Continue in a fresh process from the updated script
+    elseif ($advance.Action -eq 'Updated' -and $advance.Canonical -and $env:AEROLINK_REMOTE_DEMO_HANDOFF -ne $Config.AeroLinkRoot) {
+        # The source moved, so this module is stale: continue in a fresh process from the updated script
         # rather than letting the version already in memory drive the rest of the transition.
-        Invoke-AeroLinkRemoteDemoHandoff -Config $Config -Scheduled:$Scheduled -Run $run
+        #
+        # The handoff is a process boundary, and an obligation that does not survive it is not an obligation.
+        # If the updated child cannot build, start or prove the service, the tunnel and runtime are already
+        # down and the source is already current - so a later pass would see AlreadyCurrent and do nothing,
+        # leaving the demo dark indefinitely. Git is never rolled backward to compensate; the recovery is on
+        # the verified CURRENT source, to the topology that was running before.
+        try { Invoke-AeroLinkRemoteDemoHandoff -Config $Config -Scheduled:$Scheduled -Run $run }
+        catch {
+            $handoffFailure = $_.Exception.Message
+            Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The post-advance handoff failed: $handoffFailure. Recovering the prior topology on the current source."
+            try { Restore-AeroLinkServiceTopology -Config $Config -Topology $priorState -KeepReady:(-not $PreserveServiceState) -Scheduled:$Scheduled -Run $run }
+            catch {
+                throw "The source was advanced to $($advance.HeadSha) but the updated code could not complete the transition ($handoffFailure), and the prior service topology could not be recovered either: $($_.Exception.Message)."
+            }
+        }
     }
-    else { Start-AeroLinkRemoteDemo -Config $Config -Scheduled:$Scheduled }
+    else { Restore-AeroLinkServiceTopology -Config $Config -Topology $priorState -KeepReady:(-not $PreserveServiceState) -Scheduled:$Scheduled -Run $run }
+    $obligation.Discharged = $true
 
     if ($advance.Action -ne 'Updated' -or -not $advance.Canonical) {
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'The advance was refused; production was restarted on the revision already on disk.'
@@ -1819,6 +1981,9 @@ Export-ModuleMember -Function `
     Stop-AeroLinkRemoteDemo, `
     Assert-AeroLinkOwnedTunnelStopped, `
     New-AeroLinkTransitionObligation, `
+    Get-AeroLinkServiceTopology, `
+    Restore-AeroLinkServiceTopology, `
+    Stop-AeroLinkSourceExecutingProcesses, `
     Get-AeroLinkRemoteDemoTaskXml, `
     Get-AeroLinkReconcileTaskXml, `
     Install-AeroLinkReconcileTask, `

@@ -172,12 +172,18 @@ switch ($Action) {
         # What was ACTUALLY running, from the stop's own result rather than from the fact that a stop was
         # attempted. Assuming a runtime was there meant a refused advance could START production that had not
         # been running before this command was invoked - the opposite of preserving prior state.
-        $stoppedTheRuntime = $false
+        # An obligation inherited from the process that handed off to us: it stopped a runtime, advanced the
+        # source, and handed the duty to restart it to this fresh process running the updated code. Bound to
+        # the source root and cleared on read, so it is one-shot and local.
+        $stoppedTheRuntime = ($env:AEROLINK_RUNTIME_OWED -eq $config.SourceRoot)
+        $env:AEROLINK_RUNTIME_OWED = $null
         if ($inspect.Canonical -and $inspect.Action -eq 'UpdateAvailable') {
             Write-Host "      Stopping the production runtime before advancing to $($inspect.TargetSha)..." -ForegroundColor Yellow
             $apiDirectory = Join-Path $config.SourceRoot 'product\src\AeroLink.Api'
             $stopResult = Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiDirectory)
-            $stoppedTheRuntime = [bool]$stopResult.Stopped
+            # -or, not =: an obligation inherited from the process that handed off to us is not cancelled by
+            # this process finding nothing left to stop. It already stopped it.
+            $stoppedTheRuntime = $stoppedTheRuntime -or [bool]$stopResult.Stopped
             if (-not $stoppedTheRuntime) { Write-Host '      No AeroLink-owned runtime was on 5080; none will be started by this command.' -ForegroundColor DarkGray }
             # Everything after the stop is inside the compensation boundary, the same as the scheduled pass
             # and the production bootstrap. This is a documented operator action; once it has taken a running
@@ -196,6 +202,35 @@ switch ($Action) {
         }
         else { $result = $inspect }
         $result | Format-List
+
+        # The control plane is part of what an update replaces, here too.
+        #
+        # This script has already loaded itself and its modules; a successful advance may have replaced any of
+        # them, and everything below - posture re-check, restart, reporting - would then run on bytes the
+        # update superseded. Hand the rest to a fresh process from the updated source, exactly as the
+        # production launcher's re-entry and the remote-demo handoff do. AEROLINK_PRODUCTION_SOURCE_HANDOFF is
+        # bound to the source root and consumed by the child, so it is one-shot and cannot recurse.
+        if ($result.Action -eq 'Updated' -and $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF -ne $config.SourceRoot) {
+            $updatedScript = Join-Path $config.SourceRoot 'product\scripts\Configure-AeroLinkProductionSource.ps1'
+            if (-not (Test-Path -LiteralPath $updatedScript -PathType Leaf)) {
+                throw "The source was advanced but the updated tree has no configuration script at $updatedScript. The runtime was stopped and has NOT been restarted; start it with START_AEROLINK_PRODUCTION.bat."
+            }
+            Write-Host 'The source advanced; completing the update from the new revision...' -ForegroundColor Cyan
+            $previousHandoff = $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF
+            $previousOwed = $env:AEROLINK_RUNTIME_OWED
+            try {
+                $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF = $config.SourceRoot
+                # The obligation crosses the process boundary: the child must know a runtime was taken down,
+                # or the transition ends with production stopped and nothing owning the duty to restart it.
+                if ($stoppedTheRuntime) { $env:AEROLINK_RUNTIME_OWED = $config.SourceRoot }
+                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updatedScript -Action Update
+                exit $LASTEXITCODE
+            }
+            finally {
+                $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF = $previousHandoff
+                $env:AEROLINK_RUNTIME_OWED = $previousOwed
+            }
+        }
 
         # Restore exactly what was running, and only what was running.
         #
