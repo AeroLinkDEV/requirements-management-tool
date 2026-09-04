@@ -58,23 +58,36 @@ function Wait-HttpEndpoint {
 
 function Clear-StaleAeroLinkPort {
     <#
-      .SYNOPSIS Takes a port back from a previous AeroLink process, and refuses to take it from anything else.
+      .SYNOPSIS Takes a port back from a previous AeroLink process of THIS checkout, and refuses otherwise.
       .DESCRIPTION
         Re-running a launcher while the last one is still up is the normal case, so the port is reclaimed rather
         than reported. What must not happen is killing somebody's unrelated process because it happened to be on
         5080 — so the owning command line is checked first and an unrecognised one is an error, not a casualty.
+
+        EVERY fragment must appear, and the caller passes fragments specific to one checkout. This used to
+        accept a match on ANY fragment while the development launcher passed the generic word 'vite' beside
+        the client root, so another project's Vite server on 5173 satisfied 'vite' and became eligible to be
+        killed. #881 is explicit that unrecognized processes on AeroLink ports must never be killed, and
+        another checkout's server is not this checkout's to reclaim.
+
+        Matching is literal and case-insensitive: a filesystem path is not a wildcard pattern.
     #>
     param(
         [Parameter(Mandatory)][int]$Port,
         [Parameter(Mandatory)][string[]]$ExpectedCommandFragments
     )
+    $required = @($ExpectedCommandFragments | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($required.Count -eq 0) { throw "Reclaiming port $Port requires at least one ownership fragment; refusing to stop anything on a port whose ownership cannot be established." }
     $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
     foreach ($listener in $listeners) {
         $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
+        if (-not $process) {
+            throw "Port $Port is held by PID $($listener.OwningProcess), but its command line could not be read, so AeroLink cannot tell whether it owns it. Nothing was stopped."
+        }
         $command = "$($process.ExecutablePath) $($process.CommandLine)"
-        $recognized = $false
-        foreach ($fragment in $ExpectedCommandFragments) {
-            if ($command -like "*$fragment*") { $recognized = $true; break }
+        $recognized = $true
+        foreach ($fragment in $required) {
+            if ($command.IndexOf($fragment, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $recognized = $false; break }
         }
         if (-not $recognized) {
             throw "Port $Port is occupied by another application (PID $($listener.OwningProcess)). Close it and run this launcher again."

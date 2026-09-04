@@ -36,6 +36,10 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkUpgrade.psm1') -Force
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
 $apiProject = Join-Path $productRoot 'src\AeroLink.Api\AeroLink.Api.csproj'
+# Process ownership is judged on the project DIRECTORY, not the .csproj: the process that holds 5080 is the
+# apphost under bin\, whose command line never contains the .csproj path. It is checkout-specific, which is
+# what keeps another checkout's AeroLink from being treated as ours to stop (#881).
+$apiProjectDirectory = Split-Path $apiProject -Parent
 $clientRoot = Join-Path $productRoot 'client'
 $distRoot = Join-Path $clientRoot 'dist'
 # The persistent installation this source belongs to. On HOME that is the canonical installation, whether
@@ -168,7 +172,7 @@ Assert-AeroLinkPostgres -ProductRoot $productRoot
 Write-Host '      Checking what is already on 127.0.0.1:5080...' -ForegroundColor Cyan
 $disposition = Resolve-AeroLinkRuntimeDisposition -Port 5080 -BaseUri $url `
     -ExpectedMode $launcherMode -ExpectedSourceIdentity $sourceFingerprint.Identity `
-    -OwnershipFragments @('AeroLink.Api', $apiProject)
+    -OwnershipFragments @($apiProjectDirectory)
 if ($disposition.Disposition -eq 'Refuse') { throw $disposition.Detail }
 $reuseExisting = ($disposition.Disposition -eq 'Reuse')
 if ($reuseExisting) {
@@ -176,7 +180,7 @@ if ($reuseExisting) {
 }
 elseif ($disposition.Disposition -ne 'Free') {
     Write-Host "      $($disposition.Detail)" -ForegroundColor Yellow
-    Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @('AeroLink.Api', $apiProject) | Out-Null
+    Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiProjectDirectory) | Out-Null
 }
 
 # Upgrade posture before the client build, so a database this build cannot operate on costs seconds rather
@@ -211,7 +215,13 @@ else {
             throw 'AeroLink was not started: the canonical database needs an explicit decision that AeroLink is not entitled to make.'
         }
         default {
-            Write-Host "      Database upgrade posture could not be established: $($upgradePosture.Detail)" -ForegroundColor Yellow
+            # Fail closed, as development does. The canonical database has even less business being exercised
+            # by a build whose compatibility with it could not be established.
+            Write-Host ''
+            Write-Host 'DATABASE UPGRADE POSTURE COULD NOT BE ESTABLISHED' -ForegroundColor Red
+            Write-Host $upgradePosture.Detail -ForegroundColor Red
+            Write-Host 'No persistent data was changed.' -ForegroundColor Red
+            throw "AeroLink was not started: this build's compatibility with the canonical database could not be established."
         }
     }
 }

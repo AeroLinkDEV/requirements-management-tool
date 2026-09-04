@@ -28,13 +28,23 @@ function Assert-Throws([scriptblock]$Action, [string]$Pattern, [string]$Message)
     $script:failures.Add("$Message (nothing was thrown)")
 }
 
-$ownership = @('AeroLink.Api', 'C:\Sean Project\AeroLink Production\product\src\AeroLink.Api\AeroLink.Api.csproj')
+# The project DIRECTORY, which is what a real listener's command line carries. Measured from a live process
+# on this machine: the holder of the API port is the apphost at
+# <project dir>\bin\Debug\net10.0\AeroLink.Api.exe, so the .csproj path never appears in it and requiring
+# the .csproj would refuse every launch instead of tightening anything.
+$ownership = @('C:\Sean Project\AeroLink Production\product\src\AeroLink.Api')
+$otherCheckout = 'C:\Sean Project\Requirements Management Tool\product\src\AeroLink.Api'
 $currentSha = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
 $olderSha = '0f1e2d3c4b5a69788796a5b4c3d2e1f098765432'
 
 function New-Owner {
-    param([int]$ProcessId = 4242, [string]$CommandLine = 'dotnet run --project "C:\Sean Project\AeroLink Production\product\src\AeroLink.Api\AeroLink.Api.csproj"')
-    return { param($Port) [pscustomobject]@{ Found = $true; Ambiguous = $false; Attributable = $true; ProcessId = $ProcessId; CommandLine = $CommandLine; ExecutablePath = 'C:\Program Files\dotnet\dotnet.exe'; Detail = "Port $Port is held by PID $ProcessId." } }.GetNewClosure()
+    # The real shape, copied from a live listener rather than imagined.
+    param(
+        [int]$ProcessId = 4242,
+        [string]$CommandLine = '"C:\Sean Project\AeroLink Production\product\src\AeroLink.Api\bin\Debug\net10.0\AeroLink.Api.exe"  --urls http://127.0.0.1:5080',
+        [string]$ExecutablePath = 'C:\Sean Project\AeroLink Production\product\src\AeroLink.Api\bin\Debug\net10.0\AeroLink.Api.exe'
+    )
+    return { param($Port) [pscustomobject]@{ Found = $true; Ambiguous = $false; Attributable = $true; ProcessId = $ProcessId; CommandLine = $CommandLine; ExecutablePath = $ExecutablePath; Detail = "Port $Port is held by PID $ProcessId." } }.GetNewClosure()
 }
 function New-Identity {
     param([string]$Sha, [string]$Mode)
@@ -43,7 +53,7 @@ function New-Identity {
 $alwaysReady = { param($BaseUri) $true }
 
 function Get-Disposition {
-    param($PortOwnerProbe, $RuntimeProbe, $ReadyProbe = $alwaysReady, [string]$ExpectedMode = 'HOME-PRODUCTION', [string]$ExpectedIdentity = $currentSha)
+    param($PortOwnerProbe, $RuntimeProbe, $ReadyProbe = $alwaysReady, [string]$ExpectedMode = 'HOME-PRODUCTION', [AllowNull()][AllowEmptyString()][string]$ExpectedIdentity = $currentSha)
     return Resolve-AeroLinkRuntimeDisposition -Port 5080 -BaseUri 'http://127.0.0.1:5080' `
         -ExpectedMode $ExpectedMode -ExpectedSourceIdentity $ExpectedIdentity -OwnershipFragments $ownership `
         -PortOwnerProbe $PortOwnerProbe -RuntimeProbe $RuntimeProbe -ReadyProbe $ReadyProbe
@@ -118,10 +128,29 @@ try {
     $null = Get-Disposition -PortOwnerProbe $testPortOwner -RuntimeProbe (New-Identity $currentSha 'HOME-PRODUCTION')
 
     # --- Ownership matching is by command line and executable, and is not fooled by a similar name ---
-    Assert-True (Test-AeroLinkProcessOwnership -CommandLine 'dotnet run --project "...\AeroLink.Api.csproj"' -ExecutablePath 'dotnet.exe' -OwnershipFragments $ownership) `
-        'An AeroLink API command line is recognized.'
+    Assert-True (Test-AeroLinkProcessOwnership -CommandLine "dotnet run --project `"$($ownership[0])\AeroLink.Api.csproj`"" -ExecutablePath 'dotnet.exe' -OwnershipFragments $ownership) `
+        'This checkout''s AeroLink API command line is recognized.'
     Assert-True (-not (Test-AeroLinkProcessOwnership -CommandLine 'node aerolink-api-mock.js' -ExecutablePath 'node.exe' -OwnershipFragments $ownership)) `
         'A process merely mentioning AeroLink in a different form is not owned.'
+
+    # The dangerous near-match, and the reason ownership is no longer an OR over fragments: ANOTHER
+    # CHECKOUT'S AeroLink. It is unmistakably an AeroLink API, and it is unmistakably not ours to stop.
+    $otherCheckoutCommand = "`"$otherCheckout\bin\Debug\net10.0\AeroLink.Api.exe`"  --urls http://127.0.0.1:5080"
+    Assert-True (-not (Test-AeroLinkProcessOwnership -CommandLine $otherCheckoutCommand -ExecutablePath "$otherCheckout\bin\Debug\net10.0\AeroLink.Api.exe" -OwnershipFragments $ownership)) `
+        'Another checkout''s AeroLink API must not be owned by this checkout.'
+
+    $otherCheckoutOwner = New-Owner -ProcessId 5150 -CommandLine $otherCheckoutCommand -ExecutablePath "$otherCheckout\bin\Debug\net10.0\AeroLink.Api.exe"
+    $otherCheckoutRefusal = Get-Disposition -PortOwnerProbe $otherCheckoutOwner -RuntimeProbe (New-Identity $currentSha 'HOME-PRODUCTION')
+    Assert-True ($otherCheckoutRefusal.Disposition -eq 'Refuse') `
+        'Another checkout''s AeroLink on our port must be refused, not stopped as though it were ours.'
+    $stoppedOther = [System.Collections.Generic.List[int]]::new()
+    Assert-Throws { Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments $ownership -PortOwnerProbe $otherCheckoutOwner -Stopper { param($ProcessId) $stoppedOther.Add($ProcessId) } } `
+        'occupied by another application' 'Stopping another checkout''s AeroLink must throw.'
+    Assert-True ($stoppedOther.Count -eq 0) 'Another checkout''s AeroLink must never be stopped.'
+
+    # Every fragment must match, so an empty fragment set can never be an implicit yes.
+    Assert-True (-not (Test-AeroLinkProcessOwnership -CommandLine $otherCheckoutCommand -ExecutablePath 'x' -OwnershipFragments @())) `
+        'No ownership fragment means ownership cannot be established, never that it is granted.'
     Assert-True (-not (Test-AeroLinkProcessOwnership -CommandLine $null -ExecutablePath $null -OwnershipFragments $ownership)) `
         'A process whose command line cannot be read is not owned.'
 
@@ -172,6 +201,50 @@ try {
         -ExpectedMode 'LOCAL-DEV' -ExpectedIdentity "$currentSha+worktree:0123456789abcdef"
     Assert-True ($dirtyDecision.Disposition -eq 'RestartStale') `
         'A launcher running a dirty tree must not reuse a process that reports only the commit SHA.'
+
+    # --- A pathname Git would C-quote must still change the identity ---
+    #
+    # With plain --porcelain, a name containing a space, a quote or a non-ASCII character comes back quoted
+    # and escaped; the old parser trimmed quotes but decoded nothing, failed to resolve the file, and folded
+    # in only the status text. Editing that file then left the identity unchanged, which is a stale process
+    # surviving an edit. --porcelain=v1 -z emits the name verbatim.
+    $awkwardName = 'r' + [char]0x00E9 + 'serv' + [char]0x00E9 + ' notes.tsx'
+    $awkward = Join-Path $repo $awkwardName
+    Set-Content -LiteralPath $awkward -Value 'one' -Encoding UTF8
+    $awkwardFirst = Get-AeroLinkSourceFingerprint -RepositoryRoot $repo
+    Set-Content -LiteralPath $awkward -Value 'two' -Encoding UTF8
+    $awkwardSecond = Get-AeroLinkSourceFingerprint -RepositoryRoot $repo
+    Assert-True ($awkwardFirst.Identity -ne $awkwardSecond.Identity) `
+        "Editing a file whose pathname Git would quote must change the source identity (before='$($awkwardFirst.Identity)' after='$($awkwardSecond.Identity)' detail='$($awkwardSecond.Detail)')."
+    Remove-Item -LiteralPath $awkward -Force
+
+    # --- A rename carries both paths, and the parse stays in step ---
+    Set-Content -LiteralPath (Join-Path $repo 'renamed.txt') -Value 'content' -Encoding ASCII
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & git -C $repo add -A 2>&1 | Out-Null
+    & git -C $repo commit -m 'add renamed' --quiet 2>&1 | Out-Null
+    & git -C $repo mv 'renamed.txt' 'renamed-now.txt' 2>&1 | Out-Null
+    $ErrorActionPreference = $previousPreference
+    $renameFingerprint = Get-AeroLinkSourceFingerprint -RepositoryRoot $repo
+    Assert-True (-not [string]::IsNullOrWhiteSpace($renameFingerprint.Identity)) 'A rename must still produce a source identity rather than derailing the parse.'
+    Assert-True ($renameFingerprint.Reusable -eq $true) 'A bounded dirty tree with a rename is still fingerprintable.'
+
+    # --- Unknown source must be UNREUSABLE, not consistently unknown ---
+    #
+    # The old code returned the stable string "<sha>+worktree:unfingerprintable" here. Two consecutive
+    # launches in that state therefore produced the same expected identity, the process published it, and the
+    # second launch REUSED a process whose bytes had never been established.
+    $overLimit = [pscustomobject]@{ Sha = $currentSha; IsDirty = $true; Reusable = $false; Identity = $null }
+    $firstLaunch = Get-Disposition -PortOwnerProbe (New-Owner) `
+        -RuntimeProbe (New-Identity $currentSha 'LOCAL-DEV') -ExpectedMode 'LOCAL-DEV' -ExpectedIdentity $overLimit.Identity
+    Assert-True ($firstLaunch.Disposition -eq 'RestartStale') 'An unprovable source must not reuse a running process.'
+    # The second consecutive launch, against a process started by the first one under the same condition.
+    $secondLaunch = Get-Disposition -PortOwnerProbe (New-Owner) `
+        -RuntimeProbe { param($BaseUri) [pscustomobject]@{ sourceIdentity = ''; sourceShortSha = ''; mode = 'LOCAL-DEV' } } `
+        -ExpectedMode 'LOCAL-DEV' -ExpectedIdentity $overLimit.Identity
+    Assert-True ($secondLaunch.Disposition -eq 'RestartStale') `
+        'Two consecutive launches with unprovable source must BOTH restart; unknown must never become a stable reusable identity.'
 }
 finally {
     foreach ($fixture in $fixtures) {

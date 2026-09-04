@@ -28,6 +28,73 @@ Set-StrictMode -Version Latest
 # is correct behaviour; the alternative is minutes of hashing on every launch.
 $script:AeroLinkDirtyFileLimit = 2000
 
+function Read-AeroLinkGitUtf8 {
+    <#
+        .SYNOPSIS Runs git and decodes its standard output as UTF-8, whichever PowerShell host is running.
+        .DESCRIPTION
+            Both supported hosts decode a native command's output through a console encoding, and they do not
+            agree about it. Git emits pathnames as UTF-8 bytes, so the decoding has to be ours or a
+            non-ASCII pathname arrives corrupted. StandardOutputEncoding makes that explicit and local.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string[]]$GitArguments
+    )
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = 'git.exe'
+    $startInfo.WorkingDirectory = $RepositoryRoot
+    # Arguments as one quoted string, not ArgumentList: that collection is .NET Core only, and the supported
+    # launcher chain includes Windows PowerShell 5.1 on .NET Framework.
+    $quoted = @("-C", "`"$RepositoryRoot`"") + $GitArguments
+    $startInfo.Arguments = $quoted -join ' '
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
+    $startInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $null = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+    return [pscustomobject]@{ ExitCode = $process.ExitCode; StdOut = $stdout }
+}
+
+function Split-AeroLinkPorcelainZ {
+    <#
+        .SYNOPSIS Splits `git status --porcelain=v1 -z` output into entries with verbatim pathnames.
+        .DESCRIPTION
+            The -z format is NUL-terminated and never quotes or escapes a pathname, which is the whole reason
+            for using it: a file called `réservé.tsx` or one with a space, a quote or a backslash comes back
+            exactly as it is on disk. Renames and copies (R/C) emit a SECOND NUL-terminated field holding the
+            original path immediately after the entry, so that field is consumed and kept — both paths belong
+            to the fingerprint, and mistaking the origin path for the next entry would desynchronise the
+            whole parse.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][string]$Raw)
+    if ([string]::IsNullOrEmpty($Raw)) { return @() }
+    $fields = $Raw -split "`0"
+    $entries = @()
+    for ($index = 0; $index -lt $fields.Count; $index++) {
+        $field = $fields[$index]
+        if ([string]::IsNullOrEmpty($field)) { continue }
+        # "XY <path>": two status characters and a space.
+        if ($field.Length -lt 4) { continue }
+        $status = $field.Substring(0, 2)
+        $path = $field.Substring(3)
+        if ($status[0] -eq 'R' -or $status[0] -eq 'C') {
+            $index++
+            $origin = if ($index -lt $fields.Count) { $fields[$index] } else { '' }
+            $entries += [pscustomobject]@{ Status = $status; Path = $path; OriginPath = $origin }
+            continue
+        }
+        $entries += [pscustomobject]@{ Status = $status; Path = $path; OriginPath = $null }
+    }
+    return ,$entries
+}
+
 function Get-AeroLinkSourceFingerprint {
     <#
         .SYNOPSIS The exact source identity of a checkout, honest about dirt.
@@ -45,35 +112,56 @@ function Get-AeroLinkSourceFingerprint {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $sha = (& git -C $RepositoryRoot rev-parse HEAD 2>$null | Select-Object -First 1)
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sha)) {
-            return [pscustomobject]@{ Sha = $null; IsDirty = $null; Identity = $null; Detail = 'The source is not a Git working tree; its identity cannot be established.' }
+        # Read through the same explicit process call as the status below, rather than `& git | Select-Object
+        # -First 1`. Piping a native command into Select-Object -First stops the pipeline early, and under
+        # PowerShell 7 that can terminate git before it exits cleanly and leave a non-zero $LASTEXITCODE — so
+        # a perfectly good working tree intermittently reported "not a Git working tree" and lost its
+        # identity, which forces a needless restart at best.
+        $shaRun = Read-AeroLinkGitUtf8 -RepositoryRoot $RepositoryRoot -GitArguments @('rev-parse', 'HEAD')
+        $sha = ($shaRun.StdOut -split "`r?`n" | Where-Object { $_ -and $_.Trim() } | Select-Object -First 1)
+        if ($shaRun.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($sha)) {
+            return [pscustomobject]@{ Sha = $null; IsDirty = $null; Reusable = $false; Identity = $null; Detail = 'The source is not a Git working tree; its identity cannot be established.' }
         }
         $sha = $sha.Trim()
-        $status = @(& git -C $RepositoryRoot status --porcelain 2>$null | Where-Object { $_ -and $_.Trim() })
+        # -z: NUL-separated, and pathnames are emitted verbatim rather than C-quoted. With plain --porcelain
+        # a path containing a space, a quote, or any non-ASCII character comes back quoted and escaped, and
+        # the naive unquoting below it could not resolve the file — so a changed file contributed only its
+        # status text and later edits to it did not change the fingerprint. That is a stale process surviving
+        # an edit, which is the exact failure this function exists to prevent.
+        # Read git's bytes and decode them as UTF-8 ourselves rather than letting the host do it. Git writes
+        # pathnames as UTF-8; Windows PowerShell 5.1 decodes native output through a code page, and the two
+        # hosts disagree about how that is configured, so `réservé.tsx` arrived mangled on at least one of
+        # them. A mangled name fails Test-Path, contributes only its status text, and its edits then leave
+        # the source identity unchanged — a stale process surviving an edit.
+        $statusRun = Read-AeroLinkGitUtf8 -RepositoryRoot $RepositoryRoot -GitArguments @('status', '--porcelain=v1', '-z')
+        $statusRaw = $statusRun.StdOut
+        $LASTEXITCODE = $statusRun.ExitCode
         if ($LASTEXITCODE -ne 0) {
-            return [pscustomobject]@{ Sha = $sha; IsDirty = $null; Identity = "$sha+worktree:unfingerprintable"; Detail = 'The working-tree state could not be read.' }
+            return [pscustomobject]@{ Sha = $sha; IsDirty = $null; Reusable = $false; Identity = $null; Detail = 'The working-tree state could not be read, so this source cannot be proven equivalent to a running process.' }
         }
+        $status = @(Split-AeroLinkPorcelainZ -Raw $statusRaw)
     }
     finally { $ErrorActionPreference = $previous }
 
     if ($status.Count -eq 0) {
-        return [pscustomobject]@{ Sha = $sha; IsDirty = $false; Identity = $sha; Detail = "Clean checkout at $($sha.Substring(0,8))." }
+        return [pscustomobject]@{ Sha = $sha; IsDirty = $false; Reusable = $true; Identity = $sha; Detail = "Clean checkout at $($sha.Substring(0,8))." }
     }
     if ($status.Count -gt $script:AeroLinkDirtyFileLimit) {
-        return [pscustomobject]@{ Sha = $sha; IsDirty = $true; Identity = "$sha+worktree:unfingerprintable"; Detail = "$($status.Count) changed paths is beyond the bounded fingerprint limit; the runtime will be restarted rather than assumed equivalent." }
+        # Not an identity. A string like "<sha>+worktree:unfingerprintable" is stable, so two consecutive
+        # launches in this state produced the same value and the second one REUSED a process whose bytes were
+        # never established. Unknown source must be unreusable, not consistently unknown.
+        return [pscustomobject]@{ Sha = $sha; IsDirty = $true; Reusable = $false; Identity = $null; Detail = "$($status.Count) changed paths is beyond the bounded fingerprint limit; the runtime will be restarted rather than assumed equivalent." }
     }
 
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
     try {
         $builder = New-Object System.Text.StringBuilder
-        foreach ($entry in ($status | Sort-Object)) {
-            [void]$builder.AppendLine($entry)
-            # Porcelain v1: two status characters, a space, then the path (renames use " -> ").
-            $path = $entry.Substring(3)
-            if ($path -match ' -> ') { $path = ($path -split ' -> ')[-1] }
-            $path = $path.Trim('"')
-            $full = Join-Path $RepositoryRoot $path
+        foreach ($entry in ($status | Sort-Object -Property Status, Path)) {
+            [void]$builder.AppendLine("$($entry.Status) $($entry.Path)")
+            if ($entry.OriginPath) { [void]$builder.AppendLine("from $($entry.OriginPath)") }
+            # The path is verbatim from -z: no quoting to strip, no escapes to decode, so a file whose name
+            # contains a space, a quote or a non-ASCII character resolves like any other.
+            $full = Join-Path $RepositoryRoot $entry.Path
             if (Test-Path -LiteralPath $full -PathType Leaf) {
                 [void]$builder.AppendLine((Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash)
             }
@@ -93,6 +181,7 @@ function Get-AeroLinkSourceFingerprint {
     return [pscustomobject]@{
         Sha      = $sha
         IsDirty  = $true
+        Reusable = $true
         Identity = "$sha+worktree:$($digest.Substring(0, 16))"
         Detail   = "Checkout at $($sha.Substring(0,8)) with $($status.Count) local change(s); the worktree fingerprint is part of its identity."
     }
@@ -151,7 +240,25 @@ function Get-AeroLinkPortOwner {
 
 function Test-AeroLinkProcessOwnership {
     <#
-        .SYNOPSIS Whether a command line is recognizably an AeroLink process this repository launched.
+        .SYNOPSIS Whether a process is one THIS checkout launched. Every fragment must appear.
+        .DESCRIPTION
+            This used to return true if ANY fragment matched, and the callers passed a generic
+            'AeroLink.Api' alongside the checkout-specific project path. A second checkout's API therefore
+            satisfied the generic fragment and became eligible to be stopped — precisely the "do not assume
+            every AeroLink-looking process belongs to production" case the 2026-09-03 amendment names. Every
+            fragment must now match, and callers pass fragments that are specific to one checkout.
+
+            The fragment to pass is the project or client DIRECTORY, not the .csproj path. Measured on this
+            machine, the process that actually holds port 5080 is the apphost, not `dotnet run`:
+
+                C:\...\product\src\AeroLink.Api\bin\Debug\net10.0\AeroLink.Api.exe  --urls http://127.0.0.1:5097
+
+            Its command line contains the project directory and never the .csproj path, so requiring the
+            .csproj would match nothing and refuse every launch. Vite is the same shape — its command line
+            carries the client root through node_modules.
+
+            Matching is literal and case-insensitive rather than -like: a path is not a wildcard pattern, and
+            a directory containing [ or ] would otherwise be silently mis-compared.
     #>
     [CmdletBinding()]
     param(
@@ -160,12 +267,14 @@ function Test-AeroLinkProcessOwnership {
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$OwnershipFragments
     )
     if ([string]::IsNullOrWhiteSpace($CommandLine) -and [string]::IsNullOrWhiteSpace($ExecutablePath)) { return $false }
+    $required = @($OwnershipFragments | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    # No fragment means no way to establish ownership. Never an implicit yes.
+    if ($required.Count -eq 0) { return $false }
     $candidate = "$ExecutablePath $CommandLine"
-    foreach ($fragment in $OwnershipFragments) {
-        if ([string]::IsNullOrWhiteSpace($fragment)) { continue }
-        if ($candidate -like "*$fragment*") { return $true }
+    foreach ($fragment in $required) {
+        if ($candidate.IndexOf($fragment, [StringComparison]::OrdinalIgnoreCase) -lt 0) { return $false }
     }
-    return $false
+    return $true
 }
 
 function Resolve-AeroLinkRuntimeDisposition {
@@ -190,7 +299,10 @@ function Resolve-AeroLinkRuntimeDisposition {
         [Parameter(Mandatory)][int]$Port,
         [Parameter(Mandatory)][string]$BaseUri,
         [Parameter(Mandatory)][string]$ExpectedMode,
-        [Parameter(Mandatory)][AllowNull()][string]$ExpectedSourceIdentity,
+        # Null or empty is the "this source cannot be proven" signal, and it must bind rather than throw:
+        # Get-AeroLinkSourceFingerprint returns a null Identity when the worktree state is unreadable or
+        # beyond the bounded limit, and PowerShell converts that null to an empty string on the way in.
+        [Parameter(Mandatory)][AllowNull()][AllowEmptyString()][string]$ExpectedSourceIdentity,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$OwnershipFragments,
         [scriptblock]$PortOwnerProbe,
         [scriptblock]$RuntimeProbe,
@@ -289,6 +401,10 @@ function Stop-AeroLinkOwnedListener {
 }
 
 Export-ModuleMember -Function @(
+    # Exported so the porcelain parser can be exercised directly rather than only through a fingerprint:
+    # rename pairing and verbatim pathnames are exactly the parts that were wrong before.
+    'Read-AeroLinkGitUtf8',
+    'Split-AeroLinkPorcelainZ',
     'Get-AeroLinkSourceFingerprint',
     'Get-AeroLinkRuntimeIdentity',
     'Get-AeroLinkPortOwner',
