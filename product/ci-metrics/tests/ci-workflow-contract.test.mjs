@@ -200,22 +200,27 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   // A merge queue validates the composed tree with a merge_group run of this workflow. A job gated on
   // pull_request can silently disappear there; the merge-group guard inside "Summarise and enforce" is
   // what turns that missing evidence into a red required check rather than a merge. No other test pins it.
+  //
+  // The identical gate pair list also appears in the generic failure loop earlier in this step, which
+  // deliberately permits skipped results. Every merge-group assertion below runs inside the text starting
+  // at the merge-group condition, so removing a browser job from that specific loop still fails this test.
   const blocks = stepBlocks(jobBodies(workflowLines())['gate'])
   const enforceBlock = blocks.find((block) => block.name === 'Summarise and enforce')
   assert.ok(enforceBlock, 'gate Summarise and enforce step must exist')
   const enforceText = enforceBlock.lines.join('\n')
+
+  const condition = '[ "$EVENT_NAME" = "merge_group" ] && [ "$DOCS_ONLY" != "true" ]'
+  const guardIndex = enforceText.indexOf(condition)
+  assert.ok(guardIndex >= 0, 'the merge-group enforcement condition must exist in the gate')
+  const guardText = enforceText.slice(guardIndex)
+
   assert.match(
-    enforceText,
-    /"\$EVENT_NAME" = "merge_group" \] && \[ "\$DOCS_ONLY" != "true"/,
-    'the merge-group enforcement condition must exist in the gate',
-  )
-  assert.match(
-    enforceText,
+    guardText,
     /"browser-pr:\$BROWSER" "browser-production:\$PRODUCTION"/,
     'the merge-group gate list must include the pull-request-gated browser jobs',
   )
   assert.match(
-    enforceText,
+    guardText,
     /A merge-queue run must actually execute the product gates/,
     'a missing merge-group gate must be named as a queue refusal, not a silent failure',
   )
