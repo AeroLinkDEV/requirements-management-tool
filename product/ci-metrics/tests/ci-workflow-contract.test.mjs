@@ -212,7 +212,13 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   const condition = '[ "$EVENT_NAME" = "merge_group" ] && [ "$DOCS_ONLY" != "true" ]'
   const guardIndex = enforceText.indexOf(condition)
   assert.ok(guardIndex >= 0, 'the merge-group enforcement condition must exist in the gate')
-  const guardText = enforceText.slice(guardIndex)
+  // Bound the block by its own closing fi. guardText otherwise reaches the end of the step, so moving
+  // the terminator up would make the loop unconditional while every assertion below still matched —
+  // and an unconditional missing-gate check would fail ordinary label-dispatched runs whose lanes
+  // legitimately skipped.
+  const closeIndex = enforceText.slice(guardIndex).search(/^ {10}fi$/m)
+  assert.ok(closeIndex >= 0, 'the merge-group guard block must be terminated by its closing fi')
+  const guardText = enforceText.slice(guardIndex, guardIndex + closeIndex)
 
   assert.match(
     guardText,
