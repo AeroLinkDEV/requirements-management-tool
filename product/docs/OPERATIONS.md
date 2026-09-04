@@ -107,10 +107,19 @@ CONFIGURE_AEROLINK_REMOTE_DEMO.bat Install
 ```
 
 Configuration lives in `%LOCALAPPDATA%\AeroLink\Production\production-source.config.psd1` and holds no
-secret. `Status` reports where the production source is and whether it is canonical. `Update` goes through
-the same **inspect / stop / advance** controller as the timed reconciliation — an operator can run it at any
-moment, and fetching and fast-forwarding immediately would rewrite the working tree underneath a live
-production process and a live tunnel. A production source that has acquired a tracked modification, an
+secret. `Status` reports where the production source is and whether it is canonical. `Update` **delegates to
+the dedicated source** before it changes anything, then goes through the same **inspect / stop / advance /
+restart** controller as the timed reconciliation. Both halves matter: this BAT runs from whichever checkout
+contains it, and that checkout is allowed to be a dirty feature branch — so without the delegation, unmerged
+development bytes would be the controller of a canonical production transition, which is the coupling #881
+exists to remove. And an operator can run it at any moment, so fetching and fast-forwarding immediately would
+rewrite the working tree underneath a live production process and a live tunnel.
+
+`Update` restores **what was actually running, and only that**: a runtime that was up comes back on the
+verified revision whether the advance succeeded or was refused, and a tunnel that was not running is not
+started. A remote-demo configuration file outlives a demo somebody deliberately stopped, so its existence is
+not evidence of service state. The scheduled recovery pass is deliberately different — keeping the demo up is
+its job — and that difference is now a named policy rather than an accident. A production source that has acquired a tracked modification, an
 untracked file, a local-only commit, a feature branch, or divergence is reported and refused **exactly as
 found** — never stashed, reset, rebased or cleaned. A source that is clean but **misbound** — a malformed
 marker, an origin that is not AeroLink, an installation pointer that has moved — is refused *before* anything
@@ -173,6 +182,20 @@ credentials are per-user), and neither carrying a secret:
   refused after the stop — `origin/main` moved again in between, say — production is still restarted on the
   revision that is on disk rather than left down. Polling rather than a webhook: an inbound public endpoint
   to learn about a merge would be a far larger security surface than the problem justifies.
+
+  **The control plane is part of what an update replaces.** Every implementation file loaded before a source
+  advance is either in the production launcher's re-entry fingerprint — so an update to it re-execs a fresh
+  process from the new revision — or the controller hands the rest of the transition to a fresh process
+  itself. The remote-demo module does the latter: after a successful advance it re-runs the updated
+  `AeroLinkRemoteDemo.ps1` rather than letting the version already in memory finish a transition whose
+  subordinate scripts have just changed underneath it.
+
+  **What a transition took down, it owes back.** The obligation is recorded the moment a teardown step
+  succeeds — not when the whole teardown returns — because the failures that matter happen in between: a
+  listener stop can throw after the tunnel is down, a second owned tunnel can fail to stop after the first
+  succeeded, and fail-closed process enumeration can make the post-stop proof throw after a tunnel has
+  genuinely gone. In each case the caller still knows it owes a restoration, and every exit path after that
+  point either completes the transition or puts back exactly what was running.
 
 `remote-demo-state.json` is advisory operational metadata, not process truth. A recorded PID from before a
 reboot can never block a fresh start; live ownership, port, runtime identity and readiness decide.

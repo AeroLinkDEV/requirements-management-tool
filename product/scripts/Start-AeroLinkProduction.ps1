@@ -152,8 +152,14 @@ was started and nothing was changed.
 # update of any commit touching this file, AeroLinkBootstrap.psm1 or the other launcher files would complete,
 # start production, and leave the protected endpoint dark. An environment variable is the right carrier here
 # because the child is a new process and inherits it; the child clears it, so it is one-shot.
+#
+# The flag carries the SOURCE ROOT, not a bare "1", and is consumed only by a launcher running out of that
+# same root. An environment variable is inherited by every child of the process that set it, so a bare flag
+# left behind in a shell could later make an unrelated launch publish a tunnel nobody asked for. Binding it
+# to the checkout that set it, and clearing it the moment it is read, keeps it one-shot and local.
 $script:preAdvanceStopPerformed = $false
-$script:tunnelWasRunning = ($env:AEROLINK_TUNNEL_OWED -eq '1')
+$script:tunnelWasRunning = ($env:AEROLINK_TUNNEL_OWED -and
+    ([IO.Path]::GetFullPath($env:AEROLINK_TUNNEL_OWED).TrimEnd('\', '/') -eq [IO.Path]::GetFullPath($repositoryRoot).TrimEnd('\', '/')))
 $env:AEROLINK_TUNNEL_OWED = $null
 $script:demoConfig = $null
 $stopOwnedProductionRuntime = {
@@ -194,8 +200,9 @@ $stopOwnedProductionRuntime = {
             # establish; marking the obligation only afterwards meant the outer handler rethrew without
             # compensating, with the public endpoint already dark.
             if ($obligation.TeardownBegan) { $script:preAdvanceStopPerformed = $true }
-            # Inherited by the re-entry child the bootstrap may spawn immediately after this.
-            if ($script:tunnelWasRunning) { $env:AEROLINK_TUNNEL_OWED = '1' }
+            # Inherited by the re-entry child the bootstrap may spawn immediately after this, and bound to
+            # this checkout so no other launcher can consume it.
+            if ($script:tunnelWasRunning) { $env:AEROLINK_TUNNEL_OWED = $repositoryRoot }
         }
     }
 
@@ -218,7 +225,14 @@ try {
             'product\scripts\AeroLinkBootstrap.psm1',
             'product\scripts\AeroLinkInstallation.psm1',
             'product\scripts\AeroLinkRuntimeIdentity.psm1',
-            'product\scripts\AeroLinkUpgrade.psm1'
+            'product\scripts\AeroLinkUpgrade.psm1',
+            # Loaded before the advance as well, and both decide production behaviour: the production-source
+            # module gates delegation and canonicality, and the remote-demo module runs inside the pre-advance
+            # hook. An update changing either of them was leaving the OLD version in memory to finish the
+            # launch it had already started - "every implementation file already loaded" has to mean every
+            # one, or the re-entry fingerprint quietly stops covering the control plane.
+            'product\scripts\AeroLinkProductionSource.psm1',
+            'product\scripts\AeroLinkRemoteDemo.psm1'
         )
 }
 catch {
@@ -522,6 +536,31 @@ else {
 # AEROLINK_TUNNEL_RESTORE is a one-shot guard. Start-AeroLinkRemoteDemo will invoke the production launcher
 # if the local API is not ready and matching - normally it is, because this script just started and proved
 # it - and a nested launch that tried to restore the tunnel again would be a loop.
+#
+# The re-entry child has the obligation but not the means, unless it loads them here.
+#
+# A genuine bootstrap re-entry skips the fetch and the pre-advance hook entirely, so the child never runs the
+# block that imports the remote-demo module and reads its configuration - and the guard below required both
+# the flag AND a loaded config. The obligation arrived and could not be honoured, which is the same outcome as
+# not carrying it. So: if a tunnel is owed and the config is not loaded, load it from THIS source, which after
+# a re-entry is the updated one.
+if ($script:tunnelWasRunning -and -not $script:demoConfig) {
+    try {
+        Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force
+        $demoConfigPath = Get-AeroLinkRemoteDemoConfigPath
+        if (Test-Path -LiteralPath $demoConfigPath -PathType Leaf) {
+            $script:demoConfig = Get-AeroLinkRemoteDemoConfig -ConfigPath $demoConfigPath
+        }
+        else {
+            Write-Host 'A public tunnel was owed from before a source update, but this machine has no remote-demo configuration to restore it with.' -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host '      THE OWED REMOTE DEMO COULD NOT BE RESTORED' -ForegroundColor Red
+        Write-Host "      $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host '      Local production is running. Restore the public endpoint with START_AEROLINK_REMOTE_DEMO.bat.' -ForegroundColor Yellow
+    }
+}
 if ($script:tunnelWasRunning -and $script:demoConfig -and $env:AEROLINK_TUNNEL_RESTORE -ne '1') {
     Write-Host ''
     Write-Host 'Restoring the protected remote demo this launcher took down for the source update...' -ForegroundColor Cyan

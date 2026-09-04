@@ -103,6 +103,38 @@ switch ($Action) {
         exit 0
     }
     'Update' {
+        # Delegate before mutating, for the same reason production itself delegates.
+        #
+        # This BAT runs the script from whichever checkout contains it, and in the supported architecture that
+        # checkout is explicitly allowed to be a dirty feature branch under agent development. Update then
+        # stops, advances and restarts canonical HOME production using THOSE bytes - unmerged development code
+        # controlling the canonical transition, which is precisely the coupling #881 exists to remove. The
+        # verified dedicated source is the control plane for a mutating operation on it.
+        #
+        # Preview, Install and Status stay development-side: Install has to run somewhere before a dedicated
+        # source exists, and the read-only actions change nothing.
+        $delegation = $null
+        try { $delegation = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $repositoryRoot }
+        catch { throw }
+        if ($delegation.DelegateTo -and $env:AEROLINK_PRODUCTION_SOURCE_DELEGATED -ne '1') {
+            $delegateScript = Join-Path $delegation.DelegateTo 'product\scripts\Configure-AeroLinkProductionSource.ps1'
+            if (-not (Test-Path -LiteralPath $delegateScript -PathType Leaf)) {
+                throw "The configured production source has no configuration script at $delegateScript. Nothing was changed."
+            }
+            Write-Host 'This checkout is not the dedicated production source.' -ForegroundColor Yellow
+            Write-Host "      Running the update from: $($delegation.DelegateTo)" -ForegroundColor Cyan
+            $previousDelegated = $env:AEROLINK_PRODUCTION_SOURCE_DELEGATED
+            try {
+                $env:AEROLINK_PRODUCTION_SOURCE_DELEGATED = '1'
+                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $delegateScript -Action Update
+                exit $LASTEXITCODE
+            }
+            finally { $env:AEROLINK_PRODUCTION_SOURCE_DELEGATED = $previousDelegated }
+        }
+        if ($delegation.DelegateTo) {
+            throw "Delegation did not reach the dedicated production source: $($delegation.Reason) Nothing was changed."
+        }
+
         # Through the same inspect / stop / advance / restart controller as the timed pass, not a bare
         # fast-forward.
         #
@@ -122,7 +154,11 @@ switch ($Action) {
             catch { throw "This machine has a remote-demo configuration at $demoConfigPath that could not be read ($($_.Exception.Message)). A tunnel started while it was valid may still be publishing port 5080, so the production source was NOT advanced and nothing was stopped." }
         }
         if ($demoConfig) {
-            $result = Invoke-AeroLinkProductionSourceReconciliation -Config $demoConfig
+            # -PreserveServiceState: this is an operator command, not the recovery timer. The scheduled pass
+            # is deliberately keep-ready - having the demo up is its job - but a configuration file outlives
+            # a demo somebody deliberately stopped, so an update that ended by starting the tunnel would
+            # publish a public endpoint on the strength of a file existing. Restore what was running.
+            $result = Invoke-AeroLinkProductionSourceReconciliation -Config $demoConfig -PreserveServiceState
             $result | Format-List
             exit ($(if ($result.Action -in 'Updated', 'AlreadyCurrent', 'CachedCanonical') { 0 } else { 1 }))
         }

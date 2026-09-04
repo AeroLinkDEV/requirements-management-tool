@@ -86,6 +86,22 @@ foreach ($launcher in $launchers) {
     Assert-True ($text -match 'call\s+"%~dp0product\\scripts\\launch\.cmd"') "$($launcher.Name) sets AEROLINK_SCRIPT but never calls launch.cmd."
 }
 
+# The control-plane generation rule: every implementation file loaded BEFORE a source advance is either part
+# of the re-entry fingerprint, or an update to it leaves the old version driving the rest of the launch. Two
+# modules were missing - the production-source module that gates delegation and canonicality, and the
+# remote-demo module the pre-advance hook imports - so an update touching either did not force re-entry.
+$productionLauncher = [System.IO.File]::ReadAllText((Join-Path $root 'product\scripts\Start-AeroLinkProduction.ps1'))
+$launcherFilesBlock = if ($productionLauncher -match '(?s)-LauncherFiles\s*@\((.*?)\n\s*\)') { $Matches[1] } else { '' }
+Assert-True ([bool]$launcherFilesBlock) 'The production launcher must declare the launcher files its re-entry fingerprint covers.'
+foreach ($module in @(
+        'Start-AeroLinkProduction.ps1', 'AeroLinkPrerequisites.ps1', 'AeroLinkLaunch.ps1',
+        'AeroLinkNativeRunner.psm1', 'AeroLinkBootstrap.psm1', 'AeroLinkInstallation.psm1',
+        'AeroLinkRuntimeIdentity.psm1', 'AeroLinkUpgrade.psm1',
+        'AeroLinkProductionSource.psm1', 'AeroLinkRemoteDemo.psm1')) {
+    Assert-True ($launcherFilesBlock -match [regex]::Escape($module)) `
+        "The re-entry fingerprint omits $module, which is loaded before the source advance - an update to it would leave the old version driving the launch."
+}
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
     Write-Host "Root launcher contract FAILED ($($failures.Count) failure(s))." -ForegroundColor Red

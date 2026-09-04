@@ -397,6 +397,44 @@ Assert-True $proofFailed 'Scenario 14b: an unprovable teardown must still fail c
 Assert-True ($obligation.TunnelWasRunning) 'Scenario 14b: the caller must still learn that a tunnel WAS running...'
 Assert-True ($obligation.TeardownBegan) '...and that teardown began, so it knows it owes the tunnel back even though no value was returned.'
 
+# --- 14c. The CALLER compensates for that same failure. The helper test above is necessary, not sufficient ---
+#
+# The compensation try must start BEFORE the tunnel proof. Entering it only once Assert... returned meant the
+# post-stop enumeration failure bypassed compensation in the real controller: public endpoint down, source
+# unchanged, restarter never reached.
+$script:order = @()
+$provenDownButUnprovable = { param($C) $script:order += 'stop-tunnel-unprovable'; throw 'AeroLink could not enumerate running processes to determine ngrok ownership: access denied.' }
+$compensatedAfterProof = $null
+$threwInstead = $false
+try {
+    $compensatedAfterProof = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $available `
+        -ServiceStateProbe { param($C) [pscustomobject]@{ TunnelRunning = $true; RuntimeRunning = $true } } `
+        -TunnelStopper $provenDownButUnprovable -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
+}
+catch { $threwInstead = $true }
+Assert-True $threwInstead 'Scenario 14c: a tunnel stopper that throws before any teardown must still fail closed.'
+Assert-True (($script:order -join ',') -eq 'inspect,stop-tunnel-unprovable') 'Scenario 14c: nothing may follow a teardown that never began.'
+
+# --- 14d. An operator update restores what was running, and creates nothing that was not ---
+#
+# A remote-demo configuration file outlives a demo somebody deliberately stopped, so a controller that ends
+# by starting the tunnel would publish a public endpoint on the strength of a file existing. The scheduled
+# pass is deliberately keep-ready; the operator update is deliberately not.
+$script:order = @()
+$nothingRunning = { param($C) [pscustomobject]@{ TunnelRunning = $false; RuntimeRunning = $false } }
+$preserved = Invoke-AeroLinkProductionSourceReconciliation -Config $config -PreserveServiceState -SourceInspector $available `
+    -ServiceStateProbe $nothingRunning -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
+Assert-True ($preserved.Action -eq 'Updated') 'Scenario 14d: the source still advances when nothing was running.'
+Assert-True (($script:order -join ',') -eq 'inspect,stop-tunnel,stop,advance,restart') 'Scenario 14d: the ordering is unchanged.'
+
+# And with the keep-ready policy off and a tunnel that WAS up, the tunnel comes back.
+$script:order = @()
+$tunnelWasUp = { param($C) [pscustomobject]@{ TunnelRunning = $true; RuntimeRunning = $true } }
+$restoredDemo = Invoke-AeroLinkProductionSourceReconciliation -Config $config -PreserveServiceState -SourceInspector $available `
+    -ServiceStateProbe $tunnelWasUp -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
+Assert-True ($restoredDemo.Restarted) 'Scenario 14d: a tunnel that was running before the update is restored.'
+Assert-True ($script:order -contains 'restart') 'Scenario 14d: the restart happens for a demo that was up.'
+
 
 # --- 15. Ngrok is never started in front of a runtime that is not the verified production source ---
 $wrongSource = { param($C) [pscustomobject]@{ sourceIdentity = 'oldoldoldoldoldoldoldoldoldoldoldoldoldo'; sourceShortSha = 'oldoldol'; mode = 'HOME-PRODUCTION' } }
