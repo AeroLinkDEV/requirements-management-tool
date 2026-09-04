@@ -238,6 +238,11 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   )
   assert.match(
     guardText,
+    /\[ "\$result" = "success" \] \|\| missing="\$missing \$name"\n\s*done\n\s*if \[ -n "\$missing" \]; then/,
+    'the refusal must fire only after the collecting loop terminates — a check inside the loop tests an incomplete missing set',
+  )
+  assert.match(
+    guardText,
     /\[ -n "\$missing" \]; then\n\s*echo "::error::A merge-queue run must actually execute the product gates\. These did not run:\$missing"\n\s*exit 1/,
     'a missing merge-group gate must fail the step — the refusal must be adjacent to an unconditional exit, not a diagnostic that can be swallowed',
   )
