@@ -521,15 +521,45 @@ test('the expected job topology matches the current workflow', () => {
     const shardedNameLine = `    name: ${group.name} (\${{ matrix.shard }}/\${{ strategy.job-total }})`
     const nameIndex = lines.findIndex((line) => line === shardedNameLine)
     assert.ok(nameIndex >= 0, `ci.yml must define the sharded job '${group.name}'`)
-    const matrixLine = lines.slice(nameIndex, nameIndex + 60).find((line) => /^\s+shard: \[[0-9, ]+\]$/.test(line))
-    assert.ok(matrixLine, `the '${group.name}' job must declare its shard matrix`)
-    // The values matter, not just the count: a 0-based matrix of the same length would satisfy a
-    // size check while the verifier refuses every 0/N job as out of range.
-    const entries = matrixLine.match(/\[([0-9, ]+)\]/)[1].split(',').map((entry) => Number(entry.trim()))
+
+    let jobStart = nameIndex
+    while (jobStart >= 0 && !/^  [a-z0-9-]+:$/.test(lines[jobStart])) jobStart -= 1
+    assert.ok(jobStart >= 0, `the '${group.name}' display name must belong to a workflow job`)
+    const nextJobOffset = lines.slice(jobStart + 1).findIndex((line) => /^  [a-z0-9-]+:$/.test(line))
+    const jobEnd = nextJobOffset < 0 ? lines.length : jobStart + 1 + nextJobOffset
+    const jobLines = lines.slice(jobStart, jobEnd)
+
+    assert.equal(
+      jobLines.filter((line) => line === '    strategy:').length,
+      1,
+      `the '${group.name}' job must have exactly one strategy mapping`,
+    )
+    const strategyIndex = jobLines.indexOf('    strategy:')
+    const nextJobPropertyOffset = jobLines.slice(strategyIndex + 1).findIndex((line) =>
+      /^    \S/.test(line) && !/^    #/.test(line),
+    )
+    const strategyEnd = nextJobPropertyOffset < 0 ? jobLines.length : strategyIndex + 1 + nextJobPropertyOffset
+    const strategyLines = jobLines.slice(strategyIndex, strategyEnd)
+    assert.equal(
+      strategyLines.filter((line) => line === '      matrix:').length,
+      1,
+      `the '${group.name}' strategy must have exactly one matrix mapping`,
+    )
+    const matrixIndex = strategyLines.indexOf('      matrix:')
+    const nextStrategyPropertyOffset = strategyLines.slice(matrixIndex + 1).findIndex((line) =>
+      /^      \S/.test(line) && !/^      #/.test(line),
+    )
+    const matrixEnd = nextStrategyPropertyOffset < 0
+      ? strategyLines.length
+      : matrixIndex + 1 + nextStrategyPropertyOffset
+    const effectiveMatrixLines = strategyLines
+      .slice(matrixIndex, matrixEnd)
+      .filter((line) => line.trim() !== '' && !line.trimStart().startsWith('#'))
+    const expectedEntries = Array.from({ length: group.expectedShards }, (_, index) => index + 1)
     assert.deepEqual(
-      entries,
-      Array.from({ length: group.expectedShards }, (_, index) => index + 1),
-      `the '${group.name}' job's shard matrix must be exactly 1..${group.expectedShards}; update SHARDED_JOB_GROUPS with the workflow change`,
+      effectiveMatrixLines,
+      ['      matrix:', `        shard: [${expectedEntries.join(', ')}]`],
+      `the '${group.name}' matrix must contain only shard: 1..${group.expectedShards}; include, exclude, or another axis changes the expanded job topology and must update the verifier consciously`,
     )
   }
 })
