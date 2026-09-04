@@ -183,7 +183,10 @@ unreadable trusted subtree refuses the binding.
 
 The App private key is an environment secret, and the environment deployment policy must admit only the
 default branch. The post-merge ruleset must require this check **with the AeroLink Merge Authority App's
-integration id**; a name-only required check does not establish publisher identity. The merge queue and
+integration id**, together with GitHub Actions' `Full Product evidence aggregate`. The native check suite
+becomes non-success as soon as a rerun is queued, covering the interval before `workflow_run` emits
+`in_progress`; the App check then supplies the independent exact-evidence binding. A name-only required check
+does not establish publisher identity. The merge queue and
 this required check remain disabled until the App, environment policy, and ruleset are configured and
 live acceptance succeeds. `.github/CODEOWNERS` assigns all three trusted surfaces to the repository owner.
 Required code-owner review must not be enabled while that owner is the only eligible reviewer, because an

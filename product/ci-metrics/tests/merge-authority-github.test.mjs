@@ -223,6 +223,9 @@ test('default-branch workflow keeps authority credentials behind the queue-only 
   const readme = readFileSync(join(repoRoot, 'product/ci-metrics/README.md'), 'utf8')
   const verifier = readFileSync(join(repoRoot, 'product/ci-metrics/bin/verify-merge-authority.mjs'), 'utf8')
   assert.match(workflow, /workflow_run:\s+workflows:\s+- Product quality gate\s+types:\s+- in_progress\s+- completed/)
+  assert.match(workflow, /live ruleset must require both this App-bound check and the GitHub Actions-published/)
+  assert.match(workflow, /`Full Product evidence aggregate`/)
+  assert.match(workflow, /queues the native check suite as soon as a rerun is requested/)
   assert.match(workflow, /permissions:\s+actions: read\s+contents: read/)
   assert.match(
     workflow,

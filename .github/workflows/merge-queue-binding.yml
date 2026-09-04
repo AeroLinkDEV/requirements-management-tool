@@ -2,6 +2,10 @@ name: Trusted merge-queue binding
 
 # workflow_run loads this verifier from the protected default branch, not from the merge candidate.
 # Non-queue Product runs create a skipped job and never enter the protected environment or mint an App token.
+# CUTOVER INVARIANT: the live ruleset must require both this App-bound check and the GitHub Actions-published
+# `Full Product evidence aggregate`. GitHub queues the native check suite as soon as a rerun is requested,
+# closing the interval before workflow_run emits in_progress; this App check then invalidates itself as soon
+# as that observable event arrives. Neither check is sufficient by itself.
 on:
   workflow_run:
     workflows:

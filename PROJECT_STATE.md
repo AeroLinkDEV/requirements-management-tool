@@ -324,6 +324,9 @@ trusted merge-queue verifier and App-bound check publisher. At this checkpoint t
 classic strict branch protection remains authoritative until #911 merges, the repository-scoped GitHub App
 credentials are stored in the main-only `merge-authority` environment, the `main` ruleset is activated, and
 live queue acceptance succeeds. GitHub's live ruleset/protection APIs are the authority during that cutover.
+The live ruleset must require both the App-bound `Trusted merge-queue binding` and GitHub Actions'
+`Full Product evidence aggregate`: the native check enters a non-success state as soon as a rerun is queued,
+while the App check independently binds the exact evidence after protected-default-branch verification.
 The first docs-only pull request through the queue must update this section from staged to active; until then,
 follow the existing strict protected-merge flow.
 

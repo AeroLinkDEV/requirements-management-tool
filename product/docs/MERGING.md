@@ -51,6 +51,9 @@ reads the completed run and publishes the App-bound `Trusted merge-queue binding
 authoritative gate succeeded and the candidate did not replace trusted CI/authority machinery.
 An initial run or rerun first replaces any earlier App success with an in-progress check, so old evidence
 cannot remain authoritative while a newer Product attempt is active.
+The ruleset also requires GitHub Actions' native `Full Product evidence aggregate`. GitHub moves that check
+out of success as soon as a rerun is queued, covering the interval before `workflow_run` emits `in_progress`.
+The native gate and the App binding are a required pair; neither is merge authority alone.
 
 Do **not** rebase merely because `main` advanced. That discards valid pull-request evidence and restarts the
 pre-queue gate. Check live state before touching the branch:
@@ -91,8 +94,9 @@ environment credentials and live ruleset are accepted, the queue supersedes stri
 up to date" protection: the pull-request branch may be behind, but the exact composed candidate cannot merge
 without passing the App-bound authority check.
 
-The required check is pinned to the dedicated AeroLink Merge Authority App, not accepted by name from any
-publisher. The App's private key exists only in the `merge-authority` environment, whose deployment policy admits
+The App-bound required check is pinned to the dedicated AeroLink Merge Authority App, not accepted by name
+from any publisher. The co-required `Full Product evidence aggregate` is pinned to GitHub Actions. The App's
+private key exists only in the `merge-authority` environment, whose deployment policy admits
 `main` only. Pull-request readiness and merge-group binding run from protected default-branch definitions;
 candidate code cannot mint that check. Changes to `.github/`, `product/test-planner/`, or
 `product/ci-metrics/` deliberately refuse automatic queue binding and require an explicitly reviewed

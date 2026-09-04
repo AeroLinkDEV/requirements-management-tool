@@ -57,8 +57,12 @@ A separate `workflow_run` verifier loaded from protected `main` reads the exact 
 requires the full gate topology, and refuses candidates that differ from `main` under `.github/`,
 `product/test-planner/`, or `product/ci-metrics/`. It publishes the required check with the repository-scoped
 App identity only after those checks pass. The App key is restricted to the main-only `merge-authority`
-environment, and the ruleset pins the required context to that App's integration id. Every initial Product run or rerun first replaces earlier App success
-with an in-progress check, so prior authority cannot bridge a newer attempt.
+environment, and the ruleset pins the required context to that App's integration id. Every initial Product run
+or rerun first replaces earlier App success with an in-progress check, so prior authority cannot bridge a
+newer attempt.
+The ruleset separately requires GitHub Actions' `Full Product evidence aggregate`; its native check suite
+leaves success as soon as a rerun is queued, covering the earlier interval before `workflow_run` reaches
+`in_progress`. The native Product check and App-bound evidence check are deliberately co-required.
 
 Successful live acceptance will complete the deferred strict-branch-protection item. After activation,
 ordinary behind branches no longer need a manual rebase; real conflicts and deliberately protected
