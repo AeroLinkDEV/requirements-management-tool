@@ -128,7 +128,7 @@ function collectShardReasons(jobs, reasons) {
  *   the FROM side is the one that can remove trusted machinery. Refuses when absent — an unverified
  *   surface is not a trusted one.
  * @param {object} input.expected trusted configuration from the verifier's own context:
- *   { repository, headSha, baseBranch, runId? }.
+ *   { repository, headSha, baseBranch, runId } — all mandatory; omitting any refuses.
  * @returns {{decision: 'PASS'|'REFUSE', reasons: string[]}}
  */
 export function evaluateMergeGroupCandidate(input) {
