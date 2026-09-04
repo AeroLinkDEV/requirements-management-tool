@@ -58,7 +58,9 @@ function legitimateRun() {
     workflowPath: PRODUCT_WORKFLOW_PATH,
     event: 'merge_group',
     headSha: HEAD_SHA,
-    headBranch: `${QUEUE_REF_PREFIX}main/909-${HEAD_SHA}`,
+    // The queue ref's embedded hex identifies the branch's base commit and deliberately differs
+    // from the merge-group candidate SHA (run.headSha/expected.headSha below).
+    headBranch: `${QUEUE_REF_PREFIX}main/pr-909-061c9387c245a237e608cffb69999a9e564d2ffa`,
     runId: RUN_ID,
     runAttempt: RUN_ATTEMPT,
     status: 'completed',
@@ -122,23 +124,63 @@ test('refuses refs that are not merge-queue candidates', () => {
   }
 })
 
+test('accepts the real-world queue-ref shape and validates the base structurally', () => {
+  // A captured real merge-group entry: the ref's embedded hex is the branch's base/parent commit
+  // and differs from the merge-group candidate head SHA. The ref is validated structurally; the
+  // candidate-tree binding is run.headSha === expected.headSha.
+  const realWorld = reasonsFor({
+    run: {
+      ...legitimateRun(),
+      headSha: 'eaa88899f4e18417ab4ddf1e39ad9d7f10c92fc1',
+      headBranch: 'gh-readonly-queue/main/pr-8-061c9387c245a237e608cffb69999a9e564d2ffa',
+    },
+    expected: { repository: REPOSITORY, headSha: 'eaa88899f4e18417ab4ddf1e39ad9d7f10c92fc1', baseBranch: 'main', runId: RUN_ID, runAttempt: RUN_ATTEMPT },
+  })
+  assert.equal(realWorld.decision, 'PASS', 'a real queue ref whose embedded SHA differs from the candidate head SHA must bind')
+  assert.deepEqual(realWorld.reasons, [])
+
+  // A base branch containing a slash is supported when it is the configured, escaped base.
+  const slashedBase = reasonsFor({
+    run: { ...legitimateRun(), headBranch: `${QUEUE_REF_PREFIX}release/7/pr-3-061c9387c245a237e608cffb69999a9e564d2ffa` },
+    expected: { repository: REPOSITORY, headSha: HEAD_SHA, baseBranch: 'release/7', runId: RUN_ID, runAttempt: RUN_ATTEMPT },
+  })
+  assert.equal(slashedBase.decision, 'PASS')
+  assert.deepEqual(slashedBase.reasons, [])
+})
+
+test('refuses queue refs that are structurally invalid or belong to another base', () => {
+  // A slash-bearing sibling base satisfies base 'main's prefix but not its exact ref shape.
+  const siblingBase = reasonsFor({
+    run: { ...legitimateRun(), headBranch: `${QUEUE_REF_PREFIX}main/foo/pr-8-061c9387c245a237e608cffb69999a9e564d2ffa` },
+  })
+  assert.equal(siblingBase.decision, 'REFUSE')
+  assert.ok(siblingBase.reasons.some((reason) => reason.startsWith('ref-not-queue')))
+
+  const wrongBase = reasonsFor({
+    run: { ...legitimateRun(), headBranch: `${QUEUE_REF_PREFIX}release/pr-8-061c9387c245a237e608cffb69999a9e564d2ffa` },
+  })
+  assert.equal(wrongBase.decision, 'REFUSE')
+  assert.ok(wrongBase.reasons.some((reason) => reason.startsWith('ref-not-queue')))
+
+  for (const headBranch of [
+    `${QUEUE_REF_PREFIX}main/foo`,
+    `${QUEUE_REF_PREFIX}main/not-a-pr`,
+    `${QUEUE_REF_PREFIX}main/pr-x-061c9387c245a237e608cffb69999a9e564d2ffa`,
+    `${QUEUE_REF_PREFIX}main/pr-8-notasha`,
+  ]) {
+    const malformed = reasonsFor({ run: { ...legitimateRun(), headBranch } })
+    assert.equal(malformed.decision, 'REFUSE', `malformed queue ref '${headBranch}' must refuse`)
+    assert.ok(malformed.reasons.some((reason) => reason.startsWith('ref-not-queue')), headBranch)
+  }
+})
+
 test('refuses queue candidates for a base branch other than the protected one', () => {
   // Another branch's merge queue produces the same ref shape; only main's candidates bind here.
   const result = reasonsFor({
-    run: { ...legitimateRun(), headBranch: `${QUEUE_REF_PREFIX}release/7/abc123` },
+    run: { ...legitimateRun(), headBranch: `${QUEUE_REF_PREFIX}release/pr-7-061c9387c245a237e608cffb69999a9e564d2ffa` },
   })
   assert.equal(result.decision, 'REFUSE')
   assert.ok(result.reasons.some((reason) => reason.startsWith('ref-not-queue') && reason.includes('release')))
-
-  // A slash-bearing sibling base ('main/foo') satisfies main's queue-ref prefix, but its composed
-  // candidate carries a different head SHA, so the required '-<sha>' suffix excludes it. (A
-  // sibling-branch ref ending in OUR candidate SHA would imply an identical composed tree — the
-  // same evidence about the same tree — which is benign.)
-  const nestedBase = reasonsFor({
-    run: { ...legitimateRun(), headBranch: `${QUEUE_REF_PREFIX}main/foo/555-${'b'.repeat(40)}` },
-  })
-  assert.equal(nestedBase.decision, 'REFUSE')
-  assert.ok(nestedBase.reasons.some((reason) => reason.startsWith('ref-not-queue')))
 
   const missingConfig = evaluateMergeGroupCandidate({
     run: legitimateRun(),

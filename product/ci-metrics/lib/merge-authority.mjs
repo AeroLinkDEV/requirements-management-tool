@@ -43,6 +43,13 @@ export const NON_AUTHORITATIVE_JOB_IDS = ['metrics-tooling', 'metrics-report']
 // invocation (and to the documented full-suite command) in .github/workflows/ci.yml — together with,
 // or before, that verifier. Until then this suite runs only from local/PR-lane commands, which is
 // acceptable solely because no live path consumes the module yet.
+//
+// TRUSTED-CALLER CONTRACT: the wrapper MUST obtain the job list from the workflow jobs endpoint with
+// EXPLICIT `filter=latest` (GitHub's latest-execution semantics) and map run_id, run_attempt, name,
+// and conclusion directly into this evaluator. Verifier input must never be assembled from
+// filter=all, multiple attempt endpoints, cached or stale records, or manually merged arrays —
+// fabricated or mixed historical job lists are outside the evaluator's threat model, exactly like
+// fabricating the trusted expected configuration.
 
 // Trusted merge machinery. A candidate that changes any of these surfaces relative to the default
 // branch is evaluating itself with machinery the candidate chose, so the evidence cannot be bound.
@@ -174,18 +181,16 @@ export function evaluateMergeGroupCandidate(input) {
   } else if (run.runAttempt !== expected.runAttempt) {
     reasons.push(`run-attempt-mismatch: run attempt ${run.runAttempt} is not the expected attempt ${expected.runAttempt}`)
   }
-  // Queue refs name their base branch and end with the candidate's head SHA, and the workflow
-  // subscribes to merge_group for any base — so a slash-bearing sibling branch's queue ref (base
-  // 'main/foo' begins 'gh-readonly-queue/main/foo/', satisfying base 'main's prefix) must be
-  // excluded by the SHA it carries: a different base composes a different candidate tree and
-  // therefore a different head SHA, which cannot end this ref.
-  const expectedQueuePrefix = `${QUEUE_REF_PREFIX}${expected.baseBranch}/`
-  if (
-    typeof run.headBranch !== 'string' ||
-    !run.headBranch.startsWith(expectedQueuePrefix) ||
-    !run.headBranch.endsWith(`-${expected.headSha}`)
-  ) {
-    reasons.push(`ref-not-queue: run ref '${run.headBranch ?? 'unknown'}' is not a '${expectedQueuePrefix}<candidate>-${expected.headSha}' ref`)
+  // Queue refs are structurally `gh-readonly-queue/<base>/pr-<number>-<40 hex>`, and the workflow
+  // subscribes to merge_group for any base — so the base must match exactly (escaped, never as a
+  // bare prefix: a slash-bearing sibling base such as 'main/foo' begins with base 'main's prefix).
+  // The 40-hex embedded in the ref identifies the branch's base/parent commit and is NOT reliably
+  // the merge-group candidate SHA, so it is validated structurally only and never compared to
+  // expected.headSha — the candidate-tree binding is run.headSha === expected.headSha above.
+  const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const queueRefPattern = new RegExp(`^${escapeRegExp(QUEUE_REF_PREFIX)}${escapeRegExp(expected.baseBranch)}/pr-[0-9]+-[0-9a-f]{40}$`)
+  if (typeof run.headBranch !== 'string' || !queueRefPattern.test(run.headBranch)) {
+    reasons.push(`ref-not-queue: run ref '${run.headBranch ?? 'unknown'}' is not a '${QUEUE_REF_PREFIX}${expected.baseBranch}/pr-<number>-<40-hex>' queue ref`)
   }
   // The run must be completed, but its overall conclusion is deliberately NOT consulted: by design
   // the workflow treats metrics/reporting jobs as non-authoritative, so their failure turns the run
