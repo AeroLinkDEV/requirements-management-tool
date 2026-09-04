@@ -254,10 +254,10 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
     )
   }
 
-  assert.match(
-    guardText,
-    /missing=""/,
-    'the merge-group guard must start from an empty missing set',
+  assert.equal(
+    (guardText.match(/missing=""/g) || []).length,
+    1,
+    'the missing set must be initialized exactly once — a reset inside the loop discards earlier collected gates',
   )
   assert.match(
     guardText,
@@ -283,7 +283,7 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   )
   assert.match(
     guardText,
-    /\[ -n "\$missing" \]; then\n\s*echo "::error::A merge-queue run must actually execute the product gates\. These did not run:\$missing"\n\s*exit 1/,
-    'a missing merge-group gate must fail the step — the refusal must be adjacent to an unconditional exit, not a diagnostic that can be swallowed',
+    /\[ -n "\$missing" \]; then\n\s*echo "::error::A merge-queue run must actually execute the product gates\. These did not run:\$missing"\n\s*exit 1\n/,
+    'a missing merge-group gate must fail the step in the foreground — a backgrounded or conditional exit would let the aggregate pass without evidence',
   )
 })
