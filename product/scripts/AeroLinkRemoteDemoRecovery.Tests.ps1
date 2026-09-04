@@ -490,6 +490,31 @@ $runtimeOnly = [pscustomobject]@{ TunnelRunning = $false; RuntimeRunning = $fals
 $nothing = Restore-AeroLinkServiceTopology -Config $config -Topology $runtimeOnly
 Assert-True ($nothing.Detail -match 'nothing was started') 'Scenario 14e: preserve-state discharge with nothing running must start nothing.'
 
+# --- 14f. Unknown process state fails closed, at both layers ---
+#
+# A port whose listener cannot be attributed is not a free port, and a TCP table that cannot be read is not an
+# empty one. Both used to collapse into "nothing is running", which is the one answer that lets a transition
+# rewrite a working tree while an old production API executes out of it.
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1') -Force
+$freePort = Get-AeroLinkPortOwner -Port 59987
+Assert-True (-not $freePort.Found) 'Scenario 14f: a genuinely unused port must still read as unused - the no-match case is an answer, not a failure.'
+Assert-True ($freePort.Detail -match 'Nothing is listening') 'Scenario 14f: and it says so, rather than reporting an error.'
+
+# An unused port yields no owned runtime, and does NOT trip the unknown-state refusal.
+$probe = Get-AeroLinkServiceTopology -Config $config -Port 59987
+Assert-True (-not $probe.RuntimeRunning) 'Scenario 14f: an unused port yields no owned runtime, without refusing.'
+
+# --- 14g. The handoff guard expires with the generation it guarded ---
+#
+# Bound to the source root alone, a fresh child that legitimately advanced the source AGAIN found the guard
+# already set and skipped the handoff it now needed - so generation N code carried on over generation N+1
+# files, in exactly the rapid-main-evolution environment this feature exists for.
+$root = $config.AeroLinkRoot
+$generationOne = "$root|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+$generationTwo = "$root|bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+Assert-True ($generationOne -ne $generationTwo) 'Scenario 14g: two generations of the same root are different guard values.'
+Assert-True ($generationOne -ne $root) 'Scenario 14g: a generation-bound guard is not satisfied by the root alone, which is what made it permanent.'
+
 
 # --- 15. Ngrok is never started in front of a runtime that is not the verified production source ---
 $wrongSource = { param($C) [pscustomobject]@{ sourceIdentity = 'oldoldoldoldoldoldoldoldoldoldoldoldoldo'; sourceShortSha = 'oldoldol'; mode = 'HOME-PRODUCTION' } }

@@ -215,10 +215,26 @@ switch ($Action) {
         # update superseded. Hand the rest to a fresh process from the updated source, exactly as the
         # production launcher's re-entry and the remote-demo handoff do. AEROLINK_PRODUCTION_SOURCE_HANDOFF is
         # bound to the source root and consumed by the child, so it is one-shot and cannot recurse.
-        if ($result.Action -eq 'Updated' -and $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF -ne $config.SourceRoot) {
+        # The guard is bound to the source root AND the revision handed off. Bound to the root alone, a fresh
+        # child that legitimately advanced again - main moving while it ran - would find the guard set and skip
+        # the handoff it now needed, leaving generation N code over generation N+1 files.
+        if ($result.Action -eq 'Updated' -and $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF -ne "$($config.SourceRoot)|$($result.HeadSha)") {
             $updatedScript = Join-Path $config.SourceRoot 'product\scripts\Configure-AeroLinkProductionSource.ps1'
             if (-not (Test-Path -LiteralPath $updatedScript -PathType Leaf)) {
-                throw "The source was advanced but the updated tree has no configuration script at $updatedScript. The runtime was stopped and has NOT been restarted; start it with START_AEROLINK_PRODUCTION.bat."
+                # A post-advance continuation failure with a runtime obligation already incurred, and it used
+                # to be the one such failure that discharged nothing: it threw before reaching the child-exit
+                # compensation, leaving the source current and the runtime knowingly down.
+                if ($stoppedTheRuntime) {
+                    Write-Host 'THE UPDATED TREE HAS NO CONFIGURATION SCRIPT' -ForegroundColor Yellow
+                    Write-Host 'The source was advanced. Restoring the production runtime that was stopped for it...' -ForegroundColor Yellow
+                    $onDisk = Get-AeroLinkProductionSourcePosture -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName
+                    if ($onDisk.Canonical) {
+                        & (Join-Path $config.SourceRoot 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser
+                        throw "The source was advanced but the updated tree has no configuration script at $updatedScript. Production was restarted on main @ $($onDisk.Posture.ShortSha); the update's continuation did not run."
+                    }
+                    throw "The source was advanced but the updated tree has no configuration script at $updatedScript, and the revision on disk is not canonical: $($onDisk.Reason) The runtime was stopped and has NOT been restarted."
+                }
+                throw "The source was advanced but the updated tree has no configuration script at $updatedScript. Nothing was running here, so nothing was left down."
             }
             Write-Host 'The source advanced; completing the update from the new revision...' -ForegroundColor Cyan
             $previousHandoff = $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF
@@ -226,7 +242,7 @@ switch ($Action) {
             $previousAdvanced = $env:AEROLINK_SOURCE_ALREADY_ADVANCED
             $childExit = 1
             try {
-                $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF = $config.SourceRoot
+                $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF = "$($config.SourceRoot)|$($result.HeadSha)"
                 # The obligation crosses the process boundary: the child must know a runtime was taken down,
                 # or the transition ends with production stopped and nothing owning the duty to restart it.
                 if ($stoppedTheRuntime) { $env:AEROLINK_RUNTIME_OWED = $config.SourceRoot }

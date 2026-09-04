@@ -220,13 +220,23 @@ function Get-AeroLinkPortOwner {
     [CmdletBinding()]
     param([Parameter(Mandatory)][int]$Port)
     try { $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop) }
-    catch [Microsoft.PowerShell.Cmdletization.Cim.CimJobException] {
-        # The documented "no matching connections" shape. An empty result IS the answer here, not a failure.
-        $listeners = @()
-    }
     catch {
-        if ($_.Exception.Message -match '(?i)no matching|cannot find|not found') { $listeners = @() }
-        else { throw "AeroLink could not read the TCP connection table to determine what is listening on port ${Port}: $($_.Exception.Message). Nothing was concluded and nothing was stopped - an unreadable port table means unknown, never free." }
+        # ONE condition converts to an empty list: the cmdlet reporting that no connection matched. Everything
+        # else - access denied, a CIM transport failure, a broken provider - is unknown, and unknown is not
+        # free.
+        #
+        # A typed `catch [CimJobException]` was wrong here and worse than no catch at all: PowerShell selects
+        # a typed catch ahead of a later general one, and Get-NetTCPConnection raises that same type for
+        # genuine provider and access failures as it does for "nothing matched". So every enumeration failure
+        # was being converted into "the port is free", which is the exact fail-open this was written to close.
+        # The condition is identified by the error's own category and identifier, not by its exception type.
+        $noMatch = ($_.CategoryInfo.Category -eq 'ObjectNotFound') -or
+            ($_.FullyQualifiedErrorId -match '(?i)NoMatching|ObjectNotFound') -or
+            ($_.Exception.Message -match '(?i)no matching .* objects? found')
+        if (-not $noMatch) {
+            throw "AeroLink could not read the TCP connection table to determine what is listening on port ${Port}: $($_.Exception.Message). Nothing was concluded and nothing was stopped - an unreadable port table means unknown, never free."
+        }
+        $listeners = @()
     }
     if ($listeners.Count -eq 0) {
         return [pscustomobject]@{ Found = $false; Ambiguous = $false; Attributable = $false; ProcessId = $null; CommandLine = $null; ExecutablePath = $null; Detail = "Nothing is listening on port $Port." }
