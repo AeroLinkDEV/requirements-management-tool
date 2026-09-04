@@ -342,4 +342,17 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
     refusalExitIndex,
     'the only exit inside the merge-group guard must be the refusal exit — an earlier successful exit would skip collection and pass vacuously',
   )
+  // Exactly three control statements may exist: the outer condition (guardText's first line), the
+  // collecting for loop, and the refusal if. Any nested wrapper such as 'if false; then' can render
+  // the whole body unreachable while every substring and adjacency assertion above still matches.
+  const controlLines = guardText.split('\n').filter((line) => /^\s*(if |elif |case |while |until |for )/.test(line))
+  assert.deepEqual(
+    controlLines.map((line) => line.trim()),
+    [
+      'if [ "$EVENT_NAME" = "merge_group" ] && [ "$DOCS_ONLY" != "true" ]; then',
+      'for pair in "backend-api:$BACKEND_API" "backend-core-domain:$BACKEND_CORE_DOMAIN" "backend-core-infrastructure:$BACKEND_CORE_INFRASTRUCTURE" "client:$CLIENT" "script-contracts:$CONTRACTS" "browser-pr:$BROWSER" "browser-production:$PRODUCTION"; do',
+      'if [ -n "$missing" ]; then',
+    ],
+    'the guard must contain exactly the outer condition, the collecting loop, and the refusal if — no nested wrappers',
+  )
 })
