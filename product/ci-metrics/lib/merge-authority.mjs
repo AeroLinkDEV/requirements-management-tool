@@ -106,8 +106,10 @@ function collectShardReasons(jobs, reasons) {
  *   workflowPath, event, headSha, headBranch, runId?, status, conclusion.
  * @param {Array<{name: string, conclusion: string, runId?: number|string}>} input.jobs the jobs of
  *   exactly this run (caller resolves via the runs API); runId included when known.
- * @param {string[]|undefined} input.changedPaths paths differing between the candidate queue SHA and
- *   the default branch. Refuses when absent — an unverified surface is not a trusted one.
+ * @param {Array<string|{from: string, to: string}>|undefined} input.changedPaths paths differing
+ *   between the candidate queue SHA and the default branch; a rename supplies both sides, because
+ *   the FROM side is the one that can remove trusted machinery. Refuses when absent — an unverified
+ *   surface is not a trusted one.
  * @param {object} input.expected trusted configuration from the verifier's own context:
  *   { repository, headSha, runId? }.
  * @returns {{decision: 'PASS'|'REFUSE', reasons: string[]}}
@@ -202,14 +204,22 @@ export function evaluateMergeGroupCandidate(input) {
 
   if (!Array.isArray(changedPaths)) {
     reasons.push('surface-comparison-missing: no candidate-vs-default-branch path list was supplied; an unverified surface is not a trusted one')
-  } else if (changedPaths.some((path) => typeof path !== 'string' || path.length === 0)) {
-    // A parsing or mapping failure upstream could silently erase an altered trusted path from the
-    // list; malformed input refuses instead of being skipped over.
-    reasons.push('surface-comparison-malformed: the changed-path list contains non-string or empty entries')
   } else {
-    for (const path of changedPaths) {
-      if (TRUSTED_SURFACE_PREFIXES.some((prefix) => path.startsWith(prefix))) {
-        reasons.push(`trusted-surface-modified: '${path}' differs from the default branch, so the candidate did not run main's merge machinery`)
+    const isPath = (value) => typeof value === 'string' && value.length > 0
+    const isRename = (value) => value !== null && typeof value === 'object' && isPath(value.from) && isPath(value.to)
+    if (changedPaths.some((entry) => !isPath(entry) && !isRename(entry))) {
+      // A parsing or mapping failure upstream could silently erase an altered trusted path from the
+      // list; malformed input refuses instead of being skipped over.
+      reasons.push('surface-comparison-malformed: the changed-path list contains entries that are neither paths nor {from, to} rename pairs')
+    } else {
+      // A rename must present both sides: the FROM side is the one that can remove trusted merge
+      // machinery under a destination no prefix rule would ever inspect (the same lesson the CI
+      // classifier learned — include both sides of renames).
+      const inspected = changedPaths.flatMap((entry) => (typeof entry === 'string' ? [entry] : [entry.from, entry.to]))
+      for (const path of inspected) {
+        if (TRUSTED_SURFACE_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+          reasons.push(`trusted-surface-modified: '${path}' differs from the default branch, so the candidate did not run main's merge machinery`)
+        }
       }
     }
   }

@@ -229,11 +229,23 @@ test('product changes under trusted directories are still expected to differ —
 })
 
 test('refuses malformed surface comparisons', () => {
-  for (const changedPaths of [[null], [42], [''], ['.github/workflows/ci.yml', undefined]]) {
+  for (const changedPaths of [[null], [42], [''], ['.github/workflows/ci.yml', undefined], [{ from: '.github/workflows/ci.yml' }], [{ to: 'docs/x.yml' }]]) {
     const result = reasonsFor({ changedPaths })
     assert.equal(result.decision, 'REFUSE', `changedPaths ${JSON.stringify(changedPaths)} must refuse`)
     assert.ok(result.reasons.some((reason) => reason.startsWith('surface-comparison-malformed')), JSON.stringify(changedPaths))
   }
+})
+
+test('inspects both sides of a rename for trusted-surface removal', () => {
+  // Moving trusted machinery out of a trusted prefix must refuse on the FROM side: the destination
+  // path matches no prefix rule, so only the rename's source reveals the removal.
+  const renamedOut = reasonsFor({ changedPaths: [{ from: '.github/workflows/request-full-ci.yml', to: 'docs/request-full-ci.yml' }] })
+  assert.equal(renamedOut.decision, 'REFUSE')
+  assert.ok(renamedOut.reasons.some((reason) => reason.startsWith('trusted-surface-modified') && reason.includes('.github/workflows/request-full-ci.yml')))
+
+  const renamedWithin = reasonsFor({ changedPaths: [{ from: 'product/client/src/App.tsx', to: 'product/client/src/App2.tsx' }] })
+  assert.equal(renamedWithin.decision, 'PASS')
+  assert.deepEqual(renamedWithin.reasons, [])
 })
 
 test('refuses malformed input fail-closed', () => {
@@ -258,6 +270,9 @@ test('every refusal reports machine-readable reasons, and PASS reports none', ()
 
 test('the expected job topology matches the current workflow', () => {
   const workflow = readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  // The display name must match exactly: renaming the workflow keeps every job intact while every
+  // real run would be refused by workflow-name-mismatch.
+  assert.match(workflow, new RegExp(`^name: ${PRODUCT_WORKFLOW_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
   for (const name of [
     'Domain test suite',
     'Infrastructure test suite',
@@ -278,15 +293,18 @@ test('the expected job topology matches the current workflow', () => {
   }
   for (const group of SHARDED_JOB_GROUPS) {
     const escaped = group.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const jobPattern = new RegExp(`name: ${escaped} \\(\\$\\{\\{ matrix\\.shard \\}\\}/\\$\\{\\{ strategy\\.job-total \\}\\}\\)`)
-    assert.match(workflow, jobPattern, `ci.yml must still define the sharded group '${group.name}'`)
+    const jobPattern = new RegExp(`^    name: ${escaped} \\(\\$\\{\\{ matrix\\.shard \\}\\}/\\$\\{\\{ strategy\\.job-total \\}\\}\\)$`, 'm')
+    assert.match(workflow, jobPattern, `ci.yml must still define the sharded group '${group.name}' exactly`)
   }
   for (const group of SHARDED_JOB_GROUPS) {
     const escaped = group.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     // Parse THIS group's own matrix, not any shard array of a matching size elsewhere: browser-full
     // also runs three shards, so a global size list would mask an API or browser-pr change.
     const lines = workflow.split(/\r?\n/)
-    const nameIndex = lines.findIndex((line) => line.includes(`name: ${group.name} (\${{ matrix.shard }}/\${{ strategy.job-total }})`))
+    // Exact full line, so a renamed survivor like 'API test suite (…template…) v2' cannot satisfy
+    // the lookup while the verifier's anchored runtime pattern rejects the renamed jobs.
+    const shardedNameLine = `    name: ${group.name} (\${{ matrix.shard }}/\${{ strategy.job-total }})`
+    const nameIndex = lines.findIndex((line) => line === shardedNameLine)
     assert.ok(nameIndex >= 0, `ci.yml must define the sharded job '${group.name}'`)
     const matrixLine = lines.slice(nameIndex, nameIndex + 60).find((line) => /^\s+shard: \[[0-9, ]+\]$/.test(line))
     assert.ok(matrixLine, `the '${group.name}' job must declare its shard matrix`)
