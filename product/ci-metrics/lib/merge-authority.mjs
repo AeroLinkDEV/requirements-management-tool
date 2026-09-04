@@ -202,9 +202,12 @@ export function evaluateMergeGroupCandidate(input) {
 
   if (!Array.isArray(changedPaths)) {
     reasons.push('surface-comparison-missing: no candidate-vs-default-branch path list was supplied; an unverified surface is not a trusted one')
+  } else if (changedPaths.some((path) => typeof path !== 'string' || path.length === 0)) {
+    // A parsing or mapping failure upstream could silently erase an altered trusted path from the
+    // list; malformed input refuses instead of being skipped over.
+    reasons.push('surface-comparison-malformed: the changed-path list contains non-string or empty entries')
   } else {
     for (const path of changedPaths) {
-      if (typeof path !== 'string') continue
       if (TRUSTED_SURFACE_PREFIXES.some((prefix) => path.startsWith(prefix))) {
         reasons.push(`trusted-surface-modified: '${path}' differs from the default branch, so the candidate did not run main's merge machinery`)
       }

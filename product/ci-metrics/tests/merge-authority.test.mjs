@@ -228,6 +228,14 @@ test('product changes under trusted directories are still expected to differ —
   assert.deepEqual(result.reasons, [])
 })
 
+test('refuses malformed surface comparisons', () => {
+  for (const changedPaths of [[null], [42], [''], ['.github/workflows/ci.yml', undefined]]) {
+    const result = reasonsFor({ changedPaths })
+    assert.equal(result.decision, 'REFUSE', `changedPaths ${JSON.stringify(changedPaths)} must refuse`)
+    assert.ok(result.reasons.some((reason) => reason.startsWith('surface-comparison-malformed')), JSON.stringify(changedPaths))
+  }
+})
+
 test('refuses malformed input fail-closed', () => {
   assert.equal(evaluateMergeGroupCandidate(undefined).decision, 'REFUSE')
   assert.equal(evaluateMergeGroupCandidate({ run: null }).decision, 'REFUSE')
@@ -260,7 +268,13 @@ test('the expected job topology matches the current workflow', () => {
     AGGREGATE_JOB_NAME,
     CLASSIFIER_JOB_NAME,
   ]) {
-    assert.ok(workflow.includes(`name: ${name}`), `ci.yml must still define the gate job '${name}'`)
+    // Exact YAML name values, anchored to the whole line: a renamed survivor such as
+    // 'Domain test suite v2' must not satisfy the check for 'Domain test suite'.
+    assert.match(
+      workflow,
+      new RegExp(`^    name: ${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'),
+      `ci.yml must still define the gate job '${name}' exactly`,
+    )
   }
   for (const group of SHARDED_JOB_GROUPS) {
     const escaped = group.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -276,11 +290,13 @@ test('the expected job topology matches the current workflow', () => {
     assert.ok(nameIndex >= 0, `ci.yml must define the sharded job '${group.name}'`)
     const matrixLine = lines.slice(nameIndex, nameIndex + 60).find((line) => /^\s+shard: \[[0-9, ]+\]$/.test(line))
     assert.ok(matrixLine, `the '${group.name}' job must declare its shard matrix`)
-    const size = matrixLine.match(/\[([0-9, ]+)\]/)[1].split(',').length
-    assert.equal(
-      size,
-      group.expectedShards,
-      `the '${group.name}' job runs ${size} shards but SHARDED_JOB_GROUPS expects ${group.expectedShards}; update the verifier with the workflow change`,
+    // The values matter, not just the count: a 0-based matrix of the same length would satisfy a
+    // size check while the verifier refuses every 0/N job as out of range.
+    const entries = matrixLine.match(/\[([0-9, ]+)\]/)[1].split(',').map((entry) => Number(entry.trim()))
+    assert.deepEqual(
+      entries,
+      Array.from({ length: group.expectedShards }, (_, index) => index + 1),
+      `the '${group.name}' job's shard matrix must be exactly 1..${group.expectedShards}; update SHARDED_JOB_GROUPS with the workflow change`,
     )
   }
 })
