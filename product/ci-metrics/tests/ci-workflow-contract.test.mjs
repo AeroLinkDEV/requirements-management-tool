@@ -227,7 +227,10 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   // The refusal loop consumes env variables; pin each to its job's actual result, or a hardcoded
   // `success` would satisfy the guard while a job skipped. The same applies to the step's own
   // control inputs: a hardcoded EVENT_NAME would never select the merge-group branch, and a
-  // hardcoded DOCS_ONLY of true would skip it for every run.
+  // hardcoded DOCS_ONLY of true would skip it for every run. Bindings must appear exactly once as
+  // a live env-mapping line — an anchored match, so a commented-out original beside a hardcoded
+  // replacement cannot satisfy the contract.
+  const envBindingCount = (binding) => (enforceText.match(new RegExp(`^ {10}${binding.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'gm')) || []).length
   for (const [envVar, job] of [
     ['BACKEND_API', 'backend-api'],
     ['BACKEND_CORE_DOMAIN', 'backend-core-domain'],
@@ -237,10 +240,8 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
     ['BROWSER', 'browser-pr'],
     ['PRODUCTION', 'browser-production'],
   ]) {
-    assert.ok(
-      enforceText.includes(`${envVar}: \${{ needs.${job}.result }}`),
-      `${envVar} must be bound to needs.${job}.result — the merge-group refusal is only as truthful as its inputs`,
-    )
+    const binding = `${envVar}: \${{ needs.${job}.result }}`
+    assert.equal(envBindingCount(binding), 1, `${envVar} must be bound exactly once to needs.${job}.result as a live env-mapping line — the merge-group refusal is only as truthful as its inputs`)
   }
   for (const binding of [
     "EVENT_NAME: ${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}",
@@ -248,10 +249,7 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
     'LAUNCHERS_ONLY: ${{ needs.changes.outputs.launchers_only }}',
     'POST_MERGE_SKIP: ${{ needs.changes.outputs.post_merge_skip }}',
   ]) {
-    assert.ok(
-      enforceText.includes(binding),
-      `the gate must bind its guard input dynamically: ${binding.split(':')[0]} — a hardcoded value silently disarms the merge-group refusal`,
-    )
+    assert.equal(envBindingCount(binding), 1, `the gate must bind its guard input dynamically exactly once: ${binding.split(':')[0]} — a hardcoded value silently disarms the merge-group refusal`)
   }
 
   // The guard only matters if the aggregate runs and its failure counts. A skipped dependency must
