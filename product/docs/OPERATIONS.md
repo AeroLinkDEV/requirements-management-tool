@@ -113,6 +113,17 @@ feature branch, or divergence is reported and refused **exactly as found** — n
 cleaned. When GitHub is unreachable a previously verified clean cached `main` runs with an explicit "the
 latest remote revision could not be verified" diagnostic.
 
+Once a dedicated source is configured, **the production launchers refuse to run from any other checkout** —
+`START_AEROLINK_PRODUCTION.bat`, `START_AEROLINK_SHARED.bat` and `START_AEROLINK_EMAIL_DEMO.bat` alike. The
+canonical-main gate already refuses a dirty or feature-branch development checkout, so this is not about
+unreviewed code; it is about which working tree the resulting long-lived process executes out of. A
+development checkout that happens to be on clean `main` passes every gate, serves the demo, and is then one
+`git checkout` away from having its assemblies and client bundle replaced underneath a running process. The
+refusal names both paths and the command to run instead, and starts nothing. `-AllowNonDedicatedSource`
+exists for qualifying the launcher itself and for a machine where the dedicated source is genuinely
+unavailable. On a machine with no dedicated source configured — every work laptop, and any HOME machine set
+up before this — nothing changes.
+
 Recovery is registered against that source in both of the places the 2026-09-03 amendment named: the source
 root it launches, and the `AeroLinkRemoteDemo.ps1` path the Scheduled Task executes. Registration refuses any
 checkout not marked as dedicated production source, so it cannot be aimed back at the development checkout.
@@ -132,10 +143,15 @@ credentials are per-user), and neither carrying a secret:
   `UnattendedBootRecovery` in its result and `Configure Status` report which shape is installed. Everything
   else about the task is unchanged by the fallback, including its binding to the dedicated production source.
 * `AeroLinkProductionSourceReconcile` — every 30 minutes, so a machine that never reboots does not run last
-  week's `main`. It does nothing unless `origin/main` actually moved; when it has, the source is
-  fast-forwarded and production is restarted into it through the ordinary start path, which re-proves the
-  protected endpoint. Polling rather than a webhook: an inbound public endpoint to learn about a merge would
-  be a far larger security surface than the problem justifies.
+  week's `main`. It does nothing unless `origin/main` actually moved. When it has, it **inspects, stops,
+  advances, then starts**: a fetch touches only remote-tracking refs, which nothing running reads, so the
+  decision is safe with the demo up; the running production process is stopped before the working tree it is
+  executing out of is rewritten; and the restart goes through the ordinary start path, which re-proves the
+  protected endpoint. Advancing first and restarting afterwards would leave a live process serving the demo
+  out of assemblies, migrations and a client bundle that had already been replaced on disk. If the advance is
+  refused after the stop — `origin/main` moved again in between, say — production is still restarted on the
+  revision that is on disk rather than left down. Polling rather than a webhook: an inbound public endpoint
+  to learn about a merge would be a far larger security surface than the problem justifies.
 
 `remote-demo-state.json` is advisory operational metadata, not process truth. A recorded PID from before a
 reboot can never block a fresh start; live ownership, port, runtime identity and readiness decide.
@@ -180,9 +196,24 @@ dotnet run --project product/src/AeroLink.Api -- maintenance resolve ^
 ```
 
 Dry run without `--apply`. Preconditions are re-read inside the transaction immediately before the write, so
-a decision reviewed against state that has since moved cannot land. History is ended, never deleted, and both
-decisions and refusals write a maintenance audit event under one formal attribution
-(`aerolink-maintenance`).
+a decision reviewed against state that has since moved cannot land. History is ended, never deleted, and a
+decision that changes state writes a maintenance audit event under one formal attribution
+(`aerolink-maintenance`). A **refusal writes nothing at all** — an audit row is a write, and "this changed
+nothing" has to be literally true to be worth relying on.
+
+A third category is reported but never applied automatically: **showcase content upgrade steps**. Unlike
+schema migrations and semantic authorities these do not run at startup — the seeder returns early for a
+database that already has the showcase program, because existing showcase content is operator-owned state a
+restart must not rewrite. So a database seeded before a step shipped stays behind indefinitely, and analysis
+used to answer `DATABASE CURRENT`: true about the schema, misleading about everything on screen. `analyze`
+now names the outstanding steps and says plainly that nothing applies them on its own. They do not make the
+database "upgrade required", so no start routes demo content through backup and clone validation; the
+explicit showcase upgrade command, which takes a verified backup first, is how they are applied.
+
+The maintenance and upgrade qualification runs against a **disposable PostgreSQL** in the `postgresql-smoke`
+CI lane the merge gate waits on, with `AEROLINK_REQUIRE_POSTGRES_QUALIFICATION` set so a missing connection
+fails the lane rather than skipping into a green tick. Locally, point `AEROLINK_MIGRATIONS_CONNECTION` at a
+throwaway server; never at a persistent installation.
 
 ### Explicit HOME to work-laptop snapshot refresh
 
