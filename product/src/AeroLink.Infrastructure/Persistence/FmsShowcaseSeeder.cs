@@ -608,6 +608,31 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         }
     }
 
+    /// <summary>
+    /// The ordered showcase upgrade steps this build knows how to apply, by key.
+    ///
+    /// Exposed so <c>AeroLinkUpgradeAnalyzer</c> can tell an operator which of them an existing showcase
+    /// database has not recorded, instead of that being knowable only by running the upgrade and reading
+    /// what came back. <see cref="ApplyUpgradeStepsAsync"/> asserts the executable list still matches this
+    /// one, so a step added there and forgotten here fails loudly rather than being silently under-reported.
+    /// </summary>
+    public static readonly IReadOnlyList<string> UpgradeStepKeys =
+    [
+        "leadership-roster",
+        "release-campaign",
+        "product-line",
+        "verification-impact",
+        "downstream-impact",
+        "test-change-reviews",
+        "problem-report-build-scope",
+        "controlled-test-change-identity",
+        "verification-coverage-gap",
+        "approver-identity",
+        "released-campaign",
+        "code-traceability-demo",
+        "scenario-richness",
+    ];
+
     private async Task<IReadOnlyList<string>> ApplyUpgradeStepsAsync(Guid programId, CancellationToken ct)
     {
         var authority = await CheckUpgradeAuthorityAsync(programId, ct);
@@ -631,6 +656,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             ("code-traceability-demo", EnsureCodeTraceabilityAsync),
             ("scenario-richness", EnsureScenarioRichnessAsync),
         };
+        if (!steps.Select(x => x.Key).SequenceEqual(UpgradeStepKeys))
+            throw new InvalidOperationException(
+                "FMS showcase upgrade steps and the published UpgradeStepKeys have diverged. Analysis would "
+                + "under-report pending showcase work. Update UpgradeStepKeys to match, in order.");
 
         foreach (var step in steps)
         {

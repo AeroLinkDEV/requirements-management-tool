@@ -109,7 +109,28 @@ public sealed class AeroLinkUpgradeAnalyzer(
         }
 
         return new AeroLinkUpgradeAnalysis(true, null, databaseName, pending, semantic, conflicts,
-            DatabaseModified: false);
+            DatabaseModified: false, Showcase: await ShowcaseStateAsync(ct));
+    }
+
+    /// <summary>
+    /// Which showcase upgrade steps this build knows that this database has not recorded.
+    ///
+    /// Called only when no schema migration is pending, because the markers live in a table an unmigrated
+    /// database may not have. Reads the recorded keys and subtracts them in the seeder's own order, so the
+    /// operator sees the same names the upgrade command reports back.
+    /// </summary>
+    private async Task<AeroLinkShowcaseUpgradeState> ShowcaseStateAsync(CancellationToken ct)
+    {
+        var programId = await db.Programs.AsNoTracking()
+            .Where(x => x.Code == FmsShowcaseSeeder.ProgramCode)
+            .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+        if (programId is null)
+            return new AeroLinkShowcaseUpgradeState(false, FmsShowcaseSeeder.ProgramCode, []);
+
+        var recorded = await db.ShowcaseUpgradeSteps.AsNoTracking()
+            .Where(x => x.ProgramId == programId.Value).Select(x => x.StepKey).ToListAsync(ct);
+        return new AeroLinkShowcaseUpgradeState(true, FmsShowcaseSeeder.ProgramCode,
+            [.. FmsShowcaseSeeder.UpgradeStepKeys.Where(x => !recorded.Contains(x))]);
     }
 
     /// <summary>
@@ -212,6 +233,7 @@ public sealed class AeroLinkUpgradeAnalyzer(
             lines.Add("DATABASE CURRENT");
             lines.Add($"Database: {analysis.DatabaseName}");
             lines.Add("No schema or semantic upgrade is pending.");
+            lines.AddRange(RenderShowcase(analysis));
             return lines;
         }
         lines.Add("DATABASE UPGRADE REQUIRED");
@@ -231,7 +253,29 @@ public sealed class AeroLinkUpgradeAnalyzer(
             lines.Add("Semantic upgrades and conflicts cannot be assessed against a schema this build has not "
                 + "migrated yet, so none is claimed here; they are assessed on the isolated validated copy "
                 + "before the real database is touched.");
+        lines.AddRange(RenderShowcase(analysis));
         lines.Add("No persistent data has been changed by this analysis.");
+        return lines;
+    }
+
+    /// <summary>
+    /// The showcase category, phrased as what it is: available, operator-initiated, and not something a
+    /// restart will do. Saying "DATABASE CURRENT" and nothing else to somebody whose demo content is many
+    /// steps behind the build is accurate about schema and misleading about everything they can see.
+    /// </summary>
+    private static IReadOnlyList<string> RenderShowcase(AeroLinkUpgradeAnalysis analysis)
+    {
+        if (!analysis.ShowcaseUpgradeAvailable || analysis.Showcase is null) return [];
+        var lines = new List<string>
+        {
+            "",
+            $"Showcase content upgrade available ({analysis.Showcase.PendingSteps.Count} step(s) for "
+                + $"{analysis.Showcase.ProgramCode}):",
+        };
+        lines.AddRange(analysis.Showcase.PendingSteps.Select(x => $"  {x}"));
+        lines.Add("Nothing applies these automatically: existing showcase content is operator-owned state, so "
+            + "a restart will not rewrite it. Run the explicit showcase upgrade command, which takes a "
+            + "verified backup first, when you want them.");
         return lines;
     }
 }

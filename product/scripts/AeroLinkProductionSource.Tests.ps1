@@ -364,6 +364,35 @@ try {
     Assert-Throws { Update-AeroLinkProductionSource -SourceRoot $phaseFixture.Production -InspectOnly -AdvanceToSha $moved } 'contradiction' `
         'Asking to inspect and to advance in one call is a caller error, not a silent choice of one of them.'
 
+    # =====================================================================================================
+    # 11. HOME production runs from the dedicated source, not from whichever checkout the launcher lives in.
+    #
+    # The canonical-main gate refuses a dirty or feature-branch development checkout, so this is not about
+    # unreviewed code. It is about which working tree the long-lived process executes out of: a development
+    # checkout momentarily on clean main passes every gate and is then one `git checkout` away from having
+    # its assemblies replaced under a running production API.
+    # =====================================================================================================
+    $launchFixture = New-Fixture
+    $null = New-ProductionSource -Fixture $launchFixture
+    $declared = { [pscustomobject]@{ SourceRoot = $launchFixture.Production; ConfigPath = 'C:\config\production-source.psd1' } }
+
+    $fromProduction = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Production -ConfigReader $declared
+    Assert-True ($fromProduction.Checked) 'Starting production FROM the dedicated production source is exactly right.'
+
+    Assert-Throws { Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigReader $declared } `
+        'not the dedicated production source' 'Starting HOME production from the development checkout must be refused.'
+    Assert-Throws { Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigReader $declared } `
+        ([regex]::Escape($launchFixture.Production)) 'The refusal must name the checkout to start from instead.'
+
+    # A trailing separator is the same directory, not a different one.
+    Assert-True (Assert-AeroLinkRunningFromProductionSource -RepositoryRoot ($launchFixture.Production + '\') -ConfigReader $declared).Checked `
+        'A trailing separator must not turn the production source into a stranger.'
+
+    # No dedicated source configured is the ordinary state on a laptop and on any machine set up before #881.
+    # Refusing there would remove the ability to run production rather than protect it.
+    $unconfigured = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigReader { throw 'configuration not found' }
+    Assert-True (-not $unconfigured.Checked) 'With no dedicated source configured, production must still start.'
+
     # Trivial spelling differences in a remote URL are not different repositories.
     Assert-True (Test-AeroLinkSameRemote -Left 'https://github.com/o/r.git' -Right 'https://github.com/o/r') 'A trailing .git is the same repository.'
     Assert-True (Test-AeroLinkSameRemote -Left 'https://github.com/o/r/' -Right 'https://github.com/o/r') 'A trailing slash is the same repository.'

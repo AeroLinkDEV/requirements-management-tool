@@ -3,7 +3,11 @@ param(
     [switch]$DoNotOpenBrowser,
     [switch]$SkipClientBuild,
     [switch]$Shared,
-    [string]$NotificationBaseUrl
+    [string]$NotificationBaseUrl,
+    # Run HOME production from THIS checkout even though a dedicated production source is configured
+    # elsewhere. Deliberately awkward: the only supported reasons are qualifying the launcher itself and
+    # operating a machine where the dedicated source is temporarily unavailable.
+    [switch]$AllowNonDedicatedSource
 )
 
 # Starts AeroLink the way a demonstration or an on-premises workstation should run it: the client compiled, and
@@ -47,6 +51,22 @@ $distRoot = Join-Path $clientRoot 'dist'
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
 $logs = $installation.Logs
 $launcherMode = 'HOME-PRODUCTION'
+
+# If this machine has a dedicated production source, HOME production runs from THAT checkout - not from
+# whichever one this launcher happens to live in.
+#
+# The canonical-main gate below already refuses a dirty or feature-branch development checkout, so this is
+# not about running unreviewed code. It is about which working tree the resulting long-lived process is
+# executing out of. A development checkout that is momentarily on clean main passes every gate, serves the
+# demo happily, and is then one `git checkout` away from having its assemblies and client bundle swapped
+# underneath it - which is the 2026-09-03 failure with a different first step.
+#
+# Checked before the re-entry bootstrap, so the wrong checkout is never fetched or fast-forwarded on the way
+# to being refused.
+if (-not $AllowNonDedicatedSource) {
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkProductionSource.psm1') -Force
+    Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $repositoryRoot | Out-Null
+}
 
 # Source posture first, before any prerequisite, build, or PostgreSQL start. The canonical HOME database must
 # only ever be exercised by a clean, current main — clean also means no untracked, non-ignored source, which

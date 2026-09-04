@@ -221,6 +221,53 @@ function Assert-AeroLinkDedicatedProductionSource {
     return $posture
 }
 
+function Assert-AeroLinkRunningFromProductionSource {
+    <#
+        .SYNOPSIS Refuses HOME production from a checkout that is not the machine's dedicated production source.
+        .DESCRIPTION
+            The canonical-main gate already refuses a dirty or feature-branch development checkout, so this is
+            not about running unreviewed code. It is about which working tree the resulting long-lived process
+            executes out of. A development checkout momentarily on clean main passes every gate, serves the
+            demo happily, and is then one `git checkout` away from having its assemblies and client bundle
+            replaced underneath a running process - the 2026-09-03 failure with a different first step.
+
+            No configuration is the ordinary state on a laptop, and on any machine set up before #881. There,
+            this launcher is the only way to run production at all, so refusing would remove the feature
+            rather than protect it: the check applies only once a dedicated source has been declared.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        # Injectable so the contract suite can drive both outcomes without a machine-wide configuration.
+        [scriptblock]$ConfigReader
+    )
+    $configured = $null
+    try { $configured = if ($ConfigReader) { & $ConfigReader } else { Get-AeroLinkProductionSourceConfig } }
+    catch { return [pscustomobject]@{ Checked = $false; Reason = 'No dedicated production source is configured on this machine.' } }
+    if (-not $configured) { return [pscustomobject]@{ Checked = $false; Reason = 'No dedicated production source is configured on this machine.' } }
+
+    $thisRoot = [IO.Path]::GetFullPath($RepositoryRoot).TrimEnd('\', '/')
+    $dedicatedRoot = ([string]$configured.SourceRoot).TrimEnd('\', '/')
+    if ($thisRoot.Equals($dedicatedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject]@{ Checked = $true; Reason = "This checkout is the dedicated production source ($thisRoot)." }
+    }
+    throw @"
+AeroLink HOME production refused: this is not the dedicated production source.
+
+  Running from:        $thisRoot
+  Production source:   $dedicatedRoot
+  Configured in:       $($configured.ConfigPath)
+
+HOME production must run from the dedicated source, so that editing, branching or rebasing this checkout
+cannot change the files a long-running production process is executing. Start it from there:
+
+  "$dedicatedRoot\START_AEROLINK_PRODUCTION.bat"
+
+Nothing was started and nothing was changed. Pass -AllowNonDedicatedSource only to qualify the launcher
+itself, or when the dedicated source is genuinely unavailable.
+"@
+}
+
 function Initialize-AeroLinkProductionSource {
     <#
         .SYNOPSIS Creates (or confirms) the dedicated production source and points it at the canonical
@@ -495,6 +542,7 @@ Export-ModuleMember -Function @(
     'Get-AeroLinkProductionSourceConfig',
     'Get-AeroLinkProductionSourcePosture',
     'Assert-AeroLinkDedicatedProductionSource',
+    'Assert-AeroLinkRunningFromProductionSource',
     'Initialize-AeroLinkProductionSource',
     'Update-AeroLinkProductionSource'
 )

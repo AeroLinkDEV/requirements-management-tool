@@ -27,11 +27,26 @@ public sealed class AeroLinkMaintenanceQualificationTests
 {
     private const string ConnectionVariable = "AEROLINK_MIGRATIONS_CONNECTION";
 
+    /// <summary>
+    /// Set by the CI lane that exists to run these. Without it, "no connection configured" and "twelve
+    /// qualifications passed" are the same green tick, which is how a suite can be present and prove nothing
+    /// for months. The lane sets this, so a missing connection there is a failure rather than a quiet pass.
+    /// </summary>
+    private const string RequiredVariable = "AEROLINK_REQUIRE_POSTGRES_QUALIFICATION";
+
     private static bool ServerConfigured(out string serverConnectionString)
     {
         var raw = Environment.GetEnvironmentVariable(ConnectionVariable);
         serverConnectionString = raw ?? "";
-        return !string.IsNullOrWhiteSpace(serverConnectionString);
+        if (!string.IsNullOrWhiteSpace(serverConnectionString)) return true;
+
+        var required = Environment.GetEnvironmentVariable(RequiredVariable);
+        if (!string.IsNullOrWhiteSpace(required) && !required.Equals("false", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"{RequiredVariable} is set, so this qualification must actually run, but {ConnectionVariable} "
+                + "names no disposable PostgreSQL server. Point it at a throwaway database; never at a "
+                + "persistent AeroLink installation.");
+        return false;
     }
 
     private static async Task<string> CreateDisposableDatabaseAsync(string serverConnectionString)
@@ -104,6 +119,78 @@ public sealed class AeroLinkMaintenanceQualificationTests
             Assert.False(analysis.UpgradeRequired);
             Assert.False(analysis.DatabaseModified);
             Assert.Equal(database, analysis.DatabaseName);
+            // No showcase program at all is a valid state, and must not read as an available upgrade.
+            Assert.NotNull(analysis.Showcase);
+            Assert.False(analysis.Showcase!.Present);
+            Assert.False(analysis.ShowcaseUpgradeAvailable);
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    /// <summary>
+    /// The third upgrade category: showcase content.
+    ///
+    /// Schema and semantic upgrades run at startup; showcase upgrade steps do not, because the seeder returns
+    /// early for a database that already has the showcase program. So an installation seeded before a step
+    /// shipped is indefinitely behind, and analysis used to answer "DATABASE CURRENT" — true about the schema,
+    /// and misleading about everything the operator can actually see on screen.
+    ///
+    /// It is reported, and reported as what it is: available and operator-initiated. It must NOT make
+    /// UpgradeRequired true, or every HOME start would route demo content through backup and clone validation.
+    /// </summary>
+    [Fact]
+    public async Task Showcase_steps_this_build_knows_and_the_database_has_not_recorded_are_reported_as_available()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            await using (var migrate = new AeroLinkDbContext(Options(connection))) await migrate.Database.MigrateAsync();
+            await using (var upgrade = new AeroLinkDbContext(Options(connection)))
+            {
+                await new ProjectLeadershipMigrationAuthority(upgrade).EnsureCompletedAsync();
+                await new ProjectLeadershipReconciliationAuthority(upgrade).EnsureCompletedAsync();
+            }
+            await MarkCompletedAsync(connection,
+                SoftwareVerificationCaseMigrationAuthority.MigrationMarker,
+                TestChangeRequestPrefixMigrationAuthority.MigrationMarker,
+                SoftwareProcedureExecutionCutoverAuthority.MigrationMarker);
+
+            // A showcase database seeded by an older build: the program exists, and it recorded only the two
+            // steps that existed when it was created.
+            var applied = FmsShowcaseSeeder.UpgradeStepKeys.Take(2).ToArray();
+            Guid programId;
+            await using (var seed = new AeroLinkDbContext(Options(connection)))
+            {
+                var program = new ProgramRecord("Flight Management System Live Program", FmsShowcaseSeeder.ProgramCode);
+                programId = program.Id;
+                seed.Programs.Add(program);
+                foreach (var key in applied)
+                    seed.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId, key, "seeded by an older build", DateTimeOffset.UtcNow));
+                await seed.SaveChangesAsync();
+            }
+
+            await using var db = new AeroLinkDbContext(Options(connection));
+            var analysis = await Analyzer(db).AnalyzeAsync();
+
+            Assert.NotNull(analysis.Showcase);
+            Assert.True(analysis.Showcase!.Present);
+            Assert.True(analysis.ShowcaseUpgradeAvailable);
+            Assert.Equal(FmsShowcaseSeeder.UpgradeStepKeys.Skip(2), analysis.Showcase.PendingSteps);
+            Assert.DoesNotContain(applied, x => analysis.Showcase.PendingSteps.Contains(x));
+
+            // Advisory, not required: nothing applies these on its own.
+            Assert.False(analysis.UpgradeRequired);
+            Assert.Equal("current", analysis.Status);
+            Assert.False(analysis.DatabaseModified);
+
+            // And the operator is actually told, rather than being left with "DATABASE CURRENT" alone.
+            var rendered = string.Join("\n", AeroLinkUpgradeAnalyzer.Render(analysis));
+            Assert.Contains("Showcase content upgrade available", rendered);
+            Assert.Contains(FmsShowcaseSeeder.UpgradeStepKeys[^1], rendered);
+            Assert.Contains("Nothing applies these automatically", rendered);
         }
         finally { await DropDatabaseAsync(server, database); }
     }

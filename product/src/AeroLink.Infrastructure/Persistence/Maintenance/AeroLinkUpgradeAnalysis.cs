@@ -94,6 +94,29 @@ public sealed record AeroLinkUpgradeConflict(
 public sealed record AeroLinkSemanticUpgradeState(string Marker, string Target, bool? Completed);
 
 /// <summary>
+/// The third upgrade category, and the one easiest to forget exists.
+///
+/// Schema migrations and semantic authorities both run at startup. Showcase upgrade steps do not: the seeder
+/// returns early for a database that already has the showcase program, so an installation seeded before a
+/// step shipped keeps the demo content it was born with until an operator runs the explicit, backup-confirmed
+/// upgrade command. That is deliberate — existing showcase content is operator-owned state, not something a
+/// restart may rewrite — but it left analysis printing "DATABASE CURRENT" for a database whose demo content
+/// was many steps behind the build looking at it.
+///
+/// So it is reported, and reported separately: <paramref name="PendingSteps"/> deliberately does not make
+/// <c>UpgradeRequired</c> true, because nothing is going to apply it on its own, and routing every HOME start
+/// through backup and clone validation for demo content would be false urgency.
+/// </summary>
+/// <param name="Present">False when this database has no showcase program at all, which is a valid state.</param>
+/// <param name="ProgramCode">The showcase program the steps belong to.</param>
+/// <param name="PendingSteps">
+/// Steps this build knows and this database has not recorded. Read from the recorded markers, so a step whose
+/// marker exists counts as applied even in the one case the upgrade re-checks its own postconditions and
+/// re-runs it; the count is a lower bound on what the upgrade would do, never an over-estimate.
+/// </param>
+public sealed record AeroLinkShowcaseUpgradeState(bool Present, string ProgramCode, IReadOnlyList<string> PendingSteps);
+
+/// <summary>
 /// Everything an operator or a launcher needs to know about this database before starting a web server.
 ///
 /// <paramref name="DatabaseModified"/> is part of the contract, not a courtesy: the first question after a
@@ -107,7 +130,8 @@ public sealed record AeroLinkUpgradeAnalysis(
     IReadOnlyList<string> PendingEfMigrations,
     IReadOnlyList<AeroLinkSemanticUpgradeState> SemanticUpgrades,
     IReadOnlyList<AeroLinkUpgradeConflict> Conflicts,
-    bool DatabaseModified)
+    bool DatabaseModified,
+    AeroLinkShowcaseUpgradeState? Showcase = null)
 {
     /// <summary>
     /// Semantic upgrades known to be outstanding. Authorities whose state could not be read are not counted:
@@ -121,6 +145,12 @@ public sealed record AeroLinkUpgradeAnalysis(
 
     /// <summary>True when starting current code against this database would write to it.</summary>
     public bool UpgradeRequired => PendingEfMigrations.Count > 0 || PendingSemanticUpgrades.Count > 0;
+
+    /// <summary>
+    /// True when this build knows showcase upgrade steps this database has not recorded. Advisory: nothing
+    /// applies these on its own, so it is deliberately not part of <see cref="UpgradeRequired"/>.
+    /// </summary>
+    public bool ShowcaseUpgradeAvailable => Showcase is { Present: true } && Showcase.PendingSteps.Count > 0;
 
     /// <summary>
     /// True when the pending work is deterministic — it needs no human decision and may proceed through the
