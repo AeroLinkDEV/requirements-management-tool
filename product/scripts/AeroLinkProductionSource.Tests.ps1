@@ -374,10 +374,20 @@ try {
     # =====================================================================================================
     $launchFixture = New-Fixture
     $null = New-ProductionSource -Fixture $launchFixture
-    $declared = { [pscustomobject]@{ SourceRoot = $launchFixture.Production; ConfigPath = 'C:\config\production-source.psd1' } }
+    $declared = { [pscustomobject]@{ SourceRoot = $launchFixture.Production; ConfigPath = 'C:\config\production-source.psd1'; RemoteName = 'origin' } }
 
     $fromProduction = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Production -ConfigReader $declared
     Assert-True ($fromProduction.Checked) 'Starting production FROM the dedicated production source is exactly right.'
+
+    # Sitting at the configured path is a claim, not a proof. The marker, the remote and the installation
+    # pointer are what substantiate it, and each of those can break while the path stays correct.
+    $brokenBinding = Get-AeroLinkProductionSourceMarkerPath -SourceRoot $launchFixture.Production
+    'not json at all' | Set-Content -LiteralPath $brokenBinding -Encoding UTF8
+    Assert-Throws { Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Production -ConfigReader $declared } `
+        'malformed' 'A checkout at the configured path whose dedicated binding has broken must still be refused.'
+    $null = New-ProductionSource -Fixture $launchFixture
+    Assert-True (Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Production -ConfigReader $declared).Checked `
+        'Repairing the binding makes the source usable again.'
 
     Assert-Throws { Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigReader $declared } `
         'not the dedicated production source' 'Starting HOME production from the development checkout must be refused.'
@@ -389,9 +399,28 @@ try {
         'A trailing separator must not turn the production source into a stranger.'
 
     # No dedicated source configured is the ordinary state on a laptop and on any machine set up before #881.
-    # Refusing there would remove the ability to run production rather than protect it.
-    $unconfigured = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigReader { throw 'configuration not found' }
+    # Refusing there would remove the ability to run production rather than protect it. Absence is decided by
+    # the file not existing, not by an exception.
+    $missingConfig = Join-Path $launchFixture.Root 'no-such-production-source.psd1'
+    $unconfigured = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigPath $missingConfig
     Assert-True (-not $unconfigured.Checked) 'With no dedicated source configured, production must still start.'
+
+    # A configuration that is PRESENT but unusable is the opposite case. Swallowing it would disable the
+    # guard exactly when something is already wrong, and let production run from the development checkout.
+    $malformedConfig = Join-Path $launchFixture.Root 'malformed-production-source.psd1'
+    'this is not a data file' | Set-Content -LiteralPath $malformedConfig -Encoding UTF8
+    Assert-Throws { Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigPath $malformedConfig } `
+        'malformed' 'A malformed production-source configuration must fail closed, not read as "not configured".'
+
+    $unknownKeyConfig = Join-Path $launchFixture.Root 'unknown-key-production-source.psd1'
+    "@{ SourceRoot = 'C:\\AeroLink Production'; NgrokAuthToken = 'secret' }" | Set-Content -LiteralPath $unknownKeyConfig -Encoding UTF8
+    Assert-Throws { Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigPath $unknownKeyConfig } `
+        'unknown key' 'A configuration carrying an unexpected key must fail closed rather than be partially honoured.'
+
+    $relativeConfig = Join-Path $launchFixture.Root 'relative-production-source.psd1'
+    "@{ SourceRoot = 'AeroLink Production' }" | Set-Content -LiteralPath $relativeConfig -Encoding UTF8
+    Assert-Throws { Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigPath $relativeConfig } `
+        'absolute path' 'A configuration whose source root is not an absolute path must fail closed.'
 
     # Trivial spelling differences in a remote URL are not different repositories.
     Assert-True (Test-AeroLinkSameRemote -Left 'https://github.com/o/r.git' -Right 'https://github.com/o/r') 'A trailing .git is the same repository.'

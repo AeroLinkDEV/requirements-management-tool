@@ -231,25 +231,46 @@ function Assert-AeroLinkRunningFromProductionSource {
             demo happily, and is then one `git checkout` away from having its assemblies and client bundle
             replaced underneath a running process - the 2026-09-03 failure with a different first step.
 
-            No configuration is the ordinary state on a laptop, and on any machine set up before #881. There,
+            NO configuration is the ordinary state on a laptop, and on any machine set up before #881. There,
             this launcher is the only way to run production at all, so refusing would remove the feature
             rather than protect it: the check applies only once a dedicated source has been declared.
+
+            A configuration that is PRESENT but malformed is the opposite case and must fail closed. Treating
+            every read error as "not configured" meant a corrupt, truncated or hand-edited config on a HOME
+            machine silently disabled the guard it exists to arm, and production fell back to checkout-local
+            behaviour precisely when something was already wrong. Absence is decided by the file not being
+            there, not by an exception.
+
+            Matching the path is necessary and not sufficient. A checkout can sit at the configured path and
+            still have a marker that is malformed, a remote that is not AeroLink, or an installation pointer
+            redirected to a different installation - all states the posture check calls non-dedicated, and
+            all of which would otherwise pass here and go on to exercise the wrong database.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$RepositoryRoot,
-        # Injectable so the contract suite can drive both outcomes without a machine-wide configuration.
-        [scriptblock]$ConfigReader
+        [string]$ConfigPath = (Get-AeroLinkProductionSourceConfigPath),
+        # Injectable so the contract suite can drive every outcome without a machine-wide configuration.
+        # Return $null for "no configuration exists"; throw for "it exists and is unusable".
+        [scriptblock]$ConfigReader,
+        [scriptblock]$BindingAssertion
     )
-    $configured = $null
-    try { $configured = if ($ConfigReader) { & $ConfigReader } else { Get-AeroLinkProductionSourceConfig } }
-    catch { return [pscustomobject]@{ Checked = $false; Reason = 'No dedicated production source is configured on this machine.' } }
-    if (-not $configured) { return [pscustomobject]@{ Checked = $false; Reason = 'No dedicated production source is configured on this machine.' } }
+    if (-not $ConfigReader -and -not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
+        return [pscustomobject]@{ Checked = $false; Reason = 'No dedicated production source is configured on this machine.' }
+    }
+    $configured = if ($ConfigReader) { & $ConfigReader } else { Get-AeroLinkProductionSourceConfig -ConfigPath $ConfigPath }
+    if (-not $configured) {
+        return [pscustomobject]@{ Checked = $false; Reason = 'No dedicated production source is configured on this machine.' }
+    }
 
     $thisRoot = [IO.Path]::GetFullPath($RepositoryRoot).TrimEnd('\', '/')
     $dedicatedRoot = ([string]$configured.SourceRoot).TrimEnd('\', '/')
     if ($thisRoot.Equals($dedicatedRoot, [StringComparison]::OrdinalIgnoreCase)) {
-        return [pscustomobject]@{ Checked = $true; Reason = "This checkout is the dedicated production source ($thisRoot)." }
+        # Being at the right path is a claim; the marker, the remote and the installation pointer are what
+        # substantiate it. This throws with its own reason when they do not.
+        if ($BindingAssertion) { & $BindingAssertion $thisRoot | Out-Null }
+        else { Assert-AeroLinkDedicatedProductionSource -SourceRoot $thisRoot -RemoteName $configured.RemoteName | Out-Null }
+        return [pscustomobject]@{ Checked = $true; Reason = "This checkout is the dedicated production source ($thisRoot), and its repository and installation binding still hold." }
     }
     throw @"
 AeroLink HOME production refused: this is not the dedicated production source.

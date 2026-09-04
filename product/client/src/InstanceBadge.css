@@ -51,6 +51,16 @@
    the age for anyone who wants it. */
 .brand .instanceBadgeSnapshot { display: none; }
 
+/* At 12px the label alone measured 140px starting 24px in, which is 164px against a 160px column: clipped by
+   four pixels. Measured in a browser against the built stylesheet, not reasoned about — the earlier version
+   of this badge shipped at 23px because a DOM harness said it was fine. Tightening the gutter and the
+   tracking here keeps the readability floor and the column both intact. */
+.brand .instanceBadge {
+  margin-left: 8px;
+  padding: 3px 6px;
+  letter-spacing: .03em;
+}
+
 @media (max-width: 560px) {
   /* The label alone still answers the question the badge exists for. */
   .instanceBadge { margin-left: 9px; padding: 3px 7px; letter-spacing: .04em; }

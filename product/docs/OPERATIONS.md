@@ -175,9 +175,25 @@ the launcher's contract: `0` current, `10` deterministic upgrade required, `20` 
 
 When an upgrade is pending and deterministic, the launcher takes a verified backup, restores an **isolated
 copy** through the supported `Restore-AeroLink.ps1` path, applies this build's upgrade to that copy, proves
-the copy is then current, and only then upgrades the real database. The ordering is the safety property: a
-failure at any earlier step leaves the persistent database and evidence untouched because nothing had reached
-them.
+the copy is then current, proves current AeroLink can actually serve it, and only then upgrades the real
+database. The ordering is the safety property: a failure at any earlier step leaves the persistent database
+and evidence untouched because nothing had reached them.
+
+**Isolated means the evidence store too.** A maintenance run pointed at a clone by connection string alone
+still resolved the live `Evidence:Root`, and one of the semantic authorities in this upgrade set rewrites
+controlled renditions through it — so validating a clone wrote new objects into the canonical evidence tree,
+where no database rollback can reach them. An isolated database target now **requires** an isolated evidence
+root and is refused without one; the clone and the HOME snapshot staging copy each get their own tree under
+`restore-validation/<database>/evidence`.
+
+The post-upgrade proof runs in the **restore-validation read-only** boundary, not an ordinary web host.
+That matters on a copy of production data: an ordinary host would migrate, seed, and start every hosted
+worker — notification, managed-document integrity, enterprise job, webhook, Jira — so a copied outbox row
+could send real mail or real webhook traffic because somebody asked whether an upgrade was safe. Read-only
+mode removes every hosted service, performs no startup mutation, and refuses a database with pending
+migrations. Within it the proof is: `/health/ready`, an **anonymous request refused**, a wrong token refused,
+and byte-exact authenticated controlled reads. An anonymous `200` is the shape of a broken authentication
+boundary and fails validation rather than counting as "authentication responding".
 
 When the database presents a genuine ambiguity — the #816 legacy leadership backup that no longer holds the
 position's required base role is the modelled case — every conflict in the database is reported at once, in
@@ -214,6 +230,32 @@ The maintenance and upgrade qualification runs against a **disposable PostgreSQL
 CI lane the merge gate waits on, with `AEROLINK_REQUIRE_POSTGRES_QUALIFICATION` set so a missing connection
 fails the lane rather than skipping into a green tick. Locally, point `AEROLINK_MIGRATIONS_CONNECTION` at a
 throwaway server; never at a persistent installation.
+
+### Declaring which installation this is
+
+An installation says what it is; nothing infers it from the machine name. The declaration lives in
+`instance.json` under the installation root, the header badge renders it, and the destructive guards read it:
+a `HomeCanonical` installation refuses a HOME-to-laptop snapshot import and refuses a development launch.
+
+Two supported actions establish it on their own — `CONFIGURE_AEROLINK_PRODUCTION_SOURCE.bat Install` declares
+`HOME CANONICAL`, and the first `REFRESH_AEROLINK_FROM_HOME.bat` import declares `WORK-LAPTOP LOCAL`, since
+an installation that has just accepted a HOME snapshot over its database is not anything else. For every
+other case, including a laptop that never imports a snapshot:
+
+```text
+DECLARE_AEROLINK_INSTANCE.bat
+DECLARE_AEROLINK_INSTANCE.bat Preview WorkLaptopLocal
+DECLARE_AEROLINK_INSTANCE.bat Declare WorkLaptopLocal
+```
+
+`Status` and `Preview` change nothing, on disk or anywhere else. Reclassifying an installation that already
+declares something needs `-Force`, because it moves which destructive guards apply to real data. No database,
+evidence, attachment or backup is touched by any of it.
+
+Each installation also carries a stable `instanceId` — a bare GUID, minted once, describing nothing about the
+machine or the network. It answers what a label cannot: two installations can both be labelled
+`WORK-LAPTOP LOCAL`, and a restored snapshot carries the source's label with it. It is minted by the
+launchers and by explicit setup, never by a read: `Preview` paths do not create it.
 
 ### Explicit HOME to work-laptop snapshot refresh
 

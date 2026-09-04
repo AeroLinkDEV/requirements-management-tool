@@ -246,12 +246,19 @@ function Get-AeroLinkInstanceConfig {
             When nothing is declared the answer is deliberately modest rather than flattering: a development
             launch is LOCAL DEVELOPMENT and a production-mode launch is LOCAL PRODUCTION. Neither claims to
             be canonical, because nobody said it was.
+
+            This READS. It used to mint and persist a missing instance id on the way past, which made a
+            getter a writer - and made `REFRESH_AEROLINK_FROM_HOME.bat` Preview write to disk while telling
+            the operator that nothing had been changed. Minting is now -EnsureInstanceId, which the launchers
+            and explicit setup pass, and which anything advertising itself as read-only does not.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$ProductRoot,
         [ValidateSet('Development', 'HomeCanonical')][string]$Mode = 'Development',
-        [string]$InstallationRoot
+        [string]$InstallationRoot,
+        # Mint and persist a stable instance id when this installation has none.
+        [switch]$EnsureInstanceId
     )
     $paths = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot -InstallationRoot $InstallationRoot
     $configPath = Join-Path $paths.InstallationRoot 'instance.json'
@@ -277,7 +284,7 @@ function Get-AeroLinkInstanceConfig {
     # a question a label cannot: two installations may both be labelled WORK-LAPTOP LOCAL, and a snapshot
     # restored onto a third carries the source's label with it. A plain GUID identifies without describing —
     # no machine name, no user, nothing about the network.
-    if ([string]::IsNullOrWhiteSpace($instanceId) -and (Test-Path -LiteralPath $paths.InstallationRoot -PathType Container)) {
+    if ($EnsureInstanceId -and [string]::IsNullOrWhiteSpace($instanceId) -and (Test-Path -LiteralPath $paths.InstallationRoot -PathType Container)) {
         $instanceId = [guid]::NewGuid().ToString('D')
         $minted = [ordered]@{}
         if ($declared) { foreach ($property in $declared.PSObject.Properties) { $minted[$property.Name] = $property.Value } }

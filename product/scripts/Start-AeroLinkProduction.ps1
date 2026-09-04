@@ -81,8 +81,22 @@ if (-not $AllowNonDedicatedSource) {
 # call (or invoked on the way here): the running script, everything it dot-sourced or imported, the cmd/bat
 # entry chain, and the bootstrap module itself. A fast-forward that changes any of them must restart the
 # launch from the updated files rather than continue half-old/half-new.
+#
+# -PreAdvanceAction is the ordering that makes this safe. The bootstrap may fast-forward THIS working tree,
+# and on HOME there can already be a production AeroLink serving the public demo out of it. Advancing first
+# would replace its assemblies, migrations and client bundle while it answers requests. So anything this
+# repository can positively attribute as its own on 5080 is stopped in the moment before the tree moves;
+# a listener that cannot be attributed is left alone, and the ordinary disposition check below still refuses
+# to start over it.
+$stopOwnedProductionRuntime = {
+    param($Root, $Posture)
+    Write-Host '      A source advance is due; stopping the production runtime that is executing out of this tree first.' -ForegroundColor Yellow
+    try { Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiProjectDirectory) | Out-Null }
+    catch { Write-Host "      $($_.Exception.Message)" -ForegroundColor Yellow }
+}.GetNewClosure()
 $bootstrapResult = Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical `
     -RepositoryRoot $repositoryRoot `
+    -PreAdvanceAction $stopOwnedProductionRuntime `
     -CurrentScriptPath $PSCommandPath `
     -ScriptArguments (Get-AeroLinkBootstrapScriptArguments $PSBoundParameters) `
     -LauncherFiles @(
@@ -103,7 +117,7 @@ if ($bootstrapResult.Action -eq 'Reentered') { exit $bootstrapResult.ExitCode }
 # always a bare commit SHA here — and it is the value the runtime publishes and remote demo checks before it
 # will put a public tunnel in front of this process.
 $sourceFingerprint = Get-AeroLinkSourceFingerprint -RepositoryRoot $repositoryRoot
-$instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode HomeCanonical
+$instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode HomeCanonical -EnsureInstanceId
 
 # Reaching this machine from another one takes two changes, not one, and the second is the one nobody expects.
 #

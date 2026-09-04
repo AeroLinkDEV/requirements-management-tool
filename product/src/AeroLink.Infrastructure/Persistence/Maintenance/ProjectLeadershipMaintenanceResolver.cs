@@ -1,5 +1,7 @@
 using AeroLink.Domain.Identity;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using System.Data;
 using System.Text.Json;
 
 namespace AeroLink.Infrastructure.Persistence.Maintenance;
@@ -107,9 +109,24 @@ public sealed class ProjectLeadershipMaintenanceResolver(
         var strategy = db.Database.CreateExecutionStrategy();
         AeroLinkResolutionResult? result = null;
 
+        try
+        {
         await strategy.ExecuteAsync(async () =>
         {
-            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            // Serializable, not the Read Committed default, and the reason is the whole point of this method.
+            //
+            // Re-deriving the conflict inside the transaction proves the state at the moment it is read. Under
+            // Read Committed that proof expires immediately: AnalyzeConflictsAsync takes no locks, so another
+            // maintenance process - or an ordinary user changing a leadership assignment in the application -
+            // can move the primary, the base role, or the legacy backup between this read and the write below,
+            // and the decision then commits against state nobody validated. "Exact preconditions" has to mean
+            // exact at commit, not exact at query time.
+            //
+            // PostgreSQL implements this with predicate locks and aborts the loser with a serialization
+            // failure, which is what should happen: an aborted transaction writes nothing, and nothing written
+            // is the same answer the resolver gives to any other stale precondition. SQLite, used by the
+            // in-memory tests, is serializable already.
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
 
             // Re-derive the conflict from the authority that reports it, inside the transaction, and require
             // the decision to be about the conflict that actually exists right now. Everything below this
@@ -223,9 +240,27 @@ public sealed class ProjectLeadershipMaintenanceResolver(
             result = new AeroLinkResolutionResult(true, AeroLinkResolutionResult.AppliedOutcome,
                 "The decision was applied and recorded. Re-run the analysis to confirm the upgrade posture.", changes);
         });
+        }
+        catch (Exception exception) when (IsSerializationFailure(exception))
+        {
+            return Refuse("Another writer changed the leadership state this decision depends on while it was being applied, so the transaction was aborted and nothing was written. Re-run the analysis and act on the conflict that exists now.");
+        }
 
         return result!;
     }
+
+    /// <summary>
+    /// A serialization failure is a stale precondition that PostgreSQL noticed for us, so it gets the same
+    /// answer as every other stale precondition: nothing written, and go and look again.
+    ///
+    /// It is deliberately not retried. Retrying would re-derive the conflict and could apply the decision
+    /// against state the operator has not seen — which is the exact thing the exact-precondition contract
+    /// exists to prevent. 40001 is serialization_failure and 40P01 is deadlock_detected; both mean the
+    /// transaction was aborted and no row survives it.
+    /// </summary>
+    private static bool IsSerializationFailure(Exception exception) =>
+        exception is PostgresException { SqlState: "40001" or "40P01" }
+        || (exception.InnerException is not null && IsSerializationFailure(exception.InnerException));
 
     /// <summary>
     /// A refusal, which writes nothing.

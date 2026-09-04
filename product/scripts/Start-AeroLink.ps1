@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
-    [switch]$DoNotOpenBrowser
+    [switch]$DoNotOpenBrowser,
+    # Run development against an installation declared HOME CANONICAL. Deliberately awkward, and only for
+    # qualifying this launcher against a disposable HOME-classified installation.
+    [switch]$AllowHomeCanonicalDatabase
 )
 
 # Starts AeroLink for development: the API on 5080 and the Vite dev server on 5173, each supervised separately.
@@ -62,7 +65,35 @@ if ($bootstrapResult.Action -eq 'Reentered') { exit $bootstrapResult.ExitCode }
 # actually execute. For a dirty development tree it folds in a bounded worktree fingerprint, because a SHA
 # says nothing about uncommitted bytes and claiming otherwise is how a stale process survives an edit.
 $sourceFingerprint = Get-AeroLinkSourceFingerprint -RepositoryRoot $repositoryRoot
-$instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode Development
+$instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode Development -EnsureInstanceId
+
+# The development launcher must not be pointed at the HOME canonical database.
+#
+# The three supported modes are not three moods: LOCAL DEV deliberately permits feature branches, dirty
+# worktrees and half-finished migrations, and that is safe against a work-laptop database it is allowed to
+# ruin. HOME CANONICAL is the one that carries real controlled history. On the HOME machine the development
+# checkout is the installation that owns the canonical product/.local, so without this the whole stronger
+# HOME source policy could be bypassed by double-clicking the other BAT - the same class of mistake #881
+# exists to remove, reached through a different door.
+#
+# The classification is what decides, not the hostname: an installation says what it is, and a machine name
+# is not a fact about a database.
+if ($instance.Classification -eq 'HomeCanonical' -and -not $AllowHomeCanonicalDatabase) {
+    throw @"
+AeroLink development start refused: this installation is declared HOME CANONICAL.
+
+  Installation: $($installation.InstallationRoot)
+  Instance:     $($instance.Label) ($($instance.Classification))
+
+The development launcher permits feature branches and an uncommitted worktree, which is safe against a
+work-laptop database and not against the canonical one. Use START_AEROLINK_PRODUCTION.bat from the dedicated
+production source to run this installation, or point development at its own installation.
+
+Nothing was started and nothing was changed. -AllowHomeCanonicalDatabase exists only to qualify this
+launcher against a disposable HOME-classified installation.
+"@
+}
+
 $runtimeEnvironment = @{
     Runtime__SourceSha        = $sourceFingerprint.Sha
     Runtime__SourceIdentity   = $sourceFingerprint.Identity

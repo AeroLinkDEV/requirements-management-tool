@@ -111,6 +111,20 @@ if ($Confirmation -ne 'REFRESH-FROM-HOME') {
     throw 'Activation requires -Confirmation REFRESH-FROM-HOME. Nothing was changed.'
 }
 
+# Declaring the laptop, at the one moment it is unambiguously true.
+#
+# WORK-LAPTOP LOCAL existing as an enum value is not the same as an operator being unable to confuse it with
+# HOME CANONICAL, and until now nothing in the supported laptop path established it: a laptop stayed
+# LOCAL DEVELOPMENT / Undeclared forever, so the badge said nothing and the guards had nothing to read. An
+# installation that has just accepted a HOME snapshot over its database IS a work-laptop local installation -
+# there is no other thing it could be - so this is where it gets said, not inferred from a hostname.
+# An installation that already declares something is left alone: reclassification is an operator decision.
+if ($instance.Classification -eq 'Undeclared') {
+    Set-AeroLinkInstanceConfig -ProductRoot $productRoot -Label 'WORK-LAPTOP LOCAL' -Classification 'WorkLaptopLocal' | Out-Null
+    Write-Host '      Instance declared: WORK-LAPTOP LOCAL.' -ForegroundColor Green
+}
+$instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode Development -EnsureInstanceId
+
 Write-Host '[2/6] Backing up this laptop as it is now...' -ForegroundColor Cyan
 $laptopCapture = & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -PostgresAlreadyRunning
 $laptopBackup = ($laptopCapture | Where-Object { $_.PSObject.Properties['Archive'] } | Select-Object -Last 1).Archive

@@ -604,6 +604,98 @@ public sealed class AeroLinkMaintenanceQualificationTests
     }
 
     /// <summary>
+    /// The window the in-transaction re-derivation does not close on its own.
+    ///
+    /// Re-reading the conflict inside the transaction proves the state at the moment it is read. Under the
+    /// Read Committed default that proof expires immediately: the analysis takes no locks, so another writer
+    /// can move the primary, the base role or the legacy backup between that read and the write, and the
+    /// decision commits against state nobody validated. Serializable is what makes "exact preconditions"
+    /// mean exact at commit rather than exact at query time.
+    ///
+    /// The assertion is the invariant, not a particular winner: whichever transaction PostgreSQL aborts,
+    /// the database must never end up with the decision applied on top of the competing change. An aborted
+    /// resolver writes nothing, which is the same answer it gives every other stale precondition.
+    /// </summary>
+    [Fact]
+    public async Task A_concurrent_writer_cannot_land_a_decision_against_state_it_did_not_validate()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            var fixture = await SeedIneligibleBackupAsync(connection);
+
+            // A competing serializable transaction that reads the same leadership state and then changes it,
+            // held open across the resolver's own transaction. This is the interleaving that Read Committed
+            // allows to commit and that Serializable must refuse.
+            await using var competitor = new AeroLinkDbContext(Options(connection));
+            await using var competingTransaction =
+                await competitor.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            // Write skew, which is the anomaly that actually matters here and the one Read Committed permits.
+            //
+            // The resolver READS the leadership assignments and WRITES the legacy backup. This competitor
+            // does the mirror image: it reads the legacy backup and writes the assignment. Each transaction
+            // decides using state the other is about to invalidate, and neither ordering of them serially
+            // produces the result both committing gives - so there is no serial history equivalent to it.
+            // Under Read Committed both commit and the decision lands against state nobody validated; under
+            // Serializable PostgreSQL detects the cycle and aborts one.
+            //
+            // (Making the competitor write only, or write after the resolver, would be a legitimate serial
+            // history that Serializable is supposed to allow - asserting against that would be testing
+            // PostgreSQL rather than this code.)
+            _ = await competitor.ProjectRoleBackups.SingleAsync(x => x.Id == fixture.LegacyBackupId);
+            var contested = await competitor.ProjectLeadershipAssignments.SingleAsync(x =>
+                x.ProgramId == fixture.ProgramId
+                && x.Position == ProjectLeadershipPosition.SoftwareEngineeringLead && x.EndedAt == null);
+            contested.End("competing.writer", DateTimeOffset.UtcNow);
+
+            AeroLinkResolutionResult resolution;
+            await using (var resolving = new AeroLinkDbContext(Options(connection)))
+            {
+                resolution = await new ProjectLeadershipMaintenanceResolver(resolving, new ProjectLeadershipReconciliationAuthority(resolving))
+                    .ResolveLegacyBackupAsync(
+                        fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
+                        fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup,
+                        fixture.PrimaryId, "Sean, issue #816", apply: true);
+            }
+
+            // A serialization failure surfaces wrapped: EF's retrying execution strategy raises an
+            // InvalidOperationException whose chain ends in Npgsql 40001. Matching on the outer type alone
+            // would miss it and read an abort as a successful commit.
+            static bool IsSerializationAbort(Exception? exception) =>
+                exception is not null
+                && (exception is PostgresException { SqlState: "40001" or "40P01" } || IsSerializationAbort(exception.InnerException));
+
+            var competitorCommitted = true;
+            try { await competitor.SaveChangesAsync(); await competingTransaction.CommitAsync(); }
+            catch (Exception exception) when (IsSerializationAbort(exception)) { competitorCommitted = false; }
+
+            // Exactly one of them may have taken effect, and whichever lost must have written nothing at all.
+            await using var check = new AeroLinkDbContext(Options(connection));
+            var backupRetired = !await check.ProjectRoleBackups.AsNoTracking()
+                .AnyAsync(x => x.Id == fixture.LegacyBackupId && x.RemovedAt == null);
+            var decisionRows = await check.SecurityAuditEvents.AsNoTracking()
+                .CountAsync(x => x.ActorId == AeroLinkMaintenanceAttribution.Actor);
+
+            Assert.Equal(resolution.Applied, backupRetired);
+            Assert.Equal(resolution.Applied ? 1 : 0, decisionRows);
+            Assert.False(resolution.Applied && competitorCommitted,
+                "Serializable isolation must not allow the decision and the competing change that invalidates it to both commit.");
+            if (!resolution.Applied)
+            {
+                // A refusal is a refusal however it was reached - stale precondition, or an abort PostgreSQL
+                // detected for us. Neither may leave a row behind.
+                Assert.Equal(AeroLinkResolutionResult.PreconditionFailedOutcome, resolution.Outcome);
+                Assert.Empty(await check.SecurityAuditEvents.AsNoTracking()
+                    .Where(x => x.ActorId == AeroLinkMaintenanceAttribution.Actor).ToListAsync());
+            }
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    /// <summary>
     /// A row that has already been retired, or that belongs to another program, is not the row the operator
     /// reviewed, and no decision may be applied to it.
     /// </summary>

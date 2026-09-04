@@ -291,11 +291,12 @@ Assert-True ($reconcileXml -match [regex]::Escape('C:\Sean Project\AeroLink Prod
 
 $script:order = @()
 $noMovement = { param($C) $script:order += 'inspect'; [pscustomobject]@{ Action = 'AlreadyCurrent'; Canonical = $true; HeadSha = 'aaaaaaaa'; TargetSha = 'aaaaaaaa'; Reason = 'current' } }
+$stopTunnel = { param($C) $script:order += 'stop-tunnel'; $null }
 $stop = { param($C, $I) $script:order += 'stop'; $null }
 $advanceOk = { param($C, $I) $script:order += 'advance'; [pscustomobject]@{ Action = 'Updated'; Canonical = $true; HeadSha = 'bbbbbbbb'; TargetSha = 'bbbbbbbb'; Reason = 'advanced' } }
 $restart = { param($C, $R) $script:order += 'restart'; [pscustomobject]@{ Detail = 'restarted' } }
 
-$quiet = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $noMovement -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
+$quiet = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $noMovement -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
 Assert-True (-not $quiet.Restarted) 'Scenario 14: reconciliation must do nothing when origin/main has not moved.'
 Assert-True (($script:order -join ',') -eq 'inspect') 'Scenario 14: a quiet pass must not stop, advance, or restart anything.'
 
@@ -304,17 +305,17 @@ Assert-True (($script:order -join ',') -eq 'inspect') 'Scenario 14: a quiet pass
 # the restart takes. Inspect (fetch only), stop, advance, start.
 $script:order = @()
 $available = { param($C) $script:order += 'inspect'; [pscustomobject]@{ Action = 'UpdateAvailable'; Canonical = $true; HeadSha = 'aaaaaaaa'; TargetSha = 'bbbbbbbb'; Reason = 'origin/main moved' } }
-$advanced = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $available -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
+$advanced = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $available -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
 Assert-True ($advanced.Restarted) 'Scenario 14: a real main advance must restart production into the new source.'
 Assert-True ($advanced.HeadSha -eq 'bbbbbbbb') 'Scenario 14: the new running revision must be reported.'
-Assert-True (($script:order -join ',') -eq 'inspect,stop,advance,restart') `
+Assert-True (($script:order -join ',') -eq 'inspect,stop-tunnel,stop,advance,restart') `
     'Scenario 14: the runtime must be stopped BEFORE the working tree it is executing out of is advanced.'
 
 # A refusal at inspection never reaches the runtime at all: nothing is stopped for an update that is not
 # going to happen.
 $script:order = @()
 $refused = { param($C) $script:order += 'inspect'; [pscustomobject]@{ Action = 'Refused'; Canonical = $false; HeadSha = $null; TargetSha = $null; Reason = 'untracked source present' } }
-$blocked = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $refused -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
+$blocked = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $refused -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
 Assert-True (-not $blocked.Restarted) 'Scenario 14: a refused source must never be started.'
 Assert-True (($script:order -join ',') -eq 'inspect') 'Scenario 14: a refused inspection must not stop the running production demo.'
 
@@ -322,8 +323,8 @@ Assert-True (($script:order -join ',') -eq 'inspect') 'Scenario 14: a refused in
 # whatever is on disk rather than be left off because the update did not happen.
 $script:order = @()
 $advanceRefused = { param($C, $I) $script:order += 'advance'; [pscustomobject]@{ Action = 'Refused'; Canonical = $false; HeadSha = 'aaaaaaaa'; TargetSha = 'cccccccc'; Reason = 'origin/main moved between inspection and advance.' } }
-$recovered = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $available -RuntimeStopper $stop -SourceAdvancer $advanceRefused -Restarter $restart
-Assert-True (($script:order -join ',') -eq 'inspect,stop,advance,restart') 'Scenario 14: a refused advance must still restart what was stopped.'
+$recovered = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $available -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceRefused -Restarter $restart
+Assert-True (($script:order -join ',') -eq 'inspect,stop-tunnel,stop,advance,restart') 'Scenario 14: a refused advance must still restart what was stopped.'
 Assert-True ($recovered.Action -eq 'Refused' -and $recovered.Restarted) 'Scenario 14: the refusal must be reported without leaving production down.'
 Assert-True ($recovered.Detail -match 'already on disk') 'Scenario 14: the operator must be told which revision is actually running.'
 

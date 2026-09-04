@@ -132,16 +132,25 @@ try {
     # #881 asks for one alongside source, mode and classification. It answers what a label cannot: two
     # installations can both be labelled WORK-LAPTOP LOCAL, and a restored snapshot carries the source's
     # label with it.
+    # Minting is deliberate, not a side effect of reading. A getter that writes made
+    # REFRESH_AEROLINK_FROM_HOME.bat Preview change a file on disk while reporting nothing had changed, and
+    # "read-only" has to be literally true to be worth saying.
     $identified = New-FixtureProductRoot -WithLocal
-    $firstRead = Get-AeroLinkInstanceConfig -ProductRoot $identified -Mode Development
-    Assert-True (-not [string]::IsNullOrWhiteSpace($firstRead.InstanceId)) 'An installation must have a stable instance identifier.'
-    $secondRead = Get-AeroLinkInstanceConfig -ProductRoot $identified -Mode Development
+    $pureRead = Get-AeroLinkInstanceConfig -ProductRoot $identified -Mode Development
+    Assert-True ([string]::IsNullOrWhiteSpace($pureRead.InstanceId)) 'Reading an installation must not mint an identifier for it.'
+    Assert-True (-not (Test-Path -LiteralPath $pureRead.ConfigPath -PathType Leaf)) 'A read of an undeclared installation must not create its declaration file.'
+
+    $firstRead = Get-AeroLinkInstanceConfig -ProductRoot $identified -Mode Development -EnsureInstanceId
+    Assert-True (-not [string]::IsNullOrWhiteSpace($firstRead.InstanceId)) 'An installation must have a stable instance identifier once one is ensured.'
+    $secondRead = Get-AeroLinkInstanceConfig -ProductRoot $identified -Mode Development -EnsureInstanceId
     Assert-True ($secondRead.InstanceId -eq $firstRead.InstanceId) 'The instance identifier must be minted once, not regenerated on every read.'
+    Assert-True ((Get-AeroLinkInstanceConfig -ProductRoot $identified -Mode Development).InstanceId -eq $firstRead.InstanceId) `
+        'A plain read must still report the identifier that already exists.'
     Set-AeroLinkInstanceConfig -ProductRoot $identified -Label 'WORK-LAPTOP LOCAL' -Classification 'WorkLaptopLocal' | Out-Null
     Assert-True ((Get-AeroLinkInstanceConfig -ProductRoot $identified -Mode Development).InstanceId -eq $firstRead.InstanceId) `
         'Declaring a label must not change the instance identifier.'
     Assert-True ($firstRead.InstanceId -notmatch [regex]::Escape($env:COMPUTERNAME)) 'The instance identifier must identify without describing the machine.'
-    Assert-True ((Get-AeroLinkInstanceConfig -ProductRoot (New-FixtureProductRoot -WithLocal) -Mode Development).InstanceId -ne $firstRead.InstanceId) `
+    Assert-True ((Get-AeroLinkInstanceConfig -ProductRoot (New-FixtureProductRoot -WithLocal) -Mode Development -EnsureInstanceId).InstanceId -ne $firstRead.InstanceId) `
         'Two installations must not share an identifier.'
 
     # A declaration survives an unrelated update, so snapshot metadata cannot erase the label.

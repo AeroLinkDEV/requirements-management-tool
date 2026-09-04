@@ -66,7 +66,7 @@ switch ($Action) {
         # HomeCanonical, so an installation left Undeclared — which is what a normally configured HOME was,
         # because nothing established it — had no protection against having the canonical database replaced
         # by a laptop snapshot. Declaring it is what arms that guard.
-        $existingInstance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode HomeCanonical
+        $existingInstance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode HomeCanonical -EnsureInstanceId
         if ($existingInstance.Classification -eq 'HomeCanonical') {
             Write-Host "Instance already declared: $($existingInstance.Label) ($($existingInstance.Classification))." -ForegroundColor DarkGray
         }

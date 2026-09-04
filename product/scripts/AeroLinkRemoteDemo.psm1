@@ -852,9 +852,34 @@ function Start-AeroLinkRemoteDemo {
             # Decide with a fetch (remote-tracking refs only), stop what is running out of the tree, advance.
             $inspect = Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -InspectOnly
             if ($inspect.Canonical -and $inspect.Action -eq 'UpdateAvailable') {
-                Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production source is behind; stopping the local runtime before advancing to $($inspect.TargetSha)."
-                if ((& $LocalReadyTest $Config).Ready) { & (Join-Path $Config.AeroLinkRoot 'product\scripts\Stop-AeroLink.ps1') | Out-Null }
-                Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -AdvanceToSha $inspect.TargetSha
+                Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production source is behind; stopping the local runtime and the owned tunnel before advancing to $($inspect.TargetSha)."
+                # The tunnel first. It forwards the public URL at 127.0.0.1:5080, so leaving it up across the
+                # transition publishes whatever occupies that port next - including a process whose identity
+                # has not been re-proved. Only the AeroLink-owned tunnel is stopped; a foreign ngrok is a
+                # refusal, never a casualty.
+                try { Stop-AeroLinkRemoteDemo -Config $Config | Out-Null }
+                catch { Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The owned tunnel could not be stopped before the source advance: $($_.Exception.Message)" }
+                # Unconditionally, not "if it looks ready". A running process is what the tree is about to be
+                # rewritten under; an owned process that is up but unhealthy is exactly the one that must not
+                # be left executing deleted files.
+                & (Join-Path $Config.AeroLinkRoot 'product\scripts\Stop-AeroLink.ps1') | Out-Null
+                $advanced = Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -AdvanceToSha $inspect.TargetSha
+                if ($advanced.Canonical) { $advanced }
+                else {
+                    # The runtime is already down. A refused advance - origin/main moved again between the
+                    # phases, most likely - must not also mean the demo stays off; the revision on disk is
+                    # still the verified canonical one, so bring that back up and say what happened.
+                    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The source advance was refused after the runtime was stopped: $($advanced.Reason)"
+                    $onDisk = Get-AeroLinkProductionSourcePosture -SourceRoot $Config.AeroLinkRoot
+                    if ($onDisk.Canonical) {
+                        [pscustomobject]@{
+                            Action = 'AdvanceRefused'; Canonical = $true; HeadSha = $onDisk.Posture.HeadSha
+                            TargetSha = $inspect.TargetSha; RemoteReachable = $true
+                            Reason = "The source was not advanced ($($advanced.Reason)) so production is being started on the revision already on disk, main @ $($onDisk.Posture.ShortSha)."
+                        }
+                    }
+                    else { $advanced }
+                }
             }
             else { $inspect }
         }
@@ -1282,7 +1307,9 @@ function Invoke-AeroLinkProductionSourceReconciliation {
         # Phase 1: fetch and decide, changing nothing. Injectable so the contract suite can drive every
         # source outcome and assert the ordering without a clone or a network.
         [scriptblock]$SourceInspector,
-        # Phase 2: stop the runtime executing out of the working tree about to be rewritten.
+        # Phase 2a: take down the owned public tunnel before the endpoint it forwards to disappears.
+        [scriptblock]$TunnelStopper,
+        # Phase 2b: stop the runtime executing out of the working tree about to be rewritten.
         [scriptblock]$RuntimeStopper,
         # Phase 3: advance the working tree to the revision phase 1 decided on.
         [scriptblock]$SourceAdvancer,
@@ -1299,8 +1326,21 @@ function Invoke-AeroLinkProductionSourceReconciliation {
         return [pscustomobject]@{ Action = $inspect.Action; Restarted = $false; HeadSha = $inspect.HeadSha; Detail = $inspect.Reason }
     }
 
-    # From here the working tree is going to be rewritten, so nothing may still be running out of it.
-    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Stopping the local production runtime before advancing the source to $($inspect.TargetSha)."
+    # From here the working tree is going to be rewritten, so nothing may still be running out of it - and
+    # nothing may still be publishing the port it was serving on.
+    #
+    # The tunnel comes down first and deliberately. It forwards the public URL to 127.0.0.1:5080, so leaving
+    # it up across the transition means the protected public endpoint is pointed at an absent API and then at
+    # whatever occupies that port next - a process whose identity has not been re-proved. Only the
+    # AeroLink-owned tunnel is stopped; an ngrok that does not match the contract is a refusal, never a
+    # casualty. The restart below brings a tunnel back and re-proves the 401 edge contract before declaring
+    # the demo ready.
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Stopping the owned tunnel and the local production runtime before advancing the source to $($inspect.TargetSha)."
+    if ($TunnelStopper) { & $TunnelStopper $Config | Out-Null }
+    else {
+        try { Stop-AeroLinkRemoteDemo -Config $Config | Out-Null }
+        catch { Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The owned tunnel could not be stopped: $($_.Exception.Message)" }
+    }
     if ($RuntimeStopper) { & $RuntimeStopper $Config $inspect | Out-Null }
     else { & (Join-Path $Config.AeroLinkRoot 'product\scripts\Stop-AeroLink.ps1') | Out-Null }
 
