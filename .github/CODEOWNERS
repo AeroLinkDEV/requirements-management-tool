@@ -1,0 +1,4 @@
+# Trusted merge-authority and Product-gate surfaces.
+/.github/ @seanmccarthyns
+/product/test-planner/ @seanmccarthyns
+/product/ci-metrics/ @seanmccarthyns

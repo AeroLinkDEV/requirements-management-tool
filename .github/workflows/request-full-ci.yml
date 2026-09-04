@@ -23,6 +23,8 @@ jobs:
     if: github.event.label.name == 'ready-for-full-ci' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    environment:
+      name: merge-authority
     env:
       GITHUB_TOKEN: ${{ github.token }}
       HEAD_REF: ${{ github.event.pull_request.head.ref }}
@@ -226,3 +228,45 @@ jobs:
 
           verify_live_pr
           echo "Bound exact Product Full run $run_id to PR #$PR_NUMBER head $HEAD_SHA against base $BASE_SHA." >> "$GITHUB_STEP_SUMMARY"
+      - name: Mint the repository-scoped Merge Authority token
+        id: authority-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.MERGE_AUTHORITY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MERGE_AUTHORITY_APP_PRIVATE_KEY }}
+          permission-checks: write
+          permission-contents: read
+      - name: Publish trusted pull-request readiness
+        shell: bash
+        env:
+          MERGE_AUTHORITY_TOKEN: ${{ steps.authority-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python - <<'PY' > "$RUNNER_TEMP/merge-authority-pr-check.json"
+          import json
+          import os
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          head_sha = os.environ["HEAD_SHA"]
+          run_id = os.environ["GITHUB_RUN_ID"]
+          print(json.dumps({
+              "name": "Trusted merge-queue binding",
+              "head_sha": head_sha,
+              "status": "completed",
+              "conclusion": "success",
+              "details_url": f"https://github.com/{repository}/actions/runs/{run_id}",
+              "external_id": f"aerolink-merge-authority:pull-request:{head_sha}",
+              "output": {
+                  "title": "Trusted pull-request evidence bound",
+                  "summary": "Default-branch verification bound the exact successful Product gate to this pull-request head, so it may enter the merge queue.",
+              },
+          }))
+          PY
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer $MERGE_AUTHORITY_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --header "Content-Type: application/json" \
+            --data-binary "@$RUNNER_TEMP/merge-authority-pr-check.json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/check-runs"

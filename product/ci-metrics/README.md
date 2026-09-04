@@ -160,6 +160,32 @@ and eligible raw evidence; any missing/malformed/mismatched/contradictory eviden
 `canSkip` is always false, and the output records what phase B would skip. Enforcement requires real-merge
 observation and a separate review.
 
+## Trusted merge-queue binding
+
+Two protected-default-branch paths publish the same App-bound `Trusted merge-queue binding` check. The
+trusted Full requester publishes it on an exact pull-request head only after the existing Product evidence
+and live readiness checks succeed; GitHub requires that pull-request check before an entry can join the
+queue. `.github/workflows/merge-queue-binding.yml` then observes completed `Product quality gate` runs with
+`workflow_run` and publishes the check on the composed `merge_group` SHA only after the queue-specific
+evidence below passes. Both paths enter the `merge-authority` environment and use a repository-scoped
+AeroLink Merge Authority App token. Their ordinary `GITHUB_TOKEN` cannot publish the authority check.
+
+`bin/verify-merge-authority.mjs` consumes the tested decision function in `lib/merge-authority.mjs`.
+It resolves the exact workflow run from GitHub, enumerates all job pages with explicit `filter=latest`,
+and maps each job's run id, attempt, name, and conclusion directly into the evaluator. It also compares
+the `.github/`, `product/test-planner/`, and `product/ci-metrics/` Git subtree SHAs between the queue
+candidate and the current default branch. Tree identity covers every descendant name, mode, and blob
+without the changed-files API's pagination limit. A differing, missing, ambiguous, truncated, or
+unreadable trusted subtree refuses the binding.
+
+The App private key is an environment secret, and the environment deployment policy must admit only the
+default branch. The future ruleset must require this check **with the AeroLink Merge Authority App's
+integration id**; a name-only required check does not establish publisher identity. The merge queue and
+this required check remain disabled until the App, environment policy, and ruleset are configured and
+live acceptance succeeds. `.github/CODEOWNERS` assigns all three trusted surfaces to the repository owner.
+Required code-owner review must not be enabled while that owner is the only eligible reviewer, because an
+author cannot approve their own pull request; enable it after a second eligible reviewer or team exists.
+
 ## API startup-floor telemetry (563A)
 
 `AeroLinkApiFactory` emits one bounded JSON line per measured phase (schema
@@ -267,10 +293,11 @@ independently selected producer, so push/schedule reports are complete).
 Run the full suite exactly as CI does:
 
 ```powershell
-node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs
+node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs product/ci-metrics/tests/merge-authority.test.mjs product/ci-metrics/tests/merge-authority-github.test.mjs
 ```
 
-The exact command above currently runs **164 tests** (the former 154-test count predates the later metrics-test additions in #599 and #602). The suite covers schema-driven nested validation, real-format Playwright suite traversal,
+The command's reported test count is the authoritative current total; historical run artifacts retain
+the count that applied to their exact revisions. The suite covers schema-driven nested validation, real-format Playwright suite traversal,
 representative TRX success/failure fixtures, Node JUnit parsing, valid/missing/malformed/oversized
 fragments and artifacts, unknown schema versions, failed/cancelled/skipped jobs, missing test reports,
 count mismatches, retried Playwright tests, empty test sets, comparable-run grouping and rolling
