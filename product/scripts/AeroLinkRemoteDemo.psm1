@@ -847,7 +847,16 @@ function Start-AeroLinkRemoteDemo {
     if (-not $SkipSourceReconciliation) {
         $reconcile = if ($SourceReconciler) { & $SourceReconciler $Config } else {
             Assert-AeroLinkDedicatedProductionSource -SourceRoot $Config.AeroLinkRoot | Out-Null
-            Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot
+            # Two phases for the same reason the timed pass has them: an operator can run this with the demo
+            # up, and fast-forwarding the working tree first would rewrite the files that process is executing.
+            # Decide with a fetch (remote-tracking refs only), stop what is running out of the tree, advance.
+            $inspect = Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -InspectOnly
+            if ($inspect.Canonical -and $inspect.Action -eq 'UpdateAvailable') {
+                Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production source is behind; stopping the local runtime before advancing to $($inspect.TargetSha)."
+                if ((& $LocalReadyTest $Config).Ready) { & (Join-Path $Config.AeroLinkRoot 'product\scripts\Stop-AeroLink.ps1') | Out-Null }
+                Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -AdvanceToSha $inspect.TargetSha
+            }
+            else { $inspect }
         }
         if (-not $reconcile.Canonical) {
             Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: $($reconcile.Reason)"
@@ -1248,37 +1257,71 @@ function Install-AeroLinkReconcileTask {
 
 function Invoke-AeroLinkProductionSourceReconciliation {
     <#
-      .SYNOPSIS One bounded reconciliation pass: advance the production source, and restart into it if it moved.
+      .SYNOPSIS One bounded reconciliation pass: decide, stop, advance, restart - in that order.
       .DESCRIPTION
         Does nothing when origin/main has not moved, which is the overwhelmingly common case and the reason
         this can afford to run on a timer at all. When it has moved, the restart goes through the ordinary
         start path so every existing gate still applies - canonical source, database upgrade posture, runtime
         identity, and the 401 proof before the tunnel is declared ready.
+
+        The order is the safety property, not a style choice. Fast-forwarding first and restarting afterwards
+        rewrites assemblies, EF migrations and the built client bundle underneath a process that is serving
+        the public demo, over however long the restart takes. Between those two moments the running AeroLink
+        is executing deleted or replaced files while its database is one revision behind what is now on disk -
+        the exact class of half-swapped state #881 exists to remove. So: inspect (a fetch writes only
+        remote-tracking refs, which nothing running reads), decide, stop the runtime we own, and only then
+        advance the working tree and start the new revision.
+
+        If the advance refuses after the runtime has been stopped, the pass still starts AeroLink again on the
+        revision that is actually on disk. A refused update must not leave the machine down.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Config,
         [switch]$Scheduled,
-        [scriptblock]$SourceReconciler,
+        # Phase 1: fetch and decide, changing nothing. Injectable so the contract suite can drive every
+        # source outcome and assert the ordering without a clone or a network.
+        [scriptblock]$SourceInspector,
+        # Phase 2: stop the runtime executing out of the working tree about to be rewritten.
+        [scriptblock]$RuntimeStopper,
+        # Phase 3: advance the working tree to the revision phase 1 decided on.
+        [scriptblock]$SourceAdvancer,
+        # Phase 4: the full start path, with all of its gates.
         [scriptblock]$Restarter
     )
     $run = New-AeroLinkRemoteDemoRun -Scheduled:$Scheduled
-    $reconcile = if ($SourceReconciler) { & $SourceReconciler $Config } else {
+    $inspect = if ($SourceInspector) { & $SourceInspector $Config } else {
         Assert-AeroLinkDedicatedProductionSource -SourceRoot $Config.AeroLinkRoot | Out-Null
-        Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot
+        Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -InspectOnly
     }
-    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production-source reconciliation: $($reconcile.Action) - $($reconcile.Reason)"
-    if (-not $reconcile.Canonical) {
-        return [pscustomobject]@{ Action = $reconcile.Action; Restarted = $false; HeadSha = $reconcile.HeadSha; Detail = $reconcile.Reason }
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production-source inspection: $($inspect.Action) - $($inspect.Reason)"
+    if ((-not $inspect.Canonical) -or $inspect.Action -ne 'UpdateAvailable') {
+        return [pscustomobject]@{ Action = $inspect.Action; Restarted = $false; HeadSha = $inspect.HeadSha; Detail = $inspect.Reason }
     }
-    if ($reconcile.Action -ne 'Updated') {
-        return [pscustomobject]@{ Action = $reconcile.Action; Restarted = $false; HeadSha = $reconcile.HeadSha; Detail = $reconcile.Reason }
+
+    # From here the working tree is going to be rewritten, so nothing may still be running out of it.
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Stopping the local production runtime before advancing the source to $($inspect.TargetSha)."
+    if ($RuntimeStopper) { & $RuntimeStopper $Config $inspect | Out-Null }
+    else { & (Join-Path $Config.AeroLinkRoot 'product\scripts\Stop-AeroLink.ps1') | Out-Null }
+
+    $advance = if ($SourceAdvancer) { & $SourceAdvancer $Config $inspect } else {
+        Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -AdvanceToSha $inspect.TargetSha
     }
-    # The full start, not a shortcut: it re-runs reconciliation (now a no-op), finds a runtime whose source
-    # identity no longer matches, restarts only the process it owns, and re-proves the protected endpoint.
-    $result = if ($Restarter) { & $Restarter $Config $reconcile } else { Start-AeroLinkRemoteDemo -Config $Config -Scheduled:$Scheduled }
-    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production restarted onto $($reconcile.HeadSha)."
-    return [pscustomobject]@{ Action = 'Updated'; Restarted = $true; HeadSha = $reconcile.HeadSha; Detail = "Production now runs $($reconcile.HeadSha). $($result.Detail)" }
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production-source advance: $($advance.Action) - $($advance.Reason)"
+
+    # The full start, not a shortcut: it re-runs the source gate (now a no-op), starts the revision on disk,
+    # proves its runtime identity, and re-proves the protected endpoint.
+    $result = if ($Restarter) { & $Restarter $Config $advance } else { Start-AeroLinkRemoteDemo -Config $Config -Scheduled:$Scheduled }
+
+    if ($advance.Action -ne 'Updated' -or -not $advance.Canonical) {
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'The advance was refused; production was restarted on the revision already on disk.'
+        return [pscustomobject]@{
+            Action = $advance.Action; Restarted = $true; HeadSha = $advance.HeadSha
+            Detail = "The production source was not advanced: $($advance.Reason) Production was restarted on the revision already on disk rather than left down. $($result.Detail)"
+        }
+    }
+    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production restarted onto $($advance.HeadSha)."
+    return [pscustomobject]@{ Action = 'Updated'; Restarted = $true; HeadSha = $advance.HeadSha; Detail = "Production now runs $($advance.HeadSha). $($result.Detail)" }
 }
 
 function Save-AeroLinkRemoteDemoTaskXml {

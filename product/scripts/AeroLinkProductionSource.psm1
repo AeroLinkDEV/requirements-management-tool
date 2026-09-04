@@ -348,6 +348,14 @@ function Update-AeroLinkProductionSource {
 
             Nothing here is a repair. A production source that has somehow acquired dirt, an untracked file,
             or a local commit is reported and refused, exactly as found.
+
+            -InspectOnly separates deciding from acting. A fetch writes only remote-tracking refs, which no
+            running process reads; the fast-forward rewrites the working tree the production runtime is
+            executing out of. A caller with a runtime up must therefore inspect first, stop that runtime, and
+            only then advance - otherwise a timer swaps assemblies, migrations and client bundles under a live
+            process, which is a worse outage than the stale revision it was fixing. -AdvanceToSha closes the
+            gap between the two phases: the advance happens only if origin/main still points where the
+            inspection said it did, so a push landing in between cannot silently redirect the update.
     #>
     [CmdletBinding()]
     param(
@@ -355,8 +363,16 @@ function Update-AeroLinkProductionSource {
         [string]$RemoteName = 'origin',
         [int]$FetchTimeoutSeconds = 45,
         [switch]$AllowNonDedicated,
-        [scriptblock]$FetchOverride
+        [scriptblock]$FetchOverride,
+        # Fetch and decide, but never touch the working tree.
+        [switch]$InspectOnly,
+        # Advance only if origin/main is still this exact revision.
+        [string]$AdvanceToSha
     )
+
+    if ($InspectOnly -and $AdvanceToSha) {
+        throw 'Update-AeroLinkProductionSource: -InspectOnly decides and -AdvanceToSha acts. Asking for both is a contradiction; nothing was changed.'
+    }
 
     if (-not $AllowNonDedicated) {
         $marker = Get-AeroLinkProductionSourceMarkerPath -SourceRoot $SourceRoot
@@ -374,7 +390,7 @@ function Update-AeroLinkProductionSource {
     $preFetch = Get-AeroLinkProductionSourcePosture -SourceRoot $SourceRoot -RemoteName $RemoteName
     if (-not $preFetch.Canonical -and $before.Relationship -ne 'Behind') {
         return [pscustomobject]@{
-            Action = 'Refused'; Canonical = $false; HeadSha = $before.HeadSha
+            Action = 'Refused'; Canonical = $false; HeadSha = $before.HeadSha; TargetSha = $null
             RemoteReachable = $null; Reason = $preFetch.Reason
         }
     }
@@ -386,34 +402,48 @@ function Update-AeroLinkProductionSource {
         $offline = Get-AeroLinkProductionSourcePosture -SourceRoot $SourceRoot -RemoteName $RemoteName
         if (-not $offline.Canonical) {
             return [pscustomobject]@{
-                Action = 'Refused'; Canonical = $false; HeadSha = $posture.HeadSha
+                Action = 'Refused'; Canonical = $false; HeadSha = $posture.HeadSha; TargetSha = $posture.RemoteMainSha
                 RemoteReachable = $false; Reason = $offline.Reason
             }
         }
         if ($null -eq $posture.RemoteMainSha) {
             return [pscustomobject]@{
-                Action = 'Refused'; Canonical = $false; HeadSha = $posture.HeadSha
+                Action = 'Refused'; Canonical = $false; HeadSha = $posture.HeadSha; TargetSha = $null
                 RemoteReachable = $false; Reason = "GitHub is unavailable and no cached origin/main exists, so the canonical source posture cannot be verified for main @ $($posture.ShortSha)."
             }
         }
         return [pscustomobject]@{
-            Action = 'CachedCanonical'; Canonical = $true; HeadSha = $posture.HeadSha
+            Action = 'CachedCanonical'; Canonical = $true; HeadSha = $posture.HeadSha; TargetSha = $posture.RemoteMainSha
             RemoteReachable = $false; Reason = "GitHub is unavailable. Running the previously verified cached clean main @ $($posture.ShortSha); the latest remote revision could not be verified."
         }
     }
 
     if ($null -eq $posture.RemoteMainSha) {
         return [pscustomobject]@{
-            Action = 'Refused'; Canonical = $false; HeadSha = $posture.HeadSha
+            Action = 'Refused'; Canonical = $false; HeadSha = $posture.HeadSha; TargetSha = $null
             RemoteReachable = $true; Reason = "The remote was reachable but $RemoteName/main was not found. Nothing was changed."
         }
     }
 
     if ($posture.Relationship -eq 'Behind') {
+        if ($InspectOnly) {
+            # Decided, nothing touched. The working tree is exactly as the caller's runtime left it.
+            return [pscustomobject]@{
+                Action = 'UpdateAvailable'; Canonical = $true; HeadSha = $posture.HeadSha; TargetSha = $posture.RemoteMainSha
+                RemoteReachable = $true; Reason = "$RemoteName/main has moved to $($posture.ShortRemoteMainSha); the production source is still $($posture.ShortSha). Nothing was changed."
+            }
+        }
+        if ($AdvanceToSha -and $posture.RemoteMainSha -ne $AdvanceToSha) {
+            $short = $AdvanceToSha.Substring(0, [Math]::Min(8, $AdvanceToSha.Length))
+            return [pscustomobject]@{
+                Action = 'Refused'; Canonical = $false; HeadSha = $posture.HeadSha; TargetSha = $posture.RemoteMainSha
+                RemoteReachable = $true; Reason = "$RemoteName/main moved between inspection and advance: the decision was made against $short but the remote is now $($posture.ShortRemoteMainSha). Nothing was changed; the next pass will re-decide."
+            }
+        }
         try { Invoke-AeroLinkBootstrapGit -RepositoryRoot $SourceRoot -GitArguments @('merge', '--ff-only', "$RemoteName/main") | Out-Null }
         catch {
             return [pscustomobject]@{
-                Action = 'Refused'; Canonical = $false; HeadSha = $posture.HeadSha
+                Action = 'Refused'; Canonical = $false; HeadSha = $posture.HeadSha; TargetSha = $posture.RemoteMainSha
                 RemoteReachable = $true; Reason = "The strict fast-forward of the production source was refused by Git and nothing was changed: $($_.Exception.Message)"
             }
         }
@@ -421,17 +451,17 @@ function Update-AeroLinkProductionSource {
         if (-not $updated.Canonical) {
             return [pscustomobject]@{
                 Action = 'Refused'; Canonical = $false; HeadSha = if ($updated.Posture) { $updated.Posture.HeadSha } else { $null }
-                RemoteReachable = $true; Reason = $updated.Reason
+                TargetSha = $posture.RemoteMainSha; RemoteReachable = $true; Reason = $updated.Reason
             }
         }
         if ($updated.Posture.HeadSha -ne $posture.RemoteMainSha) {
             return [pscustomobject]@{
-                Action = 'Refused'; Canonical = $false; HeadSha = $updated.Posture.HeadSha
+                Action = 'Refused'; Canonical = $false; HeadSha = $updated.Posture.HeadSha; TargetSha = $posture.RemoteMainSha
                 RemoteReachable = $true; Reason = "The production source changed during the update: HEAD is $($updated.Posture.ShortSha) but the verified update target was $($posture.ShortRemoteMainSha). Inspect the source; no automatic action was taken."
             }
         }
         return [pscustomobject]@{
-            Action = 'Updated'; Canonical = $true; HeadSha = $updated.Posture.HeadSha
+            Action = 'Updated'; Canonical = $true; HeadSha = $updated.Posture.HeadSha; TargetSha = $posture.RemoteMainSha
             RemoteReachable = $true; Reason = "The production source was strictly fast-forwarded to $RemoteName/main @ $($updated.Posture.ShortSha) and revalidated."
         }
     }
@@ -439,12 +469,20 @@ function Update-AeroLinkProductionSource {
     $current = Get-AeroLinkProductionSourcePosture -SourceRoot $SourceRoot -RemoteName $RemoteName
     if (-not $current.Canonical) {
         return [pscustomobject]@{
-            Action = 'Refused'; Canonical = $false; HeadSha = $posture.HeadSha
+            Action = 'Refused'; Canonical = $false; HeadSha = $posture.HeadSha; TargetSha = $posture.RemoteMainSha
             RemoteReachable = $true; Reason = $current.Reason
         }
     }
+    if ($AdvanceToSha -and $posture.HeadSha -ne $AdvanceToSha) {
+        # Already current, but not with what was decided: someone else advanced the source under us.
+        $short = $AdvanceToSha.Substring(0, [Math]::Min(8, $AdvanceToSha.Length))
+        return [pscustomobject]@{
+            Action = 'Refused'; Canonical = $false; HeadSha = $posture.HeadSha; TargetSha = $posture.RemoteMainSha
+            RemoteReachable = $true; Reason = "The production source is current at $($posture.ShortSha), but the advance was decided for $short. Something else moved the source; no automatic action was taken."
+        }
+    }
     return [pscustomobject]@{
-        Action = 'AlreadyCurrent'; Canonical = $true; HeadSha = $posture.HeadSha
+        Action = 'AlreadyCurrent'; Canonical = $true; HeadSha = $posture.HeadSha; TargetSha = $posture.RemoteMainSha
         RemoteReachable = $true; Reason = "The production source is current with $RemoteName/main @ $($posture.ShortSha)."
     }
 }

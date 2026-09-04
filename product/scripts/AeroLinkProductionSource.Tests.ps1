@@ -327,6 +327,43 @@ try {
     Assert-Throws { Assert-AeroLinkDedicatedProductionSource -SourceRoot $movedFixture.Production } 'installation' `
         'Production start must refuse a source whose data pointer no longer matches what it was bound to.'
 
+    # =====================================================================================================
+    # 10. Deciding and acting are separable, so a caller can stop its runtime in between.
+    #
+    # Fetching writes only remote-tracking refs, which no running process reads. The fast-forward rewrites
+    # the working tree the production runtime executes out of. A caller with a runtime up must be able to
+    # learn that an update is due WITHOUT the tree moving under that process.
+    # =====================================================================================================
+    $phaseFixture = New-Fixture
+    $null = New-ProductionSource -Fixture $phaseFixture
+    $beforeSha = (Get-AeroLinkProductionSourcePosture -SourceRoot $phaseFixture.Production).Posture.HeadSha
+    $target = Push-RemoteCommit -Fixture $phaseFixture -Content 'phase-v2'
+
+    $inspect = Update-AeroLinkProductionSource -SourceRoot $phaseFixture.Production -InspectOnly
+    Assert-True ($inspect.Action -eq 'UpdateAvailable') "Inspection must report an available update; it reported $($inspect.Action): $($inspect.Reason)"
+    Assert-True ($inspect.TargetSha -eq $target) 'Inspection must name the revision the advance will land on.'
+    Assert-True ($inspect.HeadSha -eq $beforeSha) 'Inspection must report the source still at its current revision...'
+    Assert-True ((Get-AeroLinkProductionSourcePosture -SourceRoot $phaseFixture.Production).Posture.HeadSha -eq $beforeSha) `
+        '...and must actually leave the working tree there. This is the whole point of the phase split.'
+
+    # The gap between the phases is closed: a push landing in between cannot silently redirect the advance.
+    $moved = Push-RemoteCommit -Fixture $phaseFixture -Content 'phase-v3'
+    Assert-True ($moved -ne $target) 'Fixture sanity: origin/main moved again between inspection and advance.'
+    $stale = Update-AeroLinkProductionSource -SourceRoot $phaseFixture.Production -AdvanceToSha $target
+    Assert-True ($stale.Action -eq 'Refused') 'An advance decided against a revision that is no longer origin/main must be refused.'
+    Assert-True ($stale.Reason -match 'between inspection and advance') 'The refusal must say why, so the next pass is understood to re-decide.'
+    Assert-True ((Get-AeroLinkProductionSourcePosture -SourceRoot $phaseFixture.Production).Posture.HeadSha -eq $beforeSha) `
+        'A refused advance must not have moved the working tree.'
+
+    # Re-decide, then advance: the ordinary two-phase pass completes.
+    $inspect2 = Update-AeroLinkProductionSource -SourceRoot $phaseFixture.Production -InspectOnly
+    $advance = Update-AeroLinkProductionSource -SourceRoot $phaseFixture.Production -AdvanceToSha $inspect2.TargetSha
+    Assert-True ($advance.Action -eq 'Updated' -and $advance.HeadSha -eq $moved) 'A re-decided advance must land on the current origin/main.'
+    Assert-DevelopmentUnchanged -Fixture $phaseFixture -Before (Get-DevelopmentSnapshot -Fixture $phaseFixture) -Scenario 'two-phase advance:'
+
+    Assert-Throws { Update-AeroLinkProductionSource -SourceRoot $phaseFixture.Production -InspectOnly -AdvanceToSha $moved } 'contradiction' `
+        'Asking to inspect and to advance in one call is a caller error, not a silent choice of one of them.'
+
     # Trivial spelling differences in a remote URL are not different repositories.
     Assert-True (Test-AeroLinkSameRemote -Left 'https://github.com/o/r.git' -Right 'https://github.com/o/r') 'A trailing .git is the same repository.'
     Assert-True (Test-AeroLinkSameRemote -Left 'https://github.com/o/r/' -Right 'https://github.com/o/r') 'A trailing slash is the same repository.'
