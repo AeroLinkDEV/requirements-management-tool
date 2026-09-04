@@ -90,6 +90,9 @@ Use the repository's test-planning contract instead of guessing what to run.
 - One focused branch/worktree per task.
 - Keep unrelated cleanup out of feature PRs.
 - Rebase/update only when the repository's actual merge state requires it; do not churn a green PR from habit.
+- With the `main` merge queue active, do not rebase merely because the pull-request branch is behind; the
+  queue validates the exact composed candidate. Rebase only for a real conflict or an explicit queue failure
+  that cannot be regenerated against current `main`.
 - Follow [product/docs/MERGING.md](product/docs/MERGING.md).
 - Do not force-merge or bypass required checks.
 - Record exact validation commands/results in the PR when the change is material.

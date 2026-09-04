@@ -1,0 +1,57 @@
+name: Trusted merge-queue binding
+
+# workflow_run loads this verifier from the protected default branch, not from the merge candidate.
+# Non-queue Product runs create a skipped job and never enter the protected environment or mint an App token.
+# CUTOVER INVARIANT: the live ruleset must require both this App-bound check and the GitHub Actions-published
+# `Full Product evidence aggregate`. GitHub queues the native check suite as soon as a rerun is requested,
+# closing the interval before workflow_run emits in_progress; this App check then invalidates itself as soon
+# as that observable event arrives. Neither check is sufficient by itself.
+on:
+  workflow_run:
+    workflows:
+      - Product quality gate
+    types:
+      - in_progress
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+
+# An in-progress rerun must preempt a stale completed handler, while a completed event must wait for (not
+# cancel) its invalidator. Separate queue candidates have separate run ids and never block one another.
+concurrency:
+  group: merge-authority-${{ github.event.workflow_run.id }}
+  cancel-in-progress: ${{ github.event.action == 'in_progress' }}
+
+jobs:
+  bind:
+    name: Publish trusted merge-queue binding
+    if: github.event.workflow_run.event == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: merge-authority
+    steps:
+      - name: Check out the protected default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Mint the repository-scoped Merge Authority token
+        id: authority-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.MERGE_AUTHORITY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MERGE_AUTHORITY_APP_PRIVATE_KEY }}
+          permission-checks: write
+          permission-contents: read
+      - name: Invalidate prior authority or bind the completed merge-group run
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          MERGE_AUTHORITY_TOKEN: ${{ steps.authority-token.outputs.token }}
+        run: node product/ci-metrics/bin/verify-merge-authority.mjs

@@ -1,6 +1,6 @@
 # Feedback Time: Where a Pull Request's Wall Clock Actually Goes
 
-Date: 2026-08-13
+Date: 2026-08-13; merge-queue cutover: 2026-09-04
 
 > **Live measurement record.** This supersedes the shard-count reasoning in
 > [CI_COST_AND_READINESS_REVIEW.md](CI_COST_AND_READINESS_REVIEW.md), whose numbers describe a suite roughly a
@@ -8,16 +8,15 @@ Date: 2026-08-13
 
 ## Why this exists
 
-A pull request that is green is not a pull request that is merged. Branch protection is **strict** (a branch
-must be up to date with `main`), so every unrelated merge to `main` invalidates a passing run and starts the
-whole gate again. On a day when `main` moved six times, one parity pull request was re-tested end to end six
-times and found nothing new on any of them.
+A pull request that is green is not necessarily a pull request that is merged. When this was first measured,
+branch protection was **strict** (a branch had to be up to date with `main`), so every unrelated merge to
+`main` invalidated a passing run and started the whole gate again. On a day when `main` moved six times, one
+parity pull request was re-tested end to end six times and found nothing new on any of them.
 
-**Auto-merge is now enabled** (it was not when this was first measured), which removes the half of that cost
-that came from a green run sitting unnoticed. It does not remove the other half: strict protection still
-blocks a pull request that has fallen behind, and an armed pull request in that state waits rather than
-merging. A merge queue would remove the rest and cannot be enabled here — see
-[Merging into main](MERGING.md).
+Auto-merge first removed the delay from a green run sitting unnoticed. After the staged 4 September
+merge-queue cutover is activated and accepted, GitHub will remove the remaining strict-protection treadmill
+by validating the exact composed candidate against current `main` and entries ahead of it, without a manual
+rebase. See [Merging into main](MERGING.md).
 
 That makes elapsed time per run the number worth optimizing, and it makes it worth knowing which job actually
 governs it. Optimizing the wrong job costs runners and buys nothing.
@@ -32,13 +31,42 @@ When `ready-for-full-ci` is applied to the final SHA, a trusted `pull_request_ta
 out PR code dispatches the Product gate against the exact same-repository head. Product still selects the same
 API, browser, production-browser, backend/core, client, PostgreSQL and operator lanes; its internal
 `Full Product evidence aggregate` remains the evidence summary. The trusted requester independently proves
-Product's readiness authentication and aggregate success before completing branch protection's required
-`Report what this run validated` context. There is no always-green placeholder and Fast is not authoritative.
+Product's readiness authentication and aggregate success before completing `Report what this run validated`.
+After the merge-queue cutover, that success also causes the dedicated Merge Authority App to publish the
+required `Trusted merge-queue binding` check on the exact pull-request head. There is no always-green
+placeholder and Fast is not authoritative. That head-bound readiness survives unrelated `main` advancement;
+the queue is responsible for validating the eventual composed candidate.
 
 A synchronize event removes stale readiness, so a later SHA must request Full again. Fast and Full use
 different concurrency groups; development feedback cannot cancel final Full evidence. The rolling metrics
 collector remains the source for post-switch full-gates-per-merge, cancellation waste, queue/final-push-to-merge
 timing and regression data; re-measure the new cadence rather than assuming savings.
+
+## Merge-queue cutover staging, 2026-09-04
+
+Issue #549 moved the repository to the `AeroLinkDEV` organization and PR #911 stages the trusted repository
+support for a squash merge queue. The queue is not active at this checkpoint: the App credentials, live
+`main` ruleset and acceptance run are deliberately post-merge. After that cutover, a
+pull-request head must first pass the existing trusted Full requester; only then does the dedicated AeroLink
+Merge Authority App publish `Trusted merge-queue binding` so the pull request can enter the queue. GitHub
+builds a `gh-readonly-queue/main/...` candidate from current `main`, that pull request, and entries ahead of
+it, and runs the complete Product gate on the composed SHA.
+
+The Product workflow is candidate-composed, so its own green result is evidence rather than final authority.
+A separate `workflow_run` verifier loaded from protected `main` reads the exact run and latest-attempt jobs,
+requires the full gate topology, and refuses candidates that differ from `main` under `.github/`,
+`product/test-planner/`, or `product/ci-metrics/`. It publishes the required check with the repository-scoped
+App identity only after those checks pass. The App key is restricted to the main-only `merge-authority`
+environment, and the ruleset pins the required context to that App's integration id. Every initial Product run
+or rerun first replaces earlier App success with an in-progress check, so prior authority cannot bridge a
+newer attempt.
+The ruleset separately requires GitHub Actions' `Full Product evidence aggregate`; its native check suite
+leaves success as soon as a rerun is queued, covering the earlier interval before `workflow_run` reaches
+`in_progress`. The native Product check and App-bound evidence check are deliberately co-required.
+
+Successful live acceptance will complete the deferred strict-branch-protection item. After activation,
+ordinary behind branches no longer need a manual rebase; real conflicts and deliberately protected
+CI-authority changes still require explicit disposition.
 
 ## Measured, 2026-08-13
 
@@ -287,8 +315,8 @@ transfer and make the critical path *worse*.
 
 ## Not implemented here, and why
 
-Tracked as a GitHub issue rather than done in this increment, because each is a real piece of work rather than
-a setting:
+Tracked separately rather than done in this increment, because each is a real piece of work rather than a
+setting:
 
 1. **`AeroLink.Api.Tests` is still the critical path**, and it is now the *whole* critical path rather than
    half of a job. The obvious fix has been tried and **disproved**: generalizing the `ShowcaseApiFixture`
@@ -305,11 +333,6 @@ a setting:
 2. **Journey parallelism (`workers: 1`).** Every journey shares one API and one database and mutates it, so
    workers cannot simply be raised. Per-test isolation — each test owning its Program and Project, as the
    newer specs already do via `seedWorkspace` — is the prerequisite.
-3. **The strict-branch-protection treadmill.** A merge queue would let GitHub perform the rebase-retest-merge
-   cycle without a human holding the window open. It **cannot be enabled on this repository**: merge queues
-   require an organization-owned repository and this one is owned by a personal account. Auto-merge was
-   enabled instead and takes back the part of the cost that came from waiting on a human. See
-   [Merging into main](MERGING.md).
 
 ## For anyone changing CI after this
 

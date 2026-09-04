@@ -131,7 +131,9 @@ jobs:
           if ($pr.state -ne 'open') { throw 'The requested pull request is not open.' }
           if ($pr.head.repo.full_name -ne $env:GITHUB_REPOSITORY) { throw 'Fork pull requests cannot request privileged Full validation.' }
           if ($pr.head.sha -ne $env:REQUESTED_HEAD_SHA -or $env:GITHUB_SHA -ne $env:REQUESTED_HEAD_SHA) { throw 'The requested Full run is not attached to the exact current PR head.' }
-          if ($pr.base.sha -ne $env:REQUESTED_BASE_SHA) { throw 'The requested Full run does not match the current PR base.' }
+          # REQUESTED_BASE_SHA came from the trusted pull_request_target label event and is the immutable
+          # comparison input for this Product run. The live base may advance while the run is queued or active;
+          # the merge queue, not this pre-queue run, validates the final composition against current main.
           if ($env:GITHUB_REF -ne "refs/heads/$($pr.head.ref)") { throw 'Workflow dispatch ref does not match the PR head branch.' }
           if (-not @($pr.labels | ForEach-Object { $_.name }).Contains('ready-for-full-ci')) { throw 'ready-for-full-ci is no longer present on this pull request.' }
       - name: Mark setup complete
@@ -1733,7 +1735,7 @@ jobs:
         continue-on-error: true
         run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
       - name: Run metrics tooling tests from a clean checkout
-        run: node --test --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=metrics-tooling.xml product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs
+        run: node --test --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=metrics-tooling.xml product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs product/ci-metrics/tests/merge-authority.test.mjs product/ci-metrics/tests/merge-authority-github.test.mjs
       - name: Mark test complete
         if: always()
         continue-on-error: true
