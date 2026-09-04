@@ -319,16 +319,19 @@ The repository uses:
 ### Merge-queue cutover status
 
 The canonical GitHub repository is `AeroLinkDEV/requirements-management-tool`; established local checkout
-paths do not change because of that ownership transfer. Issue #549 / PR #911 stages the repository-side
-trusted merge-queue verifier and App-bound check publisher. At this checkpoint the queue is **not active**:
-classic strict branch protection remains authoritative until #911 merges, the repository-scoped GitHub App
-credentials are stored in the main-only `merge-authority` environment, the `main` ruleset is activated, and
-live queue acceptance succeeds. GitHub's live ruleset/protection APIs are the authority during that cutover.
-The live ruleset must require both the App-bound `Trusted merge-queue binding` and GitHub Actions'
+paths did not change because of that ownership transfer. Issue #549 / PR #911 supplied the repository-side
+trusted merge-queue verifier and App-bound check publisher. The queue is **active**: the repository-scoped
+GitHub App is installed only on this repository, its private key is stored in the main-only
+`merge-authority` environment, and the active `main` ruleset has no bypass actors. The legacy classic
+required-status block, including strict "require branches to be up to date", is removed; classic administrator,
+pull-request, no-force-push and no-deletion protections remain enabled.
+
+The ruleset requires both the App-bound `Trusted merge-queue binding` and GitHub Actions'
 `Full Product evidence aggregate`: the native check enters a non-success state as soon as a rerun is queued,
 while the App check independently binds the exact evidence after protected-default-branch verification.
-The first docs-only pull request through the queue must update this section from staged to active; until then,
-follow the existing strict protected-merge flow.
+The first docs-only queue delivery proves the pull-request readiness path and the exact composed-candidate
+path before this active statement can reach `main`. Multi-entry composition and deliberate-failure scenarios
+remain tracked on issue #549 until their evidence is recorded.
 
 Do not change CI topology from intuition alone. Read [product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md](product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md) first.
 

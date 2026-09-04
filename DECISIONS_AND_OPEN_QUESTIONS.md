@@ -2277,6 +2277,29 @@ successful when the reviewed merge candidate contains no trace of it.
   - Operator acceptance for #881 remains a separate, later activity on the real machines. One PR is not one
     acceptance.
 
+### DEC-119 - The AeroLink Repository Uses an App-Bound GitHub Merge Queue
+
+- **Date:** 2026-09-04
+- **Status:** Accepted
+- **Decision:** The canonical repository is `AeroLinkDEV/requirements-management-tool`, and `main` is governed
+  by an active squash merge queue. Pull-request heads first earn readiness through the trusted Full Product
+  requester. GitHub then validates the exact composed queue candidate, and the candidate may merge only when
+  both GitHub Actions' `Full Product evidence aggregate` and the dedicated App's
+  `Trusted merge-queue binding` succeed.
+- **Trust boundary:** The AeroLink Merge Authority App is private, installed only on this repository, and has
+  Checks read/write plus Contents read access. Its private key exists only in the `merge-authority`
+  environment, whose deployment policy admits `main` only. The ruleset pins the trusted binding to that App's
+  integration identity and has no bypass actors.
+- **Freshness model:** The queue's current-`main` composition supersedes classic strict "require branches to
+  be up to date" enforcement. A behind pull-request branch does not need a mechanical rebase; the exact tree
+  that would land must pass the queue gate. Real conflicts still require resolution.
+- **Protected authority surfaces:** A candidate that changes `.github/`, `product/test-planner/`, or
+  `product/ci-metrics/` cannot automatically authorize itself. Those changes require an explicit, reviewed
+  authority-maintenance cutover; the queue must never be weakened merely to make such a change convenient.
+- **Acceptance:** The first documentation-only delivery through the live queue establishes the single-entry
+  path. Issue #549 remains the live authority for the remaining composition, deliberate-failure, stale-base,
+  and non-cancellation evidence before final closeout.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
