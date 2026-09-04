@@ -19,6 +19,8 @@ import {
   PRODUCT_WORKFLOW_PATH,
   AGGREGATE_JOB_NAME,
   CLASSIFIER_JOB_NAME,
+  REQUIRED_JOBS,
+  NON_AUTHORITATIVE_JOB_IDS,
   TRUSTED_SURFACE_PREFIXES,
   SHARDED_JOB_GROUPS,
 } from '../lib/merge-authority.mjs'
@@ -136,11 +138,60 @@ test('refuses queue candidates for a base branch other than the protected one', 
   assert.ok(missingConfig.reasons.some((reason) => reason.startsWith('expected-missing')))
 })
 
-test('refuses runs that have not completed successfully', () => {
-  for (const [key, value] of [['status', 'in_progress'], ['conclusion', 'failure'], ['conclusion', 'cancelled']]) {
-    const result = reasonsFor({ run: { ...legitimateRun(), [key]: value } })
-    assert.equal(result.decision, 'REFUSE', `${key}=${value} must refuse`)
+test('refuses runs that have not completed', () => {
+  for (const status of ['in_progress', 'queued', 'requested']) {
+    const result = reasonsFor({ run: { ...legitimateRun(), status } })
+    assert.equal(result.decision, 'REFUSE', `status=${status} must refuse`)
+    assert.ok(result.reasons.some((reason) => reason.startsWith('run-not-completed')), status)
   }
+})
+
+test('non-authoritative metrics and reporting failures never veto a valid candidate', () => {
+  // The workflow deliberately excludes these jobs from its failure list; the binding must not hand
+  // them a merge veto through the run's overall conclusion. Both the run conclusion and every other
+  // authoritative input stay intact below except for the named non-authoritative job.
+  const withMetricsToolingFailed = {
+    jobs: [...allJobsSuccess(), { name: 'CI metrics tooling tests', conclusion: 'failure', runId: RUN_ID }],
+  }
+  const tooling = reasonsFor(withMetricsToolingFailed)
+  assert.equal(tooling.decision, 'PASS', 'a failed metrics-tooling job must not refuse valid product evidence')
+  assert.deepEqual(tooling.reasons, [])
+
+  const withMetricsReportFailed = {
+    jobs: [...allJobsSuccess(), { name: 'Aggregate CI metrics', conclusion: 'failure', runId: RUN_ID }],
+  }
+  const report = reasonsFor(withMetricsReportFailed)
+  assert.equal(report.decision, 'PASS', 'a failed metrics-report job must not refuse valid product evidence')
+  assert.deepEqual(report.reasons, [])
+
+  // Even a red run conclusion (cancelled while reporting finished) must not veto when the full
+  // authoritative set succeeded.
+  const redConclusion = reasonsFor({
+    run: { ...legitimateRun(), conclusion: 'failure' },
+    jobs: [...allJobsSuccess(), { name: 'CI metrics tooling tests', conclusion: 'failure', runId: RUN_ID }],
+  })
+  assert.equal(redConclusion.decision, 'PASS')
+  assert.deepEqual(redConclusion.reasons, [])
+})
+
+test('authoritative product evidence remains binding authority', () => {
+  // The removal of run-conclusion authority must not weaken product authority: a failed gate, a
+  // failed shard, and a failed aggregate each still refuse.
+  const failedGate = reasonsFor({
+    jobs: allJobsSuccess().map((job) => (job.name === 'Domain test suite' ? { ...job, conclusion: 'failure' } : job)),
+  })
+  assert.equal(failedGate.decision, 'REFUSE')
+
+  const failedShard = reasonsFor({
+    jobs: allJobsSuccess().map((job) => (job.name === 'API test suite (2/3)' ? { ...job, conclusion: 'failure' } : job)),
+  })
+  assert.equal(failedShard.decision, 'REFUSE')
+
+  const failedAggregate = reasonsFor({
+    jobs: allJobsSuccess().map((job) => (job.name === AGGREGATE_JOB_NAME ? { ...job, conclusion: 'failure' } : job)),
+  })
+  assert.equal(failedAggregate.decision, 'REFUSE')
+  assert.ok(failedAggregate.reasons.some((reason) => reason.includes(AGGREGATE_JOB_NAME)))
 })
 
 test('refuses missing, skipped, failed, or cancelled expected jobs', () => {
@@ -294,37 +345,67 @@ test('every refusal reports machine-readable reasons, and PASS reports none', ()
 
 test('the expected job topology matches the current workflow', () => {
   const workflow = readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const lines = workflow.split(/\r?\n/)
   // The display name must match exactly: renaming the workflow keeps every job intact while every
   // real run would be refused by workflow-name-mismatch.
   assert.match(workflow, new RegExp(`^name: ${PRODUCT_WORKFLOW_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
-  for (const name of [
-    'Domain test suite',
-    'Infrastructure test suite',
-    'Client lint, type-check, and build',
-    'Operator and recovery script contracts',
-    'Browser journeys on the production build',
-    'PostgreSQL migrations and secure bootstrap',
-    AGGREGATE_JOB_NAME,
-    CLASSIFIER_JOB_NAME,
-  ]) {
-    // Exact YAML name values, anchored to the whole line: a renamed survivor such as
-    // 'Domain test suite v2' must not satisfy the check for 'Domain test suite'.
+
+  // REQUIRED_JOBS is the single source of truth for the verifier's fixed-name gates; this test holds
+  // no independent copy. Exact YAML name values, anchored to the whole line: a renamed survivor such
+  // as 'Domain test suite v2' must not satisfy the check for 'Domain test suite'.
+  for (const name of [...REQUIRED_JOBS, CLASSIFIER_JOB_NAME, AGGREGATE_JOB_NAME]) {
     assert.match(
       workflow,
       new RegExp(`^    name: ${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'),
       `ci.yml must still define the gate job '${name}' exactly`,
     )
   }
+
+  const jobDisplayName = (id) => {
+    const jobStart = lines.findIndex((line) => line === `  ${id}:`)
+    assert.ok(jobStart >= 0, `ci.yml must define the workflow job '${id}'`)
+    const nameLine = lines.slice(jobStart, jobStart + 40).find((line) => /^    name: /.test(line))
+    assert.ok(nameLine, `workflow job '${id}' must declare a display name`)
+    return nameLine.slice('    name: '.length)
+  }
+
+  // Every dependency of the gate job must be accounted for by the verifier model — a REQUIRED_JOBS
+  // entry, the classifier, the aggregate, a sharded group's template, or the declared
+  // non-authoritative set. Without this direction, deleting an entry from REQUIRED_JOBS would
+  // silently weaken merge authority while every remaining name still existed in ci.yml.
+  const shardedTemplates = SHARDED_JOB_GROUPS.map((group) => `${group.name} (\${{ matrix.shard }}/\${{ strategy.job-total }})`)
+  const covered = new Set([CLASSIFIER_JOB_NAME, AGGREGATE_JOB_NAME, ...REQUIRED_JOBS, ...shardedTemplates])
+  const gateIndex = lines.findIndex((line) => line === '  gate:')
+  assert.ok(gateIndex >= 0, "ci.yml must define the 'gate' job")
+  const needsLine = lines.slice(gateIndex, gateIndex + 40).find((line) => /^    needs: \[/.test(line))
+  assert.ok(needsLine, "the 'gate' job must declare its needs")
+  const gateNeeds = needsLine.match(/\[([^\]]+)\]/)[1].split(',').map((entry) => entry.trim())
+  for (const id of gateNeeds) {
+    if (NON_AUTHORITATIVE_JOB_IDS.includes(id)) continue
+    const display = jobDisplayName(id)
+    assert.ok(
+      covered.has(display),
+      `gate dependency '${id}' ('${display}') is not accounted for by the verifier model — add it to REQUIRED_JOBS/SHARDED_JOB_GROUPS or, if it is deliberately non-authoritative, to NON_AUTHORITATIVE_JOB_IDS`,
+    )
+  }
+  // Reverse direction: each REQUIRED_JOBS entry must still be a gate dependency of the workflow.
+  const gateDependencyNames = gateNeeds.filter((id) => !NON_AUTHORITATIVE_JOB_IDS.includes(id)).map((id) => jobDisplayName(id))
+  for (const name of REQUIRED_JOBS) {
+    assert.ok(
+      gateDependencyNames.includes(name),
+      `REQUIRED_JOBS entry '${name}' no longer corresponds to any gate dependency in ci.yml; if the workflow genuinely stopped requiring it, remove it from the verifier consciously`,
+    )
+  }
+  assert.equal(jobDisplayName('gate'), AGGREGATE_JOB_NAME, "the 'gate' job's display name must remain the aggregate the verifier binds")
+
   for (const group of SHARDED_JOB_GROUPS) {
     const escaped = group.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const jobPattern = new RegExp(`^    name: ${escaped} \\(\\$\\{\\{ matrix\\.shard \\}\\}/\\$\\{\\{ strategy\\.job-total \\}\\}\\)$`, 'm')
     assert.match(workflow, jobPattern, `ci.yml must still define the sharded group '${group.name}' exactly`)
   }
   for (const group of SHARDED_JOB_GROUPS) {
-    const escaped = group.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     // Parse THIS group's own matrix, not any shard array of a matching size elsewhere: browser-full
     // also runs three shards, so a global size list would mask an API or browser-pr change.
-    const lines = workflow.split(/\r?\n/)
     // Exact full line, so a renamed survivor like 'API test suite (…template…) v2' cannot satisfy
     // the lookup while the verifier's anchored runtime pattern rejects the renamed jobs.
     const shardedNameLine = `    name: ${group.name} (\${{ matrix.shard }}/\${{ strategy.job-total }})`

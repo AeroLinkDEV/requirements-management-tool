@@ -5,10 +5,14 @@
 // be the merge authority by itself. This module decides, from supplied metadata only, whether a
 // completed merge-group run may be bound to its queue SHA by the trusted default-branch verifier:
 //
-//   1. the run must be the real Product gate on this repository's queue refs;
+//   1. the run must be the real Product gate on this repository's queue refs, and completed;
 //   2. every required job must belong to that exact run, have executed, and succeeded;
 //   3. the candidate must not alter trusted merge machinery relative to the default branch, or the
 //      gates that ran were not the gates main ships and the evidence cannot be bound.
+//
+// Authority comes exclusively from that enumerated job set. The run's overall conclusion is not
+// consulted, because non-authoritative reporting jobs (see NON_AUTHORITATIVE_JOB_IDS) can fail the
+// run by design without any product gate failing.
 //
 // Nothing here performs I/O or network calls: the caller (a workflow_run verifier reading GitHub API
 // payloads and a git diff) supplies everything, and any missing input refuses rather than guessing.
@@ -26,6 +30,19 @@ export const AGGREGATE_JOB_NAME = 'Full Product evidence aggregate'
 
 /** The classifier must have run: broad merge-group classification is what makes the gates required. */
 export const CLASSIFIER_JOB_NAME = 'Classify changed product areas'
+
+// Workflow jobs that are deliberately NOT merge authority: the workflow itself excludes them from
+// its failure list, so their failure turns the run red without any product gate failing. Binding
+// never consults them, and the run's overall conclusion is ignored for the same reason — otherwise
+// observability would gain a merge veto the Product gate never gave it. The parity test uses this
+// set to account for every gate dependency the verifier does not require.
+export const NON_AUTHORITATIVE_JOB_IDS = ['metrics-tooling', 'metrics-report']
+
+// HARD CUTOVER REQUIREMENT (#549): before the workflow_run verifier that consumes this module goes
+// live, product/ci-metrics/tests/merge-authority.test.mjs MUST be added to the metrics-tooling CI
+// invocation (and to the documented full-suite command) in .github/workflows/ci.yml — together with,
+// or before, that verifier. Until then this suite runs only from local/PR-lane commands, which is
+// acceptable solely because no live path consumes the module yet.
 
 // Trusted merge machinery. A candidate that changes any of these surfaces relative to the default
 // branch is evaluating itself with machinery the candidate chose, so the evidence cannot be bound.
@@ -53,7 +70,6 @@ export const SHARDED_JOB_GROUPS = [
 
 const JOB_CONCLUSION_SUCCESS = 'success'
 const RUN_STATUS_COMPLETED = 'completed'
-const RUN_CONCLUSION_SUCCESS = 'success'
 const MERGE_GROUP_EVENT = 'merge_group'
 
 function duplicateNames(jobs, names) {
@@ -103,7 +119,8 @@ function collectShardReasons(jobs, reasons) {
  *
  * @param {object} input
  * @param {object} input.run GitHub metadata for the triggering run: repository, workflowName,
- *   workflowPath, event, headSha, headBranch, runId?, status, conclusion.
+ *   workflowPath, event, headSha, headBranch, runId?, status (conclusion is deliberately unused —
+ *   see NON_AUTHORITATIVE_JOB_IDS).
  * @param {Array<{name: string, conclusion: string, runId?: number|string}>} input.jobs the jobs of
  *   exactly this run (caller resolves via the runs API); runId included when known.
  * @param {Array<string|{from: string, to: string}>|undefined} input.changedPaths paths differing
@@ -155,10 +172,13 @@ export function evaluateMergeGroupCandidate(input) {
   if (typeof run.headBranch !== 'string' || !run.headBranch.startsWith(expectedQueuePrefix)) {
     reasons.push(`ref-not-queue: run ref '${run.headBranch ?? 'unknown'}' is not a '${expectedQueuePrefix}' candidate`)
   }
+  // The run must be completed, but its overall conclusion is deliberately NOT consulted: by design
+  // the workflow treats metrics/reporting jobs as non-authoritative, so their failure turns the run
+  // conclusion red without any product gate failing. Deriving authority from the conclusion would
+  // hand those jobs a merge veto they were explicitly built not to have. The authoritative evidence
+  // is the enumerated job set below.
   if (run.status !== RUN_STATUS_COMPLETED) {
     reasons.push(`run-not-completed: run status is '${run.status ?? 'unknown'}'`)
-  } else if (run.conclusion !== RUN_CONCLUSION_SUCCESS) {
-    reasons.push(`run-conclusion-not-success: run concluded '${run.conclusion ?? 'unknown'}'`)
   }
 
   if (!Array.isArray(jobs) || jobs.length === 0) {
