@@ -252,6 +252,14 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
     assert.equal(envBindingCount(binding), 1, `the gate must bind its guard input dynamically exactly once: ${binding.split(':')[0]} — a hardcoded value silently disarms the merge-group refusal`)
   }
 
+  // The guard only matters if the gate runs at all: the workflow must keep its top-level merge_group
+  // trigger, or queue candidates never start a Product run and every required check pends to timeout.
+  // (full-ci-readiness-dispatch pins the trigger set too; this contract stays self-contained.)
+  assert.ok(
+    workflowLines().some((line) => /^  merge_group:$/.test(line)),
+    'ci.yml must keep the top-level merge_group workflow trigger',
+  )
+
   // The guard only matters if the aggregate runs and its failure counts. A skipped dependency must
   // not skip the gate (needs default behavior), and the enforce step must not be failure-isolated.
   const gateBody = jobBodies(workflowLines())['gate'].join('\n')
