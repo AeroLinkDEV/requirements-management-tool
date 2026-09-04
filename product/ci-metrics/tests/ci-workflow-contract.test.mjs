@@ -195,3 +195,28 @@ test('product enforcement in the gate has no telemetry prerequisite', () => {
   const setupIndex = gate.indexOf('Mark setup complete')
   assert.ok(setupIndex > checkoutIndex, 'gate setup marker must run after the telemetry checkout so the script exists')
 })
+
+test('the merge-group aggregate refuses a queue entry whose product gates did not execute', () => {
+  // A merge queue validates the composed tree with a merge_group run of this workflow. A job gated on
+  // pull_request can silently disappear there; the merge-group guard inside "Summarise and enforce" is
+  // what turns that missing evidence into a red required check rather than a merge. No other test pins it.
+  const blocks = stepBlocks(jobBodies(workflowLines())['gate'])
+  const enforceBlock = blocks.find((block) => block.name === 'Summarise and enforce')
+  assert.ok(enforceBlock, 'gate Summarise and enforce step must exist')
+  const enforceText = enforceBlock.lines.join('\n')
+  assert.match(
+    enforceText,
+    /"\$EVENT_NAME" = "merge_group" \] && \[ "\$DOCS_ONLY" != "true"/,
+    'the merge-group enforcement condition must exist in the gate',
+  )
+  assert.match(
+    enforceText,
+    /"browser-pr:\$BROWSER" "browser-production:\$PRODUCTION"/,
+    'the merge-group gate list must include the pull-request-gated browser jobs',
+  )
+  assert.match(
+    enforceText,
+    /A merge-queue run must actually execute the product gates/,
+    'a missing merge-group gate must be named as a queue refusal, not a silent failure',
+  )
+})
