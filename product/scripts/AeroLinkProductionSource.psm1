@@ -113,17 +113,88 @@ function Get-AeroLinkProductionSourcePosture {
         [string]$RemoteName = 'origin'
     )
     if (-not (Test-Path -LiteralPath $SourceRoot -PathType Container)) {
-        return [pscustomobject]@{ Canonical = $false; Dedicated = $false; Reason = "The production source directory does not exist: $SourceRoot"; Posture = $null }
+        return [pscustomobject]@{ Canonical = $false; Dedicated = $false; BindingReason = $null; Reason = "The production source directory does not exist: $SourceRoot"; Posture = $null }
     }
-    $dedicated = Test-Path -LiteralPath (Get-AeroLinkProductionSourceMarkerPath -SourceRoot $SourceRoot) -PathType Leaf
+
+    # "Dedicated" is a claim the marker makes, so the marker is READ rather than merely counted.
+    #
+    # File-existence alone was too weak for what it authorises. It said nothing about which repository this
+    # checkout is, so an existing clone of some other remote could be blessed as dedicated and then judged
+    # canonical against ITS own origin/main; and nothing about which installation it belongs to, so a source
+    # could stay perfectly canonical while its pointer was moved to a different existing installation. Source
+    # identity and data identity are one binding or they are no binding at all.
+    $marker = Read-AeroLinkProductionSourceMarker -SourceRoot $SourceRoot
+    $dedicated = $marker.Valid
+    $bindingReason = $marker.Reason
+
+    if ($dedicated) {
+        $actualOrigin = Invoke-AeroLinkBootstrapGitQuiet -RepositoryRoot $SourceRoot -GitArguments @('remote', 'get-url', $RemoteName)
+        $actualOrigin = if ($actualOrigin) { $actualOrigin.Trim() } else { '' }
+        if (-not (Test-AeroLinkSameRemote -Left $actualOrigin -Right $marker.OriginUrl)) {
+            $dedicated = $false
+            $bindingReason = "The production source's '$RemoteName' remote is '$actualOrigin', but it was created against '$($marker.OriginUrl)'. This is not the repository it claims to be."
+        }
+        else {
+            $resolvedInstallation = try { (Get-AeroLinkInstallationPaths -ProductRoot (Join-Path $SourceRoot 'product')).InstallationRoot } catch { $null }
+            if (-not $resolvedInstallation -or -not [string]::Equals($resolvedInstallation, $marker.InstallationRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                $dedicated = $false
+                $bindingReason = "The production source now resolves to installation '$resolvedInstallation', but it was bound to '$($marker.InstallationRoot)'. Source and data identity must agree."
+            }
+        }
+    }
+
     $posture = Get-AeroLinkRepositoryPosture -RepositoryRoot $SourceRoot -RemoteName $RemoteName
     try {
         Assert-AeroLinkHomeCanonicalSourcePolicy -Posture $posture -Context 'startup' 6>$null | Out-Null
-        return [pscustomobject]@{ Canonical = $true; Dedicated = $dedicated; Reason = "Clean canonical main @ $($posture.ShortSha)."; Posture = $posture }
+        return [pscustomobject]@{ Canonical = $true; Dedicated = $dedicated; BindingReason = $bindingReason; Reason = "Clean canonical main @ $($posture.ShortSha)."; Posture = $posture }
     }
     catch {
-        return [pscustomobject]@{ Canonical = $false; Dedicated = $dedicated; Reason = $_.Exception.Message; Posture = $posture }
+        return [pscustomobject]@{ Canonical = $false; Dedicated = $dedicated; BindingReason = $bindingReason; Reason = $_.Exception.Message; Posture = $posture }
     }
+}
+
+function Test-AeroLinkSameRemote {
+    <#
+        .SYNOPSIS Whether two remote URLs name the same repository, allowing for trivial spelling differences.
+        .DESCRIPTION
+            A trailing .git, a trailing slash and case on the host are not different repositories. Anything
+            beyond that is treated as different, because the point is to catch a wrong-origin checkout rather
+            than to normalise every way a remote can be written.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][string]$Left, [AllowNull()][string]$Right)
+    if ([string]::IsNullOrWhiteSpace($Left) -or [string]::IsNullOrWhiteSpace($Right)) { return $false }
+    $normalize = {
+        param($value)
+        $trimmed = ([string]$value).Trim().TrimEnd('/')
+        if ($trimmed.EndsWith('.git', [StringComparison]::OrdinalIgnoreCase)) { $trimmed = $trimmed.Substring(0, $trimmed.Length - 4) }
+        return $trimmed.TrimEnd('/')
+    }
+    return [string]::Equals((& $normalize $Left), (& $normalize $Right), [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Read-AeroLinkProductionSourceMarker {
+    <#
+        .SYNOPSIS Reads and validates the dedicated-production-source marker, rather than counting the file.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$SourceRoot)
+    $path = Get-AeroLinkProductionSourceMarkerPath -SourceRoot $SourceRoot
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return [pscustomobject]@{ Valid = $false; Reason = "$SourceRoot carries no dedicated production-source marker."; OriginUrl = $null; InstallationRoot = $null }
+    }
+    try { $marker = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json }
+    catch { return [pscustomobject]@{ Valid = $false; Reason = "The dedicated production-source marker at $path is malformed: $($_.Exception.Message)"; OriginUrl = $null; InstallationRoot = $null } }
+
+    if (-not $marker.PSObject.Properties['dedicatedProductionSource'] -or -not [bool]$marker.dedicatedProductionSource) {
+        return [pscustomobject]@{ Valid = $false; Reason = "The marker at $path does not assert that this is a dedicated production source."; OriginUrl = $null; InstallationRoot = $null }
+    }
+    $originUrl = if ($marker.PSObject.Properties['originUrl']) { [string]$marker.originUrl } else { $null }
+    $installationRoot = if ($marker.PSObject.Properties['installationRoot']) { [string]$marker.installationRoot } else { $null }
+    if ([string]::IsNullOrWhiteSpace($originUrl) -or [string]::IsNullOrWhiteSpace($installationRoot)) {
+        return [pscustomobject]@{ Valid = $false; Reason = "The marker at $path does not record the repository and installation it was bound to. Re-create the production source."; OriginUrl = $originUrl; InstallationRoot = $installationRoot }
+    }
+    return [pscustomobject]@{ Valid = $true; Reason = 'Marker asserts a dedicated production source bound to a named repository and installation.'; OriginUrl = $originUrl; InstallationRoot = [IO.Path]::GetFullPath($installationRoot) }
 }
 
 function Assert-AeroLinkDedicatedProductionSource {
@@ -141,7 +212,8 @@ function Assert-AeroLinkDedicatedProductionSource {
     )
     $posture = Get-AeroLinkProductionSourcePosture -SourceRoot $SourceRoot -RemoteName $RemoteName
     if (-not $posture.Dedicated) {
-        throw "AeroLink production/recovery refused: $SourceRoot is not a dedicated AeroLink production source. HOME production must never run from the active development checkout, whatever branch it is on. Create the dedicated source with Initialize-AeroLinkProductionSource. Nothing was changed."
+        $detail = if ($posture.BindingReason) { " $($posture.BindingReason)" } else { '' }
+        throw "AeroLink production/recovery refused: $SourceRoot is not a dedicated AeroLink production source.$detail HOME production must never run from the active development checkout, whatever branch it is on. Create the dedicated source with Initialize-AeroLinkProductionSource. Nothing was changed."
     }
     if (-not $posture.Canonical) {
         throw "AeroLink production/recovery refused: the dedicated production source at $SourceRoot is not canonical. $($posture.Reason) Nothing was changed."
@@ -194,6 +266,16 @@ function Initialize-AeroLinkProductionSource {
 
     $cloned = $false
     $isRepository = (Invoke-AeroLinkBootstrapGitQuiet -RepositoryRoot $SourceRoot -GitArguments @('rev-parse', '--is-inside-work-tree')) -eq 'true'
+    if ($isRepository) {
+        # Adopting an existing checkout is convenient and was too trusting: whatever repository happened to
+        # be sitting at this path got the dedicated marker, and its canonicality was then judged against its
+        # OWN origin/main. Prove it is the repository we mean before blessing it.
+        $existingOrigin = Invoke-AeroLinkBootstrapGitQuiet -RepositoryRoot $SourceRoot -GitArguments @('remote', 'get-url', $RemoteName)
+        $existingOrigin = if ($existingOrigin) { $existingOrigin.Trim() } else { '' }
+        if (-not (Test-AeroLinkSameRemote -Left $existingOrigin -Right $OriginUrl)) {
+            throw "Refusing to adopt ${SourceRoot} as the dedicated production source: its '$RemoteName' remote is '$existingOrigin', not '$OriginUrl'. Nothing was changed."
+        }
+    }
     if (-not $isRepository) {
         if ((Test-Path -LiteralPath $SourceRoot -PathType Container) -and @(Get-ChildItem -LiteralPath $SourceRoot -Force).Count -gt 0) {
             throw "Refusing to clone the production source into ${SourceRoot}: the directory exists and is not empty, and is not a Git working tree. Inspect it; nothing was changed."
@@ -215,8 +297,14 @@ function Initialize-AeroLinkProductionSource {
     # The marker and the pointer, both idempotent, both under the ignored .local area.
     $localRoot = Join-Path $SourceRoot 'product\.local'
     if (-not (Test-Path -LiteralPath $localRoot -PathType Container)) { New-Item -ItemType Directory -Path $localRoot -Force | Out-Null }
+    # The marker records WHAT this source is bound to, not merely that it exists. Both bindings are checked
+    # on every use: the repository it was created from, so a wrong-origin checkout cannot be blessed and then
+    # judged canonical against its own remote; and the installation it belongs to, so a source cannot stay
+    # canonical while its data pointer is moved somewhere else.
     [pscustomobject]@{
         dedicatedProductionSource = $true
+        originUrl                 = $OriginUrl
+        installationRoot          = $InstallationRoot
         note                      = 'AeroLink HOME canonical production/remote-demo source. Not for development: no feature branches, no local commits, no untracked source.'
         recordedAtUtc             = (Get-Date).ToUniversalTime().ToString('o')
     } | ConvertTo-Json | Set-Content -LiteralPath (Get-AeroLinkProductionSourceMarkerPath -SourceRoot $SourceRoot) -Encoding UTF8
@@ -364,6 +452,8 @@ function Update-AeroLinkProductionSource {
 Export-ModuleMember -Function @(
     'Get-AeroLinkProductionSourceConfigPath',
     'Get-AeroLinkProductionSourceMarkerPath',
+    'Read-AeroLinkProductionSourceMarker',
+    'Test-AeroLinkSameRemote',
     'Get-AeroLinkProductionSourceConfig',
     'Get-AeroLinkProductionSourcePosture',
     'Assert-AeroLinkDedicatedProductionSource',

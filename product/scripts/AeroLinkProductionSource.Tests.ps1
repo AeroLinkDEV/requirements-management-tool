@@ -274,6 +274,64 @@ try {
     $second = New-ProductionSource -Fixture $fixture
     Assert-True ($first.Cloned -and -not $second.Cloned) 'Re-running initialization must confirm the existing production source rather than clone again.'
     Assert-True ($second.Canonical) 'A confirmed production source is still canonical.'
+
+    # =====================================================================================================
+    # 9. "Dedicated" is a binding to a repository AND an installation, not a file that happens to exist.
+    #
+    # Existence alone was too weak for what it authorises: a checkout of some other repository could be
+    # blessed and then judged canonical against ITS own origin/main, and a source could stay canonical while
+    # its data pointer was moved to a different installation.
+    # =====================================================================================================
+
+    # An existing checkout of a DIFFERENT repository is refused rather than adopted.
+    $wrongOriginFixture = New-Fixture
+    $strangerOrigin = Join-Path $wrongOriginFixture.Root 'stranger.git'
+    $null = Invoke-FixtureGit -GitArguments @('init', '--bare', $strangerOrigin)
+    $null = Invoke-FixtureGit -GitArguments @('symbolic-ref', 'HEAD', 'refs/heads/main') -Repository $strangerOrigin
+    $null = Invoke-FixtureGit -GitArguments @('clone', $strangerOrigin, $wrongOriginFixture.Production)
+    Assert-Throws { Initialize-AeroLinkProductionSource -SourceRoot $wrongOriginFixture.Production -InstallationRoot $wrongOriginFixture.Installation -OriginUrl $wrongOriginFixture.Origin } `
+        'Refusing to adopt' 'A checkout of another repository must not be adopted as the dedicated production source.'
+    Assert-True (-not (Test-Path -LiteralPath (Get-AeroLinkProductionSourceMarkerPath -SourceRoot $wrongOriginFixture.Production) -PathType Leaf)) `
+        'A refused adoption must not leave a dedicated marker behind.'
+
+    # A marker that asserts nothing, or records no binding, is not a dedicated source.
+    $markerFixture = New-Fixture
+    $null = New-ProductionSource -Fixture $markerFixture
+    $markerPath = Get-AeroLinkProductionSourceMarkerPath -SourceRoot $markerFixture.Production
+    Assert-True ((Get-AeroLinkProductionSourcePosture -SourceRoot $markerFixture.Production).Dedicated) 'A properly created production source is dedicated.'
+
+    '{ "dedicatedProductionSource": false }' | Set-Content -LiteralPath $markerPath -Encoding UTF8
+    Assert-True (-not (Get-AeroLinkProductionSourcePosture -SourceRoot $markerFixture.Production).Dedicated) `
+        'A marker that does not assert a dedicated production source must not be treated as one.'
+
+    '{ "dedicatedProductionSource": true }' | Set-Content -LiteralPath $markerPath -Encoding UTF8
+    Assert-True (-not (Get-AeroLinkProductionSourcePosture -SourceRoot $markerFixture.Production).Dedicated) `
+        'A marker recording no repository or installation binding must not be treated as dedicated.'
+
+    'not json at all' | Set-Content -LiteralPath $markerPath -Encoding UTF8
+    Assert-True (-not (Get-AeroLinkProductionSourcePosture -SourceRoot $markerFixture.Production).Dedicated) `
+        'A malformed marker must not be treated as dedicated.'
+    Assert-Throws { Assert-AeroLinkDedicatedProductionSource -SourceRoot $markerFixture.Production } 'malformed' `
+        'Production start must refuse a source whose marker cannot be read.'
+
+    # The installation binding: canonical source, but repointed at a different installation.
+    $movedFixture = New-Fixture
+    $null = New-ProductionSource -Fixture $movedFixture
+    Assert-True ((Get-AeroLinkProductionSourcePosture -SourceRoot $movedFixture.Production).Dedicated) 'Baseline: the fresh production source is dedicated.'
+    $otherInstallation = Join-Path $movedFixture.Root 'other-installation'
+    New-Item -ItemType Directory -Path $otherInstallation -Force | Out-Null
+    Set-AeroLinkInstallationPointer -ProductRoot (Join-Path $movedFixture.Production 'product') -InstallationRoot $otherInstallation | Out-Null
+    $movedPosture = Get-AeroLinkProductionSourcePosture -SourceRoot $movedFixture.Production
+    Assert-True ($movedPosture.Canonical) 'Repointing the installation does not make the SOURCE uncanonical...'
+    Assert-True (-not $movedPosture.Dedicated) '...but it must break the dedicated binding: source identity and data identity are one binding.'
+    Assert-Throws { Assert-AeroLinkDedicatedProductionSource -SourceRoot $movedFixture.Production } 'installation' `
+        'Production start must refuse a source whose data pointer no longer matches what it was bound to.'
+
+    # Trivial spelling differences in a remote URL are not different repositories.
+    Assert-True (Test-AeroLinkSameRemote -Left 'https://github.com/o/r.git' -Right 'https://github.com/o/r') 'A trailing .git is the same repository.'
+    Assert-True (Test-AeroLinkSameRemote -Left 'https://github.com/o/r/' -Right 'https://github.com/o/r') 'A trailing slash is the same repository.'
+    Assert-True (-not (Test-AeroLinkSameRemote -Left 'https://github.com/o/r' -Right 'https://github.com/o/other')) 'A different repository is a different repository.'
+    Assert-True (-not (Test-AeroLinkSameRemote -Left '' -Right 'https://github.com/o/r')) 'An unknown remote is never a match.'
 }
 finally {
     foreach ($fixture in $fixtures) {
