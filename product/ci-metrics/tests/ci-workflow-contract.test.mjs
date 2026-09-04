@@ -227,10 +227,14 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   // The refusal loop consumes env variables; pin each to its job's actual result, or a hardcoded
   // `success` would satisfy the guard while a job skipped. The same applies to the step's own
   // control inputs: a hardcoded EVENT_NAME would never select the merge-group branch, and a
-  // hardcoded DOCS_ONLY of true would skip it for every run. Bindings must appear exactly once as
-  // a live env-mapping line — an anchored match, so a commented-out original beside a hardcoded
-  // replacement cannot satisfy the contract.
-  const envBindingCount = (binding) => (enforceText.match(new RegExp(`^ {10}${binding.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'gm')) || []).length
+  // hardcoded DOCS_ONLY of true would skip it for every run. Bindings must appear exactly once as a
+  // live line of the step's actual env mapping — parsed from the env: block only, so a matching line
+  // inside the run script's heredocs satisfies nothing.
+  const envStart = enforceText.indexOf('        env:')
+  const runStart = enforceText.indexOf('        run:')
+  assert.ok(envStart >= 0 && runStart > envStart, 'the enforcement step must define its env mapping before the run script')
+  const envMapping = enforceText.slice(envStart, runStart)
+  const envBindingCount = (binding) => (envMapping.match(new RegExp(`^ {10}${binding.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'gm')) || []).length
   for (const [envVar, job] of [
     ['BACKEND_API', 'backend-api'],
     ['BACKEND_CORE_DOMAIN', 'backend-core-domain'],
@@ -254,10 +258,15 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
 
   // The guard only matters if the gate runs at all: the workflow must keep its top-level merge_group
   // trigger, or queue candidates never start a Product run and every required check pends to timeout.
+  // Scoped to the on: mapping — a job merely named merge_group: satisfies nothing here.
   // (full-ci-readiness-dispatch pins the trigger set too; this contract stays self-contained.)
+  const lines = workflowLines()
+  const onIndex = lines.findIndex((line) => line === 'on:')
+  const jobsIndex = lines.findIndex((line) => line === 'jobs:')
+  assert.ok(onIndex >= 0 && jobsIndex > onIndex, 'ci.yml must define its triggers in a top-level on: block')
   assert.ok(
-    workflowLines().some((line) => /^  merge_group:$/.test(line)),
-    'ci.yml must keep the top-level merge_group workflow trigger',
+    lines.slice(onIndex, jobsIndex).some((line) => line === '  merge_group:'),
+    'the on: block must keep the merge_group workflow trigger',
   )
 
   // The guard only matters if the aggregate runs and its failure counts. A skipped dependency must
