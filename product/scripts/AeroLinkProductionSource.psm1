@@ -275,6 +275,33 @@ function Assert-AeroLinkRunningFromProductionSource {
             Reason = "This checkout is the dedicated production source ($thisRoot), and its repository and installation binding still hold."
         }
     }
+    # Before returning a path the caller is going to EXECUTE POWERSHELL FROM, prove it is what it claims.
+    #
+    # Delegation means the trusted parent runs a script out of a directory named by a configuration file. If
+    # that target is validated only by the child, then a configuration edited to point somewhere else - or a
+    # directory that was the production source and no longer is - gets to run first and validate itself
+    # afterwards, which is not validation. So the repository, the dedicated marker and the installation
+    # binding are checked here, by the caller that still has authority.
+    #
+    # Not remote-currency: that needs the network, belongs to the child, and a machine that cannot reach
+    # GitHub must still be able to start production from a previously verified cached main.
+    $targetPosture = Get-AeroLinkProductionSourcePosture -SourceRoot $dedicatedRoot -RemoteName $configured.RemoteName
+    if (-not $targetPosture.Dedicated) {
+        $detail = if ($targetPosture.BindingReason) { " $($targetPosture.BindingReason)" } else { " $($targetPosture.Reason)" }
+        throw @"
+AeroLink HOME production refused: the configured production source does not prove it is one.
+
+  Running from:        $thisRoot
+  Production source:   $dedicatedRoot
+  Configured in:       $($configured.ConfigPath)
+ $detail
+
+Nothing was delegated to and nothing was started - a path named by a configuration file does not get to run
+before it has been shown to be the dedicated AeroLink production source. Re-create or repair it with
+CONFIGURE_AEROLINK_PRODUCTION_SOURCE.bat.
+"@
+    }
+
     # Not a refusal: a redirection.
     #
     # Refusing here was safe and wrong. #881's operating-mode contract names START_AEROLINK_PRODUCTION.bat as
@@ -443,10 +470,17 @@ function Update-AeroLinkProductionSource {
         throw 'Update-AeroLinkProductionSource: -InspectOnly decides and -AdvanceToSha acts. Asking for both is a contradiction; nothing was changed.'
     }
 
+    # The COMPLETE binding, before anything is fetched or fast-forwarded.
+    #
+    # Checking only that the marker file exists let a clean-but-misbound source be advanced and then rejected
+    # afterwards: Git posture can be Canonical while Dedicated is false, because the marker is malformed, the
+    # origin is not AeroLink, or the installation pointer has moved. Mutating a working tree and reporting the
+    # problem after the fact is the wrong order for a source that runs the canonical database.
     if (-not $AllowNonDedicated) {
-        $marker = Get-AeroLinkProductionSourceMarkerPath -SourceRoot $SourceRoot
-        if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
-            throw "AeroLink production source update refused: $SourceRoot is not a dedicated AeroLink production source. Nothing was changed."
+        $binding = Get-AeroLinkProductionSourcePosture -SourceRoot $SourceRoot -RemoteName $RemoteName
+        if (-not $binding.Dedicated) {
+            $detail = if ($binding.BindingReason) { " $($binding.BindingReason)" } else { '' }
+            throw "AeroLink production source update refused: $SourceRoot is not a dedicated AeroLink production source.$detail Nothing was fetched and nothing was changed."
         }
     }
 

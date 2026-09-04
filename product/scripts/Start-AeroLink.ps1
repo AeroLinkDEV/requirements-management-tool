@@ -36,6 +36,38 @@ $apiUrl = 'http://127.0.0.1:5080'
 $websiteUrl = 'http://127.0.0.1:5173'
 $launcherMode = 'LOCAL-DEV'
 
+# Before the bootstrap, because the bootstrap can fast-forward this checkout.
+#
+# The development launcher must not be pointed at the HOME canonical database. The three supported modes are
+# not three moods: LOCAL DEV deliberately permits feature branches, dirty worktrees and half-finished
+# migrations, which is safe against a work-laptop database it is allowed to ruin. HOME CANONICAL carries real
+# controlled history, and on the HOME machine the development checkout is the installation that owns the
+# canonical product/.local - so without this, the stronger HOME source policy could be bypassed by
+# double-clicking the other launcher.
+#
+# Read and refuse FIRST. Doing this after the bootstrap meant a clean HOME development checkout could be
+# fast-forwarded on its way to being told it was not allowed to run: a refusal that has already changed the
+# working tree is not a refusal.
+#
+# The classification decides, never the hostname: an installation says what it is, and a machine name is not
+# a fact about a database.
+$instanceBeforeBootstrap = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode Development
+if ($instanceBeforeBootstrap.Classification -eq 'HomeCanonical' -and -not $AllowHomeCanonicalDatabase) {
+    throw @"
+AeroLink development start refused: this installation is declared HOME CANONICAL.
+
+  Installation: $($installation.InstallationRoot)
+  Instance:     $($instanceBeforeBootstrap.Label) ($($instanceBeforeBootstrap.Classification))
+
+The development launcher permits feature branches and an uncommitted worktree, which is safe against a
+work-laptop database and not against the canonical one. Use START_AEROLINK_PRODUCTION.bat to run this
+installation, or point development at its own installation.
+
+Nothing was started and nothing was changed - not even a source update. -AllowHomeCanonicalDatabase exists
+only to qualify this launcher against a disposable HOME-classified installation.
+"@
+}
+
 # Source posture before anything else. Development mode preserves deliberate local work — feature branches,
 # dirt, local-only commits, untracked files — and only fast-forwards a clean main; it never polices the
 # checkout.
@@ -67,31 +99,10 @@ if ($bootstrapResult.Action -eq 'Reentered') { exit $bootstrapResult.ExitCode }
 $sourceFingerprint = Get-AeroLinkSourceFingerprint -RepositoryRoot $repositoryRoot
 $instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode Development -EnsureInstanceId
 
-# The development launcher must not be pointed at the HOME canonical database.
-#
-# The three supported modes are not three moods: LOCAL DEV deliberately permits feature branches, dirty
-# worktrees and half-finished migrations, and that is safe against a work-laptop database it is allowed to
-# ruin. HOME CANONICAL is the one that carries real controlled history. On the HOME machine the development
-# checkout is the installation that owns the canonical product/.local, so without this the whole stronger
-# HOME source policy could be bypassed by double-clicking the other BAT - the same class of mistake #881
-# exists to remove, reached through a different door.
-#
-# The classification is what decides, not the hostname: an installation says what it is, and a machine name
-# is not a fact about a database.
+# Re-read after the bootstrap: a fast-forward cannot change installation state, but a re-entered launch and a
+# freshly minted instance id both land here, and the guard above has already run on the pre-bootstrap value.
 if ($instance.Classification -eq 'HomeCanonical' -and -not $AllowHomeCanonicalDatabase) {
-    throw @"
-AeroLink development start refused: this installation is declared HOME CANONICAL.
-
-  Installation: $($installation.InstallationRoot)
-  Instance:     $($instance.Label) ($($instance.Classification))
-
-The development launcher permits feature branches and an uncommitted worktree, which is safe against a
-work-laptop database and not against the canonical one. Use START_AEROLINK_PRODUCTION.bat from the dedicated
-production source to run this installation, or point development at its own installation.
-
-Nothing was started and nothing was changed. -AllowHomeCanonicalDatabase exists only to qualify this
-launcher against a disposable HOME-classified installation.
-"@
+    throw 'AeroLink development start refused: this installation is declared HOME CANONICAL. Use START_AEROLINK_PRODUCTION.bat. Nothing was started.'
 }
 
 $runtimeEnvironment = @{
@@ -273,10 +284,20 @@ catch {
         throw "The API health check passed, but the authentication endpoint is unreachable: $($_.Exception.Message)"
     }
 }
-if ($authStatus -notin 200, 401) {
-    throw "The authentication endpoint returned unexpected HTTP status $authStatus."
+# Exactly 401, not "200 or 401".
+#
+# An unauthenticated GET of /api/auth/me answering 200 is not a healthy endpoint that happens to be
+# permissive - it is the authentication boundary being open, which is the single worst thing this check could
+# be looking at and the one thing it used to accept. Nothing else is a pass either: a 404 says the route is
+# gone, a 500 says the identity service is broken, and both are worth failing on now rather than at the
+# sign-in screen.
+if ($authStatus -eq 200) {
+    throw 'The authentication endpoint returned HTTP 200 to an UNAUTHENTICATED request. That is an open authentication boundary, not a healthy endpoint. AeroLink was not started.'
 }
-Write-Host '      Authentication endpoint is responding.' -ForegroundColor Green
+if ($authStatus -ne 401) {
+    throw "The authentication endpoint returned unexpected HTTP status $authStatus; an unauthenticated request must be refused with 401."
+}
+Write-Host '      Authentication endpoint refuses an unauthenticated request, as it must.' -ForegroundColor Green
 
 if (-not $DoNotOpenBrowser) {
     Start-Process $websiteUrl

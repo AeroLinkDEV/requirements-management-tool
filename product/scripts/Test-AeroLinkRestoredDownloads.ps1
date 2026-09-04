@@ -5,21 +5,32 @@ param(
     [Parameter(Mandatory)][object[]]$AttachmentInventory,
     [int]$PostgresPort = 54329,
     [int]$ApiPort = 5091,
-    [string]$LogRoot
+    [string]$LogRoot,
+    # The exact build to validate with. Named by the caller, never guessed - see below.
+    [Parameter(Mandatory)][string]$ApiExecutable
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Net.Http
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-# Release is what the restore path builds, and therefore what it should validate with. The upgrade path
-# reaches here after `dotnet run` has produced a Debug build and no Release one, so a Release-only
-# requirement would fail clone validation for a reason that has nothing to do with the clone. Prefer
-# Release, accept Debug, and name both when neither exists.
-$apiExecutable = @(
-    (Join-Path $productRoot 'src\AeroLink.Api\bin\Release\net10.0\AeroLink.Api.exe'),
-    (Join-Path $productRoot 'src\AeroLink.Api\bin\Debug\net10.0\AeroLink.Api.exe')
-) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-if (-not $apiExecutable) { throw "A built API executable is required for isolated validation. Neither bin\Release\net10.0\AeroLink.Api.exe nor bin\Debug\net10.0\AeroLink.Api.exe exists under $productRoot\src\AeroLink.Api." }
+# The CALLER names the executable, because only the caller knows which one it just built.
+#
+# Preferring Release and falling back to Debug looked harmless and was not: an established installation keeps
+# a Release executable from its last production run, while the clone-upgrade path arrives having just built
+# current source into Debug. The preference order would then pick the stale Release binary as the thing that
+# supposedly proves the upgraded clone works with CURRENT AeroLink - and a binary predating the read-only
+# boundary would ignore these settings entirely and start the ordinary mutating host, with its workers, over
+# copied production data. That result can authorise mutating the real database.
+#
+# So there is no preference order any more. Restore passes the Release build it produced; clone validation
+# passes the Debug build `dotnet run` produced on the way here. Guessing is the defect.
+if (-not $ApiExecutable) {
+    throw 'Test-AeroLinkRestoredDownloads requires -ApiExecutable naming the build to validate with. It must be the executable the caller has just built from current source; selecting whichever build happens to exist can run a stale binary as proof about the current one.'
+}
+$apiExecutable = [IO.Path]::GetFullPath($ApiExecutable)
+if (-not (Test-Path -LiteralPath $apiExecutable -PathType Leaf)) {
+    throw "The API executable named for isolated validation does not exist: $apiExecutable"
+}
 if (-not $LogRoot) { $LogRoot = Join-Path $productRoot '.local\restore-validation\logs' }
 $logs = [IO.Path]::GetFullPath($LogRoot)
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
@@ -60,8 +71,23 @@ try {
     $handler = [Net.Http.HttpClientHandler]::new(); $handler.CookieContainer = [Net.CookieContainer]::new()
     $client = [Net.Http.HttpClient]::new($handler); $client.BaseAddress = [Uri]"http://127.0.0.1:$ApiPort"
     try {
+        # What this proves, precisely: the read-only BOUNDARY refuses every route that is not an authenticated
+        # controlled read. It does NOT prove the login route exists, and must not be read as proving it - the
+        # middleware short-circuits before endpoint routing, so an absent or broken /api/auth/login would
+        # answer 403 here exactly as a present one does. Asserting the boundary's own error code is what keeps
+        # that honest: a 403 carrying restore_validation_read_only is the middleware, by construction.
+        #
+        # Proving a live login would need the ordinary host, which on copied production data means every
+        # seeder, every startup mutation and every outbound worker. That trade is not worth a stronger
+        # sentence in a log. What IS proven here about the identity stack is that the host composed and became
+        # ready with the full DI graph and the authentication scheme registered - validate-on-build would have
+        # failed startup otherwise - and that an authenticated controlled read below returns exact bytes.
         $forbidden = $client.PostAsync('/api/auth/login', [Net.Http.StringContent]::new('{}',[Text.Encoding]::UTF8,'application/json')).GetAwaiter().GetResult()
         if ([int]$forbidden.StatusCode -ne 403) { throw "The read-only validation API accepted a non-download route with HTTP $([int]$forbidden.StatusCode)." }
+        $forbiddenBody = $forbidden.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ($forbiddenBody -notmatch 'restore_validation_read_only') {
+            throw "The read-only validation API refused a non-download route, but not through the read-only boundary: $forbiddenBody"
+        }
         $managed = @($AttachmentInventory | Where-Object { [string]$_.ArtifactType -eq 'ManagedDocument' })
         if ($managed.Count -gt 0) {
             $wrongTokenClient = [Net.Http.HttpClient]::new(); $wrongTokenClient.BaseAddress = $client.BaseAddress

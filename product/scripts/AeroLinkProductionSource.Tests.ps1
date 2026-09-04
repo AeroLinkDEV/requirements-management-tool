@@ -201,8 +201,10 @@ try {
     # =====================================================================================================
     # 5. GitHub unavailable: a previously verified clean cached main runs, and says it is unverified.
     # =====================================================================================================
-    $null = Invoke-FixtureGit -GitArguments @('remote', 'set-url', 'origin', (Join-Path $fixture.Root 'no-such-remote')) -Repository $fixture.Production
-    $offline = Update-AeroLinkProductionSource -SourceRoot $fixture.Production
+    # Unreachability is simulated by a failing fetch, not by repointing origin at a path that does not exist.
+    # Rewriting the remote URL models a different repository, which is a state that must now be refused before
+    # any fetch - so using it here would have proved the wrong thing about the wrong failure.
+    $offline = Update-AeroLinkProductionSource -SourceRoot $fixture.Production -FetchOverride { $false }
     Assert-True ($offline.Action -eq 'CachedCanonical') "An unreachable remote must still allow a verified cached main; it reported $($offline.Action)."
     Assert-True ($offline.Canonical) 'Cached canonical source is usable.'
     Assert-True ($offline.RemoteReachable -eq $false) 'The offline result must record that the remote was not reached.'
@@ -396,6 +398,22 @@ try {
     Assert-True (-not $fromDevelopment.Checked) 'The development checkout is not the dedicated production source.'
     Assert-True ($fromDevelopment.DelegateTo -eq $launchFixture.Production) 'It must name the dedicated source to delegate to, so the stable entry point keeps working.'
     Assert-True ($fromDevelopment.Reason -match [regex]::Escape($launchFixture.Production)) 'The reason must name the production source.'
+
+    # Delegation runs PowerShell out of a directory named by a configuration file, so the caller proves the
+    # target is the dedicated source BEFORE handing control to it. Validating only in the child would let a
+    # redirected configuration run first and validate itself afterwards, which is not validation.
+    $strangerTarget = Join-Path $launchFixture.Root 'not-a-production-source'
+    New-Item -ItemType Directory -Path $strangerTarget -Force | Out-Null
+    $pointsAtStranger = { [pscustomobject]@{ SourceRoot = $strangerTarget; ConfigPath = 'C:\config\production-source.psd1'; RemoteName = 'origin' } }.GetNewClosure()
+    Assert-Throws { Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigReader $pointsAtStranger } `
+        'does not prove it is one' 'A configuration pointing at something that is not a dedicated production source must be refused before anything is executed from it.'
+
+    # A directory that WAS the production source and no longer is must not be delegated to either.
+    $revokedMarker = Get-AeroLinkProductionSourceMarkerPath -SourceRoot $launchFixture.Production
+    Remove-Item -LiteralPath $revokedMarker -Force
+    Assert-Throws { Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigReader $declared } `
+        'does not prove it is one' 'A target whose dedicated marker has gone must not be delegated to.'
+    $null = New-ProductionSource -Fixture $launchFixture
 
     # A trailing separator is the same directory, not a different one.
     $trailing = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot ($launchFixture.Production + '\') -ConfigReader $declared

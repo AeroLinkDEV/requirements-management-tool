@@ -384,10 +384,21 @@ function Test-AeroLinkUpgradedCloneReadiness {
         # Readiness, the anonymous refusal, the wrong-token refusal, and byte-exact authenticated controlled
         # reads - all against the upgraded clone, in a host that can neither mutate it nor talk to the world.
         $proof = if ($ReadOnlyApiProver) { & $ReadOnlyApiProver $cloneDatabaseName $evidenceRoot $inventory $ApiPort } else {
+            # The DEBUG build, named explicitly, because that is the one current source was just built into:
+            # reaching this point means `dotnet run` compiled and ran the maintenance host from this revision
+            # and returned zero. An established installation may still hold a Release executable from its last
+            # production run, and validating with that would run a previous SHA as proof about this one - a
+            # binary predating the read-only boundary would ignore these settings and start the ordinary
+            # mutating host, with its workers, over copied production data.
+            $currentBuild = Join-Path $ProductRoot 'src\AeroLink.Api\bin\Debug\net10.0\AeroLink.Api.exe'
+            if (-not (Test-Path -LiteralPath $currentBuild -PathType Leaf)) {
+                throw "The upgraded clone cannot be validated: the current-source build is not present at $currentBuild. The maintenance host builds it, so its absence means this is not the revision that just ran."
+            }
             & (Join-Path $PSScriptRoot 'Test-AeroLinkRestoredDownloads.ps1') `
                 -Database $cloneDatabaseName -EvidenceRoot $evidenceRoot -AttachmentInventory $inventory `
                 -PostgresPort $clonePort -ApiPort $ApiPort `
-                -LogRoot (Join-Path $installation.Logs 'upgrade-validation')
+                -LogRoot (Join-Path $installation.Logs 'upgrade-validation') `
+                -ApiExecutable $currentBuild
         }
         if (-not $proof -or -not $proof.Passed) {
             $why = if ($proof -and $proof.Detail) { $proof.Detail } else { 'the isolated read-only host did not prove the upgraded copy.' }

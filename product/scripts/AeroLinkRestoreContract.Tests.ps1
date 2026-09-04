@@ -19,7 +19,14 @@ if(-not $restore.Contains('if ($command -notlike "*$productRoot*") { continue }'
 if(-not $restore.Contains("Disposable restore qualification is forbidden on the persistent AeroLink PostgreSQL port 54329.")){throw 'Disposable restore qualification is not fenced from the persistent database.'}
 if(-not $download.Contains('X-AeroLink-Restore-Validation') -or -not $program.Contains('restore_validation_read_only') -or -not $program.Contains('typeof(IHostedService)')){throw 'The isolated API-download validation token/read-only boundary is incomplete.'}
 if($download.Contains("Start-Process -FilePath 'dotnet'")){throw 'Restore validation still tracks a dotnet-run parent instead of the API listener process.'}
-if(-not $download.Contains('AeroLink.Api.exe') -or -not $download.Contains('remained in use after process cleanup')){throw 'Restore validation does not launch the built API directly and prove its port is released.'}
+if(-not $download.Contains('$apiExecutable') -or -not $download.Contains('remained in use after process cleanup')){throw 'Restore validation does not launch the built API directly and prove its port is released.'}
+# The build to validate with is named by the caller and never chosen here. Preferring whichever configuration
+# had output on disk let an established installation validate an upgraded clone with a stale Release binary
+# from its previous production run; a binary predating the read-only boundary would ignore these settings and
+# start the ordinary mutating host, with its outbound workers, over copied production data.
+if(-not $download.Contains('[Parameter(Mandatory)][string]$ApiExecutable')){throw 'Restore validation still selects its own API build instead of requiring the caller to name the current one.'}
+if($download.Contains('bin\Release') -or $download.Contains('bin\Debug')){throw 'Restore validation must not know about build configurations; the caller names the executable.'}
+if(-not $restore.Contains('-ApiExecutable')){throw 'Restore does not name the build it validates with.'}
 if($download.IndexOf('finally {', $download.IndexOf('finally {') + 1) -lt 0 -or -not $download.Contains('Production rollback/restart must never inherit')){throw 'Restore validation does not restore its parent environment in a nested cleanup finally.'}
 [pscustomobject]@{Passed=$true;ShadowDatabase=$true;ReversibleActivation=$true;ReadOnlyApiDownloads=$true;PersistentPortFence=$true}
 $global:LASTEXITCODE=0

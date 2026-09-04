@@ -107,11 +107,15 @@ CONFIGURE_AEROLINK_REMOTE_DEMO.bat Install
 ```
 
 Configuration lives in `%LOCALAPPDATA%\AeroLink\Production\production-source.config.psd1` and holds no
-secret. `Status` reports where the production source is and whether it is canonical; `Update` fast-forwards
-it. A production source that has acquired a tracked modification, an untracked file, a local-only commit, a
-feature branch, or divergence is reported and refused **exactly as found** — never stashed, reset, rebased or
-cleaned. When GitHub is unreachable a previously verified clean cached `main` runs with an explicit "the
-latest remote revision could not be verified" diagnostic.
+secret. `Status` reports where the production source is and whether it is canonical. `Update` goes through
+the same **inspect / stop / advance** controller as the timed reconciliation — an operator can run it at any
+moment, and fetching and fast-forwarding immediately would rewrite the working tree underneath a live
+production process and a live tunnel. A production source that has acquired a tracked modification, an
+untracked file, a local-only commit, a feature branch, or divergence is reported and refused **exactly as
+found** — never stashed, reset, rebased or cleaned. A source that is clean but **misbound** — a malformed
+marker, an origin that is not AeroLink, an installation pointer that has moved — is refused *before* anything
+is fetched, rather than advanced and rejected afterwards. When GitHub is unreachable a previously verified
+clean cached `main` runs with an explicit "the latest remote revision could not be verified" diagnostic.
 
 Once a dedicated source is configured, **the production launchers delegate to it** — `START_AEROLINK_PRODUCTION.bat`,
 `START_AEROLINK_SHARED.bat` and `START_AEROLINK_EMAIL_DEMO.bat` alike. Run one from the development checkout
@@ -125,6 +129,10 @@ feature-branch checkout. It is **which working tree the long-lived process execu
 checkout that happens to be on clean `main` passes every gate, serves the demo, and is then one `git checkout`
 away from having its assemblies and client bundle replaced underneath a running process.
 
+Before anything is executed from the configured target, the caller proves it: repository origin, dedicated
+marker and installation binding, all checked by the trusted parent rather than left to the child to assert
+about itself. Remote-currency is not required here — that needs the network, belongs to the child, and a
+machine that cannot reach GitHub must still start from a verified cached `main`.
 `AEROLINK_PRODUCTION_DELEGATED` is a one-shot recursion guard: a delegated launch that still is not the
 dedicated source refuses rather than bouncing again, and so does a configuration whose target has no
 launcher. `-AllowNonDedicatedSource` skips delegation entirely, for qualifying the launcher itself and for a

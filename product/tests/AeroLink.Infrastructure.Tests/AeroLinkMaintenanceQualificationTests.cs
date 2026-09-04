@@ -3,7 +3,10 @@ using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
 using AeroLink.Infrastructure.Persistence.Maintenance;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Npgsql;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -602,6 +605,99 @@ public sealed class AeroLinkMaintenanceQualificationTests
         }
         finally { await DropDatabaseAsync(server, database); }
     }
+
+    /// <summary>
+    /// A database is not the only persistent thing an upgrade writes, and this is the qualification for the
+    /// half that a connection string does not isolate.
+    ///
+    /// <c>SoftwareVerificationCaseMigrationAuthority</c> — one of the semantic authorities the upgrade runs —
+    /// takes an <c>EvidenceFileStore</c> and calls <c>StoreAsync</c> while rewriting controlled renditions.
+    /// That store resolves <c>Evidence:Root</c> and, absent one, the LIVE
+    /// <c>%LOCALAPPDATA%\AeroLink\evidence</c> tree. So a "clone" upgrade isolated only by connection string
+    /// wrote new objects into the canonical evidence store, before the clone had been proved and where a
+    /// database rollback cannot reach them.
+    ///
+    /// What is proved here, on real PostgreSQL and a real filesystem:
+    ///
+    ///   1. `Evidence__Root` — the exact variable the PowerShell sets, through the exact double-underscore
+    ///      environment mapping the host uses — actually redirects the store the authority is constructed
+    ///      with. This is the mechanism that was missing.
+    ///   2. A real <c>StoreAsync</c> under that redirection lands in the isolated tree.
+    ///   3. Running the authority against the isolated database leaves the canonical tree byte-identical,
+    ///      on the completing path AND on a failing one.
+    ///
+    /// Honest about its limit: this fixture has no HLR/LLR controlled documents, so the authority completes
+    /// without renditions to rewrite. The write in step 2 is therefore what exercises the store; the
+    /// authority's own path is exercised for the absence of leakage rather than for a rewrite.
+    /// </summary>
+    [Fact]
+    public async Task An_evidence_writing_semantic_authority_cannot_touch_the_canonical_evidence_tree()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-881-evidence-{Guid.NewGuid():N}");
+        var canonical = Path.Combine(root, "canonical-evidence");
+        var isolated = Path.Combine(root, "clone-evidence");
+        var previousEvidenceRoot = Environment.GetEnvironmentVariable("Evidence__Root");
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            Directory.CreateDirectory(canonical);
+            // Something already in the canonical tree, so "unchanged" is a comparison and not an empty set.
+            await File.WriteAllTextAsync(Path.Combine(canonical, "existing-controlled-object.bin"), "canonical bytes");
+            var before = SnapshotTree(canonical);
+
+            await using (var migrate = new AeroLinkDbContext(Options(connection))) await migrate.Database.MigrateAsync();
+
+            // The mechanism, exactly as the launcher configures it: Evidence__Root in the environment,
+            // resolved through IConfiguration, into the store the authority is constructed with.
+            Environment.SetEnvironmentVariable("Evidence__Root", isolated);
+            var configuration = new ConfigurationBuilder().AddEnvironmentVariables().Build();
+            var store = new EvidenceFileStore(configuration);
+            Assert.Equal(Path.GetFullPath(isolated), Path.GetFullPath(store.RootPath));
+
+            // A real controlled write through that store.
+            var payload = Encoding.UTF8.GetBytes("rewritten controlled rendition");
+            var stored = await store.StoreAsync(new MemoryStream(payload), "rendition.bin", "application/octet-stream", default);
+            Assert.NotNull(stored);
+            Assert.Equal(Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant(), stored.Sha256.ToLowerInvariant());
+            Assert.True(Directory.EnumerateFiles(isolated, "*", SearchOption.AllDirectories).Any(),
+                "the isolated evidence tree should hold the object that was just written");
+            Assert.Equal(before, SnapshotTree(canonical));
+
+            // The authority itself, against the isolated database and the isolated store.
+            await using (var authorityContext = new AeroLinkDbContext(Options(connection)))
+            {
+                var generator = new ControlledOutputGenerator(authorityContext, new RichContentPublisher(authorityContext, store));
+                await new SoftwareVerificationCaseMigrationAuthority(authorityContext, generator, store).EnsureCompletedAsync();
+            }
+            Assert.Equal(before, SnapshotTree(canonical));
+
+            // And on a failing path: a store pointed at a file rather than a directory cannot write, and the
+            // canonical tree must still be untouched when the authority throws.
+            var unusable = Path.Combine(root, "unusable-evidence");
+            await File.WriteAllTextAsync(unusable, "not a directory");
+            await Assert.ThrowsAnyAsync<Exception>(async () =>
+            {
+                var broken = new EvidenceFileStore(unusable);
+                await broken.StoreAsync(new MemoryStream(payload), "rendition.bin", "application/octet-stream", default);
+            });
+            Assert.Equal(before, SnapshotTree(canonical));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("Evidence__Root", previousEvidenceRoot);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            await DropDatabaseAsync(server, database);
+        }
+    }
+
+    /// <summary>Every file under a tree, by relative path and content hash, for an exact comparison.</summary>
+    private static string SnapshotTree(string root) =>
+        string.Join("\n", Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .Select(x => $"{Path.GetRelativePath(root, x)}:{Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(x)))}"));
 
     /// <summary>
     /// The window the in-transaction re-derivation does not close on its own.

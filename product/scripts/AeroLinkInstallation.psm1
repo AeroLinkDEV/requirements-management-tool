@@ -33,6 +33,11 @@ Set-StrictMode -Version Latest
 
 $script:AeroLinkInstallationPointerName = 'installation.json'
 
+# The one list of what an installation may declare itself to be. Every guard that protects real data compares
+# against these by equality, so a value outside the list is not a label AeroLink does not recognise - it is a
+# guard that silently stops applying. Keep this and Set-AeroLinkInstanceConfig's ValidateSet in step.
+$script:AeroLinkInstanceClassifications = @('HomeCanonical', 'WorkLaptopLocal', 'LocalDemo', 'Undeclared')
+
 function Get-AeroLinkInstallationPointerPath {
     <#
         .SYNOPSIS The pointer file a source checkout would carry, whether or not it exists.
@@ -273,7 +278,19 @@ function Get-AeroLinkInstanceConfig {
         try { $declared = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
         catch { throw "The AeroLink instance declaration at $configPath is malformed: $($_.Exception.Message)" }
         if ($declared.PSObject.Properties['label'] -and -not [string]::IsNullOrWhiteSpace([string]$declared.label)) { $label = [string]$declared.label }
-        if ($declared.PSObject.Properties['classification'] -and -not [string]::IsNullOrWhiteSpace([string]$declared.classification)) { $classification = [string]$declared.classification }
+        if ($declared.PSObject.Properties['classification'] -and -not [string]::IsNullOrWhiteSpace([string]$declared.classification)) {
+            $classification = [string]$declared.classification
+            # Fail closed on a classification nobody supports.
+            #
+            # Every guard that protects real data compares this string for equality: the development launcher
+            # refuses `HomeCanonical`, and the snapshot import refuses to overwrite one. A typo - HomeCanonica
+            # - makes both comparisons false, so a file that LOOKS like it declares the canonical installation
+            # silently removes the protection it appears to establish, while the badge shows the typo back to
+            # the operator as if it meant something. An unreadable declaration is a refusal, not a default.
+            if ($classification -notin $script:AeroLinkInstanceClassifications) {
+                throw "The AeroLink instance declaration at $configPath has classification '$classification', which is not one of: $($script:AeroLinkInstanceClassifications -join ', '). Correct it with DECLARE_AEROLINK_INSTANCE.bat; nothing is assumed about this installation while it is unreadable."
+            }
+        }
         if ($declared.PSObject.Properties['snapshot'] -and $declared.snapshot) { $snapshot = $declared.snapshot }
         if ($declared.PSObject.Properties['instanceId']) { $instanceId = [string]$declared.instanceId }
     }
@@ -317,7 +334,7 @@ function Set-AeroLinkInstanceConfig {
     param(
         [Parameter(Mandatory)][string]$ProductRoot,
         [string]$Label,
-        [ValidateSet('HomeCanonical', 'WorkLaptopLocal', 'Undeclared')][string]$Classification,
+        [ValidateSet('HomeCanonical', 'WorkLaptopLocal', 'LocalDemo', 'Undeclared')][string]$Classification,
         [hashtable]$Snapshot,
         [string]$InstallationRoot
     )

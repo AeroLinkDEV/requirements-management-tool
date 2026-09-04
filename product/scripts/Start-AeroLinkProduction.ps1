@@ -135,29 +135,71 @@ was started and nothing was changed.
 # repository can positively attribute as its own on 5080 is stopped in the moment before the tree moves;
 # a listener that cannot be attributed is left alone, and the ordinary disposition check below still refuses
 # to start over it.
+#
+# It fails CLOSED. Logging that the stop did not work and letting the fast-forward proceed is the same outcome
+# as not having the hook: the tree is rewritten under a process that is still executing it. A stop that fails,
+# or a listener whose ownership cannot be read, blocks the advance - the source stays where it is, which is a
+# state the machine already runs in perfectly well.
+#
+# It also quiesces the owned tunnel, not only port 5080. Leaving the public URL forwarding at a port whose
+# process is about to be replaced publishes whatever takes that port next.
+$script:preAdvanceStopPerformed = $false
 $stopOwnedProductionRuntime = {
     param($Root, $Posture)
-    Write-Host '      A source advance is due; stopping the production runtime that is executing out of this tree first.' -ForegroundColor Yellow
-    try { Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiProjectDirectory) | Out-Null }
-    catch { Write-Host "      $($_.Exception.Message)" -ForegroundColor Yellow }
+    Write-Host '      A source advance is due; quiescing the production stack that is executing out of this tree first.' -ForegroundColor Yellow
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force -ErrorAction SilentlyContinue
+    if (Get-Command Get-AeroLinkRemoteDemoConfig -ErrorAction SilentlyContinue) {
+        $demoConfig = $null
+        try { $demoConfig = Get-AeroLinkRemoteDemoConfig } catch { $demoConfig = $null }
+        if ($demoConfig) {
+            # Only the AeroLink-owned tunnel. Stop-AeroLinkRemoteDemo refuses on a mismatched ngrok rather
+            # than killing it, and that refusal must stop the advance too.
+            Stop-AeroLinkRemoteDemo -Config $demoConfig | Out-Null
+        }
+    }
+    Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiProjectDirectory) | Out-Null
+    $script:preAdvanceStopPerformed = $true
 }.GetNewClosure()
-$bootstrapResult = Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical `
-    -RepositoryRoot $repositoryRoot `
-    -PreAdvanceAction $stopOwnedProductionRuntime `
-    -CurrentScriptPath $PSCommandPath `
-    -ScriptArguments (Get-AeroLinkBootstrapScriptArguments $PSBoundParameters) `
-    -LauncherFiles @(
-        'START_AEROLINK_PRODUCTION.bat',
-        'product\scripts\launch.cmd',
-        'product\scripts\Start-AeroLinkProduction.ps1',
-        'product\scripts\AeroLinkPrerequisites.ps1',
-        'product\scripts\AeroLinkLaunch.ps1',
-        'product\scripts\AeroLinkNativeRunner.psm1',
-        'product\scripts\AeroLinkBootstrap.psm1',
-        'product\scripts\AeroLinkInstallation.psm1',
-        'product\scripts\AeroLinkRuntimeIdentity.psm1',
-        'product\scripts\AeroLinkUpgrade.psm1'
-    )
+try {
+    $bootstrapResult = Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical `
+        -RepositoryRoot $repositoryRoot `
+        -PreAdvanceAction $stopOwnedProductionRuntime `
+        -CurrentScriptPath $PSCommandPath `
+        -ScriptArguments (Get-AeroLinkBootstrapScriptArguments $PSBoundParameters) `
+        -LauncherFiles @(
+            'START_AEROLINK_PRODUCTION.bat',
+            'product\scripts\launch.cmd',
+            'product\scripts\Start-AeroLinkProduction.ps1',
+            'product\scripts\AeroLinkPrerequisites.ps1',
+            'product\scripts\AeroLinkLaunch.ps1',
+            'product\scripts\AeroLinkNativeRunner.psm1',
+            'product\scripts\AeroLinkBootstrap.psm1',
+            'product\scripts\AeroLinkInstallation.psm1',
+            'product\scripts\AeroLinkRuntimeIdentity.psm1',
+            'product\scripts\AeroLinkUpgrade.psm1'
+        )
+}
+catch {
+    # Compensation, for the one window where failing is not enough.
+    #
+    # If the advance failed BEFORE the stop, nothing was running and nothing is owed: rethrow. If it failed
+    # AFTER the stop - a fast-forward Git refused, most likely - production is already down because this
+    # launcher took it down, and stopping here would leave the machine off to report an update that did not
+    # happen. The revision on disk is untouched and was canonical a moment ago, so re-prove that and carry on
+    # with it, saying plainly that the update did not occur. This is the same invariant the scheduled
+    # reconciliation pass already has.
+    if (-not $script:preAdvanceStopPerformed) { throw }
+    Write-Host ''
+    Write-Host 'THE SOURCE UPDATE DID NOT HAPPEN' -ForegroundColor Yellow
+    Write-Host $_.Exception.Message -ForegroundColor Yellow
+    $onDisk = Get-AeroLinkProductionSourcePosture -SourceRoot $repositoryRoot
+    if (-not $onDisk.Canonical) {
+        throw "The source update failed after the production runtime was stopped, and the revision on disk is not canonical either: $($onDisk.Reason) AeroLink was not restarted. Nothing was changed."
+    }
+    Write-Host "Starting production on the revision already on disk: main @ $($onDisk.Posture.ShortSha)." -ForegroundColor Yellow
+    Write-Host 'Nothing was left running from before, and no persistent data was changed.' -ForegroundColor Yellow
+    $bootstrapResult = [pscustomobject]@{ Action = 'AdvanceRefused'; HeadSha = $onDisk.Posture.HeadSha; ExitCode = 0 }
+}
 if ($bootstrapResult.Action -eq 'Reentered') { exit $bootstrapResult.ExitCode }
 
 # The verified source identity this launch runs. HOME canonical refuses a dirty tree outright, so this is

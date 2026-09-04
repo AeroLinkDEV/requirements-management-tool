@@ -853,12 +853,16 @@ function Start-AeroLinkRemoteDemo {
             $inspect = Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -InspectOnly
             if ($inspect.Canonical -and $inspect.Action -eq 'UpdateAvailable') {
                 Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production source is behind; stopping the local runtime and the owned tunnel before advancing to $($inspect.TargetSha)."
-                # The tunnel first. It forwards the public URL at 127.0.0.1:5080, so leaving it up across the
-                # transition publishes whatever occupies that port next - including a process whose identity
-                # has not been re-proved. Only the AeroLink-owned tunnel is stopped; a foreign ngrok is a
-                # refusal, never a casualty.
-                try { Stop-AeroLinkRemoteDemo -Config $Config | Out-Null }
-                catch { Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The owned tunnel could not be stopped before the source advance: $($_.Exception.Message)" }
+                # The tunnel first, and it must actually come down. It forwards the public URL at
+                # 127.0.0.1:5080, so leaving it up across the transition publishes whatever occupies that port
+                # next - including a process whose identity has not been re-proved. Only the AeroLink-owned
+                # tunnel is stopped; a foreign ngrok is a refusal, never a casualty.
+                #
+                # And that refusal has to stop the transition. Stop-AeroLinkRemoteDemo throws on a mismatched
+                # ngrok BEFORE it reaches the loop that stops owned ones, so catching and continuing left the
+                # owned tunnel publishing an absent API through the entire advance. Fail closed instead: the
+                # source stays where it is, which is a state this machine already runs in.
+                Assert-AeroLinkOwnedTunnelStopped -Config $Config -Run $run
                 # Unconditionally, not "if it looks ready". A running process is what the tree is about to be
                 # rewritten under; an owned process that is up but unhealthy is exactly the one that must not
                 # be left executing deleted files.
@@ -1280,6 +1284,43 @@ function Install-AeroLinkReconcileTask {
     return [pscustomobject]@{ TaskName = $TaskName; IntervalMinutes = $IntervalMinutes; LogonType = $logonType; SourceRoot = $Config.AeroLinkRoot }
 }
 
+function Assert-AeroLinkOwnedTunnelStopped {
+    <#
+      .SYNOPSIS Takes the AeroLink-owned tunnel down and PROVES it is down, or refuses.
+      .DESCRIPTION
+        The transition that follows replaces whatever is listening on the local port the tunnel forwards to.
+        If the owned tunnel survives that, the protected public URL points first at an absent API and then at
+        whichever process takes the port - one whose runtime identity nothing has re-proved. So this is a
+        precondition, not a courtesy.
+
+        Two ways it used to fail open, both fixed here. Stop-AeroLinkRemoteDemo throws on a mismatched ngrok
+        BEFORE it reaches the loop that stops owned tunnels, so a single unrelated ngrok on the machine meant
+        the owned one was never stopped - and the caller caught that, logged it, and advanced anyway. And a
+        stop that silently did nothing was indistinguishable from one that worked, so the result is re-read
+        and required to show no owned process left.
+
+        An ngrok that does not match the AeroLink contract is still never killed. It stops this transition
+        instead, which is the correct trade: not updating the source is a state the machine already runs in.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        $Run
+    )
+    try { Stop-AeroLinkRemoteDemo -Config $Config | Out-Null }
+    catch {
+        if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "The owned tunnel could not be stopped, so the source transition was abandoned: $($_.Exception.Message)" }
+        throw "The AeroLink-owned public tunnel could not be stopped, so the production source was NOT advanced and nothing was restarted: $($_.Exception.Message)"
+    }
+    $remaining = Get-AeroLinkRemoteDemoNgrokProcess -Config $Config
+    if (@($remaining.Owned).Count -gt 0) {
+        $pids = (@($remaining.Owned) | ForEach-Object { $_.ProcessId }) -join ', '
+        if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "The owned tunnel is still running (PID $pids); the source transition was abandoned." }
+        throw "The AeroLink-owned public tunnel is still running (PID $pids) after being asked to stop, so the production source was NOT advanced. The public endpoint must not forward to a port whose process is being replaced."
+    }
+    if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message 'The owned public tunnel is down.' }
+}
+
 function Invoke-AeroLinkProductionSourceReconciliation {
     <#
       .SYNOPSIS One bounded reconciliation pass: decide, stop, advance, restart - in that order.
@@ -1336,11 +1377,11 @@ function Invoke-AeroLinkProductionSourceReconciliation {
     # casualty. The restart below brings a tunnel back and re-proves the 401 edge contract before declaring
     # the demo ready.
     Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Stopping the owned tunnel and the local production runtime before advancing the source to $($inspect.TargetSha)."
+    # Fails closed, deliberately. Logging a failed tunnel stop and advancing anyway leaves the protected
+    # public URL forwarding to a port whose process is being replaced, which is the outcome this ordering
+    # exists to prevent; not updating the source is the safe half of that choice.
     if ($TunnelStopper) { & $TunnelStopper $Config | Out-Null }
-    else {
-        try { Stop-AeroLinkRemoteDemo -Config $Config | Out-Null }
-        catch { Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The owned tunnel could not be stopped: $($_.Exception.Message)" }
-    }
+    else { Assert-AeroLinkOwnedTunnelStopped -Config $Config -Run $run }
     if ($RuntimeStopper) { & $RuntimeStopper $Config $inspect | Out-Null }
     else { & (Join-Path $Config.AeroLinkRoot 'product\scripts\Stop-AeroLink.ps1') | Out-Null }
 
@@ -1564,6 +1605,7 @@ Export-ModuleMember -Function `
     Write-AeroLinkRemoteDemoLog, `
     Start-AeroLinkRemoteDemo, `
     Stop-AeroLinkRemoteDemo, `
+    Assert-AeroLinkOwnedTunnelStopped, `
     Get-AeroLinkRemoteDemoTaskXml, `
     Get-AeroLinkReconcileTaskXml, `
     Install-AeroLinkReconcileTask, `

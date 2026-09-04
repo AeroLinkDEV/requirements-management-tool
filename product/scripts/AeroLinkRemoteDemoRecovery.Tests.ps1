@@ -328,6 +328,23 @@ Assert-True (($script:order -join ',') -eq 'inspect,stop-tunnel,stop,advance,res
 Assert-True ($recovered.Action -eq 'Refused' -and $recovered.Restarted) 'Scenario 14: the refusal must be reported without leaving production down.'
 Assert-True ($recovered.Detail -match 'already on disk') 'Scenario 14: the operator must be told which revision is actually running.'
 
+# A tunnel that will not come down aborts the whole transition.
+#
+# Logging the failure and advancing anyway leaves the protected public URL forwarding to 127.0.0.1:5080 while
+# the process behind it is stopped and replaced - so the endpoint points first at nothing and then at whatever
+# takes the port, whose identity nothing has re-proved. Not updating the source is the safe half of that
+# choice: it is a state the machine already runs in.
+$script:order = @()
+$stuckTunnel = { param($C) $script:order += 'stop-tunnel-failed'; throw 'Refusing to stop: ngrok process PID 4242 does not match the AeroLink remote-demo contract.' }
+$aborted = $false
+try {
+    Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $available -TunnelStopper $stuckTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart | Out-Null
+}
+catch { $aborted = $true; Assert-True ($_.Exception.Message -match 'does not match') 'Scenario 14: the tunnel refusal must reach the operator.' }
+Assert-True $aborted 'Scenario 14: a tunnel that cannot be stopped must abort the reconciliation.'
+Assert-True (($script:order -join ',') -eq 'inspect,stop-tunnel-failed') `
+    'Scenario 14: nothing may be stopped, advanced or restarted once the owned tunnel could not be taken down.'
+
 # --- 15. Ngrok is never started in front of a runtime that is not the verified production source ---
 $wrongSource = { param($C) [pscustomobject]@{ sourceIdentity = 'oldoldoldoldoldoldoldoldoldoldoldoldoldo'; sourceShortSha = 'oldoldol'; mode = 'HOME-PRODUCTION' } }
 $mismatch = Test-AeroLinkRemoteDemoRuntimeMatchesSource -Config $config -ExpectedSourceIdentity 'newnewnewnewnewnewnewnewnewnewnewnewnewn' -RuntimeIdentityProbe $wrongSource

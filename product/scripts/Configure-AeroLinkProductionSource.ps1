@@ -103,10 +103,42 @@ switch ($Action) {
         exit 0
     }
     'Update' {
+        # Through the same inspect / stop / advance / restart controller as the timed pass, not a bare
+        # fast-forward.
+        #
+        # This action is documented, an operator can run it at any time, and it used to fetch and fast-forward
+        # immediately - so running it while production or the remote demo was live rewrote the working tree
+        # underneath them. That is the same defect the scheduled reconciliation was corrected for; having one
+        # controller and one exception to it is not having a controller.
         $config = Get-AeroLinkProductionSourceConfig
-        $result = Update-AeroLinkProductionSource -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName `
-            -FetchTimeoutSeconds $config.FetchTimeoutSeconds
+        Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force
+        $demoConfig = $null
+        try { $demoConfig = Get-AeroLinkRemoteDemoConfig } catch { $demoConfig = $null }
+        if ($demoConfig) {
+            $result = Invoke-AeroLinkProductionSourceReconciliation -Config $demoConfig
+            $result | Format-List
+            exit ($(if ($result.Action -in 'Updated', 'AlreadyCurrent', 'CachedCanonical') { 0 } else { 1 }))
+        }
+
+        # No remote-demo configuration on this machine, so there is no tunnel and no supervised runtime to
+        # coordinate with. Still two-phase: decide with a fetch, stop anything of ours executing out of the
+        # tree, then advance.
+        Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1') -Force
+        $inspect = Update-AeroLinkProductionSource -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName `
+            -FetchTimeoutSeconds $config.FetchTimeoutSeconds -InspectOnly
+        if ($inspect.Canonical -and $inspect.Action -eq 'UpdateAvailable') {
+            Write-Host "      Stopping the production runtime before advancing to $($inspect.TargetSha)..." -ForegroundColor Yellow
+            $apiDirectory = Join-Path $config.SourceRoot 'product\src\AeroLink.Api'
+            Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiDirectory) | Out-Null
+            $result = Update-AeroLinkProductionSource -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName `
+                -FetchTimeoutSeconds $config.FetchTimeoutSeconds -AdvanceToSha $inspect.TargetSha
+        }
+        else { $result = $inspect }
         $result | Format-List
+        if ($result.Action -eq 'Updated') {
+            Write-Host 'The production source was advanced and the local runtime was stopped.' -ForegroundColor Yellow
+            Write-Host 'Start it again with START_AEROLINK_PRODUCTION.bat.' -ForegroundColor Yellow
+        }
         exit ($(if ($result.Canonical) { 0 } else { 1 }))
     }
 }

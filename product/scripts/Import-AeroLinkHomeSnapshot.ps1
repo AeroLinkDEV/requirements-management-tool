@@ -111,19 +111,10 @@ if ($Confirmation -ne 'REFRESH-FROM-HOME') {
     throw 'Activation requires -Confirmation REFRESH-FROM-HOME. Nothing was changed.'
 }
 
-# Declaring the laptop, at the one moment it is unambiguously true.
-#
-# WORK-LAPTOP LOCAL existing as an enum value is not the same as an operator being unable to confuse it with
-# HOME CANONICAL, and until now nothing in the supported laptop path established it: a laptop stayed
-# LOCAL DEVELOPMENT / Undeclared forever, so the badge said nothing and the guards had nothing to read. An
-# installation that has just accepted a HOME snapshot over its database IS a work-laptop local installation -
-# there is no other thing it could be - so this is where it gets said, not inferred from a hostname.
-# An installation that already declares something is left alone: reclassification is an operator decision.
-if ($instance.Classification -eq 'Undeclared') {
-    Set-AeroLinkInstanceConfig -ProductRoot $productRoot -Label 'WORK-LAPTOP LOCAL' -Classification 'WorkLaptopLocal' | Out-Null
-    Write-Host '      Instance declared: WORK-LAPTOP LOCAL.' -ForegroundColor Green
-}
+# The instance id is minted here because this command is about to change installation state either way. The
+# CLASSIFICATION is not declared yet: see after activation.
 $instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode Development -EnsureInstanceId
+$declaresLaptopOnSuccess = ($instance.Classification -eq 'Undeclared')
 
 Write-Host '[2/6] Backing up this laptop as it is now...' -ForegroundColor Cyan
 $laptopCapture = & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -PostgresAlreadyRunning
@@ -201,6 +192,25 @@ Write-Host '[6/6] Activating the validated snapshot on this laptop...' -Foregrou
 # The archive activated is the one captured from the validated staging state, not the incoming snapshot.
 & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive $validatedArchive -TargetDatabase 'aerolink' `
     -PostgresPort $PostgresPort -AllowProductionRestore -Confirmation 'RESTORE-AEROLINK' | Out-Host
+
+# Declaring the laptop, at the one moment it is unambiguously true: AFTER activation succeeded.
+#
+# WORK-LAPTOP LOCAL existing as an enum value is not the same as an operator being unable to confuse it with
+# HOME CANONICAL, and nothing in the supported laptop path used to establish it: a laptop stayed
+# LOCAL DEVELOPMENT / Undeclared forever, so the badge said nothing and the guards had nothing to read. An
+# installation that has accepted a HOME snapshot over its database IS a work-laptop local installation -
+# there is nothing else it could be - so this is where it is said, rather than inferred from a hostname.
+#
+# Declared here rather than before the backup: a failure during backup, staging, validation or activation
+# leaves the original database untouched, and a classification written before any of that would have
+# permanently changed the badge and the guard state to record something that never happened. The pre-refresh
+# recovery-point archive would have carried the premature classification too.
+#
+# An installation that already declares something is left alone: reclassification is an operator decision.
+if ($declaresLaptopOnSuccess) {
+    Set-AeroLinkInstanceConfig -ProductRoot $productRoot -Label 'WORK-LAPTOP LOCAL' -Classification 'WorkLaptopLocal' | Out-Null
+    Write-Host '      Instance declared: WORK-LAPTOP LOCAL.' -ForegroundColor Green
+}
 
 Set-AeroLinkInstanceConfig -ProductRoot $productRoot -Snapshot @{
     sourceLabel          = $sourceLabel

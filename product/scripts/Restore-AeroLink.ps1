@@ -71,11 +71,33 @@ function Stop-AeroLinkApplicationProcesses {
         }
     }
 }
+function Start-AeroLinkAfterRestore {
+    <#
+        Restarts AeroLink through the launcher that is allowed to run THIS installation.
+
+        The development launcher now refuses an installation declared HOME CANONICAL, which is right - but
+        restore called it unconditionally, both after a successful activation and again on the rollback path.
+        On a declared HOME installation that turned a good restore into a failure, and then prevented the
+        compensating restart of the original database as well. A guard that breaks recovery is worse than the
+        gap it closes.
+    #>
+    $instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode Development
+    if ($instance.Classification -eq 'HomeCanonical') {
+        & (Join-Path $PSScriptRoot 'Start-AeroLinkProduction.ps1') -DoNotOpenBrowser
+    }
+    else {
+        & (Join-Path $PSScriptRoot 'Start-AeroLink.ps1') -DoNotOpenBrowser
+    }
+}
+
 function Test-RestoredApi([string]$Database, [string]$Root, [object[]]$Inventory, [int]$Port) {
     $managed = @($Inventory | Where-Object { [string]$_.ArtifactType -eq 'ManagedDocument' })
     if ($managed.Count -eq 0) { return [pscustomobject]@{ Passed=$true; ManagedDocumentDownloads=0; DownloadedBytes=0 } }
+    # Release, named explicitly: this path builds Release and must validate with the build it produced, not
+    # with whichever configuration happens to have output on disk.
     return & (Join-Path $PSScriptRoot 'Test-AeroLinkRestoredDownloads.ps1') -Database $Database -EvidenceRoot $Root `
-        -AttachmentInventory $Inventory -PostgresPort $PostgresPort -ApiPort $Port -LogRoot (Join-Path $temporary 'validation-logs')
+        -AttachmentInventory $Inventory -PostgresPort $PostgresPort -ApiPort $Port -LogRoot (Join-Path $temporary 'validation-logs') `
+        -ApiExecutable (Join-Path $productRoot 'src\AeroLink.Api\bin\Release\net10.0\AeroLink.Api.exe')
 }
 
 & (Join-Path $PSScriptRoot 'Verify-AeroLinkBackup.ps1') -BackupArchive $BackupArchive | Out-Host
@@ -156,7 +178,7 @@ try {
         $finalDownloads = Test-RestoredApi 'aerolink' $resolvedTarget $activatedInventory ($ValidationApiPort + 1)
         Invoke-Fault 'AfterActivationValidation'
         Invoke-Fault 'BeforeRestart'
-        if (-not $DisposableQualification) { & (Join-Path $PSScriptRoot 'Start-AeroLink.ps1') -DoNotOpenBrowser }
+        if (-not $DisposableQualification) { Start-AeroLinkAfterRestore }
         Invoke-Fault 'AfterRestart'
         $activationPassed = $true
     }
@@ -182,7 +204,7 @@ catch {
         catch { throw "Restore failed: $($failure.Exception.Message). Automatic rollback also failed: $($_.Exception.Message). AeroLink was not restarted." }
     }
     if ($originalPairAvailable -and -not $DisposableQualification) {
-        try { & (Join-Path $PSScriptRoot 'Start-AeroLink.ps1') -DoNotOpenBrowser }
+        try { Start-AeroLinkAfterRestore }
         catch { throw "Restore failed: $($failure.Exception.Message). The original database/evidence pair was retained but AeroLink restart failed: $($_.Exception.Message)." }
     }
     throw $failure

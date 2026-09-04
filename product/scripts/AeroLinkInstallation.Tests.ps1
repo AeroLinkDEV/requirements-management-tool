@@ -153,6 +153,26 @@ try {
     Assert-True ((Get-AeroLinkInstanceConfig -ProductRoot (New-FixtureProductRoot -WithLocal) -Mode Development -EnsureInstanceId).InstanceId -ne $firstRead.InstanceId) `
         'Two installations must not share an identifier.'
 
+    # A classification outside the supported set fails closed.
+    #
+    # Every guard that protects real data compares this string for equality: the development launcher refuses
+    # HomeCanonical, the snapshot import refuses to overwrite one. A typo - HomeCanonica - makes both
+    # comparisons false, so a file that LOOKS like it declares the canonical installation silently removes the
+    # protection it appears to establish, while the badge shows the typo back as though it meant something.
+    $typo = New-FixtureProductRoot -WithLocal
+    Set-AeroLinkInstanceConfig -ProductRoot $typo -Label 'HOME CANONICAL' -Classification 'HomeCanonical' | Out-Null
+    $typoPath = (Get-AeroLinkInstanceConfig -ProductRoot $typo -Mode Development).ConfigPath
+    (Get-Content -LiteralPath $typoPath -Raw).Replace('HomeCanonical', 'HomeCanonica') | Set-Content -LiteralPath $typoPath -Encoding UTF8
+    Assert-Throws { Get-AeroLinkInstanceConfig -ProductRoot $typo -Mode Development } 'not one of' `
+        'A classification outside the supported set must fail closed rather than silently disable every guard that reads it.'
+
+    # LocalDemo is advertised by DECLARE_AEROLINK_INSTANCE.bat, so it must actually be writable. It was not:
+    # Preview succeeded and Declare died in parameter binding, recording nothing.
+    $demo = New-FixtureProductRoot -WithLocal
+    Set-AeroLinkInstanceConfig -ProductRoot $demo -Label 'LOCAL DEMO' -Classification 'LocalDemo' | Out-Null
+    Assert-True ((Get-AeroLinkInstanceConfig -ProductRoot $demo -Mode Development).Classification -eq 'LocalDemo') `
+        'Every classification the operator is offered must be one the shared authority accepts.'
+
     # A declaration survives an unrelated update, so snapshot metadata cannot erase the label.
     Set-AeroLinkInstanceConfig -ProductRoot $undeclared -Snapshot @{ sourceLabel = 'HOME CANONICAL'; createdAtUtc = '2026-09-01T10:00:00Z' } | Out-Null
     $withSnapshot = Get-AeroLinkInstanceConfig -ProductRoot $undeclared -Mode Development
