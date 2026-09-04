@@ -42,15 +42,22 @@ public sealed record AeroLinkResolutionResult(
 ///     opposite answers, and AeroLink is not entitled to pick — least of all because picking would let
 ///     startup proceed.
 ///   * A choice that grants authority nobody has today must be named explicitly, and is never inferred.
+///   * The conflict is RE-DERIVED inside the transaction, from the same authority that reported it, and the
+///     caller's conflict code, subject and choice must all match what actually exists. Taking the caller's
+///     conflict code as truth was a real defect: a decision could be applied under a code naming a different
+///     conflict from the one present, and the audit would then faithfully record the wrong one.
 ///   * Preconditions are exact and re-read inside the transaction immediately before the write. The row id,
 ///     the person, the position, the base roles they hold, and who the current primary is must all still be
 ///     what the analysis reported.
 ///   * History is ended, never deleted. A retired backup keeps its NamedBy/NamedAt and gains RemovedBy/
 ///     RemovedAt, so "who was standing cover in March" stays answerable.
-///   * Every applied decision writes a maintenance audit event with the formal attribution, and so does
-///     every refusal.
+///   * An applied decision writes a maintenance audit event with the formal attribution. A REFUSAL writes
+///     nothing at all: #881 says a stale or conflicting precondition causes no write, and an audit row is a
+///     write. The refusal is reported to the operator instead, which is where they are looking.
 /// </summary>
-public sealed class ProjectLeadershipMaintenanceResolver(AeroLinkDbContext db)
+public sealed class ProjectLeadershipMaintenanceResolver(
+    AeroLinkDbContext db,
+    ProjectLeadershipReconciliationAuthority reconciliation)
 {
     /// <summary>
     /// Resolves one legacy standing-backup conflict for one position in one program.
@@ -70,9 +77,10 @@ public sealed class ProjectLeadershipMaintenanceResolver(AeroLinkDbContext db)
     /// audit event so the decision is attributable to a person and not only to a process.
     /// </param>
     /// <param name="conflictCode">
-    /// The conflict the operator reviewed. Recorded on the audit event: several conflicts share this
-    /// resolution path, and an audit record naming the wrong one is worse than useless, because the whole
-    /// reason to resolve through here rather than in SQL is that the evidence is trustworthy.
+    /// The conflict the operator reviewed. Re-derived and matched against the conflict that actually exists
+    /// for this legacy row before anything is written, and recorded on the audit event. Several conflicts
+    /// share this resolution path, so a decision applied under a code naming a different conflict would put
+    /// an untrue record in the audit trail — which is the one thing this path exists to be better at than SQL.
     /// </param>
     /// <param name="apply">False analyzes and reports; true writes.</param>
     public async Task<AeroLinkResolutionResult> ResolveLegacyBackupAsync(
@@ -103,58 +111,64 @@ public sealed class ProjectLeadershipMaintenanceResolver(AeroLinkDbContext db)
         {
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
 
-            // Re-read inside the transaction. Everything below is the state at the moment of the write, not
-            // the state the analysis saw, which may be minutes or days old.
-            var legacy = await db.ProjectRoleBackups
-                .SingleOrDefaultAsync(x => x.Id == legacyBackupId, ct);
-            if (legacy is null || legacy.RemovedAt is not null || legacy.ProgramId != programId || legacy.BackupUserId != personId)
+            // Re-derive the conflict from the authority that reports it, inside the transaction, and require
+            // the decision to be about the conflict that actually exists right now. Everything below this
+            // point is acting on state the resolver has just confirmed for itself rather than on the
+            // caller's description of it.
+            var liveConflicts = await reconciliation.AnalyzeConflictsAsync(ct);
+            var actual = liveConflicts.FirstOrDefault(x =>
+                x.Subject.TryGetValue("legacyBackupId", out var id) && id == legacyBackupId.ToString());
+            if (actual is null)
             {
-                result = await RefuseAsync(programId, position, choice, conflictCode, operatorReference,
-                    "The legacy standing-backup row named by the decision is no longer the active row it was analyzed as. Re-run the analysis.", apply, ct);
-                await transaction.CommitAsync(ct);
+                result = Refuse("No modelled Project Leadership conflict exists for that legacy standing backup any more. Nothing was written; re-run the analysis.");
+                await transaction.RollbackAsync(ct);
                 return;
             }
-            if (ProjectLeadership.PositionForGovernedRole(legacy.Role) != position)
+            if (actual.Code != conflictCode)
             {
-                result = await RefuseAsync(programId, position, choice, conflictCode, operatorReference,
-                    $"The legacy row's role {legacy.Role} does not map to {position}. Re-run the analysis.", apply, ct);
-                await transaction.CommitAsync(ct);
+                result = Refuse($"The conflict on that legacy standing backup is {actual.Code}, not the {conflictCode} the decision names. Nothing was written; re-run the analysis and act on the conflict that exists.");
+                await transaction.RollbackAsync(ct);
+                return;
+            }
+            if (actual.Subject.GetValueOrDefault("programId") != programId.ToString()
+                || actual.Subject.GetValueOrDefault("position") != position.ToString()
+                || actual.Subject.GetValueOrDefault("personId") != personId.ToString())
+            {
+                result = Refuse("The conflict that exists names a different program, position, or person than the decision does. Nothing was written; re-run the analysis.");
+                await transaction.RollbackAsync(ct);
+                return;
+            }
+            if (actual.Subject.GetValueOrDefault("currentPrimaryId") != expectedCurrentPrimaryId?.ToString())
+            {
+                result = Refuse("The position's active primary changed after the conflict was analyzed. Nothing was written; re-run the analysis.");
+                await transaction.RollbackAsync(ct);
+                return;
+            }
+            // The offered choices are part of the conflict, not a global list. Retiring a designation is
+            // offered for every one of these; granting a role is offered only where granting is the question.
+            if (!actual.Choices.Any(x => x.Key == choice))
+            {
+                result = new AeroLinkResolutionResult(false, AeroLinkResolutionResult.ChoiceRefusedOutcome,
+                    $"'{choice}' is not one of the decisions {actual.Code} offers. Nothing was written.", []);
+                await transaction.RollbackAsync(ct);
                 return;
             }
 
-            var currentPrimaryId = await db.ProjectLeadershipAssignments.AsNoTracking()
-                .Where(x => x.ProgramId == programId && x.Position == position && x.EndedAt == null)
-                .Select(x => (Guid?)x.HolderUserId).FirstOrDefaultAsync(ct);
-            if (currentPrimaryId != expectedCurrentPrimaryId)
+            // The row to mutate, tracked. Its identity was already proved by the conflict subject above; this
+            // read is for the entity, not for the decision.
+            var legacy = await db.ProjectRoleBackups.SingleOrDefaultAsync(x => x.Id == legacyBackupId, ct);
+            if (legacy is null || legacy.RemovedAt is not null)
             {
-                result = await RefuseAsync(programId, position, choice, conflictCode, operatorReference,
-                    "The position's active primary changed after the conflict was analyzed. Nothing was written; re-run the analysis.", apply, ct);
-                await transaction.CommitAsync(ct);
+                result = Refuse("The legacy standing-backup row named by the decision is no longer active. Nothing was written; re-run the analysis.");
+                await transaction.RollbackAsync(ct);
                 return;
             }
-
-            var holdsRequiredRole = await db.ProgramMemberships.AsNoTracking().AnyAsync(x =>
-                x.UserId == personId && x.ProgramId == programId && x.Role == requiredRole && x.EndedAt == null, ct);
 
             var now = DateTimeOffset.UtcNow;
             var changes = new List<string>();
 
             if (choice == AeroLinkUpgradeConflict.ChoiceGrantAndKeep)
             {
-                if (holdsRequiredRole)
-                {
-                    result = await RefuseAsync(programId, position, choice, conflictCode, operatorReference,
-                        $"The person already holds the required {requiredRole} base role, so this conflict no longer exists. Re-run the analysis.", apply, ct);
-                    await transaction.CommitAsync(ct);
-                    return;
-                }
-                if (currentPrimaryId == personId)
-                {
-                    result = await RefuseAsync(programId, position, choice, conflictCode, operatorReference,
-                        "The person is the position's active primary and cannot also be its standing backup. Re-run the analysis.", apply, ct);
-                    await transaction.CommitAsync(ct);
-                    return;
-                }
                 changes.Add($"Grant {requiredRole} on program {programId} to {personId}.");
                 changes.Add($"Migrate legacy {legacy.Role} standing backup {legacyBackupId} to the {position} leadership backup for {personId}.");
                 changes.Add($"Retire legacy standing backup {legacyBackupId}, preserving it as ended history.");
@@ -214,25 +228,14 @@ public sealed class ProjectLeadershipMaintenanceResolver(AeroLinkDbContext db)
     }
 
     /// <summary>
-    /// Records a refusal, so a decision that could not be applied leaves evidence rather than only a console
-    /// message. The refusal itself writes nothing to the rows under discussion.
+    /// A refusal, which writes nothing.
+    ///
+    /// This used to record a maintenance audit row so a refused decision left evidence. That was the wrong
+    /// trade: #881 says in as many words that a stale or conflicting precondition causes **no write**, the
+    /// result type says "Nothing was written", and the maintenance host prints "No persistent data was
+    /// changed" — while an audit row was being committed behind all three. A contract that is contradicted
+    /// by the code is worse than a missing audit row, and the operator is told the reason directly.
     /// </summary>
-    private async Task<AeroLinkResolutionResult> RefuseAsync(
-        Guid programId, ProjectLeadershipPosition position, string choice, string conflictCode, string operatorReference,
-        string reason, bool apply, CancellationToken ct)
-    {
-        if (apply)
-        {
-            db.SecurityAuditEvents.Add(new SecurityAuditEvent(
-                AeroLinkMaintenanceAttribution.RefusedEvent,
-                AeroLinkMaintenanceAttribution.Actor,
-                "project-leadership",
-                "Refused",
-                JsonSerializer.Serialize(new { conflict = conflictCode, choice, programId, position = position.ToString(), operatorReference, reason }),
-                AeroLinkMaintenanceAttribution.Source,
-                DateTimeOffset.UtcNow));
-            await db.SaveChangesAsync(ct);
-        }
-        return new AeroLinkResolutionResult(false, AeroLinkResolutionResult.PreconditionFailedOutcome, reason, []);
-    }
+    private static AeroLinkResolutionResult Refuse(string reason) =>
+        new(false, AeroLinkResolutionResult.PreconditionFailedOutcome, reason, []);
 }

@@ -334,7 +334,7 @@ public sealed class AeroLinkMaintenanceQualificationTests
             // Dry run first, exactly as an operator would.
             await using (var dryRun = new AeroLinkDbContext(Options(connection)))
             {
-                var preview = await new ProjectLeadershipMaintenanceResolver(dryRun).ResolveLegacyBackupAsync(
+                var preview = await new ProjectLeadershipMaintenanceResolver(dryRun, new ProjectLeadershipReconciliationAuthority(dryRun)).ResolveLegacyBackupAsync(
                     fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
                     fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup, fixture.PrimaryId,
                     "Sean, issue #816", apply: false);
@@ -350,16 +350,40 @@ public sealed class AeroLinkMaintenanceQualificationTests
                     .Where(x => x.EventType == AeroLinkMaintenanceAttribution.DecisionEvent).ToListAsync());
             }
 
-            await using (var apply = new AeroLinkDbContext(Options(connection)))
+            // A conflict code that is NOT the conflict which exists must refuse, and write nothing.
+            //
+            // An earlier version of this test did the opposite: it passed LegacyBackupSupersededCode against
+            // this ineligible-backup fixture, applied the decision, and asserted the audit carried the wrong
+            // code — calling that a successful "round-trip". It proved precisely the defect it was meant to
+            // close. The resolver now re-derives the conflict inside the transaction, so the caller's code is
+            // checked against reality rather than trusted.
+            await using (var mismatched = new AeroLinkDbContext(Options(connection)))
             {
-                // The conflict code is passed explicitly, and a NON-default one, because several conflicts
-                // share this resolution path: the audit must record the conflict the operator reviewed
-                // rather than whichever code the resolver happens to default to.
-                var applied = await new ProjectLeadershipMaintenanceResolver(apply).ResolveLegacyBackupAsync(
+                var refused = await new ProjectLeadershipMaintenanceResolver(mismatched, new ProjectLeadershipReconciliationAuthority(mismatched)).ResolveLegacyBackupAsync(
                     fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
                     fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup, fixture.PrimaryId,
                     "Sean, issue #816", apply: true,
                     conflictCode: AeroLinkUpgradeConflict.LegacyBackupSupersededCode);
+                Assert.False(refused.Applied);
+                Assert.Equal(AeroLinkResolutionResult.PreconditionFailedOutcome, refused.Outcome);
+                Assert.Contains(AeroLinkUpgradeConflict.LegacyBackupIneligibleCode, refused.Detail);
+            }
+            await using (var untouched = new AeroLinkDbContext(Options(connection)))
+            {
+                Assert.True(await untouched.ProjectRoleBackups.AsNoTracking()
+                    .AnyAsync(x => x.Id == fixture.LegacyBackupId && x.RemovedAt == null));
+                Assert.Empty(await untouched.SecurityAuditEvents.AsNoTracking()
+                    .Where(x => x.ActorId == AeroLinkMaintenanceAttribution.Actor).ToListAsync());
+            }
+
+            // The code that IS the conflict applies, and the audit records that code.
+            await using (var apply = new AeroLinkDbContext(Options(connection)))
+            {
+                var applied = await new ProjectLeadershipMaintenanceResolver(apply, new ProjectLeadershipReconciliationAuthority(apply)).ResolveLegacyBackupAsync(
+                    fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
+                    fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup, fixture.PrimaryId,
+                    "Sean, issue #816", apply: true,
+                    conflictCode: AeroLinkUpgradeConflict.LegacyBackupIneligibleCode);
                 Assert.True(applied.Applied);
             }
 
@@ -382,8 +406,8 @@ public sealed class AeroLinkMaintenanceQualificationTests
                 Assert.Equal(AeroLinkMaintenanceAttribution.Source, audit.IpAddress);
                 Assert.Contains("Sean, issue #816", audit.Detail);
                 Assert.Contains(AeroLinkUpgradeConflict.ChoiceRetireBackup, audit.Detail);
-                Assert.Contains(AeroLinkUpgradeConflict.LegacyBackupSupersededCode, audit.Detail);
-                Assert.DoesNotContain(AeroLinkUpgradeConflict.LegacyBackupIneligibleCode, audit.Detail);
+                Assert.Contains(AeroLinkUpgradeConflict.LegacyBackupIneligibleCode, audit.Detail);
+                Assert.DoesNotContain(AeroLinkUpgradeConflict.LegacyBackupSupersededCode, audit.Detail);
             }
 
             await using (var reanalyze = new AeroLinkDbContext(Options(connection)))
@@ -409,7 +433,7 @@ public sealed class AeroLinkMaintenanceQualificationTests
 
             await using (var apply = new AeroLinkDbContext(Options(connection)))
             {
-                var applied = await new ProjectLeadershipMaintenanceResolver(apply).ResolveLegacyBackupAsync(
+                var applied = await new ProjectLeadershipMaintenanceResolver(apply, new ProjectLeadershipReconciliationAuthority(apply)).ResolveLegacyBackupAsync(
                     fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
                     fixture.PersonId, AeroLinkUpgradeConflict.ChoiceGrantAndKeep, fixture.PrimaryId,
                     "Sean, issue #816", apply: true);
@@ -464,7 +488,7 @@ public sealed class AeroLinkMaintenanceQualificationTests
 
             await using (var stale = new AeroLinkDbContext(Options(connection)))
             {
-                var refused = await new ProjectLeadershipMaintenanceResolver(stale).ResolveLegacyBackupAsync(
+                var refused = await new ProjectLeadershipMaintenanceResolver(stale, new ProjectLeadershipReconciliationAuthority(stale)).ResolveLegacyBackupAsync(
                     fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
                     fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup,
                     fixture.PrimaryId, // the primary the operator reviewed, who is no longer the primary
@@ -479,9 +503,15 @@ public sealed class AeroLinkMaintenanceQualificationTests
                 .AnyAsync(x => x.Id == fixture.LegacyBackupId && x.RemovedAt == null));
             Assert.Empty(await check.SecurityAuditEvents.AsNoTracking()
                 .Where(x => x.EventType == AeroLinkMaintenanceAttribution.DecisionEvent).ToListAsync());
-            // The refusal itself is evidence, so a decision that could not be applied leaves a record.
-            Assert.NotEmpty(await check.SecurityAuditEvents.AsNoTracking()
+            // "No write" means no write. An earlier version recorded a refusal audit row here and this test
+            // asserted it existed, which encoded the contradiction rather than the contract: #881 says a
+            // stale or conflicting precondition causes no write, and both the result type and the
+            // maintenance host tell the operator nothing was written.
+            Assert.Empty(await check.SecurityAuditEvents.AsNoTracking()
                 .Where(x => x.EventType == AeroLinkMaintenanceAttribution.RefusedEvent).ToListAsync());
+            // Nothing at all, in fact: no maintenance-actor row of any kind.
+            Assert.Empty(await check.SecurityAuditEvents.AsNoTracking()
+                .Where(x => x.ActorId == AeroLinkMaintenanceAttribution.Actor).ToListAsync());
         }
         finally { await DropDatabaseAsync(server, database); }
     }
@@ -502,7 +532,7 @@ public sealed class AeroLinkMaintenanceQualificationTests
             var fixture = await SeedIneligibleBackupAsync(connection);
 
             await using (var first = new AeroLinkDbContext(Options(connection)))
-                Assert.True((await new ProjectLeadershipMaintenanceResolver(first).ResolveLegacyBackupAsync(
+                Assert.True((await new ProjectLeadershipMaintenanceResolver(first, new ProjectLeadershipReconciliationAuthority(first)).ResolveLegacyBackupAsync(
                     fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
                     fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup, fixture.PrimaryId,
                     "Sean", apply: true)).Applied);
@@ -510,7 +540,7 @@ public sealed class AeroLinkMaintenanceQualificationTests
             // The same decision, replayed. It must not apply twice.
             await using (var replay = new AeroLinkDbContext(Options(connection)))
             {
-                var refused = await new ProjectLeadershipMaintenanceResolver(replay).ResolveLegacyBackupAsync(
+                var refused = await new ProjectLeadershipMaintenanceResolver(replay, new ProjectLeadershipReconciliationAuthority(replay)).ResolveLegacyBackupAsync(
                     fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
                     fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup, fixture.PrimaryId,
                     "Sean", apply: true);
@@ -521,7 +551,7 @@ public sealed class AeroLinkMaintenanceQualificationTests
             // An unsupported choice is refused before anything is read or written.
             await using (var wrongChoice = new AeroLinkDbContext(Options(connection)))
             {
-                var refused = await new ProjectLeadershipMaintenanceResolver(wrongChoice).ResolveLegacyBackupAsync(
+                var refused = await new ProjectLeadershipMaintenanceResolver(wrongChoice, new ProjectLeadershipReconciliationAuthority(wrongChoice)).ResolveLegacyBackupAsync(
                     fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
                     fixture.PersonId, "delete-the-row", fixture.PrimaryId, "Sean", apply: true);
                 Assert.False(refused.Applied);
@@ -546,7 +576,7 @@ public sealed class AeroLinkMaintenanceQualificationTests
             var fixture = await SeedIneligibleBackupAsync(connection);
             await using var db = new AeroLinkDbContext(Options(connection));
             await Assert.ThrowsAsync<ArgumentException>(() =>
-                new ProjectLeadershipMaintenanceResolver(db).ResolveLegacyBackupAsync(
+                new ProjectLeadershipMaintenanceResolver(db, new ProjectLeadershipReconciliationAuthority(db)).ResolveLegacyBackupAsync(
                     fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
                     fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup, fixture.PrimaryId,
                     "   ", apply: true));

@@ -17,7 +17,13 @@ public static class AeroLinkMaintenanceAttribution
     /// <summary>The security-audit event type for a maintenance decision that changed persistent state.</summary>
     public const string DecisionEvent = "AeroLinkMaintenance.Decision";
 
-    /// <summary>The security-audit event type for a maintenance decision that was refused before writing.</summary>
+    /// <summary>
+    /// The security-audit event type a refused maintenance decision would have carried. Retained so an
+    /// installation that recorded one before #881''s zero-write correction can still be queried for it.
+    ///
+    /// Nothing writes this any more, and that is deliberate: #881 requires a stale or conflicting
+    /// precondition to cause no write, and an audit row is a write.
+    /// </summary>
     public const string RefusedEvent = "AeroLinkMaintenance.Refused";
 
     /// <summary>The audit source recorded for a local operator-run maintenance host.</summary>
