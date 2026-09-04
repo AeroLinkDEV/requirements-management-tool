@@ -268,9 +268,9 @@ test('binds the trusted expected run id, refusing any other run', () => {
   assert.ok(unmappedJob.reasons.some((reason) => reason.startsWith('job-run-id-missing') && reason.includes('Domain test suite')))
 })
 
-test('binds the trusted run attempt, refusing first-attempt records for a rerun', () => {
-  // Rerun attempts share a run id, and the run conclusion is not consulted — so first-attempt job
-  // records must not authorize a failed second attempt.
+test('binds the trusted run attempt; retained earlier attempts bind, later attempts refuse', () => {
+  // Rerun attempts share a run id, and the run conclusion is not consulted — so attempt identity is
+  // what stops a rerun from being authorized by records that predate it.
   const otherAttempt = reasonsFor({ run: { ...legitimateRun(), runAttempt: 3 } })
   assert.equal(otherAttempt.decision, 'REFUSE')
   assert.ok(otherAttempt.reasons.some((reason) => reason.startsWith('run-attempt-mismatch')))
@@ -279,12 +279,22 @@ test('binds the trusted run attempt, refusing first-attempt records for a rerun'
   assert.equal(noAttempt.decision, 'REFUSE')
   assert.ok(noAttempt.reasons.some((reason) => reason.startsWith('run-attempt-missing')))
 
-  const firstAttemptJobs = reasonsFor({
+  // A partial rerun ("Re-run failed jobs") retains successful jobs at their earlier attempt — the
+  // legitimate recovery path must not stall, so retained records of the SAME run bind.
+  const retainedJobs = reasonsFor({
     expected: { repository: REPOSITORY, headSha: HEAD_SHA, baseBranch: 'main', runId: RUN_ID, runAttempt: 3 },
+    run: { ...legitimateRun(), runAttempt: 3 },
     jobs: allJobsSuccess(RUN_ID, 1),
   })
-  assert.equal(firstAttemptJobs.decision, 'REFUSE')
-  assert.ok(firstAttemptJobs.reasons.some((reason) => reason.startsWith('job-attempt-mismatch')))
+  assert.equal(retainedJobs.decision, 'PASS', 'retained jobs from an earlier attempt are valid evidence of the same run')
+  assert.deepEqual(retainedJobs.reasons, [])
+
+  // A record from a LATER attempt than the one being bound cannot belong to this validation.
+  const futureJob = reasonsFor({
+    jobs: allJobsSuccess().map((job) => (job.name === 'Browser journeys (2/4)' ? { ...job, runAttempt: RUN_ATTEMPT + 1 } : job)),
+  })
+  assert.equal(futureJob.decision, 'REFUSE')
+  assert.ok(futureJob.reasons.some((reason) => reason.startsWith('job-attempt-mismatch') && reason.includes('Browser journeys (2/4)')))
 
   const attemptlessJob = reasonsFor({
     jobs: allJobsSuccess().map((job) => {
