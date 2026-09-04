@@ -133,12 +133,16 @@ switch ($Action) {
         Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1') -Force
         $inspect = Update-AeroLinkProductionSource -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName `
             -FetchTimeoutSeconds $config.FetchTimeoutSeconds -InspectOnly
+        # What was ACTUALLY running, from the stop's own result rather than from the fact that a stop was
+        # attempted. Assuming a runtime was there meant a refused advance could START production that had not
+        # been running before this command was invoked - the opposite of preserving prior state.
         $stoppedTheRuntime = $false
         if ($inspect.Canonical -and $inspect.Action -eq 'UpdateAvailable') {
             Write-Host "      Stopping the production runtime before advancing to $($inspect.TargetSha)..." -ForegroundColor Yellow
             $apiDirectory = Join-Path $config.SourceRoot 'product\src\AeroLink.Api'
-            Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiDirectory) | Out-Null
-            $stoppedTheRuntime = $true
+            $stopResult = Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiDirectory)
+            $stoppedTheRuntime = [bool]$stopResult.Stopped
+            if (-not $stoppedTheRuntime) { Write-Host '      No AeroLink-owned runtime was on 5080; none will be started by this command.' -ForegroundColor DarkGray }
             # Everything after the stop is inside the compensation boundary, the same as the scheduled pass
             # and the production bootstrap. This is a documented operator action; once it has taken a running
             # service down, a refused or failed advance must not leave it down to report that nothing
@@ -157,22 +161,29 @@ switch ($Action) {
         else { $result = $inspect }
         $result | Format-List
 
-        if ($stoppedTheRuntime -and $result.Action -ne 'Updated') {
-            # Refused after the stop: the revision on disk is untouched and was canonical a moment ago, so
-            # re-prove it and put production back before reporting the refusal.
-            Write-Host 'THE SOURCE UPDATE DID NOT HAPPEN' -ForegroundColor Yellow
-            Write-Host $result.Reason -ForegroundColor Yellow
+        # Restore exactly what was running, and only what was running.
+        #
+        # Both halves matter. A runtime that WAS up is owed a restart whether the advance succeeded or was
+        # refused - this action is the same inspect / stop / advance / RESTART controller as the timed pass,
+        # and telling the operator to go and start it again by hand is not that. A runtime that was NOT up
+        # must not be created: an update command that leaves a production API listening because it was invoked
+        # is a surprise, not a service.
+        if ($stoppedTheRuntime) {
+            if ($result.Action -ne 'Updated') {
+                Write-Host 'THE SOURCE UPDATE DID NOT HAPPEN' -ForegroundColor Yellow
+                Write-Host $result.Reason -ForegroundColor Yellow
+            }
             $onDisk = Get-AeroLinkProductionSourcePosture -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName
             if (-not $onDisk.Canonical) {
-                throw "The source update was refused after the production runtime was stopped, and the revision on disk is not canonical either: $($onDisk.Reason) AeroLink was not restarted."
+                throw "The production runtime was stopped for this update, and the revision now on disk is not canonical: $($onDisk.Reason) AeroLink was NOT restarted."
             }
-            Write-Host "Restarting production on the revision already on disk: main @ $($onDisk.Posture.ShortSha)..." -ForegroundColor Yellow
+            Write-Host "Restarting production on main @ $($onDisk.Posture.ShortSha)..." -ForegroundColor Cyan
             & (Join-Path $config.SourceRoot 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser
-            exit 1
+            exit ($(if ($result.Action -eq 'Updated') { 0 } else { 1 }))
         }
         if ($result.Action -eq 'Updated') {
-            Write-Host 'The production source was advanced and the local runtime was stopped.' -ForegroundColor Yellow
-            Write-Host 'Start it again with START_AEROLINK_PRODUCTION.bat.' -ForegroundColor Yellow
+            Write-Host 'The production source was advanced. Nothing was running here, so nothing was started.' -ForegroundColor Green
+            Write-Host 'Start it with START_AEROLINK_PRODUCTION.bat when you want it.' -ForegroundColor DarkGray
         }
         exit ($(if ($result.Canonical) { 0 } else { 1 }))
     }

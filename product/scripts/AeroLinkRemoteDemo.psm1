@@ -874,12 +874,34 @@ function Start-AeroLinkRemoteDemo {
                 # ngrok BEFORE it reaches the loop that stops owned ones, so catching and continuing left the
                 # owned tunnel publishing an absent API through the entire advance. Fail closed instead: the
                 # source stays where it is, which is a state this machine already runs in.
-                Assert-AeroLinkOwnedTunnelStopped -Config $Config -Run $run
-                # Unconditionally, not "if it looks ready". A running process is what the tree is about to be
-                # rewritten under; an owned process that is up but unhealthy is exactly the one that must not
-                # be left executing deleted files.
-                & (Join-Path $Config.AeroLinkRoot 'product\scripts\Stop-AeroLink.ps1') | Out-Null
-                $advanced = Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -AdvanceToSha $inspect.TargetSha
+                $obligation = New-AeroLinkTransitionObligation
+                Assert-AeroLinkOwnedTunnelStopped -Config $Config -Run $run -Obligation $obligation | Out-Null
+                # Everything after the tunnel comes down is inside the compensation boundary, exactly as in
+                # the scheduled pass. A REFUSED advance was already handled here; a THROW from the runtime
+                # stop or from the fast-forward was not, and unwound with the demo down and the source
+                # unchanged - the worst of both outcomes, from the ordinary failure of a careful step.
+                $advanced = $null
+                try {
+                    # Unconditionally, not "if it looks ready". A running process is what the tree is about to
+                    # be rewritten under; an owned process that is up but unhealthy is exactly the one that
+                    # must not be left executing deleted files.
+                    & (Join-Path $Config.AeroLinkRoot 'product\scripts\Stop-AeroLink.ps1') | Out-Null
+                    $obligation.TeardownBegan = $true
+                    $advanced = Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -AdvanceToSha $inspect.TargetSha
+                }
+                catch {
+                    $failure = $_.Exception.Message
+                    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The transition failed after teardown began: $failure. Falling back to the verified revision on disk."
+                    $onDisk = Get-AeroLinkProductionSourcePosture -SourceRoot $Config.AeroLinkRoot
+                    if (-not $onDisk.Canonical) {
+                        throw "The production source transition failed after the tunnel was taken down ($failure), and the revision on disk is not canonical either: $($onDisk.Reason)"
+                    }
+                    $advanced = [pscustomobject]@{
+                        Action = 'TransitionFailed'; Canonical = $true; HeadSha = $onDisk.Posture.HeadSha
+                        TargetSha = $inspect.TargetSha; RemoteReachable = $true
+                        Reason = "The source was not advanced because the transition failed after teardown began ($failure), so production is being started on the revision already on disk, main @ $($onDisk.Posture.ShortSha)."
+                    }
+                }
                 if ($advanced.Canonical) { $advanced }
                 else {
                     # The runtime is already down. A refused advance - origin/main moved again between the
@@ -1317,19 +1339,38 @@ function Assert-AeroLinkOwnedTunnelStopped {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Config,
-        $Run
+        $Run,
+        # The caller's transition obligation. Recorded INTO rather than returned, because the interesting
+        # failures happen after the obligation exists and a return value never arrives - see below.
+        $Obligation,
+        # Test seams, so the failure this function exists to survive can be driven deterministically: an
+        # enumeration that succeeds, a stop that succeeds, and a post-stop proof that then throws.
+        [scriptblock]$ProcessProbe,
+        [scriptblock]$Stopper
     )
     # Was a tunnel actually up? The caller needs to know, because a transition that takes one down owes the
     # operator one back - and a transition must never start a tunnel that was not running to begin with.
-    $before = Get-AeroLinkRemoteDemoNgrokProcess -Config $Config
+    $before = if ($ProcessProbe) { & $ProcessProbe 'before' } else { Get-AeroLinkRemoteDemoNgrokProcess -Config $Config }
     $wasRunning = @($before.Owned).Count -gt 0
 
-    try { Stop-AeroLinkRemoteDemo -Config $Config | Out-Null }
+    try { if ($Stopper) { & $Stopper $Config | Out-Null } else { Stop-AeroLinkRemoteDemo -Config $Config | Out-Null } }
     catch {
         if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "The owned tunnel could not be stopped, so the source transition was abandoned: $($_.Exception.Message)" }
         throw "The AeroLink-owned public tunnel could not be stopped, so the production source was NOT advanced and nothing was restarted: $($_.Exception.Message)"
     }
-    $remaining = Get-AeroLinkRemoteDemoNgrokProcess -Config $Config
+
+    # The obligation is recorded HERE, between the stop and the proof, and that placement is the point.
+    #
+    # Fail-closed enumeration is right: an unreadable process table is unknown, never none. But it means the
+    # post-stop re-read can throw on a transient WMI failure AFTER a tunnel has actually been taken down -
+    # and if the caller only learns `WasRunning` from a return value, that throw loses the fact that anything
+    # is owed. The caller then unwinds believing it took nothing down, with the public endpoint dark.
+    if ($Obligation) {
+        $Obligation.TunnelWasRunning = $wasRunning
+        if ($wasRunning) { $Obligation.TeardownBegan = $true }
+    }
+
+    $remaining = if ($ProcessProbe) { & $ProcessProbe 'after' } else { Get-AeroLinkRemoteDemoNgrokProcess -Config $Config }
     if (@($remaining.Owned).Count -gt 0) {
         $pids = (@($remaining.Owned) | ForEach-Object { $_.ProcessId }) -join ', '
         if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "The owned tunnel is still running (PID $pids); the source transition was abandoned." }
@@ -1337,6 +1378,29 @@ function Assert-AeroLinkOwnedTunnelStopped {
     }
     if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "The owned public tunnel is down (it was $(if ($wasRunning) { 'running' } else { 'not running' }) before this)." }
     return [pscustomobject]@{ Stopped = $true; WasRunning = $wasRunning }
+}
+
+function New-AeroLinkTransitionObligation {
+    <#
+      .SYNOPSIS What a source transition took down, and therefore owes back.
+      .DESCRIPTION
+        One invariant, written down once: once a transition takes a supported service down, every later exit
+        path either completes the transition or restores exactly what was running before - and only what was
+        running before. Three paths advance the production source (the production launcher's bootstrap hook,
+        the operator remote-demo start, and the scheduled reconciliation), and each had grown its own
+        almost-equivalent compensation with a different hole in it.
+
+        Mutable and passed by reference on purpose. The obligation has to be recorded at the moment a teardown
+        step SUCCEEDS, not at the moment the whole teardown returns, because the failures that matter happen
+        in between and a return value never arrives for those.
+    #>
+    [CmdletBinding()]
+    param()
+    return [pscustomobject]@{
+        TeardownBegan     = $false
+        TunnelWasRunning  = $false
+        RuntimeWasRunning = $false
+    }
 }
 
 function Invoke-AeroLinkProductionSourceReconciliation {
@@ -1398,8 +1462,9 @@ function Invoke-AeroLinkProductionSourceReconciliation {
     # Fails closed, deliberately. Logging a failed tunnel stop and advancing anyway leaves the protected
     # public URL forwarding to a port whose process is being replaced, which is the outcome this ordering
     # exists to prevent; not updating the source is the safe half of that choice.
-    if ($TunnelStopper) { & $TunnelStopper $Config | Out-Null }
-    else { Assert-AeroLinkOwnedTunnelStopped -Config $Config -Run $run | Out-Null }
+    $obligation = New-AeroLinkTransitionObligation
+    if ($TunnelStopper) { & $TunnelStopper $Config | Out-Null; $obligation.TeardownBegan = $true }
+    else { Assert-AeroLinkOwnedTunnelStopped -Config $Config -Run $run -Obligation $obligation | Out-Null }
 
     # Everything after the tunnel came down is inside the compensation boundary.
     #
@@ -1649,6 +1714,7 @@ Export-ModuleMember -Function `
     Start-AeroLinkRemoteDemo, `
     Stop-AeroLinkRemoteDemo, `
     Assert-AeroLinkOwnedTunnelStopped, `
+    New-AeroLinkTransitionObligation, `
     Get-AeroLinkRemoteDemoTaskXml, `
     Get-AeroLinkReconcileTaskXml, `
     Install-AeroLinkReconcileTask, `

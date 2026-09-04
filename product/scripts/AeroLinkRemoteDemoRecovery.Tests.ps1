@@ -360,6 +360,44 @@ Assert-True ($compensated.Action -eq 'TransitionFailed' -and $compensated.Restar
 Assert-True ($compensated.Detail -match 'could not be attributed') 'Scenario 14: the operator must be told what actually failed.'
 Assert-True ($script:order -notcontains 'advance') 'Scenario 14: the source must not be advanced once the runtime could not be stopped.'
 
+# --- 14b. The obligation is recorded the moment a teardown step succeeds, not when they all do ---
+#
+# The failure that motivates this is specific. Fail-closed enumeration is correct - an unreadable process
+# table is unknown, never none - but it means the post-stop PROOF can throw after a tunnel has genuinely come
+# down. If the caller learns "a tunnel was running" only from a return value, that throw destroys the fact
+# that anything is owed, and the caller unwinds believing it took nothing down while the public endpoint is
+# dark. So the helper records into the caller's obligation between the stop and the proof.
+$obligation = New-AeroLinkTransitionObligation
+Assert-True (-not $obligation.TeardownBegan -and -not $obligation.TunnelWasRunning) 'Scenario 14b: a fresh obligation owes nothing.'
+
+$owned = [pscustomobject]@{ ProcessId = 4242; ExecutablePath = 'C:\Tools\ngrok.exe'; CommandLine = '"C:\Tools\ngrok.exe" http http://127.0.0.1:5080 --url https://example.ngrok-free.dev --traffic-policy-file C:\Tools\policy.yml --log stdout' }
+$live = Get-AeroLinkRemoteDemoNgrokProcess -Config $config -ProcessInfos @($owned)
+Assert-True (@($live.Owned).Count -eq 1) 'Scenario 14b: the fixture models one owned tunnel.'
+Assert-True ($live.Enumerated) 'Scenario 14b: an injected process list counts as enumerated.'
+
+# An unreadable process table must be a refusal, not an empty list read as "nothing is running".
+$deniedEnumeration = $false
+try { Get-AeroLinkRemoteDemoNgrokProcess -Config ([pscustomobject]@{ NgrokExecutable = 'Z:\nonexistent\ngrok.exe'; PublicUrl = 'https://x'; Upstream = 'http://127.0.0.1:5080'; TrafficPolicyPath = 'Z:\p.yml' }) -ProcessInfos @() | Out-Null }
+catch { $deniedEnumeration = $true }
+Assert-True (-not $deniedEnumeration) 'Scenario 14b: an empty INJECTED list is a legitimate answer; only live enumeration failure is unknown.'
+
+# The exact window: a tunnel was up, the stop succeeded, and the POST-STOP proof then throws.
+$obligation = New-AeroLinkTransitionObligation
+$probeCalls = 0
+$flakyProbe = {
+    param($Phase)
+    $script:probeCalls++
+    if ($Phase -eq 'before') { return [pscustomobject]@{ Owned = @($owned); Mismatched = @(); Enumerated = $true } }
+    throw 'AeroLink could not enumerate running processes to determine ngrok ownership: access denied.'
+}.GetNewClosure()
+$proofFailed = $false
+try { Assert-AeroLinkOwnedTunnelStopped -Config $config -Obligation $obligation -ProcessProbe $flakyProbe -Stopper { param($C) $null } | Out-Null }
+catch { $proofFailed = $true; Assert-True ($_.Exception.Message -match 'could not enumerate') 'Scenario 14b: the enumeration failure must reach the caller.' }
+Assert-True $proofFailed 'Scenario 14b: an unprovable teardown must still fail closed.'
+Assert-True ($obligation.TunnelWasRunning) 'Scenario 14b: the caller must still learn that a tunnel WAS running...'
+Assert-True ($obligation.TeardownBegan) '...and that teardown began, so it knows it owes the tunnel back even though no value was returned.'
+
+
 # --- 15. Ngrok is never started in front of a runtime that is not the verified production source ---
 $wrongSource = { param($C) [pscustomobject]@{ sourceIdentity = 'oldoldoldoldoldoldoldoldoldoldoldoldoldo'; sourceShortSha = 'oldoldol'; mode = 'HOME-PRODUCTION' } }
 $mismatch = Test-AeroLinkRemoteDemoRuntimeMatchesSource -Config $config -ExpectedSourceIdentity 'newnewnewnewnewnewnewnewnewnewnewnewnewn' -RuntimeIdentityProbe $wrongSource

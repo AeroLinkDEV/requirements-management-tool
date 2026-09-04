@@ -85,7 +85,9 @@ try {
         if ([int]$routes.StatusCode -ne 200) {
             throw "The validated build does not declare the required authentication routes: $routesBody"
         }
-        foreach ($required in @('/api/auth/login', '/api/auth/me', '/api/auth/logout')) {
+        # Method as well as path. A path on its own is not the contract: if POST /api/auth/login became
+        # GET-only, every required path would still be declared and this would pass while nobody could sign in.
+        foreach ($required in @('POST /api/auth/login', 'GET /api/auth/me', 'POST /api/auth/logout')) {
             if ($routesBody -notmatch [regex]::Escape($required)) {
                 throw "The validated build does not declare the authentication route $required. Reported: $routesBody"
             }

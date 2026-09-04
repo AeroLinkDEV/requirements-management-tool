@@ -143,8 +143,18 @@ was started and nothing was changed.
 #
 # It also quiesces the owned tunnel, not only port 5080. Leaving the public URL forwarding at a port whose
 # process is about to be replaced publishes whatever takes that port next.
+#
+# AEROLINK_TUNNEL_OWED carries the obligation across the bootstrap's re-entry.
+#
+# A source update that changes one of the launcher files deliberately re-execs a fresh child and exits on
+# Action='Reentered' - which is BEFORE the restoration block at the end of this script. The child starts with
+# an empty obligation and no way to know its parent had taken a public tunnel down, so a perfectly successful
+# update of any commit touching this file, AeroLinkBootstrap.psm1 or the other launcher files would complete,
+# start production, and leave the protected endpoint dark. An environment variable is the right carrier here
+# because the child is a new process and inherits it; the child clears it, so it is one-shot.
 $script:preAdvanceStopPerformed = $false
-$script:tunnelWasRunning = $false
+$script:tunnelWasRunning = ($env:AEROLINK_TUNNEL_OWED -eq '1')
+$env:AEROLINK_TUNNEL_OWED = $null
 $script:demoConfig = $null
 $stopOwnedProductionRuntime = {
     param($Root, $Posture)
@@ -169,8 +179,24 @@ $stopOwnedProductionRuntime = {
         }
         # Only the AeroLink-owned tunnel, and it must be provably down. Stop-AeroLinkRemoteDemo refuses on a
         # mismatched ngrok rather than killing it, and that refusal stops the advance too.
-        $tunnel = Assert-AeroLinkOwnedTunnelStopped -Config $script:demoConfig
-        $script:tunnelWasRunning = [bool]$tunnel.WasRunning
+        #
+        # The obligation is recorded INSIDE the helper the instant the stop succeeds, rather than read from
+        # its return value: fail-closed enumeration means the post-stop proof can throw after a tunnel has
+        # actually come down, and a return value never arrives for that case.
+        $obligation = New-AeroLinkTransitionObligation
+        try {
+            Assert-AeroLinkOwnedTunnelStopped -Config $script:demoConfig -Obligation $obligation | Out-Null
+        }
+        finally {
+            $script:tunnelWasRunning = [bool]$obligation.TunnelWasRunning
+            # Compensation is owed from the first teardown step that SUCCEEDS, not from the last one. The
+            # tunnel can come down and the listener stop below can then throw on an ownership it cannot
+            # establish; marking the obligation only afterwards meant the outer handler rethrew without
+            # compensating, with the public endpoint already dark.
+            if ($obligation.TeardownBegan) { $script:preAdvanceStopPerformed = $true }
+            # Inherited by the re-entry child the bootstrap may spawn immediately after this.
+            if ($script:tunnelWasRunning) { $env:AEROLINK_TUNNEL_OWED = '1' }
+        }
     }
 
     Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiProjectDirectory) | Out-Null

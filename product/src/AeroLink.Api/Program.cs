@@ -360,10 +360,19 @@ app.MapGet("/health/ready", async (AeroLinkDbContext db,CancellationToken ct) =>
 // declares - no data, no configuration, no identity.
 app.MapGet("/health/routes", (EndpointDataSource endpoints) =>
 {
-    var required = new[] { "/api/auth/login", "/api/auth/me", "/api/auth/logout" };
+    // Path AND method. A path on its own is not the contract: if POST /api/auth/login became GET-only, every
+    // required path would still be declared, this would answer 200, and the clone gate would call
+    // authentication "available" while nobody could sign in. The methods come from HttpMethodMetadata, which
+    // is what routing itself matches on.
+    var required = new[] { "POST /api/auth/login", "GET /api/auth/me", "POST /api/auth/logout" };
     var declared = endpoints.Endpoints.OfType<RouteEndpoint>()
-        .Select(x => "/" + x.RoutePattern.RawText?.TrimStart('/'))
-        .Where(x => x.StartsWith("/api/auth/", StringComparison.OrdinalIgnoreCase))
+        .Select(x => new
+        {
+            Path = "/" + x.RoutePattern.RawText?.TrimStart('/'),
+            Methods = x.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? [],
+        })
+        .Where(x => x.Path.StartsWith("/api/auth/", StringComparison.OrdinalIgnoreCase))
+        .SelectMany(x => x.Methods.Select(m => $"{m.ToUpperInvariant()} {x.Path}"))
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
         .ToArray();
