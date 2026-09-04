@@ -335,4 +335,11 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
     /\[ -n "\$missing" \]; then\n\s*echo "::error::A merge-queue run must actually execute the product gates\. These did not run:\$missing"\n\s*exit 1\n/,
     'a missing merge-group gate must fail the step in the foreground — a backgrounded or conditional exit would let the aggregate pass without evidence',
   )
+  const refusalExitIndex = guardText.indexOf('exit 1\n', finalIfIndex)
+  assert.ok(refusalExitIndex > finalIfIndex, 'the refusal exit must follow the missing-gate check')
+  assert.equal(
+    guardText.indexOf('exit'),
+    refusalExitIndex,
+    'the only exit inside the merge-group guard must be the refusal exit — an earlier successful exit would skip collection and pass vacuously',
+  )
 })
