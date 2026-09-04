@@ -166,6 +166,22 @@ test('refuses jobs that belong to a different run', () => {
   assert.ok(result.reasons.some((reason) => reason.startsWith('job-from-foreign-run')))
 })
 
+test('binds the trusted expected run id, refusing any other run', () => {
+  const otherRun = reasonsFor({ run: { ...legitimateRun(), runId: 999999 } })
+  assert.equal(otherRun.decision, 'REFUSE')
+  assert.ok(otherRun.reasons.some((reason) => reason.startsWith('run-id-mismatch')))
+
+  const noRunId = reasonsFor({ run: { ...legitimateRun(), runId: undefined } })
+  assert.equal(noRunId.decision, 'REFUSE')
+  assert.ok(noRunId.reasons.some((reason) => reason.startsWith('run-id-missing')))
+
+  const foreignJob = reasonsFor({
+    jobs: allJobsSuccess().map((job) => (job.name === 'Domain test suite' ? { ...job, runId: 999999 } : job)),
+  })
+  assert.equal(foreignJob.decision, 'REFUSE')
+  assert.ok(foreignJob.reasons.some((reason) => reason.startsWith('job-from-foreign-run')))
+})
+
 test('refuses an incomplete, over-counted, or inconsistent shard set', () => {
   const incomplete = reasonsFor({ jobs: allJobsSuccess().filter((job) => job.name !== 'API test suite (3/3)') })
   assert.equal(incomplete.decision, 'REFUSE')
@@ -251,12 +267,20 @@ test('the expected job topology matches the current workflow', () => {
     const jobPattern = new RegExp(`name: ${escaped} \\(\\$\\{\\{ matrix\\.shard \\}\\}/\\$\\{\\{ strategy\\.job-total \\}\\}\\)`)
     assert.match(workflow, jobPattern, `ci.yml must still define the sharded group '${group.name}'`)
   }
-  const shardArrays = [...workflow.matchAll(/^\s+shard: \[([0-9, ]+)\]$/gm)].map((match) => match[1])
-  const sizes = shardArrays.map((list) => list.split(',').length)
   for (const group of SHARDED_JOB_GROUPS) {
-    assert.ok(
-      sizes.includes(group.expectedShards),
-      `ci.yml shard arrays ${JSON.stringify(sizes)} must contain ${group.name}'s expected shard count ${group.expectedShards}; update SHARDED_JOB_GROUPS when the workflow changes shards`,
+    const escaped = group.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    // Parse THIS group's own matrix, not any shard array of a matching size elsewhere: browser-full
+    // also runs three shards, so a global size list would mask an API or browser-pr change.
+    const lines = workflow.split(/\r?\n/)
+    const nameIndex = lines.findIndex((line) => line.includes(`name: ${group.name} (\${{ matrix.shard }}/\${{ strategy.job-total }})`))
+    assert.ok(nameIndex >= 0, `ci.yml must define the sharded job '${group.name}'`)
+    const matrixLine = lines.slice(nameIndex, nameIndex + 60).find((line) => /^\s+shard: \[[0-9, ]+\]$/.test(line))
+    assert.ok(matrixLine, `the '${group.name}' job must declare its shard matrix`)
+    const size = matrixLine.match(/\[([0-9, ]+)\]/)[1].split(',').length
+    assert.equal(
+      size,
+      group.expectedShards,
+      `the '${group.name}' job runs ${size} shards but SHARDED_JOB_GROUPS expects ${group.expectedShards}; update the verifier with the workflow change`,
     )
   }
 })

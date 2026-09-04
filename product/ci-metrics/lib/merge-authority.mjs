@@ -138,6 +138,15 @@ export function evaluateMergeGroupCandidate(input) {
   if (run.headSha !== expected.headSha) {
     reasons.push(`head-sha-mismatch: run head '${run.headSha ?? 'unknown'}' does not match the queue candidate '${expected.headSha}'`)
   }
+  // The trusted configuration's run id binds everything: the run itself, and every job's membership
+  // in it. Metadata resolved from a different Product run at the same SHA must not authorize.
+  if (typeof expected.runId !== 'undefined') {
+    if (typeof run.runId === 'undefined') {
+      reasons.push('run-id-missing: the trusted configuration expects a run id but the run metadata does not carry one')
+    } else if (String(run.runId) !== String(expected.runId)) {
+      reasons.push(`run-id-mismatch: run ${run.runId} is not the expected run ${expected.runId}`)
+    }
+  }
   if (typeof run.headBranch !== 'string' || !run.headBranch.startsWith(QUEUE_REF_PREFIX)) {
     reasons.push(`ref-not-queue: run ref '${run.headBranch ?? 'unknown'}' does not start with '${QUEUE_REF_PREFIX}'`)
   }
@@ -151,10 +160,10 @@ export function evaluateMergeGroupCandidate(input) {
     reasons.push('jobs-missing: no job list was supplied for this run')
     return { decision: 'REFUSE', reasons }
   }
-  if (typeof run.runId !== 'undefined') {
+  if (typeof expected.runId !== 'undefined') {
     for (const job of jobs) {
-      if (typeof job?.runId !== 'undefined' && String(job.runId) !== String(run.runId)) {
-        reasons.push(`job-from-foreign-run: job '${job?.name ?? 'unknown'}' belongs to run ${job.runId}, not run ${run.runId}`)
+      if (typeof job?.runId !== 'undefined' && String(job.runId) !== String(expected.runId)) {
+        reasons.push(`job-from-foreign-run: job '${job?.name ?? 'unknown'}' belongs to run ${job.runId}, not the expected run ${expected.runId}`)
       }
     }
   }
