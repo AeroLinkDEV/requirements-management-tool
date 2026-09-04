@@ -254,6 +254,12 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
     )
   }
 
+  // The guard only matters if the aggregate runs and its failure counts. A skipped dependency must
+  // not skip the gate (needs default behavior), and the enforce step must not be failure-isolated.
+  const gateBody = jobBodies(workflowLines())['gate'].join('\n')
+  assert.match(gateBody, /^    if: always\(\)$/m, 'the gate must run even when a dependency was skipped — otherwise skipped evidence is never rejected')
+  assert.doesNotMatch(enforceText, /continue-on-error:/, 'the enforcement step must propagate failure — continue-on-error would let GitHub swallow the refusal exit')
+
   assert.equal(
     (guardText.match(/missing=""/g) || []).length,
     1,
