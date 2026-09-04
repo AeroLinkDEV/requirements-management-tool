@@ -174,11 +174,18 @@ export function evaluateMergeGroupCandidate(input) {
   } else if (run.runAttempt !== expected.runAttempt) {
     reasons.push(`run-attempt-mismatch: run attempt ${run.runAttempt} is not the expected attempt ${expected.runAttempt}`)
   }
-  // Queue refs name their base branch, and the workflow subscribes to merge_group for any base:
-  // only candidates for the protected default branch may bind evidence here.
+  // Queue refs name their base branch and end with the candidate's head SHA, and the workflow
+  // subscribes to merge_group for any base — so a slash-bearing sibling branch's queue ref (base
+  // 'main/foo' begins 'gh-readonly-queue/main/foo/', satisfying base 'main's prefix) must be
+  // excluded by the SHA it carries: a different base composes a different candidate tree and
+  // therefore a different head SHA, which cannot end this ref.
   const expectedQueuePrefix = `${QUEUE_REF_PREFIX}${expected.baseBranch}/`
-  if (typeof run.headBranch !== 'string' || !run.headBranch.startsWith(expectedQueuePrefix)) {
-    reasons.push(`ref-not-queue: run ref '${run.headBranch ?? 'unknown'}' is not a '${expectedQueuePrefix}' candidate`)
+  if (
+    typeof run.headBranch !== 'string' ||
+    !run.headBranch.startsWith(expectedQueuePrefix) ||
+    !run.headBranch.endsWith(`-${expected.headSha}`)
+  ) {
+    reasons.push(`ref-not-queue: run ref '${run.headBranch ?? 'unknown'}' is not a '${expectedQueuePrefix}<candidate>-${expected.headSha}' ref`)
   }
   // The run must be completed, but its overall conclusion is deliberately NOT consulted: by design
   // the workflow treats metrics/reporting jobs as non-authoritative, so their failure turns the run

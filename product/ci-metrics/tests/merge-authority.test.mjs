@@ -58,7 +58,7 @@ function legitimateRun() {
     workflowPath: PRODUCT_WORKFLOW_PATH,
     event: 'merge_group',
     headSha: HEAD_SHA,
-    headBranch: `${QUEUE_REF_PREFIX}main/909/d4f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9`,
+    headBranch: `${QUEUE_REF_PREFIX}main/909-${HEAD_SHA}`,
     runId: RUN_ID,
     runAttempt: RUN_ATTEMPT,
     status: 'completed',
@@ -129,6 +129,16 @@ test('refuses queue candidates for a base branch other than the protected one', 
   })
   assert.equal(result.decision, 'REFUSE')
   assert.ok(result.reasons.some((reason) => reason.startsWith('ref-not-queue') && reason.includes('release')))
+
+  // A slash-bearing sibling base ('main/foo') satisfies main's queue-ref prefix, but its composed
+  // candidate carries a different head SHA, so the required '-<sha>' suffix excludes it. (A
+  // sibling-branch ref ending in OUR candidate SHA would imply an identical composed tree — the
+  // same evidence about the same tree — which is benign.)
+  const nestedBase = reasonsFor({
+    run: { ...legitimateRun(), headBranch: `${QUEUE_REF_PREFIX}main/foo/555-${'b'.repeat(40)}` },
+  })
+  assert.equal(nestedBase.decision, 'REFUSE')
+  assert.ok(nestedBase.reasons.some((reason) => reason.startsWith('ref-not-queue')))
 
   const missingConfig = evaluateMergeGroupCandidate({
     run: legitimateRun(),
