@@ -2249,6 +2249,34 @@ runners do not leak into `main` or become misleading long-lived automation.
 Review the final filenames and exact tree, not merely the intended product diff. A self-deleting helper is only
 successful when the reviewed merge candidate contains no trace of it.
 
+### DEC-118 - #881 Ships as One Integrated Branch, Superseding Its Own Bounded-Slice Language
+
+- **Date:** 2026-09-03
+- **Status:** Accepted
+- **Decision:** The remaining scope of #881 is delivered as **one implementation branch and one integrated
+  pull request**, not as separate bounded child issues and slice PRs. This supersedes the issue body's "This
+  is an operational-resilience umbrella, not one giant PR. Create bounded child issues before implementation"
+  and the 2026-09-03 amendment's instruction to keep the source-isolation slice separate from the database
+  upgrade coordinator, clone validation and conflict resolver.
+- **Authority:** The product owner's implementation instruction for this work, verbatim: *"IMPORTANT OWNER
+  DIRECTION — THIS SUPERSEDES OLD SLICING LANGUAGE… ONE implementation branch. ONE integrated PR… Do NOT
+  create separate child issues merely to split implementation… This prompt is the owner's current
+  implementation authority and supersedes older #881 statements only where they require separate delivery
+  slices/PRs."*
+- **Scope of the supersession, deliberately narrow:** it overrides the *delivery shape* and nothing else.
+  Every other #881 requirement — the operating-mode contract, the safety rules, the qualification matrix and
+  the acceptance criteria — stands exactly as written. It is not authority to widen scope, to skip
+  qualification, or to merge without review.
+- **Why this record exists:** the instruction lives in an implementation prompt, while the issue body still
+  carries the superseded text. A reviewer reading #881 later would find the old rule and no trace of the
+  decision that replaced it, and would be right to raise it as a contradiction — which is exactly what
+  happened during independent review of PR #909. The durable record belongs here; the issue carries a pointer.
+- **Consequences:**
+  - The integrated PR is reviewed as one change, so the burden of keeping it reviewable moves onto the PR
+    description and the commit history rather than onto the branch count.
+  - Operator acceptance for #881 remains a separate, later activity on the real machines. One PR is not one
+    acceptance.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
