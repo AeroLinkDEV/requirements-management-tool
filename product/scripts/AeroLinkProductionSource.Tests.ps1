@@ -389,21 +389,24 @@ try {
     Assert-True (Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Production -ConfigReader $declared).Checked `
         'Repairing the binding makes the source usable again.'
 
-    Assert-Throws { Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigReader $declared } `
-        'not the dedicated production source' 'Starting HOME production from the development checkout must be refused.'
-    Assert-Throws { Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigReader $declared } `
-        ([regex]::Escape($launchFixture.Production)) 'The refusal must name the checkout to start from instead.'
+    # Starting from the development checkout is a redirection, not a refusal. The stable root BAT is the
+    # documented HOME production entry point and is referenced by shortcuts and tasks this repository cannot
+    # enumerate, so it has to keep working - by delegating to the dedicated source, not by running here.
+    $fromDevelopment = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigReader $declared
+    Assert-True (-not $fromDevelopment.Checked) 'The development checkout is not the dedicated production source.'
+    Assert-True ($fromDevelopment.DelegateTo -eq $launchFixture.Production) 'It must name the dedicated source to delegate to, so the stable entry point keeps working.'
+    Assert-True ($fromDevelopment.Reason -match [regex]::Escape($launchFixture.Production)) 'The reason must name the production source.'
 
     # A trailing separator is the same directory, not a different one.
-    Assert-True (Assert-AeroLinkRunningFromProductionSource -RepositoryRoot ($launchFixture.Production + '\') -ConfigReader $declared).Checked `
-        'A trailing separator must not turn the production source into a stranger.'
+    $trailing = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot ($launchFixture.Production + '\') -ConfigReader $declared
+    Assert-True ($trailing.Checked -and -not $trailing.DelegateTo) 'A trailing separator must not turn the production source into a stranger.'
 
     # No dedicated source configured is the ordinary state on a laptop and on any machine set up before #881.
     # Refusing there would remove the ability to run production rather than protect it. Absence is decided by
     # the file not existing, not by an exception.
     $missingConfig = Join-Path $launchFixture.Root 'no-such-production-source.psd1'
     $unconfigured = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigPath $missingConfig
-    Assert-True (-not $unconfigured.Checked) 'With no dedicated source configured, production must still start.'
+    Assert-True (-not $unconfigured.Checked -and -not $unconfigured.DelegateTo) 'With no dedicated source configured, production must start here rather than be redirected.'
 
     # A configuration that is PRESENT but unusable is the opposite case. Swallowing it would disable the
     # guard exactly when something is already wrong, and let production run from the development checkout.

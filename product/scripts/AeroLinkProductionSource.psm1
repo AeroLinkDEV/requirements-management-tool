@@ -256,11 +256,11 @@ function Assert-AeroLinkRunningFromProductionSource {
         [scriptblock]$BindingAssertion
     )
     if (-not $ConfigReader -and -not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
-        return [pscustomobject]@{ Checked = $false; Reason = 'No dedicated production source is configured on this machine.' }
+        return [pscustomobject]@{ Checked = $false; DelegateTo = $null; Reason = 'No dedicated production source is configured on this machine.' }
     }
     $configured = if ($ConfigReader) { & $ConfigReader } else { Get-AeroLinkProductionSourceConfig -ConfigPath $ConfigPath }
     if (-not $configured) {
-        return [pscustomobject]@{ Checked = $false; Reason = 'No dedicated production source is configured on this machine.' }
+        return [pscustomobject]@{ Checked = $false; DelegateTo = $null; Reason = 'No dedicated production source is configured on this machine.' }
     }
 
     $thisRoot = [IO.Path]::GetFullPath($RepositoryRoot).TrimEnd('\', '/')
@@ -270,23 +270,24 @@ function Assert-AeroLinkRunningFromProductionSource {
         # substantiate it. This throws with its own reason when they do not.
         if ($BindingAssertion) { & $BindingAssertion $thisRoot | Out-Null }
         else { Assert-AeroLinkDedicatedProductionSource -SourceRoot $thisRoot -RemoteName $configured.RemoteName | Out-Null }
-        return [pscustomobject]@{ Checked = $true; Reason = "This checkout is the dedicated production source ($thisRoot), and its repository and installation binding still hold." }
+        return [pscustomobject]@{
+            Checked = $true; DelegateTo = $null
+            Reason = "This checkout is the dedicated production source ($thisRoot), and its repository and installation binding still hold."
+        }
     }
-    throw @"
-AeroLink HOME production refused: this is not the dedicated production source.
-
-  Running from:        $thisRoot
-  Production source:   $dedicatedRoot
-  Configured in:       $($configured.ConfigPath)
-
-HOME production must run from the dedicated source, so that editing, branching or rebasing this checkout
-cannot change the files a long-running production process is executing. Start it from there:
-
-  "$dedicatedRoot\START_AEROLINK_PRODUCTION.bat"
-
-Nothing was started and nothing was changed. Pass -AllowNonDedicatedSource only to qualify the launcher
-itself, or when the dedicated source is genuinely unavailable.
-"@
+    # Not a refusal: a redirection.
+    #
+    # Refusing here was safe and wrong. #881's operating-mode contract names START_AEROLINK_PRODUCTION.bat as
+    # the HOME production entry point and #783 pins these root paths, and the desktop shortcuts, scheduled
+    # tasks and other-machine references pointing at the old checkout's copy cannot be enumerated by
+    # searching this repository - so printing a different path at them is not a compatibility transition, it
+    # is the stable front door going dark. The caller re-execs the dedicated source's own front door with a
+    # one-shot marker, which keeps the muscle memory working AND keeps production off this checkout.
+    return [pscustomobject]@{
+        Checked = $false
+        DelegateTo = $dedicatedRoot
+        Reason = "This checkout ($thisRoot) is not the dedicated production source ($dedicatedRoot), configured in $($configured.ConfigPath)."
+    }
 }
 
 function Initialize-AeroLinkProductionSource {

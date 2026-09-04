@@ -113,16 +113,29 @@ feature branch, or divergence is reported and refused **exactly as found** — n
 cleaned. When GitHub is unreachable a previously verified clean cached `main` runs with an explicit "the
 latest remote revision could not be verified" diagnostic.
 
-Once a dedicated source is configured, **the production launchers refuse to run from any other checkout** —
-`START_AEROLINK_PRODUCTION.bat`, `START_AEROLINK_SHARED.bat` and `START_AEROLINK_EMAIL_DEMO.bat` alike. The
-canonical-main gate already refuses a dirty or feature-branch development checkout, so this is not about
-unreviewed code; it is about which working tree the resulting long-lived process executes out of. A
-development checkout that happens to be on clean `main` passes every gate, serves the demo, and is then one
-`git checkout` away from having its assemblies and client bundle replaced underneath a running process. The
-refusal names both paths and the command to run instead, and starts nothing. `-AllowNonDedicatedSource`
-exists for qualifying the launcher itself and for a machine where the dedicated source is genuinely
-unavailable. On a machine with no dedicated source configured — every work laptop, and any HOME machine set
-up before this — nothing changes.
+Once a dedicated source is configured, **the production launchers delegate to it** — `START_AEROLINK_PRODUCTION.bat`,
+`START_AEROLINK_SHARED.bat` and `START_AEROLINK_EMAIL_DEMO.bat` alike. Run one from the development checkout
+and it re-execs the dedicated source's own launcher, forwarding the arguments, and every gate then runs
+there. The stable root path stays the HOME production entry point (#783), which matters because the desktop
+shortcuts, scheduled tasks and other-machine references pointing at it cannot be found by searching this
+repository — telling those to use a different path is not a transition, it is the front door going dark.
+
+The point is not that the code would be unreviewed: the canonical-main gate already refuses a dirty or
+feature-branch checkout. It is **which working tree the long-lived process executes out of**. A development
+checkout that happens to be on clean `main` passes every gate, serves the demo, and is then one `git checkout`
+away from having its assemblies and client bundle replaced underneath a running process.
+
+`AEROLINK_PRODUCTION_DELEGATED` is a one-shot recursion guard: a delegated launch that still is not the
+dedicated source refuses rather than bouncing again, and so does a configuration whose target has no
+launcher. `-AllowNonDedicatedSource` skips delegation entirely, for qualifying the launcher itself and for a
+machine where the dedicated source is genuinely unavailable. On a machine with no dedicated source configured
+— every work laptop, and any HOME machine set up before this — nothing changes.
+
+Conversely, `START_AEROLINK.bat` **refuses** an installation declared `HomeCanonical`. Development permits
+feature branches and an uncommitted worktree, which is safe against a work-laptop database and not against
+controlled history; on HOME the development checkout is the installation that owns the canonical
+`product/.local`, so without that refusal the whole stronger HOME source policy could be bypassed through the
+other launcher.
 
 Recovery is registered against that source in both of the places the 2026-09-03 amendment named: the source
 root it launches, and the `AeroLinkRemoteDemo.ps1` path the Scheduled Task executes. Registration refuses any

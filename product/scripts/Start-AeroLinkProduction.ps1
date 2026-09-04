@@ -65,7 +65,54 @@ $launcherMode = 'HOME-PRODUCTION'
 # to being refused.
 if (-not $AllowNonDedicatedSource) {
     Import-Module (Join-Path $PSScriptRoot 'AeroLinkProductionSource.psm1') -Force
-    Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $repositoryRoot | Out-Null
+    # Throws on a configuration that exists and is unusable, or a binding that has broken. Returns a
+    # DelegateTo when this simply is not the dedicated checkout.
+    $sourceDecision = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $repositoryRoot
+    if ($sourceDecision.DelegateTo) {
+        # The stable front door stays a front door. Desktop shortcuts, scheduled tasks and references from
+        # other machines point at THIS BAT, and none of them can be enumerated from inside the repository,
+        # so refusing with a different path to type would take the documented entry point away rather than
+        # move it. Re-exec the dedicated source's own launcher instead, and let every gate run there.
+        #
+        # AEROLINK_PRODUCTION_DELEGATED is the recursion guard, and it is one-shot: it exists only for the
+        # duration of the child process. If the child still is not the dedicated source - a configuration
+        # pointing somewhere that is not what it claims, or two checkouts pointing at each other - it
+        # refuses instead of bouncing, because a launcher that loops is worse than one that stops.
+        $delegateScript = Join-Path $sourceDecision.DelegateTo 'product\scripts\Start-AeroLinkProduction.ps1'
+        if ($env:AEROLINK_PRODUCTION_DELEGATED -eq '1') {
+            throw @"
+AeroLink HOME production refused: delegation did not reach the dedicated production source.
+
+  $($sourceDecision.Reason)
+
+This launch was already delegated once, so it is not being delegated again. Check the production-source
+configuration with CONFIGURE_AEROLINK_PRODUCTION_SOURCE.bat Status. Nothing was started or changed.
+"@
+        }
+        if (-not (Test-Path -LiteralPath $delegateScript -PathType Leaf)) {
+            throw @"
+AeroLink HOME production refused: the configured dedicated production source has no launcher.
+
+  $($sourceDecision.Reason)
+  Expected:            $delegateScript
+
+Re-create it with CONFIGURE_AEROLINK_PRODUCTION_SOURCE.bat Install, or correct the configuration. Nothing
+was started and nothing was changed.
+"@
+        }
+        Write-Host 'This checkout is not the dedicated production source.' -ForegroundColor Yellow
+        Write-Host "      Running from:      $repositoryRoot" -ForegroundColor DarkGray
+        Write-Host "      Production source: $($sourceDecision.DelegateTo)" -ForegroundColor DarkGray
+        Write-Host '      Starting HOME production from the production source instead...' -ForegroundColor Cyan
+        $forwarded = @(Get-AeroLinkBootstrapScriptArguments $PSBoundParameters)
+        $previousDelegated = $env:AEROLINK_PRODUCTION_DELEGATED
+        try {
+            $env:AEROLINK_PRODUCTION_DELEGATED = '1'
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $delegateScript @forwarded
+            exit $LASTEXITCODE
+        }
+        finally { $env:AEROLINK_PRODUCTION_DELEGATED = $previousDelegated }
+    }
 }
 
 # Source posture first, before any prerequisite, build, or PostgreSQL start. The canonical HOME database must
