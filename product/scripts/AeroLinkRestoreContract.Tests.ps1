@@ -27,6 +27,15 @@ if(-not $download.Contains('$apiExecutable') -or -not $download.Contains('remain
 if(-not $download.Contains('[Parameter(Mandatory)][string]$ApiExecutable')){throw 'Restore validation still selects its own API build instead of requiring the caller to name the current one.'}
 if($download.Contains('bin\Release') -or $download.Contains('bin\Debug')){throw 'Restore validation must not know about build configurations; the caller names the executable.'}
 if(-not $restore.Contains('-ApiExecutable')){throw 'Restore does not name the build it validates with.'}
+# Authentication endpoint availability, proved before the real database is mutated. The read-only middleware
+# short-circuits every non-health route BEFORE endpoint routing, so an absent /api/auth/login answered 403
+# exactly as a present one did - the 403 proves the boundary, not the route. /health/routes reads the built
+# EndpointDataSource: it reaches routing, invokes nothing, and fails if this build has lost the auth routes.
+if(-not $program.Contains('/health/routes')){throw 'The build does not expose a read-only route-presence proof, so authentication endpoint availability cannot be established inside the validation boundary.'}
+foreach($route in @('/api/auth/login','/api/auth/me','/api/auth/logout')){
+    if(-not $download.Contains($route)){throw "Isolated validation does not require the authentication route $route to be present."}
+}
+if(-not $download.Contains('does not declare the required authentication routes')){throw 'Isolated validation does not fail when the required authentication routes are missing.'}
 if($download.IndexOf('finally {', $download.IndexOf('finally {') + 1) -lt 0 -or -not $download.Contains('Production rollback/restart must never inherit')){throw 'Restore validation does not restore its parent environment in a nested cleanup finally.'}
 [pscustomobject]@{Passed=$true;ShadowDatabase=$true;ReversibleActivation=$true;ReadOnlyApiDownloads=$true;PersistentPortFence=$true}
 $global:LASTEXITCODE=0

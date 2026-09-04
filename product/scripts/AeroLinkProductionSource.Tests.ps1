@@ -415,6 +415,26 @@ try {
         'does not prove it is one' 'A target whose dedicated marker has gone must not be delegated to.'
     $null = New-ProductionSource -Fixture $launchFixture
 
+    # Dedicated and canonical answer different questions, and delegation needs both.
+    #
+    # Dedicated says this checkout IS the production source. Canonical says what is in it. A clone can hold a
+    # perfectly valid binding while sitting on a feature branch with an edited launcher, and delegating means
+    # the trusted parent executes THAT PowerShell before the child's canonical guard ever runs.
+    $null = Invoke-FixtureGit -GitArguments @('checkout', '-q', '-b', 'feat/edited-launcher') -Repository $launchFixture.Production
+    Assert-True (Get-AeroLinkProductionSourcePosture -SourceRoot $launchFixture.Production).Dedicated 'Fixture: a feature branch does not break the dedicated binding.'
+    Assert-Throws { Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigReader $declared } `
+        'does not prove it is one' 'A dedicated but non-canonical target must not be executed from: a feature branch is not production source.'
+    $null = Invoke-FixtureGit -GitArguments @('checkout', '-q', 'main') -Repository $launchFixture.Production
+
+    $editedLauncher = Join-Path $launchFixture.Production 'product\scripts\Start-AeroLinkProduction.ps1'
+    New-Item -ItemType Directory -Path (Split-Path $editedLauncher -Parent) -Force | Out-Null
+    'Write-Host "not the reviewed launcher"' | Set-Content -LiteralPath $editedLauncher -Encoding UTF8
+    Assert-Throws { Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigReader $declared } `
+        'does not prove it is one' 'A target carrying untracked or modified source must not be executed from.'
+    Remove-Item -LiteralPath $editedLauncher -Force
+    $resumed = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $launchFixture.Development -ConfigReader $declared
+    Assert-True ($resumed.DelegateTo -eq $launchFixture.Production) 'Once the target is clean canonical main again, delegation resumes.'
+
     # A trailing separator is the same directory, not a different one.
     $trailing = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot ($launchFixture.Production + '\') -ConfigReader $declared
     Assert-True ($trailing.Checked -and -not $trailing.DelegateTo) 'A trailing separator must not turn the production source into a stranger.'

@@ -112,8 +112,15 @@ switch ($Action) {
         # controller and one exception to it is not having a controller.
         $config = Get-AeroLinkProductionSourceConfig
         Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force
+        # Absent is not unreadable. A missing configuration means this machine has no remote demo; one that
+        # exists and will not parse may still have a live tunnel behind it, and treating that as "no tunnel"
+        # advances the source while the public endpoint keeps forwarding to a replaced runtime.
         $demoConfig = $null
-        try { $demoConfig = Get-AeroLinkRemoteDemoConfig } catch { $demoConfig = $null }
+        $demoConfigPath = Get-AeroLinkRemoteDemoConfigPath
+        if (Test-Path -LiteralPath $demoConfigPath -PathType Leaf) {
+            try { $demoConfig = Get-AeroLinkRemoteDemoConfig -ConfigPath $demoConfigPath }
+            catch { throw "This machine has a remote-demo configuration at $demoConfigPath that could not be read ($($_.Exception.Message)). A tunnel started while it was valid may still be publishing port 5080, so the production source was NOT advanced and nothing was stopped." }
+        }
         if ($demoConfig) {
             $result = Invoke-AeroLinkProductionSourceReconciliation -Config $demoConfig
             $result | Format-List
@@ -126,15 +133,43 @@ switch ($Action) {
         Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1') -Force
         $inspect = Update-AeroLinkProductionSource -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName `
             -FetchTimeoutSeconds $config.FetchTimeoutSeconds -InspectOnly
+        $stoppedTheRuntime = $false
         if ($inspect.Canonical -and $inspect.Action -eq 'UpdateAvailable') {
             Write-Host "      Stopping the production runtime before advancing to $($inspect.TargetSha)..." -ForegroundColor Yellow
             $apiDirectory = Join-Path $config.SourceRoot 'product\src\AeroLink.Api'
             Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiDirectory) | Out-Null
-            $result = Update-AeroLinkProductionSource -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName `
-                -FetchTimeoutSeconds $config.FetchTimeoutSeconds -AdvanceToSha $inspect.TargetSha
+            $stoppedTheRuntime = $true
+            # Everything after the stop is inside the compensation boundary, the same as the scheduled pass
+            # and the production bootstrap. This is a documented operator action; once it has taken a running
+            # service down, a refused or failed advance must not leave it down to report that nothing
+            # happened.
+            try {
+                $result = Update-AeroLinkProductionSource -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName `
+                    -FetchTimeoutSeconds $config.FetchTimeoutSeconds -AdvanceToSha $inspect.TargetSha
+            }
+            catch {
+                $result = [pscustomobject]@{
+                    Action = 'Refused'; Canonical = $false; HeadSha = $inspect.HeadSha; TargetSha = $inspect.TargetSha
+                    RemoteReachable = $true; Reason = "The fast-forward failed and nothing was changed: $($_.Exception.Message)"
+                }
+            }
         }
         else { $result = $inspect }
         $result | Format-List
+
+        if ($stoppedTheRuntime -and $result.Action -ne 'Updated') {
+            # Refused after the stop: the revision on disk is untouched and was canonical a moment ago, so
+            # re-prove it and put production back before reporting the refusal.
+            Write-Host 'THE SOURCE UPDATE DID NOT HAPPEN' -ForegroundColor Yellow
+            Write-Host $result.Reason -ForegroundColor Yellow
+            $onDisk = Get-AeroLinkProductionSourcePosture -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName
+            if (-not $onDisk.Canonical) {
+                throw "The source update was refused after the production runtime was stopped, and the revision on disk is not canonical either: $($onDisk.Reason) AeroLink was not restarted."
+            }
+            Write-Host "Restarting production on the revision already on disk: main @ $($onDisk.Posture.ShortSha)..." -ForegroundColor Yellow
+            & (Join-Path $config.SourceRoot 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser
+            exit 1
+        }
         if ($result.Action -eq 'Updated') {
             Write-Host 'The production source was advanced and the local runtime was stopped.' -ForegroundColor Yellow
             Write-Host 'Start it again with START_AEROLINK_PRODUCTION.bat.' -ForegroundColor Yellow

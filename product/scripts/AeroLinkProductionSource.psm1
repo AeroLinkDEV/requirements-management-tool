@@ -283,11 +283,21 @@ function Assert-AeroLinkRunningFromProductionSource {
     # afterwards, which is not validation. So the repository, the dedicated marker and the installation
     # binding are checked here, by the caller that still has authority.
     #
-    # Not remote-currency: that needs the network, belongs to the child, and a machine that cannot reach
-    # GitHub must still be able to start production from a previously verified cached main.
+    # Dedicated AND canonical, because they answer different questions and only one of them was being asked.
+    #
+    # Dedicated proves the marker, the origin and the installation binding: this checkout IS the production
+    # source. Canonical proves what is IN it - clean main, no local-only commits, no divergence, nothing
+    # modified, nothing untracked. A configured clone can hold a perfectly valid dedicated binding while
+    # sitting on a feature branch with edited launcher scripts, and delegating to it means the trusted parent
+    # executes that PowerShell before the child's canonical guard ever runs. Checking the child's own policy
+    # after handing it control is not checking it.
+    #
+    # Not remote-currency: being cleanly BEHIND origin/main is canonical. That keeps this working offline,
+    # which matters because the whole point of the cached-canonical path is that a machine which cannot reach
+    # GitHub still starts production.
     $targetPosture = Get-AeroLinkProductionSourcePosture -SourceRoot $dedicatedRoot -RemoteName $configured.RemoteName
-    if (-not $targetPosture.Dedicated) {
-        $detail = if ($targetPosture.BindingReason) { " $($targetPosture.BindingReason)" } else { " $($targetPosture.Reason)" }
+    if (-not $targetPosture.Dedicated -or -not $targetPosture.Canonical) {
+        $detail = if (-not $targetPosture.Dedicated -and $targetPosture.BindingReason) { " $($targetPosture.BindingReason)" } else { " $($targetPosture.Reason)" }
         throw @"
 AeroLink HOME production refused: the configured production source does not prove it is one.
 

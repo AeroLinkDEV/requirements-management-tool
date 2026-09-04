@@ -157,6 +157,13 @@ function Get-AeroLinkRemoteDemoNgrokProcess {
         Ownership requires the exact configured executable AND a command line
         containing the public URL, upstream, and Traffic Policy. Any ngrok process
         that does not match is reported as a mismatch and is never stopped.
+
+        Enumeration failure is UNKNOWN, not NONE. `-ErrorAction SilentlyContinue` on the CIM query turned an
+        unavailable or access-denied WMI into an empty process list, which reads downstream as "no ngrok is
+        running" - so a caller proving the owned tunnel is down would be told it is down without anything
+        having been observed or stopped, and a source transition would proceed while the public endpoint was
+        still forwarding. The query now throws, and `Enumerated` records that live enumeration succeeded so a
+        caller can require it.
     #>
     [CmdletBinding()]
     param(
@@ -164,8 +171,13 @@ function Get-AeroLinkRemoteDemoNgrokProcess {
         [object[]]$ProcessInfos
     )
 
+    $enumerated = $true
     if ($null -eq $ProcessInfos) {
-        $ProcessInfos = @(Get-CimInstance Win32_Process -Filter "Name='ngrok.exe'" -ErrorAction SilentlyContinue)
+        # Injected process lists stay deterministic for the contract suite; only LIVE enumeration can fail.
+        try { $ProcessInfos = @(Get-CimInstance Win32_Process -Filter "Name='ngrok.exe'" -ErrorAction Stop) }
+        catch {
+            throw "AeroLink could not enumerate running processes to determine ngrok ownership: $($_.Exception.Message). Nothing was stopped and no conclusion was drawn - an unreadable process table means unknown, never none."
+        }
     }
 
     $owned = @()
@@ -187,7 +199,7 @@ function Get-AeroLinkRemoteDemoNgrokProcess {
             $mismatched += $process
         }
     }
-    return [pscustomobject]@{ Owned = @($owned); Mismatched = @($mismatched) }
+    return [pscustomobject]@{ Owned = @($owned); Mismatched = @($mismatched); Enumerated = $enumerated }
 }
 
 function Test-AeroLinkRemoteDemoPublicProtection {
@@ -1307,6 +1319,11 @@ function Assert-AeroLinkOwnedTunnelStopped {
         [Parameter(Mandatory)]$Config,
         $Run
     )
+    # Was a tunnel actually up? The caller needs to know, because a transition that takes one down owes the
+    # operator one back - and a transition must never start a tunnel that was not running to begin with.
+    $before = Get-AeroLinkRemoteDemoNgrokProcess -Config $Config
+    $wasRunning = @($before.Owned).Count -gt 0
+
     try { Stop-AeroLinkRemoteDemo -Config $Config | Out-Null }
     catch {
         if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "The owned tunnel could not be stopped, so the source transition was abandoned: $($_.Exception.Message)" }
@@ -1318,7 +1335,8 @@ function Assert-AeroLinkOwnedTunnelStopped {
         if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "The owned tunnel is still running (PID $pids); the source transition was abandoned." }
         throw "The AeroLink-owned public tunnel is still running (PID $pids) after being asked to stop, so the production source was NOT advanced. The public endpoint must not forward to a port whose process is being replaced."
     }
-    if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message 'The owned public tunnel is down.' }
+    if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "The owned public tunnel is down (it was $(if ($wasRunning) { 'running' } else { 'not running' }) before this)." }
+    return [pscustomobject]@{ Stopped = $true; WasRunning = $wasRunning }
 }
 
 function Invoke-AeroLinkProductionSourceReconciliation {
@@ -1381,14 +1399,39 @@ function Invoke-AeroLinkProductionSourceReconciliation {
     # public URL forwarding to a port whose process is being replaced, which is the outcome this ordering
     # exists to prevent; not updating the source is the safe half of that choice.
     if ($TunnelStopper) { & $TunnelStopper $Config | Out-Null }
-    else { Assert-AeroLinkOwnedTunnelStopped -Config $Config -Run $run }
-    if ($RuntimeStopper) { & $RuntimeStopper $Config $inspect | Out-Null }
-    else { & (Join-Path $Config.AeroLinkRoot 'product\scripts\Stop-AeroLink.ps1') | Out-Null }
+    else { Assert-AeroLinkOwnedTunnelStopped -Config $Config -Run $run | Out-Null }
 
-    $advance = if ($SourceAdvancer) { & $SourceAdvancer $Config $inspect } else {
-        Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -AdvanceToSha $inspect.TargetSha
+    # Everything after the tunnel came down is inside the compensation boundary.
+    #
+    # The refused-advance case was already handled, but a THROW was not: if the runtime stop fails - an
+    # ownership read that cannot be completed, a process that will not go - the exception propagated, the
+    # restarter was never reached, and the pass returned with the source unchanged and the public tunnel
+    # down. That is the worst of both outcomes, and it is reached by the ordinary failure of a step whose
+    # whole job is to be careful. Once teardown has begun, every subsequent failure either completes the
+    # transition or puts the verified on-disk service back.
+    $advance = $null
+    try {
+        if ($RuntimeStopper) { & $RuntimeStopper $Config $inspect | Out-Null }
+        else { & (Join-Path $Config.AeroLinkRoot 'product\scripts\Stop-AeroLink.ps1') | Out-Null }
+
+        $advance = if ($SourceAdvancer) { & $SourceAdvancer $Config $inspect } else {
+            Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -AdvanceToSha $inspect.TargetSha
+        }
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production-source advance: $($advance.Action) - $($advance.Reason)"
     }
-    Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production-source advance: $($advance.Action) - $($advance.Reason)"
+    catch {
+        $failure = $_.Exception.Message
+        Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The transition failed after the tunnel was taken down: $failure. Restoring the verified service on disk."
+        $restored = $null
+        try { $restored = if ($Restarter) { & $Restarter $Config $null } else { Start-AeroLinkRemoteDemo -Config $Config -Scheduled:$Scheduled } }
+        catch {
+            throw "The production source transition failed after the tunnel was stopped ($failure), and the service could not be restored either: $($_.Exception.Message). The source was not advanced."
+        }
+        return [pscustomobject]@{
+            Action = 'TransitionFailed'; Restarted = $true; HeadSha = $inspect.HeadSha
+            Detail = "The production source was not advanced because the transition failed after the tunnel was taken down: $failure The verified service on disk was restored. $($restored.Detail)"
+        }
+    }
 
     # The full start, not a shortcut: it re-runs the source gate (now a no-op), starts the revision on disk,
     # proves its runtime identity, and re-proves the protected endpoint.

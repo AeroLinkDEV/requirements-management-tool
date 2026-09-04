@@ -144,19 +144,35 @@ was started and nothing was changed.
 # It also quiesces the owned tunnel, not only port 5080. Leaving the public URL forwarding at a port whose
 # process is about to be replaced publishes whatever takes that port next.
 $script:preAdvanceStopPerformed = $false
+$script:tunnelWasRunning = $false
+$script:demoConfig = $null
 $stopOwnedProductionRuntime = {
     param($Root, $Posture)
     Write-Host '      A source advance is due; quiescing the production stack that is executing out of this tree first.' -ForegroundColor Yellow
-    Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force -ErrorAction SilentlyContinue
-    if (Get-Command Get-AeroLinkRemoteDemoConfig -ErrorAction SilentlyContinue) {
-        $demoConfig = $null
-        try { $demoConfig = Get-AeroLinkRemoteDemoConfig } catch { $demoConfig = $null }
-        if ($demoConfig) {
-            # Only the AeroLink-owned tunnel. Stop-AeroLinkRemoteDemo refuses on a mismatched ngrok rather
-            # than killing it, and that refusal must stop the advance too.
-            Stop-AeroLinkRemoteDemo -Config $demoConfig | Out-Null
+    # No -ErrorAction SilentlyContinue: a remote-demo module that will not load is not the same as a machine
+    # without a remote demo, and swallowing the difference is how a tunnel survives a transition.
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force
+
+    # ABSENT is not the same as UNREADABLE.
+    #
+    # No configuration means this machine has no remote demo, and there is nothing to tear down. A
+    # configuration that EXISTS but is malformed means a tunnel may well have been started while the file was
+    # valid and is still running now - and treating that as "no tunnel" skips the teardown, advances the
+    # source, and leaves the public endpoint forwarding to a port whose process has just been replaced. So
+    # only a definitively missing file takes the no-tunnel path; a read or validation failure stops the
+    # advance.
+    $demoConfigPath = Get-AeroLinkRemoteDemoConfigPath
+    if (Test-Path -LiteralPath $demoConfigPath -PathType Leaf) {
+        try { $script:demoConfig = Get-AeroLinkRemoteDemoConfig -ConfigPath $demoConfigPath }
+        catch {
+            throw "The production source cannot be advanced: this machine has a remote-demo configuration at $demoConfigPath that could not be read ($($_.Exception.Message)). A tunnel started while it was valid may still be publishing port 5080, and advancing without proving it is down would leave the public endpoint in front of a replaced runtime. Nothing was stopped and nothing was changed."
         }
+        # Only the AeroLink-owned tunnel, and it must be provably down. Stop-AeroLinkRemoteDemo refuses on a
+        # mismatched ngrok rather than killing it, and that refusal stops the advance too.
+        $tunnel = Assert-AeroLinkOwnedTunnelStopped -Config $script:demoConfig
+        $script:tunnelWasRunning = [bool]$tunnel.WasRunning
     }
+
     Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiProjectDirectory) | Out-Null
     $script:preAdvanceStopPerformed = $true
 }.GetNewClosure()
@@ -461,6 +477,40 @@ else {
     Write-Host ''
     Write-Host 'Only this machine can reach it. To let colleagues on the same network open it, use' -ForegroundColor DarkGray
     Write-Host 'START_AEROLINK_SHARED.bat instead.' -ForegroundColor DarkGray
+}
+
+# Give back the protected tunnel this launcher took down.
+#
+# The source transition is one cross-mode operation, not two independent ones. This launcher stops the owned
+# tunnel before advancing the working tree, which is correct - but it used to start only the API and client
+# afterwards, so an operator running the documented production BAT while the remote demo was live would
+# update successfully and leave colleagues' protected endpoint dark indefinitely. The 30-minute reconciler
+# would not notice: it sees the source already current and does nothing.
+#
+# Strictly restoration, never creation. It runs only when an owned tunnel was observed running before the
+# teardown, so a machine that had no demo up does not acquire a public endpoint from a launcher nobody asked
+# to publish anything. Start-AeroLinkRemoteDemo re-proves the 401 edge contract before declaring it ready,
+# and a failure here is reported rather than thrown: local production is up and working, and taking it down
+# again because the tunnel did not come back would be the wrong trade.
+#
+# AEROLINK_TUNNEL_RESTORE is a one-shot guard. Start-AeroLinkRemoteDemo will invoke the production launcher
+# if the local API is not ready and matching - normally it is, because this script just started and proved
+# it - and a nested launch that tried to restore the tunnel again would be a loop.
+if ($script:tunnelWasRunning -and $script:demoConfig -and $env:AEROLINK_TUNNEL_RESTORE -ne '1') {
+    Write-Host ''
+    Write-Host 'Restoring the protected remote demo this launcher took down for the source update...' -ForegroundColor Cyan
+    $previousTunnelRestore = $env:AEROLINK_TUNNEL_RESTORE
+    try {
+        $env:AEROLINK_TUNNEL_RESTORE = '1'
+        Start-AeroLinkRemoteDemo -Config $script:demoConfig | Out-Null
+        Write-Host '      The protected public endpoint is back, and its 401 contract was re-proved.' -ForegroundColor Green
+    }
+    catch {
+        Write-Host '      THE PROTECTED REMOTE DEMO DID NOT COME BACK' -ForegroundColor Red
+        Write-Host "      $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host '      Local production is running. Restore the public endpoint with START_AEROLINK_REMOTE_DEMO.bat.' -ForegroundColor Yellow
+    }
+    finally { $env:AEROLINK_TUNNEL_RESTORE = $previousTunnelRestore }
 }
 
 Write-Host ''

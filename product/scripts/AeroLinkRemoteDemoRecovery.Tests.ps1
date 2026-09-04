@@ -345,6 +345,21 @@ Assert-True $aborted 'Scenario 14: a tunnel that cannot be stopped must abort th
 Assert-True (($script:order -join ',') -eq 'inspect,stop-tunnel-failed') `
     'Scenario 14: nothing may be stopped, advanced or restarted once the owned tunnel could not be taken down.'
 
+# Once teardown HAS begun, every later failure owes the operator a running service.
+#
+# The refused-advance case was covered; a throw was not. A runtime stop that fails - an ownership read that
+# cannot be completed, a process that will not go - used to propagate, so the restarter was never reached and
+# the pass ended with the source unchanged AND the public tunnel down: the worst of both outcomes, reached by
+# the ordinary failure of a step whose whole job is to be careful.
+$script:order = @()
+$stubbornRuntime = { param($C, $I) $script:order += 'stop-failed'; throw 'The process on 5080 could not be attributed and was not stopped.' }
+$compensated = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $available -TunnelStopper $stopTunnel -RuntimeStopper $stubbornRuntime -SourceAdvancer $advanceOk -Restarter $restart
+Assert-True (($script:order -join ',') -eq 'inspect,stop-tunnel,stop-failed,restart') `
+    'Scenario 14: a failure after the tunnel is down must still reach the restarter.'
+Assert-True ($compensated.Action -eq 'TransitionFailed' -and $compensated.Restarted) 'Scenario 14: the pass must report the failed transition and that the service was restored.'
+Assert-True ($compensated.Detail -match 'could not be attributed') 'Scenario 14: the operator must be told what actually failed.'
+Assert-True ($script:order -notcontains 'advance') 'Scenario 14: the source must not be advanced once the runtime could not be stopped.'
+
 # --- 15. Ngrok is never started in front of a runtime that is not the verified production source ---
 $wrongSource = { param($C) [pscustomobject]@{ sourceIdentity = 'oldoldoldoldoldoldoldoldoldoldoldoldoldo'; sourceShortSha = 'oldoldol'; mode = 'HOME-PRODUCTION' } }
 $mismatch = Test-AeroLinkRemoteDemoRuntimeMatchesSource -Config $config -ExpectedSourceIdentity 'newnewnewnewnewnewnewnewnewnewnewnewnewn' -RuntimeIdentityProbe $wrongSource

@@ -71,17 +71,29 @@ try {
     $handler = [Net.Http.HttpClientHandler]::new(); $handler.CookieContainer = [Net.CookieContainer]::new()
     $client = [Net.Http.HttpClient]::new($handler); $client.BaseAddress = [Uri]"http://127.0.0.1:$ApiPort"
     try {
-        # What this proves, precisely: the read-only BOUNDARY refuses every route that is not an authenticated
-        # controlled read. It does NOT prove the login route exists, and must not be read as proving it - the
-        # middleware short-circuits before endpoint routing, so an absent or broken /api/auth/login would
-        # answer 403 here exactly as a present one does. Asserting the boundary's own error code is what keeps
-        # that honest: a 403 carrying restore_validation_read_only is the middleware, by construction.
+        # Authentication endpoint AVAILABILITY, which #881 requires proved before the real database is
+        # mutated, and which the 403 below cannot establish on its own.
         #
-        # Proving a live login would need the ordinary host, which on copied production data means every
-        # seeder, every startup mutation and every outbound worker. That trade is not worth a stronger
-        # sentence in a log. What IS proven here about the identity stack is that the host composed and became
-        # ready with the full DI graph and the authentication scheme registered - validate-on-build would have
-        # failed startup otherwise - and that an authenticated controlled read below returns exact bytes.
+        # /health/routes reads the built EndpointDataSource: it reaches routing, invokes nothing and mutates
+        # nothing, so it is safe inside this boundary - and it fails if this build has lost or broken the
+        # authentication routes. That is the gap the 403 left: the read-only middleware short-circuits every
+        # non-health route BEFORE endpoint routing, so an absent /api/auth/login answers 403 exactly as a
+        # present one does. Proving a live login instead would need the ordinary mutating host over copied
+        # production data, with its seeders and outbound workers, which is a worse trade than the gap.
+        $routes = $client.GetAsync('/health/routes').GetAwaiter().GetResult()
+        $routesBody = $routes.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ([int]$routes.StatusCode -ne 200) {
+            throw "The validated build does not declare the required authentication routes: $routesBody"
+        }
+        foreach ($required in @('/api/auth/login', '/api/auth/me', '/api/auth/logout')) {
+            if ($routesBody -notmatch [regex]::Escape($required)) {
+                throw "The validated build does not declare the authentication route $required. Reported: $routesBody"
+            }
+        }
+
+        # And the boundary itself: it refuses every route that is not an authenticated controlled read.
+        # Asserting the boundary's own error code keeps this honest about what it is - a 403 carrying
+        # restore_validation_read_only is the middleware answering, by construction, not the route.
         $forbidden = $client.PostAsync('/api/auth/login', [Net.Http.StringContent]::new('{}',[Text.Encoding]::UTF8,'application/json')).GetAwaiter().GetResult()
         if ([int]$forbidden.StatusCode -ne 403) { throw "The read-only validation API accepted a non-download route with HTTP $([int]$forbidden.StatusCode)." }
         $forbiddenBody = $forbidden.Content.ReadAsStringAsync().GetAwaiter().GetResult()
