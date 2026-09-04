@@ -244,6 +244,15 @@ test('binds the trusted expected run id, refusing any other run', () => {
   assert.equal(noRunId.decision, 'REFUSE')
   assert.ok(noRunId.reasons.some((reason) => reason.startsWith('run-id-missing')))
 
+  const noExpectedRunId = evaluateMergeGroupCandidate({
+    run: legitimateRun(),
+    jobs: allJobsSuccess(),
+    changedPaths: [],
+    expected: { repository: REPOSITORY, headSha: HEAD_SHA, baseBranch: 'main' },
+  })
+  assert.equal(noExpectedRunId.decision, 'REFUSE', 'a missing trusted run id must fail closed, not skip membership checking')
+  assert.ok(noExpectedRunId.reasons.some((reason) => reason.startsWith('expected-missing')))
+
   const foreignJob = reasonsFor({
     jobs: allJobsSuccess().map((job) => (job.name === 'Domain test suite' ? { ...job, runId: 999999 } : job)),
   })

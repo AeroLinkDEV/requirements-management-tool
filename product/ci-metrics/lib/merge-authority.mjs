@@ -138,8 +138,8 @@ export function evaluateMergeGroupCandidate(input) {
   if (!run || typeof run !== 'object') {
     return { decision: 'REFUSE', reasons: ['run-metadata-missing: no triggering-run metadata was supplied'] }
   }
-  if (!expected || typeof expected !== 'object' || typeof expected.repository !== 'string' || typeof expected.headSha !== 'string' || typeof expected.baseBranch !== 'string') {
-    return { decision: 'REFUSE', reasons: ['expected-missing: the verifier must supply its own trusted repository, head SHA, and protected base branch'] }
+  if (!expected || typeof expected !== 'object' || typeof expected.repository !== 'string' || typeof expected.headSha !== 'string' || typeof expected.baseBranch !== 'string' || (typeof expected.runId !== 'string' && typeof expected.runId !== 'number')) {
+    return { decision: 'REFUSE', reasons: ['expected-missing: the verifier must supply its own trusted repository, head SHA, protected base branch, and run id'] }
   }
 
   if (run.repository !== expected.repository) {
@@ -158,13 +158,13 @@ export function evaluateMergeGroupCandidate(input) {
     reasons.push(`head-sha-mismatch: run head '${run.headSha ?? 'unknown'}' does not match the queue candidate '${expected.headSha}'`)
   }
   // The trusted configuration's run id binds everything: the run itself, and every job's membership
-  // in it. Metadata resolved from a different Product run at the same SHA must not authorize.
-  if (typeof expected.runId !== 'undefined') {
-    if (typeof run.runId === 'undefined') {
-      reasons.push('run-id-missing: the trusted configuration expects a run id but the run metadata does not carry one')
-    } else if (String(run.runId) !== String(expected.runId)) {
-      reasons.push(`run-id-mismatch: run ${run.runId} is not the expected run ${expected.runId}`)
-    }
+  // in it. It is mandatory, not optional — omitting it must fail closed, or a missing binding input
+  // would silently turn into authorization. Metadata resolved from a different Product run at the
+  // same SHA must not authorize.
+  if (typeof run.runId === 'undefined') {
+    reasons.push('run-id-missing: the run metadata does not carry its run id, so membership in the expected run is unverifiable')
+  } else if (String(run.runId) !== String(expected.runId)) {
+    reasons.push(`run-id-mismatch: run ${run.runId} is not the expected run ${expected.runId}`)
   }
   // Queue refs name their base branch, and the workflow subscribes to merge_group for any base:
   // only candidates for the protected default branch may bind evidence here.
@@ -185,14 +185,12 @@ export function evaluateMergeGroupCandidate(input) {
     reasons.push('jobs-missing: no job list was supplied for this run')
     return { decision: 'REFUSE', reasons }
   }
-  if (typeof expected.runId !== 'undefined') {
-    for (const job of jobs) {
-      if (typeof job?.runId === 'undefined') {
-        // Missing membership evidence refuses: an unmapped job record is unverified, not exempt.
-        reasons.push(`job-run-id-missing: job '${job?.name ?? 'unknown'}' does not carry its run id, so its membership in run ${expected.runId} is unverified`)
-      } else if (String(job.runId) !== String(expected.runId)) {
-        reasons.push(`job-from-foreign-run: job '${job?.name ?? 'unknown'}' belongs to run ${job.runId}, not the expected run ${expected.runId}`)
-      }
+  for (const job of jobs) {
+    if (typeof job?.runId === 'undefined') {
+      // Missing membership evidence refuses: an unmapped job record is unverified, not exempt.
+      reasons.push(`job-run-id-missing: job '${job?.name ?? 'unknown'}' does not carry its run id, so its membership in run ${expected.runId} is unverified`)
+    } else if (String(job.runId) !== String(expected.runId)) {
+      reasons.push(`job-from-foreign-run: job '${job?.name ?? 'unknown'}' belongs to run ${job.runId}, not the expected run ${expected.runId}`)
     }
   }
 
