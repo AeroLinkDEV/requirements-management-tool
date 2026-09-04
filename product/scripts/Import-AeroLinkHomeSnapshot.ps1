@@ -112,10 +112,9 @@ if ($Confirmation -ne 'REFRESH-FROM-HOME') {
 }
 
 Write-Host '[2/6] Backing up this laptop as it is now...' -ForegroundColor Cyan
-& (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -PostgresAlreadyRunning | Out-Host
-$laptopBackup = (Get-ChildItem -LiteralPath $installation.Backups -Filter 'aerolink-*.zip' -File |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
-if (-not $laptopBackup) { throw 'The pre-refresh backup of this laptop did not produce an archive. Nothing was changed.' }
+$laptopCapture = & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -PostgresAlreadyRunning
+$laptopBackup = ($laptopCapture | Where-Object { $_.PSObject.Properties['Archive'] } | Select-Object -Last 1).Archive
+if (-not $laptopBackup -or -not (Test-Path -LiteralPath $laptopBackup -PathType Leaf)) { throw 'The pre-refresh backup of this laptop did not produce an archive. Nothing was changed.' }
 Write-Host "      Laptop backup retained: $laptopBackup" -ForegroundColor Green
 
 $token = [Guid]::NewGuid().ToString('N').Substring(0, 10)
@@ -132,13 +131,17 @@ try {
     & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive $SnapshotArchive -TargetDatabase $stagingDatabase -PostgresPort $PostgresPort -SkipCurrentCodeValidation | Out-Host
 
     Write-Host '[4/6] Upgrading the staging copy with this build...' -ForegroundColor Cyan
-    $stagingUpgrade = Invoke-AeroLinkMaintenanceCommand -ProductRoot $productRoot -Arguments @('maintenance', 'upgrade', '--apply') -ConnectionString $stagingConnection
+    # -EvidenceRoot is not optional here. A semantic authority in this upgrade set rewrites controlled
+    # renditions through EvidenceFileStore, which otherwise resolves the LIVE evidence tree - so staging a
+    # snapshot would write new objects into this laptop's canonical evidence store before the snapshot had
+    # been proved, and a file write cannot be rolled back with the transaction that abandoned it.
+    $stagingUpgrade = Invoke-AeroLinkMaintenanceCommand -ProductRoot $productRoot -Arguments @('maintenance', 'upgrade', '--apply') -ConnectionString $stagingConnection -EvidenceRoot $stagingEvidence
     if ($stagingUpgrade.ExitCode -ne 0) {
         throw "The snapshot could not be upgraded by this build, so it was NOT activated and this laptop's database is unchanged. $($stagingUpgrade.StdOut)"
     }
 
     Write-Host '[5/6] Proving the staging copy is current and serviceable...' -ForegroundColor Cyan
-    $stagingAnalysis = Get-AeroLinkUpgradeAnalysis -ProductRoot $productRoot -ConnectionString $stagingConnection
+    $stagingAnalysis = Get-AeroLinkUpgradeAnalysis -ProductRoot $productRoot -ConnectionString $stagingConnection -EvidenceRoot $stagingEvidence
     if ($stagingAnalysis.Status -ne 'current') {
         if ($stagingAnalysis.Analysis -and @($stagingAnalysis.Analysis.conflicts).Count -gt 0) {
             Write-AeroLinkUpgradeConflictReport -Analysis $stagingAnalysis.Analysis
@@ -159,11 +162,14 @@ try {
     # upgraded and readiness-tested BEFORE activation; that only means anything if the activated state is the
     # validated state. The archive is taken from the staging database and its own staging evidence tree.
     Write-Host '      Capturing the validated state as a verified archive...' -ForegroundColor Cyan
-    & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -Database $stagingDatabase -PostgresPort $PostgresPort `
-        -EvidenceRoot $stagingEvidence -BackupRoot $installation.SnapshotInbox -RetentionDays 0 -PostgresAlreadyRunning | Out-Host
-    $validatedArchive = (Get-ChildItem -LiteralPath $installation.SnapshotInbox -Filter 'aerolink-*.zip' -File |
-        Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
-    if (-not $validatedArchive) {
+    # Bound to the exact artifact the backup produced, not to "the newest aerolink-*.zip in the inbox".
+    # What is being chosen here is what gets restored over this laptop's live database, and a directory
+    # listing sorted by timestamp is decided by the clock: a skewed file, a future mtime, or an archive an
+    # operator dropped in by hand would all win that comparison.
+    $capture = & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -Database $stagingDatabase -PostgresPort $PostgresPort `
+        -EvidenceRoot $stagingEvidence -BackupRoot $installation.SnapshotInbox -RetentionDays 0 -PostgresAlreadyRunning
+    $validatedArchive = ($capture | Where-Object { $_.PSObject.Properties['Archive'] } | Select-Object -Last 1).Archive
+    if (-not $validatedArchive -or -not (Test-Path -LiteralPath $validatedArchive -PathType Leaf)) {
         throw "The validated staging state could not be captured as an archive, so nothing was activated and this laptop's database is unchanged."
     }
     Write-Host "      Validated state captured: $validatedArchive" -ForegroundColor Green

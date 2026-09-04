@@ -16,7 +16,11 @@
   border-radius: 6px;
   background: rgba(255, 255, 255, .04);
   color: #c9d5e3;
-  font: 650 11px var(--font-body);
+  /* 12px is the product readability floor, not a preference: the production audit fails visible leaf text
+     below it everywhere except the scaled Digital Thread canvas. This badge is shell chrome, so it obeys the
+     floor like every other label. Uppercase letter-spacing carries the quiet it used to get from being
+     small. */
+  font: 650 12px var(--font-body);
   letter-spacing: .06em;
   text-transform: uppercase;
   white-space: nowrap;

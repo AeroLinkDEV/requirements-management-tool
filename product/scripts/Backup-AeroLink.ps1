@@ -93,3 +93,15 @@ if ($RetentionDays -gt 0) {
 }
 Write-Host "AeroLink backup complete: $archive" -ForegroundColor Green
 Write-Host "SHA-256: $archiveHash"
+
+# The exact artifact this run produced, so a caller can act on THIS archive rather than rediscovering it as
+# "the newest aerolink-*.zip in the directory". That guess is wrong whenever a clock skews, a file arrives
+# with a future timestamp, or an operator drops an archive in by hand - and in the snapshot path the thing
+# being chosen is what gets activated over a live database.
+[pscustomobject]@{
+    Archive    = $archive
+    Sha256     = $archiveHash
+    Checksum   = "$archive.sha256"
+    BackupRoot = $backupRoot
+    Database   = $Database
+}

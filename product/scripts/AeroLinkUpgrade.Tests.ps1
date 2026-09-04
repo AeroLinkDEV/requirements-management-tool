@@ -158,8 +158,10 @@ try {
 
     # --- 6. Happy path: backup, restore, clone upgrade, clone re-analysis, cleanup, THEN the real upgrade ---
     $steps.Clear()
-    $upgradeRunner = { param($ConnectionString) $steps.Add($(if ($ConnectionString) { 'upgrade:clone' } else { 'upgrade:real' })); [pscustomobject]@{ ExitCode = 0; StdOut = ''; StdErr = '' } }.GetNewClosure()
-    $cloneCurrent = { param($ConnectionString) $steps.Add('analyze:clone'); [pscustomobject]@{ Status = 'current'; Analysis = $null; ExitCode = 0; Detail = '' } }.GetNewClosure()
+    $evidenceRoots = [System.Collections.Generic.List[string]]::new()
+    $upgradeRunner = { param($ConnectionString, $EvidenceRoot) $steps.Add($(if ($ConnectionString) { 'upgrade:clone' } else { 'upgrade:real' })); $evidenceRoots.Add([string]$EvidenceRoot); [pscustomobject]@{ ExitCode = 0; StdOut = ''; StdErr = '' } }.GetNewClosure()
+    $cloneCurrent = { param($ConnectionString, $EvidenceRoot) $steps.Add('analyze:clone'); $evidenceRoots.Add([string]$EvidenceRoot); [pscustomobject]@{ Status = 'current'; Analysis = $null; ExitCode = 0; Detail = '' } }.GetNewClosure()
+    $evidenceRoots.Clear()
     $result = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -BackupRunner $backup -RestoreRunner $restore `
         -UpgradeRunner $upgradeRunner -AnalysisRunner $cloneCurrent -CleanupRunner $cleanup -CurrentCodeValidator $cloneHealthy
     Assert-True ($result.Validated -and $result.Applied) 'A validated upgrade is applied.'
@@ -168,6 +170,17 @@ try {
         "The real upgrade must be the LAST step, after backup, restore, clone upgrade, clone analysis and current-code validation. Order was: $order"
     Assert-True ($steps[-1] -eq 'upgrade:real') "The real database must be upgraded only at the end. Order was: $order"
     Assert-True ($result.Detail -match 'pre-upgrade backup is retained') 'The operator must be told where the recoverable point is.'
+
+    # A database is not the only persistent thing an upgrade writes. A semantic authority in this set rewrites
+    # controlled renditions through EvidenceFileStore, which resolves Evidence:Root and defaults to the LIVE
+    # evidence tree - so isolating the connection string alone let a clone upgrade put new objects into the
+    # canonical evidence store, where a database rollback cannot reach them.
+    $cloneEvidence = @($evidenceRoots | Where-Object { $_ })
+    Assert-True ($cloneEvidence.Count -eq 2) 'Both the clone upgrade and the clone analysis must be given an evidence root.'
+    Assert-True (($cloneEvidence | Select-Object -Unique).Count -eq 1) 'The clone upgrade and its analysis must share one isolated evidence tree.'
+    Assert-True ($cloneEvidence[0] -match 'restore-validation\\aerolink_upgrade_validation_[a-f0-9]{10}\\evidence$') `
+        "The clone's evidence must live under the isolated restore-validation tree, not the live evidence store. It was: $($cloneEvidence[0])"
+    Assert-True ($evidenceRoots[-1] -eq '') 'The real upgrade uses the installation''s own evidence root, not an isolated one.'
 
     # --- 6b. The analyzer says current, but current AeroLink cannot serve the upgraded copy ---
     #
@@ -227,6 +240,14 @@ try {
         'Refusing to drop' 'The cleanup helper must refuse any database it did not generate.'
     Assert-Throws { Remove-AeroLinkSnapshotStagingDatabase -ProductRoot $productRoot -Database 'aerolink' } `
         'Refusing to drop' 'The snapshot staging cleanup must refuse the persistent database by name.'
+
+    # --- 12. Isolating the database without isolating the evidence is not isolation ---
+    #
+    # The maintenance host is refused outright rather than trusted to be called correctly, because the
+    # failure it prevents is silent: the clone upgrade succeeds, the validation passes, and the only trace
+    # is new objects in the canonical evidence tree that no rollback will remove.
+    Assert-Throws { Invoke-AeroLinkMaintenanceCommand -ProductRoot $productRoot -Arguments @('maintenance', 'analyze') -ConnectionString 'Host=127.0.0.1;Port=54329;Database=aerolink_clone;Username=postgres' } `
+        'requires an isolated -EvidenceRoot' 'Pointing maintenance at an isolated database without an isolated evidence root must be refused.'
 }
 finally {
     foreach ($fixture in $fixtures) {

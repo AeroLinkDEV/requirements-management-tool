@@ -274,8 +274,9 @@ public sealed class AeroLinkUpgradeAnalyzer(
         };
         lines.AddRange(analysis.Showcase.PendingSteps.Select(x => $"  {x}"));
         lines.Add("Nothing applies these automatically: existing showcase content is operator-owned state, so "
-            + "a restart will not rewrite it. Run the explicit showcase upgrade command, which takes a "
-            + "verified backup first, when you want them.");
+            + "a restart will not rewrite it. Applying them can add controlled history, and the showcase "
+            + "upgrade endpoint does not take a backup of its own - take one with BACKUP_AEROLINK.bat first, "
+            + "then POST /api/showcase/upgrade as an administrator.");
         return lines;
     }
 }

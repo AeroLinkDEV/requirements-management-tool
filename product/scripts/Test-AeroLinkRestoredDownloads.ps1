@@ -11,8 +11,15 @@ param(
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Net.Http
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$apiExecutable = Join-Path $productRoot 'src\AeroLink.Api\bin\Release\net10.0\AeroLink.Api.exe'
-if (-not (Test-Path -LiteralPath $apiExecutable -PathType Leaf)) { throw "The built Release API executable is required for restore validation: $apiExecutable" }
+# Release is what the restore path builds, and therefore what it should validate with. The upgrade path
+# reaches here after `dotnet run` has produced a Debug build and no Release one, so a Release-only
+# requirement would fail clone validation for a reason that has nothing to do with the clone. Prefer
+# Release, accept Debug, and name both when neither exists.
+$apiExecutable = @(
+    (Join-Path $productRoot 'src\AeroLink.Api\bin\Release\net10.0\AeroLink.Api.exe'),
+    (Join-Path $productRoot 'src\AeroLink.Api\bin\Debug\net10.0\AeroLink.Api.exe')
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+if (-not $apiExecutable) { throw "A built API executable is required for isolated validation. Neither bin\Release\net10.0\AeroLink.Api.exe nor bin\Debug\net10.0\AeroLink.Api.exe exists under $productRoot\src\AeroLink.Api." }
 if (-not $LogRoot) { $LogRoot = Join-Path $productRoot '.local\restore-validation\logs' }
 $logs = [IO.Path]::GetFullPath($LogRoot)
 New-Item -ItemType Directory -Path $logs -Force | Out-Null

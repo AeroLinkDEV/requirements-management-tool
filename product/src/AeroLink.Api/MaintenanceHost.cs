@@ -133,6 +133,11 @@ public static class AeroLinkMaintenanceHost
                 upgradeRequired = analysis.UpgradeRequired,
                 deterministicUpgrade = analysis.DeterministicUpgrade,
                 databaseModified = analysis.DatabaseModified,
+                // The third category. Machine-readable as well as rendered, because #881 asks for the
+                // pending versioned showcase posture in both, and a category only a human can read is not
+                // something a launcher or a script can act on.
+                showcase = analysis.Showcase,
+                showcaseUpgradeAvailable = analysis.ShowcaseUpgradeAvailable,
             }, new JsonSerializerOptions { WriteIndented = true }));
         }
         else
