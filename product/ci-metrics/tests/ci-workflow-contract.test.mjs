@@ -224,6 +224,23 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   assert.ok(closeIndex >= 0, 'the merge-group guard block must be terminated by its closing fi')
   const guardText = enforceText.slice(guardIndex, guardIndex + closeIndex)
 
+  // The refusal loop consumes env variables; pin each to its job's actual result, or a hardcoded
+  // `success` would satisfy the guard while a job skipped.
+  for (const [envVar, job] of [
+    ['BACKEND_API', 'backend-api'],
+    ['BACKEND_CORE_DOMAIN', 'backend-core-domain'],
+    ['BACKEND_CORE_INFRASTRUCTURE', 'backend-core-infrastructure'],
+    ['CLIENT', 'client'],
+    ['CONTRACTS', 'script-contracts'],
+    ['BROWSER', 'browser-pr'],
+    ['PRODUCTION', 'browser-production'],
+  ]) {
+    assert.ok(
+      enforceText.includes(`${envVar}: \${{ needs.${job}.result }}`),
+      `${envVar} must be bound to needs.${job}.result — the merge-group refusal is only as truthful as its inputs`,
+    )
+  }
+
   assert.match(
     guardText,
     /missing=""/,
