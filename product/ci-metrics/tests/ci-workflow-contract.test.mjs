@@ -216,9 +216,22 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
 
   assert.match(
     guardText,
+    /missing=""/,
+    'the merge-group guard must start from an empty missing set',
+  )
+  assert.match(
+    guardText,
+    /\[ "\$result" = "success" \] \|\| missing="\$missing \$name"/,
+    'every non-success gate result — not only failure — must populate the missing set',
+  )
+  assert.match(
+    guardText,
     /"browser-pr:\$BROWSER" "browser-production:\$PRODUCTION"/,
     'the merge-group gate list must include the pull-request-gated browser jobs',
   )
+  const predicateIndex = guardText.indexOf('[ "$result" = "success" ] || missing=')
+  const finalIfIndex = guardText.indexOf('[ -n "$missing" ]; then')
+  assert.ok(predicateIndex >= 0 && finalIfIndex > predicateIndex, 'the missing set must be collected by the loop before the refusal fires')
   assert.match(
     guardText,
     /\[ -n "\$missing" \]; then\n\s*echo "::error::A merge-queue run must actually execute the product gates\. These did not run:\$missing"\n\s*exit 1/,
