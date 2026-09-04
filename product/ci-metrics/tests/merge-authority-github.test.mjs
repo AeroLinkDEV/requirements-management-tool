@@ -262,6 +262,10 @@ test('default-branch workflow keeps authority credentials behind the queue-only 
   )
   assert.match(verifier, /currentRun\.status !== 'completed' \|\| currentRun\.runAttempt !== trigger\.run_attempt/)
   assert.match(requester, /environment:\s+name: merge-authority/)
+  assert.match(requester, /permissions:\s+actions: write\s+checks: write\s+contents: read\s+pull-requests: read/)
+  assert.match(requester, /name: Publish PR-associated Product aggregate/)
+  assert.match(requester, /"name": "Full Product evidence aggregate"/)
+  assert.match(requester, /aerolink-product-evidence:pull-request:\{head_sha\}:\{product_run_id\}/)
   assert.match(requester, /actions\/create-github-app-token@[0-9a-f]{40}/)
   assert.match(requester, /client-id: \$\{\{ vars\.MERGE_AUTHORITY_APP_CLIENT_ID \}\}/)
   assert.match(requester, /private-key: \$\{\{ secrets\.MERGE_AUTHORITY_APP_PRIVATE_KEY \}\}/)
@@ -273,8 +277,13 @@ test('default-branch workflow keeps authority credentials behind the queue-only 
   assert.match(requester, /aerolink-merge-authority:pull-request:\{head_sha\}/)
   assert.ok(
     requester.indexOf('Authenticate live ready PR, dispatch once, and bind exact Product success') <
+      requester.indexOf('Publish PR-associated Product aggregate'),
+    'the GitHub Actions check must only be published after trusted PR/Product validation succeeds',
+  )
+  assert.ok(
+    requester.indexOf('Publish PR-associated Product aggregate') <
       requester.indexOf('Mint the repository-scoped Merge Authority token'),
-    'the App token must only be minted after trusted PR/Product validation succeeds',
+    'the GitHub Actions and App identities must remain separate publication steps',
   )
   assert.ok(
     requester.indexOf('Mint the repository-scoped Merge Authority token') <
