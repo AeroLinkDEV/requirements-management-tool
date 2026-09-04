@@ -203,6 +203,38 @@ function Get-AeroLinkRuntimeIdentity {
     catch { return $null }
 }
 
+function Test-AeroLinkNoMatchingConnection {
+    <#
+        .SYNOPSIS Is this error `Get-NetTCPConnection` saying "no connection matched", and nothing else?
+        .DESCRIPTION
+            The single condition under which an enumeration failure may be read as an empty result. Every
+            other failure is unknown, and unknown must never become "the port is free" - that is the fail-open
+            a source transition would ride to rewrite a working tree under a live production API.
+
+            Identified by the cmdlet's own fully-qualified error identifier, measured on this machine:
+
+                CmdletizationQuery_NotFound,Get-NetTCPConnection
+
+            Deliberately NOT by the ObjectNotFound category. That category is far broader than the condition:
+            a missing or unloadable Get-NetTCPConnection, and other absent system resources, raise it too -
+            and each of those means the TCP table was never read at all, which is the opposite of an empty
+            one. Deliberately not by message either: message text is localized, and a check that passes only
+            in English is a check that fails open everywhere else.
+
+            Both halves of the identifier are required. The command suffix keeps a NotFound raised by some
+            other cmdlet in the pipeline from being read as this one's answer.
+
+            If a future Windows changes this identifier, an unused port starts throwing rather than reporting
+            free. That is the correct direction to be wrong in, and it is loud.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$ErrorRecord)
+    $id = [string]$ErrorRecord.FullyQualifiedErrorId
+    if ([string]::IsNullOrWhiteSpace($id)) { return $false }
+    return $id.StartsWith('CmdletizationQuery_NotFound', [StringComparison]::OrdinalIgnoreCase) -and
+        $id.EndsWith(',Get-NetTCPConnection', [StringComparison]::OrdinalIgnoreCase)
+}
+
 function Get-AeroLinkPortOwner {
     <#
         .SYNOPSIS The single process listening on a port, with its command line, or a described absence.
@@ -218,22 +250,18 @@ function Get-AeroLinkPortOwner {
             must stop a transition rather than let it proceed.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][int]$Port)
-    try { $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop) }
+    param(
+        [Parameter(Mandatory)][int]$Port,
+        # Injectable so the contract suite can drive a real enumeration failure without breaking the machine's
+        # TCP stack. Live behaviour is unchanged.
+        [scriptblock]$ConnectionProbe = { param($P) Get-NetTCPConnection -LocalPort $P -State Listen -ErrorAction Stop }
+    )
+    try { $listeners = @(& $ConnectionProbe $Port) }
     catch {
-        # ONE condition converts to an empty list: the cmdlet reporting that no connection matched. Everything
-        # else - access denied, a CIM transport failure, a broken provider - is unknown, and unknown is not
-        # free.
-        #
-        # A typed `catch [CimJobException]` was wrong here and worse than no catch at all: PowerShell selects
-        # a typed catch ahead of a later general one, and Get-NetTCPConnection raises that same type for
-        # genuine provider and access failures as it does for "nothing matched". So every enumeration failure
-        # was being converted into "the port is free", which is the exact fail-open this was written to close.
-        # The condition is identified by the error's own category and identifier, not by its exception type.
-        $noMatch = ($_.CategoryInfo.Category -eq 'ObjectNotFound') -or
-            ($_.FullyQualifiedErrorId -match '(?i)NoMatching|ObjectNotFound') -or
-            ($_.Exception.Message -match '(?i)no matching .* objects? found')
-        if (-not $noMatch) {
+        # ONE condition converts to an empty list, and it is identified exactly. Everything else - access
+        # denied, a CIM transport failure, a broken or unloadable provider, the cmdlet itself missing - is
+        # unknown, and unknown is not free.
+        if (-not (Test-AeroLinkNoMatchingConnection -ErrorRecord $_)) {
             throw "AeroLink could not read the TCP connection table to determine what is listening on port ${Port}: $($_.Exception.Message). Nothing was concluded and nothing was stopped - an unreadable port table means unknown, never free."
         }
         $listeners = @()
@@ -433,6 +461,7 @@ Export-ModuleMember -Function @(
     'Get-AeroLinkSourceFingerprint',
     'Get-AeroLinkRuntimeIdentity',
     'Get-AeroLinkPortOwner',
+    'Test-AeroLinkNoMatchingConnection',
     'Test-AeroLinkProcessOwnership',
     'Test-AeroLinkReadyEndpoint',
     'Resolve-AeroLinkRuntimeDisposition',

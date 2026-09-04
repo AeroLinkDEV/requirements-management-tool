@@ -500,6 +500,32 @@ $freePort = Get-AeroLinkPortOwner -Port 59987
 Assert-True (-not $freePort.Found) 'Scenario 14f: a genuinely unused port must still read as unused - the no-match case is an answer, not a failure.'
 Assert-True ($freePort.Detail -match 'Nothing is listening') 'Scenario 14f: and it says so, rather than reporting an error.'
 
+# The no-match predicate is exact, and the three shapes it has to tell apart.
+#
+# Accepting the ObjectNotFound CATEGORY was too broad: a missing or unloadable Get-NetTCPConnection raises it
+# too, and that means the TCP table was never read at all - the opposite of an empty one. The identifier is
+# the cmdlet's own, measured on this machine as CmdletizationQuery_NotFound,Get-NetTCPConnection.
+$genuineNoMatch = $null
+try { Get-NetTCPConnection -LocalPort 59987 -State Listen -ErrorAction Stop } catch { $genuineNoMatch = $_ }
+Assert-True ($null -ne $genuineNoMatch) 'Scenario 14f: an unused port really does raise an error rather than returning nothing.'
+Assert-True (Test-AeroLinkNoMatchingConnection -ErrorRecord $genuineNoMatch) 'Scenario 14f: the measured no-match error is recognised as an empty result.'
+
+$providerFailure = $null
+try { throw 'Access is denied.' } catch { $providerFailure = $_ }
+Assert-True (-not (Test-AeroLinkNoMatchingConnection -ErrorRecord $providerFailure)) 'Scenario 14f: an access or provider failure is NOT an empty result.'
+
+$otherObjectNotFound = $null
+try { Get-Item 'Z:\no-such-thing-at-all' -ErrorAction Stop } catch { $otherObjectNotFound = $_ }
+Assert-True ($otherObjectNotFound.CategoryInfo.Category -eq 'ObjectNotFound') 'Scenario 14f: fixture sanity - this really is an ObjectNotFound.'
+Assert-True (-not (Test-AeroLinkNoMatchingConnection -ErrorRecord $otherObjectNotFound)) `
+    'Scenario 14f: an ObjectNotFound from anything but this cmdlet''s own query must NOT be read as a free port - the category is far broader than the condition.'
+
+# And the caller refuses rather than concluding "free" when enumeration fails.
+$refusedOnFailure = $false
+try { Get-AeroLinkPortOwner -Port 5080 -ConnectionProbe { param($P) throw 'The RPC server is unavailable.' } | Out-Null }
+catch { $refusedOnFailure = $true; Assert-True ($_.Exception.Message -match 'unknown, never free') 'Scenario 14f: the refusal must say what it means.' }
+Assert-True $refusedOnFailure 'Scenario 14f: an unreadable TCP table must refuse, so no transition can reach teardown or advance.'
+
 # An unused port yields no owned runtime, and does NOT trip the unknown-state refusal.
 $probe = Get-AeroLinkServiceTopology -Config $config -Port 59987
 Assert-True (-not $probe.RuntimeRunning) 'Scenario 14f: an unused port yields no owned runtime, without refusing.'
