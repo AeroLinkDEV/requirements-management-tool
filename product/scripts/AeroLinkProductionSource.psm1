@@ -29,8 +29,12 @@
 #>
 
 Set-StrictMode -Version Latest
-Import-Module (Join-Path $PSScriptRoot 'AeroLinkBootstrap.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+# These are dependency imports, not test reloads. A nested -Force import under Windows
+# PowerShell 5.1 unloads the caller-visible instance of the same module. The production
+# launcher still needs both command sets after it imports this module, so reuse the shared
+# module instances instead of replacing them inside this module's private scope.
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkBootstrap.psm1')
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1')
 
 $script:ProductionSourceMarkerName = 'production-source.json'
 

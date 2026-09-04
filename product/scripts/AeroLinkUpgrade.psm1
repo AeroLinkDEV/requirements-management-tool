@@ -31,7 +31,11 @@
 #>
 
 Set-StrictMode -Version Latest
-Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+# This is a dependency import, not a test reload. Under Windows PowerShell 5.1, forcing a
+# nested import unloads the caller-visible instance of the same module. The production
+# launcher imports AeroLinkInstallation first, then this module, and immediately needs
+# Get-AeroLinkInstallationPaths in its own scope. Keep the shared instance visible to both.
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1')
 
 function Invoke-AeroLinkMaintenanceCommand {
     <#

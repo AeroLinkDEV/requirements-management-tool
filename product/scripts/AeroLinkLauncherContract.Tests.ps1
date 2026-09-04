@@ -102,6 +102,25 @@ foreach ($module in @(
         "The re-entry fingerprint omits $module, which is loaded before the source advance - an update to it would leave the old version driving the launch."
 }
 
+# Nested dependency imports must not remove commands the launcher already imported into
+# its own scope. Windows PowerShell 5.1 does exactly that when a module uses -Force while
+# importing a dependency that the caller already loaded. The merged #881 launcher failed
+# on HOME before startup because importing AeroLinkUpgrade removed
+# Get-AeroLinkInstallationPaths; importing AeroLinkProductionSource would likewise remove
+# the bootstrap commands needed later in the same launcher.
+$scriptsRoot = Join-Path $root 'product\scripts'
+Import-Module (Join-Path $scriptsRoot 'AeroLinkBootstrap.psm1') -Force
+Import-Module (Join-Path $scriptsRoot 'AeroLinkInstallation.psm1') -Force
+Import-Module (Join-Path $scriptsRoot 'AeroLinkRuntimeIdentity.psm1') -Force
+Import-Module (Join-Path $scriptsRoot 'AeroLinkUpgrade.psm1') -Force
+Assert-True ([bool](Get-Command Get-AeroLinkInstallationPaths -ErrorAction SilentlyContinue)) `
+    'Importing AeroLinkUpgrade must not remove caller-visible AeroLinkInstallation commands.'
+Import-Module (Join-Path $scriptsRoot 'AeroLinkProductionSource.psm1') -Force
+Assert-True ([bool](Get-Command Get-AeroLinkInstallationPaths -ErrorAction SilentlyContinue)) `
+    'Importing AeroLinkProductionSource must not remove caller-visible AeroLinkInstallation commands.'
+Assert-True ([bool](Get-Command Get-AeroLinkBootstrapScriptArguments -ErrorAction SilentlyContinue)) `
+    'Importing AeroLinkProductionSource must not remove caller-visible AeroLinkBootstrap commands.'
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
     Write-Host "Root launcher contract FAILED ($($failures.Count) failure(s))." -ForegroundColor Red
