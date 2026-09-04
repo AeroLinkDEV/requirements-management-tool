@@ -221,17 +221,17 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   )
   assert.match(
     guardText,
-    /\[ "\$result" = "success" \] \|\| missing="\$missing \$name"/,
-    'every non-success gate result — not only failure — must populate the missing set',
+    /for pair in "backend-api:\$BACKEND_API" "backend-core-domain:\$BACKEND_CORE_DOMAIN" "backend-core-infrastructure:\$BACKEND_CORE_INFRASTRUCTURE" "client:\$CLIENT" "script-contracts:\$CONTRACTS" "browser-pr:\$BROWSER" "browser-production:\$PRODUCTION"; do/,
+    'the merge-group refusal must enumerate the complete seven-gate list — the generic loop additionally admits postgresql-smoke and permits skips, so this exact list is what makes skips impossible for a queue run',
   )
   assert.match(
     guardText,
-    /"browser-pr:\$BROWSER" "browser-production:\$PRODUCTION"/,
-    'the merge-group gate list must include the pull-request-gated browser jobs',
+    /name="\$\{pair%%:\*\}"\n\s*result="\$\{pair#\*:\}"\n\s*\[ "\$result" = "success" \] \|\| missing="\$missing \$name"/,
+    'each pair must be split into its own name and result before the success predicate populates the missing set — a stale result from an earlier loop would vacuously pass',
   )
-  const predicateIndex = guardText.indexOf('[ "$result" = "success" ] || missing=')
+  const listIndex = guardText.indexOf('for pair in "backend-api:$BACKEND_API"')
   const finalIfIndex = guardText.indexOf('[ -n "$missing" ]; then')
-  assert.ok(predicateIndex >= 0 && finalIfIndex > predicateIndex, 'the missing set must be collected by the loop before the refusal fires')
+  assert.ok(listIndex >= 0 && finalIfIndex > listIndex, 'the missing set must be collected by the loop before the refusal fires')
   assert.match(
     guardText,
     /\[ -n "\$missing" \]; then\n\s*echo "::error::A merge-queue run must actually execute the product gates\. These did not run:\$missing"\n\s*exit 1/,
