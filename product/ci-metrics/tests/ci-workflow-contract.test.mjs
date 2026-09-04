@@ -225,7 +225,9 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   const guardText = enforceText.slice(guardIndex, guardIndex + closeIndex)
 
   // The refusal loop consumes env variables; pin each to its job's actual result, or a hardcoded
-  // `success` would satisfy the guard while a job skipped.
+  // `success` would satisfy the guard while a job skipped. The same applies to the step's own
+  // control inputs: a hardcoded EVENT_NAME would never select the merge-group branch, and a
+  // hardcoded DOCS_ONLY of true would skip it for every run.
   for (const [envVar, job] of [
     ['BACKEND_API', 'backend-api'],
     ['BACKEND_CORE_DOMAIN', 'backend-core-domain'],
@@ -238,6 +240,17 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
     assert.ok(
       enforceText.includes(`${envVar}: \${{ needs.${job}.result }}`),
       `${envVar} must be bound to needs.${job}.result — the merge-group refusal is only as truthful as its inputs`,
+    )
+  }
+  for (const binding of [
+    "EVENT_NAME: ${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}",
+    'DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}',
+    'LAUNCHERS_ONLY: ${{ needs.changes.outputs.launchers_only }}',
+    'POST_MERGE_SKIP: ${{ needs.changes.outputs.post_merge_skip }}',
+  ]) {
+    assert.ok(
+      enforceText.includes(binding),
+      `the gate must bind its guard input dynamically: ${binding.split(':')[0]} — a hardcoded value silently disarms the merge-group refusal`,
     )
   }
 
