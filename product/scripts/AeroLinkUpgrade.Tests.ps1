@@ -153,19 +153,36 @@ try {
     $backup = { $steps.Add('backup'); 'C:\fixture\backups\aerolink-20260903-120000.zip' }.GetNewClosure()
     $restore = { param($Archive, $Database) $steps.Add("restore:$Database"); $true }.GetNewClosure()
     $cleanup = { param($Database) $steps.Add("cleanup:$Database") }.GetNewClosure()
+    # Current code standing up against the UPGRADED clone: ready, authentication answering, storage coherent.
+    $cloneHealthy = { param($ConnectionString) $steps.Add('validate:clone'); [pscustomobject]@{ Passed = $true; Detail = 'ready, authentication answering' } }.GetNewClosure()
 
     # --- 6. Happy path: backup, restore, clone upgrade, clone re-analysis, cleanup, THEN the real upgrade ---
     $steps.Clear()
     $upgradeRunner = { param($ConnectionString) $steps.Add($(if ($ConnectionString) { 'upgrade:clone' } else { 'upgrade:real' })); [pscustomobject]@{ ExitCode = 0; StdOut = ''; StdErr = '' } }.GetNewClosure()
     $cloneCurrent = { param($ConnectionString) $steps.Add('analyze:clone'); [pscustomobject]@{ Status = 'current'; Analysis = $null; ExitCode = 0; Detail = '' } }.GetNewClosure()
     $result = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -BackupRunner $backup -RestoreRunner $restore `
-        -UpgradeRunner $upgradeRunner -AnalysisRunner $cloneCurrent -CleanupRunner $cleanup
+        -UpgradeRunner $upgradeRunner -AnalysisRunner $cloneCurrent -CleanupRunner $cleanup -CurrentCodeValidator $cloneHealthy
     Assert-True ($result.Validated -and $result.Applied) 'A validated upgrade is applied.'
     $order = $steps -join ' -> '
-    Assert-True ($order -match '^backup -> restore:aerolink_upgrade_validation_[a-f0-9]{10} -> upgrade:clone -> analyze:clone -> cleanup:') `
-        "The real upgrade must be the LAST step, after backup, restore, clone upgrade and clone validation. Order was: $order"
+    Assert-True ($order -match '^backup -> restore:aerolink_upgrade_validation_[a-f0-9]{10} -> upgrade:clone -> analyze:clone -> validate:clone -> cleanup:') `
+        "The real upgrade must be the LAST step, after backup, restore, clone upgrade, clone analysis and current-code validation. Order was: $order"
     Assert-True ($steps[-1] -eq 'upgrade:real') "The real database must be upgraded only at the end. Order was: $order"
     Assert-True ($result.Detail -match 'pre-upgrade backup is retained') 'The operator must be told where the recoverable point is.'
+
+    # --- 6b. The analyzer says current, but current AeroLink cannot serve the upgraded copy ---
+    #
+    # "Analyzer-current" means the schema and semantic markers line up; it does not mean the application
+    # works. #881 asks for readiness, authentication and storage invariants on the isolated copy BEFORE the
+    # real database is mutated, and without this step a clone that no build could actually run would still
+    # have authorised mutating real data.
+    $steps.Clear()
+    $cloneUnhealthy = { param($ConnectionString) $steps.Add('validate:clone'); [pscustomobject]@{ Passed = $false; Detail = 'current AeroLink never became ready against the upgraded copy.' } }.GetNewClosure()
+    $unhealthy = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -BackupRunner $backup -RestoreRunner $restore `
+        -UpgradeRunner $upgradeRunner -AnalysisRunner $cloneCurrent -CleanupRunner $cleanup -CurrentCodeValidator $cloneUnhealthy
+    Assert-True (-not $unhealthy.Applied) 'A clone the current build cannot serve must not authorise the real upgrade.'
+    Assert-True ($steps -notcontains 'upgrade:real') 'A failed current-code validation must leave the real database untouched.'
+    Assert-True ($unhealthy.Detail -match 'never touched and is unchanged') 'The failure must state plainly that the real database is unchanged.'
+    Assert-True (($steps | Where-Object { $_ -like 'cleanup:*' }).Count -eq 1) 'The disposable copy is cleaned up when current-code validation fails.'
 
     # --- 7. Clone upgrade fails: the real database is NEVER touched ---
     $steps.Clear()
@@ -174,7 +191,7 @@ try {
         $steps.Add('upgrade:real'); return [pscustomobject]@{ ExitCode = 0; StdOut = ''; StdErr = '' }
     }.GetNewClosure()
     $failed = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -BackupRunner $backup -RestoreRunner $restore `
-        -UpgradeRunner $failingClone -AnalysisRunner $cloneCurrent -CleanupRunner $cleanup
+        -UpgradeRunner $failingClone -AnalysisRunner $cloneCurrent -CleanupRunner $cleanup -CurrentCodeValidator $cloneHealthy
     Assert-True (-not $failed.Validated -and -not $failed.Applied) 'A failed clone upgrade must not be applied.'
     Assert-True ($steps -notcontains 'upgrade:real') 'A failed clone upgrade must leave the real database untouched.'
     Assert-True (($steps | Where-Object { $_ -like 'cleanup:*' }).Count -eq 1) 'The disposable copy is cleaned up even when validation fails.'
@@ -184,7 +201,7 @@ try {
     $steps.Clear()
     $cloneNotCurrent = { param($ConnectionString) $steps.Add('analyze:clone'); [pscustomobject]@{ Status = 'upgrade-required'; Analysis = $null; ExitCode = 10; Detail = '' } }.GetNewClosure()
     $notCurrent = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -BackupRunner $backup -RestoreRunner $restore `
-        -UpgradeRunner $upgradeRunner -AnalysisRunner $cloneNotCurrent -CleanupRunner $cleanup
+        -UpgradeRunner $upgradeRunner -AnalysisRunner $cloneNotCurrent -CleanupRunner $cleanup -CurrentCodeValidator $cloneHealthy
     Assert-True (-not $notCurrent.Applied) 'A clone that is not current after upgrading must not authorize the real upgrade.'
     Assert-True ($steps -notcontains 'upgrade:real') 'A clone that is not current must leave the real database untouched.'
 
@@ -192,14 +209,14 @@ try {
     $steps.Clear()
     $failingRestore = { param($Archive, $Database) $steps.Add('restore:failed'); $false }.GetNewClosure()
     $restoreFailed = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -BackupRunner $backup -RestoreRunner $failingRestore `
-        -UpgradeRunner $upgradeRunner -AnalysisRunner $cloneCurrent -CleanupRunner $cleanup
+        -UpgradeRunner $upgradeRunner -AnalysisRunner $cloneCurrent -CleanupRunner $cleanup -CurrentCodeValidator $cloneHealthy
     Assert-True (-not $restoreFailed.Applied) 'A failed isolated restore must not authorize an upgrade.'
     Assert-True ($steps -notcontains 'upgrade:clone' -and $steps -notcontains 'upgrade:real') 'A failed restore must upgrade nothing at all.'
 
     # --- 10. No verified backup: refuse before anything else happens ---
     $steps.Clear()
     $noBackup = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -BackupRunner { $steps.Add('backup'); $null } `
-        -RestoreRunner $restore -UpgradeRunner $upgradeRunner -AnalysisRunner $cloneCurrent -CleanupRunner $cleanup
+        -RestoreRunner $restore -UpgradeRunner $upgradeRunner -AnalysisRunner $cloneCurrent -CleanupRunner $cleanup -CurrentCodeValidator $cloneHealthy
     Assert-True (-not $noBackup.Applied) 'Without a verified backup there is no recoverable point, so there is no upgrade.'
     Assert-True ($steps.Count -eq 1 -and $steps[0] -eq 'backup') 'A missing backup must stop the sequence immediately.'
 

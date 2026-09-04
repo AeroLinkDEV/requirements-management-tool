@@ -5,6 +5,11 @@ param(
     [int]$PostgresPort = 54329,
     [string]$BackupRoot,
     [string]$PostgresBin,
+    # The evidence tree belonging to -Database. Defaults to this installation's live evidence root, which is
+    # right for the persistent database and wrong for an isolated copy: a staging database restored under
+    # restore-validation has its own evidence tree, and archiving the live one beside it would produce an
+    # archive whose inventory and objects came from two different databases.
+    [string]$EvidenceRoot,
     [switch]$PostgresAlreadyRunning
 )
 
@@ -24,7 +29,7 @@ $pgDump = Join-Path $PostgresBin 'pg_dump.exe'
 $storageModule = Join-Path $PSScriptRoot 'AeroLinkEvidenceStore.psm1'
 Import-Module $storageModule -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1') -Force
-$evidence = Get-AeroLinkEvidenceRoot -ProductRoot $productRoot
+$evidence = if ($EvidenceRoot) { [IO.Path]::GetFullPath($EvidenceRoot) } else { Get-AeroLinkEvidenceRoot -ProductRoot $productRoot }
 
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
 if (-not $PostgresAlreadyRunning) {

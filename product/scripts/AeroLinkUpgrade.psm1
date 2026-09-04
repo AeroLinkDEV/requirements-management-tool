@@ -193,7 +193,10 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
         [scriptblock]$RestoreRunner,
         [scriptblock]$UpgradeRunner,
         [scriptblock]$AnalysisRunner,
-        [scriptblock]$CleanupRunner
+        [scriptblock]$CleanupRunner,
+        # Stands current AeroLink up against the UPGRADED clone and proves it works there.
+        [scriptblock]$CurrentCodeValidator,
+        [int]$ValidationApiPort = 5093
     )
     $installation = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot
     $token = [Guid]::NewGuid().ToString('N').Substring(0, 10)
@@ -214,8 +217,13 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
     $cleanedUp = $false
     try {
         Write-Host '      Restoring an isolated copy to validate the upgrade on...' -ForegroundColor Cyan
+        # -SkipCurrentCodeValidation: this copy is deliberately NOT current yet. The restore validator stands
+        # up current AeroLink read-only and refuses a database with pending migrations, which would make the
+        # "several migrations behind" case — the case this whole path exists for — fail before the upgrade
+        # was ever attempted. Archive integrity, inventory and evidence are still proved by the restore; what
+        # moves later is proving current code against the copy, which happens below once it IS current.
         $restored = if ($RestoreRunner) { & $RestoreRunner $archive $cloneDatabase } else {
-            & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive $archive -TargetDatabase $cloneDatabase -PostgresPort $PostgresPort | Out-Host
+            & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive $archive -TargetDatabase $cloneDatabase -PostgresPort $PostgresPort -SkipCurrentCodeValidation | Out-Host
             $true
         }
         if (-not $restored) {
@@ -243,7 +251,23 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
                 Detail = "The isolated copy is still not current after the upgrade ($($cloneAnalysis.Status)), so the real database was never touched and is unchanged."
             }
         }
-        Write-Host '      Isolated upgrade validated.' -ForegroundColor Green
+
+        # "The analyzer says current" is not the same as "current AeroLink works against it". #881 asks for
+        # readiness, authentication and storage/evidence invariants to be proved on the isolated copy before
+        # the real database is mutated, and the restore validator cannot stand in for that: it ran before the
+        # upgrade, against the un-migrated state.
+        Write-Host '      Proving current AeroLink against the upgraded copy...' -ForegroundColor Cyan
+        $cloneReadiness = if ($CurrentCodeValidator) { & $CurrentCodeValidator $cloneConnection } else {
+            Test-AeroLinkUpgradedCloneReadiness -ProductRoot $ProductRoot -ConnectionString $cloneConnection `
+                -DotnetPath $DotnetPath -ApiPort $ValidationApiPort
+        }
+        if (-not $cloneReadiness.Passed) {
+            return [pscustomobject]@{
+                Validated = $false; Applied = $false; Archive = $archive
+                Detail = "The upgraded copy did not pass current-code validation ($($cloneReadiness.Detail)), so the real database was never touched and is unchanged."
+            }
+        }
+        Write-Host "      Isolated upgrade validated: $($cloneReadiness.Detail)" -ForegroundColor Green
     }
     finally {
         # The disposable copy always goes, whether validation passed or failed. The persistent database is
@@ -272,6 +296,103 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
     return [pscustomobject]@{
         Validated = $true; Applied = $true; Archive = $archive
         Detail = "The upgrade was validated on an isolated copy and then applied. The pre-upgrade backup is retained at $archive."
+    }
+}
+
+function Test-AeroLinkUpgradedCloneReadiness {
+    <#
+        .SYNOPSIS Stands current AeroLink up against the upgraded isolated copy and proves it actually works.
+        .DESCRIPTION
+            The last gate before the real database is mutated. The analyzer reporting "current" says the
+            schema and the semantic markers line up; it does not say the application can serve anything on
+            top of them. #881 asks for readiness, authentication availability and storage/evidence
+            invariants on the isolated copy, and this is where that happens — after the clone is upgraded,
+            which is the only point at which current code is entitled to expect the current schema.
+
+            Bound to the clone: the connection string is the caller's isolated database, the port is a
+            validation port rather than 5080, and the process is stopped again whatever the outcome. It never
+            touches the persistent database, and it serves no client.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ProductRoot,
+        [Parameter(Mandatory)][string]$ConnectionString,
+        [string]$DotnetPath = 'dotnet',
+        [int]$ApiPort = 5093,
+        [int]$TimeoutSeconds = 300
+    )
+    $installation = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot
+    New-Item -ItemType Directory -Path $installation.Logs -Force | Out-Null
+    $project = Join-Path $ProductRoot 'src\AeroLink.Api\AeroLink.Api.csproj'
+    $baseUri = "http://127.0.0.1:$ApiPort"
+    $stdout = Join-Path $installation.Logs 'upgrade-validation.stdout.log'
+    $stderr = Join-Path $installation.Logs 'upgrade-validation.stderr.log'
+
+    $previousConnection = $env:ConnectionStrings__AeroLink
+    $previousEnvironment = $env:ASPNETCORE_ENVIRONMENT
+    $env:ConnectionStrings__AeroLink = $ConnectionString
+    if (-not $env:ASPNETCORE_ENVIRONMENT) { $env:ASPNETCORE_ENVIRONMENT = 'Development' }
+    $process = $null
+    try {
+        $process = Start-Process -FilePath $DotnetPath `
+            -ArgumentList "run --project `"$project`" --no-launch-profile --urls `"$baseUri`"" `
+            -WorkingDirectory $ProductRoot -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        $ready = $false
+        while ((Get-Date) -lt $deadline) {
+            if ($process.HasExited) { break }
+            try {
+                $health = Invoke-RestMethod -Uri "$baseUri/health/ready" -TimeoutSec 5 -UseBasicParsing
+                if ($health.status -eq 'ready' -and $health.database -eq 'connected') { $ready = $true; break }
+            }
+            catch { }
+            Start-Sleep -Seconds 3
+        }
+        if (-not $ready) {
+            $tail = if (Test-Path -LiteralPath $stderr) { (Get-Content -LiteralPath $stderr -Tail 8) -join ' ' } else { '' }
+            return [pscustomobject]@{ Passed = $false; Detail = "current AeroLink never became ready against the upgraded copy. $tail".Trim() }
+        }
+
+        # 401 is the expected answer to an unauthenticated caller, and it is the answer that proves the
+        # authentication path is wired rather than merely that the process is listening.
+        $authStatus = $null
+        try { $authStatus = [int](Invoke-WebRequest -Uri "$baseUri/api/auth/me" -UseBasicParsing -TimeoutSec 10).StatusCode }
+        catch {
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode) { $authStatus = [int]$_.Exception.Response.StatusCode }
+        }
+        if ($authStatus -notin 200, 401) {
+            return [pscustomobject]@{ Passed = $false; Detail = "the authentication endpoint answered $authStatus against the upgraded copy." }
+        }
+
+        # Controlled storage must still be coherent after the upgrade: every referenced attachment present,
+        # the right size and hash, and no half-finished storage operation.
+        Import-Module (Join-Path $PSScriptRoot 'AeroLinkEvidenceStore.psm1') -Force
+        $builder = New-Object System.Data.Common.DbConnectionStringBuilder
+        $builder.set_ConnectionString($ConnectionString)
+        $cloneDatabaseName = [string]$builder['Database']
+        $clonePort = if ($builder['Port']) { [int]$builder['Port'] } else { 54329 }
+        $psql = Join-Path $installation.PostgresBin 'psql.exe'
+        Assert-AeroLinkStorageLifecycleHealthy -Psql $psql -Database $cloneDatabaseName -Port $clonePort
+        $inventory = @(Get-AeroLinkAttachmentInventory -Psql $psql -Database $cloneDatabaseName -Port $clonePort)
+        $evidenceRoot = Join-Path $installation.RestoreValidation "$cloneDatabaseName\evidence"
+        if ($inventory.Count -gt 0) {
+            [void](Test-AeroLinkAttachmentInventory -Inventory $inventory -EvidenceRoot $evidenceRoot)
+        }
+
+        return [pscustomobject]@{
+            Passed = $true
+            Detail = "ready, authentication answering, $($inventory.Count) controlled attachment(s) verified against the upgraded copy."
+        }
+    }
+    catch {
+        return [pscustomobject]@{ Passed = $false; Detail = $_.Exception.Message }
+    }
+    finally {
+        if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+        $env:ConnectionStrings__AeroLink = $previousConnection
+        $env:ASPNETCORE_ENVIRONMENT = $previousEnvironment
     }
 }
 
@@ -326,6 +447,7 @@ function Remove-AeroLinkSnapshotStagingDatabase {
 Export-ModuleMember -Function @(
     'Invoke-AeroLinkMaintenanceCommand',
     'Remove-AeroLinkSnapshotStagingDatabase',
+    'Test-AeroLinkUpgradedCloneReadiness',
     'Get-AeroLinkUpgradeAnalysis',
     'Write-AeroLinkUpgradeConflictReport',
     'Invoke-AeroLinkCloneValidatedUpgrade',

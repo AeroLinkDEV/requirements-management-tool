@@ -183,6 +183,23 @@ public static class AeroLinkMaintenanceHost
         var db = services.GetRequiredService<AeroLinkDbContext>();
         Console.WriteLine($"Applying {before.PendingEfMigrations.Count} schema migration(s) to {before.DatabaseName}...");
         await db.Database.MigrateAsync();
+
+        // The phase boundary. Before the schema moved, the semantic markers lived in tables that may not
+        // have existed, so the analysis above reported the semantic posture as unknown rather than clean.
+        // Now it is knowable — and a controlled-data ambiguity that only becomes readable at this point must
+        // be reported as a structured conflict with its supported decisions, exactly as it would have been
+        // on a database that was already migrated. Running the authorities first would surface the same
+        // ambiguity as an exception and a stack tail, which is the operator experience #881 exists to end.
+        var afterSchema = await analyzer.AnalyzeAsync();
+        if (afterSchema.Conflicts.Count > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("The schema upgrade completed. The semantic posture is now readable, and it needs a decision:");
+            Console.WriteLine();
+            foreach (var line in AeroLinkUpgradeAnalyzer.Render(afterSchema)) Console.WriteLine(line);
+            return 20;
+        }
+
         Console.WriteLine("Applying semantic upgrades...");
         await services.GetRequiredService<SoftwareVerificationCaseMigrationAuthority>().EnsureCompletedAsync();
         await services.GetRequiredService<ProjectLeadershipMigrationAuthority>().EnsureCompletedAsync();

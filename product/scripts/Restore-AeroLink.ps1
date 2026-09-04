@@ -7,6 +7,18 @@ param(
     [string]$PostgresBin,
     [int]$ValidationApiPort = 5091,
     [switch]$DisposableQualification,
+    # Restore the archive's own state and validate the archive itself, but do NOT stand up current AeroLink
+    # against the result.
+    #
+    # The read-only validation host refuses a database with pending migrations ("The restored database schema
+    # does not match this AeroLink validation build"), which is correct when the restore is the end of the
+    # story. It is circular when the restore exists so that current code can then MIGRATE the copy: a laptop
+    # several migrations behind could never reach its upgrade, because the restore setting it up demanded the
+    # schema the upgrade was going to produce. Callers that migrate the clone afterwards pass this and run the
+    # current-code validation themselves, once the copy is genuinely current.
+    #
+    # Ignored for a production restore, which always validates.
+    [switch]$SkipCurrentCodeValidation,
     [switch]$AllowProductionRestore,
     [string]$Confirmation,
     [ValidateSet('','BeforeDatabaseRestore','AfterDatabaseRestore','AfterEvidenceCopy','AfterPreActivationValidation','AfterOriginalDatabaseRename','AfterDatabaseActivation','AfterEvidenceActivation','AfterActivationValidation','BeforeRestart','AfterRestart')]
@@ -116,14 +128,18 @@ try {
     if (Test-Path -LiteralPath $evidenceSource) { Copy-AeroLinkEvidenceTree -Source $evidenceSource -Destination $incoming }
     [void](Test-AeroLinkAttachmentInventory -Inventory $restoredInventory -EvidenceRoot $incoming)
     Invoke-Fault 'AfterEvidenceCopy'
-    $preActivationDownloads = Test-RestoredApi $restoreDatabase $incoming $restoredInventory $ValidationApiPort
+    # Archive integrity, inventory and evidence have all been proved above regardless. What is deferred is
+    # only standing up CURRENT code against a copy that is deliberately not current yet.
+    $deferCurrentCode = $SkipCurrentCodeValidation -and -not $production
+    $deferredResult = [pscustomobject]@{ Passed = $true; ManagedDocumentDownloads = 0; DownloadedBytes = 0; CurrentCodeValidationDeferred = $true }
+    $preActivationDownloads = if ($deferCurrentCode) { $deferredResult } else { Test-RestoredApi $restoreDatabase $incoming $restoredInventory $ValidationApiPort }
     Invoke-Fault 'AfterPreActivationValidation'
 
     if (-not $production) {
         if (Test-Path -LiteralPath $resolvedTarget) { Remove-Item -LiteralPath $resolvedTarget -Recurse -Force }
         Move-Item -LiteralPath $incoming -Destination $resolvedTarget; $incoming = $null
         [void](Test-AeroLinkAttachmentInventory -Inventory $restoredInventory -EvidenceRoot $resolvedTarget)
-        $finalDownloads = Test-RestoredApi $restoreDatabase $resolvedTarget $restoredInventory ($ValidationApiPort + 1)
+        $finalDownloads = if ($deferCurrentCode) { $deferredResult } else { Test-RestoredApi $restoreDatabase $resolvedTarget $restoredInventory ($ValidationApiPort + 1) }
         $activationPassed = $true
     }
     else {

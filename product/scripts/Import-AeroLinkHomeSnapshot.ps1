@@ -103,9 +103,15 @@ Write-Host "      Laptop backup retained: $laptopBackup" -ForegroundColor Green
 $token = [Guid]::NewGuid().ToString('N').Substring(0, 10)
 $stagingDatabase = "aerolink_snapshot_validation_$token"
 $stagingConnection = "Host=127.0.0.1;Port=$PostgresPort;Database=$stagingDatabase;Username=postgres"
+$stagingEvidence = Join-Path $installation.RestoreValidation "$stagingDatabase\evidence"
+$validatedArchive = $null
 try {
     Write-Host '[3/6] Restoring the snapshot to an isolated staging copy...' -ForegroundColor Cyan
-    & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive $SnapshotArchive -TargetDatabase $stagingDatabase -PostgresPort $PostgresPort | Out-Host
+    # -SkipCurrentCodeValidation: the incoming snapshot may be several migrations behind, which is the whole
+    # reason it is being staged and upgraded. The restore validator stands up current AeroLink and refuses a
+    # database with pending migrations, so validating here would fail the case this path exists to serve.
+    # Current code is proved against the staging copy below, once the upgrade has made it current.
+    & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive $SnapshotArchive -TargetDatabase $stagingDatabase -PostgresPort $PostgresPort -SkipCurrentCodeValidation | Out-Host
 
     Write-Host '[4/6] Upgrading the staging copy with this build...' -ForegroundColor Cyan
     $stagingUpgrade = Invoke-AeroLinkMaintenanceCommand -ProductRoot $productRoot -Arguments @('maintenance', 'upgrade', '--apply') -ConnectionString $stagingConnection
@@ -113,7 +119,7 @@ try {
         throw "The snapshot could not be upgraded by this build, so it was NOT activated and this laptop's database is unchanged. $($stagingUpgrade.StdOut)"
     }
 
-    Write-Host '[5/6] Proving the staging copy is current...' -ForegroundColor Cyan
+    Write-Host '[5/6] Proving the staging copy is current and serviceable...' -ForegroundColor Cyan
     $stagingAnalysis = Get-AeroLinkUpgradeAnalysis -ProductRoot $productRoot -ConnectionString $stagingConnection
     if ($stagingAnalysis.Status -ne 'current') {
         if ($stagingAnalysis.Analysis -and @($stagingAnalysis.Analysis.conflicts).Count -gt 0) {
@@ -121,18 +127,41 @@ try {
         }
         throw "The staged snapshot is not current under this build ($($stagingAnalysis.Status)), so it was NOT activated and this laptop's database is unchanged."
     }
-    Write-Host '      Staging copy validated.' -ForegroundColor Green
+    $stagingReadiness = Test-AeroLinkUpgradedCloneReadiness -ProductRoot $productRoot -ConnectionString $stagingConnection -ApiPort 5094
+    if (-not $stagingReadiness.Passed) {
+        throw "The staged snapshot did not pass current-code validation ($($stagingReadiness.Detail)), so it was NOT activated and this laptop's database is unchanged."
+    }
+    Write-Host "      Staging copy validated: $($stagingReadiness.Detail)" -ForegroundColor Green
+
+    # Capture the state that was just proved, and activate THAT.
+    #
+    # Activating $SnapshotArchive would restore the original incoming bytes — the pre-upgrade state — so the
+    # database that ends up live is not the one that passed validation, and for an older snapshot it would be
+    # left for ordinary startup to repair. #881 requires the incoming snapshot to be verified, restored,
+    # upgraded and readiness-tested BEFORE activation; that only means anything if the activated state is the
+    # validated state. The archive is taken from the staging database and its own staging evidence tree.
+    Write-Host '      Capturing the validated state as a verified archive...' -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -Database $stagingDatabase -PostgresPort $PostgresPort `
+        -EvidenceRoot $stagingEvidence -BackupRoot $installation.SnapshotInbox -RetentionDays 0 -PostgresAlreadyRunning | Out-Host
+    $validatedArchive = (Get-ChildItem -LiteralPath $installation.SnapshotInbox -Filter 'aerolink-*.zip' -File |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+    if (-not $validatedArchive) {
+        throw "The validated staging state could not be captured as an archive, so nothing was activated and this laptop's database is unchanged."
+    }
+    Write-Host "      Validated state captured: $validatedArchive" -ForegroundColor Green
 }
 finally {
     try { Remove-AeroLinkSnapshotStagingDatabase -ProductRoot $productRoot -Database $stagingDatabase -PostgresPort $PostgresPort }
     catch { Write-Host "      The staging copy could not be removed: $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
-Write-Host '[6/6] Activating the snapshot on this laptop...' -ForegroundColor Cyan
+Write-Host '[6/6] Activating the validated snapshot on this laptop...' -ForegroundColor Cyan
 # Activation goes through the supported production restore, which stops AeroLink, keeps the previous
 # database under a retained name, validates the activated pair, and rolls back on failure. Reimplementing
 # any of that here would be a second, untested activation path for controlled data.
-& (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive $SnapshotArchive -TargetDatabase 'aerolink' `
+#
+# The archive activated is the one captured from the validated staging state, not the incoming snapshot.
+& (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive $validatedArchive -TargetDatabase 'aerolink' `
     -PostgresPort $PostgresPort -AllowProductionRestore -Confirmation 'RESTORE-AEROLINK' | Out-Host
 
 Set-AeroLinkInstanceConfig -ProductRoot $productRoot -Snapshot @{
