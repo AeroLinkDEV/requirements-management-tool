@@ -177,6 +177,11 @@ switch ($Action) {
         # the source root and cleared on read, so it is one-shot and local.
         $stoppedTheRuntime = ($env:AEROLINK_RUNTIME_OWED -eq $config.SourceRoot)
         $env:AEROLINK_RUNTIME_OWED = $null
+        # Did the update already happen, in the process that handed off to us? Our own inspection will say
+        # AlreadyCurrent and be right, and without this the continuation reported the update as not having
+        # happened - and exited 1 - immediately after completing it.
+        $sourceAlreadyAdvanced = ($env:AEROLINK_SOURCE_ALREADY_ADVANCED -eq $config.SourceRoot)
+        $env:AEROLINK_SOURCE_ALREADY_ADVANCED = $null
         if ($inspect.Canonical -and $inspect.Action -eq 'UpdateAvailable') {
             Write-Host "      Stopping the production runtime before advancing to $($inspect.TargetSha)..." -ForegroundColor Yellow
             $apiDirectory = Join-Path $config.SourceRoot 'product\src\AeroLink.Api'
@@ -218,18 +223,40 @@ switch ($Action) {
             Write-Host 'The source advanced; completing the update from the new revision...' -ForegroundColor Cyan
             $previousHandoff = $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF
             $previousOwed = $env:AEROLINK_RUNTIME_OWED
+            $previousAdvanced = $env:AEROLINK_SOURCE_ALREADY_ADVANCED
+            $childExit = 1
             try {
                 $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF = $config.SourceRoot
                 # The obligation crosses the process boundary: the child must know a runtime was taken down,
                 # or the transition ends with production stopped and nothing owning the duty to restart it.
                 if ($stoppedTheRuntime) { $env:AEROLINK_RUNTIME_OWED = $config.SourceRoot }
+                # And it must know the update ALREADY HAPPENED, in this parent. Its own inspection will see
+                # AlreadyCurrent - correctly - and without this it reported "THE SOURCE UPDATE DID NOT HAPPEN"
+                # and exited 1 after successfully completing the very update it was continuing.
+                $env:AEROLINK_SOURCE_ALREADY_ADVANCED = $config.SourceRoot
                 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updatedScript -Action Update
-                exit $LASTEXITCODE
+                $childExit = $LASTEXITCODE
             }
             finally {
                 $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF = $previousHandoff
                 $env:AEROLINK_RUNTIME_OWED = $previousOwed
+                $env:AEROLINK_SOURCE_ALREADY_ADVANCED = $previousAdvanced
             }
+
+            # The obligation is retained until the child positively discharges it. Exiting on the child's
+            # status meant a child that failed before restarting left the source current, the runtime down,
+            # and nobody owning the duty to bring it back - and a later pass would see nothing to do.
+            if ($childExit -ne 0 -and $stoppedTheRuntime) {
+                Write-Host 'THE UPDATE COMPLETED BUT THE CONTINUATION DID NOT' -ForegroundColor Yellow
+                Write-Host 'The source was advanced. Restoring the production runtime that was stopped for it...' -ForegroundColor Yellow
+                $onDisk = Get-AeroLinkProductionSourcePosture -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName
+                if (-not $onDisk.Canonical) {
+                    throw "The source was advanced but the continuation failed, and the revision on disk is not canonical: $($onDisk.Reason) The production runtime is NOT running."
+                }
+                & (Join-Path $config.SourceRoot 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser
+                Write-Host "Production was restored on main @ $($onDisk.Posture.ShortSha), but the update's continuation reported failure." -ForegroundColor Yellow
+            }
+            exit $childExit
         }
 
         # Restore exactly what was running, and only what was running.
@@ -239,8 +266,13 @@ switch ($Action) {
         # and telling the operator to go and start it again by hand is not that. A runtime that was NOT up
         # must not be created: an update command that leaves a production API listening because it was invoked
         # is a surprise, not a service.
+        # The operation as a whole succeeded if the source advanced HERE or in the process that handed off to
+        # us. Reporting only on this process's own inspection made a continuation announce "the update did not
+        # happen" and exit 1 straight after completing the update it existed to finish - which outer
+        # automation would read as a failed update that in fact succeeded.
+        $updateHappened = ($result.Action -eq 'Updated') -or $sourceAlreadyAdvanced
         if ($stoppedTheRuntime) {
-            if ($result.Action -ne 'Updated') {
+            if (-not $updateHappened) {
                 Write-Host 'THE SOURCE UPDATE DID NOT HAPPEN' -ForegroundColor Yellow
                 Write-Host $result.Reason -ForegroundColor Yellow
             }
@@ -250,12 +282,13 @@ switch ($Action) {
             }
             Write-Host "Restarting production on main @ $($onDisk.Posture.ShortSha)..." -ForegroundColor Cyan
             & (Join-Path $config.SourceRoot 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser
-            exit ($(if ($result.Action -eq 'Updated') { 0 } else { 1 }))
+            if ($updateHappened) { Write-Host 'The production source update is complete and production is running on it.' -ForegroundColor Green }
+            exit ($(if ($updateHappened) { 0 } else { 1 }))
         }
-        if ($result.Action -eq 'Updated') {
+        if ($updateHappened) {
             Write-Host 'The production source was advanced. Nothing was running here, so nothing was started.' -ForegroundColor Green
             Write-Host 'Start it with START_AEROLINK_PRODUCTION.bat when you want it.' -ForegroundColor DarkGray
         }
-        exit ($(if ($result.Canonical) { 0 } else { 1 }))
+        exit ($(if ($updateHappened -or $result.Canonical) { 0 } else { 1 }))
     }
 }

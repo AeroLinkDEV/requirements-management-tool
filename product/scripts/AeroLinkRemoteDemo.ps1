@@ -15,7 +15,12 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Start', 'Stop', 'Status', 'Configure', 'Reconcile')]
+    # Continue is not an operator action. It is the continuation half of a source transition: a process that
+    # advanced the source hands the rest of the work to a fresh one running the UPDATED code, along with the
+    # exact topology it took down and the policy that governs putting it back. Handing off to Start instead
+    # meant the child could only guess, and its guess was "start the whole demo" - which republished a tunnel
+    # an operator had deliberately stopped.
+    [ValidateSet('Start', 'Stop', 'Status', 'Configure', 'Reconcile', 'Continue')]
     [string]$Action,
     [ValidateSet('Preview', 'Install', 'Status', 'Remove')]
     [string]$ConfigureAction = 'Preview',
@@ -71,6 +76,28 @@ switch ($Action) {
         $config = Get-AeroLinkRemoteDemoConfig
         Stop-AeroLinkRemoteDemo -Config $config -IncludeLocalStack:$IncludeLocalStack
         exit 0
+    }
+    'Continue' {
+        $config = Get-AeroLinkRemoteDemoConfig
+        $continuation = Get-AeroLinkTransitionContinuation -SourceRoot $config.AeroLinkRoot
+        if (-not $continuation) {
+            Write-Host 'AEROLINK TRANSITION CONTINUATION NOT FOUND' -ForegroundColor Red
+            Write-Host 'This action only runs as the continuation of a source transition, and none was handed to it.'
+            Write-Host 'Nothing was started. Use Start if you want the protected remote demo.'
+            exit 1
+        }
+        try {
+            $restored = Restore-AeroLinkServiceTopology -Config $config -Topology $continuation.Topology `
+                -KeepReady:$continuation.KeepReady -Scheduled:$Scheduled -Run (New-AeroLinkRemoteDemoRun -Scheduled:$Scheduled)
+            Write-Host 'AEROLINK TRANSITION CONTINUED'
+            Write-Host $restored.Detail
+            exit 0
+        }
+        catch {
+            Write-Host 'AEROLINK TRANSITION CONTINUATION FAILED' -ForegroundColor Red
+            Write-Host $_.Exception.Message
+            exit 1
+        }
     }
     'Reconcile' {
         # Bounded polling: advance the dedicated production source, and restart production into it only when

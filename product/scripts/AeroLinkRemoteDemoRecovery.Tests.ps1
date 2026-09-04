@@ -301,20 +301,22 @@ $quiet = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceIn
 Assert-True (-not $quiet.Restarted) 'Scenario 14: reconciliation must do nothing when origin/main has not moved and the demo is up.'
 Assert-True (($script:order -join ',') -eq 'inspect') 'Scenario 14: a quiet pass must not stop, advance, or restart anything.'
 
-# "Source current" is not "service up". A transition that failed after teardown - a handoff whose child could
-# not start, most obviously - leaves the source current and the demo down, and a recovery timer that returns
-# on AlreadyCurrent agrees forever that there is nothing to do. Under the keep-ready policy an absent demo is
-# a thing to fix; under an operator update it is still not a thing to create.
+# An explicit STOP stays stopped. This is a bounded SOURCE reconciler, not a desired-state controller.
+#
+# I had this wrong in the previous round: I made a current source with the demo down "heal" itself, which
+# meant STOP_AEROLINK_REMOTE_DEMO.bat - a supported operator command - was silently undone within thirty
+# minutes, republishing a public endpoint nobody asked to reopen. Nothing persists a desired-up state, and
+# this task's own documentation says it does nothing when origin/main has not moved. The problem that reached
+# for is solved where it happens instead: a transition whose handoff fails recovers in that same pass.
 $script:order = @()
 $demoIsDown = { param($C) [pscustomobject]@{ TunnelRunning = $false; RuntimeRunning = $false } }
-$healed = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $noMovement -ServiceStateProbe $demoIsDown -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
-Assert-True ($healed.Restarted) 'Scenario 14: a current source with the demo DOWN must be recovered, not reported as nothing to do.'
-Assert-True (($script:order -join ',') -eq 'inspect,restart') 'Scenario 14: recovery starts the demo without stopping or advancing anything.'
-Assert-True ($healed.Detail -match 'was not running and was recovered') 'Scenario 14: the operator must be told the demo was recovered rather than updated.'
+$afterExplicitStop = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $noMovement -ServiceStateProbe $demoIsDown -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
+Assert-True (-not $afterExplicitStop.Restarted) 'Scenario 14: a demo an operator stopped must stay stopped when origin/main has not moved.'
+Assert-True (($script:order -join ',') -eq 'inspect') 'Scenario 14: the source reconciler must not become an always-on desired-state controller.'
 
 $script:order = @()
 $notHealed = Invoke-AeroLinkProductionSourceReconciliation -Config $config -PreserveServiceState -SourceInspector $noMovement -ServiceStateProbe $demoIsDown -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
-Assert-True (-not $notHealed.Restarted) 'Scenario 14: an operator update must not create a demo that was not running.'
+Assert-True (-not $notHealed.Restarted) 'Scenario 14: an operator update must not create a demo that was not running either.'
 Assert-True (($script:order -join ',') -eq 'inspect') 'Scenario 14: preserve-state means preserve, including preserving "nothing".'
 
 # The ordering IS the safety property. Advancing the working tree first would rewrite the assemblies,
@@ -451,6 +453,42 @@ $restoredDemo = Invoke-AeroLinkProductionSourceReconciliation -Config $config -P
     -ServiceStateProbe $tunnelWasUp -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
 Assert-True ($restoredDemo.Restarted) 'Scenario 14d: a tunnel that was running before the update is restored.'
 Assert-True ($script:order -contains 'restart') 'Scenario 14d: the restart happens for a demo that was up.'
+
+# --- 14e. The continuation carries the policy and the topology across the process boundary ---
+#
+# The handoff used to launch the updated script with `-Action Start` and nothing else, so the child could only
+# guess what to put back - and its guess was "the whole demo". An operator update run while the tunnel was
+# deliberately stopped therefore republished it, defeating -PreserveServiceState at the one boundary the
+# policy had to survive.
+$continuationJson = $null
+$previousContinuation = $env:AEROLINK_TRANSITION_CONTINUATION
+try {
+    $env:AEROLINK_TRANSITION_CONTINUATION = (@{ sourceRoot = $config.AeroLinkRoot; keepReady = $false; priorTunnel = $false; priorRuntime = $true } | ConvertTo-Json -Compress)
+    $continuationJson = Get-AeroLinkTransitionContinuation -SourceRoot $config.AeroLinkRoot
+}
+finally { $env:AEROLINK_TRANSITION_CONTINUATION = $previousContinuation }
+Assert-True ($null -ne $continuationJson) 'Scenario 14e: a continuation handed to this source root must be readable.'
+Assert-True (-not $continuationJson.KeepReady) 'Scenario 14e: the preserve-state policy must survive the process boundary.'
+Assert-True (-not $continuationJson.Topology.TunnelRunning -and $continuationJson.Topology.RuntimeRunning) `
+    'Scenario 14e: the exact prior topology must survive it too - runtime yes, tunnel no.'
+Assert-True ($null -eq $env:AEROLINK_TRANSITION_CONTINUATION) 'Scenario 14e: the continuation is one-shot and cleared as it is read.'
+
+# A continuation addressed to another checkout is not ours to act on.
+$previousContinuation = $env:AEROLINK_TRANSITION_CONTINUATION
+try {
+    $env:AEROLINK_TRANSITION_CONTINUATION = (@{ sourceRoot = 'C:\Some\Other\Checkout'; keepReady = $true; priorTunnel = $true; priorRuntime = $true } | ConvertTo-Json -Compress)
+    Assert-True ($null -eq (Get-AeroLinkTransitionContinuation -SourceRoot $config.AeroLinkRoot)) `
+        'Scenario 14e: a continuation bound to another source root must not be consumed here.'
+}
+finally { $env:AEROLINK_TRANSITION_CONTINUATION = $previousContinuation }
+
+# And the discharge itself honours it: preserve-state with no prior tunnel must never start one.
+$script:order = @()
+$startedTunnel = $false
+$restoreProbe = { param($C) $script:order += 'restore-called'; $script:startedTunnel = $true }
+$runtimeOnly = [pscustomobject]@{ TunnelRunning = $false; RuntimeRunning = $false }
+$nothing = Restore-AeroLinkServiceTopology -Config $config -Topology $runtimeOnly
+Assert-True ($nothing.Detail -match 'nothing was started') 'Scenario 14e: preserve-state discharge with nothing running must start nothing.'
 
 
 # --- 15. Ngrok is never started in front of a runtime that is not the verified production source ---

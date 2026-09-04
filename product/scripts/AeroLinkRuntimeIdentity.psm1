@@ -209,10 +209,25 @@ function Get-AeroLinkPortOwner {
         .DESCRIPTION
             Ambiguity fails closed: more than one listener means ownership cannot be attributed, and nothing
             is stopped on a guess.
+
+            So does an unreadable connection table. `-ErrorAction SilentlyContinue` turned a denied or
+            unavailable TCP enumeration into an empty result, which every caller then read as "the port is
+            free" - so a source transition could rewrite a working tree while an old production API was still
+            executing out of it, and topology could conclude "nothing was running" about a machine it had
+            simply failed to look at. Not knowing is not the same as nothing, and it is the one answer that
+            must stop a transition rather than let it proceed.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][int]$Port)
-    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    try { $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop) }
+    catch [Microsoft.PowerShell.Cmdletization.Cim.CimJobException] {
+        # The documented "no matching connections" shape. An empty result IS the answer here, not a failure.
+        $listeners = @()
+    }
+    catch {
+        if ($_.Exception.Message -match '(?i)no matching|cannot find|not found') { $listeners = @() }
+        else { throw "AeroLink could not read the TCP connection table to determine what is listening on port ${Port}: $($_.Exception.Message). Nothing was concluded and nothing was stopped - an unreadable port table means unknown, never free." }
+    }
     if ($listeners.Count -eq 0) {
         return [pscustomobject]@{ Found = $false; Ambiguous = $false; Attributable = $false; ProcessId = $null; CommandLine = $null; ExecutablePath = $null; Detail = "Nothing is listening on port $Port." }
     }

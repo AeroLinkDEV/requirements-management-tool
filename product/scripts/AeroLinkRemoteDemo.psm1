@@ -898,7 +898,22 @@ function Start-AeroLinkRemoteDemo {
                         # The source generation changed, and this module is the old one. Everything after this
                         # point - readiness, identity, the tunnel, the 401 proof - must run from the updated
                         # entry point rather than from functions loaded before the advance.
-                        Invoke-AeroLinkRemoteDemoHandoff -Config $Config -Scheduled:$Scheduled -Run $run | Out-Null
+                        #
+                        # Handled HERE rather than by the outer catch, and deliberately. Once the advance has
+                        # succeeded, a failure must not fall back into this module: the outer catch would
+                        # report "the source was not advanced", which is untrue, and then resume the rest of
+                        # the start path in pre-advance code - the exact generation the handoff prevents.
+                        try {
+                            Invoke-AeroLinkRemoteDemoHandoff -Config $Config -Scheduled:$Scheduled -Run $run -Topology $priorTopology | Out-Null
+                        }
+                        catch {
+                            $handoffFailure = $_.Exception.Message
+                            Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The post-advance handoff failed: $handoffFailure. Recovering the prior topology from a fresh process on the current source."
+                            try { Invoke-AeroLinkRemoteDemoHandoff -Config $Config -Scheduled:$Scheduled -Run $run -Topology $priorTopology | Out-Null }
+                            catch {
+                                throw "The production source WAS advanced to $($advanced.HeadSha), but the updated code could not complete the start ($handoffFailure) and the prior service topology could not be recovered either: $($_.Exception.Message). The source is current; the service is not running."
+                            }
+                        }
                         return [pscustomobject]@{
                             Ready = $true; Action = 'HandedOff'
                             Detail = "The production source was advanced to $($advanced.HeadSha) and the transition was completed by a fresh process running the updated source."
@@ -1578,24 +1593,65 @@ function Invoke-AeroLinkRemoteDemoHandoff {
     param(
         [Parameter(Mandatory)]$Config,
         [switch]$Scheduled,
-        $Run
+        $Run,
+        # The prior topology and the policy the child must discharge. Without these the child could only guess,
+        # and its guess was "start the whole demo" - so an operator update that ran while the tunnel was
+        # deliberately stopped republished it, defeating -PreserveServiceState across the process boundary.
+        $Topology,
+        [switch]$PreserveServiceState
     )
     $script = Join-Path $Config.AeroLinkRoot 'product\scripts\AeroLinkRemoteDemo.ps1'
     if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
         throw "The updated source has no remote-demo entry point at $script, so the transition cannot be continued on the new revision."
     }
     if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message 'Handing the rest of the transition to a fresh process running the updated source.' }
-    $previous = $env:AEROLINK_REMOTE_DEMO_HANDOFF
+    $previousHandoff = $env:AEROLINK_REMOTE_DEMO_HANDOFF
+    $previousContinuation = $env:AEROLINK_TRANSITION_CONTINUATION
     try {
         $env:AEROLINK_REMOTE_DEMO_HANDOFF = $Config.AeroLinkRoot
-        $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script, '-Action', 'Start')
+        # The continuation contract: source root, policy, and the exact topology to put back. Carried as one
+        # value so a partially-set environment cannot be read as a partially-true instruction, and bound to
+        # the source root so no other checkout's process can consume it.
+        $env:AEROLINK_TRANSITION_CONTINUATION = (@{
+                sourceRoot   = $Config.AeroLinkRoot
+                keepReady    = (-not $PreserveServiceState)
+                priorTunnel  = [bool]($Topology -and $Topology.TunnelRunning)
+                priorRuntime = [bool]($Topology -and $Topology.RuntimeRunning)
+            } | ConvertTo-Json -Compress)
+        $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script, '-Action', 'Continue')
         if ($Scheduled) { $arguments += '-Scheduled' }
         & powershell.exe @arguments
         $code = $LASTEXITCODE
     }
-    finally { $env:AEROLINK_REMOTE_DEMO_HANDOFF = $previous }
-    if ($code -ne 0) { throw "The updated source could not complete the remote-demo start (exit code $code)." }
+    finally {
+        $env:AEROLINK_REMOTE_DEMO_HANDOFF = $previousHandoff
+        $env:AEROLINK_TRANSITION_CONTINUATION = $previousContinuation
+    }
+    if ($code -ne 0) { throw "The updated source could not complete the transition (exit code $code)." }
     return [pscustomobject]@{ Detail = 'The transition was completed by a fresh process running the updated source.'; ExitCode = $code }
+}
+
+function Get-AeroLinkTransitionContinuation {
+    <#
+      .SYNOPSIS Reads and CONSUMES a continuation handed to this process by the one that advanced the source.
+      .DESCRIPTION
+        One-shot: cleared as it is read, and bound to a source root so a value left in an environment cannot
+        be picked up by an unrelated launcher. Returns $null when there is nothing to continue.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$SourceRoot)
+    $raw = $env:AEROLINK_TRANSITION_CONTINUATION
+    $env:AEROLINK_TRANSITION_CONTINUATION = $null
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+    $parsed = $null
+    try { $parsed = $raw | ConvertFrom-Json }
+    catch { throw "A transition continuation was handed to this process but could not be read: $($_.Exception.Message). Nothing was started; the prior service topology is unknown to this process." }
+    $handedRoot = [string]$parsed.sourceRoot
+    if ([IO.Path]::GetFullPath($handedRoot).TrimEnd('\', '/') -ne [IO.Path]::GetFullPath($SourceRoot).TrimEnd('\', '/')) { return $null }
+    return [pscustomobject]@{
+        KeepReady = [bool]$parsed.keepReady
+        Topology  = [pscustomobject]@{ TunnelRunning = [bool]$parsed.priorTunnel; RuntimeRunning = [bool]$parsed.priorRuntime }
+    }
 }
 
 function Invoke-AeroLinkProductionSourceReconciliation {
@@ -1652,24 +1708,18 @@ function Invoke-AeroLinkProductionSourceReconciliation {
     }
     Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production-source inspection: $($inspect.Action) - $($inspect.Reason)"
     if ((-not $inspect.Canonical) -or $inspect.Action -ne 'UpdateAvailable') {
-        # "Source current" is not the same as "service up", and the recovery timer must not confuse them.
+        # Deliberately does NOTHING when the source has not moved, including when the demo is down.
         #
-        # A transition that failed after teardown - a handoff whose child could not start, most obviously -
-        # leaves the source current and the demo down. Returning here on AlreadyCurrent meant every later pass
-        # agreed there was nothing to do, and the protected endpoint stayed dark until somebody noticed. Under
-        # the keep-ready policy this pass is a recovery, so an absent demo is a thing to fix, not a thing to
-        # report. Under -PreserveServiceState it is an operator update and must still create nothing.
-        if (-not $PreserveServiceState -and $inspect.Canonical) {
-            $topology = if ($ServiceStateProbe) { & $ServiceStateProbe $Config } else { Get-AeroLinkServiceTopology -Config $Config }
-            if (-not $topology.TunnelRunning) {
-                Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'The source is current but the protected demo is not running; recovering it.'
-                $healed = if ($Restarter) { & $Restarter $Config $inspect } else { Start-AeroLinkRemoteDemo -Config $Config -Scheduled:$Scheduled }
-                return [pscustomobject]@{
-                    Action = $inspect.Action; Restarted = $true; HeadSha = $inspect.HeadSha
-                    Detail = "The source needed no update, but the protected demo was not running and was recovered. $($healed.Detail)"
-                }
-            }
-        }
+        # I added an unconditional self-heal here in the previous round and it was wrong: this task is a
+        # bounded SOURCE reconciler, not a desired-state controller. `STOP_AEROLINK_REMOTE_DEMO.bat` is a
+        # supported operator command, nothing persists a desired-up state, and the task's own documentation
+        # says it does nothing when origin/main has not moved - so healing here meant an explicit STOP was
+        # silently undone within thirty minutes, republishing a public endpoint nobody had asked to reopen.
+        #
+        # The problem that self-heal was reaching for is real, and is solved where it happens instead: a
+        # transition whose handoff fails recovers the prior topology in that same pass, from a fresh process
+        # on the current source. It does not leave the repair to a later tick that cannot tell an operator's
+        # STOP from an incomplete transition.
         return [pscustomobject]@{ Action = $inspect.Action; Restarted = $false; HeadSha = $inspect.HeadSha; Detail = $inspect.Reason }
     }
 
@@ -1755,13 +1805,16 @@ function Invoke-AeroLinkProductionSourceReconciliation {
         # down and the source is already current - so a later pass would see AlreadyCurrent and do nothing,
         # leaving the demo dark indefinitely. Git is never rolled backward to compensate; the recovery is on
         # the verified CURRENT source, to the topology that was running before.
-        try { Invoke-AeroLinkRemoteDemoHandoff -Config $Config -Scheduled:$Scheduled -Run $run }
+        try { Invoke-AeroLinkRemoteDemoHandoff -Config $Config -Scheduled:$Scheduled -Run $run -Topology $priorState -PreserveServiceState:$PreserveServiceState }
         catch {
             $handoffFailure = $_.Exception.Message
-            Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The post-advance handoff failed: $handoffFailure. Recovering the prior topology on the current source."
-            try { Restore-AeroLinkServiceTopology -Config $Config -Topology $priorState -KeepReady:(-not $PreserveServiceState) -Scheduled:$Scheduled -Run $run }
+            Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The post-advance handoff failed: $handoffFailure. Recovering the prior topology on the current source, from a fresh process."
+            # Recovery runs from a FRESH process too. The source has already advanced, so this module is the
+            # pre-advance generation; recovering here in memory would be the exact stale control plane the
+            # handoff exists to prevent, reached through the failure path instead of the success path.
+            try { Invoke-AeroLinkRemoteDemoHandoff -Config $Config -Scheduled:$Scheduled -Run $run -Topology $priorState -PreserveServiceState:$PreserveServiceState }
             catch {
-                throw "The source was advanced to $($advance.HeadSha) but the updated code could not complete the transition ($handoffFailure), and the prior service topology could not be recovered either: $($_.Exception.Message)."
+                throw "The production source WAS advanced to $($advance.HeadSha), but the updated code could not complete the transition ($handoffFailure) and the prior service topology could not be recovered either: $($_.Exception.Message). The source is current; the service is not running."
             }
         }
     }
@@ -1989,6 +2042,7 @@ Export-ModuleMember -Function `
     Install-AeroLinkReconcileTask, `
     Invoke-AeroLinkProductionSourceReconciliation, `
     Invoke-AeroLinkRemoteDemoHandoff, `
+    Get-AeroLinkTransitionContinuation, `
     Save-AeroLinkRemoteDemoTaskXml, `
     Install-AeroLinkRemoteDemoTask, `
     Remove-AeroLinkRemoteDemoTask, `

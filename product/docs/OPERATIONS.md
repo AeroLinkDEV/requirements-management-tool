@@ -190,6 +190,13 @@ credentials are per-user), and neither carrying a secret:
   `AeroLinkRemoteDemo.ps1` rather than letting the version already in memory finish a transition whose
   subordinate scripts have just changed underneath it.
 
+  **The reconciler is a source reconciler, not a desired-state controller.** It does nothing when
+  `origin/main` has not moved — including when the demo is not running. `STOP_AEROLINK_REMOTE_DEMO.bat` is a
+  supported operator command and nothing persists a desired-up state, so a task that "healed" a stopped demo
+  would silently undo an explicit STOP within thirty minutes and republish a public endpoint nobody asked to
+  reopen. A transition whose continuation fails recovers in that same pass instead, from a fresh process on
+  the current source.
+
   **What a transition took down, it owes back.** The obligation is recorded the moment a teardown step
   succeeds — not when the whole teardown returns — because the failures that matter happen in between: a
   listener stop can throw after the tunnel is down, a second owned tunnel can fail to stop after the first
