@@ -1,6 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { ComponentType, FormEvent } from "react";
 import CommandPalette from "./CommandPalette";
+import { API_ORIGIN } from "./apiOrigin";
+import InstanceBadge from "./InstanceBadge";
 import { officialBuildName, verificationArtifactLevel, verificationArtifactRouteKey } from "./presentation";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
@@ -165,17 +167,9 @@ type Workspace = {
   }[];
 };
 /**
- * Where the API is.
- *
- * A production build defaults to the empty string, which makes every request relative and therefore
- * same-origin: the API process serves this bundle, so it is already the right host, whatever address the
- * workstation answers on. Baking one in would mean a build that only runs on the machine it was built for.
- *
- * `npm run dev` serves the client on its own port and has to be told where the API is, so the development
- * default points at the local one. `VITE_API_URL` overrides either, which is how the browser journeys aim at
- * their own isolated instance.
+ * Where the API is. The reasoning moved to apiOrigin.ts when the instance badge needed the same answer.
  */
-const API = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://127.0.0.1:5080" : "");
+const API = API_ORIGIN;
 
 function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, artifactKind, coverageReport, context, projectWide, density, ladder, onNavigate, onOpenCoverage, onSearch, onDisplay, onExitBuild, onSignOut }:{
   user:AuthUser;workspaces:Workspace[];activeId:string;selectedProjectId:string;selectedReleaseId:string;view:View;discipline:Discipline;context?:RouteContext;
@@ -234,7 +228,9 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
     ? "softwareTest" : hasSystemVerification ? "systemTest" : "softwareTest";
   return (
     <aside className="appNavigation">
-      <div className="brand"><span aria-hidden="true">▲</span><b>AeroLink</b></div>
+      {/* Which installation this is, on every screen inside a workspace. The records on the page belong to
+          one database, and there is more than one AeroLink. */}
+      <div className="brand"><span aria-hidden="true">▲</span><b>AeroLink</b><InstanceBadge/></div>
       <button className="quickSearch" onClick={onSearch}><span aria-hidden="true">⌕</span> Search &amp; navigate <kbd>Ctrl K</kbd></button>
       <div className="program">
         <small>ACTIVE CONTEXT</small>

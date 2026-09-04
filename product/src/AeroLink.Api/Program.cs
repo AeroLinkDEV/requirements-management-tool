@@ -41,6 +41,12 @@ using System.Net;
 // scope run *before* endpoint routing, which means they decide reachability from the path alone and cannot
 // see anything declared on an endpoint.
 
+// Maintenance mode, decided before anything else exists. #881: an operator with a database several weeks
+// behind must be able to ask "what needs to happen here?" and get the answer in seconds — not after a client
+// build, an API start and a readiness timeout that ends in a stack trace. No web server, no port, no worker.
+if (AeroLinkMaintenanceHost.IsMaintenanceInvocation(args))
+    return await AeroLinkMaintenanceHost.RunAsync(args);
+
 var builder = WebApplication.CreateBuilder(args);
 var restoreValidationReadOnly = builder.Configuration.GetValue<bool>("RestoreValidation:ReadOnly");
 var restoreValidationToken = builder.Configuration["RestoreValidation:Token"] ?? "";
@@ -335,7 +341,46 @@ app.Use(async (context, next) =>
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
 app.MapGet("/health/live", () => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
+// Who is listening, and what source is it running? Readiness cannot answer that, and #816 proved a launcher
+// needs the answer before it may reuse a healthy process. Non-secret by construction (RuntimeIdentity.cs).
+app.MapRuntimeIdentityEndpoint();
 app.MapGet("/health/ready", async (AeroLinkDbContext db,CancellationToken ct) => await db.Database.CanConnectAsync(ct)?Results.Ok(new{status="ready",service="AeroLink API",database="connected"}):Results.Json(new{status="not_ready",service="AeroLink API",database="unavailable"},statusCode:StatusCodes.Status503ServiceUnavailable));
+// Are the authentication routes this build is supposed to serve actually registered?
+//
+// #881 requires authentication endpoint availability to be proved on the isolated upgraded clone before the
+// real database is mutated, and that proof was not obtainable. The clone runs in restore-validation
+// read-only mode, whose middleware short-circuits every non-health route BEFORE endpoint routing - so an
+// absent or broken /api/auth/login answered exactly as a present one did, and the check proved the
+// middleware rather than the route. Standing up the ordinary mutating host over copied production data to
+// perform a real login would reintroduce seeders, startup mutation and outbound workers, which is a worse
+// trade than the gap.
+//
+// This reads the built EndpointDataSource: it reaches routing, invokes nothing, mutates nothing, and is
+// therefore safe inside the read-only boundary. It reports only route patterns and methods this build
+// declares - no data, no configuration, no identity.
+app.MapGet("/health/routes", (EndpointDataSource endpoints) =>
+{
+    // Path AND method. A path on its own is not the contract: if POST /api/auth/login became GET-only, every
+    // required path would still be declared, this would answer 200, and the clone gate would call
+    // authentication "available" while nobody could sign in. The methods come from HttpMethodMetadata, which
+    // is what routing itself matches on.
+    var required = new[] { "POST /api/auth/login", "GET /api/auth/me", "POST /api/auth/logout" };
+    var declared = endpoints.Endpoints.OfType<RouteEndpoint>()
+        .Select(x => new
+        {
+            Path = "/" + x.RoutePattern.RawText?.TrimStart('/'),
+            Methods = x.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? [],
+        })
+        .Where(x => x.Path.StartsWith("/api/auth/", StringComparison.OrdinalIgnoreCase))
+        .SelectMany(x => x.Methods.Select(m => $"{m.ToUpperInvariant()} {x.Path}"))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+    var missing = required.Where(x => !declared.Contains(x, StringComparer.OrdinalIgnoreCase)).ToArray();
+    return missing.Length == 0
+        ? Results.Ok(new { status = "present", required, declared })
+        : Results.Json(new { status = "missing", required, declared, missing }, statusCode: StatusCodes.Status503ServiceUnavailable);
+});
 // The API surface, one module per part of the lifecycle. Registration order does not decide which route
 // matches — routing resolves that by precedence — so these read in the order somebody meets the product:
 // sign in, find your work, propose a change, freeze it, verify it, release it, administer it.
@@ -377,6 +422,9 @@ app.MapAeroLinkReqIfEndpoints();
 app.MapProductLineConfigurationEndpoints();
 
 app.Run();
+// Top-level statements need one return type: maintenance mode above returns its own exit code, so the web
+// host's ordinary completion is an explicit success.
+return 0;
 
 public partial class Program { }
 

@@ -15,7 +15,12 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Start', 'Stop', 'Status', 'Configure')]
+    # Continue is not an operator action. It is the continuation half of a source transition: a process that
+    # advanced the source hands the rest of the work to a fresh one running the UPDATED code, along with the
+    # exact topology it took down and the policy that governs putting it back. Handing off to Start instead
+    # meant the child could only guess, and its guess was "start the whole demo" - which republished a tunnel
+    # an operator had deliberately stopped.
+    [ValidateSet('Start', 'Stop', 'Status', 'Configure', 'Reconcile', 'Continue')]
     [string]$Action,
     [ValidateSet('Preview', 'Install', 'Status', 'Remove')]
     [string]$ConfigureAction = 'Preview',
@@ -28,13 +33,25 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force
 
 $moduleRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $localDemoRoot = Join-Path $env:LOCALAPPDATA 'AeroLink\RemoteDemo'
-$configureConfig = [pscustomobject]@{
-    AeroLinkRoot = $moduleRoot
-    StatePath = Join-Path $localDemoRoot 'state'
-    LogsPath = Join-Path $localDemoRoot 'logs'
-    NgrokExecutable = ''
-    PublicUrl = ''
-    TrafficPolicyPath = ''
+
+# The task must be registered against the DEDICATED production source, not against whichever checkout this
+# script happens to have been started from. Before #881 this used $moduleRoot unconditionally, which is how
+# a recovery task installed from the development checkout came to invoke the development checkout's own
+# recovery script — the second half of the 2026-09-03 coupling, and the half a configured AeroLinkRoot alone
+# would not have fixed.
+$configureConfig = $null
+try { $configureConfig = Get-AeroLinkRemoteDemoConfig }
+catch {
+    $configureConfig = [pscustomobject]@{
+        AeroLinkRoot = $moduleRoot
+        ProductionSourceRoot = $null
+        ProductionSourceReason = "The remote-demo configuration could not be read: $($_.Exception.Message)"
+        StatePath = Join-Path $localDemoRoot 'state'
+        LogsPath = Join-Path $localDemoRoot 'logs'
+        NgrokExecutable = ''
+        PublicUrl = ''
+        TrafficPolicyPath = ''
+    }
 }
 
 switch ($Action) {
@@ -60,6 +77,44 @@ switch ($Action) {
         Stop-AeroLinkRemoteDemo -Config $config -IncludeLocalStack:$IncludeLocalStack
         exit 0
     }
+    'Continue' {
+        $config = Get-AeroLinkRemoteDemoConfig
+        $continuation = Get-AeroLinkTransitionContinuation -SourceRoot $config.AeroLinkRoot
+        if (-not $continuation) {
+            Write-Host 'AEROLINK TRANSITION CONTINUATION NOT FOUND' -ForegroundColor Red
+            Write-Host 'This action only runs as the continuation of a source transition, and none was handed to it.'
+            Write-Host 'Nothing was started. Use Start if you want the protected remote demo.'
+            exit 1
+        }
+        try {
+            $restored = Restore-AeroLinkServiceTopology -Config $config -Topology $continuation.Topology `
+                -KeepReady:$continuation.KeepReady -Scheduled:$Scheduled -Run (New-AeroLinkRemoteDemoRun -Scheduled:$Scheduled)
+            Write-Host 'AEROLINK TRANSITION CONTINUED'
+            Write-Host $restored.Detail
+            exit 0
+        }
+        catch {
+            Write-Host 'AEROLINK TRANSITION CONTINUATION FAILED' -ForegroundColor Red
+            Write-Host $_.Exception.Message
+            exit 1
+        }
+    }
+    'Reconcile' {
+        # Bounded polling: advance the dedicated production source, and restart production into it only when
+        # origin/main actually moved. A machine that stays up for weeks should not stay weeks behind.
+        $config = Get-AeroLinkRemoteDemoConfig
+        try {
+            $result = Invoke-AeroLinkProductionSourceReconciliation -Config $config -Scheduled:$Scheduled
+            Write-Host "AEROLINK PRODUCTION SOURCE $($result.Action.ToUpperInvariant())"
+            Write-Host $result.Detail
+            exit 0
+        }
+        catch {
+            Write-Host 'AEROLINK PRODUCTION SOURCE RECONCILIATION FAILED' -ForegroundColor Red
+            Write-Host $_.Exception.Message
+            exit 1
+        }
+    }
     'Status' {
         $config = Get-AeroLinkRemoteDemoConfig
         $status = Get-AeroLinkRemoteDemoStatus -Config $config
@@ -70,21 +125,33 @@ switch ($Action) {
     'Configure' {
         switch ($ConfigureAction) {
             'Preview' {
+                Write-Host "Production source: $($configureConfig.AeroLinkRoot)"
+                Write-Host "Resolution: $($configureConfig.ProductionSourceReason)"
+                Write-Host ''
                 Write-Host (Get-AeroLinkRemoteDemoTaskXml -Config $configureConfig)
                 exit 0
             }
             'Install' {
                 $task = Install-AeroLinkRemoteDemoTask -Config $configureConfig
                 $task | Format-List
-                Write-Host 'AeroLink remote-demo recovery task installed (current user, no admin, no secrets).'
+                if (-not $task.UnattendedBootRecovery) {
+                    Write-Host 'This machine would not accept the unattended (S4U) principal, so recovery happens at' -ForegroundColor Yellow
+                    Write-Host 'sign-in rather than at boot. A reboot with nobody logged in will NOT recover the demo.' -ForegroundColor Yellow
+                }
+                $reconcileTask = Install-AeroLinkReconcileTask -Config $configureConfig
+                $reconcileTask | Format-List
+                Write-Host 'AeroLink remote-demo recovery and production-source reconciliation tasks installed'
+                Write-Host '(current user, no admin, no secrets), both bound to the dedicated production source.'
                 exit 0
             }
             'Status' {
                 Get-AeroLinkRemoteDemoTaskStatus | Format-List
+                Get-AeroLinkRemoteDemoTaskStatus -TaskName 'AeroLinkProductionSourceReconcile' | Format-List
                 exit 0
             }
             'Remove' {
                 Remove-AeroLinkRemoteDemoTask | Format-List
+                Remove-AeroLinkRemoteDemoTask -TaskName 'AeroLinkProductionSourceReconcile' | Format-List
                 exit 0
             }
         }

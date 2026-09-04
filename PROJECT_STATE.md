@@ -274,6 +274,34 @@ Those root launchers are intentionally treated as compatibility surfaces; their 
 
 The normal persistent developer/demo PostgreSQL database uses port **54329** and is not disposable qualification state.
 
+There are three supported operating modes, and they are deliberately independent of each other:
+
+- **HOME canonical / production** — `START_AEROLINK_PRODUCTION.bat` on HOME, running from a **dedicated
+  production source checkout** against the HOME canonical database.
+- **Work-laptop local development** — `START_AEROLINK.bat` on the laptop, running that laptop's own
+  checkout on any deliberate branch against that laptop's own database.
+- **Protected remote demo** — `START_AEROLINK_REMOTE_DEMO.bat` on HOME or its recovery task, from the same
+  dedicated production source. A remote-demo browser session is a view of HOME; the work-laptop repository
+  and database are irrelevant to it.
+
+A checkout is **source**; the persistent PostgreSQL cluster, evidence, attachments and backups are an
+**installation** it points at. An ordinary clone is its own installation (`product/.local`, unchanged); a
+checkout carrying `product/.local/installation.json` uses the installation that names. This is what lets
+HOME have a second checkout without acquiring a second AeroLink, and it fails closed rather than falling
+back — a dangling pointer is refused, because the fallback is a healthy, empty installation holding none of
+the operator's data.
+
+An installation may declare its own identity (`instance.json`), which the API publishes at
+`/health/identity` and the client shows beside the wordmark. Canonical status is declared, never inferred
+from the hostname. `/health/identity` also carries the source SHA and launcher mode, which is what lets a
+launcher tell a matching process from a stale one — readiness alone never could.
+
+Database upgrade posture is answered before a web server starts, by a maintenance mode of the application
+host that reuses the same migration authorities startup runs. A deterministic upgrade is backed up and
+validated on an isolated restored copy before the real database is touched; a modelled controlled-data
+conflict is reported in seconds with the affected records and the supported operator decisions, and
+AeroLink makes no authority decision itself.
+
 See [product/docs/OPERATIONS.md](product/docs/OPERATIONS.md) and [docs/REMOTE_DEMO_OPERATOR.md](docs/REMOTE_DEMO_OPERATOR.md).
 
 ## Testing and quality gates

@@ -1,8 +1,11 @@
 $ErrorActionPreference = 'Stop'
-$root = Resolve-Path (Join-Path $PSScriptRoot '..')
-$bin = Join-Path $root '.local\postgresql\pgsql\bin'
-$data = Join-Path $root '.local\pgdata'
-$logs = Join-Path $root '.local\logs'
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $root
+$bin = $installation.PostgresBin
+$data = $installation.PostgresData
+$logs = $installation.Logs
+New-Item -ItemType Directory -Path $logs -Force | Out-Null
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
 
 $stopRun = Invoke-AeroLinkNativeCommand -FilePath (Join-Path $bin 'pg_ctl.exe') `

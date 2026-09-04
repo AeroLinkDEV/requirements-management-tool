@@ -5,14 +5,32 @@ param(
     [Parameter(Mandatory)][object[]]$AttachmentInventory,
     [int]$PostgresPort = 54329,
     [int]$ApiPort = 5091,
-    [string]$LogRoot
+    [string]$LogRoot,
+    # The exact build to validate with. Named by the caller, never guessed - see below.
+    [Parameter(Mandatory)][string]$ApiExecutable
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Net.Http
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$apiExecutable = Join-Path $productRoot 'src\AeroLink.Api\bin\Release\net10.0\AeroLink.Api.exe'
-if (-not (Test-Path -LiteralPath $apiExecutable -PathType Leaf)) { throw "The built Release API executable is required for restore validation: $apiExecutable" }
+# The CALLER names the executable, because only the caller knows which one it just built.
+#
+# Preferring Release and falling back to Debug looked harmless and was not: an established installation keeps
+# a Release executable from its last production run, while the clone-upgrade path arrives having just built
+# current source into Debug. The preference order would then pick the stale Release binary as the thing that
+# supposedly proves the upgraded clone works with CURRENT AeroLink - and a binary predating the read-only
+# boundary would ignore these settings entirely and start the ordinary mutating host, with its workers, over
+# copied production data. That result can authorise mutating the real database.
+#
+# So there is no preference order any more. Restore passes the Release build it produced; clone validation
+# passes the Debug build `dotnet run` produced on the way here. Guessing is the defect.
+if (-not $ApiExecutable) {
+    throw 'Test-AeroLinkRestoredDownloads requires -ApiExecutable naming the build to validate with. It must be the executable the caller has just built from current source; selecting whichever build happens to exist can run a stale binary as proof about the current one.'
+}
+$apiExecutable = [IO.Path]::GetFullPath($ApiExecutable)
+if (-not (Test-Path -LiteralPath $apiExecutable -PathType Leaf)) {
+    throw "The API executable named for isolated validation does not exist: $apiExecutable"
+}
 if (-not $LogRoot) { $LogRoot = Join-Path $productRoot '.local\restore-validation\logs' }
 $logs = [IO.Path]::GetFullPath($LogRoot)
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
@@ -53,8 +71,37 @@ try {
     $handler = [Net.Http.HttpClientHandler]::new(); $handler.CookieContainer = [Net.CookieContainer]::new()
     $client = [Net.Http.HttpClient]::new($handler); $client.BaseAddress = [Uri]"http://127.0.0.1:$ApiPort"
     try {
+        # Authentication endpoint AVAILABILITY, which #881 requires proved before the real database is
+        # mutated, and which the 403 below cannot establish on its own.
+        #
+        # /health/routes reads the built EndpointDataSource: it reaches routing, invokes nothing and mutates
+        # nothing, so it is safe inside this boundary - and it fails if this build has lost or broken the
+        # authentication routes. That is the gap the 403 left: the read-only middleware short-circuits every
+        # non-health route BEFORE endpoint routing, so an absent /api/auth/login answers 403 exactly as a
+        # present one does. Proving a live login instead would need the ordinary mutating host over copied
+        # production data, with its seeders and outbound workers, which is a worse trade than the gap.
+        $routes = $client.GetAsync('/health/routes').GetAwaiter().GetResult()
+        $routesBody = $routes.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ([int]$routes.StatusCode -ne 200) {
+            throw "The validated build does not declare the required authentication routes: $routesBody"
+        }
+        # Method as well as path. A path on its own is not the contract: if POST /api/auth/login became
+        # GET-only, every required path would still be declared and this would pass while nobody could sign in.
+        foreach ($required in @('POST /api/auth/login', 'GET /api/auth/me', 'POST /api/auth/logout')) {
+            if ($routesBody -notmatch [regex]::Escape($required)) {
+                throw "The validated build does not declare the authentication route $required. Reported: $routesBody"
+            }
+        }
+
+        # And the boundary itself: it refuses every route that is not an authenticated controlled read.
+        # Asserting the boundary's own error code keeps this honest about what it is - a 403 carrying
+        # restore_validation_read_only is the middleware answering, by construction, not the route.
         $forbidden = $client.PostAsync('/api/auth/login', [Net.Http.StringContent]::new('{}',[Text.Encoding]::UTF8,'application/json')).GetAwaiter().GetResult()
         if ([int]$forbidden.StatusCode -ne 403) { throw "The read-only validation API accepted a non-download route with HTTP $([int]$forbidden.StatusCode)." }
+        $forbiddenBody = $forbidden.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ($forbiddenBody -notmatch 'restore_validation_read_only') {
+            throw "The read-only validation API refused a non-download route, but not through the read-only boundary: $forbiddenBody"
+        }
         $managed = @($AttachmentInventory | Where-Object { [string]$_.ArtifactType -eq 'ManagedDocument' })
         if ($managed.Count -gt 0) {
             $wrongTokenClient = [Net.Http.HttpClient]::new(); $wrongTokenClient.BaseAddress = $client.BaseAddress

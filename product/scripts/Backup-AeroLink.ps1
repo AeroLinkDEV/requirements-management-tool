@@ -5,31 +5,39 @@ param(
     [int]$PostgresPort = 54329,
     [string]$BackupRoot,
     [string]$PostgresBin,
+    # The evidence tree belonging to -Database. Defaults to this installation's live evidence root, which is
+    # right for the persistent database and wrong for an isolated copy: a staging database restored under
+    # restore-validation has its own evidence tree, and archiving the live one beside it would produce an
+    # archive whose inventory and objects came from two different databases.
+    [string]$EvidenceRoot,
     [switch]$PostgresAlreadyRunning
 )
 
 $ErrorActionPreference = 'Stop'
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
-if (-not $BackupRoot) { $BackupRoot = Join-Path $productRoot '.local\backups' }
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+if (-not $BackupRoot) { $BackupRoot = $installation.Backups }
 $backupRoot = [IO.Path]::GetFullPath($BackupRoot)
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $staging = Join-Path $backupRoot "aerolink-$timestamp"
 $archive = "$staging.zip"
-if (-not $PostgresBin) { $PostgresBin = Join-Path $productRoot '.local\postgresql\pgsql\bin' }
+if (-not $PostgresBin) { $PostgresBin = $installation.PostgresBin }
 $PostgresBin = [IO.Path]::GetFullPath($PostgresBin)
 $pgDump = Join-Path $PostgresBin 'pg_dump.exe'
 $storageModule = Join-Path $PSScriptRoot 'AeroLinkEvidenceStore.psm1'
 Import-Module $storageModule -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1') -Force
-$evidence = Get-AeroLinkEvidenceRoot -ProductRoot $productRoot
+$evidence = if ($EvidenceRoot) { [IO.Path]::GetFullPath($EvidenceRoot) } else { Get-AeroLinkEvidenceRoot -ProductRoot $productRoot }
+$instanceIdentity = Get-AeroLinkInstanceConfig -ProductRoot $productRoot
 
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
 if (-not $PostgresAlreadyRunning) {
     if ($PostgresPort -ne 54329 -or $Database -ne 'aerolink') { throw 'A non-default backup target requires -PostgresAlreadyRunning and must be isolated qualification infrastructure.' }
     $start = Invoke-AeroLinkChildScript -ScriptPath (Join-Path $PSScriptRoot 'Start-Postgres.ps1') `
-        -StandardOutput (Join-Path $productRoot '.local\logs\backup-postgres-start.stdout.log') `
-        -StandardError (Join-Path $productRoot '.local\logs\backup-postgres-start.stderr.log') `
+        -StandardOutput (Join-Path $installation.Logs 'backup-postgres-start.stdout.log') `
+        -StandardError (Join-Path $installation.Logs 'backup-postgres-start.stderr.log') `
         -TimeoutSeconds 420 -StepName 'Start-Postgres.ps1 (backup)'
     if ($start.ExitCode -ne 0) { throw "PostgreSQL is not available for backup: $($start.Detail)" }
 }
@@ -59,6 +67,11 @@ try {
         FormatVersion = 2
         CreatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
         Application = [ordered]@{ SourceSha = $applicationSha; SchemaVersion = $schemaVersion }
+        # Which installation these bytes came from, so provenance travels with the archive rather than being
+        # asserted by whoever imports it. Without this the HOME->laptop refresh had nothing to check: any
+        # valid AeroLink archive could be imported and labelled HOME CANONICAL on the importer's say-so.
+        # Non-secret: the operator-declared label and classification, nothing more.
+        Instance = [ordered]@{ Label = $instanceIdentity.Label; Classification = $instanceIdentity.Classification }
         Database = [ordered]@{ Name = $Database; Dump = 'aerolink-postgresql.dump'; SnapshotCompletedAtUtc = (Get-Date).ToUniversalTime().ToString('o') }
         Storage = [ordered]@{ Scheme = 'filesystem-v1'; SourceRoot = $evidence; ArchiveRoot = 'evidence'; ObjectCount = $archiveEvidence.ReferencedObjects; AttachmentCount = $archiveEvidence.ReferencedAttachments; ReferencedBytes = $archiveEvidence.VerifiedBytes; UnreferencedObjectCount = $archiveEvidence.UnreferencedObjects.Count; UnreferencedObjects = @($archiveEvidence.UnreferencedObjects) }
         AttachmentInventory = 'attachment-inventory.json'
@@ -80,3 +93,15 @@ if ($RetentionDays -gt 0) {
 }
 Write-Host "AeroLink backup complete: $archive" -ForegroundColor Green
 Write-Host "SHA-256: $archiveHash"
+
+# The exact artifact this run produced, so a caller can act on THIS archive rather than rediscovering it as
+# "the newest aerolink-*.zip in the directory". That guess is wrong whenever a clock skews, a file arrives
+# with a future timestamp, or an operator drops an archive in by hand - and in the snapshot path the thing
+# being chosen is what gets activated over a live database.
+[pscustomobject]@{
+    Archive    = $archive
+    Sha256     = $archiveHash
+    Checksum   = "$archive.sha256"
+    BackupRoot = $backupRoot
+    Database   = $Database
+}

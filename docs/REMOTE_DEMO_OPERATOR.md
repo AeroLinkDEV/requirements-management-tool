@@ -57,6 +57,14 @@ with placeholders is at `product\scripts\AeroLinkRemoteDemo.config.sample.psd1`.
 
 Missing, malformed, unknown-key, or secret-looking configuration fails closed.
 
+`AeroLinkRoot` is now advisory. When a dedicated production source is configured
+(`CONFIGURE_AEROLINK_PRODUCTION_SOURCE.bat Install`), remote demo resolves its source from
+that authority instead, and `Preview` prints which it chose and why. On 2026-09-03 a
+recovery task installed from the only checkout on the machine invoked that checkout's own
+recovery script while it sat on a feature branch with dirty work; resolving the source
+rather than reading it back from this file is what makes that unrepresentable. Registration
+refuses any checkout not marked as dedicated production source.
+
 ## Traffic Policy
 
 The operator mode consumes an external user-owned policy file (or a non-secret
@@ -115,18 +123,34 @@ readiness, built client, applied migrations, backup recency) and adds:
 
 ## Automatic recovery (current-user Scheduled Task)
 
-`CONFIGURE_AEROLINK_REMOTE_DEMO.bat Install` creates the current-user task
-`AeroLinkRemoteDemoRecovery` (no administrator rights, no password):
+`CONFIGURE_AEROLINK_REMOTE_DEMO.bat Install` creates two current-user tasks bound to the
+dedicated production source, neither running as SYSTEM (ngrok's configuration and
+credentials are per-user) and neither carrying a secret.
 
-- trigger: at user logon, with Start-When-Available enabled;
+`AeroLinkRemoteDemoRecovery`:
+
+- triggers: at machine boot with a one-minute delay, **and** at user logon as a second
+  chance, with Start-When-Available enabled;
+- principal: S4U, so recovery runs in the operator's account with no interactive session
+  and no stored password;
 - action: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File
-  <AeroLinkRoot>\product\scripts\AeroLinkRemoteDemo.ps1 -Action Start -Scheduled`;
-- multiple instances policy `IgnoreNew`, so repeated logons/triggers cannot
-  create duplicate AeroLink or ngrok processes;
-- the task XML and its arguments contain no secrets.
+  <production source>\product\scripts\AeroLinkRemoteDemo.ps1 -Action Start -Scheduled`;
+- multiple instances policy `IgnoreNew`, so boot and logon both firing cannot create a
+  duplicate AeroLink or a second tunnel.
 
-`Status` inspects the task; `Remove` deletes it; `Preview` prints the exact XML
-that would be installed without creating anything.
+**Install it once from an elevated PowerShell.** Windows refuses both a boot trigger and an
+S4U principal to a non-elevated caller. Without elevation the installer falls back to the
+previous logon-only shape and says so; that shape recovers after you sign in and **not**
+after a reboot with nobody logged in, which is the exact 2026-09-03 failure. The result's
+`UnattendedBootRecovery` and `Configure Status` report which shape is installed.
+
+`AeroLinkProductionSourceReconcile` polls every 30 minutes and does nothing unless
+`origin/main` has moved; when it has, the production source is fast-forwarded and
+production is restarted into it through the ordinary start path, which re-proves the
+protected endpoint.
+
+`Status` inspects both tasks; `Remove` deletes both; `Preview` prints the exact recovery
+XML that would be installed, and the source it resolved, without creating anything.
 
 ## Qualification evidence
 

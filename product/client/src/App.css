@@ -16,13 +16,16 @@
 .brand {
   display: flex;
   align-items: center;
+  /* The instance badge wraps under the wordmark in the narrow sidebar rather than squeezing it. */
+  flex-wrap: wrap;
   gap: 12px;
   font-family: var(--font-display);
   font-size: 20px;
   color: white;
   padding: 0 10px 20px;
 }
-.brand span { color: #70d8c9; }
+/* The logo glyph only. See PortalHeader.css: a bare element selector here also tinted the instance badge. */
+.brand > span[aria-hidden="true"] { color: #70d8c9; }
 
 .program {
   background: #122642;

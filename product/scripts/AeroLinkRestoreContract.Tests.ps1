@@ -19,7 +19,27 @@ if(-not $restore.Contains('if ($command -notlike "*$productRoot*") { continue }'
 if(-not $restore.Contains("Disposable restore qualification is forbidden on the persistent AeroLink PostgreSQL port 54329.")){throw 'Disposable restore qualification is not fenced from the persistent database.'}
 if(-not $download.Contains('X-AeroLink-Restore-Validation') -or -not $program.Contains('restore_validation_read_only') -or -not $program.Contains('typeof(IHostedService)')){throw 'The isolated API-download validation token/read-only boundary is incomplete.'}
 if($download.Contains("Start-Process -FilePath 'dotnet'")){throw 'Restore validation still tracks a dotnet-run parent instead of the API listener process.'}
-if(-not $download.Contains('AeroLink.Api.exe') -or -not $download.Contains('remained in use after process cleanup')){throw 'Restore validation does not launch the built API directly and prove its port is released.'}
+if(-not $download.Contains('$apiExecutable') -or -not $download.Contains('remained in use after process cleanup')){throw 'Restore validation does not launch the built API directly and prove its port is released.'}
+# The build to validate with is named by the caller and never chosen here. Preferring whichever configuration
+# had output on disk let an established installation validate an upgraded clone with a stale Release binary
+# from its previous production run; a binary predating the read-only boundary would ignore these settings and
+# start the ordinary mutating host, with its outbound workers, over copied production data.
+if(-not $download.Contains('[Parameter(Mandatory)][string]$ApiExecutable')){throw 'Restore validation still selects its own API build instead of requiring the caller to name the current one.'}
+if($download.Contains('bin\Release') -or $download.Contains('bin\Debug')){throw 'Restore validation must not know about build configurations; the caller names the executable.'}
+if(-not $restore.Contains('-ApiExecutable')){throw 'Restore does not name the build it validates with.'}
+# Authentication endpoint availability, proved before the real database is mutated. The read-only middleware
+# short-circuits every non-health route BEFORE endpoint routing, so an absent /api/auth/login answered 403
+# exactly as a present one did - the 403 proves the boundary, not the route. /health/routes reads the built
+# EndpointDataSource: it reaches routing, invokes nothing, and fails if this build has lost the auth routes.
+if(-not $program.Contains('/health/routes')){throw 'The build does not expose a read-only route-presence proof, so authentication endpoint availability cannot be established inside the validation boundary.'}
+# Path AND method: a path that survives with the wrong verb is a route nobody can use, and the proof must
+# fail for it. HttpMethodMetadata is what routing itself matches on.
+if(-not $program.Contains('HttpMethodMetadata')){throw 'The route-presence proof reads paths only, so an authentication route that changed method would still pass it.'}
+foreach($route in @('POST /api/auth/login','GET /api/auth/me','POST /api/auth/logout')){
+    if(-not $download.Contains($route)){throw "Isolated validation does not require the authentication route $route to be present with its method."}
+    if(-not $program.Contains($route)){throw "The build does not require $route in its own route-presence contract."}
+}
+if(-not $download.Contains('does not declare the required authentication routes')){throw 'Isolated validation does not fail when the required authentication routes are missing.'}
 if($download.IndexOf('finally {', $download.IndexOf('finally {') + 1) -lt 0 -or -not $download.Contains('Production rollback/restart must never inherit')){throw 'Restore validation does not restore its parent environment in a nested cleanup finally.'}
 [pscustomobject]@{Passed=$true;ShadowDatabase=$true;ReversibleActivation=$true;ReadOnlyApiDownloads=$true;PersistentPortFence=$true}
 $global:LASTEXITCODE=0

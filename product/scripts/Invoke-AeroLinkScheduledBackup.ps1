@@ -6,8 +6,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$logRoot = Join-Path $productRoot '.local\logs'
-$backupRoot = Join-Path $productRoot '.local\backups'
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+$logRoot = $installation.Logs
+$backupRoot = $installation.Backups
 $logPath = Join-Path $logRoot 'scheduled-backup.log'
 $backupScript = Join-Path $PSScriptRoot 'Backup-AeroLink.ps1'
 $verifyScript = Join-Path $PSScriptRoot 'Verify-AeroLinkBackup.ps1'

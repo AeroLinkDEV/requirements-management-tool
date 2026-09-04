@@ -1,0 +1,954 @@
+using AeroLink.Domain.Identity;
+using AeroLink.Domain.Programs;
+using AeroLink.Infrastructure.Persistence;
+using AeroLink.Infrastructure.Persistence.Maintenance;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Npgsql;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace AeroLink.Infrastructure.Tests;
+
+/// <summary>
+/// PostgreSQL qualification for the upgrade analyzer and the controlled conflict resolver (#881).
+///
+/// Two incidents drive these. In #747 and again in #816 an old but perfectly valid database could not be
+/// started by current code, and the operator learned that only after dependencies, a client build, an API
+/// start and a readiness timeout — with a .NET stack trace as the answer. Everything needed to say so was
+/// knowable the moment PostgreSQL accepted a connection.
+///
+/// On 2026-08-31 the #816 repair then had to be performed with hand-written SQL against a live database,
+/// because no supported path existed while the API was down. These prove the supported path: it analyzes
+/// without writing, it never chooses between granting authority and retiring a designation, and it refuses
+/// to write against state that moved after the operator reviewed it.
+///
+/// Skipped unless AEROLINK_MIGRATIONS_CONNECTION points at a disposable PostgreSQL server. The disposable
+/// database is created and dropped per test; the persistent developer database on 54329 is never touched.
+/// </summary>
+public sealed class AeroLinkMaintenanceQualificationTests
+{
+    private const string ConnectionVariable = "AEROLINK_MIGRATIONS_CONNECTION";
+
+    /// <summary>
+    /// Set by the CI lane that exists to run these. Without it, "no connection configured" and "twelve
+    /// qualifications passed" are the same green tick, which is how a suite can be present and prove nothing
+    /// for months. The lane sets this, so a missing connection there is a failure rather than a quiet pass.
+    /// </summary>
+    private const string RequiredVariable = "AEROLINK_REQUIRE_POSTGRES_QUALIFICATION";
+
+    private static bool ServerConfigured(out string serverConnectionString)
+    {
+        var raw = Environment.GetEnvironmentVariable(ConnectionVariable);
+        serverConnectionString = raw ?? "";
+        if (!string.IsNullOrWhiteSpace(serverConnectionString)) return true;
+
+        var required = Environment.GetEnvironmentVariable(RequiredVariable);
+        if (!string.IsNullOrWhiteSpace(required) && !required.Equals("false", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"{RequiredVariable} is set, so this qualification must actually run, but {ConnectionVariable} "
+                + "names no disposable PostgreSQL server. Point it at a throwaway database; never at a "
+                + "persistent AeroLink installation.");
+        return false;
+    }
+
+    private static async Task<string> CreateDisposableDatabaseAsync(string serverConnectionString)
+    {
+        var database = $"aerolink_881_maint_{Guid.NewGuid():N}";
+        await using var admin = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(serverConnectionString)
+        { Database = "postgres" }.ConnectionString);
+        await admin.OpenAsync();
+        await using var command = admin.CreateCommand();
+        command.CommandText = $"CREATE DATABASE \"{database}\"";
+        await command.ExecuteNonQueryAsync();
+        return new NpgsqlConnectionStringBuilder(serverConnectionString) { Database = database }.ConnectionString;
+    }
+
+    private static async Task DropDatabaseAsync(string serverConnectionString, string? database)
+    {
+        if (string.IsNullOrWhiteSpace(database)) return;
+        await using var admin = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(serverConnectionString)
+        { Database = "postgres" }.ConnectionString);
+        await admin.OpenAsync();
+        await using var command = admin.CreateCommand();
+        command.CommandText = $"DROP DATABASE IF EXISTS \"{database}\" WITH (FORCE)";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static DbContextOptions<AeroLinkDbContext> Options(string connectionString) =>
+        new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connectionString).Options;
+
+    private static UserAccount Account(string name, DateTimeOffset now) =>
+        new(name, name, $"{name}@example.test", IdentityService.HashPassword("StrongPass!2026"), now);
+
+    private static AeroLinkUpgradeAnalyzer Analyzer(AeroLinkDbContext db) =>
+        new(db, new ProjectLeadershipReconciliationAuthority(db));
+
+    /// <summary>
+    /// A migrated database with nothing pending reports current, and the analysis is honest that it wrote
+    /// nothing.
+    /// </summary>
+    [Fact]
+    public async Task A_current_database_reports_current_and_requires_no_upgrade()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            await using (var migrate = new AeroLinkDbContext(Options(connection))) await migrate.Database.MigrateAsync();
+            await using (var upgrade = new AeroLinkDbContext(Options(connection)))
+            {
+                await new ProjectLeadershipMigrationAuthority(upgrade).EnsureCompletedAsync();
+                await new ProjectLeadershipReconciliationAuthority(upgrade).EnsureCompletedAsync();
+            }
+            // The remaining authorities need a renderer and an evidence store to RUN; the analyzer only reads
+            // the completion markers they write, so a database on which they already ran is modelled by those
+            // markers. That is exactly the read the analyzer performs against a real installation.
+            await MarkCompletedAsync(connection,
+                SoftwareVerificationCaseMigrationAuthority.MigrationMarker,
+                TestChangeRequestPrefixMigrationAuthority.MigrationMarker,
+                SoftwareProcedureExecutionCutoverAuthority.MigrationMarker);
+
+            await using var db = new AeroLinkDbContext(Options(connection));
+            var analysis = await Analyzer(db).AnalyzeAsync();
+
+            Assert.True(analysis.DatabaseReachable);
+            Assert.Empty(analysis.PendingEfMigrations);
+            Assert.Empty(analysis.Conflicts);
+            Assert.Empty(analysis.PendingSemanticUpgrades);
+            Assert.Equal("current", analysis.Status);
+            Assert.False(analysis.UpgradeRequired);
+            Assert.False(analysis.DatabaseModified);
+            Assert.Equal(database, analysis.DatabaseName);
+            // No showcase program at all is a valid state, and must not read as an available upgrade.
+            Assert.NotNull(analysis.Showcase);
+            Assert.False(analysis.Showcase!.Present);
+            Assert.False(analysis.ShowcaseUpgradeAvailable);
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    /// <summary>
+    /// The third upgrade category: showcase content.
+    ///
+    /// Schema and semantic upgrades run at startup; showcase upgrade steps do not, because the seeder returns
+    /// early for a database that already has the showcase program. So an installation seeded before a step
+    /// shipped is indefinitely behind, and analysis used to answer "DATABASE CURRENT" — true about the schema,
+    /// and misleading about everything the operator can actually see on screen.
+    ///
+    /// It is reported, and reported as what it is: available and operator-initiated. It must NOT make
+    /// UpgradeRequired true, or every HOME start would route demo content through backup and clone validation.
+    /// </summary>
+    [Fact]
+    public async Task Showcase_steps_this_build_knows_and_the_database_has_not_recorded_are_reported_as_available()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            await using (var migrate = new AeroLinkDbContext(Options(connection))) await migrate.Database.MigrateAsync();
+            await using (var upgrade = new AeroLinkDbContext(Options(connection)))
+            {
+                await new ProjectLeadershipMigrationAuthority(upgrade).EnsureCompletedAsync();
+                await new ProjectLeadershipReconciliationAuthority(upgrade).EnsureCompletedAsync();
+            }
+            await MarkCompletedAsync(connection,
+                SoftwareVerificationCaseMigrationAuthority.MigrationMarker,
+                TestChangeRequestPrefixMigrationAuthority.MigrationMarker,
+                SoftwareProcedureExecutionCutoverAuthority.MigrationMarker);
+
+            // A showcase database seeded by an older build: the program exists, and it recorded only the two
+            // steps that existed when it was created.
+            var applied = FmsShowcaseSeeder.UpgradeStepKeys.Take(2).ToArray();
+            Guid programId;
+            await using (var seed = new AeroLinkDbContext(Options(connection)))
+            {
+                var program = new ProgramRecord("Flight Management System Live Program", FmsShowcaseSeeder.ProgramCode);
+                programId = program.Id;
+                seed.Programs.Add(program);
+                foreach (var key in applied)
+                    seed.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId, key, "seeded by an older build", DateTimeOffset.UtcNow));
+                await seed.SaveChangesAsync();
+            }
+
+            await using var db = new AeroLinkDbContext(Options(connection));
+            var analysis = await Analyzer(db).AnalyzeAsync();
+
+            Assert.NotNull(analysis.Showcase);
+            Assert.True(analysis.Showcase!.Present);
+            Assert.True(analysis.ShowcaseUpgradeAvailable);
+            Assert.Equal(FmsShowcaseSeeder.UpgradeStepKeys.Skip(2), analysis.Showcase.PendingSteps);
+            Assert.DoesNotContain(applied, x => analysis.Showcase.PendingSteps.Contains(x));
+
+            // Advisory, not required: nothing applies these on its own.
+            Assert.False(analysis.UpgradeRequired);
+            Assert.Equal("current", analysis.Status);
+            Assert.False(analysis.DatabaseModified);
+
+            // And the operator is actually told, rather than being left with "DATABASE CURRENT" alone.
+            var rendered = string.Join("\n", AeroLinkUpgradeAnalyzer.Render(analysis));
+            Assert.Contains("Showcase content upgrade available", rendered);
+            Assert.Contains(FmsShowcaseSeeder.UpgradeStepKeys[^1], rendered);
+            Assert.Contains("Nothing applies these automatically", rendered);
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    /// <summary>
+    /// A database the schema has moved past reports every pending migration by name, before any web server
+    /// starts — which is the whole difference between two seconds and a readiness timeout.
+    /// </summary>
+    [Fact]
+    public async Task Pending_schema_migrations_are_reported_by_name_without_starting_anything()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            // Deliberately NOT migrated: an empty database is every migration behind.
+            await using var db = new AeroLinkDbContext(Options(connection));
+            var analysis = await Analyzer(db).AnalyzeAsync();
+
+            Assert.True(analysis.DatabaseReachable);
+            Assert.NotEmpty(analysis.PendingEfMigrations);
+            Assert.True(analysis.UpgradeRequired);
+            Assert.Equal("upgrade-required", analysis.Status);
+            Assert.False(analysis.DatabaseModified);
+
+            // No conflicts are claimed against a schema this build has not migrated: the tables the semantic
+            // markers live in may not exist, so the honest answer is "not yet knowable", assessed on the
+            // isolated copy after it is migrated. Asking anyway used to fail with a PostgreSQL error rather
+            // than an answer, which is the failure this assertion pins.
+            Assert.Empty(analysis.Conflicts);
+
+            var rendered = string.Join("\n", AeroLinkUpgradeAnalyzer.Render(analysis));
+            Assert.Contains("DATABASE UPGRADE REQUIRED", rendered);
+            Assert.Contains(analysis.PendingEfMigrations[0], rendered);
+            Assert.Contains("isolated validated copy", rendered);
+            Assert.Contains("No persistent data has been changed", rendered);
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    /// <summary>
+    /// A pending semantic upgrade with nothing ambiguous about it is a deterministic upgrade, not a conflict.
+    /// </summary>
+    [Fact]
+    public async Task A_pending_semantic_upgrade_with_no_ambiguity_is_deterministic()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            await using (var migrate = new AeroLinkDbContext(Options(connection))) await migrate.Database.MigrateAsync();
+
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("Deterministic", $"DET{Guid.NewGuid():N}"[..12]);
+            var lead = Account("det.lead", now);
+            await using (var seed = new AeroLinkDbContext(Options(connection)))
+            {
+                seed.AddRange(program, lead);
+                seed.AddRange(
+                    new ProgramMembership(lead.Id, program.Id, ProgramRole.SystemEngineeringLead, "legacy", now),
+                    new ProgramMembership(lead.Id, program.Id, ProgramRole.SystemEngineer, "legacy", now));
+                await seed.SaveChangesAsync();
+            }
+
+            await using var db = new AeroLinkDbContext(Options(connection));
+            var analysis = await Analyzer(db).AnalyzeAsync();
+
+            Assert.Empty(analysis.PendingEfMigrations);
+            Assert.NotEmpty(analysis.PendingSemanticUpgrades);
+            // Nothing ambiguous here: the v1 backfill has not run, and the legacy lead membership it is
+            // about to turn into an assignment is ordinary work, not a conflict. Reporting v2's view of a
+            // database v1 has not touched would raise a false alarm on the most common upgrade path there is.
+            Assert.Empty(analysis.Conflicts);
+            Assert.True(analysis.DeterministicUpgrade);
+            Assert.Equal("upgrade-required", analysis.Status);
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    /// <summary>
+    /// The exact 2026-08-31 work-laptop conflict, reported as a record rather than raised as an exception:
+    /// a legacy SoftwareEngineeringLead standing backup whose holder holds Engineer, not the required
+    /// SoftwareEngineer. And it must be visible WITHOUT the analysis having written anything.
+    /// </summary>
+    [Fact]
+    public async Task The_816_ineligible_legacy_backup_is_reported_as_a_structured_conflict_and_nothing_is_written()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            await using (var migrate = new AeroLinkDbContext(Options(connection))) await migrate.Database.MigrateAsync();
+
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("Flight Management System", $"FMS{Guid.NewGuid():N}"[..12]);
+            var avery = Account("software.engineer.070", now);
+            var rina = Account("rina.shah", now);
+            await using (var seed = new AeroLinkDbContext(Options(connection)))
+            {
+                seed.AddRange(program, avery, rina);
+                seed.AddRange(
+                    // Rina holds the position; Avery is the legacy standing backup and holds only Engineer,
+                    // which was sufficient under the old authority rule and is not under #816.
+                    new ProgramMembership(rina.Id, program.Id, ProgramRole.SoftwareEngineer, "legacy", now),
+                    new ProgramMembership(avery.Id, program.Id, ProgramRole.Engineer, "legacy", now),
+                    new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.SoftwareEngineeringLead, rina.Id, "operator", now),
+                    new ProjectRoleBackup(program.Id, ProgramRole.SoftwareEngineeringLead, avery.Id, "legacy", now));
+                await seed.SaveChangesAsync();
+            }
+            // v1 has run; v2 is what refuses.
+            await using (var v1 = new AeroLinkDbContext(Options(connection)))
+                await new ProjectLeadershipMigrationAuthority(v1).EnsureCompletedAsync();
+
+            long rowsBefore;
+            await using (var before = new AeroLinkDbContext(Options(connection)))
+                rowsBefore = await before.ProjectRoleBackups.AsNoTracking().LongCountAsync()
+                    + await before.ProjectLeadershipBackups.AsNoTracking().LongCountAsync()
+                    + await before.ProgramMemberships.AsNoTracking().LongCountAsync()
+                    + await before.SecurityAuditEvents.AsNoTracking().LongCountAsync();
+
+            await using var db = new AeroLinkDbContext(Options(connection));
+            var analysis = await Analyzer(db).AnalyzeAsync();
+
+            Assert.Equal("conflict", analysis.Status);
+            var conflict = Assert.Single(analysis.Conflicts,
+                x => x.Code == AeroLinkUpgradeConflict.LegacyBackupIneligibleCode);
+            Assert.Equal("Flight Management System", conflict.Subject["program"]);
+            Assert.Equal("SoftwareEngineeringLead", conflict.Subject["position"]);
+            Assert.Equal(avery.Id.ToString(), conflict.Subject["personId"]);
+            Assert.Equal("SoftwareEngineer", conflict.Subject["requiredBaseRole"]);
+            Assert.Equal("Engineer", conflict.Subject["heldBaseRoles"]);
+            Assert.Equal(rina.Id.ToString(), conflict.Subject["currentPrimaryId"]);
+
+            // Both decisions offered; exactly one grants authority nobody has today, and it is flagged.
+            Assert.Equal(2, conflict.Choices.Count);
+            Assert.True(conflict.Choices.Single(x => x.Key == AeroLinkUpgradeConflict.ChoiceGrantAndKeep).GrantsNewAuthority);
+            Assert.False(conflict.Choices.Single(x => x.Key == AeroLinkUpgradeConflict.ChoiceRetireBackup).GrantsNewAuthority);
+
+            var rendered = string.Join("\n", AeroLinkUpgradeAnalyzer.Render(analysis));
+            Assert.Contains("DATABASE ATTENTION REQUIRED", rendered);
+            Assert.Contains("AeroLink made NO authority decision automatically", rendered);
+            Assert.Contains("No persistent data was changed", rendered);
+
+            await using var after = new AeroLinkDbContext(Options(connection));
+            var rowsAfter = await after.ProjectRoleBackups.AsNoTracking().LongCountAsync()
+                + await after.ProjectLeadershipBackups.AsNoTracking().LongCountAsync()
+                + await after.ProgramMemberships.AsNoTracking().LongCountAsync()
+                + await after.SecurityAuditEvents.AsNoTracking().LongCountAsync();
+            Assert.Equal(rowsBefore, rowsAfter);
+            Assert.False(analysis.DatabaseModified);
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    /// <summary>
+    /// Several conflicts in one database are all reported by ONE analysis. Discovering them one restart at a
+    /// time is the operator experience #881 exists to end.
+    /// </summary>
+    [Fact]
+    public async Task Multiple_conflicts_are_all_reported_in_one_analysis()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            await using (var migrate = new AeroLinkDbContext(Options(connection))) await migrate.Database.MigrateAsync();
+
+            var now = DateTimeOffset.UtcNow;
+            var first = new ProgramRecord("First Program", $"ONE{Guid.NewGuid():N}"[..12]);
+            var second = new ProgramRecord("Second Program", $"TWO{Guid.NewGuid():N}"[..12]);
+            var ineligible = Account("multi.ineligible", now);
+            var primary = Account("multi.primary", now);
+            var left = Account("multi.left", now);
+            var right = Account("multi.right", now);
+            await using (var seed = new AeroLinkDbContext(Options(connection)))
+            {
+                seed.AddRange(first, second, ineligible, primary, left, right);
+                seed.AddRange(
+                    // First: ineligible legacy backup (the #816 shape).
+                    new ProgramMembership(primary.Id, first.Id, ProgramRole.SoftwareEngineer, "legacy", now),
+                    new ProgramMembership(ineligible.Id, first.Id, ProgramRole.Engineer, "legacy", now),
+                    new ProjectLeadershipAssignment(first.Id, ProjectLeadershipPosition.SoftwareEngineeringLead, primary.Id, "operator", now),
+                    new ProjectRoleBackup(first.Id, ProgramRole.SoftwareEngineeringLead, ineligible.Id, "legacy", now),
+                    // Second: two legacy backups mapping to one position, naming different people.
+                    new ProgramMembership(left.Id, second.Id, ProgramRole.ProjectEngineer, "legacy", now),
+                    new ProgramMembership(right.Id, second.Id, ProgramRole.ProjectEngineer, "legacy", now),
+                    new ProjectRoleBackup(second.Id, ProgramRole.ProjectEngineer, left.Id, "legacy", now),
+                    new ProjectRoleBackup(second.Id, ProgramRole.ProjectEngineeringLead, right.Id, "legacy", now));
+                await seed.SaveChangesAsync();
+            }
+            await using (var v1 = new AeroLinkDbContext(Options(connection)))
+                await new ProjectLeadershipMigrationAuthority(v1).EnsureCompletedAsync();
+
+            await using var db = new AeroLinkDbContext(Options(connection));
+            var analysis = await Analyzer(db).AnalyzeAsync();
+
+            Assert.True(analysis.Conflicts.Count >= 2,
+                $"Expected every conflict in one analysis; got {analysis.Conflicts.Count}.");
+            Assert.Contains(analysis.Conflicts, x => x.Code == AeroLinkUpgradeConflict.LegacyBackupIneligibleCode);
+            Assert.Contains(analysis.Conflicts, x => x.Code == AeroLinkUpgradeConflict.LegacyBackupAmbiguousCode);
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    /// <summary>
+    /// The resolver, on the #816 conflict. Dry run writes nothing; retiring the legacy designation ends it
+    /// with attribution rather than deleting it; the analysis is clean afterwards.
+    /// </summary>
+    [Fact]
+    public async Task Retiring_the_legacy_backup_preserves_history_and_clears_the_conflict()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            var fixture = await SeedIneligibleBackupAsync(connection);
+
+            // Dry run first, exactly as an operator would.
+            await using (var dryRun = new AeroLinkDbContext(Options(connection)))
+            {
+                var preview = await new ProjectLeadershipMaintenanceResolver(dryRun, new ProjectLeadershipReconciliationAuthority(dryRun)).ResolveLegacyBackupAsync(
+                    fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
+                    fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup, fixture.PrimaryId,
+                    "Sean, issue #816", apply: false);
+                Assert.False(preview.Applied);
+                Assert.Equal(AeroLinkResolutionResult.DryRunOutcome, preview.Outcome);
+                Assert.NotEmpty(preview.Changes);
+            }
+            await using (var unchanged = new AeroLinkDbContext(Options(connection)))
+            {
+                Assert.True(await unchanged.ProjectRoleBackups.AsNoTracking()
+                    .AnyAsync(x => x.Id == fixture.LegacyBackupId && x.RemovedAt == null));
+                Assert.Empty(await unchanged.SecurityAuditEvents.AsNoTracking()
+                    .Where(x => x.EventType == AeroLinkMaintenanceAttribution.DecisionEvent).ToListAsync());
+            }
+
+            // A conflict code that is NOT the conflict which exists must refuse, and write nothing.
+            //
+            // An earlier version of this test did the opposite: it passed LegacyBackupSupersededCode against
+            // this ineligible-backup fixture, applied the decision, and asserted the audit carried the wrong
+            // code — calling that a successful "round-trip". It proved precisely the defect it was meant to
+            // close. The resolver now re-derives the conflict inside the transaction, so the caller's code is
+            // checked against reality rather than trusted.
+            await using (var mismatched = new AeroLinkDbContext(Options(connection)))
+            {
+                var refused = await new ProjectLeadershipMaintenanceResolver(mismatched, new ProjectLeadershipReconciliationAuthority(mismatched)).ResolveLegacyBackupAsync(
+                    fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
+                    fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup, fixture.PrimaryId,
+                    "Sean, issue #816", apply: true,
+                    conflictCode: AeroLinkUpgradeConflict.LegacyBackupSupersededCode);
+                Assert.False(refused.Applied);
+                Assert.Equal(AeroLinkResolutionResult.PreconditionFailedOutcome, refused.Outcome);
+                Assert.Contains(AeroLinkUpgradeConflict.LegacyBackupIneligibleCode, refused.Detail);
+            }
+            await using (var untouched = new AeroLinkDbContext(Options(connection)))
+            {
+                Assert.True(await untouched.ProjectRoleBackups.AsNoTracking()
+                    .AnyAsync(x => x.Id == fixture.LegacyBackupId && x.RemovedAt == null));
+                Assert.Empty(await untouched.SecurityAuditEvents.AsNoTracking()
+                    .Where(x => x.ActorId == AeroLinkMaintenanceAttribution.Actor).ToListAsync());
+            }
+
+            // The code that IS the conflict applies, and the audit records that code.
+            await using (var apply = new AeroLinkDbContext(Options(connection)))
+            {
+                var applied = await new ProjectLeadershipMaintenanceResolver(apply, new ProjectLeadershipReconciliationAuthority(apply)).ResolveLegacyBackupAsync(
+                    fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
+                    fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup, fixture.PrimaryId,
+                    "Sean, issue #816", apply: true,
+                    conflictCode: AeroLinkUpgradeConflict.LegacyBackupIneligibleCode);
+                Assert.True(applied.Applied);
+            }
+
+            await using (var check = new AeroLinkDbContext(Options(connection)))
+            {
+                // Ended, not deleted: "who was standing cover in March" stays answerable.
+                var legacy = await check.ProjectRoleBackups.AsNoTracking().SingleAsync(x => x.Id == fixture.LegacyBackupId);
+                Assert.NotNull(legacy.RemovedAt);
+                Assert.Equal(AeroLinkMaintenanceAttribution.Actor, legacy.RemovedBy);
+                Assert.Equal("legacy", legacy.NamedBy);
+
+                // No authority was granted to make the upgrade pass.
+                Assert.False(await check.ProgramMemberships.AsNoTracking().AnyAsync(x =>
+                    x.UserId == fixture.PersonId && x.ProgramId == fixture.ProgramId
+                    && x.Role == ProgramRole.SoftwareEngineer && x.EndedAt == null));
+
+                var audit = await check.SecurityAuditEvents.AsNoTracking()
+                    .SingleAsync(x => x.EventType == AeroLinkMaintenanceAttribution.DecisionEvent);
+                Assert.Equal(AeroLinkMaintenanceAttribution.Actor, audit.ActorId);
+                Assert.Equal(AeroLinkMaintenanceAttribution.Source, audit.IpAddress);
+                Assert.Contains("Sean, issue #816", audit.Detail);
+                Assert.Contains(AeroLinkUpgradeConflict.ChoiceRetireBackup, audit.Detail);
+                Assert.Contains(AeroLinkUpgradeConflict.LegacyBackupIneligibleCode, audit.Detail);
+                Assert.DoesNotContain(AeroLinkUpgradeConflict.LegacyBackupSupersededCode, audit.Detail);
+            }
+
+            await using (var reanalyze = new AeroLinkDbContext(Options(connection)))
+                Assert.Empty((await Analyzer(reanalyze).AnalyzeAsync()).Conflicts);
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    /// <summary>
+    /// The other decision, which grants authority. It is only ever taken because the operator named it, and
+    /// taking it leaves the person genuinely eligible rather than merely unblocking startup.
+    /// </summary>
+    [Fact]
+    public async Task Granting_the_required_role_is_an_explicit_choice_that_leaves_the_backup_eligible()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            var fixture = await SeedIneligibleBackupAsync(connection);
+
+            await using (var apply = new AeroLinkDbContext(Options(connection)))
+            {
+                var applied = await new ProjectLeadershipMaintenanceResolver(apply, new ProjectLeadershipReconciliationAuthority(apply)).ResolveLegacyBackupAsync(
+                    fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
+                    fixture.PersonId, AeroLinkUpgradeConflict.ChoiceGrantAndKeep, fixture.PrimaryId,
+                    "Sean, issue #816", apply: true);
+                Assert.True(applied.Applied);
+            }
+
+            await using var check = new AeroLinkDbContext(Options(connection));
+            Assert.True(await check.ProgramMemberships.AsNoTracking().AnyAsync(x =>
+                x.UserId == fixture.PersonId && x.ProgramId == fixture.ProgramId
+                && x.Role == ProgramRole.SoftwareEngineer && x.EndedAt == null));
+            Assert.True(await check.ProjectLeadershipBackups.AsNoTracking().AnyAsync(x =>
+                x.ProgramId == fixture.ProgramId && x.Position == ProjectLeadershipPosition.SoftwareEngineeringLead
+                && x.BackupUserId == fixture.PersonId && x.RemovedAt == null));
+            var legacy = await check.ProjectRoleBackups.AsNoTracking().SingleAsync(x => x.Id == fixture.LegacyBackupId);
+            Assert.NotNull(legacy.RemovedAt);
+
+            await using var reanalyze = new AeroLinkDbContext(Options(connection));
+            Assert.Empty((await Analyzer(reanalyze).AnalyzeAsync()).Conflicts);
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    /// <summary>
+    /// State moved between the operator reviewing the conflict and acting on it. The write must refuse:
+    /// they reviewed a different situation, and applying their decision to this one is a guess.
+    /// </summary>
+    [Fact]
+    public async Task A_precondition_that_moved_after_analysis_refuses_and_writes_nothing()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            var fixture = await SeedIneligibleBackupAsync(connection);
+
+            // The primary is replaced after the operator read the analysis.
+            var replacement = Account("multi.replacement", DateTimeOffset.UtcNow);
+            await using (var move = new AeroLinkDbContext(Options(connection)))
+            {
+                move.Add(replacement);
+                var assignment = await move.ProjectLeadershipAssignments.SingleAsync(x =>
+                    x.ProgramId == fixture.ProgramId
+                    && x.Position == ProjectLeadershipPosition.SoftwareEngineeringLead && x.EndedAt == null);
+                var later = DateTimeOffset.UtcNow;
+                assignment.End("operator", later);
+                move.Add(new ProgramMembership(replacement.Id, fixture.ProgramId, ProgramRole.SoftwareEngineer, "operator", later));
+                move.Add(new ProjectLeadershipAssignment(fixture.ProgramId, ProjectLeadershipPosition.SoftwareEngineeringLead, replacement.Id, "operator", later));
+                await move.SaveChangesAsync();
+            }
+
+            await using (var stale = new AeroLinkDbContext(Options(connection)))
+            {
+                var refused = await new ProjectLeadershipMaintenanceResolver(stale, new ProjectLeadershipReconciliationAuthority(stale)).ResolveLegacyBackupAsync(
+                    fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
+                    fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup,
+                    fixture.PrimaryId, // the primary the operator reviewed, who is no longer the primary
+                    "Sean, issue #816", apply: true);
+                Assert.False(refused.Applied);
+                Assert.Equal(AeroLinkResolutionResult.PreconditionFailedOutcome, refused.Outcome);
+                Assert.Contains("changed after the conflict was analyzed", refused.Detail);
+            }
+
+            await using var check = new AeroLinkDbContext(Options(connection));
+            Assert.True(await check.ProjectRoleBackups.AsNoTracking()
+                .AnyAsync(x => x.Id == fixture.LegacyBackupId && x.RemovedAt == null));
+            Assert.Empty(await check.SecurityAuditEvents.AsNoTracking()
+                .Where(x => x.EventType == AeroLinkMaintenanceAttribution.DecisionEvent).ToListAsync());
+            // "No write" means no write. An earlier version recorded a refusal audit row here and this test
+            // asserted it existed, which encoded the contradiction rather than the contract: #881 says a
+            // stale or conflicting precondition causes no write, and both the result type and the
+            // maintenance host tell the operator nothing was written.
+            Assert.Empty(await check.SecurityAuditEvents.AsNoTracking()
+                .Where(x => x.EventType == AeroLinkMaintenanceAttribution.RefusedEvent).ToListAsync());
+            // Nothing at all, in fact: no maintenance-actor row of any kind.
+            Assert.Empty(await check.SecurityAuditEvents.AsNoTracking()
+                .Where(x => x.ActorId == AeroLinkMaintenanceAttribution.Actor).ToListAsync());
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    /// <summary>
+    /// A database is not the only persistent thing an upgrade writes, and this is the qualification for the
+    /// half that a connection string does not isolate.
+    ///
+    /// <c>SoftwareVerificationCaseMigrationAuthority</c> — one of the semantic authorities the upgrade runs —
+    /// takes an <c>EvidenceFileStore</c> and calls <c>StoreAsync</c> while rewriting controlled renditions.
+    /// That store resolves <c>Evidence:Root</c> and, absent one, the LIVE
+    /// <c>%LOCALAPPDATA%\AeroLink\evidence</c> tree. So a "clone" upgrade isolated only by connection string
+    /// wrote new objects into the canonical evidence store, before the clone had been proved and where a
+    /// database rollback cannot reach them.
+    ///
+    /// What is proved here, on real PostgreSQL and a real filesystem:
+    ///
+    ///   1. `Evidence__Root` — the exact variable the PowerShell sets, through the exact double-underscore
+    ///      environment mapping the host uses — actually redirects the store the authority is constructed
+    ///      with. This is the mechanism that was missing.
+    ///   2. A real <c>StoreAsync</c> under that redirection lands in the isolated tree.
+    ///   3. Running the authority against the isolated database leaves the canonical tree byte-identical,
+    ///      on the completing path AND on a failing one.
+    ///
+    /// Honest about its limit: this fixture has no HLR/LLR controlled documents, so the authority completes
+    /// without renditions to rewrite. The write in step 2 is therefore what exercises the store; the
+    /// authority's own path is exercised for the absence of leakage rather than for a rewrite.
+    /// </summary>
+    [Fact]
+    public async Task An_evidence_writing_semantic_authority_cannot_touch_the_canonical_evidence_tree()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-881-evidence-{Guid.NewGuid():N}");
+        var canonical = Path.Combine(root, "canonical-evidence");
+        var isolated = Path.Combine(root, "clone-evidence");
+        var previousEvidenceRoot = Environment.GetEnvironmentVariable("Evidence__Root");
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            Directory.CreateDirectory(canonical);
+            // Something already in the canonical tree, so "unchanged" is a comparison and not an empty set.
+            await File.WriteAllTextAsync(Path.Combine(canonical, "existing-controlled-object.bin"), "canonical bytes");
+            var before = SnapshotTree(canonical);
+
+            await using (var migrate = new AeroLinkDbContext(Options(connection))) await migrate.Database.MigrateAsync();
+
+            // The mechanism, exactly as the launcher configures it: Evidence__Root in the environment,
+            // resolved through IConfiguration, into the store the authority is constructed with.
+            Environment.SetEnvironmentVariable("Evidence__Root", isolated);
+            var configuration = new ConfigurationBuilder().AddEnvironmentVariables().Build();
+            var store = new EvidenceFileStore(configuration);
+            Assert.Equal(Path.GetFullPath(isolated), Path.GetFullPath(store.RootPath));
+
+            // A real controlled write through that store.
+            var payload = Encoding.UTF8.GetBytes("rewritten controlled rendition");
+            var stored = await store.StoreAsync(new MemoryStream(payload), "rendition.bin", "application/octet-stream", default);
+            Assert.NotNull(stored);
+            Assert.Equal(Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant(), stored.Sha256.ToLowerInvariant());
+            Assert.True(Directory.EnumerateFiles(isolated, "*", SearchOption.AllDirectories).Any(),
+                "the isolated evidence tree should hold the object that was just written");
+            Assert.Equal(before, SnapshotTree(canonical));
+
+            // The authority itself, against the isolated database and the isolated store.
+            await using (var authorityContext = new AeroLinkDbContext(Options(connection)))
+            {
+                var generator = new ControlledOutputGenerator(authorityContext, new RichContentPublisher(authorityContext, store));
+                await new SoftwareVerificationCaseMigrationAuthority(authorityContext, generator, store).EnsureCompletedAsync();
+            }
+            Assert.Equal(before, SnapshotTree(canonical));
+
+            // And on a failing path: a store pointed at a file rather than a directory cannot write, and the
+            // canonical tree must still be untouched when the authority throws.
+            var unusable = Path.Combine(root, "unusable-evidence");
+            await File.WriteAllTextAsync(unusable, "not a directory");
+            await Assert.ThrowsAnyAsync<Exception>(async () =>
+            {
+                var broken = new EvidenceFileStore(unusable);
+                await broken.StoreAsync(new MemoryStream(payload), "rendition.bin", "application/octet-stream", default);
+            });
+            Assert.Equal(before, SnapshotTree(canonical));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("Evidence__Root", previousEvidenceRoot);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            await DropDatabaseAsync(server, database);
+        }
+    }
+
+    /// <summary>Every file under a tree, by relative path and content hash, for an exact comparison.</summary>
+    private static string SnapshotTree(string root) =>
+        string.Join("\n", Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .Select(x => $"{Path.GetRelativePath(root, x)}:{Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(x)))}"));
+
+    /// <summary>
+    /// The window the in-transaction re-derivation does not close on its own.
+    ///
+    /// Re-reading the conflict inside the transaction proves the state at the moment it is read. Under the
+    /// Read Committed default that proof expires immediately: the analysis takes no locks, so another writer
+    /// can move the primary, the base role or the legacy backup between that read and the write, and the
+    /// decision commits against state nobody validated. Serializable is what makes "exact preconditions"
+    /// mean exact at commit rather than exact at query time.
+    ///
+    /// The assertion is the invariant, not a particular winner: whichever transaction PostgreSQL aborts,
+    /// the database must never end up with the decision applied on top of the competing change. An aborted
+    /// resolver writes nothing, which is the same answer it gives every other stale precondition.
+    /// </summary>
+    [Fact]
+    public async Task A_concurrent_writer_cannot_land_a_decision_against_state_it_did_not_validate()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            var fixture = await SeedIneligibleBackupAsync(connection);
+
+            // A competing serializable transaction that reads the same leadership state and then changes it,
+            // held open across the resolver's own transaction. This is the interleaving that Read Committed
+            // allows to commit and that Serializable must refuse.
+            await using var competitor = new AeroLinkDbContext(Options(connection));
+            await using var competingTransaction =
+                await competitor.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            // Write skew, which is the anomaly that actually matters here and the one Read Committed permits.
+            //
+            // The resolver READS the leadership assignments and WRITES the legacy backup. This competitor
+            // does the mirror image: it reads the legacy backup and writes the assignment. Each transaction
+            // decides using state the other is about to invalidate, and neither ordering of them serially
+            // produces the result both committing gives - so there is no serial history equivalent to it.
+            // Under Read Committed both commit and the decision lands against state nobody validated; under
+            // Serializable PostgreSQL detects the cycle and aborts one.
+            //
+            // (Making the competitor write only, or write after the resolver, would be a legitimate serial
+            // history that Serializable is supposed to allow - asserting against that would be testing
+            // PostgreSQL rather than this code.)
+            _ = await competitor.ProjectRoleBackups.SingleAsync(x => x.Id == fixture.LegacyBackupId);
+            var contested = await competitor.ProjectLeadershipAssignments.SingleAsync(x =>
+                x.ProgramId == fixture.ProgramId
+                && x.Position == ProjectLeadershipPosition.SoftwareEngineeringLead && x.EndedAt == null);
+            contested.End("competing.writer", DateTimeOffset.UtcNow);
+
+            AeroLinkResolutionResult resolution;
+            await using (var resolving = new AeroLinkDbContext(Options(connection)))
+            {
+                resolution = await new ProjectLeadershipMaintenanceResolver(resolving, new ProjectLeadershipReconciliationAuthority(resolving))
+                    .ResolveLegacyBackupAsync(
+                        fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
+                        fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup,
+                        fixture.PrimaryId, "Sean, issue #816", apply: true);
+            }
+
+            // A serialization failure surfaces wrapped: EF's retrying execution strategy raises an
+            // InvalidOperationException whose chain ends in Npgsql 40001. Matching on the outer type alone
+            // would miss it and read an abort as a successful commit.
+            static bool IsSerializationAbort(Exception? exception) =>
+                exception is not null
+                && (exception is PostgresException { SqlState: "40001" or "40P01" } || IsSerializationAbort(exception.InnerException));
+
+            var competitorCommitted = true;
+            try { await competitor.SaveChangesAsync(); await competingTransaction.CommitAsync(); }
+            catch (Exception exception) when (IsSerializationAbort(exception)) { competitorCommitted = false; }
+
+            // Exactly one of them may have taken effect, and whichever lost must have written nothing at all.
+            await using var check = new AeroLinkDbContext(Options(connection));
+            var backupRetired = !await check.ProjectRoleBackups.AsNoTracking()
+                .AnyAsync(x => x.Id == fixture.LegacyBackupId && x.RemovedAt == null);
+            var decisionRows = await check.SecurityAuditEvents.AsNoTracking()
+                .CountAsync(x => x.ActorId == AeroLinkMaintenanceAttribution.Actor);
+
+            Assert.Equal(resolution.Applied, backupRetired);
+            Assert.Equal(resolution.Applied ? 1 : 0, decisionRows);
+            Assert.False(resolution.Applied && competitorCommitted,
+                "Serializable isolation must not allow the decision and the competing change that invalidates it to both commit.");
+            if (!resolution.Applied)
+            {
+                // A refusal is a refusal however it was reached - stale precondition, or an abort PostgreSQL
+                // detected for us. Neither may leave a row behind.
+                Assert.Equal(AeroLinkResolutionResult.PreconditionFailedOutcome, resolution.Outcome);
+                Assert.Empty(await check.SecurityAuditEvents.AsNoTracking()
+                    .Where(x => x.ActorId == AeroLinkMaintenanceAttribution.Actor).ToListAsync());
+            }
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    /// <summary>
+    /// A row that has already been retired, or that belongs to another program, is not the row the operator
+    /// reviewed, and no decision may be applied to it.
+    /// </summary>
+    [Fact]
+    public async Task A_legacy_row_that_is_no_longer_the_analyzed_row_refuses()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            var fixture = await SeedIneligibleBackupAsync(connection);
+
+            await using (var first = new AeroLinkDbContext(Options(connection)))
+                Assert.True((await new ProjectLeadershipMaintenanceResolver(first, new ProjectLeadershipReconciliationAuthority(first)).ResolveLegacyBackupAsync(
+                    fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
+                    fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup, fixture.PrimaryId,
+                    "Sean", apply: true)).Applied);
+
+            // The same decision, replayed. It must not apply twice.
+            await using (var replay = new AeroLinkDbContext(Options(connection)))
+            {
+                var refused = await new ProjectLeadershipMaintenanceResolver(replay, new ProjectLeadershipReconciliationAuthority(replay)).ResolveLegacyBackupAsync(
+                    fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
+                    fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup, fixture.PrimaryId,
+                    "Sean", apply: true);
+                Assert.False(refused.Applied);
+                Assert.Equal(AeroLinkResolutionResult.PreconditionFailedOutcome, refused.Outcome);
+            }
+
+            // An unsupported choice is refused before anything is read or written.
+            await using (var wrongChoice = new AeroLinkDbContext(Options(connection)))
+            {
+                var refused = await new ProjectLeadershipMaintenanceResolver(wrongChoice, new ProjectLeadershipReconciliationAuthority(wrongChoice)).ResolveLegacyBackupAsync(
+                    fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
+                    fixture.PersonId, "delete-the-row", fixture.PrimaryId, "Sean", apply: true);
+                Assert.False(refused.Applied);
+                Assert.Equal(AeroLinkResolutionResult.ChoiceRefusedOutcome, refused.Outcome);
+            }
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    /// <summary>
+    /// A maintenance decision must be attributable to a person who asked for it, not only to a process.
+    /// </summary>
+    [Fact]
+    public async Task A_decision_without_an_operator_reference_is_rejected()
+    {
+        if (!ServerConfigured(out var server)) return;
+        string? database = null;
+        var connection = await CreateDisposableDatabaseAsync(server);
+        try
+        {
+            database = new NpgsqlConnectionStringBuilder(connection).Database;
+            var fixture = await SeedIneligibleBackupAsync(connection);
+            await using var db = new AeroLinkDbContext(Options(connection));
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                new ProjectLeadershipMaintenanceResolver(db, new ProjectLeadershipReconciliationAuthority(db)).ResolveLegacyBackupAsync(
+                    fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
+                    fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup, fixture.PrimaryId,
+                    "   ", apply: true));
+        }
+        finally { await DropDatabaseAsync(server, database); }
+    }
+
+    /// <summary>
+    /// The analyzer's authority list and the startup sequence in Program.cs must name the same authorities.
+    ///
+    /// They are two lists in two files, and the failure mode when they drift is silent under-reporting: an
+    /// authority that startup runs but the analyzer does not know about is a pending upgrade the operator is
+    /// never told is pending, and a conflict they meet as a stack trace instead. Source-derived rather than
+    /// hand-maintained, so adding one in Program.cs fails here rather than shipping.
+    /// </summary>
+    [Fact]
+    public void The_analyzer_knows_every_semantic_authority_startup_runs()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        string? programPath = null;
+        while (directory is not null && programPath is null)
+        {
+            var candidate = Path.Combine(directory.FullName, "product", "src", "AeroLink.Api", "Program.cs");
+            if (File.Exists(candidate)) programPath = candidate;
+            directory = directory.Parent;
+        }
+        Assert.True(programPath is not null, "Program.cs was not found above the test assembly.");
+
+        var program = File.ReadAllText(programPath!);
+        // Every authority resolved in the startup scope, by the exact type name Program.cs asks for.
+        var startupAuthorities = System.Text.RegularExpressions.Regex
+            .Matches(program, @"GetRequiredService<(\w+(?:Migration|Reconciliation|Cutover)Authority)>")
+            .Select(x => x.Groups[1].Value)
+            .Distinct()
+            .OrderBy(x => x)
+            .ToList();
+        Assert.NotEmpty(startupAuthorities);
+
+        var analyzerAuthorities = AeroLinkUpgradeAnalyzer.SemanticAuthorities
+            .Select(x => x.Marker switch
+            {
+                var m when m == SoftwareVerificationCaseMigrationAuthority.MigrationMarker => nameof(SoftwareVerificationCaseMigrationAuthority),
+                var m when m == ProjectLeadershipMigrationAuthority.MigrationMarker => nameof(ProjectLeadershipMigrationAuthority),
+                var m when m == ProjectLeadershipReconciliationAuthority.MigrationMarker => nameof(ProjectLeadershipReconciliationAuthority),
+                var m when m == TestChangeRequestPrefixMigrationAuthority.MigrationMarker => nameof(TestChangeRequestPrefixMigrationAuthority),
+                var m when m == SoftwareProcedureExecutionCutoverAuthority.MigrationMarker => nameof(SoftwareProcedureExecutionCutoverAuthority),
+                _ => x.Marker,
+            })
+            .OrderBy(x => x)
+            .ToList();
+
+        Assert.Equal(startupAuthorities, analyzerAuthorities);
+    }
+
+    /// <summary>
+    /// Records the completion markers named authorities write, for a database that has already run them.
+    /// The audit target must match what the authority itself records, because that is what the analyzer
+    /// matches on — a marker with the wrong target would read as still pending.
+    /// </summary>
+    private static async Task MarkCompletedAsync(string connection, params string[] markers)
+    {
+        await using var db = new AeroLinkDbContext(Options(connection));
+        foreach (var marker in markers)
+        {
+            var target = AeroLinkUpgradeAnalyzer.SemanticAuthorities.Single(x => x.Marker == marker).Target;
+            db.SecurityAuditEvents.Add(new SecurityAuditEvent(marker + ".Completed", "aerolink-migration",
+                target, "Success", "Recorded by qualification for an installation that already ran this.",
+                "local", DateTimeOffset.UtcNow));
+        }
+        await db.SaveChangesAsync();
+    }
+
+    private sealed record IneligibleBackupFixture(Guid ProgramId, Guid PersonId, Guid PrimaryId, Guid LegacyBackupId);
+
+    /// <summary>The 2026-08-31 work-laptop shape: Rina holds the position, Avery is the ineligible backup.</summary>
+    private static async Task<IneligibleBackupFixture> SeedIneligibleBackupAsync(string connection)
+    {
+        await using (var migrate = new AeroLinkDbContext(Options(connection))) await migrate.Database.MigrateAsync();
+
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Flight Management System", $"FMS{Guid.NewGuid():N}"[..12]);
+        var avery = Account($"software.engineer.070.{Guid.NewGuid():N}"[..24], now);
+        var rina = Account($"rina.shah.{Guid.NewGuid():N}"[..24], now);
+        var legacyBackup = new ProjectRoleBackup(program.Id, ProgramRole.SoftwareEngineeringLead, avery.Id, "legacy", now);
+        await using (var seed = new AeroLinkDbContext(Options(connection)))
+        {
+            seed.AddRange(program, avery, rina);
+            seed.AddRange(
+                new ProgramMembership(rina.Id, program.Id, ProgramRole.SoftwareEngineer, "legacy", now),
+                new ProgramMembership(avery.Id, program.Id, ProgramRole.Engineer, "legacy", now),
+                new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.SoftwareEngineeringLead, rina.Id, "operator", now),
+                legacyBackup);
+            await seed.SaveChangesAsync();
+        }
+        await using (var v1 = new AeroLinkDbContext(Options(connection)))
+            await new ProjectLeadershipMigrationAuthority(v1).EnsureCompletedAsync();
+
+        return new IneligibleBackupFixture(program.Id, avery.Id, rina.Id, legacyBackup.Id);
+    }
+}

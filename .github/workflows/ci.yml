@@ -863,6 +863,30 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./product/scripts/AeroLinkBootstrap.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Launcher source-posture bootstrap contract failed.' }
+      - name: Validate the installation-identity contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/AeroLinkInstallation.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Installation-identity contract failed.' }
+      - name: Validate the dedicated production-source contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/AeroLinkProductionSource.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Dedicated production-source contract failed.' }
+      - name: Validate the runtime-identity and process-ownership contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/AeroLinkRuntimeIdentity.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime-identity contract failed.' }
+      - name: Validate the database upgrade-orchestration contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/AeroLinkUpgrade.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Upgrade-orchestration contract failed.' }
       - name: Validate the changed-test planner Windows contract
         shell: powershell
         run: |
@@ -1417,10 +1441,40 @@ jobs:
           psql -h 127.0.0.1 -U aerolink -d aerolink_ci -qtAc \
             "select count(*) from security_audit_events where \"EventType\" like 'External%' and \"Outcome\" = 'Success';" \
             | { read -r count; test "$count" -ge 3 || { echo "expected identity audit evidence, found $count"; exit 1; }; }
+      # The #881 maintenance and upgrade qualification, on a real provider, in a lane the gate waits on.
+      #
+      # These tests return early when AEROLINK_MIGRATIONS_CONNECTION is unset. That is right on a developer
+      # machine and worthless as evidence in CI: on every runner so far "no PostgreSQL configured" and
+      # "twelve qualifications passed" produced the same green tick. AEROLINK_REQUIRE_POSTGRES_QUALIFICATION
+      # turns that skip into a failure here, so this lane cannot pass without having actually run them.
+      #
+      # Each test creates and drops its own aerolink_881_maint_* database on the ephemeral service container.
+      # The connection below names that throwaway service, never a persistent AeroLink installation.
+      - name: Qualify database maintenance and upgrade analysis against PostgreSQL
+        env:
+          AEROLINK_MIGRATIONS_CONNECTION: Host=127.0.0.1;Port=5432;Database=postgres;Username=aerolink;Password=ci-only-password
+          AEROLINK_REQUIRE_POSTGRES_QUALIFICATION: "true"
+        run: |
+          set -euo pipefail
+          dotnet test product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj \
+            --configuration Release --no-build \
+            --filter "FullyQualifiedName~AeroLinkMaintenanceQualificationTests" \
+            --logger "console;verbosity=normal" \
+            --logger "trx;LogFileName=maintenance-qualification.trx" \
+            --results-directory TestResults --blame-hang-timeout 6m
       - name: Mark test complete
         if: always()
         continue-on-error: true
         run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" test-end
+      - name: Upload maintenance qualification results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: postgresql-maintenance-qualification-${{ github.run_attempt }}
+          path: TestResults/maintenance-qualification.trx
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Upload PostgreSQL startup diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

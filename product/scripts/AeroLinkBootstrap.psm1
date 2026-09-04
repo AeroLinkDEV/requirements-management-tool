@@ -450,6 +450,11 @@ function Invoke-AeroLinkSourceBootstrap {
             mode, plus an exact expected-SHA identity check against the SHA the parent verified, and consumes
             the one-shot markers so a stale marker can never bypass a later launch.
 
+            -PreAdvanceAction runs immediately BEFORE the fast-forward, and only when one is actually going to
+            happen. It is where a caller stops whatever it owns that is executing out of this working tree,
+            because the tree is about to be rewritten underneath it. Not a test seam: the ordering it enforces
+            is the safety property, and the production launcher passes its owned-runtime stop here.
+
             -FastForwardObserver is a deterministic diagnostic/test seam invoked between the fast-forward and
             the post-update revalidation, and -FailedFetchObserver between a failed fetch and the refreshed
             posture, so contract tests can prove that source appearing in those windows fails closed instead
@@ -463,6 +468,7 @@ function Invoke-AeroLinkSourceBootstrap {
         [AllowEmptyCollection()][string[]]$ScriptArguments = @(),
         [AllowEmptyCollection()][string[]]$LauncherFiles = @(),
         [int]$FetchTimeoutSeconds = 45,
+        [scriptblock]$PreAdvanceAction,
         [scriptblock]$FastForwardObserver,
         [scriptblock]$FailedFetchObserver
     )
@@ -681,6 +687,15 @@ function Invoke-AeroLinkSourceBootstrap {
             Write-Host "origin/main: $($posture.ShortRemoteMainSha)"
             Write-Host 'Status: clean, fast-forwardable'
             $beforeFiles = Get-AeroLinkBootstrapFileSet -RepositoryRoot $RepositoryRoot -LauncherFiles $LauncherFiles
+
+            # The last moment before this working tree is rewritten, and therefore the only correct moment to
+            # stop anything still executing out of it. HOME production is a long-lived process serving a
+            # public demo; fast-forwarding underneath it replaces assemblies, EF migrations and the built
+            # client bundle while it is answering requests, with its database a revision behind what is now on
+            # disk. The caller supplies the stop, because only the caller knows what it owns - and ownership
+            # is the point: a listener this repository cannot positively attribute is refused, never killed.
+            if ($PreAdvanceAction) { & $PreAdvanceAction $RepositoryRoot $posture | Out-Null }
+
             try {
                 Invoke-AeroLinkBootstrapGit -RepositoryRoot $RepositoryRoot -GitArguments @('merge', '--ff-only', 'origin/main') | Out-Null
             }
@@ -743,5 +758,8 @@ Export-ModuleMember -Function @(
     'Compare-AeroLinkBootstrapFileSet',
     'Invoke-AeroLinkBootstrapReentry',
     'Update-AeroLinkClientDependencies',
+    # Exported so the dedicated production source (#881) validates against this exact policy rather than a
+    # second implementation of "is this source canonical" that could disagree with the launcher's.
+    'Assert-AeroLinkHomeCanonicalSourcePolicy',
     'Invoke-AeroLinkSourceBootstrap'
 )

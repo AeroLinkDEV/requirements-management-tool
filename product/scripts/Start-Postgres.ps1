@@ -6,11 +6,17 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$root = Resolve-Path (Join-Path $PSScriptRoot '..')
-$bin = Join-Path $root '.local\postgresql\pgsql\bin'
-$data = Join-Path $root '.local\pgdata'
-$log = Join-Path $root '.local\postgresql.log'
-$logs = Join-Path $root '.local\logs'
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+# Persistent paths come from the installation authority, not from this checkout's own folder. A dedicated
+# production source checkout points at the canonical HOME installation, and must start THAT cluster rather
+# than initdb an empty second one beside its own source (#881).
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $root
+$bin = $installation.PostgresBin
+$data = $installation.PostgresData
+$log = $installation.PostgresLog
+$logs = $installation.Logs
+New-Item -ItemType Directory -Path $logs -Force | Out-Null
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
 
 function Test-AeroLinkPostgresAccepting {
@@ -52,7 +58,7 @@ function Test-AeroLinkDatabaseExists {
 }
 
 function Test-AeroLinkPostgresInstalled {
-    $catalogue = Join-Path $root '.local\postgresql\pgsql\share\postgres.bki'
+    $catalogue = $installation.PostgresCatalogue
     return (Test-Path (Join-Path $bin 'postgres.exe')) -and (Test-Path $catalogue)
 }
 

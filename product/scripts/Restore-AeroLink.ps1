@@ -7,6 +7,18 @@ param(
     [string]$PostgresBin,
     [int]$ValidationApiPort = 5091,
     [switch]$DisposableQualification,
+    # Restore the archive's own state and validate the archive itself, but do NOT stand up current AeroLink
+    # against the result.
+    #
+    # The read-only validation host refuses a database with pending migrations ("The restored database schema
+    # does not match this AeroLink validation build"), which is correct when the restore is the end of the
+    # story. It is circular when the restore exists so that current code can then MIGRATE the copy: a laptop
+    # several migrations behind could never reach its upgrade, because the restore setting it up demanded the
+    # schema the upgrade was going to produce. Callers that migrate the clone afterwards pass this and run the
+    # current-code validation themselves, once the copy is genuinely current.
+    #
+    # Ignored for a production restore, which always validates.
+    [switch]$SkipCurrentCodeValidation,
     [switch]$AllowProductionRestore,
     [string]$Confirmation,
     [ValidateSet('','BeforeDatabaseRestore','AfterDatabaseRestore','AfterEvidenceCopy','AfterPreActivationValidation','AfterOriginalDatabaseRename','AfterDatabaseActivation','AfterEvidenceActivation','AfterActivationValidation','BeforeRestart','AfterRestart')]
@@ -59,11 +71,33 @@ function Stop-AeroLinkApplicationProcesses {
         }
     }
 }
+function Start-AeroLinkAfterRestore {
+    <#
+        Restarts AeroLink through the launcher that is allowed to run THIS installation.
+
+        The development launcher now refuses an installation declared HOME CANONICAL, which is right - but
+        restore called it unconditionally, both after a successful activation and again on the rollback path.
+        On a declared HOME installation that turned a good restore into a failure, and then prevented the
+        compensating restart of the original database as well. A guard that breaks recovery is worse than the
+        gap it closes.
+    #>
+    $instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode Development
+    if ($instance.Classification -eq 'HomeCanonical') {
+        & (Join-Path $PSScriptRoot 'Start-AeroLinkProduction.ps1') -DoNotOpenBrowser
+    }
+    else {
+        & (Join-Path $PSScriptRoot 'Start-AeroLink.ps1') -DoNotOpenBrowser
+    }
+}
+
 function Test-RestoredApi([string]$Database, [string]$Root, [object[]]$Inventory, [int]$Port) {
     $managed = @($Inventory | Where-Object { [string]$_.ArtifactType -eq 'ManagedDocument' })
     if ($managed.Count -eq 0) { return [pscustomobject]@{ Passed=$true; ManagedDocumentDownloads=0; DownloadedBytes=0 } }
+    # Release, named explicitly: this path builds Release and must validate with the build it produced, not
+    # with whichever configuration happens to have output on disk.
     return & (Join-Path $PSScriptRoot 'Test-AeroLinkRestoredDownloads.ps1') -Database $Database -EvidenceRoot $Root `
-        -AttachmentInventory $Inventory -PostgresPort $PostgresPort -ApiPort $Port -LogRoot (Join-Path $temporary 'validation-logs')
+        -AttachmentInventory $Inventory -PostgresPort $PostgresPort -ApiPort $Port -LogRoot (Join-Path $temporary 'validation-logs') `
+        -ApiExecutable (Join-Path $productRoot 'src\AeroLink.Api\bin\Release\net10.0\AeroLink.Api.exe')
 }
 
 & (Join-Path $PSScriptRoot 'Verify-AeroLinkBackup.ps1') -BackupArchive $BackupArchive | Out-Host
@@ -74,10 +108,12 @@ if ($production -and -not $DisposableQualification) {
 }
 if ($PostgresPort -eq 54329) { & (Join-Path $PSScriptRoot 'Start-Postgres.ps1') }
 
-if (-not $PostgresBin) { $PostgresBin = Join-Path $productRoot '.local\postgresql\pgsql\bin' }
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+if (-not $PostgresBin) { $PostgresBin = $installation.PostgresBin }
 $bin = [IO.Path]::GetFullPath($PostgresBin)
 $archive = (Resolve-Path -LiteralPath $BackupArchive).Path
-$restoreRoot = Join-Path $productRoot '.local\restore-work'; New-Item -ItemType Directory -Path $restoreRoot -Force | Out-Null
+$restoreRoot = $installation.RestoreWork; New-Item -ItemType Directory -Path $restoreRoot -Force | Out-Null
 $temporary = Join-Path $restoreRoot ([Guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $temporary | Out-Null
 $token = [Guid]::NewGuid().ToString('N').Substring(0, 12)
 $restoreDatabase = if ($production) { "aerolink_restore_stage_$token" } else { $TargetDatabase }
@@ -103,10 +139,10 @@ try {
     if ($restoredInventory.Count -gt 0 -and -not (Test-Path -LiteralPath $evidenceSource)) { throw 'The archive contains attachment rows but no evidence directory.' }
     [void](Test-AeroLinkAttachmentInventory -Inventory $restoredInventory -EvidenceRoot $evidenceSource)
 
-    if (-not $EvidenceTarget) { $EvidenceTarget = if ($production) { Get-AeroLinkEvidenceRoot -ProductRoot $productRoot } else { Join-Path $productRoot ".local\restore-validation\$TargetDatabase\evidence" } }
+    if (-not $EvidenceTarget) { $EvidenceTarget = if ($production) { Get-AeroLinkEvidenceRoot -ProductRoot $productRoot } else { Join-Path $installation.RestoreValidation "$TargetDatabase\evidence" } }
     $resolvedTarget = [IO.Path]::GetFullPath($EvidenceTarget)
-    $validationRoot = [IO.Path]::GetFullPath((Join-Path $productRoot '.local\restore-validation')) + [IO.Path]::DirectorySeparatorChar
-    if (-not $production -and -not ($resolvedTarget + [IO.Path]::DirectorySeparatorChar).StartsWith($validationRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'The isolated evidence target must remain under product\.local\restore-validation.' }
+    $validationRoot = [IO.Path]::GetFullPath($installation.RestoreValidation) + [IO.Path]::DirectorySeparatorChar
+    if (-not $production -and -not ($resolvedTarget + [IO.Path]::DirectorySeparatorChar).StartsWith($validationRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'The isolated evidence target must remain under the installation restore-validation root.' }
     $parent = Split-Path $resolvedTarget -Parent; New-Item -ItemType Directory -Path $parent -Force | Out-Null
     $incoming = Join-Path $parent ('.restore-incoming-' + $token)
     if (Test-Path -LiteralPath $incoming) { Remove-Item -LiteralPath $incoming -Recurse -Force }
@@ -114,14 +150,18 @@ try {
     if (Test-Path -LiteralPath $evidenceSource) { Copy-AeroLinkEvidenceTree -Source $evidenceSource -Destination $incoming }
     [void](Test-AeroLinkAttachmentInventory -Inventory $restoredInventory -EvidenceRoot $incoming)
     Invoke-Fault 'AfterEvidenceCopy'
-    $preActivationDownloads = Test-RestoredApi $restoreDatabase $incoming $restoredInventory $ValidationApiPort
+    # Archive integrity, inventory and evidence have all been proved above regardless. What is deferred is
+    # only standing up CURRENT code against a copy that is deliberately not current yet.
+    $deferCurrentCode = $SkipCurrentCodeValidation -and -not $production
+    $deferredResult = [pscustomobject]@{ Passed = $true; ManagedDocumentDownloads = 0; DownloadedBytes = 0; CurrentCodeValidationDeferred = $true }
+    $preActivationDownloads = if ($deferCurrentCode) { $deferredResult } else { Test-RestoredApi $restoreDatabase $incoming $restoredInventory $ValidationApiPort }
     Invoke-Fault 'AfterPreActivationValidation'
 
     if (-not $production) {
         if (Test-Path -LiteralPath $resolvedTarget) { Remove-Item -LiteralPath $resolvedTarget -Recurse -Force }
         Move-Item -LiteralPath $incoming -Destination $resolvedTarget; $incoming = $null
         [void](Test-AeroLinkAttachmentInventory -Inventory $restoredInventory -EvidenceRoot $resolvedTarget)
-        $finalDownloads = Test-RestoredApi $restoreDatabase $resolvedTarget $restoredInventory ($ValidationApiPort + 1)
+        $finalDownloads = if ($deferCurrentCode) { $deferredResult } else { Test-RestoredApi $restoreDatabase $resolvedTarget $restoredInventory ($ValidationApiPort + 1) }
         $activationPassed = $true
     }
     else {
@@ -138,7 +178,7 @@ try {
         $finalDownloads = Test-RestoredApi 'aerolink' $resolvedTarget $activatedInventory ($ValidationApiPort + 1)
         Invoke-Fault 'AfterActivationValidation'
         Invoke-Fault 'BeforeRestart'
-        if (-not $DisposableQualification) { & (Join-Path $PSScriptRoot 'Start-AeroLink.ps1') -DoNotOpenBrowser }
+        if (-not $DisposableQualification) { Start-AeroLinkAfterRestore }
         Invoke-Fault 'AfterRestart'
         $activationPassed = $true
     }
@@ -164,7 +204,7 @@ catch {
         catch { throw "Restore failed: $($failure.Exception.Message). Automatic rollback also failed: $($_.Exception.Message). AeroLink was not restarted." }
     }
     if ($originalPairAvailable -and -not $DisposableQualification) {
-        try { & (Join-Path $PSScriptRoot 'Start-AeroLink.ps1') -DoNotOpenBrowser }
+        try { Start-AeroLinkAfterRestore }
         catch { throw "Restore failed: $($failure.Exception.Message). The original database/evidence pair was retained but AeroLink restart failed: $($_.Exception.Message)." }
     }
     throw $failure
