@@ -235,7 +235,7 @@ public static class AeroLinkMaintenanceHost
 
         var result = await services.GetRequiredService<ProjectLeadershipMaintenanceResolver>()
             .ResolveLegacyBackupAsync(programId, legacyBackupId, position, personId, choice, expectedPrimary,
-                operatorReference, apply);
+                operatorReference, apply, conflict);
 
         Console.WriteLine(result.Applied ? "MAINTENANCE DECISION APPLIED" : $"MAINTENANCE DECISION NOT APPLIED ({result.Outcome})");
         Console.WriteLine(result.Detail);

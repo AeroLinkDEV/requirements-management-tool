@@ -40,6 +40,12 @@ function Invoke-AeroLinkMaintenanceCommand {
             -ConnectionString targets another database (the isolated clone) without touching configuration
             files, through the same ConnectionStrings__AeroLink the application already reads. The value is
             never echoed: it is a credentialed string, and this module's output is written to operator logs.
+
+            `dotnet run` builds before it runs, into the same output directory a live AeroLink API holds
+            open, so a running instance makes the build fail with a file lock and the caller sees no analysis
+            at all. The launchers therefore stop a stale API before asking, and skip asking entirely when
+            they are reusing a matching one. When a build failure does occur, its output is returned rather
+            than swallowed, so the caller can say why instead of reporting an unexplained "unreachable".
     #>
     [CmdletBinding()]
     param(
@@ -97,21 +103,26 @@ function Get-AeroLinkUpgradeAnalysis {
         Invoke-AeroLinkMaintenanceCommand -ProductRoot $ProductRoot -Arguments @('maintenance', 'analyze', '--json') -ConnectionString $ConnectionString -DotnetPath $DotnetPath
     }
     # The host may print build or startup noise before its JSON, so take the object rather than the whole
-    # transcript. Anchored on a line that is exactly an opening brace: an IndexOf('{') would be satisfied by
-    # a brace inside any log line that happened to be emitted first, and would then parse nothing.
+    # transcript. Anchored on the LINE whose trimmed content is an opening brace, and rejoined from that
+    # line's index: searching the transcript for the text of that line finds the first '{' anywhere, so a
+    # brace inside an earlier MSBuild or restore message would hand ConvertFrom-Json a substring starting
+    # mid-log-line, and the analysis would be reported as unreachable for no reason.
     $lines = $run.StdOut -split "`r?`n"
     $jsonLineIndex = -1
     for ($index = 0; $index -lt $lines.Count; $index++) {
         if ($lines[$index].Trim() -eq '{') { $jsonLineIndex = $index; break }
     }
-    $jsonStart = if ($jsonLineIndex -ge 0) { $run.StdOut.IndexOf($lines[$jsonLineIndex]) } else { -1 }
-    if ($jsonStart -lt 0) {
+    if ($jsonLineIndex -lt 0) {
+        # A build failure prints to stdout, not stderr, so quoting only stderr would report "no analysis"
+        # with no reason at all - which is exactly how a file-locked build would look.
+        $tail = (@($lines | Where-Object { $_ -and $_.Trim() }) | Select-Object -Last 5) -join ' '
         return [pscustomobject]@{
             Status = 'unreachable'; Analysis = $null; ExitCode = $run.ExitCode
-            Detail = "The maintenance host produced no analysis. $($run.StdErr)".Trim()
+            Detail = "The maintenance host produced no analysis. $($run.StdErr) $tail".Trim()
         }
     }
-    try { $analysis = $run.StdOut.Substring($jsonStart) | ConvertFrom-Json }
+    $jsonText = ($lines[$jsonLineIndex..($lines.Count - 1)] -join "`n")
+    try { $analysis = $jsonText | ConvertFrom-Json }
     catch {
         return [pscustomobject]@{ Status = 'unreachable'; Analysis = $null; ExitCode = $run.ExitCode; Detail = "The maintenance analysis could not be read: $($_.Exception.Message)" }
     }

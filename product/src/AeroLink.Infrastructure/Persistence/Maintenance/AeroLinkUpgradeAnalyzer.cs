@@ -69,8 +69,10 @@ public sealed class AeroLinkUpgradeAnalyzer(
         // real database is touched.
         if (pending.Count > 0)
         {
+            // Completed: null, not false. These authorities may well have run years ago; claiming they are
+            // outstanding would put a fabricated number in front of the operator.
             var unknown = SemanticAuthorities
-                .Select(x => new AeroLinkSemanticUpgradeState(x.Marker, x.Target, Completed: false)).ToList();
+                .Select(x => new AeroLinkSemanticUpgradeState(x.Marker, x.Target, Completed: null)).ToList();
             return new AeroLinkUpgradeAnalysis(true, null, databaseName, pending, unknown, [],
                 DatabaseModified: false);
         }
@@ -94,12 +96,14 @@ public sealed class AeroLinkUpgradeAnalyzer(
         // membership looks to v2 like a membership with no assignment to take over from it — a conflict the
         // upgrade itself is about to resolve. Reporting that would be a false alarm on the ordinary path.
         var conflicts = new List<AeroLinkUpgradeConflict>();
-        var backfillCompleted = semantic.Single(x => x.Marker == ProjectLeadershipMigrationAuthority.MigrationMarker).Completed;
+        // Reached only when no schema migration is pending, so every state below was actually read and none
+        // is null; == true keeps that explicit rather than relying on it.
+        var backfillCompleted = semantic.Single(x => x.Marker == ProjectLeadershipMigrationAuthority.MigrationMarker).Completed == true;
         if (!backfillCompleted)
         {
             conflicts.AddRange(await ProjectEngineerContestedAsync(ct));
         }
-        else if (!semantic.Single(x => x.Marker == ProjectLeadershipReconciliationAuthority.MigrationMarker).Completed)
+        else if (semantic.Single(x => x.Marker == ProjectLeadershipReconciliationAuthority.MigrationMarker).Completed != true)
         {
             conflicts.AddRange(await leadershipReconciliation.AnalyzeConflictsAsync(ct));
         }
@@ -223,9 +227,10 @@ public sealed class AeroLinkUpgradeAnalyzer(
             foreach (var upgrade in analysis.PendingSemanticUpgrades) lines.Add($"  {upgrade.Marker}");
         }
         lines.Add("The upgrade is deterministic so far: no operator decision is required to begin it.");
-        if (analysis.PendingEfMigrations.Count > 0)
-            lines.Add("Semantic conflicts cannot be assessed against a schema this build has not migrated yet; "
-                + "they are assessed on the isolated validated copy before the real database is touched.");
+        if (analysis.SemanticPostureUnknown)
+            lines.Add("Semantic upgrades and conflicts cannot be assessed against a schema this build has not "
+                + "migrated yet, so none is claimed here; they are assessed on the isolated validated copy "
+                + "before the real database is touched.");
         lines.Add("No persistent data has been changed by this analysis.");
         return lines;
     }

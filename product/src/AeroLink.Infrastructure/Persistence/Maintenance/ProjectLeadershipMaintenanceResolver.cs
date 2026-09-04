@@ -69,6 +69,11 @@ public sealed class ProjectLeadershipMaintenanceResolver(AeroLinkDbContext db)
     /// Who asked for this, in the operator's own terms (a name, a ticket, an issue number). Recorded on the
     /// audit event so the decision is attributable to a person and not only to a process.
     /// </param>
+    /// <param name="conflictCode">
+    /// The conflict the operator reviewed. Recorded on the audit event: several conflicts share this
+    /// resolution path, and an audit record naming the wrong one is worse than useless, because the whole
+    /// reason to resolve through here rather than in SQL is that the evidence is trustworthy.
+    /// </param>
     /// <param name="apply">False analyzes and reports; true writes.</param>
     public async Task<AeroLinkResolutionResult> ResolveLegacyBackupAsync(
         Guid programId,
@@ -79,10 +84,13 @@ public sealed class ProjectLeadershipMaintenanceResolver(AeroLinkDbContext db)
         Guid? expectedCurrentPrimaryId,
         string operatorReference,
         bool apply,
+        string conflictCode = AeroLinkUpgradeConflict.LegacyBackupIneligibleCode,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(operatorReference))
             throw new ArgumentException("A maintenance decision requires an operator reference so the audit record names who asked for it.", nameof(operatorReference));
+        if (string.IsNullOrWhiteSpace(conflictCode))
+            throw new ArgumentException("A maintenance decision must name the conflict it resolves.", nameof(conflictCode));
         if (choice is not (AeroLinkUpgradeConflict.ChoiceGrantAndKeep or AeroLinkUpgradeConflict.ChoiceRetireBackup))
             return new AeroLinkResolutionResult(false, AeroLinkResolutionResult.ChoiceRefusedOutcome,
                 $"'{choice}' is not a supported decision for a legacy Project Leadership backup conflict.", []);
@@ -101,14 +109,14 @@ public sealed class ProjectLeadershipMaintenanceResolver(AeroLinkDbContext db)
                 .SingleOrDefaultAsync(x => x.Id == legacyBackupId, ct);
             if (legacy is null || legacy.RemovedAt is not null || legacy.ProgramId != programId || legacy.BackupUserId != personId)
             {
-                result = await RefuseAsync(programId, position, choice, operatorReference,
+                result = await RefuseAsync(programId, position, choice, conflictCode, operatorReference,
                     "The legacy standing-backup row named by the decision is no longer the active row it was analyzed as. Re-run the analysis.", apply, ct);
                 await transaction.CommitAsync(ct);
                 return;
             }
             if (ProjectLeadership.PositionForGovernedRole(legacy.Role) != position)
             {
-                result = await RefuseAsync(programId, position, choice, operatorReference,
+                result = await RefuseAsync(programId, position, choice, conflictCode, operatorReference,
                     $"The legacy row's role {legacy.Role} does not map to {position}. Re-run the analysis.", apply, ct);
                 await transaction.CommitAsync(ct);
                 return;
@@ -119,7 +127,7 @@ public sealed class ProjectLeadershipMaintenanceResolver(AeroLinkDbContext db)
                 .Select(x => (Guid?)x.HolderUserId).FirstOrDefaultAsync(ct);
             if (currentPrimaryId != expectedCurrentPrimaryId)
             {
-                result = await RefuseAsync(programId, position, choice, operatorReference,
+                result = await RefuseAsync(programId, position, choice, conflictCode, operatorReference,
                     "The position's active primary changed after the conflict was analyzed. Nothing was written; re-run the analysis.", apply, ct);
                 await transaction.CommitAsync(ct);
                 return;
@@ -135,14 +143,14 @@ public sealed class ProjectLeadershipMaintenanceResolver(AeroLinkDbContext db)
             {
                 if (holdsRequiredRole)
                 {
-                    result = await RefuseAsync(programId, position, choice, operatorReference,
+                    result = await RefuseAsync(programId, position, choice, conflictCode, operatorReference,
                         $"The person already holds the required {requiredRole} base role, so this conflict no longer exists. Re-run the analysis.", apply, ct);
                     await transaction.CommitAsync(ct);
                     return;
                 }
                 if (currentPrimaryId == personId)
                 {
-                    result = await RefuseAsync(programId, position, choice, operatorReference,
+                    result = await RefuseAsync(programId, position, choice, conflictCode, operatorReference,
                         "The person is the position's active primary and cannot also be its standing backup. Re-run the analysis.", apply, ct);
                     await transaction.CommitAsync(ct);
                     return;
@@ -183,7 +191,7 @@ public sealed class ProjectLeadershipMaintenanceResolver(AeroLinkDbContext db)
                 "Success",
                 JsonSerializer.Serialize(new
                 {
-                    conflict = AeroLinkUpgradeConflict.LegacyBackupIneligibleCode,
+                    conflict = conflictCode,
                     choice,
                     programId,
                     position = position.ToString(),
@@ -210,7 +218,7 @@ public sealed class ProjectLeadershipMaintenanceResolver(AeroLinkDbContext db)
     /// message. The refusal itself writes nothing to the rows under discussion.
     /// </summary>
     private async Task<AeroLinkResolutionResult> RefuseAsync(
-        Guid programId, ProjectLeadershipPosition position, string choice, string operatorReference,
+        Guid programId, ProjectLeadershipPosition position, string choice, string conflictCode, string operatorReference,
         string reason, bool apply, CancellationToken ct)
     {
         if (apply)
@@ -220,7 +228,7 @@ public sealed class ProjectLeadershipMaintenanceResolver(AeroLinkDbContext db)
                 AeroLinkMaintenanceAttribution.Actor,
                 "project-leadership",
                 "Refused",
-                JsonSerializer.Serialize(new { choice, programId, position = position.ToString(), operatorReference, reason }),
+                JsonSerializer.Serialize(new { conflict = conflictCode, choice, programId, position = position.ToString(), operatorReference, reason }),
                 AeroLinkMaintenanceAttribution.Source,
                 DateTimeOffset.UtcNow));
             await db.SaveChangesAsync(ct);

@@ -352,10 +352,14 @@ public sealed class AeroLinkMaintenanceQualificationTests
 
             await using (var apply = new AeroLinkDbContext(Options(connection)))
             {
+                // The conflict code is passed explicitly, and a NON-default one, because several conflicts
+                // share this resolution path: the audit must record the conflict the operator reviewed
+                // rather than whichever code the resolver happens to default to.
                 var applied = await new ProjectLeadershipMaintenanceResolver(apply).ResolveLegacyBackupAsync(
                     fixture.ProgramId, fixture.LegacyBackupId, ProjectLeadershipPosition.SoftwareEngineeringLead,
                     fixture.PersonId, AeroLinkUpgradeConflict.ChoiceRetireBackup, fixture.PrimaryId,
-                    "Sean, issue #816", apply: true);
+                    "Sean, issue #816", apply: true,
+                    conflictCode: AeroLinkUpgradeConflict.LegacyBackupSupersededCode);
                 Assert.True(applied.Applied);
             }
 
@@ -378,6 +382,8 @@ public sealed class AeroLinkMaintenanceQualificationTests
                 Assert.Equal(AeroLinkMaintenanceAttribution.Source, audit.IpAddress);
                 Assert.Contains("Sean, issue #816", audit.Detail);
                 Assert.Contains(AeroLinkUpgradeConflict.ChoiceRetireBackup, audit.Detail);
+                Assert.Contains(AeroLinkUpgradeConflict.LegacyBackupSupersededCode, audit.Detail);
+                Assert.DoesNotContain(AeroLinkUpgradeConflict.LegacyBackupIneligibleCode, audit.Detail);
             }
 
             await using (var reanalyze = new AeroLinkDbContext(Options(connection)))

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using AeroLink.Infrastructure.Persistence;
+using System.Net;
 
 namespace AeroLink.Api;
 
@@ -97,21 +98,39 @@ public static class RuntimeIdentityEndpoints
     /// </summary>
     public static void MapRuntimeIdentityEndpoint(this WebApplication app)
     {
-        app.MapGet("/health/identity", async (IConfiguration configuration, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/health/identity", async (HttpContext context, IConfiguration configuration, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var identity = Resolve(configuration);
+
+            // Two audiences, two answers.
+            //
+            // The launchers and remote-demo recovery always reach this over loopback, and they need the
+            // source identity to tell a stale process from a current one. A browser is the other audience,
+            // and it needs only enough to label which installation it is looking at.
+            //
+            // Under START_AEROLINK_SHARED.bat the API binds 0.0.0.0 with AllowedHosts '*', and this endpoint
+            // is anonymous by the /health prefix — so anyone on the office network could otherwise read the
+            // canonical database name, the exact source revision and the applied schema version without
+            // authenticating. None of that is a credential, and none of it is any of their business either.
+            // The instance label and snapshot provenance stay, so the badge still works for a LAN browser.
+            var loopback = context.Connection.RemoteIpAddress is not null
+                && IPAddress.IsLoopback(context.Connection.RemoteIpAddress);
+
             // Best-effort, never fatal: this endpoint answers about the PROCESS, and must keep answering when
             // the database is unreachable so a launcher can still tell a stale process from a foreign one.
             string? latestMigration = null;
-            try { latestMigration = (await db.Database.GetAppliedMigrationsAsync(ct)).LastOrDefault(); }
-            catch { latestMigration = null; }
+            if (loopback)
+            {
+                try { latestMigration = (await db.Database.GetAppliedMigrationsAsync(ct)).LastOrDefault(); }
+                catch { latestMigration = null; }
+            }
 
             return Results.Ok(new
             {
                 service = "AeroLink API",
-                sourceSha = identity.SourceSha,
-                sourceShortSha = identity.SourceShortSha,
-                sourceIdentity = identity.SourceIdentity,
+                sourceSha = loopback ? identity.SourceSha : null,
+                sourceShortSha = loopback ? identity.SourceShortSha : null,
+                sourceIdentity = loopback ? identity.SourceIdentity : null,
                 mode = identity.Mode,
                 instance = new
                 {
@@ -125,7 +144,7 @@ public static class RuntimeIdentityEndpoints
                         activatedAtUtc = identity.SnapshotActivatedAtUtc,
                     },
                 },
-                database = new { name = identity.DatabaseName },
+                database = new { name = loopback ? identity.DatabaseName : null },
                 schema = new { latestAppliedMigration = latestMigration },
                 startedAtUtc = identity.StartedAtUtc,
             });

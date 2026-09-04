@@ -87,6 +87,34 @@ Update-AeroLinkClientDependencies -ClientRoot $clientRoot -StateDirectory (Join-
 Write-Host '[1/4] Checking PostgreSQL...' -ForegroundColor Cyan
 Assert-AeroLinkPostgres -ProductRoot $productRoot
 
+# Decide what happens to whatever is already on 5080 BEFORE the database is touched.
+#
+# Readiness is necessary and not sufficient. This used to be "/health/ready answers 200, therefore reuse".
+# Liveness alone was worse still — it reported a working product over a database that was not there — but
+# readiness only proves the process can reach a database, not that it was built from the source about to be
+# launched. #816 is the case: a healthy API from an older revision survived a repository update while the
+# client moved forward, and this launcher declared success. Ownership, mode and exact source identity all
+# have to agree before a process is reused, and a process this repository does not own is a refusal rather
+# than a casualty.
+#
+# The stop happens here, ahead of the upgrade, and not where the API is started. Migrating a database that an
+# older build still holds open — hosted workers, the notification outbox, integrity sweeps — is precisely the
+# unsupervised mutation the clone-validation path exists to avoid, and stopping the stale process afterwards
+# is too late.
+Write-Host '      Checking what is already on 127.0.0.1:5080...' -ForegroundColor Cyan
+$disposition = Resolve-AeroLinkRuntimeDisposition -Port 5080 -BaseUri $apiUrl `
+    -ExpectedMode $launcherMode -ExpectedSourceIdentity $sourceFingerprint.Identity `
+    -OwnershipFragments @('AeroLink.Api', $apiProject)
+if ($disposition.Disposition -eq 'Refuse') { throw $disposition.Detail }
+$reuseExisting = ($disposition.Disposition -eq 'Reuse')
+if ($reuseExisting) {
+    Write-Host "      $($disposition.Detail)" -ForegroundColor Green
+}
+elseif ($disposition.Disposition -ne 'Free') {
+    Write-Host "      $($disposition.Detail)" -ForegroundColor Yellow
+    Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @('AeroLink.Api', $apiProject) | Out-Null
+}
+
 # Upgrade posture before the API, not through it.
 #
 # #747 and #816 both ended the same way: dependencies installed, a client built, an API started, seventy-five
@@ -94,56 +122,50 @@ Assert-AeroLinkPostgres -ProductRoot $productRoot
 # PostgreSQL accepted a connection. This asks first. A conflict stops here with the exact records and the
 # supported decisions; a deterministic upgrade is backed up, validated on an isolated copy, and only then
 # applied.
-Write-Host '      Checking database upgrade posture...' -ForegroundColor Cyan
-$upgradePosture = Get-AeroLinkUpgradeAnalysis -ProductRoot $productRoot -DotnetPath $dotnet
-switch ($upgradePosture.Status) {
-    'current' {
-        Write-Host '      Database is current; no upgrade is pending.' -ForegroundColor Green
-    }
-    'upgrade-required' {
-        $pendingMigrations = @($upgradePosture.Analysis.pendingEfMigrations).Count
-        $pendingSemantic = @($upgradePosture.Analysis.pendingSemanticUpgrades).Count
-        Write-Host "      Upgrade pending: $pendingMigrations schema migration(s), $pendingSemantic semantic upgrade(s)." -ForegroundColor Yellow
-        $upgrade = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -DotnetPath $dotnet
-        if (-not $upgrade.Applied) {
-            Write-Host ''
-            Write-Host 'DATABASE UPGRADE NOT APPLIED' -ForegroundColor Red
-            Write-Host $upgrade.Detail -ForegroundColor Red
-            throw 'AeroLink was not started because the local database could not be safely upgraded.'
+#
+# Skipped entirely when a matching, ready API is being reused: that process migrated this database at its own
+# startup, so there is nothing to find — and asking anyway would run `dotnet run`, whose build cannot write
+# over the assemblies the live process holds, turning the preflight into an unexplained "posture could not be
+# established" in the one case where nothing was wrong.
+if ($reuseExisting) {
+    Write-Host '      Database upgrade posture already established by the running AeroLink.' -ForegroundColor DarkGray
+}
+else {
+    Write-Host '      Checking database upgrade posture...' -ForegroundColor Cyan
+    $upgradePosture = Get-AeroLinkUpgradeAnalysis -ProductRoot $productRoot -DotnetPath $dotnet
+    switch ($upgradePosture.Status) {
+        'current' {
+            Write-Host '      Database is current; no upgrade is pending.' -ForegroundColor Green
         }
-        Write-Host "      $($upgrade.Detail)" -ForegroundColor Green
-    }
-    'conflict' {
-        Write-AeroLinkUpgradeConflictReport -Analysis $upgradePosture.Analysis
-        throw 'AeroLink was not started: the local database needs an explicit decision that AeroLink is not entitled to make.'
-    }
-    default {
-        Write-Host "      Database upgrade posture could not be established: $($upgradePosture.Detail)" -ForegroundColor Yellow
-        Write-Host '      Continuing; the API will report the database problem directly.' -ForegroundColor Yellow
+        'upgrade-required' {
+            $pendingMigrations = @($upgradePosture.Analysis.pendingEfMigrations).Count
+            $pendingSemantic = @($upgradePosture.Analysis.pendingSemanticUpgrades).Count
+            Write-Host "      Upgrade pending: $pendingMigrations schema migration(s), $pendingSemantic semantic upgrade(s)." -ForegroundColor Yellow
+            $upgrade = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -DotnetPath $dotnet
+            if (-not $upgrade.Applied) {
+                Write-Host ''
+                Write-Host 'DATABASE UPGRADE NOT APPLIED' -ForegroundColor Red
+                Write-Host $upgrade.Detail -ForegroundColor Red
+                throw 'AeroLink was not started because the local database could not be safely upgraded.'
+            }
+            Write-Host "      $($upgrade.Detail)" -ForegroundColor Green
+        }
+        'conflict' {
+            Write-AeroLinkUpgradeConflictReport -Analysis $upgradePosture.Analysis
+            throw 'AeroLink was not started: the local database needs an explicit decision that AeroLink is not entitled to make.'
+        }
+        default {
+            Write-Host "      Database upgrade posture could not be established: $($upgradePosture.Detail)" -ForegroundColor Yellow
+            Write-Host '      Continuing; the API will report the database problem directly.' -ForegroundColor Yellow
+        }
     }
 }
 
 Write-Host '[2/4] Checking AeroLink API...' -ForegroundColor Cyan
-# Readiness is necessary and not sufficient.
-#
-# This used to be "/health/ready answers 200, therefore reuse". Liveness alone was worse still — it reported
-# a working product over a database that was not there — but readiness only proves the process can reach a
-# database, not that it was built from the source about to be launched. #816 is the case: a healthy API from
-# an older revision survived a repository update while the client moved forward, and this launcher declared
-# success. Ownership, mode and exact source identity all have to agree before a process is reused, and a
-# process this repository does not own is a refusal rather than a casualty.
-$disposition = Resolve-AeroLinkRuntimeDisposition -Port 5080 -BaseUri $apiUrl `
-    -ExpectedMode $launcherMode -ExpectedSourceIdentity $sourceFingerprint.Identity `
-    -OwnershipFragments @('AeroLink.Api', $apiProject)
-if ($disposition.Disposition -eq 'Refuse') { throw $disposition.Detail }
-if ($disposition.Disposition -eq 'Reuse') {
-    Write-Host "      $($disposition.Detail)" -ForegroundColor Green
+if ($reuseExisting) {
+    Write-Host '      Reusing the matching AeroLink already running on this port.' -ForegroundColor Green
 }
 else {
-    if ($disposition.Disposition -ne 'Free') {
-        Write-Host "      $($disposition.Detail)" -ForegroundColor Yellow
-        Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @('AeroLink.Api', $apiProject) | Out-Null
-    }
     # Windows PowerShell flattens ArgumentList into a single command line, so paths containing spaces must be
     # quoted explicitly.
     Start-AeroLinkService `

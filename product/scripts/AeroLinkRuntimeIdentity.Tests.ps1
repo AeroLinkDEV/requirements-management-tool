@@ -34,7 +34,7 @@ $olderSha = '0f1e2d3c4b5a69788796a5b4c3d2e1f098765432'
 
 function New-Owner {
     param([int]$ProcessId = 4242, [string]$CommandLine = 'dotnet run --project "C:\Sean Project\AeroLink Production\product\src\AeroLink.Api\AeroLink.Api.csproj"')
-    return { param($Port) [pscustomobject]@{ Found = $true; Ambiguous = $false; ProcessId = $ProcessId; CommandLine = $CommandLine; ExecutablePath = 'C:\Program Files\dotnet\dotnet.exe'; Detail = "Port $Port is held by PID $ProcessId." } }.GetNewClosure()
+    return { param($Port) [pscustomobject]@{ Found = $true; Ambiguous = $false; Attributable = $true; ProcessId = $ProcessId; CommandLine = $CommandLine; ExecutablePath = 'C:\Program Files\dotnet\dotnet.exe'; Detail = "Port $Port is held by PID $ProcessId." } }.GetNewClosure()
 }
 function New-Identity {
     param([string]$Sha, [string]$Mode)
@@ -51,7 +51,7 @@ function Get-Disposition {
 
 try {
     # --- Nothing listening: start ---
-    $free = { param($Port) [pscustomobject]@{ Found = $false; Ambiguous = $false; ProcessId = $null; CommandLine = $null; ExecutablePath = $null; Detail = "Nothing is listening on port $Port." } }
+    $free = { param($Port) [pscustomobject]@{ Found = $false; Ambiguous = $false; Attributable = $false; ProcessId = $null; CommandLine = $null; ExecutablePath = $null; Detail = "Nothing is listening on port $Port." } }
     Assert-True ((Get-Disposition -PortOwnerProbe $free -RuntimeProbe (New-Identity $currentSha 'HOME-PRODUCTION')).Disposition -eq 'Free') `
         'An empty port must be Free.'
 
@@ -77,7 +77,7 @@ try {
     Assert-True ($unready.Disposition -eq 'RestartUnready') 'A matching process that is not ready must be restarted.'
 
     # --- An unrelated process on 5080 is REFUSED and never stopped ---
-    $foreign = { param($Port) [pscustomobject]@{ Found = $true; Ambiguous = $false; ProcessId = 9001; CommandLine = 'C:\Tools\somebody-elses-server.exe --port 5080'; ExecutablePath = 'C:\Tools\somebody-elses-server.exe'; Detail = "Port $Port is held by PID 9001." } }
+    $foreign = { param($Port) [pscustomobject]@{ Found = $true; Ambiguous = $false; Attributable = $true; ProcessId = 9001; CommandLine = 'C:\Tools\somebody-elses-server.exe --port 5080'; ExecutablePath = 'C:\Tools\somebody-elses-server.exe'; Detail = "Port $Port is held by PID 9001." } }
     $refusal = Get-Disposition -PortOwnerProbe $foreign -RuntimeProbe (New-Identity $currentSha 'HOME-PRODUCTION')
     Assert-True ($refusal.Disposition -eq 'Refuse') 'An unrelated process on an AeroLink port must be a refusal.'
     Assert-True ($refusal.Detail -match '9001') 'The refusal must name the PID so the operator can find it.'
@@ -88,8 +88,23 @@ try {
         'occupied by another application' 'Stopping an unowned listener must throw.'
     Assert-True ($stopped.Count -eq 0) 'An unowned process must never be stopped, not even after the refusal.'
 
+    # --- A listener whose process cannot be read is unattributable, not somebody else's ---
+    #
+    # The process may have exited between reading the listener table and reading the process (re-running a
+    # launcher seconds after a stop), or belong to another user. Still a refusal - nothing is stopped on a
+    # guess - but telling the operator to "close it" sends them after something that may not exist.
+    $unreadable = { param($Port) [pscustomobject]@{ Found = $true; Ambiguous = $false; Attributable = $false; ProcessId = 7777; CommandLine = $null; ExecutablePath = $null; Detail = "Port $Port is held by PID 7777, whose command line could not be read." } }
+    $unreadableRefusal = Get-Disposition -PortOwnerProbe $unreadable -RuntimeProbe (New-Identity $currentSha 'HOME-PRODUCTION')
+    Assert-True ($unreadableRefusal.Disposition -eq 'Refuse') 'An unreadable listener must still fail closed.'
+    Assert-True ($unreadableRefusal.Detail -match 'could not be read') 'The refusal must say the command line could not be read...'
+    Assert-True ($unreadableRefusal.Detail -notmatch 'occupied by another application') '...and must not claim another application owns the port.'
+    $stopped.Clear()
+    Assert-Throws { Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments $ownership -PortOwnerProbe $unreadable -Stopper { param($ProcessId) $stopped.Add($ProcessId) } } `
+        'could not be read' 'Stopping an unattributable listener must throw with the honest reason.'
+    Assert-True ($stopped.Count -eq 0) 'An unattributable process must never be stopped.'
+
     # --- Ambiguous ownership fails closed rather than guessing ---
-    $ambiguous = { param($Port) [pscustomobject]@{ Found = $true; Ambiguous = $true; ProcessId = $null; CommandLine = $null; ExecutablePath = $null; Detail = "Port $Port has 2 distinct listening owners; ownership cannot be attributed." } }
+    $ambiguous = { param($Port) [pscustomobject]@{ Found = $true; Ambiguous = $true; Attributable = $false; ProcessId = $null; CommandLine = $null; ExecutablePath = $null; Detail = "Port $Port has 2 distinct listening owners; ownership cannot be attributed." } }
     Assert-True ((Get-Disposition -PortOwnerProbe $ambiguous -RuntimeProbe (New-Identity $currentSha 'HOME-PRODUCTION')).Disposition -eq 'Refuse') `
         'Ambiguous port ownership must refuse rather than pick a process to stop.'
 

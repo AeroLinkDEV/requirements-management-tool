@@ -77,8 +77,15 @@ public sealed record AeroLinkUpgradeConflict(
     public const string ChoiceRetireBackup = "retire-legacy-backup";
 }
 
-/// <summary>The state of one semantic upgrade authority against this database.</summary>
-public sealed record AeroLinkSemanticUpgradeState(string Marker, string Target, bool Completed);
+/// <summary>
+/// The state of one semantic upgrade authority against this database.
+///
+/// <paramref name="Completed"/> is deliberately nullable. On a database with schema migrations still pending
+/// the markers these authorities write live in tables that do not exist yet, so the honest answer is "not
+/// knowable from here" — null — rather than false. Reporting unknown as not-completed made the launcher print
+/// a pending count that was fabricated, on a database that may have completed every one of them years ago.
+/// </summary>
+public sealed record AeroLinkSemanticUpgradeState(string Marker, string Target, bool? Completed);
 
 /// <summary>
 /// Everything an operator or a launcher needs to know about this database before starting a web server.
@@ -96,9 +103,15 @@ public sealed record AeroLinkUpgradeAnalysis(
     IReadOnlyList<AeroLinkUpgradeConflict> Conflicts,
     bool DatabaseModified)
 {
-    /// <summary>Semantic upgrades that have not recorded completion against this database.</summary>
+    /// <summary>
+    /// Semantic upgrades known to be outstanding. Authorities whose state could not be read are not counted:
+    /// an operator told "5 semantic upgrades pending" must be able to trust the number.
+    /// </summary>
     public IReadOnlyList<AeroLinkSemanticUpgradeState> PendingSemanticUpgrades =>
-        [.. SemanticUpgrades.Where(x => !x.Completed)];
+        [.. SemanticUpgrades.Where(x => x.Completed == false)];
+
+    /// <summary>True when schema work has to happen before the semantic posture can be read at all.</summary>
+    public bool SemanticPostureUnknown => SemanticUpgrades.Any(x => x.Completed is null);
 
     /// <summary>True when starting current code against this database would write to it.</summary>
     public bool UpgradeRequired => PendingEfMigrations.Count > 0 || PendingSemanticUpgrades.Count > 0;

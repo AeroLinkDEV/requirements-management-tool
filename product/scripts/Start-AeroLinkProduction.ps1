@@ -158,31 +158,61 @@ Write-Host "      .NET SDK: $dotnet" -ForegroundColor Green
 Write-Host '[1/4] Checking PostgreSQL...' -ForegroundColor Cyan
 Assert-AeroLinkPostgres -ProductRoot $productRoot
 
+# Ownership, mode and exact source identity, in that order, and the stop, before the canonical database is
+# touched. A healthy production API from an older revision is stale; a development API answering here is a
+# mode mismatch; and a process this repository does not own is a refusal with its PID, never a casualty.
+#
+# This runs ahead of the upgrade, not after the client build. Migrating the canonical database while an
+# old-schema process still serves requests against it is the condition the clone-validation path exists to
+# avoid, and the client build would have widened that window by tens of seconds.
+Write-Host '      Checking what is already on 127.0.0.1:5080...' -ForegroundColor Cyan
+$disposition = Resolve-AeroLinkRuntimeDisposition -Port 5080 -BaseUri $url `
+    -ExpectedMode $launcherMode -ExpectedSourceIdentity $sourceFingerprint.Identity `
+    -OwnershipFragments @('AeroLink.Api', $apiProject)
+if ($disposition.Disposition -eq 'Refuse') { throw $disposition.Detail }
+$reuseExisting = ($disposition.Disposition -eq 'Reuse')
+if ($reuseExisting) {
+    Write-Host "      $($disposition.Detail)" -ForegroundColor Green
+}
+elseif ($disposition.Disposition -ne 'Free') {
+    Write-Host "      $($disposition.Detail)" -ForegroundColor Yellow
+    Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @('AeroLink.Api', $apiProject) | Out-Null
+}
+
 # Upgrade posture before the client build, so a database this build cannot operate on costs seconds rather
 # than a build plus a readiness timeout. HOME canonical is the same contract as development: a conflict is
 # reported with its supported decisions and nothing is guessed; a deterministic upgrade is backed up,
 # validated on an isolated restored copy, and only then applied.
-Write-Host '      Checking database upgrade posture...' -ForegroundColor Cyan
-$upgradePosture = Get-AeroLinkUpgradeAnalysis -ProductRoot $productRoot -DotnetPath $dotnet
-switch ($upgradePosture.Status) {
-    'current' { Write-Host '      Database is current; no upgrade is pending.' -ForegroundColor Green }
-    'upgrade-required' {
-        Write-Host "      Upgrade pending: $(@($upgradePosture.Analysis.pendingEfMigrations).Count) schema migration(s), $(@($upgradePosture.Analysis.pendingSemanticUpgrades).Count) semantic upgrade(s)." -ForegroundColor Yellow
-        $upgrade = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -DotnetPath $dotnet
-        if (-not $upgrade.Applied) {
-            Write-Host ''
-            Write-Host 'DATABASE UPGRADE NOT APPLIED' -ForegroundColor Red
-            Write-Host $upgrade.Detail -ForegroundColor Red
-            throw 'AeroLink was not started because the canonical database could not be safely upgraded.'
+#
+# Skipped when a matching, ready API is being reused: that process migrated this database at its own startup,
+# and asking anyway would run `dotnet run`, whose build cannot write over the assemblies the live process
+# holds.
+if ($reuseExisting) {
+    Write-Host '      Database upgrade posture already established by the running AeroLink.' -ForegroundColor DarkGray
+}
+else {
+    Write-Host '      Checking database upgrade posture...' -ForegroundColor Cyan
+    $upgradePosture = Get-AeroLinkUpgradeAnalysis -ProductRoot $productRoot -DotnetPath $dotnet
+    switch ($upgradePosture.Status) {
+        'current' { Write-Host '      Database is current; no upgrade is pending.' -ForegroundColor Green }
+        'upgrade-required' {
+            Write-Host "      Upgrade pending: $(@($upgradePosture.Analysis.pendingEfMigrations).Count) schema migration(s), $(@($upgradePosture.Analysis.pendingSemanticUpgrades).Count) semantic upgrade(s)." -ForegroundColor Yellow
+            $upgrade = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -DotnetPath $dotnet
+            if (-not $upgrade.Applied) {
+                Write-Host ''
+                Write-Host 'DATABASE UPGRADE NOT APPLIED' -ForegroundColor Red
+                Write-Host $upgrade.Detail -ForegroundColor Red
+                throw 'AeroLink was not started because the canonical database could not be safely upgraded.'
+            }
+            Write-Host "      $($upgrade.Detail)" -ForegroundColor Green
         }
-        Write-Host "      $($upgrade.Detail)" -ForegroundColor Green
-    }
-    'conflict' {
-        Write-AeroLinkUpgradeConflictReport -Analysis $upgradePosture.Analysis
-        throw 'AeroLink was not started: the canonical database needs an explicit decision that AeroLink is not entitled to make.'
-    }
-    default {
-        Write-Host "      Database upgrade posture could not be established: $($upgradePosture.Detail)" -ForegroundColor Yellow
+        'conflict' {
+            Write-AeroLinkUpgradeConflictReport -Analysis $upgradePosture.Analysis
+            throw 'AeroLink was not started: the canonical database needs an explicit decision that AeroLink is not entitled to make.'
+        }
+        default {
+            Write-Host "      Database upgrade posture could not be established: $($upgradePosture.Detail)" -ForegroundColor Yellow
+        }
     }
 }
 
@@ -209,21 +239,7 @@ else {
 }
 
 Write-Host '[3/4] Starting AeroLink...' -ForegroundColor Cyan
-# Ownership, mode and exact source identity, in that order, before anything is reused or stopped. A healthy
-# production API from an older revision is stale; a development API answering here is a mode mismatch; and a
-# process this repository does not own is a refusal with its PID, never a casualty.
-$disposition = Resolve-AeroLinkRuntimeDisposition -Port 5080 -BaseUri $url `
-    -ExpectedMode $launcherMode -ExpectedSourceIdentity $sourceFingerprint.Identity `
-    -OwnershipFragments @('AeroLink.Api', $apiProject)
-if ($disposition.Disposition -eq 'Refuse') { throw $disposition.Detail }
-$reuseExisting = ($disposition.Disposition -eq 'Reuse')
-if ($reuseExisting) {
-    Write-Host "      $($disposition.Detail)" -ForegroundColor Green
-}
-elseif ($disposition.Disposition -ne 'Free') {
-    Write-Host "      $($disposition.Detail)" -ForegroundColor Yellow
-    Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @('AeroLink.Api', $apiProject) | Out-Null
-}
+# The port decision and any stop already happened above, before the database was touched.
 
 Write-Host '[4/4] Waiting for AeroLink to be ready...' -ForegroundColor Cyan
 # Release, and --no-launch-profile so launchSettings.json cannot quietly substitute development configuration.

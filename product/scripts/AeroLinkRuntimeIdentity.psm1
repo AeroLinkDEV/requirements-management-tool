@@ -125,20 +125,27 @@ function Get-AeroLinkPortOwner {
     param([Parameter(Mandatory)][int]$Port)
     $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
     if ($listeners.Count -eq 0) {
-        return [pscustomobject]@{ Found = $false; Ambiguous = $false; ProcessId = $null; CommandLine = $null; ExecutablePath = $null; Detail = "Nothing is listening on port $Port." }
+        return [pscustomobject]@{ Found = $false; Ambiguous = $false; Attributable = $false; ProcessId = $null; CommandLine = $null; ExecutablePath = $null; Detail = "Nothing is listening on port $Port." }
     }
     $owners = @($listeners | Select-Object -ExpandProperty OwningProcess -Unique)
     if ($owners.Count -ne 1) {
-        return [pscustomobject]@{ Found = $true; Ambiguous = $true; ProcessId = $null; CommandLine = $null; ExecutablePath = $null; Detail = "Port $Port has $($owners.Count) distinct listening owners; ownership cannot be attributed." }
+        return [pscustomobject]@{ Found = $true; Ambiguous = $true; Attributable = $false; ProcessId = $null; CommandLine = $null; ExecutablePath = $null; Detail = "Port $Port has $($owners.Count) distinct listening owners; ownership cannot be attributed." }
     }
+    # A listener whose process cannot be read is not the same thing as a listener owned by somebody else.
+    # The process may have exited between these two calls (re-running a launcher seconds after a stop), or
+    # belong to another user. Both still fail closed - nothing is stopped on a guess - but the operator is
+    # told which of the two it is, instead of being sent to close an application that may not exist.
     $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($owners[0])" -ErrorAction SilentlyContinue
+    $attributable = [bool]$process
     return [pscustomobject]@{
         Found          = $true
         Ambiguous      = $false
+        Attributable   = $attributable
         ProcessId      = [int]$owners[0]
         CommandLine    = if ($process) { [string]$process.CommandLine } else { $null }
         ExecutablePath = if ($process) { [string]$process.ExecutablePath } else { $null }
-        Detail         = "Port $Port is held by PID $($owners[0])."
+        Detail         = if ($attributable) { "Port $Port is held by PID $($owners[0])." }
+                         else { "Port $Port is held by PID $($owners[0]), whose command line could not be read; it may have just exited or belong to another user." }
     }
 }
 
@@ -198,7 +205,13 @@ function Resolve-AeroLinkRuntimeDisposition {
         return [pscustomobject]@{ Disposition = 'Refuse'; ProcessId = $null; Detail = "$($owner.Detail) AeroLink will not stop a process it cannot attribute." }
     }
     if (-not (Test-AeroLinkProcessOwnership -CommandLine $owner.CommandLine -ExecutablePath $owner.ExecutablePath -OwnershipFragments $OwnershipFragments)) {
-        return [pscustomobject]@{ Disposition = 'Refuse'; ProcessId = $owner.ProcessId; Detail = "Port $Port is occupied by another application (PID $($owner.ProcessId)). AeroLink never stops a process it does not own. Close it and run this launcher again." }
+        $detail = if ($owner.Attributable) {
+            "Port $Port is occupied by another application (PID $($owner.ProcessId)). AeroLink never stops a process it does not own. Close it and run this launcher again."
+        }
+        else {
+            "Port $Port is held by PID $($owner.ProcessId), but its command line could not be read, so AeroLink cannot tell whether it owns it. The process may have just exited, or may belong to another user. Nothing was stopped; check the port and run this launcher again."
+        }
+        return [pscustomobject]@{ Disposition = 'Refuse'; ProcessId = $owner.ProcessId; Detail = $detail }
     }
 
     $identity = if ($RuntimeProbe) { & $RuntimeProbe $BaseUri } else { Get-AeroLinkRuntimeIdentity -BaseUri $BaseUri }
@@ -260,7 +273,10 @@ function Stop-AeroLinkOwnedListener {
     if (-not $owner.Found) { return [pscustomobject]@{ Stopped = $false; ProcessId = $null; Detail = $owner.Detail } }
     if ($owner.Ambiguous) { throw "$($owner.Detail) AeroLink will not stop a process it cannot attribute." }
     if (-not (Test-AeroLinkProcessOwnership -CommandLine $owner.CommandLine -ExecutablePath $owner.ExecutablePath -OwnershipFragments $OwnershipFragments)) {
-        throw "Port $Port is occupied by another application (PID $($owner.ProcessId)). Close it and run this launcher again."
+        if ($owner.Attributable) {
+            throw "Port $Port is occupied by another application (PID $($owner.ProcessId)). Close it and run this launcher again."
+        }
+        throw "Port $Port is held by PID $($owner.ProcessId), but its command line could not be read, so AeroLink cannot tell whether it owns it. Nothing was stopped."
     }
     if ($Stopper) { & $Stopper $owner.ProcessId }
     else {
