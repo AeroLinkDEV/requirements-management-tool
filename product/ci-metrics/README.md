@@ -180,7 +180,7 @@ without the changed-files API's pagination limit. A differing, missing, ambiguou
 unreadable trusted subtree refuses the binding.
 
 The App private key is an environment secret, and the environment deployment policy must admit only the
-default branch. The future ruleset must require this check **with the AeroLink Merge Authority App's
+default branch. The post-merge ruleset must require this check **with the AeroLink Merge Authority App's
 integration id**; a name-only required check does not establish publisher identity. The merge queue and
 this required check remain disabled until the App, environment policy, and ruleset are configured and
 live acceptance succeeds. `.github/CODEOWNERS` assigns all three trusted surfaces to the repository owner.

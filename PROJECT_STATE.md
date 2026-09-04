@@ -1,6 +1,6 @@
 # AeroLink project state — start here
 
-**Last materially reconciled: 2026-08-29.**
+**Last materially reconciled: 2026-09-04.**
 
 **Product checkpoint used for this snapshot:** the #816 Slice 7 authority-provenance and integrated-acceptance completion, built on protected `main` at `14fdffc7c7f70fb9960f198c50f0913dc34b11f7`. That is a checkpoint, not a promise that live `main` will not move. Always refresh GitHub before starting work.
 
@@ -315,6 +315,17 @@ The repository uses:
 - changed-area/test-planning logic shared between local and CI workflows;
 - sharded API/browser work where measurement justified it;
 - durable failure diagnostics and exact-SHA provenance expectations.
+
+### Merge-queue cutover status
+
+The canonical GitHub repository is `AeroLinkDEV/requirements-management-tool`; established local checkout
+paths do not change because of that ownership transfer. Issue #549 / PR #911 stages the repository-side
+trusted merge-queue verifier and App-bound check publisher. At this checkpoint the queue is **not active**:
+classic strict branch protection remains authoritative until #911 merges, the repository-scoped GitHub App
+credentials are stored in the main-only `merge-authority` environment, the `main` ruleset is activated, and
+live queue acceptance succeeds. GitHub's live ruleset/protection APIs are the authority during that cutover.
+The first docs-only pull request through the queue must update this section from staged to active; until then,
+follow the existing strict protected-merge flow.
 
 Do not change CI topology from intuition alone. Read [product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md](product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md) first.
 

@@ -1,6 +1,9 @@
 # Merging into `main`
 
-**Read before merging anything.** How a pull request lands changed on 4 September 2026.
+**Read before merging anything.** The merge-queue repository support is staged but the live ruleset is not
+active at this checkpoint. Until the post-#911 App/ruleset cutover succeeds, the existing strict protected
+merge flow remains authoritative. The queue sections below describe the staged post-cutover flow and become
+operative only when GitHub's live `main` ruleset confirms activation.
 
 ## Request Full CI only when the current SHA is merge-ready
 
@@ -38,9 +41,9 @@ To disarm auto-merge:
 gh pr merge <number> --disable-auto
 ```
 
-## What the merge queue does
+## What the staged merge queue will do after activation
 
-`main` does not require a pull-request branch to be manually rebased onto the latest base. Once the
+After live activation, `main` does not require a pull-request branch to be manually rebased onto the latest base. Once the
 pull-request head passes its App-bound readiness check, GitHub composes a temporary
 `gh-readonly-queue/main/...` candidate from current `main`, the pull request, and any entries ahead of it.
 The complete Product gate runs on that exact composed SHA. A protected-default-branch verifier independently
@@ -81,10 +84,12 @@ Title the pull request as you want it to read in `main`'s history forever. The b
 
 ## Merge-queue trust boundary
 
-The repository moved to the `AeroLinkDEV` organization and issue
-[#549](https://github.com/AeroLinkDEV/requirements-management-tool/issues/549) activated the queue. The queue
-supersedes strict "require branches to be up to date" protection: the pull-request branch may be behind, but
-the exact composed candidate cannot merge without passing the App-bound authority check.
+The repository moved to the `AeroLinkDEV` organization. Issue
+[#549](https://github.com/AeroLinkDEV/requirements-management-tool/issues/549) and PR #911 stage the queue's
+repository-side authority, but activation remains a post-merge operation at this checkpoint. Once the App,
+environment credentials and live ruleset are accepted, the queue supersedes strict "require branches to be
+up to date" protection: the pull-request branch may be behind, but the exact composed candidate cannot merge
+without passing the App-bound authority check.
 
 The required check is pinned to the dedicated AeroLink Merge Authority App, not accepted by name from any
 publisher. The App's private key exists only in the `merge-authority` environment, whose deployment policy admits

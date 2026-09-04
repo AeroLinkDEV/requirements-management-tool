@@ -41,9 +41,11 @@ different concurrency groups; development feedback cannot cancel final Full evid
 collector remains the source for post-switch full-gates-per-merge, cancellation waste, queue/final-push-to-merge
 timing and regression data; re-measure the new cadence rather than assuming savings.
 
-## Merge-queue cutover, 2026-09-04
+## Merge-queue cutover staging, 2026-09-04
 
-Issue #549 moved the repository to the `AeroLinkDEV` organization and activated a squash merge queue. A
+Issue #549 moved the repository to the `AeroLinkDEV` organization and PR #911 stages the trusted repository
+support for a squash merge queue. The queue is not active at this checkpoint: the App credentials, live
+`main` ruleset and acceptance run are deliberately post-merge. After that cutover, a
 pull-request head must first pass the existing trusted Full requester; only then does the dedicated AeroLink
 Merge Authority App publish `Trusted merge-queue binding` so the pull request can enter the queue. GitHub
 builds a `gh-readonly-queue/main/...` candidate from current `main`, that pull request, and entries ahead of
@@ -57,8 +59,9 @@ App identity only after those checks pass. The App key is restricted to the main
 environment, and the ruleset pins the required context to that App's integration id. Every initial Product run or rerun first replaces earlier App success
 with an in-progress check, so prior authority cannot bridge a newer attempt.
 
-This completes the deferred strict-branch-protection item. Ordinary behind branches no longer need a manual
-rebase; real conflicts and deliberately protected CI-authority changes still require explicit disposition.
+Successful live acceptance will complete the deferred strict-branch-protection item. After activation,
+ordinary behind branches no longer need a manual rebase; real conflicts and deliberately protected
+CI-authority changes still require explicit disposition.
 
 ## Measured, 2026-08-13
 
