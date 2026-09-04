@@ -69,6 +69,7 @@ $runtimeEnvironment = @{
     Runtime__Mode             = $launcherMode
     Instance__Label           = $instance.Label
     Instance__Classification  = $instance.Classification
+    Instance__InstanceId      = $instance.InstanceId
 }
 if ($instance.SnapshotSourceLabel) { $runtimeEnvironment['Instance__SnapshotSourceLabel'] = $instance.SnapshotSourceLabel }
 if ($instance.SnapshotSourceSha) { $runtimeEnvironment['Instance__SnapshotSourceSha'] = $instance.SnapshotSourceSha }
@@ -86,7 +87,7 @@ Write-Host "      .NET SDK: $dotnet" -ForegroundColor Green
 
 # The Vite dev server needs node_modules; this is the same fingerprinted path the production launcher uses, so
 # npm ci runs only when package-lock.json actually changed since the last successful preparation.
-Update-AeroLinkClientDependencies -ClientRoot $clientRoot -StateDirectory (Join-Path $productRoot '.local\bootstrap')
+Update-AeroLinkClientDependencies -ClientRoot $clientRoot -StateDirectory $installation.BootstrapState
 
 Write-Host '[1/4] Checking PostgreSQL...' -ForegroundColor Cyan
 Assert-AeroLinkPostgres -ProductRoot $productRoot

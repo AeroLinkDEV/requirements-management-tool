@@ -23,6 +23,7 @@ public sealed record AeroLinkRuntimeIdentity(
     string SourceShortSha,
     string SourceIdentity,
     string Mode,
+    string InstanceId,
     string InstanceLabel,
     string InstanceClassification,
     string? DatabaseName,
@@ -56,6 +57,7 @@ public static class RuntimeIdentityEndpoints
             SourceShortSha: sha.Length >= 8 ? sha[..8] : sha,
             SourceIdentity: identity,
             Mode: Trimmed(configuration["Runtime:Mode"]) ?? "UNKNOWN",
+            InstanceId: Trimmed(configuration["Instance:InstanceId"]) ?? "unknown",
             InstanceLabel: Trimmed(configuration["Instance:Label"]) ?? "AEROLINK",
             InstanceClassification: Trimmed(configuration["Instance:Classification"]) ?? "Undeclared",
             DatabaseName: DatabaseName(configuration),
@@ -134,6 +136,7 @@ public static class RuntimeIdentityEndpoints
                 mode = identity.Mode,
                 instance = new
                 {
+                    id = identity.InstanceId,
                     label = identity.InstanceLabel,
                     classification = identity.InstanceClassification,
                     snapshot = identity.SnapshotCreatedAtUtc is null && identity.SnapshotSourceSha is null ? null : new

@@ -127,6 +127,23 @@ try {
     Assert-True ($declared.Label -eq 'HOME CANONICAL' -and $declared.Classification -eq 'HomeCanonical' -and $declared.Declared) `
         'A declared instance must report exactly what the operator declared.'
 
+    # A stable instance identifier, minted once and never changing.
+    #
+    # #881 asks for one alongside source, mode and classification. It answers what a label cannot: two
+    # installations can both be labelled WORK-LAPTOP LOCAL, and a restored snapshot carries the source's
+    # label with it.
+    $identified = New-FixtureProductRoot -WithLocal
+    $firstRead = Get-AeroLinkInstanceConfig -ProductRoot $identified -Mode Development
+    Assert-True (-not [string]::IsNullOrWhiteSpace($firstRead.InstanceId)) 'An installation must have a stable instance identifier.'
+    $secondRead = Get-AeroLinkInstanceConfig -ProductRoot $identified -Mode Development
+    Assert-True ($secondRead.InstanceId -eq $firstRead.InstanceId) 'The instance identifier must be minted once, not regenerated on every read.'
+    Set-AeroLinkInstanceConfig -ProductRoot $identified -Label 'WORK-LAPTOP LOCAL' -Classification 'WorkLaptopLocal' | Out-Null
+    Assert-True ((Get-AeroLinkInstanceConfig -ProductRoot $identified -Mode Development).InstanceId -eq $firstRead.InstanceId) `
+        'Declaring a label must not change the instance identifier.'
+    Assert-True ($firstRead.InstanceId -notmatch [regex]::Escape($env:COMPUTERNAME)) 'The instance identifier must identify without describing the machine.'
+    Assert-True ((Get-AeroLinkInstanceConfig -ProductRoot (New-FixtureProductRoot -WithLocal) -Mode Development).InstanceId -ne $firstRead.InstanceId) `
+        'Two installations must not share an identifier.'
+
     # A declaration survives an unrelated update, so snapshot metadata cannot erase the label.
     Set-AeroLinkInstanceConfig -ProductRoot $undeclared -Snapshot @{ sourceLabel = 'HOME CANONICAL'; createdAtUtc = '2026-09-01T10:00:00Z' } | Out-Null
     $withSnapshot = Get-AeroLinkInstanceConfig -ProductRoot $undeclared -Mode Development

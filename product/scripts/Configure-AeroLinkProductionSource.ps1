@@ -60,6 +60,27 @@ switch ($Action) {
             Write-Host "The production source exists but is not canonical: $($result.Reason)" -ForegroundColor Yellow
             exit 1
         }
+        # Declare the installation HOME CANONICAL as part of setting HOME production up.
+        #
+        # Not only a badge. Import-AeroLinkHomeSnapshot refuses to overwrite an installation declared
+        # HomeCanonical, so an installation left Undeclared — which is what a normally configured HOME was,
+        # because nothing established it — had no protection against having the canonical database replaced
+        # by a laptop snapshot. Declaring it is what arms that guard.
+        $existingInstance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode HomeCanonical
+        if ($existingInstance.Classification -eq 'HomeCanonical') {
+            Write-Host "Instance already declared: $($existingInstance.Label) ($($existingInstance.Classification))." -ForegroundColor DarkGray
+        }
+        elseif ($existingInstance.Classification -ne 'Undeclared') {
+            Write-Host "This installation is declared $($existingInstance.Label) ($($existingInstance.Classification)), not HOME CANONICAL." -ForegroundColor Yellow
+            Write-Host 'Leaving it alone: reclassifying an installation is an operator decision, not a side effect of' -ForegroundColor Yellow
+            Write-Host 'setting up a production source. Correct it with Set-AeroLinkInstanceConfig if that is wrong.' -ForegroundColor Yellow
+        }
+        else {
+            Set-AeroLinkInstanceConfig -ProductRoot $productRoot -Label 'HOME CANONICAL' -Classification 'HomeCanonical' | Out-Null
+            Write-Host 'Instance declared: HOME CANONICAL.' -ForegroundColor Green
+            Write-Host 'The HOME-to-laptop snapshot import will now refuse to replace this database.' -ForegroundColor Green
+        }
+
         Write-Host 'AeroLink dedicated production source ready.' -ForegroundColor Green
         Write-Host 'Reinstall the remote-demo recovery task so it invokes this source:' -ForegroundColor DarkGray
         Write-Host '      CONFIGURE_AEROLINK_REMOTE_DEMO.bat' -ForegroundColor Gray

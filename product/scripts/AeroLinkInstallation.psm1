@@ -259,6 +259,8 @@ function Get-AeroLinkInstanceConfig {
     $label = if ($Mode -eq 'HomeCanonical') { 'LOCAL PRODUCTION' } else { 'LOCAL DEVELOPMENT' }
     $classification = 'Undeclared'
     $snapshot = $null
+    $declared = $null
+    $instanceId = $null
 
     if (Test-Path -LiteralPath $configPath -PathType Leaf) {
         try { $declared = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
@@ -266,11 +268,28 @@ function Get-AeroLinkInstanceConfig {
         if ($declared.PSObject.Properties['label'] -and -not [string]::IsNullOrWhiteSpace([string]$declared.label)) { $label = [string]$declared.label }
         if ($declared.PSObject.Properties['classification'] -and -not [string]::IsNullOrWhiteSpace([string]$declared.classification)) { $classification = [string]$declared.classification }
         if ($declared.PSObject.Properties['snapshot'] -and $declared.snapshot) { $snapshot = $declared.snapshot }
+        if ($declared.PSObject.Properties['instanceId']) { $instanceId = [string]$declared.instanceId }
+    }
+
+    # A stable identifier for this installation, minted once and then never changing.
+    #
+    # #881's runtime identity contract asks for one alongside source, mode and classification, and it answers
+    # a question a label cannot: two installations may both be labelled WORK-LAPTOP LOCAL, and a snapshot
+    # restored onto a third carries the source's label with it. A plain GUID identifies without describing —
+    # no machine name, no user, nothing about the network.
+    if ([string]::IsNullOrWhiteSpace($instanceId) -and (Test-Path -LiteralPath $paths.InstallationRoot -PathType Container)) {
+        $instanceId = [guid]::NewGuid().ToString('D')
+        $minted = [ordered]@{}
+        if ($declared) { foreach ($property in $declared.PSObject.Properties) { $minted[$property.Name] = $property.Value } }
+        $minted['instanceId'] = $instanceId
+        $minted['updatedAtUtc'] = (Get-Date).ToUniversalTime().ToString('o')
+        [pscustomobject]$minted | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $configPath -Encoding UTF8
     }
 
     return [pscustomobject]@{
         ConfigPath           = $configPath
-        Declared             = (Test-Path -LiteralPath $configPath -PathType Leaf)
+        Declared             = ($null -ne $declared)
+        InstanceId           = $instanceId
         Label                = $label
         Classification       = $classification
         SnapshotSourceLabel  = if ($snapshot -and $snapshot.PSObject.Properties['sourceLabel']) { [string]$snapshot.sourceLabel } else { $null }

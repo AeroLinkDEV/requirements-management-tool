@@ -236,7 +236,7 @@ if ($SkipClientBuild) {
 else {
     # Fingerprinted dependency refresh: npm ci runs only when package-lock.json changed since the last
     # successful preparation, or node_modules is missing. A failed refresh never records the fingerprint.
-    Update-AeroLinkClientDependencies -ClientRoot $clientRoot -StateDirectory (Join-Path $productRoot '.local\bootstrap')
+    Update-AeroLinkClientDependencies -ClientRoot $clientRoot -StateDirectory $installation.BootstrapState
     Push-Location $clientRoot
     try {
         # Type checking is part of `npm run build`, and on purpose: a build that compiles is the whole claim
@@ -274,6 +274,7 @@ else {
         Runtime__Mode            = $launcherMode
         Instance__Label          = $instance.Label
         Instance__Classification = $instance.Classification
+        Instance__InstanceId     = $instance.InstanceId
     }
     if ($instance.SnapshotSourceLabel) { $runtimeEnvironment['Instance__SnapshotSourceLabel'] = $instance.SnapshotSourceLabel }
     if ($instance.SnapshotSourceSha) { $runtimeEnvironment['Instance__SnapshotSourceSha'] = $instance.SnapshotSourceSha }

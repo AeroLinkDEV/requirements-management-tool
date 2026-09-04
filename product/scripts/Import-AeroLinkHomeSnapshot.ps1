@@ -31,7 +31,9 @@ param(
     [ValidateSet('Preview', 'Import')][string]$Action = 'Preview',
     # Activation replaces the laptop database. It is spelled out rather than implied by -Import.
     [string]$Confirmation,
-    [string]$SnapshotSourceLabel = 'HOME CANONICAL',
+    # Accepts an archive whose source installation did not declare itself HOME CANONICAL, recording the
+    # provenance the archive actually carries. Provenance is never invented: it is read from the manifest.
+    [switch]$AllowUndeclaredSource,
     [int]$PostgresPort = 54329
 )
 
@@ -79,7 +81,23 @@ try {
     $manifest = Get-Content -LiteralPath (Join-Path $temporary 'manifest.json') -Raw | ConvertFrom-Json
 }
 finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force } }
+
+# Provenance comes from the archive, not from the caller.
+#
+# The importer used to take a -SnapshotSourceLabel defaulting to 'HOME CANONICAL' and write it into this
+# laptop's snapshot metadata, so a backup taken on any other laptop could be imported and recorded as though
+# it came from HOME. The manifest now carries the source installation's declared identity, and that is what
+# is recorded. An archive from before this change carries none, and gets an honest "undeclared" rather than
+# a flattering guess.
+$sourceInstance = if ($manifest.PSObject.Properties['Instance']) { $manifest.Instance } else { $null }
+$sourceLabel = if ($sourceInstance -and $sourceInstance.PSObject.Properties['Label'] -and -not [string]::IsNullOrWhiteSpace([string]$sourceInstance.Label)) { [string]$sourceInstance.Label } else { 'UNDECLARED SOURCE' }
+$sourceClassification = if ($sourceInstance -and $sourceInstance.PSObject.Properties['Classification'] -and -not [string]::IsNullOrWhiteSpace([string]$sourceInstance.Classification)) { [string]$sourceInstance.Classification } else { 'Undeclared' }
+Write-Host "      Snapshot source instance: $sourceLabel ($sourceClassification)"
 Write-Host "      Snapshot source revision: $($manifest.Application.SourceSha)"
+
+if ($sourceClassification -ne 'HomeCanonical' -and -not $AllowUndeclaredSource) {
+    throw "This archive was taken from '$sourceLabel' ($sourceClassification), which is not a declared HOME CANONICAL installation. Refusing to replace this laptop's database with it. If that is genuinely the source you want, re-run with -AllowUndeclaredSource and the recorded provenance will say exactly what it is."
+}
 Write-Host "      Snapshot created:         $($manifest.CreatedAtUtc)"
 
 if ($Action -eq 'Preview') {
@@ -165,8 +183,9 @@ Write-Host '[6/6] Activating the validated snapshot on this laptop...' -Foregrou
     -PostgresPort $PostgresPort -AllowProductionRestore -Confirmation 'RESTORE-AEROLINK' | Out-Host
 
 Set-AeroLinkInstanceConfig -ProductRoot $productRoot -Snapshot @{
-    sourceLabel    = $SnapshotSourceLabel
-    sourceSha      = [string]$manifest.Application.SourceSha
+    sourceLabel          = $sourceLabel
+    sourceClassification = $sourceClassification
+    sourceSha            = [string]$manifest.Application.SourceSha
     createdAtUtc   = [string]$manifest.CreatedAtUtc
     activatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
 } | Out-Null
