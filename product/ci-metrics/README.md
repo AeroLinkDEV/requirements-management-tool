@@ -167,7 +167,9 @@ trusted Full requester publishes it on an exact pull-request head only after the
 and live readiness checks succeed; GitHub requires that pull-request check before an entry can join the
 queue. `.github/workflows/merge-queue-binding.yml` observes `Product quality gate` runs with `workflow_run`.
 Each initial run or rerun first publishes an in-progress replacement so an older success cannot authorize
-the candidate while a newer attempt is active; the completed event publishes on the composed `merge_group` SHA only after the queue-specific
+the candidate while a newer attempt is active. An in-progress rerun preempts a stale completed handler; the
+completed path also clears prior authority before evidence collection and re-fetches the live run immediately
+before publication. The completed event publishes on the composed `merge_group` SHA only after the queue-specific
 evidence below passes. Both paths enter the `merge-authority` environment and use a repository-scoped
 AeroLink Merge Authority App token. Their ordinary `GITHUB_TOKEN` cannot publish the authority check.
 

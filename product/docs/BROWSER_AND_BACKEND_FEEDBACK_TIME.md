@@ -13,9 +13,10 @@ branch protection was **strict** (a branch had to be up to date with `main`), so
 `main` invalidated a passing run and started the whole gate again. On a day when `main` moved six times, one
 parity pull request was re-tested end to end six times and found nothing new on any of them.
 
-Auto-merge first removed the delay from a green run sitting unnoticed. The 4 September merge-queue cutover
-then removed the remaining strict-protection treadmill: GitHub now validates the exact composed candidate
-against current `main` and entries ahead of it, without a manual rebase. See [Merging into main](MERGING.md).
+Auto-merge first removed the delay from a green run sitting unnoticed. After the staged 4 September
+merge-queue cutover is activated and accepted, GitHub will remove the remaining strict-protection treadmill
+by validating the exact composed candidate against current `main` and entries ahead of it, without a manual
+rebase. See [Merging into main](MERGING.md).
 
 That makes elapsed time per run the number worth optimizing, and it makes it worth knowing which job actually
 governs it. Optimizing the wrong job costs runners and buys nothing.

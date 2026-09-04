@@ -61,6 +61,18 @@ async function main() {
     throw new Error(`Unsupported workflow_run action '${action ?? 'unknown'}'.`)
   }
 
+  // A completed-event handler may start while an earlier success is still the latest App check. Replace it
+  // before collecting evidence; if a rerun begins during collection, the in-progress workflow preempts this
+  // handler and the live recheck below prevents a stale-attempt PASS even if cancellation arrives late.
+  await publishMergeAuthorityCheck({
+    request: authorityRequest,
+    repository,
+    headSha,
+    decision: 'PENDING',
+    reasons: [],
+    detailsUrl: trigger?.html_url,
+  })
+
   const evidenceRequest = createGitHubRequest({
     token: requiredEnv('GITHUB_TOKEN'),
     apiUrl: env('GITHUB_API_URL') || 'https://api.github.com',
@@ -106,6 +118,19 @@ async function main() {
         ...TRUSTED_SURFACE_PREFIXES.map((prefix) => `trusted-surface-unverified: '${prefix}' could not be compared`),
       ],
     }
+  }
+
+  const currentRun = await fetchWorkflowRun({
+    request: evidenceRequest,
+    repository,
+    runId: trigger.id,
+  })
+  if (currentRun.status !== 'completed' || currentRun.runAttempt !== trigger.run_attempt) {
+    console.log(
+      `[merge-authority] PENDING: Product run advanced from completed attempt ${trigger.run_attempt} ` +
+      `to status=${currentRun.status ?? 'unknown'} attempt=${currentRun.runAttempt ?? 'unknown'}`,
+    )
+    return
   }
 
   await publishMergeAuthorityCheck({

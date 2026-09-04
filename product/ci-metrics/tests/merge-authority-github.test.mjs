@@ -224,7 +224,10 @@ test('default-branch workflow keeps authority credentials behind the queue-only 
   const verifier = readFileSync(join(repoRoot, 'product/ci-metrics/bin/verify-merge-authority.mjs'), 'utf8')
   assert.match(workflow, /workflow_run:\s+workflows:\s+- Product quality gate\s+types:\s+- in_progress\s+- completed/)
   assert.match(workflow, /permissions:\s+actions: read\s+contents: read/)
-  assert.match(workflow, /group: merge-authority-\$\{\{ github\.event\.workflow_run\.id \}\}\s+cancel-in-progress: false/)
+  assert.match(
+    workflow,
+    /group: merge-authority-\$\{\{ github\.event\.workflow_run\.id \}\}\s+cancel-in-progress: \$\{\{ github\.event\.action == 'in_progress' \}\}/,
+  )
   assert.match(workflow, /if: github\.event\.workflow_run\.event == 'merge_group'/)
   assert.match(workflow, /environment:\s+name: merge-authority/)
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/)
@@ -242,6 +245,19 @@ test('default-branch workflow keeps authority credentials behind the queue-only 
     verifier.indexOf("if (action === 'in_progress')") < verifier.indexOf("token: requiredEnv('GITHUB_TOKEN')"),
     'the pending App check must replace prior authority before completed-run evidence collection starts',
   )
+  const completedBoundary = verifier.indexOf("if (action !== 'completed')")
+  const evidenceCollection = verifier.indexOf("token: requiredEnv('GITHUB_TOKEN')")
+  const finalPublication = verifier.lastIndexOf('await publishMergeAuthorityCheck({')
+  const finalRunFetch = verifier.lastIndexOf('const currentRun = await fetchWorkflowRun({')
+  assert.ok(
+    verifier.indexOf("decision: 'PENDING'", completedBoundary) < evidenceCollection,
+    'a completed handler must clear earlier authority before it collects evidence',
+  )
+  assert.ok(
+    evidenceCollection < finalRunFetch && finalRunFetch < finalPublication,
+    'the completed handler must re-fetch live run state immediately before final App publication',
+  )
+  assert.match(verifier, /currentRun\.status !== 'completed' \|\| currentRun\.runAttempt !== trigger\.run_attempt/)
   assert.match(requester, /environment:\s+name: merge-authority/)
   assert.match(requester, /actions\/create-github-app-token@[0-9a-f]{40}/)
   assert.match(requester, /client-id: \$\{\{ vars\.MERGE_AUTHORITY_APP_CLIENT_ID \}\}/)

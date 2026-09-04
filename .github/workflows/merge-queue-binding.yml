@@ -14,12 +14,11 @@ permissions:
   actions: read
   contents: read
 
-# Keep the in-progress invalidation ahead of the completed decision for the same Product run. Cancelling
-# either event can leave an older successful App check authoritative while a rerun is still active.
-# Separate queue candidates have separate run ids and never block one another.
+# An in-progress rerun must preempt a stale completed handler, while a completed event must wait for (not
+# cancel) its invalidator. Separate queue candidates have separate run ids and never block one another.
 concurrency:
   group: merge-authority-${{ github.event.workflow_run.id }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event.action == 'in_progress' }}
 
 jobs:
   bind:
