@@ -111,7 +111,7 @@ function collectShardReasons(jobs, reasons) {
  *   the FROM side is the one that can remove trusted machinery. Refuses when absent — an unverified
  *   surface is not a trusted one.
  * @param {object} input.expected trusted configuration from the verifier's own context:
- *   { repository, headSha, runId? }.
+ *   { repository, headSha, baseBranch, runId? }.
  * @returns {{decision: 'PASS'|'REFUSE', reasons: string[]}}
  */
 export function evaluateMergeGroupCandidate(input) {
@@ -121,8 +121,8 @@ export function evaluateMergeGroupCandidate(input) {
   if (!run || typeof run !== 'object') {
     return { decision: 'REFUSE', reasons: ['run-metadata-missing: no triggering-run metadata was supplied'] }
   }
-  if (!expected || typeof expected !== 'object' || typeof expected.repository !== 'string' || typeof expected.headSha !== 'string') {
-    return { decision: 'REFUSE', reasons: ['expected-missing: the verifier must supply its own trusted repository and head SHA configuration'] }
+  if (!expected || typeof expected !== 'object' || typeof expected.repository !== 'string' || typeof expected.headSha !== 'string' || typeof expected.baseBranch !== 'string') {
+    return { decision: 'REFUSE', reasons: ['expected-missing: the verifier must supply its own trusted repository, head SHA, and protected base branch'] }
   }
 
   if (run.repository !== expected.repository) {
@@ -149,8 +149,11 @@ export function evaluateMergeGroupCandidate(input) {
       reasons.push(`run-id-mismatch: run ${run.runId} is not the expected run ${expected.runId}`)
     }
   }
-  if (typeof run.headBranch !== 'string' || !run.headBranch.startsWith(QUEUE_REF_PREFIX)) {
-    reasons.push(`ref-not-queue: run ref '${run.headBranch ?? 'unknown'}' does not start with '${QUEUE_REF_PREFIX}'`)
+  // Queue refs name their base branch, and the workflow subscribes to merge_group for any base:
+  // only candidates for the protected default branch may bind evidence here.
+  const expectedQueuePrefix = `${QUEUE_REF_PREFIX}${expected.baseBranch}/`
+  if (typeof run.headBranch !== 'string' || !run.headBranch.startsWith(expectedQueuePrefix)) {
+    reasons.push(`ref-not-queue: run ref '${run.headBranch ?? 'unknown'}' is not a '${expectedQueuePrefix}' candidate`)
   }
   if (run.status !== RUN_STATUS_COMPLETED) {
     reasons.push(`run-not-completed: run status is '${run.status ?? 'unknown'}'`)
@@ -164,7 +167,10 @@ export function evaluateMergeGroupCandidate(input) {
   }
   if (typeof expected.runId !== 'undefined') {
     for (const job of jobs) {
-      if (typeof job?.runId !== 'undefined' && String(job.runId) !== String(expected.runId)) {
+      if (typeof job?.runId === 'undefined') {
+        // Missing membership evidence refuses: an unmapped job record is unverified, not exempt.
+        reasons.push(`job-run-id-missing: job '${job?.name ?? 'unknown'}' does not carry its run id, so its membership in run ${expected.runId} is unverified`)
+      } else if (String(job.runId) !== String(expected.runId)) {
         reasons.push(`job-from-foreign-run: job '${job?.name ?? 'unknown'}' belongs to run ${job.runId}, not the expected run ${expected.runId}`)
       }
     }

@@ -67,7 +67,7 @@ function legitimateCandidate() {
     run: legitimateRun(),
     jobs: allJobsSuccess(),
     changedPaths: [],
-    expected: { repository: REPOSITORY, headSha: HEAD_SHA, runId: RUN_ID },
+    expected: { repository: REPOSITORY, headSha: HEAD_SHA, baseBranch: 'main', runId: RUN_ID },
   }
 }
 
@@ -116,6 +116,24 @@ test('refuses refs that are not merge-queue candidates', () => {
     assert.equal(result.decision, 'REFUSE', `ref '${headBranch}' must refuse`)
     assert.ok(result.reasons.some((reason) => reason.startsWith('ref-not-queue')), headBranch)
   }
+})
+
+test('refuses queue candidates for a base branch other than the protected one', () => {
+  // Another branch's merge queue produces the same ref shape; only main's candidates bind here.
+  const result = reasonsFor({
+    run: { ...legitimateRun(), headBranch: `${QUEUE_REF_PREFIX}release/7/abc123` },
+  })
+  assert.equal(result.decision, 'REFUSE')
+  assert.ok(result.reasons.some((reason) => reason.startsWith('ref-not-queue') && reason.includes('release')))
+
+  const missingConfig = evaluateMergeGroupCandidate({
+    run: legitimateRun(),
+    jobs: allJobsSuccess(),
+    changedPaths: [],
+    expected: { repository: REPOSITORY, headSha: HEAD_SHA },
+  })
+  assert.equal(missingConfig.decision, 'REFUSE')
+  assert.ok(missingConfig.reasons.some((reason) => reason.startsWith('expected-missing')))
 })
 
 test('refuses runs that have not completed successfully', () => {
@@ -180,6 +198,12 @@ test('binds the trusted expected run id, refusing any other run', () => {
   })
   assert.equal(foreignJob.decision, 'REFUSE')
   assert.ok(foreignJob.reasons.some((reason) => reason.startsWith('job-from-foreign-run')))
+
+  const unmappedJob = reasonsFor({
+    jobs: allJobsSuccess().map((job) => (job.name === 'Domain test suite' ? { name: job.name, conclusion: job.conclusion } : job)),
+  })
+  assert.equal(unmappedJob.decision, 'REFUSE')
+  assert.ok(unmappedJob.reasons.some((reason) => reason.startsWith('job-run-id-missing') && reason.includes('Domain test suite')))
 })
 
 test('refuses an incomplete, over-counted, or inconsistent shard set', () => {
