@@ -209,8 +209,12 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   assert.ok(enforceBlock, 'gate Summarise and enforce step must exist')
   const enforceText = enforceBlock.lines.join('\n')
 
-  const condition = '[ "$EVENT_NAME" = "merge_group" ] && [ "$DOCS_ONLY" != "true" ]'
-  const guardIndex = enforceText.indexOf(condition)
+  // The complete opening line, line-anchored: a `true ||` prefix would disable the guard while an
+  // unanchored search of the operands alone still matched.
+  const conditionPattern = /^ {10}if \[ "\$EVENT_NAME" = "merge_group" \] && \[ "\$DOCS_ONLY" != "true" \]; then$/m
+  const conditionMatch = enforceText.match(conditionPattern)
+  assert.ok(conditionMatch, 'the merge-group enforcement condition must exist in the gate')
+  const guardIndex = conditionMatch.index
   assert.ok(guardIndex >= 0, 'the merge-group enforcement condition must exist in the gate')
   // Bound the block by its own closing fi. guardText otherwise reaches the end of the step, so moving
   // the terminator up would make the loop unconditional while every assertion below still matched —
