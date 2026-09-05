@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Hierarchy;
 using Microsoft.EntityFrameworkCore;
@@ -45,7 +46,26 @@ public sealed class ReqIfExchangeService(AeroLinkDbContext db, EvidenceFileStore
         var specificationIds = specifications.Select(x => x.Id).ToList();
         var nodes = await db.SpecificationNodes.AsNoTracking().Where(x => specificationIds.Contains(x.SpecificationId)).ToListAsync(ct);
         var traces = await db.RequirementTraces.AsNoTracking().Where(x => x.ProjectId == projectId && revisionIds.Contains(x.SourceRevisionId) && revisionIds.Contains(x.TargetRevisionId)).ToListAsync(ct);
-        var attachments = (await db.ControlledAttachments.AsNoTracking().Where(x => x.ProjectId == projectId && x.ArtifactType == "Requirement" && x.State == ControlledAttachmentState.Active).ToListAsync(ct)).Where(x=>revisionArtifactIds.Contains(x.ArtifactId)).ToList();
+        // Exact binding: a controlled export carries only Active evidence whose revision identity is one of
+        // the exact revisions the export presents — never "whatever is Active for the artifact".
+        var attachments = (await db.ControlledAttachments.AsNoTracking().Where(x => x.ProjectId == projectId && x.ArtifactType == "Requirement" && x.State == ControlledAttachmentState.Active && x.RevisionId != null && revisionIds.Contains(x.RevisionId.Value)).ToListAsync(ct));
+        // Legacy evidence without a revision binding stays readable in place, but an export may neither
+        // present it as evidence of an exact revision nor silently omit it, so a scoped legacy attachment
+        // fails the controlled export with the stable binding diagnostic before anything is stored.
+        var unboundScoped = (await (from attachment in db.ControlledAttachments.AsNoTracking()
+                                    join artifact in db.Requirements.AsNoTracking() on attachment.ArtifactId equals artifact.Id
+                                    where attachment.ProjectId == projectId && attachment.ArtifactType == "Requirement"
+                                          && attachment.State == ControlledAttachmentState.Active && attachment.RevisionId == null
+                                          && revisionArtifactIds.Contains(attachment.ArtifactId)
+                                    select new { artifact.BaseNumber, attachment.OriginalFileName, attachment.UploadedAt }).ToListAsync(ct))
+            .OrderBy(x => x.UploadedAt).Take(6).ToList();
+        if (unboundScoped.Count > 0)
+        {
+            var named = string.Join(", ", unboundScoped.Select(x => $"{x.BaseNumber} \"{x.OriginalFileName}\""));
+            throw new ControlledEvidenceBindingException(
+                $"The exported requirements still carry active supporting attachments without an exact revision binding ({named}). "
+                + "Bind each one to an eligible in-work revision through a governed upload, or withdraw it, before exporting controlled evidence.");
+        }
         var exportedNodeCount=nodes.Count(x=>x.Type==SpecificationNodeType.Section||(x.RequirementArtifactId is Guid id&&revisionArtifactIds.Contains(id)));
 
         var xml = BuildDocument(projectId, now, artifacts, revisions, profiles, specifications, nodes, traces, attachments);
