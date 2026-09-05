@@ -135,7 +135,8 @@ evidence. An empty result never creates an issue; an indeterminate category leav
 untouched, and a current regression carries that category forward as `status unknown/not cleared` until
 category-specific evidence permits clearing it.
 
-Rolling output is never merge authority. The required check remains `Report what this run validated`.
+Rolling output is never merge authority. The live ruleset requires the App-bound
+`Trusted merge-queue binding` together with GitHub Actions' `Full Product evidence aggregate`.
 
 ## Tested-tree provenance (562A shadow)
 
@@ -181,14 +182,16 @@ candidate and the current default branch. Tree identity covers every descendant 
 without the changed-files API's pagination limit. A differing, missing, ambiguous, truncated, or
 unreadable trusted subtree refuses the binding.
 
-The App private key is an environment secret, and the environment deployment policy must admit only the
-default branch. The post-merge ruleset must require this check **with the AeroLink Merge Authority App's
-integration id**, together with GitHub Actions' `Full Product evidence aggregate`. The native check suite
+The App private key is an environment secret, and the environment deployment policy admits only the
+default branch. The active ruleset requires this check **with the AeroLink Merge Authority App's integration
+id**, together with GitHub Actions' `Full Product evidence aggregate`. A workflow-dispatched Product check
+suite is not associated with the pull request for queue admission, so the trusted default-branch requester
+publishes a PR-associated mirror of the verified aggregate through its ordinary GitHub Actions token. The
+queue candidate's `merge_group` run publishes the native aggregate directly. The native check suite
 becomes non-success as soon as a rerun is queued, covering the interval before `workflow_run` emits
 `in_progress`; the App check then supplies the independent exact-evidence binding. A name-only required check
-does not establish publisher identity. The merge queue and
-this required check remain disabled until the App, environment policy, and ruleset are configured and
-live acceptance succeeds. `.github/CODEOWNERS` assigns all three trusted surfaces to the repository owner.
+does not establish publisher identity. The merge queue and both required checks are active.
+`.github/CODEOWNERS` assigns all three trusted surfaces to the repository owner.
 Required code-owner review must not be enabled while that owner is the only eligible reviewer, because an
 author cannot approve their own pull request; enable it after a second eligible reviewer or team exists.
 
@@ -233,8 +236,8 @@ this phase.
 - Fragment and report sizes are bounded; oversized or malformed fragments are reported as missing with a
   reason.
 - The aggregator treats fragment values as data, never as commands, paths, expressions, or scripts.
-- The reporting job is not required and never influences merge authority; the required check remains
-  `Report what this run validated`.
+- The reporting job is not required and never influences merge authority; the required pair remains
+  `Trusted merge-queue binding` and `Full Product evidence aggregate`.
 - Every metrics-only step in product jobs and the gate runs with `continue-on-error: true`; injected marker,
   writer, or upload failures cannot change an otherwise successful product job/gate result (enforced by
   `tests/ci-workflow-contract.test.mjs`).

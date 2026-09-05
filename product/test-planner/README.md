@@ -96,8 +96,11 @@ logs after each case. This protocol measures the target; it does not claim the t
 GitHub pull requests receive the Fast workflow automatically; both local `-Mode Fast` and hosted Fast remain
 non-authoritative. Once the current PR SHA is final, apply `ready-for-full-ci`. The trusted default-branch
 requester binds PR number, base SHA and exact head SHA and dispatches the existing Full Product workflow.
-Product's `Full Product evidence aggregate` is the internal Full authority; after verifying Product's own
-readiness authentication, the requester publishes the required `Report what this run validated` context.
+Product's `Full Product evidence aggregate` is the internal Full authority. After verifying Product's own
+readiness authentication, the default-branch requester publishes a PR-associated check of the same name from
+the GitHub Actions integration, plus the App-bound `Trusted merge-queue binding`. Those two checks admit the
+exact head to the queue; the requester's `Report what this run validated` job remains visible evidence but is
+not a live ruleset requirement.
 
 Do not apply readiness early. A later push removes the label through the trusted synchronize guard and the new
 SHA must request Full again. Do not use Fast success, an older SHA's Full result, or a placeholder check as
