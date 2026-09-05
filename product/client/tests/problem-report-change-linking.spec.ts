@@ -97,6 +97,11 @@ test('a PR links to change requests and System TCRs without changing its lifecyc
 
   await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: 'load' })
   await expect(page.getByRole('heading', { name: 'Problem Reports', exact: true })).toBeVisible()
+  // The queue is Project-wide and paginated, and neighbouring journeys raise their own reports, so this
+  // record can sit on a later page. Discover it through the search surface instead of assuming it is on
+  // the first page (the same discipline corrective-action-routing already applies).
+  const queueSearch = page.getByLabel('Search')
+  await queueSearch.fill(report.displayNumber)
   await page.getByRole('button', { name: new RegExp(report.displayNumber.replace('.', '\\.')) }).click()
   const panel = page.getByRole('region', { name: 'Impact and linked evidence' })
   await expect(panel).toContainText('Proposed Corrective Action')
