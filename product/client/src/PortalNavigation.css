@@ -69,6 +69,11 @@
 .primaryNavigation a:hover, .primaryNavigation a:focus-visible { background: #162b49; }
 .primaryNavigation a.active { background: #1b385e; color: white; box-shadow: inset 4px 0 #68d3c3; }
 .primaryNavigation a i { width: 19px; text-align: center; color: #70d6c8; font-style: normal; font-size: 15px; }
+/* The SVG icon renders as a block centered in the fixed-width slot, so labels align across entries and
+   the mark takes the slot's color (active/hover state included) through currentColor. */
+.primaryNavigation a i svg { display: block; margin: 0 auto; }
+.quickSearch .quickSearchIcon { display: flex; align-items: center; color: #70d6c8; }
+.quickSearch .quickSearchIcon svg { display: block; width: 16px; height: 16px; }
 .quickSearch {
   margin: 0 10px 14px;
   display: flex;
