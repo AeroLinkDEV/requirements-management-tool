@@ -22,6 +22,7 @@ type Attachment = {
   id: string;
   logicalId: string;
   version: number;
+  revisionId?: string;
   label: string;
   description: string;
   originalFileName: string;
@@ -337,6 +338,14 @@ export default function EnterpriseControlCenter({
     await load();
   };
   const versionFile = async (item: Attachment, file: File) => {
+    // A superseding upload stays within its chain's exact revision identity, so a chain bound to an
+    // earlier revision cannot take the currently selected one. Say so before the server refuses it.
+    if (item.revisionId && item.revisionId !== selected?.revisionId) {
+      setMessage(
+        `${item.label} is bound to an earlier revision of this requirement and cannot be versioned onto the selected one. Attach evidence for the selected revision as a new file instead, so the new chain records that exact revision.`,
+      );
+      return;
+    }
     const body = new FormData();
     body.set("projectId", projectId);
     body.set("artifactType", "Requirement");
@@ -829,18 +838,21 @@ export default function EnterpriseControlCenter({
                           ? "Verified ✓"
                           : "Verify integrity"}
                       </button>
-                      {x.state === "Active" && (
-                        <label>
-                          New version
-                          <input
-                            type="file"
-                            onChange={(e) => {
-                              const f = e.target.files?.[0];
-                              if (f) versionFile(x, f);
-                            }}
-                          />
-                        </label>
-                      )}
+                      {x.state === "Active" &&
+                        (!x.revisionId || x.revisionId === selected?.revisionId ? (
+                          <label>
+                            New version
+                            <input
+                              type="file"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) versionFile(x, f);
+                              }}
+                            />
+                          </label>
+                        ) : (
+                          <small>This file is bound to an earlier revision of the requirement.</small>
+                        ))}
                     </div>
                   </article>
                 ))

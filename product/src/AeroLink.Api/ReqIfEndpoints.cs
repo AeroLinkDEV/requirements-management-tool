@@ -37,9 +37,13 @@ public static class ReqIfEndpoints
         if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.Engineer,ProgramRole.ConfigurationManager))return Results.Forbid();
         var baselineId=await AeroLink.Api.BuildScope.EffectiveBaselineAsync(db,request.ProjectId,request.ReleaseId,ct);
         if(baselineId is null&&await db.Requirements.AnyAsync(x=>x.ProjectId==request.ProjectId,ct))return Results.BadRequest(new{error="The selected build has no effective requirement baseline.",code="build_baseline_unavailable"});
-        var result=await service.ExportAsync(request.ProjectId,baselineId,http.UserAccount().UserName,DateTimeOffset.UtcNow,ct);
-        await using var package=service.OpenPackage(result.Job);var integrity=ReqIfPackageIntegrity.Inspect(package,result.Job.FileName,result.Job.Sha256);
-        return Results.Created($"/api/reqif/jobs/{result.Job.Id}",new{job=Map(result.Job),downloadUrl=$"/api/reqif/jobs/{result.Job.Id}/download",binaryIntegrity=integrity});
+        try
+        {
+            var result=await service.ExportAsync(request.ProjectId,baselineId,http.UserAccount().UserName,DateTimeOffset.UtcNow,ct);
+            await using var package=service.OpenPackage(result.Job);var integrity=ReqIfPackageIntegrity.Inspect(package,result.Job.FileName,result.Job.Sha256);
+            return Results.Created($"/api/reqif/jobs/{result.Job.Id}",new{job=Map(result.Job),downloadUrl=$"/api/reqif/jobs/{result.Job.Id}/download",binaryIntegrity=integrity});
+        }
+        catch(ControlledEvidenceBindingException ex){return Results.Conflict(new{error=ex.Message,code=ControlledEvidenceBindingException.DiagnosticCode});}
     }
 
     private static async Task<IResult> PreviewAsync(Guid projectId,HttpContext http,ReqIfExchangeService service,AeroLinkDbContext db,IdentityService identity,IProjectLadderPolicyResolver policyResolver,CancellationToken ct)

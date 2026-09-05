@@ -54,8 +54,8 @@ public static class EditSessionEndpoints
         });
 
         app.MapPost("/api/enterprise-hardening/attachments",(HttpRequest request,Guid? projectId,string? artifactType,Guid? artifactId,Guid? editSessionId,
-                HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,ManagedDocumentStorageCoordinator storage,CancellationToken ct)=>
-            UploadAttachmentAsync(request,http,db,store,storage,projectId,artifactType,artifactId,editSessionId,ct)).DisableAntiforgery();
+                HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,ManagedDocumentStorageCoordinator storage,IdentityService identity,CancellationToken ct)=>
+            UploadAttachmentAsync(request,http,db,store,storage,identity,projectId,artifactType,artifactId,editSessionId,ct)).DisableAntiforgery();
 
         app.MapPost("/api/enterprise-hardening/attachments/{id:guid}/withdraw",(Guid id,WithdrawSupportingAttachmentRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
             WithdrawProblemReportAttachmentAsync(id,request,http,db,ct));
@@ -215,7 +215,7 @@ public static class EditSessionEndpoints
     private const long MaximumProblemReportAttachmentBytesPerProject = 2L * 1024 * 1024 * 1024;
 
     private static async Task<IResult> UploadAttachmentAsync(HttpRequest request,HttpContext http,
-        AeroLinkDbContext db,EvidenceFileStore store,ManagedDocumentStorageCoordinator storage,
+        AeroLinkDbContext db,EvidenceFileStore store,ManagedDocumentStorageCoordinator storage,IdentityService identity,
         Guid? queryProjectId,string? queryArtifactType,Guid? queryArtifactId,Guid? queryEditSessionId,CancellationToken ct)
     {
         if(!request.HasFormContentType)return Results.BadRequest(new{error="Use multipart form data."});
@@ -244,20 +244,8 @@ public static class EditSessionEndpoints
         }
         else
         {
-            var artifactExists=artifactType switch
-            {
-                "Requirement"=>await db.Requirements.AsNoTracking().AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
-                "ChangeRequest"=>await db.SystemChangeRequests.AsNoTracking().AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
-                _=>false,
-            };
-            if(!artifactExists)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
-            if(artifactType.Equals("ChangeRequest",StringComparison.OrdinalIgnoreCase))
-            {
-                var changeRequest=await db.SystemChangeRequests.AsNoTracking().SingleAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct);
-                var actor=http.UserAccount();
-                if(!actor.IsAdministrator&&!string.Equals(changeRequest.AuthorId,actor.UserName,StringComparison.OrdinalIgnoreCase))return Results.Forbid();
-                if(changeRequest.State!=ChangeRequestState.Draft)return Results.Conflict(new{error="Supporting files can be added only while the change request is a Draft.",code="artifact_not_editable"});
-            }
+            var failure=await ControlledAttachmentMutationPolicy.AuthorizeArtifactAsync(db,identity,http,projectId,artifactType,artifactId,ct);
+            if(failure is not null)return await DeniedMutationResultAsync(http,db,projectId,artifactType,artifactId,failure.Value,ct);
         }
         const long multipartOverhead=128L*1024;
         var maximumRequestBytes=MaximumProblemReportAttachmentBytes+multipartOverhead;
@@ -328,20 +316,8 @@ public static class EditSessionEndpoints
             }
             else
             {
-                var artifactExists=artifactType switch
-                {
-                    "Requirement"=>await db.Requirements.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
-                    "ChangeRequest"=>await db.SystemChangeRequests.AnyAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct),
-                    _=>false,
-                };
-                if(!artifactExists)return Results.BadRequest(new{error="The controlled artifact does not belong to this Project."});
-                if(artifactType=="ChangeRequest")
-                {
-                    var changeRequest=await db.SystemChangeRequests.AsNoTracking().SingleAsync(x=>x.Id==artifactId&&x.ProjectId==projectId,ct);
-                    var actor=http.UserAccount();
-                    if(!actor.IsAdministrator&&!string.Equals(changeRequest.AuthorId,actor.UserName,StringComparison.OrdinalIgnoreCase))return Results.Forbid();
-                    if(changeRequest.State!=ChangeRequestState.Draft)return Results.Conflict(new{error="Supporting files can be added only while the change request is a Draft.",code="artifact_not_editable"});
-                }
+                var failure=await ControlledAttachmentMutationPolicy.AuthorizeArtifactAsync(db,identity,http,projectId,artifactType,artifactId,ct);
+                if(failure is not null)throw new MutationDeniedException(failure.Value);
             }
 
             var rawRevisionId=form["revisionId"].ToString().Trim();
@@ -351,13 +327,18 @@ public static class EditSessionEndpoints
             Guid? revisionId=rawRevisionId.Length==0?null:parsedRevision;
             if(revisionId is not null&&artifactType!="Requirement")
                 return Results.BadRequest(new{error="Supporting attachments accept a revision identity only for Requirements.",code="revision_identity_not_supported"});
-            if(revisionId is not null&&artifactType=="Requirement"&&!await db.RequirementRevisions.AnyAsync(x=>x.Id==revisionId&&x.ArtifactId==artifactId,ct))
-                return Results.BadRequest(new{error="The selected revision does not belong to this requirement."});
+            if(artifactType=="Requirement"&&revisionId is null)
+                throw new MutationDeniedException(new(400,"Requirement supporting evidence requires its exact requirement revision identity.",ControlledAttachmentMutationPolicy.RevisionIdentityRequiredCode));
             var logicalId=Guid.TryParse(form["logicalId"],out var parsedLogical)?parsedLogical:Guid.NewGuid();
             var logicalRows=await db.ControlledAttachments.Where(x=>x.LogicalId==logicalId).ToListAsync(ct);
             if(logicalRows.Any(x=>x.ProjectId!=projectId||x.ArtifactId!=artifactId||x.ArtifactType!=artifactType))
-                return Results.BadRequest(new{error="The selected attachment identity belongs to another controlled artifact."});
+                throw new MutationDeniedException(new(400,"The selected attachment identity belongs to another controlled artifact.",ControlledAttachmentMutationPolicy.ChainIdentityConflictCode));
             var previous=logicalRows.Where(x=>x.State==ControlledAttachmentState.Active).OrderByDescending(x=>x.Version).FirstOrDefault();
+            if(revisionId is not null)
+            {
+                var bindingFailure=await ControlledAttachmentMutationPolicy.ValidateRequirementRevisionAsync(db,projectId,artifactId,revisionId.Value,previous,ct);
+                if(bindingFailure is not null)throw new MutationDeniedException(bindingFailure.Value);
+            }
             var version=await IdentifierAllocator.ClaimAsync(db,"ATTACHMENT-"+logicalId.ToString("N"),
                 ()=>Task.FromResult(logicalRows.Select(x=>x.Version).DefaultIfEmpty(0).Max()+1),ct);
             var now=DateTimeOffset.UtcNow;var actorNow=http.UserAccount();
@@ -391,7 +372,25 @@ public static class EditSessionEndpoints
                         staged.StorageKey,staged.Size,staged.Sha256)],planned,now,ct);
                 await storage.PromoteAsync(storageOperation,[staged],ct);
             }
-            db.ControlledAttachments.Add(attachment);await db.SaveChangesAsync(ct);
+            db.ControlledAttachments.Add(attachment);
+            if(report is null)
+            {
+                // Problem Report evidence is attributable through its own revision journal. The generic
+                // controlled path (Requirements and Change Requests) has no such journal, and AuditEvent
+                // aggregates are Change Request identities, so its evidence mutations are recorded in the
+                // security audit trail exactly like every other non-Change-Request controlled mutation.
+                db.SecurityAuditEvents.Add(new(
+                    previous is null?"ControlledAttachmentCreated":"ControlledAttachmentSuperseded",
+                    actorNow.UserName,
+                    $"{artifactType}:{artifactId}",
+                    "Success",
+                    previous is null
+                        ?$"Attached {attachment.OriginalFileName} v{attachment.Version}; logical {logicalId}; revision {revisionId}; SHA-256 {attachment.Sha256}."
+                        :$"Superseded {previous.OriginalFileName} v{previous.Version} with {attachment.OriginalFileName} v{attachment.Version}; logical {logicalId}; revision {revisionId}; supersedes {previous.Id}; SHA-256 {attachment.Sha256}.",
+                    http.Connection.RemoteIpAddress?.ToString()??"local",
+                    now));
+            }
+            await db.SaveChangesAsync(ct);
             await SupersedeAllButNewestAsync(db,projectId,artifactId,logicalId,ct);
             if(report is not null)
             {
@@ -421,6 +420,14 @@ public static class EditSessionEndpoints
                 await storage.CompleteAsync(storageOperation,now,ct);
             return Results.Created($"/api/enterprise-hardening/attachments/{attachment.Id}",new{attachment.Id,attachment.LogicalId,attachment.Version,attachment.Sha256});
         }
+        catch(MutationDeniedException denied)
+        {
+            // The awaited-using above has already rolled the upload transaction back, so this denial record
+            // is the only durable write: rejection evidence survives the rollback while the rejected
+            // attempt itself leaves no attachment, identifier claim, storage object, or success event.
+            CleanupFailedUpload(store,stored,staged,committed,commitAttempted);
+            return await DeniedMutationResultAsync(http,db,projectId,artifactType,artifactId,denied.Failure,ct);
+        }
         catch(DbUpdateConcurrencyException)
         {
             CleanupFailedUpload(store,stored,staged,committed,commitAttempted);
@@ -448,6 +455,28 @@ public static class EditSessionEndpoints
         if(committed||commitAttempted)return;
         if(staged is not null)store.Delete(staged.StagingKey);
         if(stored is not null)store.Delete(stored.StorageKey);
+    }
+
+    /// <summary>
+    /// A rejected controlled mutation is still an attributable security event. The denial is recorded in its
+    /// own save — after the upload transaction has rolled back — with the authenticated actor, the target
+    /// exactly as the request supplied it, and the stable policy reason. It never carries details of targets
+    /// the actor was not authorized to see, and no attachment, identifier claim, storage object, or success
+    /// event exists for a rejected attempt.
+    /// </summary>
+    private static async Task<IResult> DeniedMutationResultAsync(HttpContext http,AeroLinkDbContext db,Guid projectId,
+        string artifactType,Guid artifactId,ControlledAttachmentMutationFailure failure,CancellationToken ct)
+    {
+        db.SecurityAuditEvents.Add(new("ControlledAttachmentMutationDenied",http.UserAccount().UserName,
+            $"{artifactType}:{artifactId}","Denied",$"Project {projectId}; {failure.Error} [{failure.Code??"denied"}].",
+            http.Connection.RemoteIpAddress?.ToString()??"local",DateTimeOffset.UtcNow));
+        await db.SaveChangesAsync(ct);
+        return failure.ToResult();
+    }
+
+    private sealed class MutationDeniedException(ControlledAttachmentMutationFailure failure) : Exception(failure.Error)
+    {
+        public ControlledAttachmentMutationFailure Failure { get; } = failure;
     }
 
     private static string SafeDownloadFileName(string originalName,Guid attachmentId)
