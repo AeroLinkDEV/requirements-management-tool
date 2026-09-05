@@ -42,6 +42,7 @@ public static class ControlledAttachmentMutationPolicy
     public const string RevisionNotCurrentCode = "revision_not_current";
     public const string RevisionReleasedCode = "revision_released";
     public const string ChainRevisionMismatchCode = "attachment_chain_revision_mismatch";
+    public const string ChainIdentityConflictCode = "attachment_chain_identity_conflict";
 
     /// <summary>
     /// Who may attach to, or supersede evidence on, this artifact — before any request body is parsed.

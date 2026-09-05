@@ -169,6 +169,13 @@ public sealed class ControlledAttachmentMutationApiTests
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             Assert.Empty(await db.ControlledAttachments.Where(x => x.ArtifactId == artifactId).ToListAsync());
+            // The rejection itself is attributable: actor, target, non-success outcome, stable reason.
+            var audit = await db.SecurityAuditEvents.AsNoTracking()
+                .SingleAsync(x => x.EventType == "ControlledAttachmentMutationDenied");
+            Assert.Equal($"Requirement:{artifactId}", audit.Target);
+            Assert.Equal(Reader, audit.ActorId);
+            Assert.Equal("Denied", audit.Outcome);
+            Assert.Contains("engineering mutation authority", audit.Detail);
         }
     }
 
@@ -291,6 +298,15 @@ public sealed class ControlledAttachmentMutationApiTests
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             Assert.Empty(await db.ControlledAttachments.Where(x => x.ArtifactId == artifactId).ToListAsync());
+            // The in-transaction rejection survived its rollback as attributable evidence, with no
+            // attachment, identifier claim, or success event beside it.
+            var audit = await db.SecurityAuditEvents.AsNoTracking()
+                .SingleAsync(x => x.EventType == "ControlledAttachmentMutationDenied");
+            Assert.Equal($"Requirement:{artifactId}", audit.Target);
+            Assert.Equal(Engineer, audit.ActorId);
+            Assert.Equal("Denied", audit.Outcome);
+            Assert.Contains("revision_not_current", audit.Detail);
+            Assert.Empty(await db.AuditEvents.Where(x => x.EventType == "ControlledAttachmentCreated").ToListAsync());
         }
     }
 
@@ -337,6 +353,11 @@ public sealed class ControlledAttachmentMutationApiTests
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             Assert.Single(await db.ControlledAttachments.Where(x => x.ArtifactId == artifactId).ToListAsync());
+            var denials = (await db.SecurityAuditEvents.AsNoTracking()
+                    .Where(x => x.EventType == "ControlledAttachmentMutationDenied").ToListAsync())
+                .Where(x => x.Detail.Contains("revision_released")).ToList();
+            Assert.Equal(2, denials.Count);
+            Assert.All(denials, item => Assert.Equal("Denied", item.Outcome));
         }
     }
 

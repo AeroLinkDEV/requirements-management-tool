@@ -21,16 +21,16 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 527,
-      "cases": 588,
+      "tests": 525,
+      "cases": 586,
       "unknownCases": 0,
       "classes": 102
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 162,
-      "cases": 176,
+      "tests": 164,
+      "cases": 178,
       "unknownCases": 0,
       "classes": 58
     },
@@ -3543,8 +3543,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 502,
-        "end": 532
+        "start": 523,
+        "end": 553
       }
     },
     {
@@ -3561,8 +3561,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 388,
-        "end": 422
+        "start": 409,
+        "end": 443
       }
     },
     {
@@ -3579,8 +3579,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 424,
-        "end": 447
+        "start": 445,
+        "end": 468
       }
     },
     {
@@ -3598,7 +3598,7 @@
       ],
       "sourceLines": {
         "start": 147,
-        "end": 173
+        "end": 180
       }
     },
     {
@@ -3615,8 +3615,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 221,
-        "end": 242
+        "start": 228,
+        "end": 249
       }
     },
     {
@@ -3633,15 +3633,15 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 244,
-        "end": 267
+        "start": 251,
+        "end": 274
       }
     },
     {
       "cls": "ControlledAttachmentMutationApiTests",
       "test": "A_stale_revision_is_rejected",
       "kind": "Fact",
-      "intent": "http-boundary",
+      "intent": "ef-translation",
       "cases": 1,
       "caseEvidence": "Fact",
       "hosted": "hosted",
@@ -3651,8 +3651,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 269,
-        "end": 295
+        "start": 276,
+        "end": 311
       }
     },
     {
@@ -3669,8 +3669,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 175,
-        "end": 219
+        "start": 182,
+        "end": 226
       }
     },
     {
@@ -3687,8 +3687,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 480,
-        "end": 500
+        "start": 501,
+        "end": 521
       }
     },
     {
@@ -3705,15 +3705,15 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 449,
-        "end": 478
+        "start": 470,
+        "end": 499
       }
     },
     {
       "cls": "ControlledAttachmentMutationApiTests",
       "test": "Frozen_baseline_evidence_can_be_replaced_and_released_baseline_evidence_cannot",
       "kind": "Fact",
-      "intent": "http-boundary",
+      "intent": "ef-translation",
       "cases": 1,
       "caseEvidence": "Fact",
       "hosted": "hosted",
@@ -3723,8 +3723,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 297,
-        "end": 341
+        "start": 313,
+        "end": 362
       }
     },
     {
@@ -3741,8 +3741,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 343,
-        "end": 386
+        "start": 364,
+        "end": 407
       }
     },
     {
