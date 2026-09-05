@@ -224,10 +224,10 @@ The FMS Product Development dataset remains the principal deterministic live dem
 - Named deterministic scenarios provide representative lifecycle, later-revision, trace-branching, assessment,
   verification/evidence, Problem Report, review/approval, leadership, avatar, and distributed-work
   coverage. Interface change-control scenarios are deliberately not seeded: the FMS ladder configures
-  `[System, HighLevel, LowLevel]`, and an older seed's Interface records are retired by the explicit
-  showcase upgrade (#889). Fresh showcase creation is rollback-atomic; upgrading an existing synthetic
-  showcase is an explicit administrator action that requires positive target and backup confirmation and
-  never runs during ordinary startup.
+  `[System, HighLevel, LowLevel]`, and an older seed's Interface scenarios are closed out — withdrawn under
+  their own identity, never deleted — by the explicit showcase upgrade (#889). Fresh showcase creation is
+  rollback-atomic; upgrading an existing synthetic showcase is an explicit administrator action that
+  requires positive target and backup confirmation and never runs during ordinary startup.
 
 The showcase is synthetic demonstration data. It must not be confused with live customer/company controlled engineering data.
 

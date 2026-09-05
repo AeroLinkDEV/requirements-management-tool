@@ -86,9 +86,11 @@ remains editable and is not released.
 The seed no longer creates Interface change-control scenarios (#889): the FMS ladder configures
 `[System, HighLevel, LowLevel]`, and records at a level the project does not configure forced every
 ladder-shaped consumer — the Digital Thread change network first among them — to explain work it must not
-present. An installation upgraded by an older seed retires those records through the explicit
-`interface-scenario-retirement` showcase upgrade step; the step refuses to touch records that have become
-part of materialized baseline or assessment truth.
+present. An installation upgraded by an older seed closes those scenarios out through the explicit
+`interface-scenario-retirement` showcase upgrade step: open and approved scenario work is withdrawn under
+its own author's identity, a draft-baseline selection is reversed through the baseline aggregate, and a
+selection already frozen into a baseline — like every approval, review, audit event, and requirement change
+— is retained as controlled history. Nothing is deleted.
 
 ### Problem Reports and work distribution
 

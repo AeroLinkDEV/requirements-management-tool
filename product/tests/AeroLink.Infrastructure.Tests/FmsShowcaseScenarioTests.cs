@@ -606,7 +606,7 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
     }
 
     [Fact]
-    public async Task Upgrade_retires_owned_interface_scenarios_and_leaves_operator_content_alone()
+    public async Task Upgrade_closes_out_owned_interface_scenarios_without_deleting_any_record()
     {
         using var database = showcase.Create();
         await using var db = database.Context();
@@ -627,33 +627,54 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
             && x.StepKey == "interface-scenario-retirement"));
         await db.SaveChangesAsync();
         var legacyIds = legacy.Select(x => x.Id).ToList();
-
-        var applied = await seeder.UpgradeAsync(summary.ProgramId);
-        Assert.Contains(applied, x => x.StartsWith("interface-scenario-retirement: Retired 8 ", StringComparison.Ordinal));
-
-        Assert.Empty(await db.ShowcaseUpgradeSteps.AsNoTracking().Where(x => x.ProgramId == summary.ProgramId
-            && x.StepKey.StartsWith("scenario-richness/interface/")).ToListAsync());
-        Assert.Empty(await db.SystemChangeRequests.AsNoTracking().Where(x => legacyIds.Contains(x.Id)).ToListAsync());
-        Assert.Empty(await db.RequirementChanges.AsNoTracking().Where(x => legacyIds.Contains(x.ChangeRequestId)).ToListAsync());
-        Assert.Empty(await db.BaselineSelections.AsNoTracking().Where(x => legacyIds.Contains(x.ChangeRequestId)).ToListAsync());
-        // The draft active baseline keeps its own original selections and can still be worked.
+        var legacyRequirementChangeCount = await db.RequirementChanges.AsNoTracking()
+            .CountAsync(x => legacyIds.Contains(x.ChangeRequestId));
+        var legacyAuditEventCount = await db.AuditEvents.AsNoTracking()
+            .CountAsync(x => legacyIds.Contains(x.AggregateId));
         var activeBaseline = await db.CandidateBaselines.AsNoTracking()
             .SingleAsync(x => x.ProjectId == summary.ProjectId && x.ReleaseId == summary.ActiveReleaseId);
-        Assert.Equal(CandidateBaselineState.Draft, activeBaseline.State);
+        var originalSelectionCount = await db.BaselineSelections.AsNoTracking()
+            .CountAsync(x => x.BaselineId == activeBaseline.Id && !legacyIds.Contains(x.ChangeRequestId));
+
+        var applied = await seeder.UpgradeAsync(summary.ProgramId);
+        Assert.Contains(applied, x => x.StartsWith("interface-scenario-retirement: Closed out 7 ", StringComparison.Ordinal));
+
+        // Nothing was deleted: every scenario record, its requirement change, its review and audit
+        // evidence, and its durable ownership row all remain.
+        Assert.Equal(legacy.Count, await db.SystemChangeRequests.AsNoTracking().CountAsync(x => legacyIds.Contains(x.Id)));
+        Assert.Equal(legacyRequirementChangeCount, await db.RequirementChanges.AsNoTracking().CountAsync(x => legacyIds.Contains(x.ChangeRequestId)));
+        Assert.Equal(8, await db.ShowcaseUpgradeSteps.AsNoTracking().CountAsync(x => x.ProgramId == summary.ProgramId
+            && x.StepKey.StartsWith("scenario-richness/interface/")));
+        Assert.True(await db.ShowcaseUpgradeSteps.AsNoTracking().AnyAsync(x => x.ProgramId == summary.ProgramId
+            && x.StepKey == "interface-scenario-retirement"));
+        // Every seeded scenario is closed: withdrawn under its own author's identity, with the seven open
+        // or approved ones newly withdrawn and the already-withdrawn one untouched.
+        var closedStates = await db.SystemChangeRequests.AsNoTracking()
+            .Where(x => legacyIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.State);
+        Assert.All(closedStates.Values, state => Assert.Equal(ChangeRequestState.Withdrawn, state));
+        Assert.Contains(await db.AuditEvents.AsNoTracking().Where(x => legacyIds.Contains(x.AggregateId))
+            .Select(x => x.EventType).ToListAsync(), x => x == "ChangeRequestWithdrawn");
+        Assert.True(await db.AuditEvents.AsNoTracking().CountAsync(x => legacyIds.Contains(x.AggregateId)) > legacyAuditEventCount);
+        // The draft active baseline no longer carries the unconfigured selection, and its own original
+        // selections are untouched.
+        Assert.Equal(CandidateBaselineState.Draft, (await db.CandidateBaselines.AsNoTracking()
+            .SingleAsync(x => x.Id == activeBaseline.Id)).State);
+        Assert.Equal(originalSelectionCount, await db.BaselineSelections.AsNoTracking()
+            .CountAsync(x => x.BaselineId == activeBaseline.Id && !legacyIds.Contains(x.ChangeRequestId)));
         Assert.DoesNotContain(await db.BaselineSelections.AsNoTracking().Where(x => x.BaselineId == activeBaseline.Id)
             .Select(x => x.ChangeRequestDisplayNumber).ToListAsync(), x => x!.StartsWith("ICDCR"));
         // Operator content survives untouched.
         var foreignAfter = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Id == foreign.Id);
         Assert.Equal("Existing controlled analysis. [FMSLIVE showcase scenario: interface-01]", foreignAfter.Analysis);
-        // The ladder and its change requests agree again, and the whole showcase stays controlled.
+        // The showcase postconditions hold with the closed-out history in place, and a second upgrade has
+        // nothing left to close.
         Assert.All(await seeder.CheckInvariantsAsync(summary.ProgramId), x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
-        // Idempotent: a second upgrade has nothing left to retire.
         Assert.DoesNotContain(await seeder.UpgradeAsync(summary.ProgramId),
             x => x.StartsWith("interface-scenario-retirement:", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task Upgrade_refuses_to_retire_interface_scenarios_materialized_into_a_frozen_baseline()
+    public async Task Upgrade_leaves_an_interface_selection_frozen_into_a_baseline_untouched()
     {
         using var database = showcase.Create();
         await using var db = database.Context();
@@ -662,8 +683,9 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
 
         var legacy = await SeedLegacyInterfaceScenariosAsync(db, summary.ProgramId, summary.ProjectId, summary.ActiveReleaseId);
         // Reproduce the persistent installation that progressed 1.6 to an exact frozen candidate while the
-        // Interface scenario was still selected: the materialized revision is baseline content now, and no
-        // bookkeeping step may rewrite it.
+        // Interface scenario was still selected: that selection is baseline content now. The product
+        // forbids withdrawing a selected request, so the record is left exactly as it stands — selected,
+        // approved, and carried by the frozen baseline — while the other scenarios close out.
         var materializedAt = DateTimeOffset.UtcNow.AddSeconds(-5);
         var activeBaseline = await db.CandidateBaselines
             .Include(x => x.Selections).Include(x => x.ExternalPackageSelections)
@@ -681,13 +703,19 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         await db.SaveChangesAsync();
 
         var legacyIds = legacy.Select(x => x.Id).ToList();
-        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.UpgradeAsync(summary.ProgramId));
-        Assert.Contains("materialized requirement revisions", failure.Message, StringComparison.OrdinalIgnoreCase);
-        // Fail closed means nothing was taken apart.
-        Assert.Equal(8, await db.SystemChangeRequests.AsNoTracking().CountAsync(x => legacyIds.Contains(x.Id)));
-        Assert.Equal(8, await db.ShowcaseUpgradeSteps.AsNoTracking().CountAsync(x => x.ProgramId == summary.ProgramId
-            && x.StepKey.StartsWith("scenario-richness/interface/")));
-        Assert.Single(await db.BaselineSelections.AsNoTracking().Where(x => legacyIds.Contains(x.ChangeRequestId)).ToListAsync());
+        var selectedScenarioId = legacy.Single(x => x.State == ChangeRequestState.SelectedForBaseline).Id;
+        await seeder.UpgradeAsync(summary.ProgramId);
+
+        // The frozen selection and its materialized revision stand unchanged; the other scenarios closed.
+        var selectedAfter = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Id == selectedScenarioId);
+        Assert.Equal(ChangeRequestState.SelectedForBaseline, selectedAfter.State);
+        Assert.True(await db.BaselineSelections.AsNoTracking().AnyAsync(x => x.ChangeRequestId == selectedScenarioId));
+        Assert.True(await db.RequirementRevisions.AsNoTracking().AnyAsync(x => x.SourceChangeRequestId == selectedScenarioId));
+        var closed = await db.SystemChangeRequests.AsNoTracking()
+            .Where(x => legacyIds.Contains(x.Id) && x.Id != selectedScenarioId)
+            .ToDictionaryAsync(x => x.Id, x => x.State);
+        Assert.All(closed.Values, state => Assert.Equal(ChangeRequestState.Withdrawn, state));
+        Assert.All(await seeder.CheckInvariantsAsync(summary.ProgramId), x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
     }
 
     /// <summary>

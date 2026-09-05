@@ -1192,7 +1192,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             new("active-change-request-distribution", activeRequests.Count >= 8,
                 $"{activeRequests.Count} active-build change request(s); the showcase contributes 8 baseline scenarios."),
             new("interface-scenarios-retired", await InterfaceScenariosRetiredAsync(programId, ct),
-                "No Interface change-control scenarios remain: the seed no longer creates them (#889) and the retirement step removes what older seeds recorded."),
+                "No Interface change-control scenario is in flight or claimed by a draft baseline: the seed no longer creates them (#889) and the retirement step closes out what older seeds recorded without deleting history."),
             new("problem-report-scenarios", problemSteps.Count == 8 && problemReports.Count == 8
                     && requiredProblemStates.All(state => problemReports.Any(x => x.State == state)),
                 $"{problemReports.Count} Problem Report scenario(s); lifecycle variety should include active, closure and rejected records."),
@@ -1207,21 +1207,37 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     }
 
     /// <summary>
-    /// The #889 postcondition: the Interface change-control scenarios the seed once wrote stay retired.
+    /// The #889 postcondition: the Interface change-control scenarios the seed once wrote are closed out —
+    /// nothing left in flight, nothing still claimed by a draft baseline, and nothing destroyed.
     ///
-    /// Scoped to what the seeder owns — the durable ownership rows and the records they name — and not to
-    /// every change request in the project: an operator-authored Interface record is controlled content the
-    /// product must keep presenting (and the Digital Thread must keep counting), not a seeding defect.
-    /// False here is the retry signal the <c>interface-scenario-retirement</c> upgrade step resolves.
+    /// Every scenario named by the durable ownership rows must be withdrawn, or — where a selection has
+    /// become frozen baseline history the product cannot and should not unwind — still selected, but only
+    /// outside draft baselines. Operator-authored Interface content is not the seeder's concern and is
+    /// deliberately out of scope here: it is controlled content the product must keep presenting. False is
+    /// the retry signal the <c>interface-scenario-retirement</c> upgrade step resolves.
     /// </summary>
     private async Task<bool> InterfaceScenariosRetiredAsync(Guid programId, CancellationToken ct)
     {
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleOrDefaultAsync(ct);
+        if (projectId == Guid.Empty) return true;
         var steps = await db.ShowcaseUpgradeSteps.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.StepKey.StartsWith(InterfaceScenarioStepPrefix)).ToListAsync(ct);
         if (steps.Count == 0) return true;
         if (steps.Any(step => !Guid.TryParse(step.Detail, out _))) return false;
         var ids = steps.Select(step => Guid.Parse(step.Detail)).ToHashSet();
-        return !await db.SystemChangeRequests.AsNoTracking().AnyAsync(x => ids.Contains(x.Id), ct);
+        var requests = await db.SystemChangeRequests.AsNoTracking()
+            .Where(x => ids.Contains(x.Id))
+            .Select(x => new { x.Id, x.State }).ToListAsync(ct);
+        foreach (var request in requests)
+        {
+            if (request.State == ChangeRequestState.Withdrawn) continue;
+            if (request.State != ChangeRequestState.SelectedForBaseline) return false;
+            var stillClaimedByDraft = await db.BaselineSelections.AsNoTracking()
+                .AnyAsync(x => x.ChangeRequestId == request.Id
+                    && db.CandidateBaselines.Any(b => b.Id == x.BaselineId && b.State == CandidateBaselineState.Draft), ct);
+            if (stillClaimedByDraft) return false;
+        }
+        return true;
     }
 
     private async Task<bool> ProblemReportBuildScopeInvariantAsync(IReadOnlyCollection<ProblemReport> reports,
@@ -1445,33 +1461,40 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     }
 
     /// <summary>
-    /// Retires the Interface change-control scenarios an older seeder created (#889).
+    /// Closes out the Interface change-control scenarios an older seeder created (#889) without destroying
+    /// any of them.
     ///
     /// The FMS ladder configures [System, HighLevel, LowLevel], so Interface scenarios were a seeding
     /// defect: internally consistent records at a level this project has not configured, which every
     /// ladder-shaped consumer (the Digital Thread change network first among them) can only count out and
-    /// report as "not shown". The owner's direction is that they are not seeded for this project, so this
-    /// step removes exactly the records the seeder's own durable ownership rows name — never records that
-    /// merely carry scenario marker prose, which can be typed by anyone.
+    /// report as "not shown". The owner's direction is that they are not seeded for this project, but the
+    /// records an older seed already wrote went through the real aggregate lifecycle — several are Approved,
+    /// one was selected into a candidate baseline — so they are controlled records with lifecycle evidence,
+    /// and controlled records are never physically deleted by a product workflow.
     ///
-    /// The removal is bookkeeping for deterministic synthetic content, but it is still fail-closed: an
-    /// upgrade refuses rather than silently rewriting controlled state the records have acquired. A
-    /// materialized requirement revision, a downstream assessment, an upstream trace reference, or a
-    /// selection in a baseline that is no longer draft all mean the record has become part of configuration
-    /// truth beyond the seed; retiring that needs an explicit operator decision, not this step.
+    /// "Retiring rather than orphaning" therefore means a controlled disposition for every scenario the
+    /// seeder's durable ownership rows name, and nothing else:
     ///
-    /// Idempotent by construction: ownership rows and their named records are removed together in the one
-    /// serialized upgrade transaction, so a rerun finds nothing left to retire.
+    /// - work still open (Draft, In review, Deferred, and Approved work that will not proceed) is Withdrawn
+    ///   under its own author's identity, with the reason stated; an in-flight review is cancelled by the
+    ///   aggregate so no signatures stay outstanding;
+    /// - a selection in a candidate baseline that is still Draft is reversed through the baseline aggregate
+    ///   (the draft is explicitly editable; the product's own Remove operation keeps the approval evidence
+    ///   on the request while the build stops carrying unconfigured work);
+    /// - a selection that has reached a frozen or materialized baseline is history and is left exactly as it
+    ///   stands, as is every already-withdrawn record;
+    /// - the ownership step rows stay: they are the durable map of what the seed once created, and removing
+    ///   them while the records remain is precisely the orphaning the issue rules out.
+    ///
+    /// Nothing is deleted. Requirement changes, review cycles, approval steps, signatures, audit events and
+    /// derived impact items all remain. The step refuses when a scenario author no longer holds current
+    /// authority — a withdrawal is a controlled act, and a stale/ended authority is never repaired by the
+    /// showcase; grant the authority and retry. Idempotent: rerun finds every scenario already closed.
     /// </summary>
     private async Task<string?> RetireInterfaceScenariosAsync(Guid programId, CancellationToken ct)
     {
         var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleOrDefaultAsync(ct);
         if (projectId == Guid.Empty) return "No FMS Project; nothing to retire.";
-        var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId)
-            .ToDictionaryAsync(x => x.Version, ct);
-        if (!releases.TryGetValue("1.6", out var active))
-            return "No active FMS 1.6 release; nothing to retire.";
-
         var steps = await db.ShowcaseUpgradeSteps.Where(x => x.ProgramId == programId
             && x.StepKey.StartsWith(InterfaceScenarioStepPrefix)).ToListAsync(ct);
         if (steps.Count == 0) return "No Interface change-control scenarios recorded; nothing to retire.";
@@ -1484,59 +1507,67 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             ids.Add(id);
         }
 
-        var requests = await db.SystemChangeRequests.Where(x => ids.Contains(x.Id)).ToListAsync(ct);
+        var requests = await db.SystemChangeRequests
+            .Include(x => x.ReviewCycles)
+            .Where(x => ids.Contains(x.Id)).ToListAsync(ct);
         foreach (var request in requests)
-            if (request.ProjectId != projectId || request.Type != ChangeRequestType.Interface
-                || request.TargetReleaseId != active.Id)
+            if (request.ProjectId != projectId || request.Type != ChangeRequestType.Interface)
                 throw new InvalidOperationException(
                     $"The {InterfaceScenarioStepPrefix} ownership record names change request {request.DisplayNumber} "
                     + "outside its controlled scope; the retirement step refuses to touch it.");
 
-        // Fail closed before the first deletion. These dependencies mean the record became part of
-        // configuration truth through the product's own controlled workflows, which this bookkeeping step
-        // must not rewrite.
-        if (await db.RequirementRevisions.AnyAsync(x => x.SourceChangeRequestId != null
-                && ids.Contains(x.SourceChangeRequestId.Value), ct))
-            throw new InvalidOperationException(
-                "Interface scenario change requests have materialized requirement revisions in a baseline; "
-                + "retiring them would rewrite baseline content and requires an explicit operator decision.");
-        if (await db.ChangeRequestUpstreamLinks.AnyAsync(x => ids.Contains(x.UpstreamChangeRequestId), ct))
-            throw new InvalidOperationException(
-                "Interface scenario change requests are named as upstream context by other change requests; "
-                + "retiring them would discard controlled trace context and requires an explicit operator decision.");
-        if (await db.DownstreamChangeAssessments.AnyAsync(x => ids.Contains(x.SourceChangeRequestId), ct)
-            || await db.DownstreamAssessmentChangeRequestLinks.AnyAsync(x => ids.Contains(x.ChangeRequestId), ct))
-            throw new InvalidOperationException(
-                "Interface scenario change requests carry downstream change assessments; "
-                + "retiring them would discard controlled assessment work and requires an explicit operator decision.");
+        // A withdrawal is a controlled act by the scenario's own author at operator time. A current account
+        // without current role authority is not a plausible historical signature, and a stale/ended
+        // authority must never be repaired by the showcase seeder.
+        var now = PersistedTimestamp(DateTimeOffset.UtcNow);
+        foreach (var author in requests.Select(x => x.AuthorId).Distinct(StringComparer.OrdinalIgnoreCase))
+            await EnsureCurrentProgramAuthorityAsync(programId, author, ProgramRole.Engineer, now, ct);
 
-        // Impact items are derived from approval and mean nothing once their cause is retired. No current
-        // code raises them at an unconfigured ladder level, so any that exist predate that guard.
-        var impactItems = await db.VerificationImpactItems.Where(x => ids.Contains(x.ChangeRequestId)).ToListAsync(ct);
-        db.VerificationImpactItems.RemoveRange(impactItems);
-
-        // A draft baseline selection exists only because the seeder put it there; the selected scenario
-        // leaves with it. A frozen or materialized baseline cannot give a selection up, and the guard
-        // above has already established no revision was materialized from it.
-        var selections = await db.BaselineSelections
-            .Where(x => ids.Contains(x.ChangeRequestId)).ToListAsync(ct);
-        if (selections.Count > 0)
+        var withdrawn = 0;
+        var unselected = 0;
+        var alreadyClosed = 0;
+        foreach (var request in requests)
         {
-            var baselineIds = selections.Select(x => x.BaselineId).Distinct().ToList();
-            var baselineStates = await db.CandidateBaselines.AsNoTracking().Where(x => baselineIds.Contains(x.Id))
-                .ToDictionaryAsync(x => x.Id, x => x.State, ct);
-            if (baselineStates.Values.Any(state => state != CandidateBaselineState.Draft))
-                throw new InvalidOperationException(
-                    "Interface scenario change requests are selected in a baseline that is no longer draft; "
-                    + "retiring them would rewrite baseline content and requires an explicit operator decision.");
-            db.BaselineSelections.RemoveRange(selections);
+            if (request.State == ChangeRequestState.Withdrawn)
+            {
+                alreadyClosed++;
+                continue;
+            }
+            if (request.State == ChangeRequestState.SelectedForBaseline)
+            {
+                // The seed put this selection in the draft active candidate. Reverse it with the product's
+                // own draft-baseline operation so approval history stays on the request while the build
+                // stops carrying unconfigured work. A selection in a frozen or materialized baseline is
+                // controlled history: the aggregate itself forbids withdrawing a selected request, so the
+                // record is left exactly as it stands.
+                var selectionBaselines = await db.CandidateBaselines
+                    .Include(x => x.Selections)
+                    .Where(x => x.ProjectId == projectId && x.Selections.Any(s => s.ChangeRequestId == request.Id))
+                    .ToListAsync(ct);
+                if (selectionBaselines.Any(x => x.State != CandidateBaselineState.Draft))
+                {
+                    alreadyClosed++;
+                    continue;
+                }
+                foreach (var baseline in selectionBaselines)
+                {
+                    baseline.Remove(request, "cm.fms", now);
+                    unselected++;
+                }
+                request.Withdraw(request.AuthorId, WithdrawalReason, now);
+                withdrawn++;
+                continue;
+            }
+            request.Withdraw(request.AuthorId, WithdrawalReason, now);
+            withdrawn++;
         }
-
-        db.SystemChangeRequests.RemoveRange(requests);
-        db.ShowcaseUpgradeSteps.RemoveRange(steps);
         await db.SaveChangesAsync(ct);
-        return $"Retired {requests.Count} Interface change-control scenario(s) and {steps.Count} ownership record(s) (#889).";
+        return $"Closed out {withdrawn} Interface change-control scenario(s) ({unselected} draft-baseline selection(s) "
+            + $"reversed, {alreadyClosed} already closed) without deleting any record (#889).";
     }
+
+    private const string WithdrawalReason =
+        "Interface change control is not configured for this project; the seeded showcase scenario is retired (#889).";
 
     private async Task<ProblemReport?> ResolveProblemReportScenarioAsync(Guid programId, Guid projectId, int index,
         Guid expectedReleaseId, CancellationToken ct)
