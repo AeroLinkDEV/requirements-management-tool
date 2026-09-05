@@ -2296,9 +2296,9 @@ successful when the reviewed merge candidate contains no trace of it.
 - **Protected authority surfaces:** A candidate that changes `.github/`, `product/test-planner/`, or
   `product/ci-metrics/` cannot automatically authorize itself. Those changes require an explicit, reviewed
   authority-maintenance cutover; the queue must never be weakened merely to make such a change convenient.
-- **Acceptance:** This documentation-only delivery establishes the single-entry path only by landing through
-  the live queue. Issue #549 records that exact proof and remains the live authority for the remaining
-  composition, deliberate-failure, stale-base, and non-cancellation evidence before final closeout.
+- **Acceptance:** A documentation-only delivery through the live queue is required to establish the
+  single-entry path. Issue #549 remains the live authority for that proof and the remaining composition,
+  deliberate-failure, stale-base, and non-cancellation evidence before final closeout.
 
 ## Working Assumptions
 
