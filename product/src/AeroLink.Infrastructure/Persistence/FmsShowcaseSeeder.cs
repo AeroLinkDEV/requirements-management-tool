@@ -50,13 +50,14 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         PersistedTimestamp(value).AddTicks(PersistedTimestampTickQuantum);
     // Scenario ownership is recorded in one immutable upgrade-step row per artifact. Prose markers below
     // are display breadcrumbs only; they are never used to locate or mutate controlled rows.
-    private const string InterfaceScenarioMarkerPrefix = "[FMSLIVE showcase scenario: interface-";
     private const string ProblemReportScenarioMarkerPrefix = "[FMSLIVE showcase scenario: problem-report-";
+    // Retired by #889: the FMS ladder configures [System, HighLevel, LowLevel], so the seed no longer
+    // creates Interface change-control scenarios. The step prefix survives only so the explicit upgrade
+    // can find and retire exactly the records an older seeder recorded as its own.
     private const string InterfaceScenarioStepPrefix = "scenario-richness/interface/";
     private const string ProblemReportScenarioStepPrefix = "scenario-richness/problem-report/";
     private const string ProblemReportVerificationExecutionStepPrefix = "scenario-richness/problem-report-verification/";
     private const int PreferredScenarioNumber = 86601;
-    private static readonly string[] InterfaceScenarioAuthors = ["systems.author", "software.author"];
     private static readonly string[] ProblemReportOwners =
         ["systems.author", "software.author", "test.engineer", "engineer.demo", "test.author", "test.engineer", "software.author", "systems.author"];
     private static readonly (ProjectLeadershipPosition Position, string UserName, ProgramRole RequiredRole)[]
@@ -73,9 +74,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         ];
     private static readonly string[] Topics = ["flight plan", "lateral navigation", "vertical navigation", "performance prediction", "navigation database", "guidance", "radio navigation", "position estimation", "fuel management", "crew interface", "departure procedures", "arrival procedures", "approach management", "airspace constraints", "route sequencing"];
 
-    private static string InterfaceScenarioMarker(int index) => $"{InterfaceScenarioMarkerPrefix}{index:D2}]";
     private static string ProblemReportScenarioMarker(int index) => $"{ProblemReportScenarioMarkerPrefix}{index:D2}]";
-    private static string InterfaceScenarioStepKey(int index) => $"{InterfaceScenarioStepPrefix}{index:D2}";
     private static string ProblemReportScenarioStepKey(int index) => $"{ProblemReportScenarioStepPrefix}{index:D2}";
     private static string ProblemReportVerificationExecutionStepKey(int index) =>
         $"{ProblemReportVerificationExecutionStepPrefix}{index:D2}";
@@ -325,19 +324,6 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         await db.SaveChangesAsync(ct);
     }
 
-    private static readonly (string UserName, ProgramRole Role)[] InterfaceScenarioActors =
-    [
-        ("systems.author", ProgramRole.Engineer),
-        ("systems.author", ProgramRole.SystemEngineer),
-        ("software.author", ProgramRole.Engineer),
-        ("software.author", ProgramRole.SoftwareEngineer),
-        ("systems.reviewer", ProgramRole.SystemEngineer),
-        ("assurance.reviewer", ProgramRole.SoftwareQualityAnalyst),
-        ("lead.reviewer", ProgramRole.SoftwareEngineer),
-        ("manager.reviewer", ProgramRole.ProgramManager),
-        ("cm.fms", ProgramRole.ConfigurationManager),
-    ];
-
     private static readonly (string UserName, ProgramRole Role)[] ProblemReportScenarioActors =
     [
         ("systems.author", ProgramRole.Engineer),
@@ -362,19 +348,6 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             .Select(x => x.GrantedAt).ToListAsync(ct);
         if (!authorityGrants.Any(x => x <= effectiveAt))
             throw new InvalidOperationException($"{userName} cannot act as {role}: no current program authority covers {effectiveAt:O}.");
-    }
-
-    private async Task<DateTimeOffset> EffectiveInterfaceTimelineAtAsync(Guid programId, DateTimeOffset baselineAt,
-        CancellationToken ct)
-    {
-        var names = InterfaceScenarioActors.Select(x => x.UserName).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var actorIds = await db.UserAccounts.AsNoTracking().Where(x => names.Contains(x.UserName))
-            .Select(x => x.Id).ToListAsync(ct);
-        var grants = await db.ProgramMemberships.AsNoTracking()
-            .Where(x => x.ProgramId == programId && actorIds.Contains(x.UserId) && x.EndedAt == null)
-            .Select(x => x.GrantedAt).ToListAsync(ct);
-        var latestGrant = grants.Count == 0 ? (DateTimeOffset?)null : grants.Max();
-        return latestGrant is { } grant && grant >= baselineAt ? NextPersistedTimestamp(grant) : baselineAt;
     }
 
     private async Task<DateTimeOffset> EffectiveProblemReportTimelineAtAsync(Guid programId,
@@ -493,14 +466,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         {
             var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == project)
                 .ToDictionaryAsync(x => x.Version, ct);
-            var interfacePending = false;
-            if (releases.TryGetValue("1.6", out var activeRelease))
-                for (var index = 1; index <= 8 && !interfacePending; index++)
-                    interfacePending = await ResolveInterfaceScenarioAsync(programId, project, activeRelease.Id, index, ct) is null;
-
             var problemPending = false;
             if (releases.TryGetValue("1.5", out var released)
-                && releases.TryGetValue("1.6", out activeRelease))
+                && releases.TryGetValue("1.6", out var activeRelease))
                 for (var index = 1; index <= 8 && !problemPending; index++)
                     problemPending = await ResolveProblemReportScenarioAnyTargetAsync(programId, project, index, ct) is null;
 
@@ -510,21 +478,6 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             // roster is checked before any upgrade step can mutate it.
             if (!problemPending)
                 problemPending = !await ScenarioRichnessCompleteAsync(programId, ct);
-
-            if (interfacePending)
-            {
-                var effectiveAt = await EffectiveInterfaceTimelineAtAsync(programId,
-                    new DateTimeOffset(2024, 12, 2, 10, 0, 0, TimeSpan.Zero), ct);
-                try
-                {
-                    foreach (var actor in InterfaceScenarioActors)
-                        await EnsureCurrentProgramAuthorityAsync(programId, actor.UserName, actor.Role, effectiveAt, ct);
-                }
-                catch (InvalidOperationException ex)
-                {
-                    return new(false, "showcase_actor_authority_unavailable", ex.Message, closureAt);
-                }
-            }
 
             if (problemPending)
             {
@@ -630,6 +583,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         "approver-identity",
         "released-campaign",
         "code-traceability-demo",
+        "interface-scenario-retirement",
         "scenario-richness",
     ];
 
@@ -654,6 +608,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             ("approver-identity", ReconcileApproverIdentityAsync),
             ("released-campaign", EnsureReleasedCampaignAsync),
             ("code-traceability-demo", EnsureCodeTraceabilityAsync),
+            ("interface-scenario-retirement", RetireInterfaceScenariosAsync),
             ("scenario-richness", EnsureScenarioRichnessAsync),
         };
         if (!steps.Select(x => x.Key).SequenceEqual(UpgradeStepKeys))
@@ -1177,10 +1132,6 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var components = await db.ProductLineComponents.CountAsync(x => x.ProjectId == projectId, ct);
         var allProjectRequests = await db.SystemChangeRequests.AsNoTracking()
             .Where(x => x.ProjectId == projectId).ToListAsync(ct);
-        var interfaceSteps = await db.ShowcaseUpgradeSteps.AsNoTracking()
-            .Where(x => x.ProgramId == programId && x.StepKey.StartsWith(InterfaceScenarioStepPrefix)).ToListAsync(ct);
-        var interfaceIds = ParseScenarioIds(interfaceSteps, InterfaceScenarioStepPrefix);
-        var interfaceRequests = allProjectRequests.Where(x => interfaceIds.Contains(x.Id)).ToList();
         var allProblemReports = await db.ProblemReports.AsNoTracking()
             .Where(x => x.ProjectId == projectId).ToListAsync(ct);
         var problemSteps = await db.ShowcaseUpgradeSteps.AsNoTracking()
@@ -1189,18 +1140,6 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var problemReports = allProblemReports.Where(x => problemIds.Contains(x.Id)).ToList();
         var activeRelease = releases.SingleOrDefault(r => r.Version == "1.6");
         var activeRequests = allProjectRequests.Where(x => x.TargetReleaseId == activeRelease?.Id).ToList();
-        var hasDraftActiveBaseline = activeRelease is not null && baselines.Any(x => x.ReleaseId == activeRelease.Id
-            && x.State == CandidateBaselineState.Draft);
-        var requiredInterfaceStates = new[]
-        {
-            ChangeRequestState.Draft, ChangeRequestState.InReview, ChangeRequestState.Approved,
-            ChangeRequestState.SelectedForBaseline, ChangeRequestState.Deferred, ChangeRequestState.Withdrawn,
-        };
-        if (!hasDraftActiveBaseline)
-            requiredInterfaceStates = requiredInterfaceStates.Where(x => x != ChangeRequestState.SelectedForBaseline).ToArray();
-        var interfaceSelectionHealthy = hasDraftActiveBaseline
-            ? interfaceRequests.Any(x => x.State == ChangeRequestState.SelectedForBaseline)
-            : activeRequests.Any(x => x.State == ChangeRequestState.SelectedForBaseline);
         var requiredProblemStates = new[]
         {
             ProblemReportState.Draft, ProblemReportState.Implementing, ProblemReportState.Verifying,
@@ -1250,12 +1189,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             new("product-line", components >= 1, $"{components} product-line component(s)."),
             new("leadership-roster", leadershipHealthy,
                 $"{leadership.Select(x => x.Position).Distinct().Count()} of 8 positions have attributable history; {activeLeadershipCount} currently have eligible holders."),
-            new("active-change-request-distribution", activeRequests.Count >= 16,
-                $"{activeRequests.Count} active-build change request(s); the showcase contributes 8 baseline scenarios and 8 Interface scenarios."),
-            new("interface-scenarios", interfaceSteps.Count == 8 && interfaceRequests.Count == 8
-                    && requiredInterfaceStates.All(state => interfaceRequests.Any(x => x.State == state))
-                    && interfaceSelectionHealthy,
-                $"{interfaceRequests.Count} Interface change-control scenario(s); the active build should show draft, review, approval, deferral and withdrawal, plus truthful selection on either a current draft candidate or its existing frozen baseline."),
+            new("active-change-request-distribution", activeRequests.Count >= 8,
+                $"{activeRequests.Count} active-build change request(s); the showcase contributes 8 baseline scenarios."),
+            new("interface-scenarios-retired", await InterfaceScenariosRetiredAsync(programId, ct),
+                "No Interface change-control scenarios remain: the seed no longer creates them (#889) and the retirement step removes what older seeds recorded."),
             new("problem-report-scenarios", problemSteps.Count == 8 && problemReports.Count == 8
                     && requiredProblemStates.All(state => problemReports.Any(x => x.State == state)),
                 $"{problemReports.Count} Problem Report scenario(s); lifecycle variety should include active, closure and rejected records."),
@@ -1267,6 +1204,24 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             new("problem-report-controlled-evidence", await ProblemReportEvidenceInvariantAsync(programId, projectId, problemReports, ct),
                 "Verified and closed seeded Problem Reports carry controlled resolution links and closure evidence."),
         ];
+    }
+
+    /// <summary>
+    /// The #889 postcondition: the Interface change-control scenarios the seed once wrote stay retired.
+    ///
+    /// Scoped to what the seeder owns — the durable ownership rows and the records they name — and not to
+    /// every change request in the project: an operator-authored Interface record is controlled content the
+    /// product must keep presenting (and the Digital Thread must keep counting), not a seeding defect.
+    /// False here is the retry signal the <c>interface-scenario-retirement</c> upgrade step resolves.
+    /// </summary>
+    private async Task<bool> InterfaceScenariosRetiredAsync(Guid programId, CancellationToken ct)
+    {
+        var steps = await db.ShowcaseUpgradeSteps.AsNoTracking()
+            .Where(x => x.ProgramId == programId && x.StepKey.StartsWith(InterfaceScenarioStepPrefix)).ToListAsync(ct);
+        if (steps.Count == 0) return true;
+        if (steps.Any(step => !Guid.TryParse(step.Detail, out _))) return false;
+        var ids = steps.Select(step => Guid.Parse(step.Detail)).ToHashSet();
+        return !await db.SystemChangeRequests.AsNoTracking().AnyAsync(x => ids.Contains(x.Id), ct);
     }
 
     private async Task<bool> ProblemReportBuildScopeInvariantAsync(IReadOnlyCollection<ProblemReport> reports,
@@ -1445,11 +1400,16 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     /// Adds a small, deterministic cross-section of the records people reach from the showcase landing page.
     ///
     /// The original FMS seed was excellent at exercising the released requirement/test volume, but it was
-    /// almost entirely a single historical shape: no Interface change-control work and no Problem Reports.
-    /// That made Team Work and the PR centre look empty even though the rest of the programme was populated.
-    /// These rows are deliberately created through the same aggregate lifecycle as authored records, and are
-    /// keyed by durable per-scenario ownership rows so an upgrade or restart cannot multiply them. No released
-    /// baseline row is edited and no persistent data is cleared.
+    /// almost entirely a single historical shape: no Problem Reports. That made Team Work and the PR centre
+    /// look empty even though the rest of the programme was populated. These rows are deliberately created
+    /// through the same aggregate lifecycle as authored records, and are keyed by durable per-scenario
+    /// ownership rows so an upgrade or restart cannot multiply them. No released baseline row is edited and
+    /// no persistent data is cleared.
+    ///
+    /// Interface change-control scenarios deliberately live here no longer (#889): the FMS ladder configures
+    /// [System, HighLevel, LowLevel], and records seeded at an unconfigured level forced every
+    /// ladder-shaped consumer to explain records it must not present. The <c>interface-scenario-retirement</c>
+    /// upgrade step retires what older seeds created.
     /// </summary>
     private async Task<string?> EnsureScenarioRichnessAsync(Guid programId, CancellationToken ct)
     {
@@ -1460,7 +1420,6 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (!releases.TryGetValue("1.6", out var active) || !releases.TryGetValue("1.5", out var released))
             throw new InvalidOperationException("Both FMS 1.5 and 1.6 releases are required before scenario enrichment can be recorded.");
 
-        var interfaceCount = await EnsureInterfaceScenariosAsync(programId, projectId, active.Id, ct);
         var problemCount = await EnsureProblemReportScenariosAsync(programId, projectId, released.Id, active.Id, ct);
         if (!await ScenarioRichnessCompleteAsync(programId, ct))
         {
@@ -1469,7 +1428,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             throw new InvalidOperationException("The FMS scenario enrichment did not reach its controlled postconditions; "
                 + $"the upgrade step remains retryable. Failed invariants: {string.Join("; ", failed)}");
         }
-        return $"Ensured {interfaceCount} Interface change-control scenarios and {problemCount} Problem Report scenarios across Builds 1.5 and 1.6.";
+        return $"Ensured {problemCount} Problem Report scenarios across Builds 1.5 and 1.6; "
+            + "Interface change-control scenarios are not seeded (#889).";
     }
 
     private static HashSet<Guid> ParseScenarioIds(IEnumerable<ShowcaseUpgradeStep> steps, string prefix)
@@ -1484,19 +1444,98 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         return ids;
     }
 
-    private async Task<SystemChangeRequest?> ResolveInterfaceScenarioAsync(Guid programId, Guid projectId, Guid releaseId,
-        int index, CancellationToken ct)
+    /// <summary>
+    /// Retires the Interface change-control scenarios an older seeder created (#889).
+    ///
+    /// The FMS ladder configures [System, HighLevel, LowLevel], so Interface scenarios were a seeding
+    /// defect: internally consistent records at a level this project has not configured, which every
+    /// ladder-shaped consumer (the Digital Thread change network first among them) can only count out and
+    /// report as "not shown". The owner's direction is that they are not seeded for this project, so this
+    /// step removes exactly the records the seeder's own durable ownership rows name — never records that
+    /// merely carry scenario marker prose, which can be typed by anyone.
+    ///
+    /// The removal is bookkeeping for deterministic synthetic content, but it is still fail-closed: an
+    /// upgrade refuses rather than silently rewriting controlled state the records have acquired. A
+    /// materialized requirement revision, a downstream assessment, an upstream trace reference, or a
+    /// selection in a baseline that is no longer draft all mean the record has become part of configuration
+    /// truth beyond the seed; retiring that needs an explicit operator decision, not this step.
+    ///
+    /// Idempotent by construction: ownership rows and their named records are removed together in the one
+    /// serialized upgrade transaction, so a rerun finds nothing left to retire.
+    /// </summary>
+    private async Task<string?> RetireInterfaceScenariosAsync(Guid programId, CancellationToken ct)
     {
-        var step = await db.ShowcaseUpgradeSteps.AsNoTracking()
-            .SingleOrDefaultAsync(x => x.ProgramId == programId && x.StepKey == InterfaceScenarioStepKey(index), ct);
-        if (step is null) return null;
-        if (!Guid.TryParse(step.Detail, out var artifactId))
-            throw new InvalidOperationException($"The {step.StepKey} ownership record does not contain an artifact identity.");
-        var request = await db.SystemChangeRequests.SingleOrDefaultAsync(x => x.Id == artifactId, ct)
-            ?? throw new InvalidOperationException($"The {step.StepKey} ownership record names a missing change request.");
-        if (request.ProjectId != projectId || request.Type != ChangeRequestType.Interface || request.TargetReleaseId != releaseId)
-            throw new InvalidOperationException($"The {step.StepKey} ownership record names a change request outside its controlled scope.");
-        return request;
+        var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleOrDefaultAsync(ct);
+        if (projectId == Guid.Empty) return "No FMS Project; nothing to retire.";
+        var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId)
+            .ToDictionaryAsync(x => x.Version, ct);
+        if (!releases.TryGetValue("1.6", out var active))
+            return "No active FMS 1.6 release; nothing to retire.";
+
+        var steps = await db.ShowcaseUpgradeSteps.Where(x => x.ProgramId == programId
+            && x.StepKey.StartsWith(InterfaceScenarioStepPrefix)).ToListAsync(ct);
+        if (steps.Count == 0) return "No Interface change-control scenarios recorded; nothing to retire.";
+
+        var ids = new HashSet<Guid>();
+        foreach (var step in steps)
+        {
+            if (!Guid.TryParse(step.Detail, out var id))
+                throw new InvalidOperationException($"The {step.StepKey} ownership record does not contain an artifact identity.");
+            ids.Add(id);
+        }
+
+        var requests = await db.SystemChangeRequests.Where(x => ids.Contains(x.Id)).ToListAsync(ct);
+        foreach (var request in requests)
+            if (request.ProjectId != projectId || request.Type != ChangeRequestType.Interface
+                || request.TargetReleaseId != active.Id)
+                throw new InvalidOperationException(
+                    $"The {InterfaceScenarioStepPrefix} ownership record names change request {request.DisplayNumber} "
+                    + "outside its controlled scope; the retirement step refuses to touch it.");
+
+        // Fail closed before the first deletion. These dependencies mean the record became part of
+        // configuration truth through the product's own controlled workflows, which this bookkeeping step
+        // must not rewrite.
+        if (await db.RequirementRevisions.AnyAsync(x => x.SourceChangeRequestId != null
+                && ids.Contains(x.SourceChangeRequestId.Value), ct))
+            throw new InvalidOperationException(
+                "Interface scenario change requests have materialized requirement revisions in a baseline; "
+                + "retiring them would rewrite baseline content and requires an explicit operator decision.");
+        if (await db.ChangeRequestUpstreamLinks.AnyAsync(x => ids.Contains(x.UpstreamChangeRequestId), ct))
+            throw new InvalidOperationException(
+                "Interface scenario change requests are named as upstream context by other change requests; "
+                + "retiring them would discard controlled trace context and requires an explicit operator decision.");
+        if (await db.DownstreamChangeAssessments.AnyAsync(x => ids.Contains(x.SourceChangeRequestId), ct)
+            || await db.DownstreamAssessmentChangeRequestLinks.AnyAsync(x => ids.Contains(x.ChangeRequestId), ct))
+            throw new InvalidOperationException(
+                "Interface scenario change requests carry downstream change assessments; "
+                + "retiring them would discard controlled assessment work and requires an explicit operator decision.");
+
+        // Impact items are derived from approval and mean nothing once their cause is retired. No current
+        // code raises them at an unconfigured ladder level, so any that exist predate that guard.
+        var impactItems = await db.VerificationImpactItems.Where(x => ids.Contains(x.ChangeRequestId)).ToListAsync(ct);
+        db.VerificationImpactItems.RemoveRange(impactItems);
+
+        // A draft baseline selection exists only because the seeder put it there; the selected scenario
+        // leaves with it. A frozen or materialized baseline cannot give a selection up, and the guard
+        // above has already established no revision was materialized from it.
+        var selections = await db.BaselineSelections
+            .Where(x => ids.Contains(x.ChangeRequestId)).ToListAsync(ct);
+        if (selections.Count > 0)
+        {
+            var baselineIds = selections.Select(x => x.BaselineId).Distinct().ToList();
+            var baselineStates = await db.CandidateBaselines.AsNoTracking().Where(x => baselineIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => x.State, ct);
+            if (baselineStates.Values.Any(state => state != CandidateBaselineState.Draft))
+                throw new InvalidOperationException(
+                    "Interface scenario change requests are selected in a baseline that is no longer draft; "
+                    + "retiring them would rewrite baseline content and requires an explicit operator decision.");
+            db.BaselineSelections.RemoveRange(selections);
+        }
+
+        db.SystemChangeRequests.RemoveRange(requests);
+        db.ShowcaseUpgradeSteps.RemoveRange(steps);
+        await db.SaveChangesAsync(ct);
+        return $"Retired {requests.Count} Interface change-control scenario(s) and {steps.Count} ownership record(s) (#889).";
     }
 
     private async Task<ProblemReport?> ResolveProblemReportScenarioAsync(Guid programId, Guid projectId, int index,
@@ -1527,98 +1566,6 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (report.ProjectId != projectId || report.TargetReleaseId is null)
             throw new InvalidOperationException($"The {step.StepKey} ownership record names a Problem Report outside its controlled scope.");
         return report;
-    }
-
-    private async Task<int> EnsureInterfaceScenariosAsync(Guid programId, Guid projectId, Guid releaseId, CancellationToken ct)
-    {
-        var existing = await db.SystemChangeRequests
-            .Where(x => x.ProjectId == projectId)
-            .ToListAsync(ct);
-        var usedNumbers = existing.Select(x => x.BaseNumber).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var usedRequirementNumbers = (await db.Requirements.Where(x => x.ProjectId == projectId)
-                .Select(x => x.BaseNumber).ToListAsync(ct))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var existingRequestIds = existing.Select(request => request.Id).ToList();
-        foreach (var number in await db.RequirementChanges.Where(x => existingRequestIds.Contains(x.ChangeRequestId))
-                     .Select(x => x.BaseNumber).ToListAsync(ct))
-            usedRequirementNumbers.Add(number);
-        var deterministicAt = new DateTimeOffset(2024, 12, 2, 10, 0, 0, TimeSpan.Zero);
-        var now = await EffectiveInterfaceTimelineAtAsync(programId, deterministicAt, ct);
-        var currentTimeline = now > deterministicAt;
-        DateTimeOffset At(int scenario, int stage = 0) => currentTimeline
-            ? now.AddTicks(((scenario * 10L) + stage) * PersistedTimestampTickQuantum)
-            : now.AddDays(scenario).AddHours(stage);
-        if (currentTimeline && At(8, 3) > DateTimeOffset.UtcNow)
-            throw new InvalidOperationException("Current FMS Interface scenario events would be future-dated; retry after the actor grants are established.");
-        var missingScenarioCount = 0;
-        for (var index = 1; index <= 8; index++)
-            if (await ResolveInterfaceScenarioAsync(programId, projectId, releaseId, index, ct) is null)
-                missingScenarioCount++;
-        if (missingScenarioCount > 0)
-            // This is a preflight, before any new request, requirement change, review or baseline selection
-            // is written. A current account without current role authority is not a plausible historical
-            // signature, and a stale/ended authority must never be repaired by the showcase seeder.
-            foreach (var actor in InterfaceScenarioActors)
-                await EnsureCurrentProgramAuthorityAsync(programId, actor.UserName, actor.Role, now, ct);
-
-        var baseline = await db.CandidateBaselines
-            .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.ReleaseId == releaseId && x.BaseNumber == "SW-01.60", ct);
-
-        for (var i = 1; i <= 8; i++)
-        {
-            var marker = InterfaceScenarioMarker(i);
-            if (await ResolveInterfaceScenarioAsync(programId, projectId, releaseId, i, ct) is not null) continue;
-            var baseNumber = AllocateScenarioNumber("ICDCR", i, usedNumbers);
-            var requirementBaseNumber = AllocateScenarioNumber("ICDR", i, usedRequirementNumbers);
-            var author = InterfaceScenarioAuthors[(i - 1) % InterfaceScenarioAuthors.Length];
-            var request = new SystemChangeRequest(baseNumber, 0, projectId, releaseId,
-                i == 1 ? "Align navigation interface timing contract" : $"FMS 1.6 interface contract scenario {i}",
-                "The controlled interface contract needs a documented FMS 1.6 decision.",
-                $"The interface impact was reviewed against the current navigation and display boundaries. {marker}",
-                "Record the exact interface behaviour and its compatibility decision.", author, At(i), ChangeRequestType.Interface);
-            request.AddRequirementChange(author, requirementBaseNumber, 0, RequirementLevel.Interface,
-                RequirementChangeKind.Introduce,
-                $"The FMS interface shall preserve deterministic navigation exchange behaviour {i:D2}.",
-                "The interface requirement is retained as controlled showcase content.", "Not Applicable", At(i));
-
-            switch (i)
-            {
-                case 2:
-                    request.SubmitForReview(author, [new("assurance.reviewer", "Development Assurance Reviewer")], At(i, 1));
-                    break;
-                case 3:
-                    request.SubmitForReview(author, [new("assurance.reviewer", "Development Assurance Reviewer")], At(i, 1));
-                    request.ApproveActiveStage("assurance.reviewer", At(i, 2));
-                    break;
-                case 4:
-                    request.SubmitForReview(author, [new("lead.reviewer", "Maya Patel")], At(i, 1));
-                    request.ApproveActiveStage("lead.reviewer", At(i, 2));
-                    break;
-                case 5:
-                    request.Defer(author, "Deferred pending the next interface supplier coordination window.", At(i, 1));
-                    break;
-                case 6:
-                    request.Withdraw(author, "Withdrawn after the interface contract was consolidated into another package.", At(i, 1));
-                    break;
-                case 7:
-                    request.SubmitForReview(author,
-                        [new("lead.reviewer", "Maya Patel"), new("manager.reviewer", "Olivia Chen")], At(i, 1));
-                    break;
-            }
-
-            db.SystemChangeRequests.Add(request);
-            db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId, InterfaceScenarioStepKey(i), request.Id.ToString("D"), request.CreatedAt));
-            usedNumbers.Add(baseNumber);
-            usedRequirementNumbers.Add(requirementBaseNumber);
-            // Selection is a separate fact from approval. Keep one Interface example in the active candidate
-            // only when the expected draft baseline is available; an older installation without that baseline
-            // must not be made to look as though a build accepted work it cannot name.
-            if (i == 4 && baseline is not null && baseline.State == CandidateBaselineState.Draft)
-                baseline.Select(request, "cm.fms", At(i, 3));
-        }
-        await db.SaveChangesAsync(ct);
-        return await db.ShowcaseUpgradeSteps.CountAsync(x => x.ProgramId == programId
-            && x.StepKey.StartsWith(InterfaceScenarioStepPrefix), ct);
     }
 
     private async Task<int> EnsureProblemReportScenariosAsync(Guid programId, Guid projectId, Guid releasedId, Guid activeId, CancellationToken ct)
@@ -2213,28 +2160,6 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var hasSqaHistory = sqaAccount is not null && await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == sqaAccount.Id
                 && x.ProgramId == programId && x.Role == ProgramRole.SoftwareQualityAnalyst, ct);
         if (!hasSqaHistory) return false;
-
-        var interfaces = new List<SystemChangeRequest>();
-        for (var index = 1; index <= 8; index++)
-        {
-            var request = await ResolveInterfaceScenarioAsync(programId, projectId, active.Id, index, ct);
-            if (request is null) return false;
-            interfaces.Add(request);
-        }
-        var hasDraftActiveBaseline = await db.CandidateBaselines.AsNoTracking().AnyAsync(x => x.ProjectId == projectId
-            && x.ReleaseId == active.Id && x.State == CandidateBaselineState.Draft, ct);
-        var requiredInterfaceStates = Enum.GetValues<ChangeRequestState>().Where(x => x is ChangeRequestState.Draft
-            or ChangeRequestState.InReview or ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline
-            or ChangeRequestState.Deferred or ChangeRequestState.Withdrawn);
-        if (!hasDraftActiveBaseline)
-            requiredInterfaceStates = requiredInterfaceStates.Where(x => x != ChangeRequestState.SelectedForBaseline);
-        var interfaceSelectionHealthy = hasDraftActiveBaseline
-            ? interfaces.Any(x => x.State == ChangeRequestState.SelectedForBaseline)
-            : await db.SystemChangeRequests.AsNoTracking().AnyAsync(x => x.ProjectId == projectId
-                && x.TargetReleaseId == active.Id && x.State == ChangeRequestState.SelectedForBaseline, ct);
-        if (!interfaces.All(x => x.TargetReleaseId == active.Id && InterfaceScenarioAuthors.Contains(x.AuthorId, StringComparer.OrdinalIgnoreCase))
-            || !requiredInterfaceStates.All(state => interfaces.Any(x => x.State == state))
-            || !interfaceSelectionHealthy) return false;
 
         var reports = new List<ProblemReport>();
         for (var index = 1; index <= 8; index++)

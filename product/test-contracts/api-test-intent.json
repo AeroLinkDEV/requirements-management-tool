@@ -11327,7 +11327,7 @@
     },
     {
       "cls": "ShowcaseUpgradeApiTests",
-      "test": "Upgrade_can_add_a_pending_interface_scenario_with_current_authority_timestamps",
+      "test": "Upgrade_can_add_a_pending_problem_report_scenario_with_current_authority_timestamps",
       "kind": "Fact",
       "intent": "http-boundary",
       "cases": 1,

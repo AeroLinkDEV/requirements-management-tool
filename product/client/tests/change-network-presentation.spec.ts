@@ -187,9 +187,9 @@ test.describe("configurable ladder layers", () => {
 
 test.describe("records at a level the ladder does not configure", () => {
   test("FMS: Interface change requests get no lane, because the ladder does not configure that level", () => {
-    // The FMS ladder is [System, HighLevel, LowLevel]; the showcase still seeds Interface change requests into
-    // Build 1.6. The ladder decides how many lanes there are, so no Interface lane appears — those records are
-    // a seeding or configuration defect to fix at source, not a ladder step to invent here.
+    // The FMS ladder is [System, HighLevel, LowLevel]. The ladder decides how many lanes there are, so no
+    // Interface lane appears; the showcase seeds it no longer (#889 retired them at source), but the
+    // mechanism is level-agnostic and stays the authority for any unconfigured level a record may carry.
     const model = laneModel(["System", "HighLevel", "LowLevel"])
     expect(model.labels).toEqual([
       "PROBLEM REPORT",

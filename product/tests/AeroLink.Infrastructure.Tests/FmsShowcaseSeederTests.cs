@@ -87,8 +87,11 @@ public sealed class FmsShowcaseSeederTests
             Assert.Equal(historicalReviews.Count, historicalReviews.Select(x => new { x.ChangeRequestId, x.Discipline }).Distinct().Count());
             Assert.True(await db.RequirementRevisions.GroupBy(x => x.ArtifactId).AllAsync(x => x.Count() >= 1));
             var active = db.SystemChangeRequests.Where(x => x.TargetReleaseId == first.ActiveReleaseId);
-            Assert.Equal(16, await active.CountAsync()); Assert.Equal(3, await active.CountAsync(x => x.State == ChangeRequestState.SelectedForBaseline));
-            Assert.Equal(2, await active.CountAsync(x => x.State == ChangeRequestState.Approved)); Assert.Equal(3, await active.CountAsync(x => x.State == ChangeRequestState.InReview)); Assert.Equal(5, await active.CountAsync(x => x.State == ChangeRequestState.Draft)); Assert.Equal(2, await active.CountAsync(x => x.State == ChangeRequestState.Deferred)); Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Withdrawn));
+            Assert.Equal(8, await active.CountAsync()); Assert.Equal(2, await active.CountAsync(x => x.State == ChangeRequestState.SelectedForBaseline));
+            Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Approved)); Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.InReview)); Assert.Equal(3, await active.CountAsync(x => x.State == ChangeRequestState.Draft)); Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Deferred)); Assert.Equal(0, await active.CountAsync(x => x.State == ChangeRequestState.Withdrawn));
+            // #889: the FMS ladder configures [System, HighLevel, LowLevel], so no Interface change requests are seeded.
+            Assert.Equal(0, await active.CountAsync(x => x.Type == ChangeRequestType.Interface));
+            Assert.Equal(0, await db.SystemChangeRequests.CountAsync(x => x.ProjectId == project.Id && x.Type == ChangeRequestType.Interface));
             var codeRecords = await db.CodeTraceabilityRecords.AsNoTracking().ToListAsync();
             Assert.Equal(9, codeRecords.Count);
             Assert.Equal(5, codeRecords.Count(x => x.ReleaseId != first.ActiveReleaseId));
@@ -135,25 +138,18 @@ public sealed class FmsShowcaseSeederTests
             var release15Id = await db.Releases.Where(x => x.ProjectId == summary.ProjectId && x.Version == "1.5").Select(x => x.Id).SingleAsync();
             var interfaceScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/interface/");
             var reportScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/problem-report/");
-            var firstInterface = await db.SystemChangeRequests.AsNoTracking()
-                .Where(x => interfaceScenarioIds.Contains(x.Id))
-                .OrderBy(x => x.BaseNumber).Select(x => new { x.BaseNumber, x.Revision, x.State, x.AuthorId }).ToListAsync();
             var firstReports = await db.ProblemReports.AsNoTracking().Where(x => reportScenarioIds.Contains(x.Id))
                 .OrderBy(x => x.ReportNumber).Select(x => new { x.Id, x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId, x.ResolutionVerificationExecutionId, x.ClosureApprovedAt, x.AdditionalInformation, x.CreatedAt }).ToListAsync();
 
-            Assert.Equal(8, firstInterface.Count);
+            // #889: Interface change-control scenarios are not seeded for FMS — its ladder configures
+            // [System, HighLevel, LowLevel] — and no ownership records for them remain.
+            Assert.Empty(interfaceScenarioIds);
             Assert.Equal(8, firstReports.Count);
-            Assert.Equal(16, await db.SystemChangeRequests.CountAsync(x => x.ProjectId == summary.ProjectId && x.TargetReleaseId == summary.ActiveReleaseId));
+            Assert.Equal(8, await db.SystemChangeRequests.CountAsync(x => x.ProjectId == summary.ProjectId && x.TargetReleaseId == summary.ActiveReleaseId));
             Assert.Equal(6, firstReports.Count(x => x.TargetReleaseId == release15Id));
             Assert.Equal(2, firstReports.Count(x => x.TargetReleaseId == summary.ActiveReleaseId));
-            var eligibleAuthors = new[] { "systems.author", "software.author" };
             var eligibleOwners = new[] { "systems.author", "software.author", "test.engineer", "engineer.demo", "test.author" };
-            Assert.All(firstInterface, item => Assert.Contains(item.AuthorId, eligibleAuthors, StringComparer.OrdinalIgnoreCase));
             Assert.All(firstReports, item => Assert.Contains(item.ResponsibleEngineerId, eligibleOwners, StringComparer.OrdinalIgnoreCase));
-            Assert.Contains(firstInterface, x => x.State == ChangeRequestState.SelectedForBaseline);
-            Assert.Contains(firstInterface, x => x.State == ChangeRequestState.InReview);
-            Assert.Contains(firstInterface, x => x.State == ChangeRequestState.Deferred);
-            Assert.Contains(firstInterface, x => x.State == ChangeRequestState.Withdrawn);
             Assert.Contains(firstReports, x => x.State == ProblemReportState.Draft);
             Assert.Contains(firstReports, x => x.State == ProblemReportState.Implementing);
             Assert.Contains(firstReports, x => x.State == ProblemReportState.Verifying);
@@ -234,12 +230,9 @@ public sealed class FmsShowcaseSeederTests
             await seeder.EnsureSeededAsync();
             interfaceScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/interface/");
             reportScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/problem-report/");
-            var secondInterface = await db.SystemChangeRequests.AsNoTracking()
-                .Where(x => interfaceScenarioIds.Contains(x.Id))
-                .OrderBy(x => x.BaseNumber).Select(x => new { x.BaseNumber, x.Revision, x.State, x.AuthorId }).ToListAsync();
             var secondReports = await db.ProblemReports.AsNoTracking().Where(x => reportScenarioIds.Contains(x.Id))
                 .OrderBy(x => x.ReportNumber).Select(x => new { x.Id, x.ReportNumber, x.Revision, x.State, x.ResponsibleEngineerId, x.TargetReleaseId, x.ResolutionVerificationExecutionId, x.ClosureApprovedAt, x.AdditionalInformation, x.CreatedAt }).ToListAsync();
-            Assert.Equal(firstInterface, secondInterface);
+            Assert.Empty(interfaceScenarioIds);
             Assert.Equal(firstReports, secondReports);
             Assert.Equal(firstLeadership.Select(x => (x.Id, x.Position, x.HolderUserId, x.AssignedAt, x.EndedAt)),
                 (await db.ProjectLeadershipAssignments.AsNoTracking().Where(x => x.ProgramId == summary.ProgramId)
@@ -261,13 +254,13 @@ public sealed class FmsShowcaseSeederTests
             {
                 await db.Database.EnsureCreatedAsync();
                 await new IdentitySeeder(db).EnsureSeededAsync();
-                var lead = await db.UserAccounts.SingleAsync(x => x.UserName == "lead.reviewer");
-                lead.Disable(DateTimeOffset.UtcNow);
+                var testAuthor = await db.UserAccounts.SingleAsync(x => x.UserName == "test.author");
+                testAuthor.Disable(DateTimeOffset.UtcNow);
                 await db.SaveChangesAsync();
 
                 var failure = await Assert.ThrowsAsync<InvalidOperationException>(
                     () => new FmsShowcaseSeeder(db).EnsureSeededAsync());
-                Assert.Contains("lead.reviewer", failure.Message, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("test.author", failure.Message, StringComparison.OrdinalIgnoreCase);
             }
 
             await using var verification = new AeroLinkDbContext(options);

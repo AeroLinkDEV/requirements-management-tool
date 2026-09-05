@@ -91,10 +91,11 @@ export type LaneModel = {
  * Build the lane set strictly from the project's configured ladder.
  *
  * The ladder is the authority on which levels a project has, so it decides how many lanes there are. A level
- * it does not configure gets no lane, even when records carrying that level exist — FMS configures
- * `[System, HighLevel, LowLevel]` while its showcase seeds Interface change requests into Build 1.6. Those
- * records are a configuration or seeding defect to fix at source, and inventing a lane for them here would
- * present a ladder step this project does not have.
+ * it does not configure gets no lane, even when records carrying that level exist. FMS once seeded Interface
+ * change requests into Build 1.6 while its ladder configures [System, HighLevel, LowLevel]; those seeds were
+ * retired at source (#889), and inventing a lane here would still present a ladder step the project does not
+ * have. If an unconfigured level ever appears again — through a project that genuinely configures it or
+ * operator-authored content — the mechanism stands ready.
  *
  * They are not drawn, but they are not concealed either: `OFF_LADDER` marks them so the caller can state how
  * many exist and why they are absent. Omitting them silently would leave the canvas quietly claiming a build
