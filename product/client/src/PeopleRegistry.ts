@@ -7,41 +7,68 @@ export type DemoPerson = {
 };
 
 /**
- * The FMS showcase identity mapping (#913).
+ * The FMS showcase identity mapping.
  *
- * `people-manifest.json` is generated from the same directory the identity seeder writes
- * (IdentityService People + GeneratedPeople): per exact username it carries the seeded display
- * name and the repository-owned portrait file served from `/people/<username>.png`. The mapping
- * is therefore explicit and identity-safe — a portrait is never chosen by username prefix,
- * display-name similarity, or render-time inference, and one person's picture can never attach
- * to another account.
+ * Two layers, by design (#913):
  *
- * The display name and role shown for a person come from the API's own directory record (passed
- * in by the caller as the fallback). The manifest's seeded name is used only when a caller has no
- * API record at all, so surfaces stay truthful even before an workspace context resolves.
- * Unmapped accounts (real customers, renamed accounts) keep the initials fallback by design.
+ * - **Personhood (curated, below):** who the synthetic person behind each functional seed account is.
+ *   The showcase casts one person across several functional accounts (Maya Patel is the systems
+ *   author, the systems lead and the lead reviewer; Daniel Reyes is the release manager, the FMS
+ *   configuration manager and the software author) — that casting is a product decision the
+ *   attribution journeys enforce, and functional account labels ("Verification Author") are job
+ *   descriptions, not people.
+ * - **Portraits (manifest):** one repository-owned image per exact username, generated and guarded
+ *   by `scripts/generate-people-portraits.mjs` and listed in `people-manifest.json`. The mapping is
+ *   explicit per username — nothing is inferred at render time, and one person's picture can never
+ *   attach to another account. Curated AI portraits cover the four photographed cast members; every
+ *   other seeded account has a generated flat-design portrait.
+ *
+ * Unmapped accounts (real customers, renamed accounts, the system administrator) keep the initials
+ * fallback: initials remain the technical fallback for real identities, exactly as #913 requires,
+ * and account-attribution surfaces keep rendering the raw account.
  */
-const directory = manifest.people as Record<string, { file: string; name: string; role: string }>;
+const personhood: Record<string, { name: string; role: string }> = {
+  "systems.lead": { name: "Maya Patel", role: "Systems Lead" },
+  "systems.author": { name: "Maya Patel", role: "Systems Lead" },
+  // A distinct approval principal: it must never be rendered as the showcase author.
+  "systems.reviewer": { name: "Systems Engineer", role: "Systems Assurance Reviewer" },
+  "lead.reviewer": { name: "Maya Patel", role: "Systems Lead" },
+  "test.engineer": { name: "Ethan Brooks", role: "Verification Lead" },
+  "test.author": { name: "Ethan Brooks", role: "Verification Lead" },
+  "verification.engineer": { name: "Ethan Brooks", role: "Verification Lead" },
+  "assurance.reviewer": { name: "Olivia Chen", role: "Safety Lead" },
+  "manager.reviewer": { name: "Olivia Chen", role: "Safety Lead" },
+  "engineering.manager": { name: "Engineering Manager", role: "Engineering Manager" },
+  "program.manager": { name: "Olivia Chen", role: "Program Manager" },
+  "release.manager": { name: "Daniel Reyes", role: "Release Manager" },
+  "cm.fms": { name: "Daniel Reyes", role: "Configuration Manager" },
+  "software.lead": { name: "Rina Shah", role: "Software Engineering Lead" },
+  "software.author": { name: "Daniel Reyes", role: "Software Lead" },
+  "quality.analyst": { name: "Marcus Hale", role: "Software Quality Assurance" },
+};
+
+const portraits = manifest.people as Record<string, { file: string; name: string; role: string }>;
 
 export function demoPerson(userName: string, fallbackName?: string, fallbackRole?: string): DemoPerson | undefined {
   const normalized = (userName ?? "").trim().toLowerCase();
   if (!normalized) return undefined;
-  const entry = directory[normalized];
-  if (!entry && fallbackName === undefined && !fallbackRole) return undefined;
-  // A caller-supplied role is authoritative (it is the account's live membership); otherwise the
-  // seeded manifest role wins, and the generic label is last.
+  const cast = personhood[normalized];
+  const portraitFile = portraits[normalized]?.file;
+  // An API directory record is authoritative for display when the caller supplies one; otherwise the
+  // showcase casting names the person. Unmapped identities keep the initials fallback.
+  if (!cast && !portraitFile && fallbackName === undefined && !fallbackRole) return undefined;
   return {
-    name: fallbackName ?? entry?.name ?? userName,
-    role: fallbackRole ?? entry?.role ?? "Program member",
-    portrait: entry?.file ?? "",
+    name: fallbackName ?? cast?.name ?? userName,
+    role: fallbackRole ?? cast?.role ?? "Program member",
+    portrait: portraitFile ?? "",
   };
 }
 
 export const decisionPeople = {
-  systems: demoPerson("systems.lead", "Systems Engineering Lead", "System Engineer")!,
-  verification: demoPerson("test.engineer", "Ethan Brooks", "System Test Engineer")!,
-  safety: demoPerson("program.manager", "Olivia Chen", "Program Manager")!,
-  release: demoPerson("release.manager", "Daniel Reyes", "Configuration Manager")!,
+  systems: demoPerson("systems.lead")!,
+  verification: demoPerson("test.engineer")!,
+  safety: demoPerson("program.manager")!,
+  release: demoPerson("release.manager")!,
 };
 
 /**

@@ -21,7 +21,7 @@ test.describe("FMS showcase portrait system", () => {
   test("the manifest and the committed portrait files agree exactly", () => {
     const manifestFiles = Object.values(manifest.people).map(person => person.file.replace("/people/", ""))
     expect(manifestFiles.sort()).toEqual(diskFiles)
-    expect(diskFiles.length).toBeGreaterThanOrEqual(203)
+    expect(diskFiles.length).toBe(202)
   })
 
   test("generated portraits are unique per identity; only the curated same-person pair is shared", () => {
@@ -33,8 +33,16 @@ test.describe("FMS showcase portrait system", () => {
       const bytes = readFileSync(join(peopleDir, file)).toString("base64")
       byBytes.set(bytes, [...(byBytes.get(bytes) ?? []), file])
     }
-    const groups = [...byBytes.values()].filter(group => group.length > 1)
-    expect(groups).toEqual([["manager.reviewer.png", "program.manager.png"]])
+    const groups = [...byBytes.values()].filter(group => group.length > 1).map(group => group.sort())
+    // The cast: one synthetic person holds several functional accounts, and every account carries
+    // that person's explicit portrait copy. Maya Patel (three accounts), Ethan Brooks (three),
+    // Daniel Reyes (three), Olivia Chen (two). Nothing else may share an image.
+    expect(groups.sort()).toEqual([
+      ["cm.fms.png", "release.manager.png", "software.author.png"],
+      ["lead.reviewer.png", "systems.author.png", "systems.lead.png"],
+      ["manager.reviewer.png", "program.manager.png"],
+      ["test.author.png", "test.engineer.png"],
+    ])
   })
 
   test("every portrait stays within the asset-size ceiling", () => {
@@ -79,8 +87,11 @@ test.describe("FMS showcase portrait system", () => {
         expect(decoded.complete).toBe(true)
         expect(decoded.naturalWidth).toBeGreaterThan(0)
       }
-      // Zero initials fallbacks anywhere on the page, sampled after the strip has settled.
-      expect(await page.locator('.personInitials').count()).toBe(0)
+      // Only the system administrator (a real identity, not synthetic cast) may fall back to
+      // initials; every synthetic strip member resolves a portrait.
+      const initialsTexts = await page.locator('.personInitials').allTextContents()
+      expect(initialsTexts.length).toBeLessThanOrEqual(1)
+      for (const text of initialsTexts) expect(text.trim()).toBe('AA')
     }).toPass({ timeout: 20_000 })
   })
 
@@ -106,7 +117,9 @@ test.describe("FMS showcase portrait system", () => {
         expect(decoded.complete).toBe(true)
         expect(decoded.naturalWidth).toBeGreaterThan(0)
       }
-      expect(await page.locator('.personInitials').count()).toBe(0)
+      const initials = await page.locator('.personInitials').allTextContents()
+      expect(initials.length).toBeLessThanOrEqual(1)
+      for (const text of initials) expect(text.trim()).toBe('AA')
       expect(await page.locator('[data-member]').count()).toBeGreaterThanOrEqual(10)
     }).toPass({ timeout: 20_000 })
   })

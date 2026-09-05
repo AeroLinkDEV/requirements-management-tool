@@ -33,12 +33,13 @@ const SIZE = 128;
 // practical aim, far below any multi-megabyte source image slipping in.
 const MAX_BYTES = 256 * 1024;
 
-// The authoritative account roster. Kept in step with IdentityService.cs (People + GeneratedPeople
-// + admin); a C# test in AeroLink.Api.Tests asserts this list still covers the live FMS membership.
+// The synthetic showcase cast. Kept in step with IdentityService.cs (People + GeneratedPeople;
+// the system administrator is deliberately excluded — it is a real identity, so audit surfaces keep
+// rendering the raw account and its strip presence uses the initials fallback). A C# test in
+// AeroLink.Api.Tests asserts this list still covers every seeded cast member.
 // Each entry carries the seeded display name and the account's display role (the base-role
 // vocabulary the product surfaces).
 const curated = {
-  "admin": { name: "AeroLink Administrator", role: "Administrator" },
   "engineer.demo": { name: "Sean Engineer", role: "Engineer" },
   "systems.author": { name: "Systems Requirements Author", role: "System Engineer" },
   "software.author": { name: "Software Requirements Author", role: "Software Engineer" },
@@ -58,12 +59,20 @@ const curated = {
   "quality.analyst": { name: "Marcus Hale", role: "Software Quality Assurance" },
   "project.lead": { name: "Nadia Okoro", role: "Project Engineer" },
 };
+// The cast: one synthetic person may hold several functional accounts, and every account of that
+// person carries that person's portrait (explicit per-username copies — identity-safe by file).
 const curatedPortraitSources = {
+  "systems.lead": join(curatedDir, "maya-patel.png"),
+  "systems.author": join(curatedDir, "maya-patel.png"),
   "lead.reviewer": join(curatedDir, "maya-patel.png"),
   "test.engineer": join(curatedDir, "ethan-brooks.png"),
+  "test.author": join(curatedDir, "ethan-brooks.png"),
+  "verification.engineer": join(curatedDir, "ethan-brooks.png"),
   "manager.reviewer": join(curatedDir, "olivia-chen.png"),
   "program.manager": join(curatedDir, "olivia-chen.png"),
   "release.manager": join(curatedDir, "daniel-reyes.png"),
+  "cm.fms": join(curatedDir, "daniel-reyes.png"),
+  "software.author": join(curatedDir, "daniel-reyes.png"),
 };
 const firstNames = ["Avery", "Blake", "Cameron", "Casey", "Devon", "Emerson", "Finley", "Harper", "Jordan", "Kai", "Logan", "Morgan", "Parker", "Quinn", "Reese", "Riley", "Rowan", "Sage", "Sawyer", "Taylor", "Alex", "Jamie", "Robin"];
 const lastNames = ["Anderson", "Bennett", "Campbell", "Chen", "Clarke", "Dubois", "Evans", "Foster", "Garcia", "Gupta", "Harris", "Ibrahim", "Johnson", "Kim", "Lewis", "Martin", "Nguyen", "Patel", "Robinson", "Wilson"];

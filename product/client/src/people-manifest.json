@@ -1,11 +1,6 @@
 {
   "version": 1,
   "people": {
-    "admin": {
-      "file": "/people/admin.png",
-      "name": "AeroLink Administrator",
-      "role": "Administrator"
-    },
     "engineer.demo": {
       "file": "/people/engineer.demo.png",
       "name": "Sean Engineer",
