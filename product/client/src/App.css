@@ -26,6 +26,7 @@
 }
 /* The logo glyph only. See PortalHeader.css: a bare element selector here also tinted the instance badge. */
 .brand > span[aria-hidden="true"] { color: #70d8c9; }
+.brand .brandMark svg { display: block; width: 18px; height: 18px; }
 
 .program {
   background: #122642;

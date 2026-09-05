@@ -3,6 +3,8 @@ import type { ComponentType, FormEvent } from "react";
 import CommandPalette from "./CommandPalette";
 import { API_ORIGIN } from "./apiOrigin";
 import InstanceBadge from "./InstanceBadge";
+import { Icon } from "./icons";
+import type { IconName } from "./icons";
 import { officialBuildName, verificationArtifactLevel, verificationArtifactRouteKey } from "./presentation";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
@@ -195,7 +197,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
     : ladderAllows(ladder, "LowLevel", LadderCapability.ChangeControl) ? "LowLevel" : undefined;
   // `kind` carries the software level for the verification pages, which split into HLR and LLR. It is the
   // same field the change-request routes use for it, so no new axis had to be threaded through the shell.
-  const item = (label:string,target:View,icon:string,area:Discipline="system",accessibleLabel=label,kind?:string,topLevel=false) => {
+  const item = (label:string,target:View,icon:IconName,area:Discipline="system",accessibleLabel=label,kind?:string,topLevel=false) => {
     const groupedChangeView = target === "testChangeRequests"
       && ["testChangeRequests", "testingCoverage", "testChangeRequest", "createTestChangeRequest"].includes(view);
     // A typed software change-request route carries its level in the record, not in the URL. Until the
@@ -209,14 +211,14 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
     const warm = () => viewCode[target]?.warm();
     const linkContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);
     return <a href={linkContext ? routePath(linkContext,target,area,undefined,kind) : "#"} className={`${topLevel?"navSectionLink ":""}${activeItem?"active":""}`.trim()} aria-label={accessibleLabel} aria-current={activeItem?"page":undefined} onPointerEnter={warm} onFocus={warm} onClick={event=>{event.preventDefault();onNavigate(target,area,undefined,kind)}}>
-      <i aria-hidden="true">{icon}</i><span>{topLevel?label.toUpperCase():label}</span>
+      <i aria-hidden="true"><Icon name={icon}/></i><span>{topLevel?label.toUpperCase():label}</span>
     </a>;
   };
   const coverageItem = (label:string, area:"systemTest"|"softwareTest", level?:"HighLevel"|"LowLevel") => {
     const activeItem = view === "procedureExplorer" && coverageReport && discipline === area && (!level || artifactKind === level);
     const href = context ? coverageExplorerPath(context, area, level) : "#";
     return <a href={href} className={activeItem ? "active" : ""} aria-current={activeItem ? "page" : undefined} onClick={event => { event.preventDefault(); onOpenCoverage(area, level); }}>
-      <i aria-hidden="true">⊞</i><span>{label}</span>
+      <i aria-hidden="true"><Icon name="coverage"/></i><span>{label}</span>
     </a>;
   };
   const engineeringView = ["createSystemScr","createSoftwareChange","createInterfaceChange","history","requirements","scr"].includes(view)
@@ -230,8 +232,8 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
     <aside className="appNavigation">
       {/* Which installation this is, on every screen inside a workspace. The records on the page belong to
           one database, and there is more than one AeroLink. */}
-      <div className="brand"><span aria-hidden="true">▲</span><b>AeroLink</b><InstanceBadge/></div>
-      <button className="quickSearch" onClick={onSearch}><span aria-hidden="true">⌕</span> Search &amp; navigate <kbd>Ctrl K</kbd></button>
+      <div className="brand"><span aria-hidden="true" className="brandMark"><Icon name="brandMark"/></span><b>AeroLink</b><InstanceBadge/></div>
+      <button className="quickSearch" onClick={onSearch}><span aria-hidden="true" className="quickSearchIcon"><Icon name="search"/></span> Search &amp; navigate <kbd>Ctrl K</kbd></button>
       <div className="program">
         <small>ACTIVE CONTEXT</small>
         <strong className="activeProgram" title={active?.program.name}>{active?.program.name}</strong>
@@ -250,8 +252,8 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
         <button type="button" className="exitBuild" onClick={onExitBuild}>← Back to Software Builds</button>
       </div>
       <nav className="primaryNavigation" aria-label="Primary navigation">
-        <div className="navHome">{item("Command Center","dashboard","⌂")}{item("My Work","mywork","◎")}{item("Team Work","teamwork","◍")}</div>
-         {hasRequirements && <details className="navGroup" open={engineeringView}><summary>REQUIREMENTS</summary><div className="navScopeSwitch" role="group" aria-label="Requirements scope">{hasSystem && <button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(engineeringTargetView,"system")}>System</button>}{hasSoftware && <button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(engineeringTargetView,"software",undefined,engineeringTargetView==="history"?defaultSoftwareChangeLevel:undefined)}>Software</button>}</div>{(engineeringScope==="system" ? hasSystemChange : hasSoftwareChange) && item("Change Requests","history","◇",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests",engineeringScope==="software"?defaultSoftwareChangeLevel:undefined)}{hasInterfaceChange && item("Interface / ICD Change Requests","history","◇","system","Interface / ICD Change Requests","Interface")}{hasInterfaceChange && item("New Interface / ICD Change Request","createInterfaceChange","◇","system","New Interface / ICD Change Request","Interface")}{(engineeringScope==="system" ? hasSystem : hasSoftware) && item("Requirements Explorer","requirements","≡",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{(engineeringScope==="system" ? hasSystemRequirementsDocument : hasSoftwareRequirementsDocument) && item("Generated Documents","documents","▤",engineeringScope,engineeringScope==="software"?"Generated Software Requirements Documents":"Generated System Requirements Documents")}</details>}
+        <div className="navHome">{item("Command Center","dashboard","home")}{item("My Work","mywork","myWork")}{item("Team Work","teamwork","teamWork")}</div>
+         {hasRequirements && <details className="navGroup" open={engineeringView}><summary>REQUIREMENTS</summary><div className="navScopeSwitch" role="group" aria-label="Requirements scope">{hasSystem && <button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(engineeringTargetView,"system")}>System</button>}{hasSoftware && <button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(engineeringTargetView,"software",undefined,engineeringTargetView==="history"?defaultSoftwareChangeLevel:undefined)}>Software</button>}</div>{(engineeringScope==="system" ? hasSystemChange : hasSoftwareChange) && item("Change Requests","history","changeRequests",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests",engineeringScope==="software"?defaultSoftwareChangeLevel:undefined)}{hasInterfaceChange && item("Interface / ICD Change Requests","history","changeRequests","system","Interface / ICD Change Requests","Interface")}{hasInterfaceChange && item("New Interface / ICD Change Request","createInterfaceChange","changeRequests","system","New Interface / ICD Change Request","Interface")}{(engineeringScope==="system" ? hasSystem : hasSoftware) && item("Requirements Explorer","requirements","requirements",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{(engineeringScope==="system" ? hasSystemRequirementsDocument : hasSoftwareRequirementsDocument) && item("Generated Documents","documents","documents",engineeringScope,engineeringScope==="software"?"Generated Software Requirements Documents":"Generated System Requirements Documents")}</details>}
          {(hasSystemVerification || hasSoftwareVerification) && <details className="navGroup" open={view==="verification"||view==="testingCoverage"||view==="testChangeRequests"||view==="testChangeRequest"||view==="createTestChangeRequest"||view==="procedureExplorer"||view==="testResults"||(view==="documents"&&(discipline==="systemTest"||discipline==="softwareTest"))}>
           <summary>VERIFICATION</summary>
           <div className="navScopeSwitch" role="group" aria-label="Verification scope">
@@ -260,26 +262,26 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
           </div>
           {verificationScope==="softwareTest"
             ? <>
-                {item("Change Requests","testChangeRequests","◫","softwareTest","Software Test Change Requests")}
-                {item("Test Case/Procedure Explorer","procedureExplorer","≡","softwareTest","Software Test Case/Procedure Explorer")}
+                {item("Change Requests","testChangeRequests","testChangeRequests","softwareTest","Software Test Change Requests")}
+                {item("Test Case/Procedure Explorer","procedureExplorer","procedureExplorer","softwareTest","Software Test Case/Procedure Explorer")}
                 {ladderAllows(ladder, "HighLevel", LadderCapability.Verification) && coverageItem("HLR Coverage", "softwareTest", "HighLevel")}
                 {ladderAllows(ladder, "LowLevel", LadderCapability.Verification) && coverageItem("LLR Coverage", "softwareTest", "LowLevel")}
-                 {ladderAllows(ladder, "HighLevel", LadderCapability.Verification) && item("HLR Test Results","testResults","▦","softwareTest","Software HLR Test Results","HighLevel")}
-                 {ladderAllows(ladder, "LowLevel", LadderCapability.Verification) && item("LLR Test Results","testResults","▦","softwareTest","Software LLR Test Results","LowLevel")}
+                 {ladderAllows(ladder, "HighLevel", LadderCapability.Verification) && item("HLR Test Results","testResults","testResults","softwareTest","Software HLR Test Results","HighLevel")}
+                 {ladderAllows(ladder, "LowLevel", LadderCapability.Verification) && item("LLR Test Results","testResults","testResults","softwareTest","Software LLR Test Results","LowLevel")}
               </>
             : <>
-                {item("Change Requests","testChangeRequests","◫","systemTest","System Test Change Requests")}
-                {item("Test Procedure Explorer","procedureExplorer","≡","systemTest","System Test Procedure Explorer")}
+                {item("Change Requests","testChangeRequests","testChangeRequests","systemTest","System Test Change Requests")}
+                {item("Test Procedure Explorer","procedureExplorer","procedureExplorer","systemTest","System Test Procedure Explorer")}
                 {coverageItem("Coverage", "systemTest")}
-                {item("Test Results","testResults","▦","systemTest","System Test Results")}
+                {item("Test Results","testResults","testResults","systemTest","System Test Results")}
               </>}
-          {item("Generated Documents","documents","▤",verificationScope,verificationScope==="softwareTest"?"Generated Software Verification Documents":"Generated System Verification Documents")}
+          {item("Generated Documents","documents","documents",verificationScope,verificationScope==="softwareTest"?"Generated Software Verification Documents":"Generated System Verification Documents")}
          </details>}
-         {hasCodeTraceability && <div className="navStandalone">{item("Code","code","{ }","software","Code traceability",undefined,true)}</div>}
-        <div className="navStandalone">{item("Documentation Center","managedDocuments","▤","system","Documentation Center",undefined,true)}</div>
-        <div className="navStandalone">{item("Problem Reports","problemReports","!","system","Problem Reports",undefined,true)}</div>
-        <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","◆","system","Lifecycle Decision Room / Release Readiness")}{item("Configuration Baselines","baselines","▦","system","Configuration Baselines / Legacy Verification Bootstrap")}{item("Digital Thread","lifecycle","↗","system","Digital Thread")}</details>
-        {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"||view==="reviewWorkflows"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","⚙")}{item("Review Workflows","reviewWorkflows","⇉","system","Review Workflows / Change Review Procedure")}{item("Integration Center","integrations","↗","system","Integration Command Center")}{item("System Operations","enterprise","◈","system","System Operations / Enterprise Control")}</details>}
+         {hasCodeTraceability && <div className="navStandalone">{item("Code","code","code","software","Code traceability",undefined,true)}</div>}
+        <div className="navStandalone">{item("Documentation Center","managedDocuments","library","system","Documentation Center",undefined,true)}</div>
+        <div className="navStandalone">{item("Problem Reports","problemReports","problemReports","system","Problem Reports",undefined,true)}</div>
+        <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","release","system","Lifecycle Decision Room / Release Readiness")}{item("Configuration Baselines","baselines","baselines","system","Configuration Baselines / Legacy Verification Bootstrap")}{item("Digital Thread","lifecycle","digitalThread","system","Digital Thread")}</details>
+        {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"||view==="reviewWorkflows"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","peopleAuthority")}{item("Review Workflows","reviewWorkflows","workflow","system","Review Workflows / Change Review Procedure")}{item("Integration Center","integrations","integrations","system","Integration Command Center")}{item("System Operations","enterprise","operations","system","System Operations / Enterprise Control")}</details>}
       </nav>
       <footer><PersonAvatar userName={user.userName} displayName={user.displayName} size="large"/><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button><button className="workspaceDisplay" onClick={onDisplay} aria-label="Open workspace display settings"><span>Aa</span><div><b>Workspace display</b><small>{density} density</small></div><i aria-hidden="true">›</i></button></footer>
     </aside>
