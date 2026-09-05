@@ -25,7 +25,9 @@ public class PeoplePortraitManifestTests
         foreach (var entry in portraits.EnumerateObject())
             covered.Add(entry.Name);
 
-        foreach (var account in IdentitySeeder.SeedDirectoryUserNames())
+        // The system administrator is a real identity, not a synthetic cast member: audit surfaces
+        // render its raw account and person surfaces use the initials fallback for it.
+        foreach (var account in IdentitySeeder.SeedDirectoryUserNames().Where(x => x != IdentityService.SystemAdministratorUserName))
             Assert.True(covered.Contains(account),
                 $"Seeded account '{account}' has no portrait in people-manifest.json. Run product/client/scripts/generate-people-portraits.mjs and commit the generated portrait.");
     }
