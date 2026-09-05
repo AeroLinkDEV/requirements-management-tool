@@ -12,7 +12,7 @@ namespace AeroLink.Api.Tests;
 public sealed class ShowcaseUpgradeApiTests(ShowcaseApiFixture showcase)
 {
     [Fact]
-    public async Task Upgrade_can_add_a_pending_interface_scenario_with_current_authority_timestamps()
+    public async Task Upgrade_can_add_a_pending_problem_report_scenario_with_current_authority_timestamps()
     {
         using var factory = showcase.CreateFactory();
         using var client = factory.CreateClient();
@@ -26,15 +26,15 @@ public sealed class ShowcaseUpgradeApiTests(ShowcaseApiFixture showcase)
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var current = DateTimeOffset.UtcNow.AddMinutes(-1);
-            var authorityNames = new[] { "quality.analyst", "systems.author", "software.author", "systems.reviewer",
-                "assurance.reviewer", "lead.reviewer", "manager.reviewer", "cm.fms" };
+            var authorityNames = new[] { "quality.analyst", "systems.author", "software.author", "test.engineer",
+                "engineer.demo", "test.author", "project.lead" };
             var authorityIds = await db.UserAccounts.Where(x => authorityNames.Contains(x.UserName))
                 .Select(x => x.Id).ToListAsync();
             foreach (var membership in await db.ProgramMemberships.Where(x => x.ProgramId == showcase.Summary.ProgramId
                     && authorityIds.Contains(x.UserId) && x.EndedAt == null).ToListAsync())
                 db.Entry(membership).Property(x => x.GrantedAt).CurrentValue = current;
             db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == showcase.Summary.ProgramId
-                && x.StepKey == "scenario-richness/interface/01"));
+                && x.StepKey == "scenario-richness/problem-report/01"));
             db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == showcase.Summary.ProgramId
                 && x.StepKey == "scenario-richness"));
             await db.SaveChangesAsync();

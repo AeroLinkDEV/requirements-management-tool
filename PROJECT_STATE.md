@@ -222,9 +222,12 @@ The FMS Product Development dataset remains the principal deterministic live dem
 - Build/version 1.6 is the active in-work successor used to demonstrate current controlled development.
 - The effective software verification profile supports the full HLR/LLR Case → Procedure model.
 - Named deterministic scenarios provide representative lifecycle, later-revision, trace-branching, assessment,
-  verification/evidence, Interface, Problem Report, review/approval, leadership, avatar, and distributed-work
-  coverage. Fresh showcase creation is rollback-atomic; upgrading an existing synthetic showcase is an explicit
-  administrator action that requires positive target and backup confirmation and never runs during ordinary startup.
+  verification/evidence, Problem Report, review/approval, leadership, avatar, and distributed-work
+  coverage. Interface change-control scenarios are deliberately not seeded: the FMS ladder configures
+  `[System, HighLevel, LowLevel]`, and an older seed's Interface scenarios are closed out — withdrawn under
+  their own identity, never deleted — by the explicit showcase upgrade (#889). Fresh showcase creation is
+  rollback-atomic; upgrading an existing synthetic showcase is an explicit administrator action that
+  requires positive target and backup confirmation and never runs during ordinary startup.
 
 The showcase is synthetic demonstration data. It must not be confused with live customer/company controlled engineering data.
 

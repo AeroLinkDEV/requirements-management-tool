@@ -73,17 +73,24 @@ data, and GitLab is identified as the source of truth for code and merge content
 
 ## Active FMS 1.6 development
 
-At initial seed, FMS 1.6 begins from the FMS 1.5 predecessor baseline and contains sixteen controlled change
-requests. Eight are the original System/HLR/LLR work packages and eight are Interface contract scenarios:
+At initial seed, FMS 1.6 begins from the FMS 1.5 predecessor baseline and contains eight controlled change
+requests — the original System/HLR/LLR work packages:
 
-- 3 Selected for Baseline, 2 Approved, 3 In Review, 5 Draft, 2 Deferred, and 1 Withdrawn
-- Interface scenarios include a direct approval, a selected contract, pending multi-person review, deferral,
-  withdrawal, and untouched Draft work
+- 2 Selected for Baseline, 1 Approved, 1 In Review, 3 Draft, 1 Deferred, and 0 Withdrawn
 
-The seeded changes include a new system-level oceanic round-robin function, representative HLR and LLR
-modifications, and exact ICDCR/ICDR requirement proposals. Subsequent realistic testing may add approved,
+The seeded changes include a new system-level oceanic round-robin function and representative HLR and LLR
+modifications. Subsequent realistic testing may add approved,
 returned, deferred, or draft records; these are persistent product data, not seed drift. The FMS 1.6 workspace
 remains editable and is not released.
+
+The seed no longer creates Interface change-control scenarios (#889): the FMS ladder configures
+`[System, HighLevel, LowLevel]`, and records at a level the project does not configure forced every
+ladder-shaped consumer — the Digital Thread change network first among them — to explain work it must not
+present. An installation upgraded by an older seed closes those scenarios out through the explicit
+`interface-scenario-retirement` showcase upgrade step: open and approved scenario work is withdrawn under
+its own author's identity, a draft-baseline selection is reversed through the baseline aggregate, and a
+selection already frozen into a baseline — like every approval, review, audit event, and requirement change
+— is retained as controlled history. Nothing is deleted.
 
 ### Problem Reports and work distribution
 
@@ -99,10 +106,12 @@ eligible synthetic engineers/test engineers; the broader identity seed includes 
 no current obligations, so Team Work can show both populated and zero-obligation people without inventing
 ownership.
 
-Interface and Problem Report scenario ownership is recorded durably in one immutable
+Problem Report scenario ownership is recorded durably in one immutable
 `ShowcaseUpgradeStep` mapping per scenario key; its detail is the exact created artifact GUID. The visible FMS
 marker in narrative text is only a display breadcrumb and is never used to locate or mutate a controlled row,
-so user-authored content that happens to contain the same text is safe. Scenarios prefer the deterministic
+so user-authored content that happens to contain the same text is safe. The retired Interface scenarios were
+located the same way, which is what lets the retirement step remove exactly what the seed created and nothing
+else. Scenarios prefer the deterministic
 `86601` number range; if a legitimate record already occupies a preferred number, the next free number is
 selected. The upgrade marker is written only after all scenario postconditions pass. An interrupted or
 incomplete enrichment remains unchanged at startup and is retried only by the explicit, administrator-only

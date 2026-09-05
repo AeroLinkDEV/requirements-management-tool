@@ -2,6 +2,7 @@ using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -114,9 +115,10 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         db.BaselineTestProcedures.RemoveRange(releasedSelections);
         db.Entry(releasedBaseline).Property(x => x.TestProceduresHash).CurrentValue =
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        // Force the enrichment retry boundary. #889: the retry no longer recreates Interface scenarios —
+        // the FMS ladder does not configure that level and the seed no longer contains them.
         var retrySteps = await db.ShowcaseUpgradeSteps.Where(x => x.ProgramId == summary.ProgramId
-            && (x.StepKey == "scenario-richness"
-                || x.StepKey.StartsWith("scenario-richness/interface/"))).ToListAsync();
+            && x.StepKey == "scenario-richness").ToListAsync();
         db.ShowcaseUpgradeSteps.RemoveRange(retrySteps);
         await db.SaveChangesAsync();
 
@@ -131,10 +133,7 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         Assert.Contains(applied, x => x.StartsWith("scenario-richness:", StringComparison.Ordinal));
         var currentInterfaceIds = await OwnedScenarioIdsAsync(db, summary.ProgramId,
             "scenario-richness/interface/");
-        var currentInterfaces = await db.SystemChangeRequests.AsNoTracking()
-            .Where(x => currentInterfaceIds.Contains(x.Id)).ToListAsync();
-        Assert.Equal(8, currentInterfaces.Count);
-        Assert.DoesNotContain(currentInterfaces, x => x.State == ChangeRequestState.SelectedForBaseline);
+        Assert.Empty(currentInterfaceIds);
         Assert.Equal(CandidateBaselineState.Frozen, activeBaseline.State);
         var currentScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId,
             "scenario-richness/problem-report/");
@@ -245,44 +244,44 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
     }
 
     [Fact]
-    public async Task New_interface_scenarios_require_current_authority_for_every_controlled_actor()
+    public async Task New_problem_report_scenarios_require_current_authority_for_every_controlled_actor()
     {
         using var database = showcase.Create();
         await using var db = database.Context();
         var seeder = new FmsShowcaseSeeder(db);
         var summary = showcase.Summary;
 
-        var leadId = await db.UserAccounts.Where(x => x.UserName == "lead.reviewer").Select(x => x.Id).SingleAsync();
-        var leadMembership = await db.ProgramMemberships.SingleAsync(x => x.UserId == leadId
-            && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.SoftwareEngineer && x.EndedAt == null);
-        leadMembership.End("admin", leadMembership.GrantedAt.AddDays(1));
+        var systemsAuthorId = await db.UserAccounts.Where(x => x.UserName == "systems.author").Select(x => x.Id).SingleAsync();
+        var systemsAuthorMembership = await db.ProgramMemberships.SingleAsync(x => x.UserId == systemsAuthorId
+            && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.Engineer && x.EndedAt == null);
+        systemsAuthorMembership.End("admin", systemsAuthorMembership.GrantedAt.AddDays(1));
         var missing = await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
-            && x.StepKey == "scenario-richness/interface/03");
-        var priorRequestId = Guid.Parse(missing.Detail);
+            && x.StepKey == "scenario-richness/problem-report/01");
+        var priorReportId = Guid.Parse(missing.Detail);
         db.ShowcaseUpgradeSteps.Remove(missing);
         db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
             && x.StepKey == "scenario-richness"));
         await db.SaveChangesAsync();
-        var requestCount = await db.SystemChangeRequests.CountAsync(x => x.ProjectId == summary.ProjectId);
+        var reportCount = await db.ProblemReports.CountAsync(x => x.ProjectId == summary.ProjectId);
 
         var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.UpgradeAsync(summary.ProgramId));
-        Assert.Contains("lead.reviewer", failure.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(requestCount, await db.SystemChangeRequests.CountAsync(x => x.ProjectId == summary.ProjectId));
+        Assert.Contains("systems.author", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(reportCount, await db.ProblemReports.CountAsync(x => x.ProjectId == summary.ProjectId));
         Assert.False(await db.ShowcaseUpgradeSteps.AnyAsync(x => x.ProgramId == summary.ProgramId
-            && x.StepKey == "scenario-richness/interface/03"));
+            && x.StepKey == "scenario-richness/problem-report/01"));
 
         var lateGrant = DateTimeOffset.UtcNow.AddSeconds(-1);
-        db.ProgramMemberships.Add(new ProgramMembership(leadId, summary.ProgramId,
-            ProgramRole.SoftwareEngineer, "operator", lateGrant));
+        db.ProgramMemberships.Add(new ProgramMembership(systemsAuthorId, summary.ProgramId,
+            ProgramRole.Engineer, "operator", lateGrant));
         await db.SaveChangesAsync();
         var applied = await seeder.UpgradeAsync(summary.ProgramId);
         Assert.Contains(applied, x => x.StartsWith("scenario-richness:", StringComparison.Ordinal));
-        var replacementRequestId = Guid.Parse(await db.ShowcaseUpgradeSteps.AsNoTracking()
-            .Where(x => x.ProgramId == summary.ProgramId && x.StepKey == "scenario-richness/interface/03")
+        var replacementReportId = Guid.Parse(await db.ShowcaseUpgradeSteps.AsNoTracking()
+            .Where(x => x.ProgramId == summary.ProgramId && x.StepKey == "scenario-richness/problem-report/01")
             .Select(x => x.Detail).SingleAsync());
-        Assert.NotEqual(priorRequestId, replacementRequestId);
-        var replacement = await db.SystemChangeRequests.AsNoTracking()
-            .SingleAsync(x => x.Id == replacementRequestId);
+        Assert.NotEqual(priorReportId, replacementReportId);
+        var replacement = await db.ProblemReports.AsNoTracking()
+            .SingleAsync(x => x.Id == replacementReportId);
         Assert.True(replacement.CreatedAt >= lateGrant);
         Assert.True(replacement.CreatedAt <= DateTimeOffset.UtcNow);
         Assert.True(replacement.UpdatedAt <= DateTimeOffset.UtcNow);
@@ -506,6 +505,9 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         await using var db = database.Context();
         var seeder = new FmsShowcaseSeeder(db);
         var summary = showcase.Summary;
+        // Operator-owned content at the levels and numbers the seed used to claim: an Interface change
+        // request carrying scenario marker prose, and a Problem Report on a colliding low number. Ownership
+        // is durable-step based, so neither is ever adopted, mutated or retired by the showcase (#889).
         var foreignInterface = new SystemChangeRequest("ICDCR-00001", 0, summary.ProjectId, summary.ActiveReleaseId,
             "Operator-owned interface change", "Existing controlled content.", "Existing controlled analysis. [FMSLIVE showcase scenario: interface-01]",
             "Existing controlled disposition.", "engineer.demo", DateTimeOffset.UtcNow, ChangeRequestType.Interface);
@@ -519,30 +521,282 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         // Force the enrichment retry boundary while leaving the foreign rows' copied display breadcrumbs
         // in place. Scenario ownership is durable-step based and the preferred high range is collision-safe,
         // so a user-authored marker cannot be selected for the missing owned scenario or receive its links.
-        var missingInterfaceMapping = await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
-            && x.StepKey == "scenario-richness/interface/01");
-        db.ShowcaseUpgradeSteps.Remove(missingInterfaceMapping);
+        var missingReportMapping = await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
+            && x.StepKey == "scenario-richness/problem-report/01");
+        db.ShowcaseUpgradeSteps.Remove(missingReportMapping);
         db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
             && x.StepKey == "scenario-richness"));
         await db.SaveChangesAsync();
         await seeder.UpgradeAsync(summary.ProgramId);
         var interfaceScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/interface/");
         var reportScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/problem-report/");
-        var ownedInterfaces = await db.SystemChangeRequests.AsNoTracking()
-            .Where(x => interfaceScenarioIds.Contains(x.Id))
-            .ToListAsync();
-        var ownedReports = await db.ProblemReports.AsNoTracking().Where(x => reportScenarioIds.Contains(x.Id))
-            .ToListAsync();
-        Assert.Equal(8, ownedInterfaces.Count); Assert.Equal(8, ownedReports.Count);
-        Assert.DoesNotContain(ownedInterfaces, x => x.Id == foreignInterface.Id);
+        var ownedReports = await db.ProblemReports.AsNoTracking().Where(x => reportScenarioIds.Contains(x.Id)).ToListAsync();
+        Assert.Empty(interfaceScenarioIds);
+        Assert.Equal(8, ownedReports.Count);
         Assert.DoesNotContain(ownedReports, x => x.Id == foreignReport.Id);
-        Assert.Contains(await db.SystemChangeRequests.AsNoTracking().Select(x => x.BaseNumber).ToListAsync(), x => x == "ICDCR-00001");
         Assert.Contains(await db.ProblemReports.AsNoTracking().Select(x => x.ReportNumber).ToListAsync(), x => x == "PR-00001");
-        Assert.Equal("Existing controlled analysis. [FMSLIVE showcase scenario: interface-01]", foreignInterface.Analysis);
         Assert.Equal("Operator-owned content. [FMSLIVE showcase scenario: problem-report-01]", foreignReport.AdditionalInformation);
         Assert.Empty(await db.ProblemReportLinks.AsNoTracking().Where(x => x.ProblemReportId == foreignReport.Id).ToListAsync());
-        Assert.All(ownedInterfaces, x => Assert.StartsWith("ICDCR-866", x.BaseNumber));
         Assert.All(ownedReports, x => Assert.StartsWith("PR-866", x.ReportNumber));
+        // The operator-owned Interface record survives every upgrade path untouched, marker prose or not.
+        var foreignInterfaceAfter = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Id == foreignInterface.Id);
+        Assert.Equal("Existing controlled analysis. [FMSLIVE showcase scenario: interface-01]", foreignInterfaceAfter.Analysis);
+        Assert.Equal("ICDCR-00001", foreignInterfaceAfter.BaseNumber);
+    }
+
+    /// <summary>
+    /// Rebuilds what the pre-#889 seeder wrote: eight Interface change requests at the active build, keyed
+    /// by their durable <c>scenario-richness/interface/</c> ownership rows, with scenario 04 approved into
+    /// the draft active baseline. Uses exactly the aggregate lifecycle the old seeder used, so the
+    /// retirement step is exercised against the real legacy shape, not a simplification of it.
+    /// </summary>
+    private static async Task<List<SystemChangeRequest>> SeedLegacyInterfaceScenariosAsync(AeroLinkDbContext db,
+        Guid programId, Guid projectId, Guid activeReleaseId)
+    {
+        var deterministicAt = new DateTimeOffset(2024, 12, 2, 10, 0, 0, TimeSpan.Zero);
+        var baseline = await db.CandidateBaselines.Include(x => x.Selections)
+            .SingleAsync(x => x.ProjectId == projectId && x.ReleaseId == activeReleaseId && x.BaseNumber == "SW-01.60");
+        var requests = new List<SystemChangeRequest>();
+        for (var i = 1; i <= 8; i++)
+        {
+            var author = i % 2 == 1 ? "systems.author" : "software.author";
+            var at = deterministicAt.AddDays(i);
+            var request = new SystemChangeRequest($"ICDCR-8660{i}", 0, projectId, activeReleaseId,
+                i == 1 ? "Align navigation interface timing contract" : $"FMS 1.6 interface contract scenario {i}",
+                "The controlled interface contract needs a documented FMS 1.6 decision.",
+                $"The interface impact was reviewed against the current navigation and display boundaries. [FMSLIVE showcase scenario: interface-{i:D2}]",
+                "Record the exact interface behaviour and its compatibility decision.", author, at,
+                ChangeRequestType.Interface);
+            request.AddRequirementChange(author, $"ICDR-8660{i}", 0, RequirementLevel.Interface,
+                RequirementChangeKind.Introduce,
+                $"The FMS interface shall preserve deterministic navigation exchange behaviour {i:D2}.",
+                "The interface requirement is retained as controlled showcase content.", "Not Applicable", at);
+            switch (i)
+            {
+                case 2 or 7:
+                    request.SubmitForReview(author, i == 2
+                        ? [new ApproverSelection("assurance.reviewer", "Development Assurance Reviewer")]
+                        : [new ApproverSelection("lead.reviewer", "Maya Patel"), new ApproverSelection("manager.reviewer", "Olivia Chen")],
+                        at.AddHours(1));
+                    break;
+                case 3:
+                    request.SubmitForReview(author, [new ApproverSelection("assurance.reviewer", "Development Assurance Reviewer")], at.AddHours(1));
+                    request.ApproveActiveStage("assurance.reviewer", at.AddHours(2));
+                    break;
+                case 4:
+                    request.SubmitForReview(author, [new ApproverSelection("lead.reviewer", "Maya Patel")], at.AddHours(1));
+                    request.ApproveActiveStage("lead.reviewer", at.AddHours(2));
+                    break;
+                case 5:
+                    request.Defer(author, "Deferred pending the next interface supplier coordination window.", at.AddHours(1));
+                    break;
+                case 6:
+                    request.Withdraw(author, "Withdrawn after the interface contract was consolidated into another package.", at.AddHours(1));
+                    break;
+            }
+            db.SystemChangeRequests.Add(request);
+            db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId, $"scenario-richness/interface/{i:D2}",
+                request.Id.ToString("D"), request.CreatedAt));
+            requests.Add(request);
+        }
+        await db.SaveChangesAsync();
+        baseline.Select(requests[3], "cm.fms", deterministicAt.AddDays(4).AddHours(3));
+        await db.SaveChangesAsync();
+        return requests;
+    }
+
+    [Fact]
+    public async Task Upgrade_closes_out_owned_interface_scenarios_without_deleting_any_record()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+        var summary = showcase.Summary;
+
+        var legacy = await SeedLegacyInterfaceScenariosAsync(db, summary.ProgramId, summary.ProjectId, summary.ActiveReleaseId);
+        // Operator-owned Interface content the seed never owned: it carries scenario marker prose, but no
+        // durable ownership row names it, so the retirement must not touch it.
+        var foreign = new SystemChangeRequest("ICDCR-00001", 0, summary.ProjectId, summary.ActiveReleaseId,
+            "Operator-owned interface change", "Existing controlled content.",
+            "Existing controlled analysis. [FMSLIVE showcase scenario: interface-01]",
+            "Existing controlled disposition.", "engineer.demo", DateTimeOffset.UtcNow, ChangeRequestType.Interface);
+        db.SystemChangeRequests.Add(foreign);
+        // A database upgraded by the pre-#889 code carries the Interface ownership rows but has never
+        // recorded the retirement step, so its marker must go too for the legacy shape to be honest.
+        db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
+            && x.StepKey == "interface-scenario-retirement"));
+        await db.SaveChangesAsync();
+        // A reviewer on scenario 02's open cycle wrote a draft observation and never decided. Cancellation
+        // must publish it (carrying no invented decision), or the author loses the analysis outright.
+        var inReviewScenario = legacy.Single(x => x.BaseNumber == "ICDCR-86602");
+        var openCycle = inReviewScenario.ReviewCycles.Single(x => x.State == ReviewCycleState.Active);
+        // The comment carries an application-assigned GUID, so change detection on the tracked cycle reads
+        // it as an existing row (the same hazard the product's own comment endpoint answers by adding the
+        // comment to the set explicitly before saving).
+        var comment = openCycle.AddComment("assurance.reviewer", ReviewCommentAnchor.ChangeCase, null,
+            "The timing contract wording needs a compatibility note before this proceeds.", DateTimeOffset.UtcNow);
+        db.ReviewComments.Add(comment);
+        await db.SaveChangesAsync();
+        // Prove the upgrade against a real fresh context, not fixture-tracked children.
+        db.ChangeTracker.Clear();
+        var legacyIds = legacy.Select(x => x.Id).ToList();
+        var legacyRequirementChangeCount = await db.RequirementChanges.AsNoTracking()
+            .CountAsync(x => legacyIds.Contains(x.ChangeRequestId));
+        var legacyAuditEventCount = await db.AuditEvents.AsNoTracking()
+            .CountAsync(x => legacyIds.Contains(x.AggregateId));
+        var activeBaseline = await db.CandidateBaselines.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == summary.ProjectId && x.ReleaseId == summary.ActiveReleaseId);
+        var originalSelectionCount = await db.BaselineSelections.AsNoTracking()
+            .CountAsync(x => x.BaselineId == activeBaseline.Id && !legacyIds.Contains(x.ChangeRequestId));
+
+        var applied = await seeder.UpgradeAsync(summary.ProgramId);
+        Assert.Contains(applied, x => x.StartsWith("interface-scenario-retirement: Closed out 7 ", StringComparison.Ordinal));
+
+        // Nothing was deleted: every scenario record, its requirement change, its review and audit
+        // evidence, and its durable ownership row all remain.
+        Assert.Equal(legacy.Count, await db.SystemChangeRequests.AsNoTracking().CountAsync(x => legacyIds.Contains(x.Id)));
+        Assert.Equal(legacyRequirementChangeCount, await db.RequirementChanges.AsNoTracking().CountAsync(x => legacyIds.Contains(x.ChangeRequestId)));
+        Assert.Equal(8, await db.ShowcaseUpgradeSteps.AsNoTracking().CountAsync(x => x.ProgramId == summary.ProgramId
+            && x.StepKey.StartsWith("scenario-richness/interface/")));
+        Assert.True(await db.ShowcaseUpgradeSteps.AsNoTracking().AnyAsync(x => x.ProgramId == summary.ProgramId
+            && x.StepKey == "interface-scenario-retirement"));
+        // Every seeded scenario is closed: withdrawn under its own author's identity, with the seven open
+        // or approved ones newly withdrawn and the already-withdrawn one untouched.
+        var closedStates = await db.SystemChangeRequests.AsNoTracking()
+            .Where(x => legacyIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.State);
+        Assert.All(closedStates.Values, state => Assert.Equal(ChangeRequestState.Withdrawn, state));
+        Assert.Contains(await db.AuditEvents.AsNoTracking().Where(x => legacyIds.Contains(x.AggregateId))
+            .Select(x => x.EventType).ToListAsync(), x => x == "ChangeRequestWithdrawn");
+        Assert.True(await db.AuditEvents.AsNoTracking().CountAsync(x => legacyIds.Contains(x.AggregateId)) > legacyAuditEventCount);
+        // The cancelled cycle published the stranded reviewer observation — carrying no invented decision —
+        // and the approval recorded before the withdrawal is preserved untouched.
+        var cancelledCycle = await db.ReviewCycles.AsNoTracking()
+            .SingleAsync(x => x.ChangeRequestId == inReviewScenario.Id && x.State == ReviewCycleState.Cancelled);
+        var publishedComment = await db.ReviewComments.AsNoTracking()
+            .SingleAsync(x => x.ReviewCycleId == cancelledCycle.Id);
+        Assert.Equal(ReviewCommentState.Published, publishedComment.State);
+        Assert.False(publishedComment.DecisionRecorded);
+        var approvedScenarioId = legacy.Single(x => x.BaseNumber == "ICDCR-86603").Id;
+        Assert.True(await db.ApprovalSteps.AsNoTracking().AnyAsync(x => x.ReviewCycleId ==
+            db.ReviewCycles.Where(c => c.ChangeRequestId == approvedScenarioId).Select(c => c.Id).Single()
+            && x.State == ApprovalStepState.Approved));
+        // The draft active baseline no longer carries the unconfigured selection, and its own original
+        // selections are untouched.
+        Assert.Equal(CandidateBaselineState.Draft, (await db.CandidateBaselines.AsNoTracking()
+            .SingleAsync(x => x.Id == activeBaseline.Id)).State);
+        Assert.Equal(originalSelectionCount, await db.BaselineSelections.AsNoTracking()
+            .CountAsync(x => x.BaselineId == activeBaseline.Id && !legacyIds.Contains(x.ChangeRequestId)));
+        Assert.DoesNotContain(await db.BaselineSelections.AsNoTracking().Where(x => x.BaselineId == activeBaseline.Id)
+            .Select(x => x.ChangeRequestDisplayNumber).ToListAsync(), x => x!.StartsWith("ICDCR"));
+        // Operator content survives untouched.
+        var foreignAfter = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Id == foreign.Id);
+        Assert.Equal("Existing controlled analysis. [FMSLIVE showcase scenario: interface-01]", foreignAfter.Analysis);
+        // The showcase postconditions hold with the closed-out history in place, and a second upgrade has
+        // nothing left to close.
+        Assert.All(await seeder.CheckInvariantsAsync(summary.ProgramId), x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
+        Assert.DoesNotContain(await seeder.UpgradeAsync(summary.ProgramId),
+            x => x.StartsWith("interface-scenario-retirement:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Upgrade_refuses_to_reverse_a_draft_selection_without_current_cm_authority()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+        var summary = showcase.Summary;
+
+        var legacy = await SeedLegacyInterfaceScenariosAsync(db, summary.ProgramId, summary.ProjectId, summary.ActiveReleaseId);
+        db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
+            && x.StepKey == "interface-scenario-retirement"));
+        // A deliberate leadership vacancy plus an ended role membership: the roster preflight accepts the
+        // vacancy, but the baseline removal is attributed to cm.fms, so its current ConfigurationManager
+        // authority must exist before a controlled baseline event is written.
+        var cmId = await db.UserAccounts.Where(x => x.UserName == "cm.fms").Select(x => x.Id).SingleAsync();
+        var cmAssignment = await db.ProjectLeadershipAssignments.SingleAsync(x => x.ProgramId == summary.ProgramId
+            && x.Position == ProjectLeadershipPosition.ConfigurationManager && x.EndedAt == null);
+        cmAssignment.End("operator", DateTimeOffset.UtcNow.AddSeconds(-2));
+        var cmMembership = await db.ProgramMemberships.SingleAsync(x => x.UserId == cmId
+            && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.ConfigurationManager && x.EndedAt == null);
+        cmMembership.End("operator", cmMembership.GrantedAt.AddDays(1));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var legacyIds = legacy.Select(x => x.Id).ToList();
+        var selectedScenarioId = legacy.Single(x => x.State == ChangeRequestState.SelectedForBaseline).Id;
+        var withdrawalEventCount = await db.AuditEvents.AsNoTracking().CountAsync(x => legacyIds.Contains(x.AggregateId)
+            && x.EventType == "ChangeRequestWithdrawn");
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.UpgradeAsync(summary.ProgramId));
+        Assert.Contains("cm.fms", failure.Message, StringComparison.OrdinalIgnoreCase);
+
+        // The refusal happened before any mutation: no withdrawal, no selection reversal, no marker.
+        Assert.Equal(ChangeRequestState.SelectedForBaseline, (await db.SystemChangeRequests.AsNoTracking()
+            .SingleAsync(x => x.Id == selectedScenarioId)).State);
+        Assert.True(await db.BaselineSelections.AsNoTracking().AnyAsync(x => x.ChangeRequestId == selectedScenarioId));
+        Assert.Equal(withdrawalEventCount, await db.AuditEvents.AsNoTracking().CountAsync(x => legacyIds.Contains(x.AggregateId)
+            && x.EventType == "ChangeRequestWithdrawn"));
+        Assert.False(await db.ShowcaseUpgradeSteps.AsNoTracking().AnyAsync(x => x.ProgramId == summary.ProgramId
+            && x.StepKey == "interface-scenario-retirement"));
+
+        // Grant the authority and the normal path completes.
+        var grant = DateTimeOffset.UtcNow.AddSeconds(-1);
+        db.ProgramMemberships.Add(new ProgramMembership(cmId, summary.ProgramId,
+            ProgramRole.ConfigurationManager, "operator", grant));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        await seeder.UpgradeAsync(summary.ProgramId);
+        Assert.Equal(ChangeRequestState.Withdrawn, (await db.SystemChangeRequests.AsNoTracking()
+            .SingleAsync(x => x.Id == selectedScenarioId)).State);
+        Assert.False(await db.BaselineSelections.AsNoTracking().AnyAsync(x => x.ChangeRequestId == selectedScenarioId));
+        Assert.True(await db.ShowcaseUpgradeSteps.AsNoTracking().AnyAsync(x => x.ProgramId == summary.ProgramId
+            && x.StepKey == "interface-scenario-retirement"));
+    }
+
+    [Fact]
+    public async Task Upgrade_leaves_an_interface_selection_frozen_into_a_baseline_untouched()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+        var summary = showcase.Summary;
+
+        var legacy = await SeedLegacyInterfaceScenariosAsync(db, summary.ProgramId, summary.ProjectId, summary.ActiveReleaseId);
+        // Reproduce the persistent installation that progressed 1.6 to an exact frozen candidate while the
+        // Interface scenario was still selected: that selection is baseline content now. The product
+        // forbids withdrawing a selected request, so the record is left exactly as it stands — selected,
+        // approved, and carried by the frozen baseline — while the other scenarios close out.
+        var materializedAt = DateTimeOffset.UtcNow.AddSeconds(-5);
+        var activeBaseline = await db.CandidateBaselines
+            .Include(x => x.Selections).Include(x => x.ExternalPackageSelections)
+            .SingleAsync(x => x.ReleaseId == summary.ActiveReleaseId);
+        activeBaseline.Freeze("cm.fms", materializedAt.AddMinutes(-2));
+        await db.SaveChangesAsync();
+        var policyResolver = new EffectiveProjectLadderPolicyResolver(db);
+        await new RequirementBaselineMaterializer(db,
+                new VerificationImpactService(db, policyResolver: policyResolver),
+                policyResolver: policyResolver)
+            .MaterializeAsync(activeBaseline.Id, "cm.fms", materializedAt.AddMinutes(-1), CancellationToken.None);
+        // A database upgraded by the pre-#889 code has never recorded the retirement step.
+        db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
+            && x.StepKey == "interface-scenario-retirement"));
+        await db.SaveChangesAsync();
+        // Prove the upgrade against a real fresh context, not fixture-tracked children.
+        db.ChangeTracker.Clear();
+
+        var legacyIds = legacy.Select(x => x.Id).ToList();
+        var selectedScenarioId = legacy.Single(x => x.State == ChangeRequestState.SelectedForBaseline).Id;
+        await seeder.UpgradeAsync(summary.ProgramId);
+
+        // The frozen selection and its materialized revision stand unchanged; the other scenarios closed.
+        var selectedAfter = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Id == selectedScenarioId);
+        Assert.Equal(ChangeRequestState.SelectedForBaseline, selectedAfter.State);
+        Assert.True(await db.BaselineSelections.AsNoTracking().AnyAsync(x => x.ChangeRequestId == selectedScenarioId));
+        Assert.True(await db.RequirementRevisions.AsNoTracking().AnyAsync(x => x.SourceChangeRequestId == selectedScenarioId));
+        var closed = await db.SystemChangeRequests.AsNoTracking()
+            .Where(x => legacyIds.Contains(x.Id) && x.Id != selectedScenarioId)
+            .ToDictionaryAsync(x => x.Id, x => x.State);
+        Assert.All(closed.Values, state => Assert.Equal(ChangeRequestState.Withdrawn, state));
+        Assert.All(await seeder.CheckInvariantsAsync(summary.ProgramId), x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
     }
 
     /// <summary>

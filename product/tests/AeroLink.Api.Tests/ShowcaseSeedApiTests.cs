@@ -33,7 +33,7 @@ public sealed class ShowcaseSeedApiTests
         var activeReleaseId = summary.GetProperty("activeReleaseId").GetGuid();
         var overview = await client.GetFromJsonAsync<JsonElement>(
             $"/api/showcase/overview?projectId={projectId}&releaseId={activeReleaseId}");
-        Assert.Equal(13, overview.GetProperty("activeRequests").GetInt32());
+        Assert.Equal(7, overview.GetProperty("activeRequests").GetInt32());
 
         // The endpoint is the operator-facing retry boundary. A second request must reuse the durable
         // ownership rows and preserve the exact controlled summary on the same disposable database. Remove
