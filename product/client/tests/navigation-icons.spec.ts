@@ -103,6 +103,38 @@ test.describe('navigation icon system', () => {
     await expect(page.locator('.paletteGroup a i.kind').first()).toHaveText(/SYSR/)
   })
 
+  test('a pre-migration recent destination renders the canonical SVG, not its stored glyph', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 })
+    await login(page, 'admin')
+
+    // A recent destination saved by the pre-#902 palette carries a Unicode glyph in its icon field.
+    await page.evaluate(() => {
+      localStorage.setItem('aerolink-recent-destinations', JSON.stringify([{
+        key: 'page-dashboard-system-', category: 'page', label: 'Command Center',
+        detail: 'Program health and next actions', view: 'dashboard', discipline: 'system', icon: '⌂',
+      }]))
+    })
+
+    // First open: the recent entry draws the canonical SVG projected from its current command
+    // definition; the stored glyph must not render anywhere in the palette.
+    await page.getByRole('button', { name: /Search & navigate/ }).click()
+    const recentGroup = page.locator('.paletteGroup', { hasText: 'RECENT DESTINATIONS' })
+    await expect(recentGroup.locator('a i svg[viewBox="0 0 16 16"]').first()).toBeVisible()
+    await expect(page.locator('.commandPalette')).not.toContainText('⌂')
+
+    // Selecting it keeps the saved destination, and the record is stored with the canonical icon.
+    await page.keyboard.press('Enter')
+    await expect(page.getByRole('heading', { name: 'Command Center' })).toBeVisible()
+    const stored = await page.evaluate(() => localStorage.getItem('aerolink-recent-destinations'))
+    expect(stored).not.toBeNull()
+    expect(stored!).not.toContain('⌂')
+
+    // Reopening after selection: still recent, still the canonical SVG.
+    await page.getByRole('button', { name: /Search & navigate/ }).click()
+    await expect(page.locator('.paletteGroup', { hasText: 'RECENT DESTINATIONS' })
+      .locator('a i svg[viewBox="0 0 16 16"]').first()).toBeVisible()
+  })
+
   test('compact workspace density keeps the navigation icons aligned and unclipped', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 })
     await login(page, 'admin')
