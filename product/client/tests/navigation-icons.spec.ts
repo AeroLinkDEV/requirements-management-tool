@@ -94,9 +94,13 @@ test.describe('navigation icon system', () => {
 
     const paletteIcons = page.locator('.paletteGroup a i svg[viewBox="0 0 16 16"]')
     await expect(paletteIcons.first()).toBeVisible()
-    // Artifact entries keep their controlled-identifier acronyms as text; page entries draw the icons.
-    const acronymSlot = page.locator('.paletteGroup a i.kind')
-    expect(await acronymSlot.count()).toBeGreaterThanOrEqual(0)
+
+    // Artifact entries keep their controlled-identifier acronyms as text, exactly as the issue excludes
+    // controlled identifiers from icon replacement. Search a known seeded requirement and require its
+    // identifier prefix to be rendered as text in the acronym slot.
+    const search = page.getByPlaceholder(/Search/i)
+    await search.fill('SYSR-000001')
+    await expect(page.locator('.paletteGroup a i.kind').first()).toHaveText(/SYSR/)
   })
 
   test('compact workspace density keeps the navigation icons aligned and unclipped', async ({ page }) => {
