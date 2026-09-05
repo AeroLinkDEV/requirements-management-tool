@@ -1508,7 +1508,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         }
 
         var requests = await db.SystemChangeRequests
-            .Include(x => x.ReviewCycles)
+            .Include(x => x.ReviewCycles).ThenInclude(x => x.Comments)
             .Where(x => ids.Contains(x.Id)).ToListAsync(ct);
         foreach (var request in requests)
             if (request.ProjectId != projectId || request.Type != ChangeRequestType.Interface)
@@ -1522,6 +1522,18 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var now = PersistedTimestamp(DateTimeOffset.UtcNow);
         foreach (var author in requests.Select(x => x.AuthorId).Distinct(StringComparer.OrdinalIgnoreCase))
             await EnsureCurrentProgramAuthorityAsync(programId, author, ProgramRole.Engineer, now, ct);
+
+        // Reversing a draft-baseline selection writes a controlled baseline event under the same
+        // configuration-manager identity the seed used to select. That event must never be attributed to an
+        // actor whose current authority has ended, so the step fails closed here — before any mutation —
+        // until an operator grants the authority again. Ended leadership assignments are deliberate
+        // vacancies, so only this actor check can carry the boundary.
+        var hasPendingDraftSelections = await db.BaselineSelections.AsNoTracking()
+            .AnyAsync(x => ids.Contains(x.ChangeRequestId)
+                && db.CandidateBaselines.Any(b => b.Id == x.BaselineId && b.State == CandidateBaselineState.Draft), ct);
+        if (hasPendingDraftSelections)
+            await EnsureCurrentProgramAuthorityAsync(programId, BaselineScenarioActor,
+                ProgramRole.ConfigurationManager, now, ct);
 
         var withdrawn = 0;
         var unselected = 0;
@@ -1551,7 +1563,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 }
                 foreach (var baseline in selectionBaselines)
                 {
-                    baseline.Remove(request, "cm.fms", now);
+                    baseline.Remove(request, BaselineScenarioActor, now);
                     unselected++;
                 }
                 request.Withdraw(request.AuthorId, WithdrawalReason, now);
@@ -1568,6 +1580,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
 
     private const string WithdrawalReason =
         "Interface change control is not configured for this project; the seeded showcase scenario is retired (#889).";
+
+    private const string BaselineScenarioActor = "cm.fms";
 
     private async Task<ProblemReport?> ResolveProblemReportScenarioAsync(Guid programId, Guid projectId, int index,
         Guid expectedReleaseId, CancellationToken ct)

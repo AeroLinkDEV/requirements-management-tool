@@ -626,6 +626,19 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
             && x.StepKey == "interface-scenario-retirement"));
         await db.SaveChangesAsync();
+        // A reviewer on scenario 02's open cycle wrote a draft observation and never decided. Cancellation
+        // must publish it (carrying no invented decision), or the author loses the analysis outright.
+        var inReviewScenario = legacy.Single(x => x.BaseNumber == "ICDCR-86602");
+        var openCycle = inReviewScenario.ReviewCycles.Single(x => x.State == ReviewCycleState.Active);
+        // The comment carries an application-assigned GUID, so change detection on the tracked cycle reads
+        // it as an existing row (the same hazard the product's own comment endpoint answers by adding the
+        // comment to the set explicitly before saving).
+        var comment = openCycle.AddComment("assurance.reviewer", ReviewCommentAnchor.ChangeCase, null,
+            "The timing contract wording needs a compatibility note before this proceeds.", DateTimeOffset.UtcNow);
+        db.ReviewComments.Add(comment);
+        await db.SaveChangesAsync();
+        // Prove the upgrade against a real fresh context, not fixture-tracked children.
+        db.ChangeTracker.Clear();
         var legacyIds = legacy.Select(x => x.Id).ToList();
         var legacyRequirementChangeCount = await db.RequirementChanges.AsNoTracking()
             .CountAsync(x => legacyIds.Contains(x.ChangeRequestId));
@@ -655,6 +668,18 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         Assert.Contains(await db.AuditEvents.AsNoTracking().Where(x => legacyIds.Contains(x.AggregateId))
             .Select(x => x.EventType).ToListAsync(), x => x == "ChangeRequestWithdrawn");
         Assert.True(await db.AuditEvents.AsNoTracking().CountAsync(x => legacyIds.Contains(x.AggregateId)) > legacyAuditEventCount);
+        // The cancelled cycle published the stranded reviewer observation — carrying no invented decision —
+        // and the approval recorded before the withdrawal is preserved untouched.
+        var cancelledCycle = await db.ReviewCycles.AsNoTracking()
+            .SingleAsync(x => x.ChangeRequestId == inReviewScenario.Id && x.State == ReviewCycleState.Cancelled);
+        var publishedComment = await db.ReviewComments.AsNoTracking()
+            .SingleAsync(x => x.ReviewCycleId == cancelledCycle.Id);
+        Assert.Equal(ReviewCommentState.Published, publishedComment.State);
+        Assert.False(publishedComment.DecisionRecorded);
+        var approvedScenarioId = legacy.Single(x => x.BaseNumber == "ICDCR-86603").Id;
+        Assert.True(await db.ApprovalSteps.AsNoTracking().AnyAsync(x => x.ReviewCycleId ==
+            db.ReviewCycles.Where(c => c.ChangeRequestId == approvedScenarioId).Select(c => c.Id).Single()
+            && x.State == ApprovalStepState.Approved));
         // The draft active baseline no longer carries the unconfigured selection, and its own original
         // selections are untouched.
         Assert.Equal(CandidateBaselineState.Draft, (await db.CandidateBaselines.AsNoTracking()
@@ -671,6 +696,60 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         Assert.All(await seeder.CheckInvariantsAsync(summary.ProgramId), x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
         Assert.DoesNotContain(await seeder.UpgradeAsync(summary.ProgramId),
             x => x.StartsWith("interface-scenario-retirement:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Upgrade_refuses_to_reverse_a_draft_selection_without_current_cm_authority()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+        var summary = showcase.Summary;
+
+        var legacy = await SeedLegacyInterfaceScenariosAsync(db, summary.ProgramId, summary.ProjectId, summary.ActiveReleaseId);
+        db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
+            && x.StepKey == "interface-scenario-retirement"));
+        // A deliberate leadership vacancy plus an ended role membership: the roster preflight accepts the
+        // vacancy, but the baseline removal is attributed to cm.fms, so its current ConfigurationManager
+        // authority must exist before a controlled baseline event is written.
+        var cmId = await db.UserAccounts.Where(x => x.UserName == "cm.fms").Select(x => x.Id).SingleAsync();
+        var cmAssignment = await db.ProjectLeadershipAssignments.SingleAsync(x => x.ProgramId == summary.ProgramId
+            && x.Position == ProjectLeadershipPosition.ConfigurationManager && x.EndedAt == null);
+        cmAssignment.End("operator", DateTimeOffset.UtcNow.AddSeconds(-2));
+        var cmMembership = await db.ProgramMemberships.SingleAsync(x => x.UserId == cmId
+            && x.ProgramId == summary.ProgramId && x.Role == ProgramRole.ConfigurationManager && x.EndedAt == null);
+        cmMembership.End("operator", cmMembership.GrantedAt.AddDays(1));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var legacyIds = legacy.Select(x => x.Id).ToList();
+        var selectedScenarioId = legacy.Single(x => x.State == ChangeRequestState.SelectedForBaseline).Id;
+        var withdrawalEventCount = await db.AuditEvents.AsNoTracking().CountAsync(x => legacyIds.Contains(x.AggregateId)
+            && x.EventType == "ChangeRequestWithdrawn");
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.UpgradeAsync(summary.ProgramId));
+        Assert.Contains("cm.fms", failure.Message, StringComparison.OrdinalIgnoreCase);
+
+        // The refusal happened before any mutation: no withdrawal, no selection reversal, no marker.
+        Assert.Equal(ChangeRequestState.SelectedForBaseline, (await db.SystemChangeRequests.AsNoTracking()
+            .SingleAsync(x => x.Id == selectedScenarioId)).State);
+        Assert.True(await db.BaselineSelections.AsNoTracking().AnyAsync(x => x.ChangeRequestId == selectedScenarioId));
+        Assert.Equal(withdrawalEventCount, await db.AuditEvents.AsNoTracking().CountAsync(x => legacyIds.Contains(x.AggregateId)
+            && x.EventType == "ChangeRequestWithdrawn"));
+        Assert.False(await db.ShowcaseUpgradeSteps.AsNoTracking().AnyAsync(x => x.ProgramId == summary.ProgramId
+            && x.StepKey == "interface-scenario-retirement"));
+
+        // Grant the authority and the normal path completes.
+        var grant = DateTimeOffset.UtcNow.AddSeconds(-1);
+        db.ProgramMemberships.Add(new ProgramMembership(cmId, summary.ProgramId,
+            ProgramRole.ConfigurationManager, "operator", grant));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        await seeder.UpgradeAsync(summary.ProgramId);
+        Assert.Equal(ChangeRequestState.Withdrawn, (await db.SystemChangeRequests.AsNoTracking()
+            .SingleAsync(x => x.Id == selectedScenarioId)).State);
+        Assert.False(await db.BaselineSelections.AsNoTracking().AnyAsync(x => x.ChangeRequestId == selectedScenarioId));
+        Assert.True(await db.ShowcaseUpgradeSteps.AsNoTracking().AnyAsync(x => x.ProgramId == summary.ProgramId
+            && x.StepKey == "interface-scenario-retirement"));
     }
 
     [Fact]
@@ -701,6 +780,8 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
             && x.StepKey == "interface-scenario-retirement"));
         await db.SaveChangesAsync();
+        // Prove the upgrade against a real fresh context, not fixture-tracked children.
+        db.ChangeTracker.Clear();
 
         var legacyIds = legacy.Select(x => x.Id).ToList();
         var selectedScenarioId = legacy.Single(x => x.State == ChangeRequestState.SelectedForBaseline).Id;
