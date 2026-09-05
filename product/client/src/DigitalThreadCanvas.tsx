@@ -7,7 +7,7 @@ import {
   type LayoutResult,
   anchorInLane,
   clampOffsets,
-  edgeKey,
+  edgeIdentity,
   edgePath,
   offsetToReveal,
   fitTransform,
@@ -378,7 +378,7 @@ export default function DigitalThreadCanvas({
 
       // A trace is active only when the caller passes a set. Undefined leaves every edge at rest, which is a
       // different state from a trace that reaches nothing.
-      const traced = tracedEdges?.has(edgeKey(edge.from, edge.to)) ?? false
+      const traced = tracedEdges?.has(edgeIdentity(edge.from, edge.to)) ?? false
       const traceActive = tracedEdges !== undefined
       path.classList.toggle("is-traced", traced)
       dot.classList.toggle("is-traced", traced)
