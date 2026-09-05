@@ -97,8 +97,8 @@ GitHub pull requests receive the Fast workflow automatically; both local `-Mode 
 non-authoritative. Once the current PR SHA is final, apply `ready-for-full-ci`. The trusted default-branch
 requester binds PR number, base SHA and exact head SHA and dispatches the existing Full Product workflow.
 Product's `Full Product evidence aggregate` is the internal Full authority. After verifying Product's own
-readiness authentication, the default-branch requester publishes a PR-associated check of the same name from
-the GitHub Actions integration, plus the App-bound `Trusted merge-queue binding`. Those two checks admit the
+readiness authentication, the default-branch requester exposes a dependent job of the same name in its real
+pull-request check suite, plus the App-bound `Trusted merge-queue binding`. Those two checks admit the
 exact head to the queue; the requester's `Report what this run validated` job remains visible evidence but is
 not a live ruleset requirement.
 
