@@ -527,7 +527,7 @@ export const edgePath = (
  * How an edge is identified wherever one is looked up by its endpoints — the traced set the canvas reads, and
  * the set `trace` builds. One definition, so the two can never drift into disagreeing about the same edge.
  */
-export const edgeKey = (from: string, to: string): string => `${from}>${to}`
+export const edgeIdentity = (from: string, to: string): string => `${from}>${to}`
 
 export const trace = (
   id: string,
@@ -545,7 +545,7 @@ export const trace = (
           const from = downstream ? edge.from : edge.to
           const to = downstream ? edge.to : edge.from
           if (from !== current) continue
-          touched.add(edgeKey(edge.from, edge.to))
+          touched.add(edgeIdentity(edge.from, edge.to))
           if (seen.has(to)) continue
           seen.add(to)
           hops.set(to, (hops.get(current) ?? 0) + 1)
