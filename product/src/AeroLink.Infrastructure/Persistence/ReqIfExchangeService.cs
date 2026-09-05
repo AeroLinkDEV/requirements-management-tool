@@ -64,7 +64,7 @@ public sealed class ReqIfExchangeService(AeroLinkDbContext db, EvidenceFileStore
             var named = string.Join(", ", unboundScoped.Select(x => $"{x.BaseNumber} \"{x.OriginalFileName}\""));
             throw new ControlledEvidenceBindingException(
                 $"The exported requirements still carry active supporting attachments without an exact revision binding ({named}). "
-                + "Bind each one to an eligible in-work revision through a governed upload, or withdraw it, before exporting controlled evidence.");
+                + "Bind each one to an eligible in-work revision through a governed upload. Evidence whose requirement revision is already carried by a released baseline cannot be rebound through product workflows; resolving it requires an explicit operator decision before this export can proceed.");
         }
         var exportedNodeCount=nodes.Count(x=>x.Type==SpecificationNodeType.Section||(x.RequirementArtifactId is Guid id&&revisionArtifactIds.Contains(id)));
 
