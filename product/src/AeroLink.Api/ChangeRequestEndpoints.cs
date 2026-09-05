@@ -324,7 +324,7 @@ public static class ChangeRequestEndpoints
             });
         });
 
-        app.MapGet("/api/authoring/requirements", async (Guid projectId, string scope, string? search, int? limit, HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+        app.MapGet("/api/authoring/requirements", async (Guid projectId, string scope, RequirementLevel? level, string? search, int? limit, HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
@@ -334,6 +334,22 @@ public static class ChangeRequestEndpoints
                     && ladderPolicy.Definition(x).Has(LevelCapabilities.HasChangeControl)).ToArray()
                 : ladderPolicy.OrderedLevels.Where(x => x != RequirementLevel.System
                     && ladderPolicy.Definition(x).Has(LevelCapabilities.HasChangeControl)).ToArray();
+            // A proposal's target picker narrows candidates to its exact controlled level (#925 F1). The
+            // scope alone admits both software levels, so an LLR author searching "33" saw eight HLRs and
+            // no LLR — and client-side filtering cannot recover records the server dropped before its
+            // limit. The eligibility authority is the ladder's own change-control binding, the same rule
+            // the submission path enforces, so an unconfigured or non-change-controlled level fails
+            // closed to no candidates rather than falling back to the broad scope.
+            if (level is not null)
+            {
+                var scopeType = scope.Equals("System", StringComparison.OrdinalIgnoreCase) ? ChangeRequestType.System
+                    : scope.Equals("Interface", StringComparison.OrdinalIgnoreCase) ? ChangeRequestType.Interface
+                    : ChangeRequestType.Software;
+                allowedLevels = ladderPolicy.AcceptsChangeRequest(scopeType,
+                    scopeType == ChangeRequestType.Software ? level : null, level.Value)
+                    ? [level.Value]
+                    : [];
+            }
             artifacts = artifacts.Where(x => allowedLevels.Contains(x.Level));
             if (!string.IsNullOrWhiteSpace(search))
             {
