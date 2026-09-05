@@ -32,8 +32,8 @@ the method body does not show the host operation.
 
 | Intent | Tests | Cases | Classes | Correct level |
 |---|---:|---:|---:|---|
-| HTTP boundary: route, status, JSON shape | 527 | 588 | 102 | API (must stay hosted) |
-| EF translation / relational constraints | 162 | 176 | 58 | Infrastructure (needs a database, not a host) |
+| HTTP boundary: route, status, JSON shape | 525 | 586 | 102 | API (must stay hosted) |
+| EF translation / relational constraints | 164 | 178 | 58 | Infrastructure (needs a database, not a host) |
 | Authentication / authorization wiring | 91 | 95 | 53 | API (must stay hosted) |
 | In-process logic with no HTTP and no client | 35 | 35 | 12 | Domain or Infrastructure (migration candidate) |
 | Filesystem / evidence-root behaviour | 17 | 17 | 9 | API or Infrastructure (must stay hosted) |
