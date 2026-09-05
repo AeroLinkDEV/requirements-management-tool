@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 123,
-    "tests": 829,
-    "knownCases": 922,
+    "classes": 124,
+    "tests": 831,
+    "knownCases": 924,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -14,9 +14,9 @@
       "unknownCaseTests": 0
     },
     "fresh-host": {
-      "classes": 46,
-      "tests": 295,
-      "knownCases": 327,
+      "classes": 47,
+      "tests": 297,
+      "knownCases": 329,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -763,6 +763,17 @@
       "intents": [
         "auth-policy",
         "startup-config"
+      ]
+    },
+    {
+      "cls": "PeoplePortraitManifestTests",
+      "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Owns host-scoped state (filesystem); sharing would leak it between tests.",
+      "intents": [
+        "filesystem"
       ]
     },
     {

@@ -62,17 +62,26 @@ test.describe("FMS showcase portrait system", () => {
     await expect(page.locator('.teamWorkPeopleStrip')).toBeVisible()
 
     // Not a single initials fallback may remain on the strip: every showcase member resolves a portrait.
-    const initials = await page.locator('.personInitials').count()
-    expect(initials, "initials fallback must be gone from Team Work").toBe(0)
-
-    // Every rendered avatar is a real image element inside the people strip.
-    const avatarCount = await page.locator('.teamWorkPeopleStrip img.personAvatar').count()
-    expect(avatarCount).toBeGreaterThanOrEqual(5)
-    for (let index = 0; index < avatarCount; index++) {
-      const box = await page.locator('.teamWorkPeopleStrip img.personAvatar').nth(index).boundingBox()
-      expect(box).not.toBeNull()
-      expect(box!.width).toBeGreaterThan(0)
-    }
+    // The strip and its images populate asynchronously, so the whole coverage assertion retries until
+    // the board has settled instead of sampling once during load.
+    await expect(async () => {
+      const stripAvatars = page.locator('.teamWorkPeopleStrip img.personAvatar')
+      const avatarCount = await stripAvatars.count()
+      expect(avatarCount).toBeGreaterThanOrEqual(5)
+      for (let index = 0; index < avatarCount; index++) {
+        const box = await stripAvatars.nth(index).boundingBox()
+        expect(box).not.toBeNull()
+        expect(box!.width).toBeGreaterThan(0)
+        const decoded = await stripAvatars.nth(index).evaluate((element: HTMLImageElement) => ({
+          complete: element.complete,
+          naturalWidth: element.naturalWidth,
+        }))
+        expect(decoded.complete).toBe(true)
+        expect(decoded.naturalWidth).toBeGreaterThan(0)
+      }
+      // Zero initials fallbacks anywhere on the page, sampled after the strip has settled.
+      expect(await page.locator('.personInitials').count()).toBe(0)
+    }).toPass({ timeout: 20_000 })
   })
 
   test("Personnel renders portraits for leadership, assurance and roster members", async ({ page }) => {
@@ -81,13 +90,24 @@ test.describe("FMS showcase portrait system", () => {
     await page.goto(new URL('/projects/fms-product-development/personnel', page.url()).toString(), { waitUntil: 'load' })
     await expect(page.getByRole('heading', { name: 'Personnel' })).toBeVisible()
 
-    await expect(page.locator('.personInitials').first()).toHaveCount(0)
-    const portraits = page.locator('img.personAvatar')
-    const portraitCount = await portraits.count()
-    expect(portraitCount).toBeGreaterThanOrEqual(10)
-    for (let index = 0; index < portraitCount; index++) {
-      const natural = await portraits.nth(index).evaluate((element: HTMLImageElement) => element.naturalWidth)
-      expect(natural).toBeGreaterThan(0)
-    }
+    // The personnel read is asynchronous: the coverage assertion retries until the roster has
+    // actually populated, every rendered portrait has decoded, and no initials fallback remains.
+    // Coverage is bound to the populated roster (the fresh fixture seeds the leadership + assurance
+    // cast), not to a fixed number that would only be true of the full HOME population.
+    await expect(async () => {
+      const portraits = page.locator('img.personAvatar')
+      const portraitCount = await portraits.count()
+      expect(portraitCount).toBeGreaterThanOrEqual(10)
+      for (let index = 0; index < portraitCount; index++) {
+        const decoded = await portraits.nth(index).evaluate((element: HTMLImageElement) => ({
+          complete: element.complete,
+          naturalWidth: element.naturalWidth,
+        }))
+        expect(decoded.complete).toBe(true)
+        expect(decoded.naturalWidth).toBeGreaterThan(0)
+      }
+      expect(await page.locator('.personInitials').count()).toBe(0)
+      expect(await page.locator('[data-member]').count()).toBeGreaterThanOrEqual(10)
+    }).toPass({ timeout: 20_000 })
   })
 })

@@ -1,13 +1,13 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 829,
-    "cases": 922,
-    "classes": 123,
+    "tests": 831,
+    "cases": 924,
+    "classes": 124,
     "hostedTests": 793,
     "hostedCases": 872,
-    "nonHostedTests": 28,
-    "nonHostedCases": 42,
+    "nonHostedTests": 30,
+    "nonHostedCases": 44,
     "unknownHostTests": 8,
     "unknownHostCases": 8,
     "hostedCandidateTests": 16,
@@ -53,10 +53,10 @@
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
       "level": "API or Infrastructure (must stay hosted)",
-      "tests": 17,
-      "cases": 17,
+      "tests": 19,
+      "cases": 19,
       "unknownCases": 0,
-      "classes": 9
+      "classes": 10
     },
     "startup-config": {
       "label": "Startup, hosting and configuration",
@@ -6238,6 +6238,34 @@
       "sourceLines": {
         "start": 39,
         "end": 48
+      }
+    },
+    {
+      "cls": "PeoplePortraitManifestTests",
+      "test": "Manifest_entries_carry_a_file_and_a_display_name",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 33,
+        "end": 45
+      }
+    },
+    {
+      "cls": "PeoplePortraitManifestTests",
+      "test": "Portrait_manifest_covers_every_seeded_identity_service_account",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 19,
+        "end": 31
       }
     },
     {

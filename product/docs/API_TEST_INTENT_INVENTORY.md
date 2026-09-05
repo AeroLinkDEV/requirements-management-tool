@@ -21,12 +21,12 @@ tokens that supplied host evidence.
 ## Result
 
 <!-- BEGIN GENERATED API TEST INTENT SUMMARY -->
-**829 test methods, 922 known invocations, 123 classes.** This source-exact forecast supports planning only;
+**831 test methods, 924 known invocations, 124 classes.** This source-exact forecast supports planning only;
 it is not migration or rollout authority. All current theories use explicit `InlineData`,
 so every case count is known.
 The inventory does not infer host use from a whole class:
 **793 methods / 872 cases have direct host evidence**,
-**28 methods / 42 cases are explicitly non-hosted**, and
+**30 methods / 44 cases are explicitly non-hosted**, and
 **8 methods / 8 cases remain unknown** because their class contains a host fixture or factory but
 the method body does not show the host operation.
 
@@ -36,7 +36,7 @@ the method body does not show the host operation.
 | EF translation / relational constraints | 159 | 173 | 57 | Infrastructure (needs a database, not a host) |
 | Authentication / authorization wiring | 89 | 93 | 52 | API (must stay hosted) |
 | In-process logic with no HTTP and no client | 35 | 35 | 12 | Domain or Infrastructure (migration candidate) |
-| Filesystem / evidence-root behaviour | 17 | 17 | 9 | API or Infrastructure (must stay hosted) |
+| Filesystem / evidence-root behaviour | 19 | 19 | 10 | API or Infrastructure (must stay hosted) |
 | Startup, hosting and configuration | 7 | 7 | 5 | API (must stay hosted) |
 | Business-rule matrix over data variations | 2 | 16 | 2 | Domain (migration candidate) |
 
