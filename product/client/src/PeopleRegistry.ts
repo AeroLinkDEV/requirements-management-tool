@@ -23,11 +23,13 @@ export type DemoPerson = {
  */
 const directory = manifest.people as Record<string, { file: string; name: string; role: string }>;
 
-export function demoPerson(userName: string, fallbackName?: string, fallbackRole = "Program member"): DemoPerson | undefined {
+export function demoPerson(userName: string, fallbackName?: string, fallbackRole?: string): DemoPerson | undefined {
   const normalized = (userName ?? "").trim().toLowerCase();
   if (!normalized) return undefined;
   const entry = directory[normalized];
-  if (!entry && !fallbackName) return undefined;
+  if (!entry && fallbackName === undefined && !fallbackRole) return undefined;
+  // A caller-supplied role is authoritative (it is the account's live membership); otherwise the
+  // seeded manifest role wins, and the generic label is last.
   return {
     name: fallbackName ?? entry?.name ?? userName,
     role: fallbackRole ?? entry?.role ?? "Program member",

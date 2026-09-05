@@ -257,6 +257,8 @@ mkdirSync(outDir, { recursive: true });
 // seeded display name. It is the client's explicit identity mapping — nothing is inferred at render time.
 const manifest = { version: 1, people: {} };
 let oversized = [];
+const seenBytes = new Map(); // output bytes -> username; portraits are identity cues and must be unique
+let salted = 0;
 for (const [username, person] of Object.entries(roster)) {
   const source = curatedPortraitSources[username];
   const file = `${username}.png`;
@@ -265,12 +267,25 @@ for (const [username, person] of Object.entries(roster)) {
     if (!existsSync(source)) throw new Error(`curated portrait missing: ${source}`);
     copyFileSync(source, target);
   } else {
-    writeFileSync(target, encodePng(render(username), SIZE));
+    // A hash collision renders two named accounts visually indistinguishable, so re-salt
+    // deterministically until this identity's portrait is its own.
+    let salt = 0;
+    let bytes;
+    let key;
+    do {
+      bytes = encodePng(render(salt === 0 ? username : `${username}#${salt}`), SIZE);
+      key = bytes.toString("base64");
+      salt++;
+    } while (seenBytes.has(key) && salt < 32);
+    if (seenBytes.has(key)) throw new Error(`could not derive a unique portrait for ${username}`);
+    writeFileSync(target, bytes);
+    if (salt > 1) salted++;
+    seenBytes.set(key, username);
   }
-  const bytes = readFileSync(target);
-  if (bytes.length > MAX_BYTES) oversized.push({ file, bytes: bytes.length });
+  const stored = readFileSync(target);
+  if (stored.length > MAX_BYTES) oversized.push({ file, bytes: stored.length });
   manifest.people[username] = { file: `/people/${file}`, name: person.name, role: person.role };
 }
 if (oversized.length) throw new Error(`portraits over ${MAX_BYTES} bytes: ${JSON.stringify(oversized)}`);
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
-console.log(`wrote ${Object.keys(roster).length} portraits + manifest to ${outDir}`);
+console.log(`wrote ${Object.keys(roster).length} portraits + manifest to ${outDir} (salted: ${salted})`);

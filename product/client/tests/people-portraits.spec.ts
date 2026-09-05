@@ -15,13 +15,26 @@ const peopleDir = join(testsDir, "..", "public", "people")
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
   people: Record<string, { file: string; name: string; role: string }>
 }
+const diskFiles = readdirSync(peopleDir).filter(file => file.endsWith(".png")).sort()
 
 test.describe("FMS showcase portrait system", () => {
   test("the manifest and the committed portrait files agree exactly", () => {
     const manifestFiles = Object.values(manifest.people).map(person => person.file.replace("/people/", ""))
-    const diskFiles = readdirSync(peopleDir).filter(file => file.endsWith(".png")).sort()
     expect(manifestFiles.sort()).toEqual(diskFiles)
     expect(diskFiles.length).toBeGreaterThanOrEqual(203)
+  })
+
+  test("generated portraits are unique per identity; only the curated same-person pair is shared", () => {
+    // Olivia Chen is one synthetic person holding two seeded accounts (manager.reviewer and
+    // program.manager); her single portrait is explicitly copied to both. No two *generated*
+    // identities may render the same image — collisions are re-salted by the generator.
+    const byBytes = new Map<string, string[]>()
+    for (const file of diskFiles) {
+      const bytes = readFileSync(join(peopleDir, file)).toString("base64")
+      byBytes.set(bytes, [...(byBytes.get(bytes) ?? []), file])
+    }
+    const groups = [...byBytes.values()].filter(group => group.length > 1)
+    expect(groups).toEqual([["manager.reviewer.png", "program.manager.png"]])
   })
 
   test("every portrait stays within the asset-size ceiling", () => {
