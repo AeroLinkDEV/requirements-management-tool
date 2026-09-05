@@ -1,4 +1,4 @@
-import manifest from "./people-manifest.json";
+import manifest from "./people-manifest.json" with { type: "json" };
 
 export type DemoPerson = {
   name: string;
@@ -53,14 +53,15 @@ export function demoPerson(userName: string, fallbackName?: string, fallbackRole
   const normalized = (userName ?? "").trim().toLowerCase();
   if (!normalized) return undefined;
   const cast = personhood[normalized];
-  const portraitFile = portraits[normalized]?.file;
-  // An API directory record is authoritative for display when the caller supplies one; otherwise the
-  // showcase casting names the person. Unmapped identities keep the initials fallback.
-  if (!cast && !portraitFile && fallbackName === undefined && !fallbackRole) return undefined;
+  const entry = portraits[normalized];
+  if (!cast && !entry && fallbackName === undefined && !fallbackRole) return undefined;
+  // Resolution order: a caller-supplied historical/directory record is authoritative; then the
+  // showcase casting names the person behind a functional account; then the manifest's seeded
+  // directory entry for every other synthetic account; the generic label and raw username are last.
   return {
-    name: fallbackName ?? cast?.name ?? userName,
-    role: fallbackRole ?? cast?.role ?? "Program member",
-    portrait: portraitFile ?? "",
+    name: fallbackName ?? cast?.name ?? entry?.name ?? userName,
+    role: fallbackRole ?? cast?.role ?? entry?.role ?? "Program member",
+    portrait: entry?.file ?? "",
   };
 }
 

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from '@playwright/test'
 import { login } from './auth'
+import { demoPerson, personLabel } from "../src/PeopleRegistry"
 
 // #913: the FMS showcase promises 100% portrait coverage for its active project members. These
 // checks prove the portrait set, its manifest, and its rendering agree: every seeded account has a
@@ -16,6 +17,32 @@ const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
   people: Record<string, { file: string; name: string; role: string }>
 }
 const diskFiles = readdirSync(peopleDir).filter(file => file.endsWith(".png")).sort()
+
+test.describe("registry identity resolution", () => {
+  test("resolution order: caller record, casting, manifest directory, then generic", () => {
+    // Casting names the person behind a functional account, over the manifest directory entry.
+    expect(demoPerson("systems.lead")).toEqual({
+      name: "Maya Patel", role: "Systems Lead", portrait: "/people/systems.lead.png",
+    })
+    // Generated members resolve their seeded directory name and role from the manifest — this is
+    // the fallback path the round-6 review proved broken (raw username / Program member).
+    expect(demoPerson("system.engineer.001")).toEqual({
+      name: "Avery Anderson", role: "System Engineer", portrait: "/people/system.engineer.001.png",
+    })
+    expect(demoPerson("engineer.demo")?.name).toBe("Sean Engineer")
+    expect(personLabel("system.engineer.001")).toBe("Avery Anderson")
+    // A caller-supplied historical/directory record stays authoritative.
+    expect(demoPerson("systems.lead", "Historical Signer", "Historical Role")).toEqual({
+      name: "Historical Signer", role: "Historical Role", portrait: "/people/systems.lead.png",
+    })
+    // A truly unmapped identity resolves to undefined — surfaces then keep the raw account and the
+    // initials fallback, which is the preserved fallback contract for real identities.
+    expect(demoPerson("someone.else")).toBeUndefined()
+    expect(demoPerson("someone.else", "Real Person", "Contractor")).toEqual({
+      name: "Real Person", role: "Contractor", portrait: "",
+    })
+  })
+})
 
 test.describe("FMS showcase portrait system", () => {
   test("the manifest and the committed portrait files agree exactly", () => {
