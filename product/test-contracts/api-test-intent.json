@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 832,
-    "cases": 925,
-    "classes": 124,
-    "hostedTests": 794,
-    "hostedCases": 873,
+    "tests": 844,
+    "cases": 937,
+    "classes": 125,
+    "hostedTests": 806,
+    "hostedCases": 885,
     "nonHostedTests": 30,
     "nonHostedCases": 44,
     "unknownHostTests": 8,
@@ -21,26 +21,26 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 521,
-      "cases": 582,
+      "tests": 526,
+      "cases": 587,
       "unknownCases": 0,
-      "classes": 101
+      "classes": 102
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 159,
-      "cases": 173,
+      "tests": 164,
+      "cases": 178,
       "unknownCases": 0,
-      "classes": 57
+      "classes": 58
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 89,
-      "cases": 93,
+      "tests": 91,
+      "cases": 95,
       "unknownCases": 0,
-      "classes": 52
+      "classes": 53
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -3527,6 +3527,222 @@
       "sourceLines": {
         "start": 15,
         "end": 28
+      }
+    },
+    {
+      "cls": "ControlledAttachmentMutationApiTests",
+      "test": "A_controlled_export_fails_closed_while_legacy_unbound_evidence_is_in_scope",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 523,
+        "end": 553
+      }
+    },
+    {
+      "cls": "ControlledAttachmentMutationApiTests",
+      "test": "A_legacy_unbound_chain_is_bound_only_through_an_explicit_eligible_revision",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 409,
+        "end": 443
+      }
+    },
+    {
+      "cls": "ControlledAttachmentMutationApiTests",
+      "test": "A_logical_chain_from_another_requirement_is_refused",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 445,
+        "end": 468
+      }
+    },
+    {
+      "cls": "ControlledAttachmentMutationApiTests",
+      "test": "A_program_member_without_engineering_authority_cannot_attach_requirement_evidence",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 147,
+        "end": 180
+      }
+    },
+    {
+      "cls": "ControlledAttachmentMutationApiTests",
+      "test": "A_requirement_upload_without_its_exact_revision_is_rejected",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 228,
+        "end": 249
+      }
+    },
+    {
+      "cls": "ControlledAttachmentMutationApiTests",
+      "test": "A_revision_from_another_requirement_is_rejected",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 251,
+        "end": 274
+      }
+    },
+    {
+      "cls": "ControlledAttachmentMutationApiTests",
+      "test": "A_stale_revision_is_rejected",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 276,
+        "end": 311
+      }
+    },
+    {
+      "cls": "ControlledAttachmentMutationApiTests",
+      "test": "An_engineer_attaches_to_the_current_revision_and_creation_and_supersession_are_audited",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 182,
+        "end": 226
+      }
+    },
+    {
+      "cls": "ControlledAttachmentMutationApiTests",
+      "test": "An_unsupported_artifact_type_fails_closed",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 501,
+        "end": 521
+      }
+    },
+    {
+      "cls": "ControlledAttachmentMutationApiTests",
+      "test": "Change_request_supporting_files_keep_the_draft_author_rule",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 470,
+        "end": 499
+      }
+    },
+    {
+      "cls": "ControlledAttachmentMutationApiTests",
+      "test": "Frozen_baseline_evidence_can_be_replaced_and_released_baseline_evidence_cannot",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 313,
+        "end": 362
+      }
+    },
+    {
+      "cls": "ControlledAttachmentMutationApiTests",
+      "test": "Supersession_cannot_jump_a_bound_chain_to_a_different_revision",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 364,
+        "end": 407
       }
     },
     {

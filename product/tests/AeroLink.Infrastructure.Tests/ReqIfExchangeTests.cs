@@ -1,6 +1,7 @@
 using System.Text;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
@@ -145,5 +146,71 @@ public sealed class ReqIfExchangeTests
         var program=new ProgramRecord("Event Program","EVT");var project=new ProjectRecord(program.Id,"Event Project","Product");var release=new SoftwareRelease(project.Id,"1.0",false);var scr=new SystemChangeRequest("SRCR-00001",0,project.Id,release.Id,"Evented change","P","A","S","author",now);
         db.AddRange(program,project,release,scr);await db.SaveChangesAsync();
         var integrationEvent=await db.IntegrationEvents.SingleAsync(x=>x.ProjectId==project.Id&&x.AggregateId==scr.Id);Assert.Equal("aerolink.change-request.changed",integrationEvent.EventType);Assert.Contains("Evented change",scr.Title);Assert.Contains("Draft",integrationEvent.PayloadJson);
+    }
+
+    [Fact]
+    public async Task Exported_packages_carry_only_attachments_bound_to_the_exact_exported_revisions()
+    {
+        var database=Path.Combine(Path.GetTempPath(),$"aerolink-reqif-bind-{Guid.NewGuid():N}.db");var evidence=Path.Combine(Path.GetTempPath(),$"aerolink-reqif-bind-evidence-{Guid.NewGuid():N}");
+        try
+        {
+            var options=new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={database};Pooling=False").Options;
+            await using var db=new AeroLinkDbContext(options);await db.Database.EnsureCreatedAsync();var now=DateTimeOffset.UtcNow;
+            var program=new ProgramRecord("Binding Program","BND");var project=new ProjectRecord(program.Id,"Binding Project","Control Computer");var release=new SoftwareRelease(project.Id,"1.0",false);
+            var scr=new SystemChangeRequest("SRCR-00001",0,project.Id,release.Id,"Seed requirements","Need","Analysis","Solution","author",now);scr.AddRequirementChange("author","SYSR-00000001",0,RequirementLevel.System,RequirementChangeKind.Introduce,"The controller shall retain state.","Safety continuity","Test",now);scr.SubmitForReview("author",[new("reviewer","Reviewer")],now);scr.ApproveActiveStage("reviewer",now);
+            var baseline=new CandidateBaseline("BL-00000001",0,project.Id,release.Id,null,"Binding baseline","cm",now);baseline.Select(scr,"cm",now);baseline.Freeze("cm",now);
+            var first=new RequirementArtifact(project.Id,"SYSR-00000001",RequirementLevel.System,now);var second=new RequirementArtifact(project.Id,"SYSR-00000002",RequirementLevel.System,now);
+            var firstSuperseded=new RequirementRevision(first.Id,0,"The controller shall retain state.","Safety continuity","Test",RequirementRevisionState.Superseded,scr.Id,baseline.Id,now);
+            var firstCurrent=new RequirementRevision(first.Id,1,"The controller shall retain state across power loss.","Safety continuity","Test",RequirementRevisionState.Active,scr.Id,baseline.Id,now);
+            var secondRevision=new RequirementRevision(second.Id,0,"The controller shall restore state.","Recovery","Test",RequirementRevisionState.Active,scr.Id,baseline.Id,now);
+            var store=new EvidenceFileStore(evidence);
+            var exactFirst=await store.StoreAsync(new MemoryStream("Exact evidence for the current revision."u8.ToArray()),"exact-first.txt","text/plain",default);
+            var staleFirst=await store.StoreAsync(new MemoryStream("Evidence bound to the superseded revision."u8.ToArray()),"stale-first.txt","text/plain",default);
+            var exactSecond=await store.StoreAsync(new MemoryStream("Exact evidence for the second artifact."u8.ToArray()),"exact-second.txt","text/plain",default);
+            var attachedExactFirst=new ControlledAttachment(project.Id,"Requirement",first.Id,firstCurrent.Id,Guid.NewGuid(),1,"Exact","Exact current revision evidence.",exactFirst.OriginalFileName,exactFirst.ContentType,exactFirst.Size,exactFirst.Sha256,exactFirst.StorageKey,null,"author",now);
+            var attachedStaleFirst=new ControlledAttachment(project.Id,"Requirement",first.Id,firstSuperseded.Id,Guid.NewGuid(),1,"Stale","Historical revision evidence.",staleFirst.OriginalFileName,staleFirst.ContentType,staleFirst.Size,staleFirst.Sha256,staleFirst.StorageKey,null,"author",now);
+            var attachedExactSecond=new ControlledAttachment(project.Id,"Requirement",second.Id,secondRevision.Id,Guid.NewGuid(),1,"Exact","Exact current revision evidence.",exactSecond.OriginalFileName,exactSecond.ContentType,exactSecond.Size,exactSecond.Sha256,exactSecond.StorageKey,null,"author",now);
+            db.AddRange(program,project,release,scr,baseline,first,second,firstSuperseded,firstCurrent,secondRevision,attachedExactFirst,attachedStaleFirst,attachedExactSecond);await db.SaveChangesAsync();
+            var service=new ReqIfExchangeService(db,store);
+            var exported=await service.ExportAsync(project.Id,null,"author",now,CancellationToken.None);
+            Assert.Equal(2,exported.Job.AttachmentCount);
+            await using var package=service.OpenPackage(exported.Job);
+            using var zip=new System.IO.Compression.ZipArchive(package,System.IO.Compression.ZipArchiveMode.Read);
+            var entries=zip.Entries.Where(x=>x.FullName.StartsWith("attachments/",StringComparison.Ordinal)).Select(x=>x.FullName).ToArray();
+            Assert.Equal(2,entries.Length);
+            Assert.Contains(entries,name=>name.Contains(attachedExactFirst.Id.ToString("N"),StringComparison.Ordinal));
+            Assert.Contains(entries,name=>name.Contains(attachedExactSecond.Id.ToString("N"),StringComparison.Ordinal));
+            Assert.DoesNotContain(entries,name=>name.Contains(attachedStaleFirst.Id.ToString("N"),StringComparison.Ordinal));
+        }
+        finally{if(File.Exists(database))File.Delete(database);if(Directory.Exists(evidence))Directory.Delete(evidence,true);}
+    }
+
+    [Fact]
+    public async Task An_export_fails_closed_when_scoped_legacy_evidence_has_no_revision_binding()
+    {
+        var database=Path.Combine(Path.GetTempPath(),$"aerolink-reqif-legacy-{Guid.NewGuid():N}.db");var evidence=Path.Combine(Path.GetTempPath(),$"aerolink-reqif-legacy-evidence-{Guid.NewGuid():N}");
+        try
+        {
+            var options=new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={database};Pooling=False").Options;
+            await using var db=new AeroLinkDbContext(options);await db.Database.EnsureCreatedAsync();var now=DateTimeOffset.UtcNow;
+            var program=new ProgramRecord("Legacy Program","LGC");var project=new ProjectRecord(program.Id,"Legacy Project","Control Computer");var release=new SoftwareRelease(project.Id,"1.0",false);
+            var scr=new SystemChangeRequest("SRCR-00001",0,project.Id,release.Id,"Seed requirements","Need","Analysis","Solution","author",now);scr.AddRequirementChange("author","SYSR-00000001",0,RequirementLevel.System,RequirementChangeKind.Introduce,"The controller shall retain state.","Safety continuity","Test",now);scr.SubmitForReview("author",[new("reviewer","Reviewer")],now);scr.ApproveActiveStage("reviewer",now);
+            var baseline=new CandidateBaseline("BL-00000001",0,project.Id,release.Id,null,"Legacy baseline","cm",now);baseline.Select(scr,"cm",now);baseline.Freeze("cm",now);
+            var artifact=new RequirementArtifact(project.Id,"SYSR-00000001",RequirementLevel.System,now);
+            var revision=new RequirementRevision(artifact.Id,0,"The controller shall retain state.","Safety continuity","Test",RequirementRevisionState.Active,scr.Id,baseline.Id,now);
+            var store=new EvidenceFileStore(evidence);
+            var stored=await store.StoreAsync(new MemoryStream("Legacy evidence without revision binding."u8.ToArray()),"legacy.txt","text/plain",default);
+            var legacy=new ControlledAttachment(project.Id,"Requirement",artifact.Id,null,Guid.NewGuid(),1,"Legacy","No exact revision binding.",stored.OriginalFileName,stored.ContentType,stored.Size,stored.Sha256,stored.StorageKey,null,"author",now);
+            db.AddRange(program,project,release,scr,baseline,artifact,revision,legacy);await db.SaveChangesAsync();
+            var filesBefore=Directory.GetFiles(evidence,"*",SearchOption.AllDirectories).Length;
+            var service=new ReqIfExchangeService(db,store);
+
+            await Assert.ThrowsAsync<ControlledEvidenceBindingException>(()=>service.ExportAsync(project.Id,null,"author",now,CancellationToken.None));
+
+            Assert.Empty(await db.ReqIfExchangeJobs.ToListAsync());
+            Assert.Equal("attachment_revision_binding_required",ControlledEvidenceBindingException.DiagnosticCode);
+            Assert.Equal(filesBefore,Directory.GetFiles(evidence,"*",SearchOption.AllDirectories).Length);
+        }
+        finally{if(File.Exists(database))File.Delete(database);if(Directory.Exists(evidence))Directory.Delete(evidence,true);}
     }
 }

@@ -305,6 +305,7 @@
         "ChangeRequestReviewRationaleApiTests",
         "ChangeRequestUpstreamTraceApiTests",
         "ClosedReleaseAuthoringTests",
+        "ControlledAttachmentMutationApiTests",
         "ControlledEditingCheckInApiTests",
         "ControlledEditingProcedureAuthorityTests",
         "ControlledProcedureDocumentApiTests",
@@ -999,6 +1000,7 @@
       "file": "EditSessionEndpoints.cs",
       "coveredBy": [
         "AdministratorChangeRequestApiTests",
+        "ControlledAttachmentMutationApiTests",
         "IdentifierAllocationTests",
         "ProblemReportCheckoutApiTests",
         "ProblemReportPostgresQualificationTests",
@@ -1946,6 +1948,7 @@
       "path": "/api/reqif/exports",
       "file": "ReqIfEndpoints.cs",
       "coveredBy": [
+        "ControlledAttachmentMutationApiTests",
         "OpenDigitalThreadTests"
       ]
     },
