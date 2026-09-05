@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 831,
-    "cases": 924,
+    "tests": 832,
+    "cases": 925,
     "classes": 124,
-    "hostedTests": 793,
-    "hostedCases": 872,
+    "hostedTests": 794,
+    "hostedCases": 873,
     "nonHostedTests": 30,
     "nonHostedCases": 44,
     "unknownHostTests": 8,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 520,
-      "cases": 581,
+      "tests": 521,
+      "cases": 582,
       "unknownCases": 0,
       "classes": 101
     },
@@ -11367,8 +11367,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 14,
-        "end": 49
+        "start": 15,
+        "end": 50
       }
     },
     {
@@ -11385,8 +11385,25 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 51,
-        "end": 107
+        "start": 86,
+        "end": 142
+      }
+    },
+    {
+      "cls": "ShowcaseUpgradeApiTests",
+      "test": "Upgrade_state_reports_the_work_distribution_diagnostic",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "showcase-factory",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 52,
+        "end": 84
       }
     },
     {

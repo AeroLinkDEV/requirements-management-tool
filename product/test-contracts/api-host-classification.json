@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 124,
-    "tests": 831,
-    "knownCases": 924,
+    "tests": 832,
+    "knownCases": 925,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 47,
-      "tests": 297,
-      "knownCases": 329,
+      "tests": 298,
+      "knownCases": 330,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -754,6 +754,17 @@
       ]
     },
     {
+      "cls": "ShowcaseUpgradeApiTests",
+      "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ExternalIdentityAdminApiTests",
       "tests": 2,
       "knownCases": 2,
@@ -807,17 +818,6 @@
       "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
       "intents": [
         "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ShowcaseUpgradeApiTests",
-      "tests": 2,
-      "knownCases": 2,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
-      "intents": [
         "http-boundary"
       ]
     },
