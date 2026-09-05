@@ -63,11 +63,11 @@ The ruleset separately requires GitHub Actions' `Full Product evidence aggregate
 leaves success as soon as a rerun is queued, covering the earlier interval before `workflow_run` reaches
 `in_progress`. The native Product check and App-bound evidence check are deliberately co-required.
 
-Live activation is complete. The first docs-only queue delivery remains the next acceptance item after the
-authority-maintenance fix; it must prove both required identities on the PR head and composed queue candidate.
-Ordinary behind branches no longer need a manual rebase; real conflicts and deliberately protected
-CI-authority changes still require explicit disposition. Multi-entry and deliberate-failure qualification
-also stay tracked on issue #549 until their evidence is recorded.
+Live activation is complete. This documentation-only delivery establishes the first single-entry acceptance
+by proving both required identities on the pull-request head and the composed queue candidate after the
+authority-maintenance fix. Ordinary behind branches no longer need a manual rebase; real conflicts and
+deliberately protected CI-authority changes still require explicit disposition. Multi-entry, stale-base,
+deliberate-failure and non-cancellation qualification stay tracked on issue #549 until their evidence is recorded.
 
 ## Measured, 2026-08-13
 

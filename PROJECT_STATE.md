@@ -329,10 +329,10 @@ pull-request, no-force-push and no-deletion protections remain enabled.
 The ruleset requires both the App-bound `Trusted merge-queue binding` and GitHub Actions'
 `Full Product evidence aggregate`: the native check enters a non-success state as soon as a rerun is queued,
 while the App check independently binds the exact evidence after protected-default-branch verification.
-The first docs-only queue delivery remains a live acceptance requirement: it must prove the pull-request
-readiness path and exact composed-candidate path after the authority-maintenance fix is active. Multi-entry
-composition and deliberate-failure scenarios also remain tracked on issue #549 until their evidence is
-recorded.
+This documentation-only delivery establishes the single-entry acceptance path by passing pull-request
+readiness and then landing through the exact composed queue candidate after the authority-maintenance fix.
+Multi-entry composition, stale-base, deliberate-failure and non-cancellation scenarios remain tracked on
+issue #549 until their evidence is recorded.
 
 Do not change CI topology from intuition alone. Read [product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md](product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md) first.
 
