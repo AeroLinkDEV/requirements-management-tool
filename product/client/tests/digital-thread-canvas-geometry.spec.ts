@@ -3,7 +3,7 @@ import {
   MIN_ZOOM,
   EDGE_LAYER_OVERHANG,
   compactLanes,
-  edgeKey,
+  edgeIdentity,
   edgePath,
   isIntraLane,
   frameNodes,
@@ -33,7 +33,7 @@ const LANES = [6, 8, 9, 7, 7]
 
 test.describe("digital thread canvas geometry", () => {
   test("uses a stable directed identity for edges", () => {
-    expect(edgeKey("source", "target")).toBe("source>target")
+    expect(edgeIdentity("source", "target")).toBe("source>target")
   })
 
   test("density tiers change the row pitch, not the type size", () => {
