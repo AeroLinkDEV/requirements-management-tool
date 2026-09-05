@@ -342,11 +342,15 @@ public static class ChangeRequestEndpoints
             // closed to no candidates rather than falling back to the broad scope.
             if (level is not null)
             {
+                // Minimal-API enum binding accepts numeric undefined values (level=999), which no ladder
+                // defines. They fail closed to no candidates here rather than reaching the policy's level
+                // resolution and surfacing as a 500 on a read.
                 var scopeType = scope.Equals("System", StringComparison.OrdinalIgnoreCase) ? ChangeRequestType.System
                     : scope.Equals("Interface", StringComparison.OrdinalIgnoreCase) ? ChangeRequestType.Interface
                     : ChangeRequestType.Software;
-                allowedLevels = ladderPolicy.AcceptsChangeRequest(scopeType,
-                    scopeType == ChangeRequestType.Software ? level : null, level.Value)
+                allowedLevels = Enum.IsDefined(level.Value)
+                    && ladderPolicy.AcceptsChangeRequest(scopeType,
+                        scopeType == ChangeRequestType.Software ? level : null, level.Value)
                     ? [level.Value]
                     : [];
             }

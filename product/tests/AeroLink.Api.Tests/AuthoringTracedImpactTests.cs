@@ -560,6 +560,14 @@ public sealed class AuthoringTracedImpactTests
         Assert.Equal(HttpStatusCode.OK, systemResponse.StatusCode);
         var systemRows = JsonSerializer.Deserialize<JsonElement>(await systemResponse.Content.ReadAsStringAsync());
         Assert.Empty(systemRows.EnumerateArray());
+
+        // A numeric undefined enum value binds to a non-null level no ladder defines; it must fail closed
+        // to the same empty answer rather than escaping as a server error on a read.
+        using var undefinedResponse = await client.GetAsync(
+            $"/api/authoring/requirements?projectId={projectId}&scope=System&level=999&search={term}");
+        Assert.Equal(HttpStatusCode.OK, undefinedResponse.StatusCode);
+        var undefinedRows = JsonSerializer.Deserialize<JsonElement>(await undefinedResponse.Content.ReadAsStringAsync());
+        Assert.Empty(undefinedRows.EnumerateArray());
     }
 
     [Fact]
