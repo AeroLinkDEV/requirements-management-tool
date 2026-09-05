@@ -186,8 +186,8 @@ The App private key is an environment secret, and the environment deployment pol
 default branch. The active ruleset requires this check **with the AeroLink Merge Authority App's integration
 id**, together with GitHub Actions' `Full Product evidence aggregate`. A workflow-dispatched Product check
 suite is not associated with the pull request for queue admission, so the trusted default-branch requester
-publishes a PR-associated mirror of the verified aggregate through its ordinary GitHub Actions token. The
-queue candidate's `merge_group` run publishes the native aggregate directly. The native check suite
+exposes a dependent job of the same name in its real pull-request check suite only after verified aggregate
+success. The queue candidate's `merge_group` run publishes the native aggregate directly. The native check suite
 becomes non-success as soon as a rerun is queued, covering the interval before `workflow_run` emits
 `in_progress`; the App check then supplies the independent exact-evidence binding. A name-only required check
 does not establish publisher identity. The merge queue and both required checks are active.

@@ -12,7 +12,7 @@ test('ready label requester is trusted-base, exact-label, same-repository, and d
   assert.match(requester, /pull_request_target:/)
   assert.match(requester, /types: \[labeled\]/)
   assert.match(requester, /actions: write/)
-  assert.match(requester, /checks: write/)
+  assert.doesNotMatch(requester, /^  checks: write$/m)
   assert.match(requester, /contents: read/)
   assert.match(requester, /pull-requests: read/)
   assert.doesNotMatch(requester, /actions\/checkout|git checkout|git clone/)
@@ -78,19 +78,26 @@ test('trusted readiness dispatch preserves ordinary PR browser and gate semantic
   assert.doesNotMatch(full, /if: \(github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\) && needs\.changes\.outputs\.browser == 'true'/)
 })
 
-test('Product aggregate is mirrored onto the PR only after trusted exact-run verification', () => {
+test('Product aggregate is a real PR-suite job gated by trusted exact-run verification', () => {
   assert.match(full, /^    name: Full Product evidence aggregate$/m)
   assert.doesNotMatch(full, /^    name: Report what this run validated$/m)
   assert.match(requester, /accepted_names = \{"Report what this run validated", "Full Product evidence aggregate"\}/)
-  assert.match(requester, /id: product-evidence/)
-  assert.match(requester, /echo "run_id=\$run_id" >> "\$GITHUB_OUTPUT"/)
-  assert.match(requester, /name: Publish PR-associated Product aggregate/)
-  assert.match(requester, /PRODUCT_RUN_ID: \$\{\{ steps\.product-evidence\.outputs\.run_id \}\}/)
-  assert.match(requester, /"name": "Full Product evidence aggregate"/)
-  assert.match(requester, /aerolink-product-evidence:pull-request:\{head_sha\}:\{product_run_id\}/)
+  const prProductStart = requester.indexOf('\n  pr-product-aggregate:\n')
+  assert.notEqual(prProductStart, -1)
+  const prProductJob = requester.slice(prProductStart)
+  assert.match(prProductJob, /^  pr-product-aggregate:$/m)
+  assert.match(prProductJob, /name: \$\{\{ .*'Full Product evidence aggregate'.*\}\}/)
+  assert.match(prProductJob, /^    if: always\(\) && github\.event\.label\.name == 'ready-for-full-ci' && github\.event\.pull_request\.head\.repo\.full_name == github\.repository$/m)
+  assert.match(prProductJob, /^    needs: dispatch-and-bind$/m)
+  assert.match(prProductJob, /^    permissions: \{\}$/m)
+  assert.match(prProductJob, /TRUSTED_REQUEST_RESULT: \$\{\{ needs\.dispatch-and-bind\.result \}\}/)
+  assert.match(prProductJob, /if \[ "\$TRUSTED_REQUEST_RESULT" != "success" \]; then/)
+  assert.match(prProductJob, /refusing PR Product authority/)
+  assert.doesNotMatch(prProductJob, /continue-on-error:\s*true/)
+  assert.doesNotMatch(requester, /aerolink-product-evidence:pull-request/)
   assert.ok(
     requester.indexOf('Authenticate live ready PR, dispatch once, and bind exact Product success') <
-      requester.indexOf('Publish PR-associated Product aggregate'),
-    'the PR-associated native check must only be published after exact Product verification',
+      requester.indexOf('pr-product-aggregate:'),
+    'the PR-associated Product job must depend on exact Product verification',
   )
 })

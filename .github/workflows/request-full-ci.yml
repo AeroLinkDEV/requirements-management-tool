@@ -6,7 +6,6 @@ on:
 
 permissions:
   actions: write
-  checks: write
   contents: read
   pull-requests: read
 
@@ -34,7 +33,6 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
     steps:
       - name: Authenticate live ready PR, dispatch once, and bind exact Product success
-        id: product-evidence
         shell: bash
         run: |
           set -euo pipefail
@@ -230,46 +228,7 @@ jobs:
           PY
 
           verify_live_pr
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
           echo "Bound exact Product Full run $run_id to PR #$PR_NUMBER head $HEAD_SHA using comparison base $BASE_SHA." >> "$GITHUB_STEP_SUMMARY"
-      # A workflow_dispatch check suite is attached to the exact commit but GitHub does not expose it as a
-      # pull-request required check for merge-queue admission. Publish a PR-associated mirror only after the
-      # trusted default-branch requester has authenticated the real Product aggregate above. The ordinary
-      # GITHUB_TOKEN deliberately supplies the GitHub Actions integration identity required by the ruleset.
-      - name: Publish PR-associated Product aggregate
-        shell: bash
-        env:
-          PRODUCT_RUN_ID: ${{ steps.product-evidence.outputs.run_id }}
-        run: |
-          set -euo pipefail
-          python - <<'PY' > "$RUNNER_TEMP/pr-associated-product-check.json"
-          import json
-          import os
-
-          repository = os.environ["GITHUB_REPOSITORY"]
-          head_sha = os.environ["HEAD_SHA"]
-          product_run_id = os.environ["PRODUCT_RUN_ID"]
-          print(json.dumps({
-              "name": "Full Product evidence aggregate",
-              "head_sha": head_sha,
-              "status": "completed",
-              "conclusion": "success",
-              "details_url": f"https://github.com/{repository}/actions/runs/{product_run_id}",
-              "external_id": f"aerolink-product-evidence:pull-request:{head_sha}:{product_run_id}",
-              "output": {
-                  "title": "Trusted PR-associated Product evidence",
-                  "summary": "The protected default-branch requester verified the exact successful Product aggregate and associated that evidence with this pull-request head for merge-queue admission.",
-              },
-          }))
-          PY
-          curl --fail-with-body --silent --show-error \
-            --request POST \
-            --header "Authorization: Bearer $GITHUB_TOKEN" \
-            --header "Accept: application/vnd.github+json" \
-            --header "X-GitHub-Api-Version: 2022-11-28" \
-            --header "Content-Type: application/json" \
-            --data-binary "@$RUNNER_TEMP/pr-associated-product-check.json" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/check-runs"
       - name: Mint the repository-scoped Merge Authority token
         id: authority-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -312,3 +271,26 @@ jobs:
             --header "Content-Type: application/json" \
             --data-binary "@$RUNNER_TEMP/merge-authority-pr-check.json" \
             "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/check-runs"
+
+  pr-product-aggregate:
+    # GitHub associates a check with a pull request only when the check is a real job in that PR event's
+    # check suite. An API-created check on the same commit is not sufficient for merge-queue admission.
+    # `always()` makes a failed or skipped dependency reach the explicit refusal below instead of turning
+    # this required check into a skipped success.
+    name: ${{ github.event.label.name == 'ready-for-full-ci' && github.event.pull_request.head.repo.full_name == github.repository && 'Full Product evidence aggregate' || 'Ignore non-readiness PR label for Product evidence' }}
+    if: always() && github.event.label.name == 'ready-for-full-ci' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: dispatch-and-bind
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require trusted exact-Product verification
+        shell: bash
+        env:
+          TRUSTED_REQUEST_RESULT: ${{ needs.dispatch-and-bind.result }}
+        run: |
+          set -euo pipefail
+          if [ "$TRUSTED_REQUEST_RESULT" != "success" ]; then
+            echo "::error::Trusted exact-Product verification concluded $TRUSTED_REQUEST_RESULT; refusing PR Product authority."
+            exit 1
+          fi
+          echo "The trusted default-branch requester verified exact Product success for this pull-request head." >> "$GITHUB_STEP_SUMMARY"
