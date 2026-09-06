@@ -1278,17 +1278,19 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (members.Count == 0)
             return new TraceCoverageCheck(false, $"The materialized baseline {baseline.Id} carries no requirement revisions.");
 
-        // Scope every coverage judgement to the exact procedure manifest the released 1.5 baseline
-        // carries — the same authority the release readiness gate reads. Judging against all current
-        // procedure revisions instead would let a later 1.6 or operator-authored approved revision make
-        // a requirement look covered on a build that never carried that coverage. A baseline whose exact
-        // manifest exists but is empty (the pre-#726 cutover configuration, which the seeder never
-        // produces) has no manifest rows to judge against, so the scope falls back to unguarded there.
+        // Scope every coverage judgement to the procedure revisions the released 1.5 build actually
+        // carried, as established by the same resolver the readiness gate reads. That is either the
+        // baseline's exact procedure manifest or — for a genuinely pre-manifest baseline — the resolver's
+        // deterministic compatibility selection of approved revisions at release time; both deliberately
+        // exclude later 1.6 or operator-authored revisions, so coverage can never be settled by a link the
+        // released build did not carry. The resolver's output is the authority in every configuration,
+        // including an exact-empty manifest: an empty effective set means the diagnostic honestly reports
+        // the whole baseline uncovered, never unrestricted current coverage.
         var procedureEffectivity = await TestProcedureEffectivity.ForBaselineAsync(db, baseline.Id, ct);
-        IReadOnlyCollection<Guid>? effectiveProcedureRevisionIds =
-            procedureEffectivity is { IsExactManifest: true } exact && exact.RevisionIds.Count > 0
-                ? exact.RevisionIds
-                : null;
+        if (procedureEffectivity is null)
+            return new TraceCoverageCheck(false,
+                "Released-baseline procedure effectivity could not be established; trace coverage has no authoritative scope.");
+        IReadOnlyCollection<Guid> effectiveProcedureRevisionIds = procedureEffectivity.RevisionIds;
 
         var settled = await VerificationCoverageProjection.SettledCoveredAsync(db, members, ct,
             effectiveProcedureRevisionIds, buildScoped: false);
@@ -1303,11 +1305,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var gapCoverage = db.TestCoverage.AsNoTracking()
             .Join(db.TestProcedureRevisions.AsNoTracking(), coverage => coverage.ProcedureRevisionId,
                 revision => revision.Id, (coverage, revision) => new { coverage, revision })
-            .Where(x => gapProcedureIds.Contains(x.revision.ProcedureId));
-        var gapLinked = effectiveProcedureRevisionIds is null
-            ? await gapCoverage.Select(x => x.coverage.RequirementRevisionId).Distinct().ToListAsync(ct)
-            : await gapCoverage.Where(x => effectiveProcedureRevisionIds.Contains(x.coverage.ProcedureRevisionId))
-                .Select(x => x.coverage.RequirementRevisionId).Distinct().ToListAsync(ct);
+            .Where(x => gapProcedureIds.Contains(x.revision.ProcedureId)
+                && effectiveProcedureRevisionIds.Contains(x.coverage.ProcedureRevisionId));
+        var gapLinked = await gapCoverage.Select(x => x.coverage.RequirementRevisionId).Distinct().ToListAsync(ct);
 
         var share = members.Count == 0 ? 0 : Math.Round(suspect.Count * 100.0 / members.Count, 2);
         var gapPair = await RequirementDisplayNumbersAsync(gapLinked, ct);
@@ -1315,7 +1315,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             $"{members.Count} released-baseline requirement revision(s): {settled.Count} settled-covered, "
             + $"{suspect.Count} suspect ({share}% — the named {GapProcedureNumber} 1.6 rework scenario covering "
             + string.Join(" + ", gapPair) + "), "
-            + $"{uncovered.Count} uncovered (allow-list: none).";
+            + $"{uncovered.Count} uncovered (allow-list: none). "
+            + $"Scope: {(procedureEffectivity.IsExactManifest ? "exact" : "legacy compatibility")} manifest, "
+            + $"{effectiveProcedureRevisionIds.Count} procedure revision(s).";
 
         // The seeded contract is exactly this named pair: the requirements the procedure's approved
         // revision covers, identified by display number so a future seed redistribution that swaps which
