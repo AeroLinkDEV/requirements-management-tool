@@ -88,7 +88,9 @@ for (const density of ["comfortable", "compact"]) {
       for (const phrase of ["resolved by", "allocates to", "verified by"]) {
         const label = page.locator(".dtCanvasEdgeLabel").filter({ hasText: new RegExp(`^${phrase}$`) }).first()
         await expect(label).toBeVisible()
-        await expect(label).toBeInViewport({ ratio: 1 })
+        // Chromium's SVG intersection ratio can round a fully contained label to 0.9999996.
+        // Keep effectively complete visibility without requiring floating-point equality to one.
+        await expect(label).toBeInViewport({ ratio: 0.999999 })
       }
       await expect.poll(() => collisions(page)).toEqual([])
       await controlsDoNotOverlap(page)
