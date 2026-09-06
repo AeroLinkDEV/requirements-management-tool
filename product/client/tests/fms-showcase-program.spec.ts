@@ -31,6 +31,7 @@ test("FMS 1.5 released baseline supports active 1.6 work and full lifecycle expl
   await openNavigationGroup(page,"RELEASE & CONFIGURATION");
   await page.getByRole("link", { name: "Digital Thread" }).click();
   await expect(page.locator(".dtPage .dtnRoot")).toBeVisible();
+  await page.getByText("Baseline evidence report", { exact: true }).click();
   await page.locator(".dtPageToolbar").getByRole("button", { name: "Table" }).click();
   await expect(page.getByText("1,250 requirements")).toBeVisible();
   // A Controlled Documents tab here used to prove that inherited 1.5 documents are not offered as current 1.6

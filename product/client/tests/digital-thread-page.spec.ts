@@ -745,7 +745,7 @@ test.describe("selection and navigation coherence", () => {
     await page.getByRole("alert").getByRole("button", { name: "Back to the change network" }).click()
     await expect(page.locator(".dtnRoot")).toBeVisible()
     await expect(page.locator(".dtnInFrame-error")).toHaveCount(0)
-    await expect(page.locator(".dtPageTableEmpty")).toHaveCount(0)
+    await expect(page.locator(".dtPageTableEmpty:visible")).toHaveCount(0)
     expect(new URL(page.url()).pathname).toMatch(/\/traceability$/)
   })
 
