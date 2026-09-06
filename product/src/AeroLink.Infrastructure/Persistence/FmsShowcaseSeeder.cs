@@ -1401,7 +1401,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
                 && family.Key.Kind == VerificationArtifactKind.Procedure;
             if (isSoftwareProcedure)
             {
-                var authored = procedureProvenance.Any(x =>
+                // Authored activity is provenance from either source: a materialized procedure revision
+                // raised from a test change request, or any authored review on the key itself — a TCR
+                // authored but not yet materialized must not read as migration-only.
+                var authored = reviewCounts[family.Key] > 0 || procedureProvenance.Any(x =>
                     x.Level == ToTestProcedureLevel(family.Level) && x.Authored);
                 var reviewCount = reviewCounts[family.Key];
                 if (authored && reviewCount < 5)
