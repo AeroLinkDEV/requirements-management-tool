@@ -145,6 +145,8 @@ export interface LayoutResult {
   laneHeights: number[]
   /** Visible height shared by every band: the window, or the tallest lane when everything already fits. */
   bandHeight: number
+  /** Maximum band height available in this viewport, before nominal card counts shorten the bands. */
+  availableBandHeight: number
   /** Most negative offset each lane may take. Zero means the lane cannot roll. */
   laneMinimums: number[]
   sceneWidth: number
@@ -159,12 +161,14 @@ export const layout = (
   const geometry = geometryFor(tier)
   const laneHeights = laneCounts.map(count => laneHeight(count, tier))
   const tallest = laneHeights.length ? Math.max(...laneHeights) : geometry.cardHeight
-  const bandHeight = Math.min(windowHeight(frame, zoom), tallest)
+  const availableBandHeight = windowHeight(frame, zoom)
+  const bandHeight = Math.min(availableBandHeight, tallest)
   return {
     tier,
     geometry,
     laneHeights,
     bandHeight,
+    availableBandHeight,
     laneMinimums: laneHeights.map(height => Math.min(0, bandHeight - height)),
     sceneWidth: sceneWidth(laneCounts.length),
   }
@@ -218,27 +222,28 @@ export const positionsForNodes = (
   return result
 }
 
-/** Extend rolling bounds by the measured excess introduced by expanded or wrapped cards. */
+/** Use spare viewport room for measured cards before requiring a lane to roll. */
 export const layoutWithMeasuredCards = (
   result: LayoutResult,
   nodes: readonly CanvasNode[],
   measuredHeights?: ReadonlyMap<string, number>,
 ): LayoutResult => {
   if (!measuredHeights?.size) return result
-  const extra = new Map<number, number>()
+  const positions = positionsForNodes(nodes, result.geometry, [], measuredHeights)
+  const laneHeights = [...result.laneHeights]
   for (const node of nodes) {
-    const measured = measuredHeights.get(node.id)
-    if (measured && Number.isFinite(measured)) {
-      const excess = Math.max(0, measured - result.geometry.rowPitch)
-      extra.set(node.lane, (extra.get(node.lane) ?? 0) + excess + (excess > 0 ? MEASURED_CARD_GAP : 0))
-    }
+    const position = positions.get(node.id)
+    if (!position) continue
+    const measured = measuredHeights.get(node.id) ?? result.geometry.cardHeight
+    const height = Number.isFinite(measured) ? Math.max(result.geometry.cardHeight, measured) : result.geometry.cardHeight
+    laneHeights[node.lane] = Math.max(laneHeights[node.lane] ?? 0, position.y + height + result.geometry.pad)
   }
-  if (!extra.size) return result
-  const laneHeights = result.laneHeights.map((height, lane) => height + (extra.get(lane) ?? 0))
+  const bandHeight = Math.min(result.availableBandHeight, Math.max(result.geometry.cardHeight, ...laneHeights))
   return {
     ...result,
     laneHeights,
-    laneMinimums: laneHeights.map(height => Math.min(0, result.bandHeight - height)),
+    bandHeight,
+    laneMinimums: laneHeights.map(height => Math.min(0, bandHeight - height)),
   }
 }
 
@@ -523,7 +528,7 @@ export const frameNodes = (
     return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
   }
 
-  const first = layout(laneCounts, frame, 1)
+  const first = layoutWithMeasuredCards(layout(laneCounts, frame, 1), nodes, options.cardHeights)
   const want = measure(first)
   if (!want) return null
   const pad = 46
@@ -535,7 +540,7 @@ export const frameNodes = (
     Math.min(maxZoom, Math.min((frame.width - pad * 2) / (want.width + 52), (frame.height - pad * 2) / (want.height + 52))),
   )
 
-  const settled = layout(laneCounts, frame, zoom)
+  const settled = layoutWithMeasuredCards(layout(laneCounts, frame, zoom), nodes, options.cardHeights)
   const room = measure(settled)
   // Clamp against the same records that can actually be drawn. Including every rolled-out row here pushes the
   // camera below the viewport while trying to contain cards the lane has intentionally hidden.

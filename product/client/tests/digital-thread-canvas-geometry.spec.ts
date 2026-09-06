@@ -516,6 +516,18 @@ test.describe("story framing and label obstacles", () => {
     expect(geometry.rowPitch).toBe(138)
   })
 
+  test("a same-lane direct card uses spare viewport height after the selected card expands", () => {
+    const frame = { x: 0, y: 0, width: 720, height: 600 }
+    const nodes = [{ id: "selected", lane: 0, row: 0 }, { id: "direct", lane: 0, row: 1 }]
+    const heights = new Map([["selected", 280], ["direct", 130]])
+    const measured = layoutWithMeasuredCards(layout([2], frame, 1), nodes, heights)
+    const direct = positionsForNodes(nodes, measured.geometry, [], heights).get("direct")!
+    expect(isVisible(direct.y, measured.geometry, measured.bandHeight)).toBe(true)
+    expect(direct.y + 130).toBeLessThanOrEqual(measured.bandHeight)
+    expect(measured.bandHeight).toBeLessThanOrEqual(windowHeight(frame, 1))
+    expect(measured.laneMinimums[0]).toBe(0)
+  })
+
   test("leader clearance checks the complete segment, including a short obstacle between samples", () => {
     expect(segmentIntersectsRect(
       { x: 0, y: 0 },
