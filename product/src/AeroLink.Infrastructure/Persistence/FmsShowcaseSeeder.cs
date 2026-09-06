@@ -1302,6 +1302,13 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             return new TraceCoverageCheck(false,
                 "The named verification-coverage gap scenario is absent: no requirement links to the "
                 + $"{GapProcedureNumber} 1.6 rework. " + Detail());
+        // The seeded contract is exactly the two-requirement pair the procedure's approved revision
+        // covers. Deriving the expected set from the live coverage rows alone would let a future seed
+        // redistribution grow the gap silently, so the count is pinned and a deviation is drift.
+        if (gapLinked.Count != 2)
+            return new TraceCoverageCheck(false,
+                $"The named {GapProcedureNumber} rework scenario covers {gapLinked.Count} released-baseline "
+                + "requirement revision(s); the seeded contract is exactly the two-requirement pair. " + Detail());
         if (gapLinked.Except(suspect).Any())
             return new TraceCoverageCheck(false,
                 $"A requirement linked to the {GapProcedureNumber} rework is not Suspect, so the named gap no longer bites. " + Detail());
