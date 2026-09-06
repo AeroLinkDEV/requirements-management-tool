@@ -318,9 +318,11 @@ export default function DigitalThreadCanvas({
     // The toolbar may wrap at a narrow width or under a larger text setting. Its rendered bottom, rather than a
     // fixed constant, is the start of the actual drawing frame; the small breathing gap keeps headings readable.
     const controlBottom = controls?.getBoundingClientRect().bottom ?? rect.top + 38
-    // Lane headings extend above the card scene. Leave enough clearance beyond the measured toolbar for those
-    // headings at the readable landing scale, including compact density's taller controls.
-    const top = Math.max(40, Math.ceil(controlBottom - rect.top + 12))
+    // Headings extend above the card scene. Reserve that authored offset as well as the toolbar, so a frame
+    // clamped to its first card cannot put its heading back underneath the controls.
+    const heading = element.querySelector<HTMLElement>(".dtCanvasLaneHead")
+    const headingOffset = heading ? Math.max(0, -(parseFloat(getComputedStyle(heading).top) || 0)) : 0
+    const top = Math.max(40, Math.ceil(controlBottom - rect.top + headingOffset * Math.max(1, transform.current.zoom) + 8))
     const height = rect.height - top - (frameInset?.bottom ?? 0)
     if (width < 240 || height < 180) return null
     return {
