@@ -1241,9 +1241,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             .Select(x => new { x.Type, x.SoftwareLevel, State = (ChangeRequestState?)x.State }).ToListAsync(ct);
         var executionRows = await (from execution in db.TestExecutions.AsNoTracking()
             join revision in db.TestProcedureRevisions.AsNoTracking() on execution.ProcedureRevisionId equals revision.Id
+            join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
             where execution.ProjectId == projectId
             select new { execution.Id, Outcome = (TestOutcome?)execution.Outcome, execution.RetestOfExecutionId,
-                revision.ProcedureId, execution.ExecutedAt }).ToListAsync(ct);
+                revision.ProcedureId, execution.ExecutedAt, ProcedureLevel = (TestProcedureLevel?)procedure.Level }).ToListAsync(ct);
         var outcomes = executionRows.Select(x => new { x.Id, x.Outcome, x.RetestOfExecutionId, x.ProcedureId, x.ExecutedAt }).ToList();
         var verificationFamilies = await db.TestProcedures.AsNoTracking()
             .Where(x => x.ProjectId == projectId)
@@ -1299,6 +1300,21 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var assessmentCounts = assessmentTargets.ToDictionary(
             level => level,
             level => assessments.Count(x => x == level));
+        static TestProcedureLevel ToTestProcedureLevel(RequirementLevel level) => level switch
+        {
+            RequirementLevel.System => TestProcedureLevel.System,
+            RequirementLevel.HighLevel => TestProcedureLevel.HighLevel,
+            _ => TestProcedureLevel.LowLevel,
+        };
+        // Executions belong to the executable family of the procedure revision they ran, and the product
+        // exposes separate Test Results workspaces per family, so the aggregate outcome totals cannot
+        // stand in for them either.
+        var executableLevels = ladderPolicy.OrderedLevels
+            .Where(level => ladderPolicy.VerificationProfile(level) is not null)
+            .ToList();
+        var executionCounts = executableLevels.ToDictionary(
+            level => level,
+            level => executionRows.Count(x => x.ProcedureLevel == ToTestProcedureLevel(level)));
 
         var systemRequirements = levels.Count(x => x == RequirementLevel.System);
         var highLevelRequirements = levels.Count(x => x == RequirementLevel.HighLevel);
@@ -1334,8 +1350,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             + "verification artifacts: "
             + string.Join(", ", configuredFamilies.Select(f =>
                 $"{f.Level}/{f.Key.Kind} {artifactCounts[(f.Level, f.Key.Kind)]}")) + "; "
-            + $"executions: {passes} pass, {failures} fail, {retests} retest ({healedFailures} failure(s) healed by a passing retest); "
-            + "test change reviews: "
+            + "executions per family: "
+            + string.Join(", ", executableLevels.Select(level => $"{level} {executionCounts[level]}"))
+            + $" ({passes} pass, {failures} fail, {retests} retest, {healedFailures} failure(s) healed by a passing retest); "            + "test change reviews: "
             + string.Join(", ", configuredFamilies.Select(f => $"{f.Key.Discipline}/{f.Key.Kind} {reviewCounts[f.Key]}")) + "; "
             + "downstream assessments: "
             + string.Join(", ", assessmentTargets.Select(level => $"{level} {assessmentCounts[level]}")) + "; "
@@ -1370,6 +1387,11 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         {
             if (assessmentCounts[level] < 5)
                 failures1.Add($"only {assessmentCounts[level]} {level} downstream change assessments");
+        }
+        foreach (var level in executableLevels)
+        {
+            if (executionCounts[level] < 5)
+                failures1.Add($"only {executionCounts[level]} {level} executions");
         }
         if (healedFailures < 1) failures1.Add("no failed execution with a passing same-artifact retest successor that does not precede it (pass/fail/retest chain broken)");
         if (passes < 1) failures1.Add("no passing execution outside the retest chain (pass category empty)");
