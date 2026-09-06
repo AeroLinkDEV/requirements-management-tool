@@ -296,6 +296,7 @@
   overflow: hidden;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  row-gap: 4px;
 }
 
 .dtaPanelTools { position: static; display: flex; justify-content: flex-end; flex: 0 0 24px; gap: 4px; z-index: 2; margin-bottom: 4px; }

@@ -511,7 +511,7 @@ test.describe("story framing and label obstacles", () => {
       { id: "direct", lane: 0, row: 1 },
       { id: "last", lane: 0, row: 2 },
     ], new Map([["selected", 167]]))
-    expect(extended.laneHeights[0]).toBe(base.laneHeights[0] + 29)
+    expect(extended.laneHeights[0]).toBe(base.laneHeights[0] + 33)
     expect(extended.laneMinimums[0]).toBeLessThan(base.laneMinimums[0])
     expect(geometry.rowPitch).toBe(138)
   })

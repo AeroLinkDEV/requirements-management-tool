@@ -342,7 +342,11 @@ export default function DigitalThreadCanvas({
     // measurements used for positions so a shifted final card remains reachable by keyboard and scrub.
     const measuredCardHeights = new Map<string, number>()
     for (const node of nodes) {
-      const height = cardRefs.current.get(node.id)?.scrollHeight
+      const card = cardRefs.current.get(node.id)
+      // Toggle before measuring so selection's expanded body is included in this settled pass. offsetHeight is
+      // the rendered border box; scrollHeight omits the border and left a small overlap at the next row.
+      card?.classList.toggle("is-selected", selectedId === node.id)
+      const height = card?.offsetHeight || card?.scrollHeight
       if (height && Number.isFinite(height)) measuredCardHeights.set(node.id, height)
     }
     const result = layoutWithMeasuredCards(rawResult, nodes, measuredCardHeights)
@@ -423,9 +427,6 @@ export default function DigitalThreadCanvas({
           delete control.dataset.dtOriginalTabIndex
         }
       })
-      // The density rules exempt the selected card from compaction, and they key off this class on the node
-      // element. Without it the exemption silently never applied and a selected card compacted with the rest.
-      card.classList.toggle("is-selected", selectedId === node.id)
     }
 
     // Tab stops are authored here, from the positions just written, because a lane rolls under the pointer
@@ -482,7 +483,7 @@ export default function DigitalThreadCanvas({
         x: position.x,
         y: position.y,
         width: geometry.laneWidth,
-        height: Math.max(geometry.cardHeight, card.scrollHeight),
+        height: Math.max(geometry.cardHeight, card.offsetHeight || card.scrollHeight),
       }]
     })
     const labelsAtRest = transform.current.zoom > 1.05
@@ -621,7 +622,10 @@ export default function DigitalThreadCanvas({
           leader.setAttribute("y2", String(position?.y ?? 0))
           leader.style.opacity = inWindow && (traced || labelsAtRest) && position?.leader ? "" : "0"
         }
-        label.style.opacity = inWindow && (traced || labelsAtRest) && position?.available !== false ? "" : "0"
+        // Labels that were outside the current horizontal window have no placement entry. Keep them hidden until
+        // the same shownEdge filter admits them; otherwise the SVG's initial coordinates can leak a stale phrase
+        // into the frame after a lane roll or dock transition.
+        label.style.opacity = inWindow && (traced || labelsAtRest) && position?.available === true ? "" : "0"
       }
     }
   }, [counts, frame, lanes.length, nodes, onFramingNeedsRoom, selectedId, trailingOverhang, tracedEdges])
@@ -687,11 +691,12 @@ export default function DigitalThreadCanvas({
       if (!box || !result) return false
 
       // Read every requested card's actual layout height before choosing a camera. Wrapped identifiers and
-      // state pills can make a direct card taller than its nominal tier height; using only the selected card's
-      // scrollHeight leaves another direct record partly under the panel after a trace selection.
+      // state pills can make a direct card taller than its nominal tier height; the measured border box keeps
+      // another direct record clear after a trace selection.
       const cardHeights = new Map<string, number>()
       for (const node of nodes) {
-        const measured = cardRefs.current.get(node.id)?.scrollHeight
+        const card = cardRefs.current.get(node.id)
+        const measured = card?.offsetHeight || card?.scrollHeight
         if (measured && Number.isFinite(measured)) cardHeights.set(node.id, measured)
       }
 
@@ -928,7 +933,8 @@ export default function DigitalThreadCanvas({
           if (anchor) {
             const measuredHeights = new Map<string, number>()
             for (const candidate of nodes) {
-              const height = cardRefs.current.get(candidate.id)?.scrollHeight
+              const card = cardRefs.current.get(candidate.id)
+              const height = card?.offsetHeight || card?.scrollHeight
               if (height && Number.isFinite(height)) measuredHeights.set(candidate.id, height)
             }
             targets.current = syncTargets(
@@ -1017,7 +1023,8 @@ export default function DigitalThreadCanvas({
       if (!result) return
       const measuredHeights = new Map<string, number>()
       for (const candidate of nodes) {
-        const height = cardRefs.current.get(candidate.id)?.scrollHeight
+        const card = cardRefs.current.get(candidate.id)
+        const height = card?.offsetHeight || card?.scrollHeight
         if (height && Number.isFinite(height)) measuredHeights.set(candidate.id, height)
       }
       const measuredPosition = positionsForNodes(nodes, result.geometry, offsets.current, measuredHeights).get(node.id)

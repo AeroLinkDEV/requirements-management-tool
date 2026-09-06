@@ -68,6 +68,8 @@ const TIERS: Record<DensityTier, { rowPitch: number; cardHeight: number }> = {
 const LANE_WIDTH = 236
 const LANE_PITCH = 296
 const LANE_PAD = 12
+/** A measured border-box gap keeps an expanded card from touching the next governed record. */
+export const MEASURED_CARD_GAP = 4
 
 /** Below this the identifiers stop being legible however much more fits, so zooming out stops here. */
 export const MIN_ZOOM = 0.58
@@ -209,7 +211,8 @@ export const positionsForNodes = (
       const base = nodePosition(node, geometry, offsets)
       result.set(node.id, { x: base.x, y: base.y + extra })
       const measured = measuredHeights?.get(node.id) ?? geometry.cardHeight
-      extra += Math.max(0, measured - geometry.rowPitch)
+      const excess = Math.max(0, measured - geometry.rowPitch)
+      extra += excess + (excess > 0 ? MEASURED_CARD_GAP : 0)
     }
   }
   return result
@@ -226,7 +229,8 @@ export const layoutWithMeasuredCards = (
   for (const node of nodes) {
     const measured = measuredHeights.get(node.id)
     if (measured && Number.isFinite(measured)) {
-      extra.set(node.lane, (extra.get(node.lane) ?? 0) + Math.max(0, measured - result.geometry.rowPitch))
+      const excess = Math.max(0, measured - result.geometry.rowPitch)
+      extra.set(node.lane, (extra.get(node.lane) ?? 0) + excess + (excess > 0 ? MEASURED_CARD_GAP : 0))
     }
   }
   if (!extra.size) return result
