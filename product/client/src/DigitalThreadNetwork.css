@@ -208,7 +208,7 @@
   display: grid;
   grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr) 158px;
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
   height: auto;
   min-height: 0;
   overflow: hidden;
@@ -228,6 +228,7 @@
   align-content: start;
   max-height: none;
   min-height: 0;
+  flex: 1 1 auto;
   padding-right: 3px;
 }
 
@@ -256,6 +257,8 @@
 .dtnPanel-bottom .dtnPanelIdentityCol,
 .dtnPanel-bottom .dtnPanelCol,
 .dtnPanel-bottom .dtnPanelActions { min-height: 0; }
+.dtnPanel-bottom .dtnPanelIdentityCol,
+.dtnPanel-bottom .dtnPanelCol { overflow: hidden; }
 
 .dtnPanelActions button {
   min-height: 32px;

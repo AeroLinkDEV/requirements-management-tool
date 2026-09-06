@@ -330,7 +330,7 @@
   display: grid;
   grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr) 158px;
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
   height: auto;
   min-height: 0;
   overflow: hidden;
@@ -362,6 +362,7 @@
   align-content: start;
   max-height: none;
   min-height: 0;
+  flex: 1 1 auto;
   padding-right: 3px;
 }
 
@@ -392,6 +393,7 @@
 .dtaPanelActions { display: flex; flex-direction: column; gap: 6px; justify-content: flex-end; min-width: 0; }
 .dtaPanel-bottom .dtaPanelCol,
 .dtaPanel-bottom .dtaPanelActions { min-height: 0; }
+.dtaPanel-bottom .dtaPanelCol { overflow: hidden; }
 
 .dtaPanelActions button {
   min-height: 32px;
