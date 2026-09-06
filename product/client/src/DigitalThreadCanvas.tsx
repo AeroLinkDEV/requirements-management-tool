@@ -318,9 +318,9 @@ export default function DigitalThreadCanvas({
     // The toolbar may wrap at a narrow width or under a larger text setting. Its rendered bottom, rather than a
     // fixed constant, is the start of the actual drawing frame; the small breathing gap keeps headings readable.
     const controlBottom = controls?.getBoundingClientRect().bottom ?? rect.top + 38
-    // Reserve the strip that was actually rendered, with a small measured breathing gap. A fixed 54px band
-    // left most of the canvas empty at desktop widths and pushed the first lane heading away from its controls.
-    const top = Math.max(40, Math.ceil(controlBottom - rect.top + 4))
+    // Lane headings extend above the card scene. Leave enough clearance beyond the measured toolbar for those
+    // headings at the readable landing scale, including compact density's taller controls.
+    const top = Math.max(40, Math.ceil(controlBottom - rect.top + 12))
     const height = rect.height - top - (frameInset?.bottom ?? 0)
     if (width < 240 || height < 180) return null
     return {
@@ -572,7 +572,7 @@ export default function DigitalThreadCanvas({
       const unavailable = [...labelPositions.values()].some(position => !position.available)
       placementNotice.hidden = !unavailable
       placementNotice.textContent = unavailable
-        ? "A relation label needs more room. Resize the canvas or use Table view to read the edge context."
+        ? "A relation label cannot fit without covering other content. Enlarge the canvas to show it on its connector."
         : ""
     }
     // Edge labels rest hidden and appear on a traced edge, or once the board is zoomed past 1.05 (#880 §6.7).
