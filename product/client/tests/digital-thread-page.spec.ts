@@ -236,7 +236,7 @@ test.describe("active-view table representations", () => {
     const { projectId, releaseId } = ids(page)
     const network = await (await request.get(
       `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json() as {
-        nodes: { id: string; kind: string; displayNumber: string }[]
+        nodes: { id: string; kind: string; displayNumber: string; level?: string | null }[]
       }
     const target = network.nodes.find(node => node.kind === "ChangeRequest")
     expect(target, "the network projection should carry a Change Request").toBeTruthy()
@@ -251,8 +251,6 @@ test.describe("active-view table representations", () => {
     await card.click()
     await expect(page.locator(".dtnCard.is-selected")).toContainText(target.displayNumber)
     const networkPanel = page.locator(".dtnPanel")
-    await networkPanel.getByRole("button", { name: "Right", exact: true }).click()
-    await expect(networkPanel).toHaveClass(/dtnPanel-right/)
 
     let traceabilityRequests = 0
     page.on("request", requestEvent => {
@@ -260,6 +258,9 @@ test.describe("active-view table representations", () => {
     })
     await page.getByRole("button", { name: "Table" }).click()
     await expect(page.locator(".dtThreadTable")).toBeVisible()
+    // Map may move a side preference to Bottom when the canvas cannot preserve non-occlusion. Set Right
+    // against the active table, whose mounted canvas cannot report a map framing shortfall.
+    await networkPanel.getByRole("button", { name: "Right", exact: true }).click()
     await expect(networkPanel).toHaveClass(/dtnPanel-right/)
     const networkLastRow = page.locator(".dtThreadTable tbody tr").last()
     await networkLastRow.scrollIntoViewIfNeeded()
@@ -289,9 +290,9 @@ test.describe("active-view table representations", () => {
     const { projectId, releaseId } = ids(page)
     const network = await (await request.get(
       `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json() as {
-        nodes: { id: string; kind: string; displayNumber: string }[]
+        nodes: { id: string; kind: string; displayNumber: string; level?: string | null }[]
       }
-    const target = network.nodes.find(node => node.kind === "ChangeRequest")
+    const target = network.nodes.find(node => node.kind === "ChangeRequest" && node.level === "System")
     expect(target, "the network projection should carry a Change Request").toBeTruthy()
     if (!target) throw new Error("the network projection should carry a Change Request")
 
@@ -299,12 +300,17 @@ test.describe("active-view table representations", () => {
     await networkCard.click()
     await networkCard.getByRole("button", { name: "Open this change" }).click()
     await expect(page.locator(".dticRoot")).toBeVisible()
+    // Entering Inside opens the focal change but deliberately starts with no selected card. Select the real
+    // register node through the canvas's native button contract before exercising its inspector.
+    const insideNode = page.locator(".dtCanvasNode").filter({ hasText: target.displayNumber }).first()
+    await insideNode.focus()
+    await page.keyboard.press("Enter")
+    await expect(insideNode).toHaveAttribute("aria-pressed", "true")
     await page.getByRole("button", { name: "SYS", exact: true }).click()
     const insidePanel = page.locator(".dticPanel")
-    await insidePanel.getByRole("button", { name: "Right", exact: true }).click()
-    await expect(insidePanel).toHaveClass(/dticPanel-right/)
     await page.getByRole("button", { name: "Table" }).click()
     await expect(page.locator(".dtThreadTable")).toBeVisible()
+    await insidePanel.getByRole("button", { name: "Right", exact: true }).click()
     await expect(insidePanel).toHaveClass(/dticPanel-right/)
     const insideLastRow = page.locator(".dtThreadTable tbody tr").last()
     await insideLastRow.scrollIntoViewIfNeeded()
@@ -313,16 +319,19 @@ test.describe("active-view table representations", () => {
     await expect(page.locator(".dtThreadTable")).not.toContainText("1,250 requirement")
     await expect(page.locator(".dticTypes").getByRole("button", { name: "SYS", exact: true })).toHaveAttribute("aria-pressed", "true")
 
-    const firstRow = page.locator(".dtThreadTable tbody tr").first()
-    const selector = firstRow.getByRole("button", { name: /^Select / })
+    const selector = page.locator(".dtThreadTable").getByRole("button", { name: /^Select / }).first()
+    const selectorLabel = await selector.getAttribute("aria-label")
+    expect(selectorLabel, "the Inside table should expose an unselected row control").toMatch(/^Select /)
+    if (!selectorLabel) throw new Error("the Inside table should expose an unselected row control")
+    const selectedLabel = selectorLabel.replace(/^Select /, "Selected ")
     await selector.focus()
     await page.keyboard.press("Enter")
-    await expect(firstRow.getByRole("button", { name: /^Selected / })).toBeVisible()
+    await expect(page.locator(".dtThreadTable").getByRole("button", { name: selectedLabel, exact: true })).toBeVisible()
     await page.getByRole("button", { name: "Map" }).click()
     await expect(page.locator(".dticTypes").getByRole("button", { name: "SYS", exact: true })).toHaveAttribute("aria-pressed", "true")
     await expect(page.locator(".dticRoot .dtCanvas")).toBeVisible()
     await page.getByRole("button", { name: "Table" }).click()
-    await expect(page.locator(".dtThreadTable tbody tr").first().getByRole("button", { name: /^Selected / })).toBeVisible()
+    await expect(page.locator(".dtThreadTable").getByRole("button", { name: selectedLabel, exact: true })).toBeVisible()
   })
 
   test("Artifact Table keeps a non-focal exact record selected and searchable", async ({ page, request }) => {
@@ -354,10 +363,9 @@ test.describe("active-view table representations", () => {
     await page.goto(`${root}/traceability/${row.revisionId}`)
     await expect(page.locator(".dtaRoot")).toBeVisible()
     const artifactPanel = page.locator(".dtaPanel")
-    await artifactPanel.getByRole("button", { name: "Right", exact: true }).click()
-    await expect(artifactPanel).toHaveClass(/dtaPanel-right/)
     await page.getByRole("button", { name: "Table" }).click()
     const table = page.locator(".dtThreadTable")
+    await artifactPanel.getByRole("button", { name: "Right", exact: true }).click()
     await expect(artifactPanel).toHaveClass(/dtaPanel-right/)
     const artifactLastRow = table.locator("tbody tr").last()
     await artifactLastRow.scrollIntoViewIfNeeded()
@@ -370,7 +378,7 @@ test.describe("active-view table representations", () => {
     const selectedIdentity = await rowLink.innerText()
     await rowSelect.focus()
     await page.keyboard.press("Enter")
-    await expect(nonFocalRow.getByRole("button", { name: /^Selected / })).toBeVisible()
+    await expect(table.getByRole("button", { name: `Selected ${nonFocal.displayNumber}`, exact: true })).toBeVisible()
 
     await page.getByRole("button", { name: "Map" }).click()
     await expect(page.locator(".dtaSearch input")).toBeVisible()
@@ -380,7 +388,7 @@ test.describe("active-view table representations", () => {
     await page.getByRole("button", { name: "Table" }).click()
     await expect(page.locator(".dtaSearch input")).toHaveValue(selectedIdentity)
     await expect(table.locator("tbody tr").filter({ hasText: selectedIdentity })).toHaveCount(1)
-    await expect(table.locator("tbody tr").filter({ hasText: selectedIdentity }).getByRole("button", { name: /^Selected / })).toBeVisible()
+    await expect(table.getByRole("button", { name: `Selected ${nonFocal.displayNumber}`, exact: true })).toBeVisible()
   })
 })
 
