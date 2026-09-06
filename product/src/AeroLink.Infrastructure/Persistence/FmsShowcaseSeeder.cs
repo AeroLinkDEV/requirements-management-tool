@@ -1277,6 +1277,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (systemRequests < 5) failures1.Add($"only {systemRequests} System change requests");
         if (softwareRequests < 5) failures1.Add($"only {softwareRequests} Software change requests");
         if (healedFailures < 1) failures1.Add("no failed execution with a passing retest successor (pass/fail/retest chain broken)");
+        if (passes < 1) failures1.Add("no passing execution outside the retest chain (pass category empty)");
         if (testChangeReviews < 5) failures1.Add($"only {testChangeReviews} test change reviews");
         if (assessments < 5) failures1.Add($"only {assessments} downstream change assessments");
         if (impactItems < 5) failures1.Add($"only {impactItems} verification impact items");
