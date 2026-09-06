@@ -597,9 +597,15 @@ export default function DigitalThreadCanvas({
   const fitAll = useCallback(() => {
     const box = frame()
     if (!box) return
-    transform.current = fitTransform(box, counts, false)
+    // Fit the edge layer as well as the cards. The final lane's intra-lane connector deliberately extends into
+    // the reserved overhang; leaving that space out of this explicit overview fit makes the scene's DOM box
+    // protrude past the viewport even though every card appears to fit.
+    const fitBox = trailingOverhang
+      ? { ...box, width: Math.max(240, box.width - trailingOverhang) }
+      : box
+    transform.current = fitTransform(fitBox, counts, false)
     paint()
-  }, [counts, frame, paint])
+  }, [counts, frame, paint, trailingOverhang])
 
   /**
    * Reframe onto the selection and its direct links.
