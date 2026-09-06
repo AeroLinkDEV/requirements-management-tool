@@ -147,8 +147,26 @@ export default function DigitalThreadCanvas({
   const framedFor = useRef<string | null>(null)
   /** The latest framing request, so the resize path can retry one that arrived before the frame was real. */
   const framingRef = useRef<{ selectedId: string; wanted: string[]; key: string; intent: FrameIntent } | null>(null)
-  /** Arrival is a one-time intent. A user returning to the focal record must receive ordinary selection framing. */
-  const landingPending = useRef(true)
+  /** The arrival record remains in landing mode while measurement settles; a later selection clears it. */
+  const landingSelection = useRef<string | null>(
+    selectedId && framingIntent === "landing" && selectedId === landingId ? selectedId : null,
+  )
+  const lastLandingId = useRef(landingId)
+  const lastSelectedForLanding = useRef(selectedId)
+
+  // A measured panel inset can cause more than one framing pass for the same arrival. Keep that pass at the
+  // landing floor until the reader chooses another record, then never mistake a return to the focal record for a
+  // deep link. These refs track identity, not presentation state, and avoid a render-triggering state update.
+  if (lastLandingId.current !== landingId) {
+    lastLandingId.current = landingId
+    landingSelection.current = null
+  }
+  if (lastSelectedForLanding.current !== selectedId) {
+    landingSelection.current = framingIntent === "landing" && selectedId === landingId && lastSelectedForLanding.current === null
+      ? selectedId
+      : null
+    lastSelectedForLanding.current = selectedId
+  }
   const easeTimer = useRef<number | null>(null)
   const zoomReadoutRef = useRef<HTMLOutputElement | null>(null)
 
@@ -213,10 +231,10 @@ export default function DigitalThreadCanvas({
     if (!selectedId) return null
 
     // `landingId` identifies the record the view selected on arrival. The focal identity alone is insufficient:
-    // a reader can deliberately return to that same record after stepping through another card. The pending ref
-    // is consumed after the first successful frame, preserving the initial/deep-link distinction without adding a
-    // user density setting.
-    const intent: FrameIntent = framingIntent === "landing" && landingPending.current && selectedId === landingId
+    // a reader can deliberately return to that same record after stepping through another card. The identity ref
+    // persists through measurement retries, preserving the initial/deep-link distinction without a user density
+    // setting.
+    const intent: FrameIntent = framingIntent === "landing" && landingSelection.current === selectedId
       ? "landing"
       : framingIntent === "landing" ? "selection" : framingIntent
 
@@ -249,7 +267,6 @@ export default function DigitalThreadCanvas({
     edges,
     frameIds,
     framingIntent,
-    landingId,
     frameInset?.left,
     frameInset?.right,
     frameInset?.bottom,
@@ -602,7 +619,6 @@ export default function DigitalThreadCanvas({
       sceneRef.current?.classList.add("is-easing")
       transform.current = next
       paint()
-      landingPending.current = false
       if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
       easeTimer.current = window.setTimeout(() => {
         sceneRef.current?.classList.remove("is-easing")
