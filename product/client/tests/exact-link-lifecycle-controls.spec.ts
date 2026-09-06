@@ -43,6 +43,7 @@ test('Digital Thread reuses projected lifecycle data and the shared exact-link c
   await openNavigationGroup(page, 'RELEASE & CONFIGURATION')
   await page.getByRole('link', { name: 'Digital Thread' }).click()
   await page.locator('.dtPageToolbar').getByRole('button', { name: 'Table' }).click()
+  await page.getByText('Baseline evidence report', { exact: true }).click()
   await expect(page.locator('.dtPageTable tbody tr').first()).toBeVisible()
   await expect(page.getByRole('link', { name: 'SYSR-000001.00 · System' }))
     .toHaveAttribute('href', /\/requirements\/parent-artifact\?discipline=system&requirementRevisionId=parent-revision$/)
@@ -128,7 +129,10 @@ test('a recorded relationship refreshes the active Artifact and keeps a follow-u
   const threadRoot = new URL(page.url()).pathname.replace(/\/traceability.*$/, '')
   await page.goto(`${threadRoot}/traceability/${focalId}`)
   await expect(page.locator('.dtaRoot')).toBeVisible()
-  await expect(page.locator('.dtaSuspectFlag b')).toHaveText('SUSPECT')
+  const focalCard = page.locator('.dtaCard').filter({ hasText: 'HLR-REFRESH-0001.00' }).first()
+  const procedureCard = page.locator('.dtaCard').filter({ hasText: 'HLRTP-REFRESH-0001.00' }).first()
+  await expect(focalCard.locator('.dtaSuspectFlag b')).toHaveText('SUSPECT')
+  await expect(procedureCard.locator('.dtaSuspectFlag b')).toHaveText('SUSPECT')
   const networkReadsBeforeMutation = networkReads
 
   await page.getByText('Baseline evidence report', { exact: true }).click()
@@ -137,9 +141,10 @@ test('a recorded relationship refreshes the active Artifact and keeps a follow-u
     .fill('Review the refreshed relationship projection.')
   await page.getByRole('button', { name: 'Acknowledge relationship' }).click()
 
-  await expect(page.getByRole('alert')).toContainText('decision was recorded, but the latest relationship state could not be refreshed')
   await expect.poll(() => artifactReads).toBeGreaterThan(1)
-  await expect(page.locator('.dtaSuspectFlag')).toHaveCount(0)
+  await expect(page.getByText('Relationship Acknowledged', { exact: true })).toBeVisible()
+  await expect(focalCard.locator('.dtaSuspectFlag')).toHaveCount(0)
+  await expect(procedureCard.locator('.dtaSuspectFlag')).toHaveCount(0)
   expect(lifecycleGets).toBe(1)
   expect(networkReads).toBe(networkReadsBeforeMutation)
 })
