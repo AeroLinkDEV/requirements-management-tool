@@ -840,4 +840,38 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         // Uncovered is deliberately not seeded — see EnsureVerificationCoverageGapAsync for why.
         Assert.DoesNotContain(RequirementCoverageState.Uncovered, states.Values);
     }
+
+    /// <summary>
+    /// The trace-gap diagnostic pins the deliberate negatives into the seed contract: after a seed, the
+    /// suspect set is exactly the named SYSTP-000040 1.6 rework pair and nothing reads Uncovered. It must
+    /// also bite: the seeder's own gap mechanism (an in-work revision stopping a procedure's coverage from
+    /// counting) applied outside the named scenario is drift, and the invariant names it.
+    /// </summary>
+    [Fact]
+    public async Task Trace_gap_inventory_invariant_names_accidental_suspect_coverage_outside_the_named_scenario()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+
+        var before = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
+        var baseline = Assert.Single(before, x => x.Key == "trace-gap-inventory");
+        Assert.True(baseline.Holds, baseline.Detail);
+        Assert.Contains("SYSTP-000040", baseline.Detail, StringComparison.Ordinal);
+
+        var procedure = await db.TestProcedures.AsNoTracking().SingleAsync(x => x.BaseNumber == "SYSTP-000041");
+        db.TestProcedureRevisions.Add(new TestProcedureRevision(procedure.Id, 1,
+            "Verify the drifted FMS behavior group against revised 1.6 behavior.",
+            "Load the FMS 1.6 candidate software.",
+            "Stimulate the revised inputs and record each observable output.",
+            "Every observed output meets the linked requirement acceptance criteria.",
+            TestProcedureState.Draft, "test.author", DateTimeOffset.UtcNow));
+        await db.SaveChangesAsync();
+
+        var after = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
+        var drifted = Assert.Single(after, x => x.Key == "trace-gap-inventory");
+        Assert.False(drifted.Holds, drifted.Detail);
+        Assert.Contains("Accidental suspect coverage outside the named SYSTP-000040 scenario",
+            drifted.Detail, StringComparison.Ordinal);
+    }
 }
