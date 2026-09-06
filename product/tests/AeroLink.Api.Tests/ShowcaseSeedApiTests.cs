@@ -15,7 +15,13 @@ public sealed class ShowcaseSeedApiTests
     {
         using var factory = new AeroLinkApiFactory(seedDemoAccounts: true, allowDemoAccounts: true);
         using var client = factory.CreateClient();
-        client.Timeout = TimeSpan.FromMinutes(10);
+        // The full controlled seed demonstrably runs ~8.5 minutes on an idle CI runner and over the old
+        // 10-minute budget on a shard running other SQLite suites concurrently (PR #930's gate: cancelled
+        // at 10m04s while the same request passed in 8m28s in the same hour elsewhere). 14 minutes keeps
+        // real runner variance inside the client budget while staying under the 15-minute blame-hang
+        // detection, so a genuinely wedged seed is still caught as a hang rather than a vague client
+        // cancellation.
+        client.Timeout = TimeSpan.FromMinutes(14);
         using var login = await client.PostAsJsonAsync("/api/auth/login",
             new { userName = IdentityService.SystemAdministratorUserName, password = IdentitySeeder.DemoPassword });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
