@@ -468,6 +468,26 @@ test.describe("selection and navigation coherence", () => {
       link.click(),
     ])
     expect(new URL(page.url()).pathname).toBe(new URL(href, page.url()).pathname)
+
+    // Fresh route, then a native Enter activation on a link that is actually in the usable canvas window.
+    await page.goto(`${threadRoot(page)}/traceability/change-requests/${change.id}?view=inside`)
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    const links = page.locator(".dticCard .dticId.exactArtifactLink[href]")
+    const keyboardLinkIndex = await links.evaluateAll(elements => elements.findIndex(element => {
+      const box = element.getBoundingClientRect()
+      return box.width > 10 && box.height > 10 && box.bottom > 0 && box.top < window.innerHeight
+    }))
+    expect(keyboardLinkIndex, "Inside should expose a visible exact link for keyboard activation").toBeGreaterThanOrEqual(0)
+    const keyboardLink = links.nth(keyboardLinkIndex)
+    const keyboardHref = await keyboardLink.getAttribute("href")
+    expect(keyboardHref, "the keyboard target should remain an exact native route").toBeTruthy()
+    if (!keyboardHref) throw new Error("the keyboard target should remain an exact native route")
+    await keyboardLink.focus()
+    await Promise.all([
+      page.waitForURL(url => new URL(url).pathname === new URL(keyboardHref, page.url()).pathname),
+      page.keyboard.press("Enter"),
+    ])
+    expect(new URL(page.url()).pathname).toBe(new URL(keyboardHref, page.url()).pathname)
   })
 
   test("Artifact card actions survive shared canvas pointer and keyboard handling", async ({ page, request }) => {
@@ -483,20 +503,37 @@ test.describe("selection and navigation coherence", () => {
     const context = await (await request.get(
       `${apiBase}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)).json()
     const list = await (await request.get(
-      `${apiBase}/api/traceability?projectId=${projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=1`
+      `${apiBase}/api/traceability?projectId=${projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=100`
     )).json()
-    const row = (Array.isArray(list) ? list : list.items ?? [])[0] as { revisionId: string; displayNumber: string } | undefined
-    expect(row, "the seeded showcase should carry a requirement revision for Artifact actions").toBeTruthy()
-    if (!row) throw new Error("the seeded showcase should carry a requirement revision for Artifact actions")
-    const thread = await (await request.get(
-      `${apiBase}/api/artifact-thread?projectId=${projectId}&baselineId=${context.effectiveBaselineId}`
-      + `&focalKind=Requirement&focalId=${encodeURIComponent(row.revisionId)}`)).json()
-    const change = (thread.nodes ?? []).find((node: { kind: string }) =>
-      node.kind === "ChangeRequest" || node.kind === "TestChangeRequest") as {
-        id: string; displayNumber: string
-      } | undefined
+    const rows = (Array.isArray(list) ? list : list.items ?? []) as { revisionId: string; displayNumber: string }[]
+    expect(rows.length, "the seeded showcase should carry requirement revisions for Artifact actions").toBeGreaterThan(0)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const networkChangeIds = new Set((network.nodes ?? [])
+      .filter((node: { kind: string }) => node.kind === "ChangeRequest" || node.kind === "TestChangeRequest")
+      .map((node: { id: string }) => node.id))
+    let row: { revisionId: string; displayNumber: string } | undefined
+    let thread: { nodes?: { id: string; kind: string; displayNumber: string }[] } | undefined
+    let change: { id: string; displayNumber: string } | undefined
+    // Historical authored changes can occur in an artifact thread without belonging to this active build. Find
+    // a real current-build action card so the ensuing Inside navigation is a supported context transition.
+    for (const candidate of rows) {
+      const candidateThread = await (await request.get(
+        `${apiBase}/api/artifact-thread?projectId=${projectId}&baselineId=${context.effectiveBaselineId}`
+        + `&focalKind=Requirement&focalId=${encodeURIComponent(candidate.revisionId)}`)).json() as {
+          nodes?: { id: string; kind: string; displayNumber: string }[]
+        }
+      const candidateChange = (candidateThread.nodes ?? []).find(node => networkChangeIds.has(node.id))
+      if (candidateChange) {
+        row = candidate
+        thread = candidateThread
+        change = { id: candidateChange.id, displayNumber: candidateChange.displayNumber }
+        break
+      }
+    }
+    expect(row, "the seeded showcase should carry a current-build requirement revision for Artifact actions").toBeTruthy()
     expect(change, "the seeded Artifact thread should carry a change action card").toBeTruthy()
-    if (!change) throw new Error("the seeded Artifact thread should carry a change action card")
+    if (!row || !thread || !change) throw new Error("the seeded Artifact thread should carry a current-build change action card")
 
     const artifactPath = `${threadRoot(page)}/traceability/${row.revisionId}`
     await page.goto(artifactPath)
@@ -617,6 +654,7 @@ test.describe("selection and navigation coherence", () => {
 
     let releaseResponse: (() => void) | undefined
     const artifactRequest = page.waitForRequest(requestEvent => requestEvent.url().includes("/api/artifact-thread"))
+    const artifactResponse = page.waitForResponse(response => response.url().includes("/api/artifact-thread"))
     await page.route("**/api/artifact-thread*", async route => {
       await new Promise<void>(resolve => { releaseResponse = resolve })
       await route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
@@ -629,6 +667,7 @@ test.describe("selection and navigation coherence", () => {
     await page.getByRole("button", { name: "Change network" }).click()
     await expect(page.locator(".dtnRoot")).toBeVisible()
     releaseResponse?.()
+    expect((await artifactResponse).status()).toBe(503)
     await expect(page.locator(".dtnInFrame-error")).toHaveCount(0)
   })
 })
