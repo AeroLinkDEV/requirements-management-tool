@@ -1262,12 +1262,14 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
     /// </summary>
     private async Task<TraceCoverageCheck> TraceCoverageInvariantAsync(Guid projectId, CancellationToken ct)
     {
-        // The denominator is the released build's baseline — the population the issue calls released
+        // The denominator is the released 1.5 build's baseline — the population the issue calls released
         // truth — never whichever baseline happened to materialize most recently: an operator who
-        // materializes the 1.6 candidate must not change what this diagnostic measures.
+        // materializes the 1.6 candidate must not change what this diagnostic measures. The version is
+        // matched explicitly rather than via IsReleased because MarkReleased does not clear the flag on
+        // predecessors, so once 1.6 ships, two releases would qualify.
         var baseline = await (from candidate in db.CandidateBaselines.AsNoTracking()
             join release in db.Releases.AsNoTracking() on candidate.ReleaseId equals release.Id
-            where candidate.ProjectId == projectId && release.IsReleased
+            where candidate.ProjectId == projectId && release.Version == "1.5"
             select candidate).FirstOrDefaultAsync(ct);
         if (baseline is null)
             return new TraceCoverageCheck(false, "No materialized requirement baseline; trace coverage has no denominator.");
