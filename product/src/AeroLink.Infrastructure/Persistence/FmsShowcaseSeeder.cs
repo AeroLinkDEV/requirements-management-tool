@@ -1239,9 +1239,11 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var requests = await db.SystemChangeRequests.AsNoTracking()
             .Where(x => x.ProjectId == projectId)
             .Select(x => new { x.Type, State = (ChangeRequestState?)x.State }).ToListAsync(ct);
-        var outcomes = await db.TestExecutions.AsNoTracking()
-            .Where(x => x.ProjectId == projectId)
-            .Select(x => new { x.Id, Outcome = (TestOutcome?)x.Outcome, x.RetestOfExecutionId }).ToListAsync(ct);
+        var executionRows = await (from execution in db.TestExecutions.AsNoTracking()
+            join revision in db.TestProcedureRevisions.AsNoTracking() on execution.ProcedureRevisionId equals revision.Id
+            where execution.ProjectId == projectId
+            select new { execution.Id, Outcome = (TestOutcome?)execution.Outcome, execution.RetestOfExecutionId, revision.ProcedureId }).ToListAsync(ct);
+        var outcomes = executionRows.Select(x => new { x.Id, x.Outcome, x.RetestOfExecutionId }).ToList();
         var testChangeReviews = await db.TestChangeReviews.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
         var assessments = await db.DownstreamChangeAssessments.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
         var impactItems = await db.VerificationImpactItems.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
@@ -1255,9 +1257,15 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var failures = outcomes.Count(x => x.Outcome == TestOutcome.Fail);
         var retests = outcomes.Count(x => x.RetestOfExecutionId != null);
         // The chain is correlated, not two independent totals: a failed execution only demonstrates the
-        // retest journey when a retest successor of that exact failure actually passed.
+        // retest journey when a retest successor of that exact failure actually passed. The successor must
+        // also belong to the same controlled test artifact — the record-execution path rejects a retest
+        // whose predecessor is a different procedure, so a foreign-artifact pass must not count here.
+        var procedureByExecutionId = executionRows.ToDictionary(x => x.Id, x => x.ProcedureId);
         var passingRetestSources = outcomes
-            .Where(x => x.RetestOfExecutionId != null && x.Outcome == TestOutcome.Pass)
+            .Where(x => x.RetestOfExecutionId != null && x.Outcome == TestOutcome.Pass
+                && procedureByExecutionId.TryGetValue(x.RetestOfExecutionId.Value, out var predecessor)
+                && procedureByExecutionId.TryGetValue(x.Id, out var successor)
+                && predecessor == successor)
             .Select(x => x.RetestOfExecutionId!.Value).ToHashSet();
         var healedFailures = outcomes.Count(x => x.Outcome == TestOutcome.Fail && passingRetestSources.Contains(x.Id));
 
