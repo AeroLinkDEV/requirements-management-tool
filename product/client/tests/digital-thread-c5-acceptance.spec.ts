@@ -69,7 +69,9 @@ async function controlsDoNotOverlap(page: Page) {
     }
     const toolbar = document.querySelector(".dtCanvasControls")!.getBoundingClientRect()
     for (const head of document.querySelectorAll(".dtCanvasLaneHead")) {
-      if (visible(head) && overlaps(toolbar, head.getBoundingClientRect())) failures.push(`Canvas controls / ${head.textContent}`)
+      if (visible(head) && overlaps(toolbar, head.getBoundingClientRect())) failures.push(
+        `Canvas controls bottom ${toolbar.bottom} / ${head.textContent} top ${head.getBoundingClientRect().top}`,
+      )
     }
     return failures
   })
