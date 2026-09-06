@@ -322,7 +322,8 @@ export default function DigitalThreadCanvas({
     // clamped to its first card cannot put its heading back underneath the controls.
     const heading = element.querySelector<HTMLElement>(".dtCanvasLaneHead")
     const headingOffset = heading ? Math.max(0, -(parseFloat(getComputedStyle(heading).top) || 0)) : 0
-    const top = Math.max(40, Math.ceil(controlBottom - rect.top + headingOffset * Math.max(1, transform.current.zoom) + 8))
+    // The viewport frame must not depend on the current camera: Fit measures it before changing zoom.
+    const top = Math.max(40, Math.ceil(controlBottom - rect.top + headingOffset + 8))
     const height = rect.height - top - (frameInset?.bottom ?? 0)
     if (width < 240 || height < 180) return null
     return {
