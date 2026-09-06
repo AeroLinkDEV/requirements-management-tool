@@ -1368,8 +1368,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             + "The enforced verification families are exactly the resolved ladder profile's configured "
             + "bindings; enforcement follows that authority rather than the broader kinds listed on the "
             + "authored ladder steps. After the #726 cutover, software Procedure families carry "
-            + "migration-generated revisions without fabricated reviews, so their review/impact minimums "
-            + "are reported but not enforced.";
+            + "migration-generated revisions without fabricated reviews; their review/impact minimums "
+            + "are not enforced while they hold zero authored reviews and apply in full once any "
+            + "authored review exists.";
 
         var failures1 = new List<string>();
         if (systemRequirements < 5) failures1.Add($"only {systemRequirements} System requirements");
@@ -1384,11 +1385,15 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             if (artifactCount < 5)
                 failures1.Add($"only {artifactCount} {family.Level}/{family.Key.Kind} verification artifacts");
             // The #726 cutover authority generates software Procedure revisions and rebinds impact
-            // references without fabricating reviews or signatures — reviews are authored work. On a
-            // migrated installation those keys therefore legitimately carry zero reviews and zero
-            // review-key-derived impact items, so their review/impact minimums are reported in the
-            // matrix but not enforced; their artifact and execution minimums stay enforced.
-            if (family.Key.Discipline == VerificationDiscipline.System || family.Key.Kind != VerificationArtifactKind.Procedure)
+            // references without fabricating reviews or signatures — reviews are authored work. A
+            // software-Procedure key sits in migration-only state while it has zero authored reviews,
+            // and its review/impact minimums are reported but not enforced then; once even one authored
+            // review exists the family is demonstrated and both minima apply in full, so partially lost
+            // authored work still fails. Artifact and execution minimums are always enforced.
+            var migrationOnly = family.Key.Discipline != VerificationDiscipline.System
+                && family.Key.Kind == VerificationArtifactKind.Procedure
+                && reviewCounts[family.Key] == 0;
+            if (!migrationOnly)
             {
                 var reviewCount = reviewCounts[family.Key];
                 if (reviewCount < 5)

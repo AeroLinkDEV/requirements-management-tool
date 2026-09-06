@@ -1086,4 +1086,63 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         Assert.Contains("System/Procedure 75", drifted.Detail, StringComparison.Ordinal);
         Assert.Contains("LowLevel/Case 280", drifted.Detail, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// The migration-only exemption for software-Procedure keys is conditional: one authored review on
+    /// such a key demonstrates the family, and both minima then apply in full — a family holding a single
+    /// <summary>
+    /// The migration-only exemption for software-Procedure keys is conditional: the cutover-created
+    /// families are not held to authored minima while they hold zero authored reviews, but the artifact
+    /// minimum bites immediately, and one authored review on the key resumes both minima in full.
+    /// </summary>
+    [Fact]
+    public async Task Family_inventory_enforces_software_procedure_minima_once_authored_reviews_exist()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+
+        var before = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
+        Assert.True(Assert.Single(before, x => x.Key == "family-inventory").Holds);
+
+        // Simulate the post-cutover profile through the seeder's policy seam: software levels configure
+        // Case and Procedure, so the software-Procedure keys enter the configured matrix with zero
+        // authored reviews. Stored governance is deliberately untouched.
+        var configuration = await db.ProjectLadderConfigurations.AsNoTracking()
+            .Include(x => x.Steps).Include(x => x.AllowedUpstream)
+            .SingleAsync(x => x.ProjectId == showcase.Summary.ProjectId);
+        var resolved = ProjectLadderResolver.Resolve(configuration, LegacyLadderPolicy.Instance);
+        var fullProfileSteps = resolved.Steps.Select(x => x.Level
+                is RequirementLevel.HighLevel or RequirementLevel.LowLevel
+                    ? x with { EnabledArtifactKinds = [VerificationArtifactKind.Case, VerificationArtifactKind.Procedure] }
+                    : x).ToArray();
+        var fullProfile = new ResolvedProjectLadderPolicy(
+            resolved with { Steps = fullProfileSteps }, LegacyLadderPolicy.Instance);
+        seeder = new FmsShowcaseSeeder(db, new FixedProjectLadderPolicyResolver(fullProfile));
+
+        var migrated = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
+        var migratedInventory = Assert.Single(migrated, x => x.Key == "family-inventory");
+        Assert.False(migratedInventory.Holds, migratedInventory.Detail);
+        // Migration-only state: the artifact minimum bites, but the review/impact minima are not
+        // enforced while the family holds zero authored reviews.
+        Assert.Contains("only 0 HighLevel/Procedure verification artifacts",
+            migratedInventory.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("HighLevelSoftware/Procedure test change reviews",
+            migratedInventory.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("HighLevelSoftware/Procedure verification impact items",
+            migratedInventory.Detail, StringComparison.Ordinal);
+
+        var review = await db.TestChangeReviews
+            .OrderBy(x => x.Id).FirstAsync(x => x.ProjectId == showcase.Summary.ProjectId
+                && x.Discipline == TestChangeReviewDiscipline.HighLevelSoftware);
+        db.Entry(review).Property(x => x.Discipline).CurrentValue = TestChangeReviewDiscipline.HighLevelSoftware;
+        db.Entry(review).Property(x => x.ArtifactKind).CurrentValue = VerificationArtifactKind.Procedure;
+        await db.SaveChangesAsync();
+
+        var after = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
+        var drifted = Assert.Single(after, x => x.Key == "family-inventory");
+        Assert.False(drifted.Holds, drifted.Detail);
+        Assert.Contains("only 1 HighLevelSoftware/Procedure test change reviews",
+            drifted.Detail, StringComparison.Ordinal);
+    }
 }
