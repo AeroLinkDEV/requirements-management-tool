@@ -237,9 +237,9 @@ export default function DigitalThreadNetwork({
         if (!related) return null
         const hop = web?.hops.get(related.id)
         return (
-          <span key={`${edge.fromId}:${edge.toId}:${edge.relation}`}>
+          <span className="dtThreadTableRelation" key={`${edge.fromId}:${edge.toId}:${edge.relation}`}>
             <ExactArtifactLink href={hrefFor?.(related)}>{related.displayNumber}</ExactArtifactLink>
-            <small>
+            {" "}<small>
               {traceRelationLabelFor(edge.relation, edge.fromId === related.id)}
               {hop && hop > 1 ? ` · ${hop} hops from selected` : ""}
             </small>
@@ -300,7 +300,7 @@ export default function DigitalThreadNetwork({
   // Non-occlusion outranks the preference (§6.6), the same contract the artifact thread keeps: when a side
   // cannot leave room for the selection and its direct links at the landing floor, the panel moves rather
   // than a linked record being hidden.
-  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${selectedId ?? ""}:${dockPreference}`)
+  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${representation}:${selectedId ?? ""}:${dockPreference}`)
 
   // The canvas must not lay records out under the panel, so the frame it may use shrinks by the dock.
   const frameInset = useMemo(
@@ -504,7 +504,7 @@ export default function DigitalThreadNetwork({
             onSelect={setSelectedId}
             onHover={setHoveredId}
             frameInset={frameInset}
-            onFramingNeedsRoom={reportNeedsRoom}
+            onFramingNeedsRoom={representation === "map" ? reportNeedsRoom : undefined}
             tracedEdges={web?.edges}
             ariaLabel="Change network for this build"
           />

@@ -395,7 +395,7 @@ export default function DigitalThreadInsideChange({
   }, [canvasEdges, canvasNodes, dockPreference, selectedId])
 
   // Non-occlusion outranks the preference (§6.6), the same contract the other two views keep.
-  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${selectedId ?? ""}:${dockPreference}`)
+  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${representation}:${selectedId ?? ""}:${dockPreference}`)
 
   /**
    * The frame the board may use. It shrinks by the docked edge, so the canvas never lays a record out
@@ -791,9 +791,9 @@ export default function DigitalThreadInsideChange({
         if (!related) return null
         const hop = web?.hops.get(relatedId)
         return (
-          <span key={`${edge.from}:${edge.to}:${edge.label}`}>
+          <span className="dtThreadTableRelation" key={`${edge.from}:${edge.to}:${edge.label}`}>
             {tableIdentity(related)}
-            <small>
+            {" "}<small>
               {edge.label}
               {hop && hop > 1 ? ` · ${hop} hops from selected` : ""}
             </small>
@@ -900,7 +900,7 @@ export default function DigitalThreadInsideChange({
             onHover={setHoveredId}
             tracedEdges={web?.edges}
             frameInset={frameInset}
-            onFramingNeedsRoom={reportNeedsRoom}
+            onFramingNeedsRoom={representation === "map" ? reportNeedsRoom : undefined}
             ariaLabel={`Inside ${opened.displayNumber}`}
           />
         </div>

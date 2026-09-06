@@ -221,7 +221,7 @@ export default function DigitalThreadArtifact({
   }, [directLinks, dockPreference, laneOfNode, selected])
 
   // Non-occlusion outranks the preference: a linked record must not vanish to honour a side (§6.6).
-  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${selectedId ?? ""}:${dockPreference}`)
+  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${representation}:${selectedId ?? ""}:${dockPreference}`)
 
   // The canvas must not lay records out under the panel, so the frame it may use shrinks by the dock.
   const frameInset = useMemo(
@@ -299,9 +299,9 @@ export default function DigitalThreadArtifact({
         if (!related) return null
         const hop = web?.hops.get(related.id)
         return (
-          <span key={`${edge.fromId}:${edge.toId}:${edge.relation}`}>
+          <span className="dtThreadTableRelation" key={`${edge.fromId}:${edge.toId}:${edge.relation}`}>
             {tableIdentity(related)}
-            <small>
+            {" "}<small>
               {traceRelationLabelFor(edge.relation, edge.fromId === related.id)}
               {edge.isSuspect ? " · SUSPECT" : ""}
               {hop && hop > 1 ? ` · ${hop} hops from selected` : ""}
@@ -575,7 +575,7 @@ export default function DigitalThreadArtifact({
             frameInset={frameInset}
             tracedEdges={web?.edges}
             frameIds={framedForFocal}
-            onFramingNeedsRoom={reportNeedsRoom}
+            onFramingNeedsRoom={representation === "map" ? reportNeedsRoom : undefined}
             ariaLabel={
               focal ? `Artifact thread for ${identityLabel(focal)}` : "Artifact thread"
             }

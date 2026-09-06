@@ -86,11 +86,11 @@ test('a recorded relationship refreshes the active Artifact and keeps a follow-u
         nodes: [
           { id: focalRevisionId, kind: 'Requirement', lane: 2, displayNumber: 'HLR-REFRESH-0001.00',
             title: 'Refresh focal', state: 'Approved', level: 'HighLevel', isFocal: true, evidence: [] },
-          { id: 'artifact-procedure', kind: 'Procedure', lane: 4, displayNumber: 'HLRTP-REFRESH-0001.00',
-            title: 'Refresh procedure', state: 'Approved', level: 'System', isFocal: false, evidence: [] },
+          { id: 'parent-revision', kind: 'Requirement', lane: 2, displayNumber: 'SYSR-REFRESH-0001.00',
+            title: 'Refresh parent', state: 'Approved', level: 'System', isFocal: false, evidence: [] },
         ],
-        edges: [{ fromId: focalRevisionId, fromKind: 'Requirement', toId: 'artifact-procedure',
-          toKind: 'Procedure', relation: 'VerifiedBy', isSuspect: artifactReads === 1 }],
+        edges: [{ fromId: 'parent-revision', fromKind: 'Requirement', toId: focalRevisionId,
+          toKind: 'Requirement', relation: 'AllocatedFrom', isSuspect: artifactReads === 1 }],
         verification: { isApplicable: true, reason: null },
       }),
     })
@@ -116,8 +116,8 @@ test('a recorded relationship refreshes the active Artifact and keeps a follow-u
     lifecycleGets += 1
     await route.fulfill({ status: 503, contentType: 'application/json', body: '{}' })
   })
-  await page.route('**/api/trace-links/trace-refresh-link/lifecycle/acknowledge', async route => {
-    lifecycleState = 'Acknowledged'
+  await page.route('**/api/trace-links/trace-refresh-link/lifecycle/resolve', async route => {
+    lifecycleState = 'Closed'
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
       linkId: 'trace-refresh-link', state: lifecycleState,
     }) })
@@ -130,21 +130,53 @@ test('a recorded relationship refreshes the active Artifact and keeps a follow-u
   await page.goto(`${threadRoot}/traceability/${focalId}`)
   await expect(page.locator('.dtaRoot')).toBeVisible()
   const focalCard = page.locator('.dtaCard').filter({ hasText: 'HLR-REFRESH-0001.00' }).first()
-  const procedureCard = page.locator('.dtaCard').filter({ hasText: 'HLRTP-REFRESH-0001.00' }).first()
+  const parentCard = page.locator('.dtaCard').filter({ hasText: 'SYSR-REFRESH-0001.00' }).first()
   await expect(focalCard.locator('.dtaSuspectFlag b')).toHaveText('SUSPECT')
-  await expect(procedureCard.locator('.dtaSuspectFlag b')).toHaveText('SUSPECT')
+  await expect(parentCard.locator('.dtaSuspectFlag b')).toHaveText('SUSPECT')
   const networkReadsBeforeMutation = networkReads
 
   await page.getByText('Baseline evidence report', { exact: true }).click()
   await expect(page.getByLabel('Exact link lifecycle Suspect')).toBeVisible()
-  await page.getByPlaceholder('Record why this exact relationship is under assessment.')
-    .fill('Review the refreshed relationship projection.')
-  await page.getByRole('button', { name: 'Acknowledge relationship' }).click()
+  await page.getByPlaceholder('Record the controlled disposition and supporting rationale.')
+    .fill('The downstream revision remains valid after controlled review.')
+  await page.getByRole('button', { name: 'Record resolution' }).click()
 
   await expect.poll(() => artifactReads).toBeGreaterThan(1)
-  await expect(page.getByText('Relationship Acknowledged', { exact: true })).toBeVisible()
+  await expect(page.getByText('Relationship Closed', { exact: true })).toBeVisible()
   await expect(focalCard.locator('.dtaSuspectFlag')).toHaveCount(0)
-  await expect(procedureCard.locator('.dtaSuspectFlag')).toHaveCount(0)
+  await expect(parentCard.locator('.dtaSuspectFlag')).toHaveCount(0)
   expect(lifecycleGets).toBe(1)
   expect(networkReads).toBe(networkReadsBeforeMutation)
+})
+
+test('the active table states loading, error, truncation and no-match without a baseline read', async ({ page }) => {
+  let releaseNetwork!: () => void
+  let networkReads = 0
+  const networkPending = new Promise<void>(resolve => { releaseNetwork = resolve })
+  await page.route('**/api/change-requests/network?*', async route => {
+    networkReads += 1
+    if (networkReads === 1) {
+      await networkPending
+      await route.fulfill({ status: 503, contentType: 'application/json', body: '{}' })
+      return
+    }
+    const response = await route.fetch()
+    const body = await response.json()
+    body.truncated = true
+    await route.fulfill({ response, json: body })
+  })
+
+  await login(page)
+  await openNavigationGroup(page, 'RELEASE & CONFIGURATION')
+  await page.getByRole('link', { name: 'Digital Thread' }).click()
+  await page.locator('.dtPageToolbar').getByRole('button', { name: 'Table' }).click()
+  await expect(page.locator('.dtThreadTableState')).toContainText('Loading this Digital Thread table')
+
+  releaseNetwork()
+  await expect(page.locator('.dtThreadTableState-error')).toBeVisible()
+  await page.getByRole('button', { name: 'Try again' }).click()
+  await expect(page.locator('.dtThreadTableTruncated')).toContainText('not shown')
+  await expect(page.locator('.dtThreadTableSelection')).toContainText('No record selected')
+  await page.locator('.dtnSearch input').fill('no active record has this identifier')
+  await expect(page.locator('.dtThreadTableState')).toContainText('No records match')
 })

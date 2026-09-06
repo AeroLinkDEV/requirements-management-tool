@@ -49,6 +49,13 @@
 .dtThreadTable tbody th { vertical-align: top; padding: 9px 12px; font-size: var(--text-sm); text-align: left; }
 .dtThreadTable td span { display: block; color: #2b3d54; }
 .dtThreadTable td span + span { margin-top: 4px; }
+.dtThreadTable td .dtThreadTableRelation {
+  display: flex;
+  align-items: baseline;
+  gap: .35rem;
+  flex-wrap: wrap;
+}
+.dtThreadTable td .dtThreadTableRelation small { margin-left: .15rem; }
 .dtThreadTable td small { color: #8493a6; font-size: var(--text-xs); }
 .dtThreadTable td em { color: #8fa0b2; font-style: normal; font-size: var(--text-xs); }
 .dtThreadTable td code { color: #5f7080; font: var(--text-xs) ui-monospace, SFMono-Regular, Consolas, monospace; }
