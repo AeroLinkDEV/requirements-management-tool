@@ -15,7 +15,11 @@ public sealed class ShowcaseSeedApiTests
     {
         using var factory = new AeroLinkApiFactory(seedDemoAccounts: true, allowDemoAccounts: true);
         using var client = factory.CreateClient();
-        client.Timeout = TimeSpan.FromMinutes(10);
+        // The full controlled seed demonstrably runs ~8.5 minutes on one CI runner and was cancelled at
+        // exactly the old 10-minute client budget on another in the same hour (PR #930's gate). 14
+        // minutes is additional bounded request margin over the observed passing duration; a request that
+        // exceeds it still fails this test as a client cancellation. The assertions below are unchanged.
+        client.Timeout = TimeSpan.FromMinutes(14);
         using var login = await client.PostAsJsonAsync("/api/auth/login",
             new { userName = IdentityService.SystemAdministratorUserName, password = IdentitySeeder.DemoPassword });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
