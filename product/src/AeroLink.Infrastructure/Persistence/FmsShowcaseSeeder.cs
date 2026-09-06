@@ -1293,22 +1293,31 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             select coverage.RequirementRevisionId).Distinct().ToListAsync(ct);
 
         var share = members.Count == 0 ? 0 : Math.Round(suspect.Count * 100.0 / members.Count, 2);
+        var gapPair = await RequirementDisplayNumbersAsync(gapLinked, ct);
         string Detail() =>
             $"{members.Count} released-baseline requirement revision(s): {settled.Count} settled-covered, "
-            + $"{suspect.Count} suspect ({share}% — the named {GapProcedureNumber} 1.6 rework scenario), "
+            + $"{suspect.Count} suspect ({share}% — the named {GapProcedureNumber} 1.6 rework scenario covering "
+            + string.Join(" + ", gapPair) + "), "
             + $"{uncovered.Count} uncovered (allow-list: none).";
 
+        // The seeded contract is exactly this named pair: the requirements the procedure's approved
+        // revision covers, identified by display number so a future seed redistribution that swaps which
+        // requirements carry the gap fails here instead of silently re-deriving a new allow-list.
+        string[] expectedGapPair = ["SYSR-000040.01", "SYSR-000115.01"];
         if (gapProcedureIds.Count == 0 || gapLinked.Count == 0)
             return new TraceCoverageCheck(false,
                 "The named verification-coverage gap scenario is absent: no requirement links to the "
                 + $"{GapProcedureNumber} 1.6 rework. " + Detail());
-        // The seeded contract is exactly the two-requirement pair the procedure's approved revision
-        // covers. Deriving the expected set from the live coverage rows alone would let a future seed
-        // redistribution grow the gap silently, so the count is pinned and a deviation is drift.
-        if (gapLinked.Count != 2)
+        var unexpectedInGap = gapPair.Except(expectedGapPair).ToList();
+        var missingFromGap = expectedGapPair.Except(gapPair).ToList();
+        if (unexpectedInGap.Count > 0 || missingFromGap.Count > 0)
             return new TraceCoverageCheck(false,
-                $"The named {GapProcedureNumber} rework scenario covers {gapLinked.Count} released-baseline "
-                + "requirement revision(s); the seeded contract is exactly the two-requirement pair. " + Detail());
+                $"The named {GapProcedureNumber} rework scenario covers "
+                + (gapPair.Count > 0 ? string.Join(", ", gapPair) : "no requirement")
+                + "; the seeded contract is exactly " + string.Join(" + ", expectedGapPair) + ". "
+                + (unexpectedInGap.Count > 0 ? "Unexpected: " + string.Join(", ", unexpectedInGap) + ". " : "")
+                + (missingFromGap.Count > 0 ? "Missing: " + string.Join(", ", missingFromGap) + ". " : "")
+                + Detail());
         if (gapLinked.Except(suspect).Any())
             return new TraceCoverageCheck(false,
                 $"A requirement linked to the {GapProcedureNumber} rework is not Suspect, so the named gap no longer bites. " + Detail());

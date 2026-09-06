@@ -857,6 +857,8 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         var before = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
         var baseline = Assert.Single(before, x => x.Key == "trace-gap-inventory");
         Assert.True(baseline.Holds, baseline.Detail);
+        Assert.Contains("SYSR-000040.01", baseline.Detail, StringComparison.Ordinal);
+        Assert.Contains("SYSR-000115.01", baseline.Detail, StringComparison.Ordinal);
         Assert.Contains("SYSTP-000040", baseline.Detail, StringComparison.Ordinal);
 
         var procedure = await db.TestProcedures.AsNoTracking().SingleAsync(x => x.BaseNumber == "SYSTP-000041");
