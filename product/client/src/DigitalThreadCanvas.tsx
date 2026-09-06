@@ -633,16 +633,21 @@ export default function DigitalThreadCanvas({
     }
   }, [counts, frame, lanes.length, nodes, onFramingNeedsRoom, selectedId, trailingOverhang, tracedEdges])
 
+  // A lane's animation can outlive the render that started it (focus is followed by selection).
+  // Paint the committed selection rather than letting an older tick restore stale card visibility.
+  const committedPaint = useRef(paint)
+  useLayoutEffect(() => { committedPaint.current = paint }, [paint])
+
   const settle = useCallback(() => {
     if (animation.current !== null) return
     const tick = () => {
       const stepped = stepTowards(offsets.current, targets.current)
       offsets.current = stepped.offsets
-      paint()
+      committedPaint.current()
       animation.current = stepped.moving || scrubbing.current ? requestAnimationFrame(tick) : null
     }
     animation.current = requestAnimationFrame(tick)
-  }, [paint])
+  }, [])
 
   /**
    * Land the board.
