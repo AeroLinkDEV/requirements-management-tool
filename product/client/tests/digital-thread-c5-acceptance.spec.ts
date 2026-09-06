@@ -47,7 +47,7 @@ async function collisions(page: Page) {
 }
 
 async function controlsDoNotOverlap(page: Page) {
-  const failures = await page.locator("body").evaluate(() => {
+  const failures = () => page.locator("body").evaluate(() => {
     const overlaps = (a: DOMRect, b: DOMRect) =>
       Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
       Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1
@@ -73,7 +73,7 @@ async function controlsDoNotOverlap(page: Page) {
     }
     return failures
   })
-  expect(failures).toEqual([])
+  await expect.poll(failures).toEqual([])
 }
 
 for (const density of ["comfortable", "compact"]) {
