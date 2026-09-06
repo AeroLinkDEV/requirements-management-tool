@@ -870,6 +870,7 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         var after = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
         var drifted = Assert.Single(after, x => x.Key == "family-inventory");
         Assert.False(drifted.Holds, drifted.Detail);
-        Assert.Contains("no retest execution", drifted.Detail, StringComparison.Ordinal);
+        Assert.Contains("no failed execution with a passing retest successor",
+            drifted.Detail, StringComparison.Ordinal);
     }
 }

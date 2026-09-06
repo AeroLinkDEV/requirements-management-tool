@@ -1241,7 +1241,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             .Select(x => new { x.Type, State = (ChangeRequestState?)x.State }).ToListAsync(ct);
         var outcomes = await db.TestExecutions.AsNoTracking()
             .Where(x => x.ProjectId == projectId)
-            .Select(x => new { Outcome = (TestOutcome?)x.Outcome, x.RetestOfExecutionId }).ToListAsync(ct);
+            .Select(x => new { x.Id, Outcome = (TestOutcome?)x.Outcome, x.RetestOfExecutionId }).ToListAsync(ct);
         var testChangeReviews = await db.TestChangeReviews.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
         var assessments = await db.DownstreamChangeAssessments.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
         var impactItems = await db.VerificationImpactItems.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
@@ -1254,11 +1254,17 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var passes = outcomes.Count(x => x.Outcome == TestOutcome.Pass && x.RetestOfExecutionId == null);
         var failures = outcomes.Count(x => x.Outcome == TestOutcome.Fail);
         var retests = outcomes.Count(x => x.RetestOfExecutionId != null);
+        // The chain is correlated, not two independent totals: a failed execution only demonstrates the
+        // retest journey when a retest successor of that exact failure actually passed.
+        var passingRetestSources = outcomes
+            .Where(x => x.RetestOfExecutionId != null && x.Outcome == TestOutcome.Pass)
+            .Select(x => x.RetestOfExecutionId!.Value).ToHashSet();
+        var healedFailures = outcomes.Count(x => x.Outcome == TestOutcome.Fail && passingRetestSources.Contains(x.Id));
 
         string Detail() =>
             $"Families: SYSR {systemRequirements}, HLR {highLevelRequirements}, LLR {lowLevelRequirements}; "
             + $"change requests: {systemRequests} System, {softwareRequests} Software; "
-            + $"executions: {passes} pass, {failures} fail, {retests} retest; "
+            + $"executions: {passes} pass, {failures} fail, {retests} retest ({healedFailures} failure(s) healed by a passing retest); "
             + $"test change reviews {testChangeReviews}; downstream assessments {assessments}; "
             + $"verification impact items {impactItems}. "
             + "Deliberate exceptions: Interface change control is retired (#889); the product line, "
@@ -1270,11 +1276,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (lowLevelRequirements < 5) failures1.Add($"only {lowLevelRequirements} LLRs");
         if (systemRequests < 5) failures1.Add($"only {systemRequests} System change requests");
         if (softwareRequests < 5) failures1.Add($"only {softwareRequests} Software change requests");
-        if (failures < 1) failures1.Add("no failed execution (pass/fail/retest chain broken)");
-        if (retests < 1) failures1.Add("no retest execution (pass/fail/retest chain broken)");
-        if (testChangeReviews < 1) failures1.Add("no test change review");
-        if (assessments < 1) failures1.Add("no downstream change assessment");
-        if (impactItems < 1) failures1.Add("no verification impact item");
+        if (healedFailures < 1) failures1.Add("no failed execution with a passing retest successor (pass/fail/retest chain broken)");
+        if (testChangeReviews < 5) failures1.Add($"only {testChangeReviews} test change reviews");
+        if (assessments < 5) failures1.Add($"only {assessments} downstream change assessments");
+        if (impactItems < 5) failures1.Add($"only {impactItems} verification impact items");
         return failures1.Count > 0
             ? new FamilyInventoryCheck(false, "Family inventory below the repeated-family minimum: "
                 + string.Join("; ", failures1) + ". " + Detail())
