@@ -120,7 +120,13 @@ test("artifact full story retains both verification branches and excludes the si
   const beforeFit = await page.locator(".dtCanvasScene").getAttribute("style")
   await page.getByRole("button", { name: "Fit entire story", exact: true }).click()
   await expect(page.locator(".dtCanvasScene")).not.toHaveAttribute("style", beforeFit!)
-  await expect(page.locator(".dtCanvasEdgeLabel").filter({ hasText: /^verified by$/ })).toHaveCount(2)
+  const verificationLabels = page.locator(".dtCanvasEdgeLabel").filter({ hasText: /^verified by$/ })
+  await expect(verificationLabels).toHaveCount(2)
+  for (const label of await verificationLabels.all()) {
+    await expect(label).toBeVisible()
+    await expect(label).toBeInViewport({ ratio: 1 })
+  }
+  await expect(page.locator(".dtCanvasPlacementNotice")).toBeHidden()
   await expect.poll(() => collisions(page)).toEqual([])
   const fitted = await page.locator(".dtCanvasScene").getAttribute("style")
   await page.locator(`[data-node-id="${ids.hlr}"]`).hover()
