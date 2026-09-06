@@ -316,7 +316,9 @@ export default function DigitalThreadCanvas({
     // The toolbar may wrap at a narrow width or under a larger text setting. Its rendered bottom, rather than a
     // fixed constant, is the start of the actual drawing frame; the small breathing gap keeps headings readable.
     const controlBottom = controls?.getBoundingClientRect().bottom ?? rect.top + 38
-    const top = Math.max(54, Math.ceil(controlBottom - rect.top + 8))
+    // Reserve the strip that was actually rendered, with a small measured breathing gap. A fixed 54px band
+    // left most of the canvas empty at desktop widths and pushed the first lane heading away from its controls.
+    const top = Math.max(40, Math.ceil(controlBottom - rect.top + 4))
     const height = rect.height - top - (frameInset?.bottom ?? 0)
     if (width < 240 || height < 180) return null
     return {
@@ -637,14 +639,23 @@ export default function DigitalThreadCanvas({
       offsets.current = [...synced]
       targets.current = [...synced]
 
-      const fits = (transform: { x: number; zoom: number }, ids: readonly string[]): boolean => {
+      const fits = (transform: { x: number; y: number; zoom: number }, ids: readonly string[]): boolean => {
+        const settled = layout(counts, box, transform.zoom)
         const wanted = new Set(ids)
         for (const node of nodes) {
           if (!wanted.has(node.id)) continue
-          const { x } = nodePosition(node, result.geometry, offsets.current)
+          const { x, y } = nodePosition(node, settled.geometry, offsets.current)
           const left = x * transform.zoom + transform.x
-          const right = left + result.geometry.laneWidth * transform.zoom
-          if (left < box.x - 1 || right > box.x + box.width + 1) return false
+          const right = left + settled.geometry.laneWidth * transform.zoom
+          const measuredHeight = node.id === target.selectedId
+            ? selectedCardHeight ?? settled.geometry.cardHeight
+            : settled.geometry.cardHeight
+          const top = y * transform.zoom + transform.y
+          const bottom = top + measuredHeight * transform.zoom
+          // Direct cards need both an actual lane-window position and complete x/y containment. A card that is
+          // merely in the same scene but rolled out or sitting beneath the dock is not reachable evidence.
+          if (!isVisible(y, settled.geometry, settled.bandHeight)) return false
+          if (left < box.x - 1 || right > box.x + box.width + 1 || top < box.y - 1 || bottom > box.y + box.height + 1) return false
         }
         return true
       }

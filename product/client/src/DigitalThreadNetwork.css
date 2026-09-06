@@ -169,6 +169,11 @@
 
 .dtnPanelTools { position: static; display: flex; justify-content: flex-end; flex: 0 0 24px; gap: 4px; z-index: 2; margin-bottom: 4px; }
 
+/* In the horizontal dock, the controls belong to the actions column. Keeping them out of the content flow
+   lets identity and relationship headings start at the panel's measured top instead of leaving a toolbar-sized
+   blank band above every fact; side docks retain their normal flow so narrow columns stay readable. */
+.dtnPanel-bottom .dtnPanelTools { position: absolute; top: 8px; right: 10px; }
+
 .dtnPanelTools button {
   min-height: 24px;
   border: 1px solid #e4eaf0;

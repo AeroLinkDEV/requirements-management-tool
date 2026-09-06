@@ -552,6 +552,7 @@ export interface EdgeLabelPlacement {
   anchorX: number
   anchorY: number
   leader: boolean
+  exhausted: boolean
 }
 
 /**
@@ -604,7 +605,10 @@ export const placeEdgeLabels = (
     const normalX = -dy / length
     const normalY = dx / length
     const width = Math.max(28, item.label.length * 5.4 + 8)
-    const offsets = [0, -12, 12, -22, 22, -34, 34]
+    // Search outward from the true connector in bounded steps. The leader is only drawn after the segment has
+    // passed the same obstacle test, so a farther slot remains attached to this edge rather than becoming a
+    // free-floating midpoint; explicit exhaustion below keeps the required phrase visible when none is free.
+    const offsets = [0, -12, 12, -22, 22, -34, 34, -52, 52, -72, 72, -96, 96, -124, 124]
     let chosen: { x: number; y: number } | null = null
     for (const offset of offsets) {
       const x = baseX + (intra ? offset * 0.35 : normalX * offset)
@@ -618,17 +622,20 @@ export const placeEdgeLabels = (
       placed.push(rect)
       break
     }
-    // A dense graph may have no collision-free slot. Keep the phrase attached to its connector and visible;
-    // clipping/hiding it would erase a controlled relationship. The selected/traced phrases are processed first
-    // by the canvas, so they retain the most useful slots when space is genuinely scarce.
-    const fallback = chosen ?? { x: baseX, y: baseY }
-    result.set(item.key, {
-      ...fallback,
-      anchorX,
-      anchorY,
-      leader: Boolean(chosen && (fallback.x !== baseX || fallback.y !== baseY)),
-    })
-    if (!chosen) placed.push({ x: fallback.x - width / 2, y: fallback.y - 10, width, height: 12 })
+    // A dense graph may exhaust every measured slot. Keep the phrase at the actual connector anchor and visible;
+    // clipping/hiding it would erase a controlled relationship. Mark this explicit exhaustion state so callers
+    // can diagnose the crowded frame, rather than pretending an unchecked midpoint was collision-free.
+    if (chosen) {
+      result.set(item.key, {
+        ...chosen,
+        anchorX,
+        anchorY,
+        leader: chosen.x !== baseX || chosen.y !== baseY,
+        exhausted: false,
+      })
+    } else {
+      result.set(item.key, { x: baseX, y: baseY, anchorX, anchorY, leader: false, exhausted: true })
+    }
   }
   return result
 }

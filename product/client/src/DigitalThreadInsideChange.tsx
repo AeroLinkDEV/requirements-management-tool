@@ -304,15 +304,9 @@ export default function DigitalThreadInsideChange({
     if (!normalizedIdentifierQuery) return new Set(cards.keys())
     const matching = new Set<string>()
     for (const [id, card] of cards) {
-      const haystack = `${insideCardLabel(card)} ${
-        card.kind === "register" ? card.node.title :
-        card.kind === "proposal" ? card.item.statement :
-        card.kind === "verification" ? card.item.proposedContent?.title ?? card.item.artifactKind :
-        card.kind === "allocation" ? card.target.statement :
-        card.kind === "coverage" ? card.target.statement :
-        card.kind === "covering" ? card.record.title :
-        card.kind === "execution" ? card.record.determination : card.record.name
-      }`.toLowerCase()
+      // This field is explicitly an identifier search. Titles, statements and status text can explain a card,
+      // but matching them here would claim a non-identifier query was an exact controlled identity.
+      const haystack = insideCardLabel(card).toLowerCase()
       if (haystack.includes(normalizedIdentifierQuery)) {
         matching.add(id)
       }
