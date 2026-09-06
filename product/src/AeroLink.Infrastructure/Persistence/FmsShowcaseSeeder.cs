@@ -1244,7 +1244,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
             where execution.ProjectId == projectId
             select new { execution.Id, Outcome = (TestOutcome?)execution.Outcome, execution.RetestOfExecutionId,
-                revision.ProcedureId, execution.ExecutedAt, ProcedureLevel = (TestProcedureLevel?)procedure.Level }).ToListAsync(ct);
+                revision.ProcedureId, execution.ExecutedAt,
+                ProcedureLevel = (TestProcedureLevel?)procedure.Level, procedure.ArtifactKind }).ToListAsync(ct);
         var outcomes = executionRows.Select(x => new { x.Id, x.Outcome, x.RetestOfExecutionId, x.ProcedureId, x.ExecutedAt }).ToList();
         var verificationFamilies = await db.TestProcedures.AsNoTracking()
             .Where(x => x.ProjectId == projectId)
@@ -1308,13 +1309,15 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         };
         // Executions belong to the executable family of the procedure revision they ran, and the product
         // exposes separate Test Results workspaces per family, so the aggregate outcome totals cannot
-        // stand in for them either.
+        // stand in for them. The family is the level's profile executable key — kind included, not just
+        // level — so a Case execution can never stand in for a Procedure one (or vice versa).
         var executableLevels = ladderPolicy.OrderedLevels
             .Where(level => ladderPolicy.VerificationProfile(level) is not null)
             .ToList();
         var executionCounts = executableLevels.ToDictionary(
             level => level,
-            level => executionRows.Count(x => x.ProcedureLevel == ToTestProcedureLevel(level)));
+            level => executionRows.Count(x => x.ProcedureLevel == ToTestProcedureLevel(level)
+                && x.ArtifactKind == ladderPolicy.ExecutableArtifactKey(level).Kind));
 
         var systemRequirements = levels.Count(x => x == RequirementLevel.System);
         var highLevelRequirements = levels.Count(x => x == RequirementLevel.HighLevel);
@@ -1350,8 +1353,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             + "verification artifacts: "
             + string.Join(", ", configuredFamilies.Select(f =>
                 $"{f.Level}/{f.Key.Kind} {artifactCounts[(f.Level, f.Key.Kind)]}")) + "; "
-            + "executions per family: "
-            + string.Join(", ", executableLevels.Select(level => $"{level} {executionCounts[level]}"))
+            + "executions per executable family: "
+            + string.Join(", ", executableLevels.Select(level =>
+                $"{level}/{ladderPolicy.ExecutableArtifactKey(level).Kind} {executionCounts[level]}"))
             + $" ({passes} pass, {failures} fail, {retests} retest, {healedFailures} failure(s) healed by a passing retest); "            + "test change reviews: "
             + string.Join(", ", configuredFamilies.Select(f => $"{f.Key.Discipline}/{f.Key.Kind} {reviewCounts[f.Key]}")) + "; "
             + "downstream assessments: "

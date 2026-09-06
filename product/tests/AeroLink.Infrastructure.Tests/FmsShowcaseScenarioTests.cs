@@ -866,6 +866,9 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         Assert.Contains("System/Procedure 75", baseline.Detail, StringComparison.Ordinal);
         Assert.Contains("HighLevel/Case 160", baseline.Detail, StringComparison.Ordinal);
         Assert.Contains("LowLevel/Case 280", baseline.Detail, StringComparison.Ordinal);
+        Assert.Contains("executions per executable family: System/Procedure", baseline.Detail, StringComparison.Ordinal);
+        Assert.Contains("HighLevel/Case", baseline.Detail, StringComparison.Ordinal);
+        Assert.Contains("LowLevel/Case", baseline.Detail, StringComparison.Ordinal);
         Assert.Contains("enforced verification families are exactly the resolved ladder profile's configured bindings",
             baseline.Detail, StringComparison.Ordinal);
 
