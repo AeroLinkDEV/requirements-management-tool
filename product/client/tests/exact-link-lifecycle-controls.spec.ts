@@ -151,11 +151,11 @@ test('a recorded relationship refreshes the active Artifact and keeps a follow-u
 
 test('the active table states loading, error, truncation and no-match without a baseline read', async ({ page }) => {
   let releaseNetwork!: () => void
-  let networkReads = 0
+  let allowNetworkSuccess = false
+  let traceabilityReads = 0
   const networkPending = new Promise<void>(resolve => { releaseNetwork = resolve })
   await page.route('**/api/change-requests/network?*', async route => {
-    networkReads += 1
-    if (networkReads === 1) {
+    if (!allowNetworkSuccess) {
       await networkPending
       await route.fulfill({ status: 503, contentType: 'application/json', body: '{}' })
       return
@@ -164,6 +164,9 @@ test('the active table states loading, error, truncation and no-match without a 
     const body = await response.json()
     body.truncated = true
     await route.fulfill({ response, json: body })
+  })
+  page.on('request', request => {
+    if (new URL(request.url()).pathname.endsWith('/api/traceability')) traceabilityReads += 1
   })
 
   await login(page)
@@ -174,9 +177,11 @@ test('the active table states loading, error, truncation and no-match without a 
 
   releaseNetwork()
   await expect(page.locator('.dtThreadTableState-error')).toBeVisible()
+  allowNetworkSuccess = true
   await page.getByRole('button', { name: 'Try again' }).click()
   await expect(page.locator('.dtThreadTableTruncated')).toContainText('not shown')
   await expect(page.locator('.dtThreadTableSelection')).toContainText('No record selected')
   await page.locator('.dtnSearch input').fill('no active record has this identifier')
   await expect(page.locator('.dtThreadTableState')).toContainText('No records match')
+  expect(traceabilityReads).toBe(0)
 })
