@@ -1354,7 +1354,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (systemRequests < 5) failures1.Add($"only {systemRequests} System change requests (SRCR)");
         if (highLevelChangeRequests < 5) failures1.Add($"only {highLevelChangeRequests} HighLevel change requests (HLRCR)");
         if (lowLevelChangeRequests < 5) failures1.Add($"only {lowLevelChangeRequests} LowLevel change requests (LLRCR)");
-        foreach (var family in configuredFamilies.Where(f => f.Level != RequirementLevel.System || f.Key.Kind != VerificationArtifactKind.Procedure))
+        foreach (var family in configuredFamilies)
         {
             var artifactCount = artifactCounts[(family.Level, family.Key.Kind)];
             if (artifactCount < 5)
