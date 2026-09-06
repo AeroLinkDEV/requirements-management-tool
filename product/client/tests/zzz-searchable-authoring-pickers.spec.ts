@@ -77,7 +77,10 @@ test('a Modify target beyond the former 200-row limit is searchable, selectable 
   const { displayNumber } = await createApprovedLlrChange(
     request, playwright, showcase, 'LLR-000650', suffix)
 
-  await login(page, 'test.engineer')
+  // Establish the named FMS workspace explicitly before opening Verification. The portal's project picker
+  // can race the workspaces response and otherwise leave the engineer on the default ladder context.
+  await login(page, 'test.engineer', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('button', { name: 'Software' }).last().click()
   await page.getByRole('link', { name: 'Software Test Change Requests' }).click()
@@ -253,7 +256,10 @@ test('an approved Case beyond the former 200-row limit is searchable in the cove
   const { displayNumber } = await createApprovedLlrChange(
     request, playwright, showcase, 'LLR-000651', suffix)
 
-  await login(page, 'test.engineer')
+  // Establish the named FMS workspace explicitly before opening Verification. The portal's project picker
+  // can race the workspaces response and otherwise leave the engineer on the default ladder context.
+  await login(page, 'test.engineer', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('button', { name: 'Software' }).last().click()
   await page.getByRole('link', { name: 'Software Test Change Requests' }).click()

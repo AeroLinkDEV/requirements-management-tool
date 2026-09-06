@@ -1,5 +1,10 @@
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import DigitalThreadCanvas from "./DigitalThreadCanvas"
+import DigitalThreadTable, {
+  type DigitalThreadTableColumn,
+  type DigitalThreadTableRow,
+  type ThreadRepresentation,
+} from "./DigitalThreadTable"
 import { usePanelDock } from "./digitalThreadPanelDock"
 import ExactArtifactLink from "./ExactArtifactLink"
 import {
@@ -78,6 +83,7 @@ export type DigitalThreadInsideChangeProps = {
   /** Opens a different change request in place, from the lane-0 register. */
   onOpenChange?: (node: NetworkNode) => void
   onBackToNetwork?: () => void
+  representation?: ThreadRepresentation
 }
 
 type Card =
@@ -89,6 +95,21 @@ type Card =
   | { kind: "covering"; record: CoveringArtifact }
   | { kind: "execution"; record: VerificationExecution }
   | { kind: "baseline"; record: BaselineEffect }
+
+type InsideTableRow = DigitalThreadTableRow & { card: Card }
+
+const insideCardLabel = (card: Card): string => {
+  switch (card.kind) {
+    case "register": return card.node.displayNumber
+    case "proposal": return card.item.displayNumber
+    case "verification": return card.item.displayNumber
+    case "allocation": return card.target.displayNumber || "Unnamed proposal"
+    case "coverage": return card.target.displayNumber
+    case "covering": return card.record.displayNumber
+    case "execution": return `Run by ${card.record.executedBy}`
+    case "baseline": return card.record.displayNumber
+  }
+}
 
 /**
  * Inside one change: what it proposes, what that allocates to, what verifies it, and what it does to the build.
@@ -108,12 +129,26 @@ export default function DigitalThreadInsideChange({
   hrefFor,
   onOpenChange,
   onBackToNetwork,
+  representation = "map",
 }: DigitalThreadInsideChangeProps) {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [dockPreference, setDockPreference] = useState<PanelDock>("bottom")
   const liveRegion = useRef<HTMLDivElement | null>(null)
+  const canvasViewRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const element = canvasViewRef.current
+    if (!element) return
+    if (representation === "table") {
+      element.setAttribute("aria-hidden", "true")
+      element.setAttribute("inert", "")
+    } else {
+      element.removeAttribute("aria-hidden")
+      element.removeAttribute("inert")
+    }
+  }, [representation])
 
   const isTestChange = opened.kind === "TestChangeRequest"
   const labels = useMemo(
@@ -360,7 +395,7 @@ export default function DigitalThreadInsideChange({
   }, [canvasEdges, canvasNodes, dockPreference, selectedId])
 
   // Non-occlusion outranks the preference (§6.6), the same contract the other two views keep.
-  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${selectedId ?? ""}:${dockPreference}`)
+  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${representation}:${selectedId ?? ""}:${dockPreference}`)
 
   /**
    * The frame the board may use. It shrinks by the docked edge, so the canvas never lays a record out
@@ -719,6 +754,110 @@ export default function DigitalThreadInsideChange({
     [cards, onOpenChange, opened.id],
   )
 
+  const tableIdentity = useCallback(
+    (card: Card) => {
+      switch (card.kind) {
+        case "register":
+          return <ExactArtifactLink href={hrefFor?.(card.node)}>{card.node.displayNumber}</ExactArtifactLink>
+        case "proposal":
+          return <span>{card.item.displayNumber}</span>
+        case "verification":
+          return <span>{card.item.displayNumber}</span>
+        case "allocation":
+          return card.target.isProposed
+            ? <span>{card.target.displayNumber || "Unnamed proposal"}</span>
+            : <ExactArtifactLink href={hrefFor?.({ id: card.target.revisionId ?? "", kind: "Requirement", displayNumber: card.target.displayNumber, level: card.target.level, artifactId: card.target.id })}>{card.target.displayNumber}</ExactArtifactLink>
+        case "coverage":
+          return <ExactArtifactLink href={hrefFor?.({ id: card.target.revisionId, kind: "Requirement", displayNumber: card.target.displayNumber, level: card.target.level, artifactId: card.target.artifactId })}>{card.target.displayNumber}</ExactArtifactLink>
+        case "covering":
+          return <ExactArtifactLink href={hrefFor?.({ id: card.record.artifactRevisionId, kind: card.record.artifactKind, displayNumber: card.record.displayNumber, artifactId: card.record.artifactId })}>{card.record.displayNumber}</ExactArtifactLink>
+        case "execution":
+          return <span>{insideCardLabel(card)}</span>
+        case "baseline":
+          return <span>{card.record.displayNumber}</span>
+      }
+    },
+    [hrefFor],
+  )
+
+  const tableRelations = useCallback(
+    (cardId: string, direction: "upstream" | "downstream") => {
+      const relationEdges = canvasEdges.filter(edge =>
+        direction === "upstream" ? edge.to === cardId : edge.from === cardId)
+      if (!relationEdges.length) return <em>None recorded</em>
+      return relationEdges.map(edge => {
+        const relatedId = direction === "upstream" ? edge.from : edge.to
+        const related = cards.get(relatedId)
+        if (!related) return null
+        const hop = web?.hops.get(relatedId)
+        return (
+          <span className="dtThreadTableRelation" key={`${edge.from}:${edge.to}:${edge.label}`}>
+            {tableIdentity(related)}
+            {" "}<small>
+              {edge.label}
+              {hop && hop > 1 ? ` · ${hop} hops from selected` : ""}
+            </small>
+          </span>
+        )
+      })
+    },
+    [cards, canvasEdges, tableIdentity, web],
+  )
+
+  const tableRows = useMemo<InsideTableRow[]>(
+    () => [...cards.entries()].map(([id, card]) => ({ id, label: insideCardLabel(card), card })),
+    [cards],
+  )
+
+  const tableColumns = useMemo<readonly DigitalThreadTableColumn<InsideTableRow>[]>(
+    () => [
+      {
+        key: "record",
+        label: "Record",
+        render: row => (
+          <>
+            {tableIdentity(row.card)}
+            <span>{row.card.kind === "register" ? row.card.node.title : row.card.kind === "proposal" ? row.card.item.statement : row.card.kind === "verification" ? row.card.item.proposedContent?.title ?? row.card.item.artifactKind : row.card.kind === "allocation" ? row.card.target.statement : row.card.kind === "coverage" ? row.card.target.statement : row.card.kind === "covering" ? row.card.record.title : row.card.kind === "execution" ? row.card.record.determination : row.card.record.name}</span>
+          </>
+        ),
+      },
+      {
+        key: "kind",
+        label: "Type",
+        render: row => row.card.kind === "register" ? row.card.node.kind : row.card.kind === "verification" ? row.card.item.artifactKind : row.card.kind,
+      },
+      {
+        key: "state",
+        label: "State",
+        render: row => {
+          switch (row.card.kind) {
+            case "register": return stateLabel(row.card.node.state ?? undefined)
+            case "proposal": return operationLabel(row.card.item.kind)
+            case "verification": return operationLabel(row.card.item.kind)
+            case "allocation": return row.card.target.isProposed ? "Proposed" : "In the build"
+            case "coverage": return "Covered by this package"
+            case "covering": return stateLabel(row.card.record.artifactState)
+            case "execution": return row.card.record.outcome
+            case "baseline": return stateLabel(row.card.record.state)
+          }
+        },
+      },
+      { key: "upstream", label: "Upstream", render: row => tableRelations(row.id, "upstream") },
+      { key: "downstream", label: "Downstream", render: row => tableRelations(row.id, "downstream") },
+      {
+        key: "trace",
+        label: "Trace context",
+        render: row => {
+          if (!selectedId) return <em>No record selected</em>
+          if (row.id === selectedId) return "Selected record"
+          const hop = web?.hops.get(row.id)
+          return hop ? `${hop} hop${hop === 1 ? "" : "s"}` : "Outside selected trace"
+        },
+      },
+    ],
+    [selectedId, tableIdentity, tableRelations, web],
+  )
+
   return (
     <div className="dticRoot">
       <div className="dticToolbar">
@@ -747,25 +886,47 @@ export default function DigitalThreadInsideChange({
       </div>
 
       <div className="dticStage">
-        <DigitalThreadCanvas
-          lanes={lanes}
-          nodes={canvasNodes}
-          edges={canvasEdges}
-          renderCard={renderCard}
-          selectedId={selectedId}
-          onSelect={handleSelect}
-          onHover={setHoveredId}
-          tracedEdges={web?.edges}
-          frameInset={frameInset}
-          onFramingNeedsRoom={reportNeedsRoom}
-          ariaLabel={`Inside ${opened.displayNumber}`}
-        />
-        {loading ? <div className="dticLoading">Loading what this change proposes…</div> : null}
+        <div
+          className={`dticCanvasView${representation === "table" ? " is-hidden" : ""}`}
+          ref={canvasViewRef}
+        >
+          <DigitalThreadCanvas
+            lanes={lanes}
+            nodes={canvasNodes}
+            edges={canvasEdges}
+            renderCard={renderCard}
+            selectedId={selectedId}
+            onSelect={handleSelect}
+            onHover={setHoveredId}
+            tracedEdges={web?.edges}
+            frameInset={frameInset}
+            onFramingNeedsRoom={representation === "map" ? reportNeedsRoom : undefined}
+            ariaLabel={`Inside ${opened.displayNumber}`}
+          />
+        </div>
+        {representation === "table" ? (
+          <DigitalThreadTable
+            ariaLabel={`Inside ${opened.displayNumber} table`}
+            caption={`Content and relationships inside ${opened.displayNumber}`}
+            columns={tableColumns}
+            rows={tableRows}
+            availableCount={tableRows.length}
+            selectedId={selectedId}
+            onSelect={handleSelect}
+            loading={loading}
+            error={error}
+            onRetry={onRetry}
+            emptyMessage={content ? emptyHeading(content) : "No content is available for this change yet."}
+            selectionMessage="No record selected. Select a row to inspect its change content and relationships."
+            reservedInset={frameInset}
+          />
+        ) : null}
+        {representation === "map" && loading ? <div className="dticLoading">Loading what this change proposes…</div> : null}
 
         {/* Failure renders inside the frame rather than replacing it (#880 §6.8). Swapping the canvas out for
             a message discards the transform, the zoom, the lane offsets and the selection, so recovering from
             a failed refresh would cost the reader the view they had built. */}
-        {error ? (
+        {representation === "map" && error ? (
           <div className="dticInFrame dticInFrame-error" role="alert">
             <b>This change could not be opened.</b>
             <p>{error}</p>
@@ -777,7 +938,7 @@ export default function DigitalThreadInsideChange({
           </div>
         ) : null}
 
-        {!loading && !error && content && itemCount === 0 ? (
+        {representation === "map" && !loading && !error && content && itemCount === 0 ? (
           <div className="dticInFrame" role="status">
             <b>{emptyHeading(content)}</b>
           </div>

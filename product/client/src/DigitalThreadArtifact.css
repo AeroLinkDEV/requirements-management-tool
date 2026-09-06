@@ -75,6 +75,9 @@
 
 .dtaStage { position: relative; flex: 1; min-height: 0; }
 .dtaStage > .dtCanvas { position: absolute; inset: 0; }
+.dtaCanvasView { position: absolute; inset: 0; }
+.dtaCanvasView > .dtCanvas { position: absolute; inset: 0; }
+.dtaCanvasView.is-hidden { visibility: hidden; pointer-events: none; }
 
 .dtaLoading {
   position: absolute;

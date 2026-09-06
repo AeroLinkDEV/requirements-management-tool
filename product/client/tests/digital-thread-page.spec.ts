@@ -103,7 +103,7 @@ test.describe("the reclaimed header", () => {
 })
 
 test.describe("the toolbar", () => {
-  test("carries the view switch, the representation toggle and a compact Export", async ({ page, request }) => {
+  test("carries the view switch, representation toggle and explicit baseline report", async ({ page, request }) => {
     test.setTimeout(180_000)
     await page.setViewportSize({ width: 1440, height: 900 })
     await apiLogin(request)
@@ -119,11 +119,11 @@ test.describe("the toolbar", () => {
     await expect(toolbar.getByRole("button", { name: "Map" })).toBeVisible()
     await expect(toolbar.getByRole("button", { name: "Table" })).toBeVisible()
 
-    // The exports survive, grouped rather than spending the width two large buttons used to (§4.5).
-    await expect(page.getByRole("link", { name: "Trace PDF" })).toBeHidden()
-    await toolbar.locator(".dtPageExport summary").click()
-    await expect(page.getByRole("link", { name: "Trace PDF" })).toBeVisible()
-    await expect(page.getByRole("link", { name: "Trace DOCX" })).toBeVisible()
+    // Baseline exports remain available, but only under an explicitly named baseline report.
+    await expect(page.getByRole("link", { name: "Baseline trace PDF" })).toBeHidden()
+    await page.getByText("Baseline evidence report", { exact: true }).click()
+    await expect(page.getByRole("link", { name: "Baseline trace PDF" })).toBeVisible()
+    await expect(page.getByRole("link", { name: "Baseline trace DOCX" })).toBeVisible()
   })
 
   test("the export links keep their existing report behaviour", async ({ page, request }) => {
@@ -136,8 +136,8 @@ test.describe("the toolbar", () => {
     await openThread(page)
 
     await expect(page.locator(".dtPageBaseline select")).toBeVisible()
-    await page.locator(".dtPageExport summary").click()
-    for (const [name, format] of [["Trace PDF", "pdf"], ["Trace DOCX", "docx"]] as const) {
+    await page.getByText("Baseline evidence report", { exact: true }).click()
+    for (const [name, format] of [["Baseline trace PDF", "pdf"], ["Baseline trace DOCX", "docx"]] as const) {
       const href = await page.getByRole("link", { name }).getAttribute("href")
       // Same report resource the replaced page used; the generator is untouched by this slice.
       expect(href).toMatch(new RegExp(`/api/traceability/[^/]+/download\\?format=${format}$`))
@@ -155,7 +155,7 @@ test.describe("the evidence table", () => {
     await selectProgram(page, "Flight Management System Live Program")
     await openThread(page)
 
-    await page.locator(".dtPageToolbar").getByRole("button", { name: "Table" }).click()
+    await page.getByText("Baseline evidence report", { exact: true }).click()
     const table = page.locator(".dtPageTable table")
     await expect(table).toBeVisible()
 
@@ -181,7 +181,7 @@ test.describe("the evidence table", () => {
     const before = page.url()
 
     await page.locator(".dtPageToolbar").getByRole("button", { name: "Table" }).click()
-    await expect(page.locator(".dtPageTable")).toBeVisible()
+    await expect(page.locator(".dtThreadTable")).toBeVisible()
     await page.locator(".dtPageToolbar").getByRole("button", { name: "Map" }).click()
     await expect(page.locator(".dtCanvas")).toBeVisible()
 
@@ -198,7 +198,7 @@ test.describe("the evidence table", () => {
     await selectProgram(page, "Flight Management System Live Program")
     await openThread(page)
 
-    await page.locator(".dtPageToolbar").getByRole("button", { name: "Table" }).click()
+    await page.getByText("Baseline evidence report", { exact: true }).click()
     const table = page.locator(".dtPageTable")
     await expect(table.locator("tbody tr").first()).toBeVisible()
 
@@ -220,6 +220,175 @@ test.describe("the evidence table", () => {
     // The last page is reachable and says so, rather than paging forever.
     const pages = Number(/Page \d+ of ([\d,]+)/.exec(await pager.innerText())![1].replace(/,/g, ""))
     expect(pages).toBeGreaterThan(1)
+  })
+})
+
+test.describe("active-view table representations", () => {
+  test("Network Table keeps its selected change, search and typed relationships", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json() as {
+        nodes: { id: string; kind: string; displayNumber: string; level?: string | null }[]
+      }
+    const target = network.nodes.find(node => node.kind === "ChangeRequest")
+    expect(target, "the network projection should carry a Change Request").toBeTruthy()
+    if (!target) throw new Error("the network projection should carry a Change Request")
+
+    // Search and select a real projection card before switching representation. The table must use this same
+    // projection rather than the unrelated baseline requirement population.
+    const search = page.locator(".dtnSearch input")
+    await search.fill(target.displayNumber)
+    const card = page.locator(".dtnCard").filter({ hasText: target.displayNumber }).first()
+    await expect(card).toBeVisible()
+    await card.click()
+    await expect(page.locator(".dtnCard.is-selected")).toContainText(target.displayNumber)
+    const networkPanel = page.locator(".dtnPanel")
+
+    let traceabilityRequests = 0
+    page.on("request", requestEvent => {
+      if (new URL(requestEvent.url()).pathname.endsWith("/api/traceability")) traceabilityRequests += 1
+    })
+    await page.getByRole("button", { name: "Table" }).click()
+    await expect(page.locator(".dtThreadTable")).toBeVisible()
+    // Map may move a side preference to Bottom when the canvas cannot preserve non-occlusion. Set Right
+    // against the active table, whose mounted canvas cannot report a map framing shortfall.
+    await networkPanel.getByRole("button", { name: "Right", exact: true }).click()
+    await expect(networkPanel).toHaveClass(/dtnPanel-right/)
+    const networkLastRow = page.locator(".dtThreadTable tbody tr").last()
+    await networkLastRow.scrollIntoViewIfNeeded()
+    await expect(networkLastRow).toBeVisible()
+    await expect(page.locator(".dtThreadTable").getByRole("link", { name: target.displayNumber, exact: true })).toBeVisible()
+    await expect(page.locator(".dtThreadTable tbody tr").filter({ hasText: target.displayNumber }).getByRole("button", { name: /Selected/ })).toBeVisible()
+    await expect(page.locator(".dtThreadTable")).not.toContainText("1,250 requirement")
+    expect(traceabilityRequests, "active-view representation switching must not load baseline rows").toBe(0)
+
+    // Returning to Map keeps the child mounted: the query, selected card and routed focal remain intact.
+    await page.getByRole("button", { name: "Map" }).click()
+    await expect(page.locator(".dtnSearch input")).toHaveValue(target.displayNumber)
+    await expect(page.locator(".dtnCard.is-selected")).toContainText(target.displayNumber)
+    await page.getByRole("button", { name: "Table" }).click()
+    await expect(page.locator(".dtThreadTable tbody tr").filter({ hasText: target.displayNumber })).toHaveCount(1)
+  })
+
+  test("Inside Table keeps the opened change and type filter across the round trip", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json() as {
+        nodes: { id: string; kind: string; displayNumber: string; level?: string | null }[]
+      }
+    const target = network.nodes.find(node => node.kind === "ChangeRequest" && node.level === "System")
+    expect(target, "the network projection should carry a Change Request").toBeTruthy()
+    if (!target) throw new Error("the network projection should carry a Change Request")
+
+    const networkCard = page.locator(".dtnCard").filter({ hasText: target.displayNumber }).first()
+    await networkCard.click()
+    await networkCard.getByRole("button", { name: "Open this change" }).click()
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    // Entering Inside opens the focal change but deliberately starts with no selected card. Select the real
+    // register node through the canvas's native button contract before exercising its inspector.
+    const insideNode = page.locator(".dtCanvasNode").filter({ hasText: target.displayNumber }).first()
+    await insideNode.focus()
+    await page.keyboard.press("Enter")
+    await expect(insideNode).toHaveAttribute("aria-pressed", "true")
+    await page.getByRole("button", { name: "SYS", exact: true }).click()
+    const insidePanel = page.locator(".dticPanel")
+    await page.getByRole("button", { name: "Table" }).click()
+    await expect(page.locator(".dtThreadTable")).toBeVisible()
+    await insidePanel.getByRole("button", { name: "Right", exact: true }).click()
+    await expect(insidePanel).toHaveClass(/dticPanel-right/)
+    const insideLastRow = page.locator(".dtThreadTable tbody tr").last()
+    await insideLastRow.scrollIntoViewIfNeeded()
+    await expect(insideLastRow).toBeVisible()
+    await expect(page.locator(".dtThreadTable")).toContainText(target.displayNumber)
+    await expect(page.locator(".dtThreadTable")).not.toContainText("1,250 requirement")
+    await expect(page.locator(".dticTypes").getByRole("button", { name: "SYS", exact: true })).toHaveAttribute("aria-pressed", "true")
+
+    const selector = page.locator(".dtThreadTable").getByRole("button", { name: /^Select / }).first()
+    const selectorLabel = await selector.getAttribute("aria-label")
+    expect(selectorLabel, "the Inside table should expose an unselected row control").toMatch(/^Select /)
+    if (!selectorLabel) throw new Error("the Inside table should expose an unselected row control")
+    const selectedLabel = selectorLabel.replace(/^Select /, "Selected ")
+    await selector.focus()
+    await page.keyboard.press("Enter")
+    await expect(page.locator(".dtThreadTable").getByRole("button", { name: selectedLabel, exact: true })).toBeVisible()
+    await page.getByRole("button", { name: "Map" }).click()
+    await expect(page.locator(".dticTypes").getByRole("button", { name: "SYS", exact: true })).toHaveAttribute("aria-pressed", "true")
+    await expect(page.locator(".dticRoot .dtCanvas")).toBeVisible()
+    await page.getByRole("button", { name: "Table" }).click()
+    await expect(page.locator(".dtThreadTable").getByRole("button", { name: selectedLabel, exact: true })).toBeVisible()
+  })
+
+  test("Artifact Table keeps a non-focal exact record selected and searchable", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await apiLogin(request)
+    const showcase = await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const context = await (await request.get(
+      `${apiBase}/api/build-context?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`)).json() as { effectiveBaselineId: string }
+    const list = await (await request.get(
+      `${apiBase}/api/traceability?projectId=${showcase.projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=1`)).json() as { items?: { revisionId: string }[] }
+    const row = (Array.isArray(list) ? list : list.items ?? [])[0] as { revisionId: string } | undefined
+    expect(row, "the baseline should carry a requirement revision").toBeTruthy()
+    if (!row) throw new Error("the baseline should carry a requirement revision")
+
+    const thread = await (await request.get(
+      `${apiBase}/api/artifact-thread?projectId=${showcase.projectId}&baselineId=${context.effectiveBaselineId}&focalKind=Requirement&focalId=${row.revisionId}`)).json() as {
+        nodes?: { id: string; displayNumber: string | null; isFocal: boolean }[]
+      }
+    const nonFocal = thread.nodes?.find(node => !node.isFocal && node.displayNumber)
+    expect(nonFocal, "the artifact thread should carry a non-focal exact record").toBeTruthy()
+    if (!nonFocal || !nonFocal.displayNumber) throw new Error("the artifact thread should carry a non-focal exact record")
+
+    const root = threadRoot(page)
+    await page.goto(`${root}/traceability/${row.revisionId}`)
+    await expect(page.locator(".dtaRoot")).toBeVisible()
+    const artifactPanel = page.locator(".dtaPanel")
+    await page.getByRole("button", { name: "Table" }).click()
+    const table = page.locator(".dtThreadTable")
+    await artifactPanel.getByRole("button", { name: "Right", exact: true }).click()
+    await expect(artifactPanel).toHaveClass(/dtaPanel-right/)
+    const artifactLastRow = table.locator("tbody tr").last()
+    await artifactLastRow.scrollIntoViewIfNeeded()
+    await expect(artifactLastRow).toBeVisible()
+    const rowSelect = table.getByRole("button", { name: `Select ${nonFocal.displayNumber}`, exact: true })
+    const nonFocalRow = rowSelect.locator("xpath=ancestor::tr")
+    const rowLink = nonFocalRow.locator("td").nth(1)
+      .getByRole("link", { name: nonFocal.displayNumber, exact: true })
+    await expect(rowLink).toBeVisible()
+    const selectedIdentity = await rowLink.innerText()
+    await rowSelect.focus()
+    await page.keyboard.press("Enter")
+    await expect(table.getByRole("button", { name: `Selected ${nonFocal.displayNumber}`, exact: true })).toBeVisible()
+
+    await page.getByRole("button", { name: "Map" }).click()
+    await expect(page.locator(".dtaSearch input")).toBeVisible()
+    await expect(page.locator(".dtaCard.is-selected")).toHaveCount(1)
+    await expect(page.locator(".dtaCard.is-selected .dtaId")).toContainText(selectedIdentity)
+    await page.locator(".dtaSearch input").fill(selectedIdentity)
+    await page.getByRole("button", { name: "Table" }).click()
+    await expect(page.locator(".dtaSearch input")).toHaveValue(selectedIdentity)
+    await expect(table.locator("tbody tr").filter({ hasText: selectedIdentity })).toHaveCount(1)
+    await expect(table.getByRole("button", { name: `Selected ${nonFocal.displayNumber}`, exact: true })).toBeVisible()
   })
 })
 
@@ -576,7 +745,7 @@ test.describe("selection and navigation coherence", () => {
     await page.getByRole("alert").getByRole("button", { name: "Back to the change network" }).click()
     await expect(page.locator(".dtnRoot")).toBeVisible()
     await expect(page.locator(".dtnInFrame-error")).toHaveCount(0)
-    await expect(page.locator(".dtPageTableEmpty")).toHaveCount(0)
+    await expect(page.locator(".dtPageTableEmpty:visible")).toHaveCount(0)
     expect(new URL(page.url()).pathname).toMatch(/\/traceability$/)
   })
 

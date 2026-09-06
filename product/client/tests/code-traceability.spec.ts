@@ -77,6 +77,7 @@ test('Digital Thread reads the requirement-to-evidence chain by exact identifier
   await login(page)
   await openNavigationGroup(page, 'RELEASE & CONFIGURATION')
   await page.getByRole('link', { name: 'Digital Thread' }).click()
+  await page.getByText('Baseline evidence report', { exact: true }).click()
   await page.locator('.dtPageToolbar').getByRole('button', { name: 'Table' }).click()
 
   const table = page.locator('.dtPageTable')

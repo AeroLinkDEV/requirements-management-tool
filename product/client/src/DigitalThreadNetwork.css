@@ -47,6 +47,9 @@
 
 .dtnStage { position: relative; flex: 1; min-height: 0; }
 .dtnStage > .dtCanvas { position: absolute; inset: 0; }
+.dtnCanvasView { position: absolute; inset: 0; }
+.dtnCanvasView > .dtCanvas { position: absolute; inset: 0; }
+.dtnCanvasView.is-hidden { visibility: hidden; pointer-events: none; }
 
 .dtnLoading {
   position: absolute;
