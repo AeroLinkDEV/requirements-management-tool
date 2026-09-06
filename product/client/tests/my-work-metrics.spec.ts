@@ -2,15 +2,21 @@ import { expect, test } from '@playwright/test'
 import { login, showcaseSeed } from './auth'
 
 /**
- * #925 P3 — the My Work metric row is compact and states its scope once.
+ * #925 P3 — the whole My Work metrics section is compact, in both workspace densities, at every
+ * supported desktop width.
  *
- * The four metrics are server-authoritative and all stay. What changed is the repetition: the scope
- * line used to be printed inside three of the four cards, and the cards carried enough padding to
- * measure 132.6px tall at every supported width. The row is now a single scope line above four compact
- * cards, measured here against the whole populated page rather than an isolated tile.
+ * What the owner accepted is a noticeably shorter section with the queue moving up — not a pixel
+ * budget. The recorded before values are the **complete section**: 132.6px comfortable and 114.8px
+ * compact. An earlier correction made the card grid smaller while a standalone scope line gave the
+ * space straight back, which is exactly why these assertions measure the full section and the queue's
+ * position — never a sub-element that can pass while the page stays tall.
  */
 
-test('the metric row states the scope once and keeps all four metrics', async ({ page, request }) => {
+const WIDTHS = [1280, 1440, 1920]
+const BEFORE_SECTION = { comfortable: 132.6, compact: 114.8 } as const
+const SECTION_LIMIT = { comfortable: 120, compact: 108 } as const
+
+test('the whole metrics section is compact and the queue moves up, at every width and density', async ({ page, request }) => {
   test.setTimeout(240_000)
   const showcase = await showcaseSeed(request)
   const root = `/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}`
@@ -19,24 +25,58 @@ test('the metric row states the scope once and keeps all four metrics', async ({
   await page.goto(`${root}/my-work`)
   await expect(page.getByRole('heading', { name: 'My Work' })).toBeVisible()
 
-  const metrics = page.locator('.workMetrics')
-  // The scope is stated once for the whole row.
-  await expect(metrics.getByText('Current program scope')).toHaveCount(1)
-  // All four server-authoritative metrics remain.
-  const cards = page.locator('.workMetricsGrid article')
-  await expect(cards).toHaveCount(4)
-  await expect(cards.filter({ hasText: 'Assigned to me' })).toContainText('4')
-  await expect(cards.filter({ hasText: 'Drafts I own' })).toContainText('4')
+  const evidenceDir = process.env.AEROLINK_C6_EVIDENCE
+  const measurements: string[] = []
 
-  // The compacted card row: measured, not assumed. The pre-correction row measured 132.6px tall at
-  // every supported width.
-  const gridHeight = await page.locator('.workMetricsGrid').evaluate(
-    element => element.getBoundingClientRect().height)
-  expect(gridHeight).toBeGreaterThan(0)
-  expect(gridHeight).toBeLessThan(120)
-  // The exact measurement travels with the report, so the before/after comparison cites a number.
-  await test.info().attach('metric-row-height-px', { body: String(gridHeight), contentType: 'text/plain' })
-  if (process.env.AEROLINK_C6_EVIDENCE) {
-    await page.screenshot({ path: `${process.env.AEROLINK_C6_EVIDENCE}/my-work-metrics.png`, fullPage: false })
+  for (const density of ['comfortable', 'compact'] as const) {
+    for (const width of WIDTHS) {
+      await page.evaluate(d => { window.localStorage.setItem('aerolink-density', d) }, density)
+      await page.setViewportSize({ width, height: 720 })
+      await page.reload()
+      await expect(page.getByRole('heading', { name: 'My Work' })).toBeVisible()
+
+      const section = page.locator('.workMetrics')
+      await expect(section).toBeVisible()
+      // The scope is stated once for the row, and all four server-authoritative metrics remain.
+      await expect(section.getByText('Current program scope')).toHaveCount(1)
+      const cards = page.locator('.workMetricsGrid article')
+      await expect(cards).toHaveCount(4)
+      await expect(cards.filter({ hasText: 'Assigned to me' })).toContainText('4')
+      await expect(cards.filter({ hasText: 'Drafts I own' })).toContainText('4')
+
+      const sectionBox = await section.boundingBox()
+      const queueBox = await page.locator('.workQueue').boundingBox()
+      expect(sectionBox, `section at ${width}×${density}`).not.toBeNull()
+      expect(queueBox, `queue at ${width}×${density}`).not.toBeNull()
+
+      // The complete section — scope cell and cards together — must sit clearly under the recorded
+      // before value in both densities.
+      const height = sectionBox!.height
+      expect(
+        height,
+        `complete section height at ${width}×${density} (before ${BEFORE_SECTION[density]}px)`,
+      ).toBeLessThan(SECTION_LIMIT[density])
+
+      // The queue below gains the difference: it must sit at least 12px higher than the recorded
+      // before section put it (header height and the section's bottom margin are identical on both
+      // sides of the comparison).
+      const metricsTop = sectionBox!.y
+      expect(
+        queueBox!.y,
+        `queue position at ${width}×${density}`,
+      ).toBeLessThan(metricsTop + BEFORE_SECTION[density] + 20 - 12)
+
+      measurements.push(
+        `${width}×${density}: section ${height.toFixed(1)}px (before ${BEFORE_SECTION[density]}px), queue top ${queueBox!.y.toFixed(1)}px`)
+      if (evidenceDir && width === 1280) {
+        await page.screenshot({ path: `${evidenceDir}/my-work-${density}.png`, fullPage: false })
+      }
+    }
   }
+
+  await test.info().attach('section-measurements', {
+    body: measurements.join('\n'),
+    contentType: 'text/plain',
+  })
+  console.log('My Work section measurements (after / before):\n' + measurements.join('\n'))
 })

@@ -899,12 +899,13 @@ export function MyWorkCenter({
       </header>
       {data && (
         <>
-          {/* The scope is a fact about all four metrics at once, so it is stated once above the row rather
-              than repeated inside every card (#925 P3). The overdue card keeps its own urgent note because
-              it says something the scope line does not. */}
+          {/* The scope is a fact about all four metrics at once, so it is stated once (#925 P3) — as a
+              leading cell of the same row, so stating it costs no extra vertical space and the work
+              queue below moves up by the full card compaction. The overdue card keeps its own urgent
+              note because it says something the scope line does not. */}
           <section className="workMetrics" aria-label="My Work metrics — current program scope">
-            <p className="workMetricsScope">Current program scope</p>
             <div className="workMetricsGrid">
+              <p className="workMetricsScope">Current program scope</p>
               {[
                 ["Assigned to me", data.summary.total],
                 ["Awaiting signature", data.summary.approvals],
