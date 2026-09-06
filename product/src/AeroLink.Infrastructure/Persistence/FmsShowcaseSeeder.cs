@@ -1242,8 +1242,12 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var executionRows = await (from execution in db.TestExecutions.AsNoTracking()
             join revision in db.TestProcedureRevisions.AsNoTracking() on execution.ProcedureRevisionId equals revision.Id
             where execution.ProjectId == projectId
-            select new { execution.Id, Outcome = (TestOutcome?)execution.Outcome, execution.RetestOfExecutionId, revision.ProcedureId }).ToListAsync(ct);
-        var outcomes = executionRows.Select(x => new { x.Id, x.Outcome, x.RetestOfExecutionId }).ToList();
+            select new { execution.Id, Outcome = (TestOutcome?)execution.Outcome, execution.RetestOfExecutionId,
+                revision.ProcedureId, execution.ExecutedAt }).ToListAsync(ct);
+        var outcomes = executionRows.Select(x => new { x.Id, x.Outcome, x.RetestOfExecutionId, x.ProcedureId, x.ExecutedAt }).ToList();
+        var verificationFamilies = await db.TestProcedures.AsNoTracking()
+            .Where(x => x.ProjectId == projectId)
+            .Select(x => new { x.Level, x.ArtifactKind }).ToListAsync(ct);
         var testChangeReviews = await db.TestChangeReviews.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
         var assessments = await db.DownstreamChangeAssessments.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
         var impactItems = await db.VerificationImpactItems.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
@@ -1258,20 +1262,30 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var retests = outcomes.Count(x => x.RetestOfExecutionId != null);
         // The chain is correlated, not two independent totals: a failed execution only demonstrates the
         // retest journey when a retest successor of that exact failure actually passed. The successor must
-        // also belong to the same controlled test artifact — the record-execution path rejects a retest
-        // whose predecessor is a different procedure, so a foreign-artifact pass must not count here.
-        var procedureByExecutionId = executionRows.ToDictionary(x => x.Id, x => x.ProcedureId);
-        var passingRetestSources = outcomes
-            .Where(x => x.RetestOfExecutionId != null && x.Outcome == TestOutcome.Pass
-                && procedureByExecutionId.TryGetValue(x.RetestOfExecutionId.Value, out var predecessor)
-                && procedureByExecutionId.TryGetValue(x.Id, out var successor)
-                && predecessor == successor)
-            .Select(x => x.RetestOfExecutionId!.Value).ToHashSet();
-        var healedFailures = outcomes.Count(x => x.Outcome == TestOutcome.Fail && passingRetestSources.Contains(x.Id));
+        // also belong to the same controlled test artifact and must not precede its source — the
+        // record-execution path rejects a retest whose predecessor is a different procedure or that
+        // executed before the failure it references, so neither may count as a healed chain here.
+        var rowsByExecutionId = executionRows.ToDictionary(x => x.Id);
+        var healedFailures = outcomes.Count(x => x.Outcome == TestOutcome.Pass
+            && x.RetestOfExecutionId is { } sourceId
+            && rowsByExecutionId.TryGetValue(sourceId, out var failure)
+            && failure.Outcome == TestOutcome.Fail
+            && failure.ProcedureId == x.ProcedureId
+            && x.ExecutedAt >= failure.ExecutedAt);
+        // Each configured verification artifact family is its own user-visible workspace, so the
+        // aggregate artifact total cannot stand in for them: an upgraded database that keeps 500+
+        // artifacts overall but loses every HLR Case still has an empty family a user opens.
+        var familyCounts = verificationFamilies
+            .GroupBy(x => (x.Level, x.ArtifactKind))
+            .OrderBy(g => (int)g.Key.Level).ThenBy(g => (int)g.Key.ArtifactKind)
+            .Select(g => (Key: g.Key, Count: g.Count()))
+            .ToList();
 
         string Detail() =>
             $"Families: SYSR {systemRequirements}, HLR {highLevelRequirements}, LLR {lowLevelRequirements}; "
             + $"change requests: {systemRequests} System, {softwareRequests} Software; "
+            + "verification artifacts: "
+            + string.Join(", ", familyCounts.Select(f => $"{f.Key.Level}/{f.Key.ArtifactKind} {f.Count}")) + "; "
             + $"executions: {passes} pass, {failures} fail, {retests} retest ({healedFailures} failure(s) healed by a passing retest); "
             + $"test change reviews {testChangeReviews}; downstream assessments {assessments}; "
             + $"verification impact items {impactItems}. "
@@ -1284,7 +1298,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (lowLevelRequirements < 5) failures1.Add($"only {lowLevelRequirements} LLRs");
         if (systemRequests < 5) failures1.Add($"only {systemRequests} System change requests");
         if (softwareRequests < 5) failures1.Add($"only {softwareRequests} Software change requests");
-        if (healedFailures < 1) failures1.Add("no failed execution with a passing retest successor (pass/fail/retest chain broken)");
+        foreach (var family in familyCounts.Where(f => f.Count < 5))
+            failures1.Add($"only {family.Count} {family.Key.Level}/{family.Key.ArtifactKind} verification artifacts");
+        if (healedFailures < 1) failures1.Add("no failed execution with a passing same-artifact retest successor that does not precede it (pass/fail/retest chain broken)");
         if (passes < 1) failures1.Add("no passing execution outside the retest chain (pass category empty)");
         if (testChangeReviews < 5) failures1.Add($"only {testChangeReviews} test change reviews");
         if (assessments < 5) failures1.Add($"only {assessments} downstream change assessments");
