@@ -139,6 +139,9 @@ export const viewForFocal = (focalKind: ThreadFocalKind, focalId?: string): Thre
   // of everything around it, with `Open this change` one click away.
   focalKind === "change-request" ? "network" : focalId ? "artifact" : "network"
 
+const isChangeNode = (node: { kind: string } | null): boolean =>
+  node?.kind === "ChangeRequest" || node?.kind === "TestChangeRequest"
+
 /**
  * The route's focal-kind vocabulary mapped to the artifact-thread contract's.
  *
@@ -238,16 +241,48 @@ export default function DigitalThreadPage({
    * that way.
    */
   const [proposalState, setProposalState] = useState<{ key: string; content: ProposalContent } | null>(null)
-  const [thread, setThread] = useState<unknown>(null)
+  const [threadState, setThreadState] = useState<{ key: string; body: unknown } | null>(null)
   const [rows, setRows] = useState<TraceRow[]>([])
   const [rowTotal, setRowTotal] = useState(0)
   const [rowPage, setRowPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Artifact resolution/thread failures belong to Artifact. Keeping them separate prevents a failed or
+  // unsupported Artifact attempt from being presented as a false Network load failure after navigation (F6).
+  const [artifactErrorState, setArtifactErrorState] = useState<{ key: string; message: string } | null>(null)
   const [attempt, setAttempt] = useState(0)
+  /** Network selection is page context so a selected change can become the exact Inside focal. */
+  const [networkSelectionId, setNetworkSelectionId] = useState<string | null>(
+    focalKind === "change-request" ? focalId ?? null : null,
+  )
+  // A Problem Report can remain a local Network selection because its kind has no Digital Thread focal
+  // segment. This marker distinguishes that intentional selection from a bare route reached by navigation.
+  const bareSelectionRef = useRef<string | null>(null)
   const exportRef = useRef<HTMLDetailsElement | null>(null)
 
   const retry = useCallback(() => setAttempt(value => value + 1), [])
+
+  /** A transport/projection error belongs to the view that raised it. Navigation starts a new read context. */
+  useEffect(() => {
+    setError(null)
+    setArtifactErrorState(null)
+  }, [active, focalId, focalKind])
+
+  // A routed change is the network's initial selection. A bare network address intentionally starts empty,
+  // except while the user is selecting a non-change card locally (there is no honest focal route for it).
+  useEffect(() => {
+    if (active !== "network") return
+    if (focalKind === "change-request") {
+      bareSelectionRef.current = null
+      setNetworkSelectionId(focalId ?? null)
+      return
+    }
+    if (bareSelectionRef.current === networkSelectionId) {
+      bareSelectionRef.current = null
+      return
+    }
+    setNetworkSelectionId(null)
+  }, [active, focalId, focalKind, networkSelectionId])
 
   /** The build's change network, plus the configuration context every other read is scoped by. */
   useEffect(() => {
@@ -321,6 +356,10 @@ export default function DigitalThreadPage({
     () => (focalId ? register.find(node => node.id === focalId) ?? null : null),
     [focalId, register],
   )
+  const selectedNetworkNode = useMemo(
+    () => network?.nodes.find(node => node.id === networkSelectionId) ?? null,
+    [network, networkSelectionId],
+  )
 
   /**
    * The opened change's proposal content, for the inside-a-change lanes.
@@ -360,6 +399,23 @@ export default function DigitalThreadPage({
     return () => { cancelled = true }
   }, [active, api, attempt, opened, proposalKey])
 
+  /** Artifact-thread entry is valid only when the address names a supported exact focal kind. */
+  const artifactContext = useMemo<ArtifactThreadFocalKind | undefined>(() => {
+    if (!focalId) return undefined
+    return focalKind ? ARTIFACT_FOCAL_KIND[focalKind] : "Requirement"
+  }, [focalId, focalKind])
+  const artifactEntryAvailable = Boolean(focalId && artifactContext)
+  // The request identity is part of the state key. A requirement A response must never render for requirement B
+  // while B is resolving, even when both requests map to the same Artifact focal kind (Requirement).
+  const artifactRequestKey = active === "artifact" && focalId && artifactContext && baselineId
+    ? `${projectId}:${baselineId}:${artifactContext}:${focalId}`
+    : ""
+  const thread = threadState?.key === artifactRequestKey ? threadState.body : null
+  const artifactError = artifactErrorState?.key === artifactRequestKey ? artifactErrorState.message : null
+  const setArtifactError = useCallback((message: string | null) => {
+    setArtifactErrorState(message && artifactRequestKey ? { key: artifactRequestKey, message } : null)
+  }, [artifactRequestKey])
+
   /**
    * The exact revision a requirement focal names.
    *
@@ -374,11 +430,22 @@ export default function DigitalThreadPage({
    * carries — not the newest one that happens to exist. An id that is already a revision comes back as
    * itself, so the per-kind addresses introduced by §4.4 are unaffected.
    */
-  const [resolvedFocalId, setResolvedFocalId] = useState<string | undefined>(undefined)
+  const [resolutionState, setResolutionState] = useState<{ key: string; revisionId?: string } | null>(null)
+  const resolvedFocalId = resolutionState?.key === artifactRequestKey ? resolutionState.revisionId : undefined
   useEffect(() => {
     const isRequirement = !focalKind || focalKind === "requirement"
-    if (!focalId || !isRequirement) { setResolvedFocalId(focalId); return undefined }
-    if (!baselineId) { setResolvedFocalId(undefined); return undefined }
+    // Resolution is an Artifact concern. Cancelling it when the reader leaves Artifact prevents a late
+    // requirement response from writing an error into the newly active Network context.
+    if (active !== "artifact" || !focalId || !isRequirement) {
+      setResolutionState({ key: artifactRequestKey, revisionId: focalId })
+      return undefined
+    }
+    if (!baselineId) { setResolutionState({ key: artifactRequestKey }); return undefined }
+    // Clear the previous resolution before reading this focal. Otherwise the Artifact effect can fetch the
+    // previous revision for one render while the new requirement is still being resolved.
+    setResolutionState({ key: artifactRequestKey })
+    setThreadState(null)
+    setArtifactError(null)
     let cancelled = false
     const run = async () => {
       try {
@@ -391,14 +458,22 @@ export default function DigitalThreadPage({
         // Unresolved stays unresolved. Falling back to the address as given would send an artifact id to a
         // read rooted on a revision, and the reader would be told the thread is unavailable rather than that
         // this build does not carry the record they named.
-        setResolvedFocalId(match?.revisionId)
+        if (!match) {
+          setResolutionState({ key: artifactRequestKey })
+          setArtifactError("That exact requirement is not present in the selected Project and build.")
+          return
+        }
+        setResolutionState({ key: artifactRequestKey, revisionId: match.revisionId })
       } catch (failure) {
-        if (!cancelled) { setResolvedFocalId(undefined); setError(failure instanceof Error ? failure.message : "That requirement could not be resolved.") }
+        if (!cancelled) {
+          setResolutionState({ key: artifactRequestKey })
+          setArtifactError(failure instanceof Error ? failure.message : "That requirement could not be resolved.")
+        }
       }
     }
     void run()
     return () => { cancelled = true }
-  }, [api, attempt, baselineId, focalId, focalKind, projectId])
+  }, [active, api, artifactRequestKey, attempt, baselineId, focalId, focalKind, projectId, setArtifactError])
 
   /**
    * The artifact thread for the focal record.
@@ -407,25 +482,31 @@ export default function DigitalThreadPage({
    * would put a second, unvalidated reading of the wire between the server and the canvas.
    */
   useEffect(() => {
-    if (active !== "artifact" || !resolvedFocalId || !baselineId) { setThread(null); return undefined }
+    if (active !== "artifact" || !artifactContext || !resolvedFocalId || !baselineId) {
+      setThreadState(null)
+      return undefined
+    }
     let cancelled = false
     const run = async () => {
+      setThreadState(null)
+      setArtifactError(null)
       try {
-        const kind = focalKind ? ARTIFACT_FOCAL_KIND[focalKind] : "Requirement"
-        if (!kind) throw new Error("That artifact kind cannot open an artifact thread.")
         const response = await fetch(api + artifactThreadUrl({
-          projectId, baselineId, focalKind: kind, focalId: resolvedFocalId!,
+          projectId, baselineId, focalKind: artifactContext, focalId: resolvedFocalId!,
         }))
         if (!response.ok) throw new Error("This artifact thread is unavailable in the selected Project and build.")
         const body = await response.json() as unknown
-        if (!cancelled) setThread(body)
+        if (!cancelled) {
+          setThreadState({ key: artifactRequestKey, body })
+          setArtifactError(null)
+        }
       } catch (failure) {
-        if (!cancelled) setError(failure instanceof Error ? failure.message : "The artifact thread could not be loaded.")
+        if (!cancelled) setArtifactError(failure instanceof Error ? failure.message : "The artifact thread could not be loaded.")
       }
     }
     void run()
     return () => { cancelled = true }
-  }, [active, api, attempt, baselineId, focalKind, projectId, resolvedFocalId])
+  }, [active, api, attempt, artifactContext, artifactRequestKey, baselineId, projectId, resolvedFocalId, setArtifactError])
 
   /**
    * The evidence table's rows.
@@ -482,6 +563,29 @@ export default function DigitalThreadPage({
     [onRoute],
   )
 
+  /** Publish a network selection so the next view receives the exact selected change. */
+  const handleNetworkSelect = useCallback(
+    (id: string | null) => {
+      setNetworkSelectionId(id)
+      const node = network?.nodes.find(item => item.id === id) ?? null
+      if (node && isChangeNode(node)) {
+        bareSelectionRef.current = null
+        go("network", node.id, "change-request")
+      } else {
+        // Problem Reports can be selected for context, but there is no change-request focal route for them.
+        // Clear any prior routed change rather than leaving the address naming a different selected card.
+        bareSelectionRef.current = id
+        go("network")
+      }
+    },
+    [go, network],
+  )
+
+  const insideId = active === "network"
+    ? (isChangeNode(selectedNetworkNode) ? selectedNetworkNode!.id : undefined)
+    : focalKind === "change-request" && focalId ? focalId : undefined
+  const insideAvailable = Boolean(insideId)
+
   /**
    * Every identifier a canvas card renders, routed to its own native controlled record at its exact revision.
    *
@@ -499,7 +603,10 @@ export default function DigitalThreadPage({
 
   /** Opening a change request from any view lands inside it, keeping the address honest about where you are. */
   const openChange = useCallback(
-    (node: { id: string }) => go("inside", node.id, "change-request"),
+    (node: { id: string }) => {
+      setNetworkSelectionId(node.id)
+      go("inside", node.id, "change-request")
+    },
     [go],
   )
 
@@ -521,11 +628,14 @@ export default function DigitalThreadPage({
               key={key}
               aria-pressed={active === key}
               className={active === key ? "is-on" : ""}
-              // Inside-a-change is only meaningful with a change open, so it keeps the current focal when one
-              // is a change request and is otherwise unavailable rather than opening on nothing.
-              disabled={key === "inside" && !(focalKind === "change-request" && focalId)}
-              onClick={() => go(key, key === "network" && focalKind !== "change-request" ? undefined : focalId,
-                key === "network" && focalKind !== "change-request" ? undefined : focalKind)}
+              // Inside-a-change is only meaningful with a selected/routed change, and Artifact requires a
+              // supported focal kind. Disabled states preserve truthful entry instead of opening on nothing.
+              disabled={(key === "inside" && !insideAvailable) || (key === "artifact" && !artifactEntryAvailable)}
+              onClick={() => go(
+                key,
+                key === "inside" ? insideId : key === "network" && focalKind !== "change-request" ? undefined : focalId,
+                key === "inside" ? "change-request" : key === "network" && focalKind !== "change-request" ? undefined : focalKind,
+              )}
             >
               {label}
             </button>
@@ -622,11 +732,17 @@ export default function DigitalThreadPage({
           onOpenChange={node => openChange(node)}
           onBackToNetwork={() => go("network")}
         />
+      ) : active === "artifact" && !artifactContext && !loading ? (
+        <div className="dtPageTableEmpty" role="alert">
+          <b>Artifact thread needs a supported exact artifact.</b>
+          <p>Select a requirement, test artifact, execution or build with an exact identity before opening this view.</p>
+          <button type="button" onClick={() => go("network")}>Back to the change network</button>
+        </div>
       ) : active === "artifact" ? (
         <DigitalThreadArtifact
           response={thread}
-          loading={loading || (!!focalId && !thread && !error)}
-          error={error}
+          loading={loading || (!!focalId && !thread && !artifactError)}
+          error={artifactError}
           onRetry={retry}
           hrefFor={(node: ArtifactThreadNode) => cardHref(node)}
           evidenceHref={file => `${api}/api/evidence/${file.id}`}
@@ -641,6 +757,8 @@ export default function DigitalThreadPage({
           orderedLevels={orderedLevels}
           buildLabel={buildLabel}
           focalId={focalId}
+          selectedId={networkSelectionId}
+          onSelect={handleNetworkSelect}
           hrefFor={node => cardHref(node)}
           onOpenChange={node => openChange(node)}
         />
