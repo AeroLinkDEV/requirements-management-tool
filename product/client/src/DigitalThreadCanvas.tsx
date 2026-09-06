@@ -695,8 +695,7 @@ export default function DigitalThreadCanvas({
     (target: { selectedId: string; wanted: string[]; intent: FrameIntent; key: string } | null): boolean => {
       if (!target) return false
       const box = frame()
-      const result = geometryRef.current
-      if (!box || !result) return false
+      if (!box || !geometryRef.current) return false
 
       // Read every requested card's actual layout height before choosing a camera. Wrapped identifiers and
       // state pills can make a direct card taller than its nominal tier height; the measured border box keeps
@@ -704,8 +703,30 @@ export default function DigitalThreadCanvas({
       const cardHeights = new Map<string, number>()
       for (const node of nodes) {
         const card = cardRefs.current.get(node.id)
+        card?.classList.toggle("is-selected", target.selectedId === node.id)
         const measured = card?.offsetHeight || card?.scrollHeight
         if (measured && Number.isFinite(measured)) cardHeights.set(node.id, measured)
+      }
+      const result = layoutWithMeasuredCards(layout(counts, box, transform.current.zoom), nodes, cardHeights)
+
+      const synchronize = (measuredLayout: typeof result) => {
+        const rolled = clampOffsets(offsets.current, measuredLayout.laneMinimums)
+        const selectedNode = nodes.find(node => node.id === target.selectedId)
+        if (selectedNode) {
+          const position = positionsForNodes(nodes, measuredLayout.geometry, rolled, cardHeights).get(selectedNode.id)
+          if (position) {
+            const height = Math.max(measuredLayout.geometry.cardHeight, cardHeights.get(selectedNode.id) ?? 0)
+            const top = measuredLayout.geometry.pad
+            const bottom = Math.max(top, measuredLayout.bandHeight - height - top)
+            const wantedY = Math.max(top, Math.min(bottom, position.y))
+            // Ordinary lane synchronization preserves its anchor lane. Selection has to reveal the entire
+            // expanded anchor first, including native actions beneath its title, before aligning other lanes.
+            rolled[selectedNode.lane] = Math.max(measuredLayout.laneMinimums[selectedNode.lane] ?? 0,
+              Math.min(0, (rolled[selectedNode.lane] ?? 0) + wantedY - position.y))
+          }
+        }
+        return syncTargets(target.selectedId, nodes, edges, measuredLayout.geometry, rolled,
+          measuredLayout.laneMinimums, counts.length, -1, cardHeights)
       }
 
       // Roll every lane to bring the selected record's directed story into its own windows, before framing
@@ -713,17 +734,7 @@ export default function DigitalThreadCanvas({
       // scrolls independently, so a linked record can sit outside its lane window no matter where the camera
       // is, and framing alone would centre on a card the reader still cannot see. The offsets are applied at
       // once rather than animated into place so the two-pass framing below measures where the cards landed.
-      const synced = syncTargets(
-        target.selectedId,
-        nodes,
-        edges,
-        result.geometry,
-        offsets.current,
-        result.laneMinimums,
-        counts.length,
-        -1,
-        cardHeights,
-      )
+      const synced = synchronize(result)
       offsets.current = [...synced]
       targets.current = [...synced]
 
@@ -787,6 +798,23 @@ export default function DigitalThreadCanvas({
       sceneRef.current?.classList.add("is-easing")
       transform.current = next
       paint()
+      // The new zoom can change row pitch and card height. Reconcile the anchor against that actual tier,
+      // rather than leaving an expanded lower-row card beneath the dock after offsets have been rescaled.
+      for (const node of nodes) {
+        const card = cardRefs.current.get(node.id)
+        const measured = card?.offsetHeight || card?.scrollHeight
+        if (measured && Number.isFinite(measured)) cardHeights.set(node.id, measured)
+      }
+      const settledLayout = layoutWithMeasuredCards(layout(counts, box, next.zoom), nodes, cardHeights)
+      offsets.current = synchronize(settledLayout)
+      targets.current = offsets.current.slice()
+      const settledFrame = frameNodes(target.wanted, nodes, counts, box, offsets.current, target.selectedId,
+        next.zoom, true, { intent: target.intent, selectedCardHeight: cardHeights.get(target.selectedId), cardHeights })
+      if (settledFrame) {
+        transform.current = settledFrame
+        paint()
+        if (!fits(settledFrame, [...direct])) onFramingNeedsRoom?.()
+      }
       if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
       easeTimer.current = window.setTimeout(() => {
         sceneRef.current?.classList.remove("is-easing")
