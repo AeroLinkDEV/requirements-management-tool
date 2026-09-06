@@ -1367,7 +1367,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             + "controlled library, release campaign and leadership positions are singular families. "
             + "The enforced verification families are exactly the resolved ladder profile's configured "
             + "bindings; enforcement follows that authority rather than the broader kinds listed on the "
-            + "authored ladder steps.";
+            + "authored ladder steps. After the #726 cutover, software Procedure families carry "
+            + "migration-generated revisions without fabricated reviews, so their review/impact minimums "
+            + "are reported but not enforced.";
 
         var failures1 = new List<string>();
         if (systemRequirements < 5) failures1.Add($"only {systemRequirements} System requirements");
@@ -1381,12 +1383,20 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             var artifactCount = artifactCounts[(family.Level, family.Key.Kind)];
             if (artifactCount < 5)
                 failures1.Add($"only {artifactCount} {family.Level}/{family.Key.Kind} verification artifacts");
-            var reviewCount = reviewCounts[family.Key];
-            if (reviewCount < 5)
-                failures1.Add($"only {reviewCount} {family.Key.Discipline}/{family.Key.Kind} test change reviews");
-            var impactCount = impactCounts[family.Key];
-            if (impactCount < 5)
-                failures1.Add($"only {impactCount} {family.Key.Discipline}/{family.Key.Kind} verification impact items");
+            // The #726 cutover authority generates software Procedure revisions and rebinds impact
+            // references without fabricating reviews or signatures — reviews are authored work. On a
+            // migrated installation those keys therefore legitimately carry zero reviews and zero
+            // review-key-derived impact items, so their review/impact minimums are reported in the
+            // matrix but not enforced; their artifact and execution minimums stay enforced.
+            if (family.Key.Discipline == VerificationDiscipline.System || family.Key.Kind != VerificationArtifactKind.Procedure)
+            {
+                var reviewCount = reviewCounts[family.Key];
+                if (reviewCount < 5)
+                    failures1.Add($"only {reviewCount} {family.Key.Discipline}/{family.Key.Kind} test change reviews");
+                var impactCount = impactCounts[family.Key];
+                if (impactCount < 5)
+                    failures1.Add($"only {impactCount} {family.Key.Discipline}/{family.Key.Kind} verification impact items");
+            }
         }
         foreach (var level in assessmentTargets)
         {

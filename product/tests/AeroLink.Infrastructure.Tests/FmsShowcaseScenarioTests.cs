@@ -1056,6 +1056,34 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         var after = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
         var drifted = Assert.Single(after, x => x.Key == "family-inventory");
         Assert.False(drifted.Holds, drifted.Detail);
+
         Assert.Contains("only 0 System executions", drifted.Detail, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A configured artifact family emptied straight out of the database - the exact regression the
+    /// present-row grouping once hid - is still enumerated at zero and named, while the report keeps the
+    /// other families counts visible for the operator.
+    /// </summary>
+    [Fact]
+    public async Task Family_inventory_names_a_configured_artifact_family_emptied_from_the_database()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+
+        /// Raw delete on purpose: this simulates an upgraded database that has lost the family rows,
+        /// not a controlled aggregate transition, so no domain lifecycle is involved.
+        await db.Database.OpenConnectionAsync();
+        await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
+        await db.Database.ExecuteSqlRawAsync("DELETE FROM test_procedures WHERE Level = 'HighLevel'");
+        await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = ON;");
+
+        var after = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
+        var drifted = Assert.Single(after, x => x.Key == "family-inventory");
+        Assert.False(drifted.Holds, drifted.Detail);
+        Assert.Contains("only 0 HighLevel/Case verification artifacts", drifted.Detail, StringComparison.Ordinal);
+        Assert.Contains("System/Procedure 75", drifted.Detail, StringComparison.Ordinal);
+        Assert.Contains("LowLevel/Case 280", drifted.Detail, StringComparison.Ordinal);
     }
 }
