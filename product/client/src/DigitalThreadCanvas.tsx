@@ -920,7 +920,11 @@ export default function DigitalThreadCanvas({
               // free frame on a board wider than the viewport, and #880 §6.9 does not care how focus got
               // there: it must not rest on a card the reader cannot see. Revealing rather than dropping the
               // stop keeps every lane reachable by keyboard, which removing it would not.
-              onFocus={() => {
+              onFocus={event => {
+                // A nested control has its own focus target. Revealing the parent card as that focus bubbles
+                // through the canvas can move the lane between pointerdown and click, so preserve the native
+                // control's activation geometry (F4).
+                if (nestedControl(event.target)) return
                 setRoving(current => ({ ...current, [node.lane]: node.id }))
                 reveal(node)
               }}
