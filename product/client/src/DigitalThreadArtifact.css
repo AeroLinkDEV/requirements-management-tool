@@ -276,6 +276,8 @@
 
 .dtaPanel {
   position: absolute;
+  display: flex;
+  flex-direction: column;
   z-index: 70;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -288,7 +290,7 @@
 .dtaPanel-left { left: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
 .dtaPanel-bottom { left: 16px; right: 16px; bottom: 18px; height: 150px; overflow: hidden; }
 
-.dtaPanelTools { position: absolute; right: 10px; top: 10px; display: flex; gap: 4px; z-index: 2; }
+.dtaPanelTools { position: static; display: flex; justify-content: flex-end; flex: 0 0 24px; gap: 4px; z-index: 2; margin-bottom: 4px; }
 
 .dtaPanelTools button {
   min-height: 24px;
@@ -304,7 +306,7 @@
 .dtaPanelTools button:hover { border-color: #a9c9c4; color: var(--teal-700); }
 .dtaPanelTools button.is-on { border-color: var(--teal-700); background: #eff9f6; color: var(--teal-700); }
 
-.dtaPanelGrid { display: flex; flex-direction: column; gap: 13px; }
+.dtaPanelGrid { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 13px; }
 
 /* Flattened, the panel is four columns rather than one third of a tall box with empty space beneath it. */
 .dtaPanel-bottom .dtaPanelGrid {
@@ -312,7 +314,8 @@
   grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr) 158px;
   gap: 18px;
   align-items: start;
-  height: 100%;
+  height: auto;
+  min-height: 0;
 }
 
 .dtaPanelIdentityCol { min-width: 0; overflow: hidden; }
@@ -376,7 +379,7 @@
 }
 
 .dtaPanelActions button.is-primary { border-color: var(--teal-700); background: var(--teal-700); color: #fff; }
-.dtaPanel-bottom .dtaPanelActions { padding-top: 26px; }
+.dtaPanel-bottom .dtaPanelActions { padding-top: 0; }
 
 .dtaVisuallyHidden {
   position: absolute;

@@ -546,6 +546,14 @@ export interface EdgeLabelCandidate {
   to: { x: number; y: number }
 }
 
+export interface EdgeLabelPlacement {
+  x: number
+  y: number
+  anchorX: number
+  anchorY: number
+  leader: boolean
+}
+
 /**
  * Place visible edge phrases beside their actual connector while avoiding rendered cards and earlier labels.
  * The caller supplies DOM-measured card obstacles; this helper deliberately knows nothing about a view's data
@@ -556,24 +564,47 @@ export const placeEdgeLabels = (
   geometry: CanvasGeometry,
   obstacles: readonly CanvasRect[],
   frame: CanvasRect,
-): Map<string, { x: number; y: number }> => {
+): Map<string, EdgeLabelPlacement> => {
   const placed: CanvasRect[] = []
-  const result = new Map<string, { x: number; y: number }>()
+  const result = new Map<string, EdgeLabelPlacement>()
   const intersects = (a: CanvasRect, b: CanvasRect): boolean =>
     a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+  const leaderClear = (
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    blocked: readonly CanvasRect[],
+  ): boolean => {
+    // A leader is a visual attachment to an existing edge, so a displaced phrase must not draw through another
+    // controlled card or an earlier phrase. Sample the segment in scene coordinates; the endpoints themselves
+    // are allowed to touch the edge/card boundary and the label's own box is tested separately below.
+    for (let step = 1; step < 12; step += 1) {
+      const t = step / 12
+      const point: CanvasRect = {
+        x: from.x + (to.x - from.x) * t - 0.75,
+        y: from.y + (to.y - from.y) * t - 0.75,
+        width: 1.5,
+        height: 1.5,
+      }
+      if (blocked.some(obstacle => intersects(point, obstacle))) return false
+    }
+    return true
+  }
   for (const item of labels) {
     const intra = isIntraLane(item.from, item.to)
-    const baseX = intra
-      ? item.from.x + geometry.laneWidth + 30
-      : (item.from.x + geometry.laneWidth + item.to.x) / 2
+    const backwards = item.to.x < item.from.x
+    const startX = backwards ? item.from.x : item.from.x + geometry.laneWidth
+    const endX = backwards ? item.to.x + geometry.laneWidth : item.to.x
+    const anchorX = intra ? item.from.x + geometry.laneWidth + 34.5 : (startX + endX) / 2
+    const baseX = anchorX
     const baseY = (item.from.y + item.to.y) / 2 + geometry.anchor - 6
+    const anchorY = (item.from.y + item.to.y) / 2 + geometry.anchor
     const dx = (item.to.x - item.from.x) || 1
     const dy = item.to.y - item.from.y
     const length = Math.max(1, Math.sqrt(dx * dx + dy * dy))
     const normalX = -dy / length
     const normalY = dx / length
     const width = Math.max(28, item.label.length * 5.4 + 8)
-    const offsets = [0, -18, 18, -34, 34, -52, 52, -72, 72]
+    const offsets = [0, -12, 12, -22, 22, -34, 34]
     let chosen: { x: number; y: number } | null = null
     for (const offset of offsets) {
       const x = baseX + (intra ? offset * 0.35 : normalX * offset)
@@ -582,6 +613,7 @@ export const placeEdgeLabels = (
       if (rect.x < frame.x + 2 || rect.x + rect.width > frame.x + frame.width - 2 ||
           rect.y < frame.y + 2 || rect.y + rect.height > frame.y + frame.height - 2) continue
       if (obstacles.some(obstacle => intersects(rect, obstacle)) || placed.some(previous => intersects(rect, previous))) continue
+      if (offset !== 0 && !leaderClear({ x: anchorX, y: anchorY }, { x, y }, [...obstacles, ...placed])) continue
       chosen = { x, y }
       placed.push(rect)
       break
@@ -590,7 +622,12 @@ export const placeEdgeLabels = (
     // clipping/hiding it would erase a controlled relationship. The selected/traced phrases are processed first
     // by the canvas, so they retain the most useful slots when space is genuinely scarce.
     const fallback = chosen ?? { x: baseX, y: baseY }
-    result.set(item.key, fallback)
+    result.set(item.key, {
+      ...fallback,
+      anchorX,
+      anchorY,
+      leader: Boolean(chosen && (fallback.x !== baseX || fallback.y !== baseY)),
+    })
     if (!chosen) placed.push({ x: fallback.x - width / 2, y: fallback.y - 10, width, height: 12 })
   }
   return result

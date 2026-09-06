@@ -153,6 +153,8 @@
 
 .dtnPanel {
   position: absolute;
+  display: flex;
+  flex-direction: column;
   z-index: 70;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -165,7 +167,7 @@
 .dtnPanel-left { left: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
 .dtnPanel-bottom { left: 16px; right: 16px; bottom: 18px; height: 150px; overflow: hidden; }
 
-.dtnPanelTools { position: absolute; right: 10px; top: 10px; display: flex; gap: 4px; z-index: 2; }
+.dtnPanelTools { position: static; display: flex; justify-content: flex-end; flex: 0 0 24px; gap: 4px; z-index: 2; margin-bottom: 4px; }
 
 .dtnPanelTools button {
   min-height: 24px;
@@ -182,7 +184,7 @@
 .dtnPanelTools button.is-on { border-color: var(--teal-700); background: #eff9f6; color: var(--teal-700); }
 
 .dtnEyebrow { margin: 0; color: var(--teal-600); font: var(--weight-bold) 9px var(--font-body); letter-spacing: .13em; }
-.dtnPanelGrid { display: flex; flex-direction: column; gap: 13px; }
+.dtnPanelGrid { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 13px; }
 
 /* Flattened, the panel is four columns rather than one third of a tall box with empty space beneath it. */
 .dtnPanel-bottom .dtnPanelGrid {
@@ -190,7 +192,8 @@
   grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr) 158px;
   gap: 18px;
   align-items: start;
-  height: 100%;
+  height: auto;
+  min-height: 0;
 }
 
 .dtnPanelIdentity { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
@@ -239,7 +242,7 @@
 }
 
 .dtnPanelActions button.is-primary { border-color: var(--teal-700); background: var(--teal-700); color: #fff; }
-.dtnPanel-bottom .dtnPanelActions { padding-top: 26px; }
+.dtnPanel-bottom .dtnPanelActions { padding-top: 0; }
 
 .dtnVisuallyHidden {
   position: absolute;

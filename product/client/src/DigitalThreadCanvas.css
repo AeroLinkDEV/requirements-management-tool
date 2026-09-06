@@ -125,6 +125,7 @@
 .dtCanvasEdge.is-traced.is-suspect { stroke: #d6a33b; stroke-width: 2.6; }
 .dtCanvasEdgeDot.is-traced { fill: #2a8e83; }
 .dtCanvasEdgeDot.is-traced.is-suspect { fill: #d6a33b; }
+.dtCanvasEdgeLabelLeader { stroke: #7ea7ad; stroke-width: 1; stroke-dasharray: 1 4; stroke-linecap: round; opacity: 0; pointer-events: none; }
 
 /* Untraced edges recede while a trace is active rather than vanishing, so the build keeps its shape. */
 .dtCanvasEdge.is-untraced,

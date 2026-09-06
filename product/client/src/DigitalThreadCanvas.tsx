@@ -3,6 +3,7 @@ import {
   EDGE_LAYER_OVERHANG,
   type CanvasEdge,
   type CanvasFrame,
+  type CanvasRect,
   type CanvasNode,
   type FrameIntent,
   type LayoutResult,
@@ -122,7 +123,13 @@ export default function DigitalThreadCanvas({
   const edgeLayerRef = useRef<SVGSVGElement | null>(null)
   const cardRefs = useRef(new Map<string, HTMLDivElement>())
   const edgeRefs = useRef<
-    { path: SVGPathElement; dot: SVGCircleElement; label: SVGTextElement | null; edge: CanvasEdge }[]
+    {
+      path: SVGPathElement
+      dot: SVGCircleElement
+      leader: SVGLineElement | null
+      label: SVGTextElement | null
+      edge: CanvasEdge
+    }[]
   >([])
 
   const transform = useRef({ x: 0, y: 0, zoom: 1 })
@@ -147,25 +154,44 @@ export default function DigitalThreadCanvas({
   const framedFor = useRef<string | null>(null)
   /** The latest framing request, so the resize path can retry one that arrived before the frame was real. */
   const framingRef = useRef<{ selectedId: string; wanted: string[]; key: string; intent: FrameIntent } | null>(null)
-  /** The arrival record remains in landing mode while measurement settles; a later selection clears it. */
-  const landingSelection = useRef<string | null>(
-    selectedId && framingIntent === "landing" && selectedId === landingId ? selectedId : null,
-  )
-  const lastLandingId = useRef(landingId)
-  const lastSelectedForLanding = useRef(selectedId)
+  /** Arrival survives measurement retries, but focal -> close -> focal is still a user return, not a new landing. */
+  const landingState = useRef({
+    id: landingId,
+    lastSelected: selectedId,
+    seen: Boolean(selectedId && framingIntent === "landing" && selectedId === landingId),
+    consumed: false,
+    selection: selectedId && framingIntent === "landing" && selectedId === landingId ? selectedId : null,
+  })
 
   // A measured panel inset can cause more than one framing pass for the same arrival. Keep that pass at the
   // landing floor until the reader chooses another record, then never mistake a return to the focal record for a
   // deep link. These refs track identity, not presentation state, and avoid a render-triggering state update.
-  if (lastLandingId.current !== landingId) {
-    lastLandingId.current = landingId
-    landingSelection.current = null
-  }
-  if (lastSelectedForLanding.current !== selectedId) {
-    landingSelection.current = framingIntent === "landing" && selectedId === landingId && lastSelectedForLanding.current === null
-      ? selectedId
-      : null
-    lastSelectedForLanding.current = selectedId
+  if (landingState.current.id !== landingId) {
+    landingState.current = {
+      id: landingId,
+      lastSelected: selectedId,
+      seen: Boolean(selectedId && framingIntent === "landing" && selectedId === landingId),
+      consumed: false,
+      selection: selectedId && framingIntent === "landing" && selectedId === landingId ? selectedId : null,
+    }
+  } else if (landingState.current.lastSelected !== selectedId) {
+    const previous = landingState.current.lastSelected
+    if (selectedId === null) {
+      if (landingState.current.seen) landingState.current.consumed = true
+      landingState.current.selection = null
+    } else if (
+      previous === null &&
+      selectedId === landingId &&
+      framingIntent === "landing" &&
+      !landingState.current.consumed
+    ) {
+      landingState.current.seen = true
+      landingState.current.selection = selectedId
+    } else {
+      landingState.current.consumed = true
+      landingState.current.selection = null
+    }
+    landingState.current.lastSelected = selectedId
   }
   const easeTimer = useRef<number | null>(null)
   const zoomReadoutRef = useRef<HTMLOutputElement | null>(null)
@@ -234,7 +260,7 @@ export default function DigitalThreadCanvas({
     // a reader can deliberately return to that same record after stepping through another card. The identity ref
     // persists through measurement retries, preserving the initial/deep-link distinction without a user density
     // setting.
-    const intent: FrameIntent = framingIntent === "landing" && landingSelection.current === selectedId
+    const intent: FrameIntent = framingIntent === "landing" && landingState.current.selection === selectedId
       ? "landing"
       : framingIntent === "landing" ? "selection" : framingIntent
 
@@ -285,16 +311,21 @@ export default function DigitalThreadCanvas({
     if (!element) return null
     const rect = element.getBoundingClientRect()
     if (rect.width < 320 || rect.height < 240) return null
-    const width = rect.width - (frameInset?.left ?? 0) - (frameInset?.right ?? 0) - trailingOverhang
-    const height = rect.height - (frameInset?.bottom ?? 0)
+    const width = rect.width - (frameInset?.left ?? 0) - (frameInset?.right ?? 0)
+    const controls = element.querySelector<HTMLElement>(".dtCanvasControls")
+    // The toolbar may wrap at a narrow width or under a larger text setting. Its rendered bottom, rather than a
+    // fixed constant, is the start of the actual drawing frame; the small breathing gap keeps headings readable.
+    const controlBottom = controls?.getBoundingClientRect().bottom ?? rect.top + 38
+    const top = Math.max(54, Math.ceil(controlBottom - rect.top + 8))
+    const height = rect.height - top - (frameInset?.bottom ?? 0)
     if (width < 240 || height < 180) return null
     return {
       x: frameInset?.left ?? 0,
-      y: 0,
+      y: top,
       width,
       height,
     }
-  }, [frameInset?.left, frameInset?.right, frameInset?.bottom, trailingOverhang])
+  }, [frameInset?.left, frameInset?.right, frameInset?.bottom])
 
   /** Write current geometry to the DOM: transform, band sizes, card positions, edge paths. */
   const paint = useCallback(() => {
@@ -314,7 +345,7 @@ export default function DigitalThreadCanvas({
 
     const { geometry, bandHeight } = result
     scene.style.transform = `translate(${transform.current.x}px,${transform.current.y}px) scale(${transform.current.zoom})`
-    scene.style.width = `${result.sceneWidth}px`
+    scene.style.width = `${result.sceneWidth + trailingOverhang}px`
     scene.style.height = `${bandHeight}px`
     scene.dataset.tier = String(result.tier)
     scene.dataset.zoom = String(Math.round(transform.current.zoom * 100))
@@ -453,12 +484,40 @@ export default function DigitalThreadCanvas({
         from: positions.get(entry.edge.from)!,
         to: positions.get(entry.edge.to)!,
       }))
-    const labelPositions = placeEdgeLabels(labelCandidates, geometry, cardObstacles, box)
+    const viewportRect = viewportRef.current?.getBoundingClientRect()
+    const zoom = transform.current.zoom || 1
+    const toSceneRect = (rect: DOMRect): CanvasRect | null => {
+      if (!viewportRect) return null
+      return {
+        x: (rect.left - viewportRect.left - transform.current.x) / zoom,
+        y: (rect.top - viewportRect.top - transform.current.y) / zoom,
+        width: rect.width / zoom,
+        height: rect.height / zoom,
+      }
+    }
+    // Labels are SVG scene coordinates. Convert the free frame and every untransformed/DOM-measured obstacle to
+    // that same coordinate space before collision testing; mixing viewport pixels with scene units lets labels
+    // appear clear in one pan position and land over a card in another.
+    const sceneFrame: CanvasRect = {
+      x: (box.x - transform.current.x) / zoom,
+      y: (box.y - transform.current.y) / zoom,
+      width: box.width / zoom,
+      height: box.height / zoom,
+    }
+    const domObstacles = [
+      ...Array.from(scene.querySelectorAll<HTMLElement>(".dtCanvasLaneHead")),
+      scene.querySelector<HTMLElement>(".dtCanvasControls"),
+    ].flatMap(element => {
+      const rect = element?.getBoundingClientRect()
+      const converted = rect ? toSceneRect(rect) : null
+      return converted ? [converted] : []
+    })
+    const labelPositions = placeEdgeLabels(labelCandidates, geometry, [...cardObstacles, ...domObstacles], sceneFrame)
     // Edge labels rest hidden and appear on a traced edge, or once the board is zoomed past 1.05 (#880 §6.7).
     // At the default fit the canvas stays calm; a reader who has selected something, or leaned in, gets the
     // relation words.
     const labelsAtRest = transform.current.zoom > 1.05
-    for (const { path, dot, label, edge } of edgeRefs.current) {
+    for (const { path, dot, leader, label, edge } of edgeRefs.current) {
       const from = positions.get(edge.from)
       const to = positions.get(edge.to)
       if (!from || !to) continue
@@ -494,10 +553,17 @@ export default function DigitalThreadCanvas({
           label.setAttribute("x", String(position.x))
           label.setAttribute("y", String(position.y))
         }
+        if (leader) {
+          leader.setAttribute("x1", String(position?.anchorX ?? 0))
+          leader.setAttribute("y1", String(position?.anchorY ?? 0))
+          leader.setAttribute("x2", String(position?.x ?? 0))
+          leader.setAttribute("y2", String(position?.y ?? 0))
+          leader.style.opacity = inWindow && (traced || labelsAtRest) && position?.leader ? "" : "0"
+        }
         label.style.opacity = inWindow && (traced || labelsAtRest) ? "" : "0"
       }
     }
-  }, [counts, frame, lanes.length, nodes, selectedId, tracedEdges])
+  }, [counts, frame, lanes.length, nodes, selectedId, trailingOverhang, tracedEdges])
 
   const settle = useCallback(() => {
     if (animation.current !== null) return
@@ -1018,15 +1084,19 @@ export default function DigitalThreadCanvas({
                 ref={element => {
                   if (!element) return
                   const dot = element.nextElementSibling as SVGCircleElement | null
-                  const label = dot?.nextElementSibling as SVGTextElement | null
-                  if (dot) edgeRefs.current.push({ path: element, dot, label, edge })
+                  const leader = dot?.nextElementSibling as SVGLineElement | null
+                  const label = leader?.nextElementSibling as SVGTextElement | null
+                  if (dot) edgeRefs.current.push({ path: element, dot, leader, label, edge })
                 }}
               />
               <circle r="3" className={`dtCanvasEdgeDot${edge.kind ? ` is-${edge.kind}` : ""}`} />
               {edge.label ? (
-                <text className="dtCanvasEdgeLabel" textAnchor="middle">
-                  {edge.label}
-                </text>
+                <>
+                  <line className="dtCanvasEdgeLabelLeader" />
+                  <text className="dtCanvasEdgeLabel" textAnchor="middle">
+                    {edge.label}
+                  </text>
+                </>
               ) : null}
             </g>
           ))}
