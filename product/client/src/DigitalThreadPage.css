@@ -191,7 +191,7 @@ html .workspaceView > main.dtPage { padding: 0; }
   border-bottom: 1px solid var(--line);
   background: var(--surface);
   padding: 10px 12px;
-  color: var(--teal-600);
+  color: var(--teal-700);
   font: var(--weight-bold) var(--text-xs) var(--font-body);
   letter-spacing: .08em;
   text-align: left;
