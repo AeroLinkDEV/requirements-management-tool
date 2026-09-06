@@ -1325,9 +1325,11 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var systemRequests = requests.Count(x => x.Type == ChangeRequestType.System);
         // HLRCR and LLRCR are separate controlled families worked and reviewed separately, so the
         // governed SoftwareLevel — not the aggregate Software type — decides which family a request
-        // belongs to and what the diagnostic reports.
-        var highLevelChangeRequests = requests.Count(x => x.SoftwareLevel == RequirementLevel.HighLevel);
-        var lowLevelChangeRequests = requests.Count(x => x.SoftwareLevel == RequirementLevel.LowLevel);
+        // belongs to and what the diagnostic reports. Both predicates require the Software type as well,
+        // matching the product's own family predicate: a misclassified System or Interface row carrying
+        // a stray SoftwareLevel must not pad a software family.
+        var highLevelChangeRequests = requests.Count(x => x.Type == ChangeRequestType.Software && x.SoftwareLevel == RequirementLevel.HighLevel);
+        var lowLevelChangeRequests = requests.Count(x => x.Type == ChangeRequestType.Software && x.SoftwareLevel == RequirementLevel.LowLevel);
         var passes = outcomes.Count(x => x.Outcome == TestOutcome.Pass && x.RetestOfExecutionId == null);
         var failures = outcomes.Count(x => x.Outcome == TestOutcome.Fail);
         var retests = outcomes.Count(x => x.RetestOfExecutionId != null);
