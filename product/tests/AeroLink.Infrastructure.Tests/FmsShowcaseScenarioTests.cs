@@ -191,8 +191,98 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
                 .Where(x => priorClosureIds.Contains(x.ProblemReportId)).ToListAsync())
             .OrderBy(x => x.Id).Select(x => (x.Id, x.State, x.ClosurePackageHash, x.ClosurePackageJson)).ToArray());
         Assert.Empty(await seeder.UpgradeAsync(summary.ProgramId));
-        Assert.All(await seeder.CheckInvariantsAsync(summary.ProgramId),
+
+        // The deliberate cutover configuration above leaves the released baseline with an authoritative
+        // exact-empty procedure manifest, so the #913 trace contract honestly reads unhealthy here:
+        // nothing on the released build settles coverage any more, and the diagnostic says so instead of
+        // silently falling back to unrestricted current coverage. Every other seed invariant holds.
+        var invariants = await seeder.CheckInvariantsAsync(summary.ProgramId);
+        Assert.All(invariants.Where(x => x.Key != "trace-gap-inventory"),
             invariant => Assert.True(invariant.Holds, $"{invariant.Key}: {invariant.Detail}"));
+        var trace = invariants.Single(x => x.Key == "trace-gap-inventory");
+        Assert.False(trace.Holds, trace.Detail);
+        Assert.Contains("Scope: exact manifest, 0 procedure revision(s).", trace.Detail, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Exact-empty released manifest plus unrelated current coverage: a later approved procedure revision
+    /// linked to a released requirement must never settle released-build coverage. The invariant stays
+    /// honestly unhealthy with an empty exact scope instead of reporting a false healthy state.
+    /// </summary>
+    [Fact]
+    public async Task An_exact_empty_released_manifest_never_lets_later_current_coverage_settle_the_contract()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+        var summary = showcase.Summary;
+        var released = await db.Releases.SingleAsync(x => x.ProjectId == summary.ProjectId && x.Version == "1.5");
+        var releasedBaseline = await db.CandidateBaselines.SingleAsync(x => x.ReleaseId == released.Id);
+
+        db.BaselineTestProcedures.RemoveRange(await db.BaselineTestProcedures
+            .Where(x => x.BaselineId == releasedBaseline.Id).ToListAsync());
+        var laterProcedure = new TestProcedure(summary.ProjectId, "SYSTP-900001", "Later coverage",
+            "test.author", DateTimeOffset.UtcNow, TestProcedureLevel.System);
+        var laterRevision = new TestProcedureRevision(laterProcedure.Id, 0, "Later objective.", "Later preconditions.",
+            "Later steps.", "Later expectation.", TestProcedureState.Approved, "test.author", DateTimeOffset.UtcNow,
+            effectiveBaselineId: releasedBaseline.Id, parentKind: VerificationProcedureParentKind.Allocated);
+        db.TestProcedures.Add(laterProcedure);
+        db.TestProcedureRevisions.Add(laterRevision);
+        var requirementRevisionId = await (from member in db.BaselineRequirements.AsNoTracking()
+            where member.BaselineId == releasedBaseline.Id
+            join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
+            where artifact.BaseNumber == "SYSR-000040"
+            select member.RevisionId).SingleAsync();
+        db.TestCoverage.Add(new TestRequirementCoverage(laterRevision.Id, requirementRevisionId));
+        await db.SaveChangesAsync();
+
+        var trace = (await seeder.CheckInvariantsAsync(summary.ProgramId)).Single(x => x.Key == "trace-gap-inventory");
+        Assert.False(trace.Holds, trace.Detail);
+        Assert.Contains("Scope: exact manifest, 0 procedure revision(s).", trace.Detail, StringComparison.Ordinal);
+        Assert.Contains("0 settled-covered", trace.Detail, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A genuinely pre-manifest released baseline takes the resolver's legacy compatibility selection as
+    /// its authority: an approved procedure revision created after the release is excluded from the scope,
+    /// so the named gap pair stays exactly the seeded pair and the invariant stays healthy — a later link
+    /// must not leak in and settle a released requirement.
+    /// </summary>
+    [Fact]
+    public async Task Legacy_effectivity_excludes_later_approved_revisions_from_the_trace_scope()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+        var summary = showcase.Summary;
+        var released = await db.Releases.SingleAsync(x => x.ProjectId == summary.ProjectId && x.Version == "1.5");
+        var releasedBaseline = await db.CandidateBaselines.SingleAsync(x => x.ReleaseId == released.Id);
+
+        db.Entry(releasedBaseline).Property(x => x.TestProceduresMaterializedAt).CurrentValue = null;
+        // A genuinely pre-manifest release closed after its content was written, so the compatibility
+        // window (approved revisions at or before the release) is populated; the seed's nominal dates do
+        // not model that, so the fixture states it explicitly.
+        db.Entry(released).Property(x => x.ReleasedAt).CurrentValue =
+            new DateTimeOffset(2024, 8, 1, 12, 0, 0, TimeSpan.Zero);
+        var laterProcedure = new TestProcedure(summary.ProjectId, "SYSTP-900001", "Later coverage",
+            "test.author", DateTimeOffset.UtcNow, TestProcedureLevel.System);
+        var laterRevision = new TestProcedureRevision(laterProcedure.Id, 0, "Later objective.", "Later preconditions.",
+            "Later steps.", "Later expectation.", TestProcedureState.Approved, "test.author", DateTimeOffset.UtcNow,
+            effectiveBaselineId: releasedBaseline.Id, parentKind: VerificationProcedureParentKind.Allocated);
+        db.TestProcedures.Add(laterProcedure);
+        db.TestProcedureRevisions.Add(laterRevision);
+        var requirementRevisionId = await (from member in db.BaselineRequirements.AsNoTracking()
+            where member.BaselineId == releasedBaseline.Id
+            join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
+            where artifact.BaseNumber == "SYSR-000040"
+            select member.RevisionId).SingleAsync();
+        db.TestCoverage.Add(new TestRequirementCoverage(laterRevision.Id, requirementRevisionId));
+        await db.SaveChangesAsync();
+
+        var trace = (await seeder.CheckInvariantsAsync(summary.ProgramId)).Single(x => x.Key == "trace-gap-inventory");
+        Assert.True(trace.Holds, trace.Detail);
+        Assert.Contains("Scope: legacy compatibility manifest", trace.Detail, StringComparison.Ordinal);
+        Assert.Contains("SYSR-000040.01 + SYSR-000115.01", trace.Detail, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -839,5 +929,41 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
 
         // Uncovered is deliberately not seeded — see EnsureVerificationCoverageGapAsync for why.
         Assert.DoesNotContain(RequirementCoverageState.Uncovered, states.Values);
+    }
+
+    /// <summary>
+    /// The trace-gap diagnostic pins the deliberate negatives into the seed contract: after a seed, the
+    /// suspect set is exactly the named SYSTP-000040 1.6 rework pair and nothing reads Uncovered. It must
+    /// also bite: the seeder's own gap mechanism (an in-work revision stopping a procedure's coverage from
+    /// counting) applied outside the named scenario is drift, and the invariant names it.
+    /// </summary>
+    [Fact]
+    public async Task Trace_gap_inventory_invariant_names_accidental_suspect_coverage_outside_the_named_scenario()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+
+        var before = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
+        var baseline = Assert.Single(before, x => x.Key == "trace-gap-inventory");
+        Assert.True(baseline.Holds, baseline.Detail);
+        Assert.Contains("SYSR-000040.01", baseline.Detail, StringComparison.Ordinal);
+        Assert.Contains("SYSR-000115.01", baseline.Detail, StringComparison.Ordinal);
+        Assert.Contains("SYSTP-000040", baseline.Detail, StringComparison.Ordinal);
+
+        var procedure = await db.TestProcedures.AsNoTracking().SingleAsync(x => x.BaseNumber == "SYSTP-000041");
+        db.TestProcedureRevisions.Add(new TestProcedureRevision(procedure.Id, 1,
+            "Verify the drifted FMS behavior group against revised 1.6 behavior.",
+            "Load the FMS 1.6 candidate software.",
+            "Stimulate the revised inputs and record each observable output.",
+            "Every observed output meets the linked requirement acceptance criteria.",
+            TestProcedureState.Draft, "test.author", DateTimeOffset.UtcNow));
+        await db.SaveChangesAsync();
+
+        var after = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
+        var drifted = Assert.Single(after, x => x.Key == "trace-gap-inventory");
+        Assert.False(drifted.Holds, drifted.Detail);
+        Assert.Contains("Accidental suspect coverage outside the named SYSTP-000040 scenario",
+            drifted.Detail, StringComparison.Ordinal);
     }
 }

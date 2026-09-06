@@ -1174,7 +1174,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (!hasActiveSqa)
             requiredProblemStates = requiredProblemStates.Where(state => state != ProblemReportState.Closed).ToArray();
 
-        return
+        List<ShowcaseInvariant> invariants =
         [
             new("releases", releases.Count >= 2, $"{releases.Count} release(s); a released 1.5 and an in-work 1.6 are expected."),
             new("materialized-baseline", materialized.Count >= 1, $"{materialized.Count} materialized baseline(s)."),
@@ -1204,6 +1204,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             new("problem-report-controlled-evidence", await ProblemReportEvidenceInvariantAsync(programId, projectId, problemReports, ct),
                 "Verified and closed seeded Problem Reports carry controlled resolution links and closure evidence."),
         ];
+        var traceCoverage = await TraceCoverageInvariantAsync(projectId, ct);
+        invariants.Add(new("trace-gap-inventory", traceCoverage.Holds, traceCoverage.Detail));
+        return invariants;
     }
 
     /// <summary>
@@ -1238,6 +1241,138 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             if (stillClaimedByDraft) return false;
         }
         return true;
+    }
+
+    private sealed record TraceCoverageCheck(bool Holds, string Detail);
+
+    /// <summary>
+    /// The #913 trace-coverage diagnostic. Reads the same settled-coverage definition the release readiness
+    /// gate and the requirements workspace read (<see cref="VerificationCoverageProjection"/>), over the
+    /// released baseline's effective requirement-revision population — never a second coverage engine.
+    ///
+    /// The showcase's deliberate negatives are part of the contract this pins down: the FMS 1.6 procedure
+    /// rework (<see cref="GapProcedureNumber"/>) keeps exactly its linked requirements Suspect so
+    /// coverage-warning journeys stay exercisable, and Uncovered is deliberately unreachable on the
+    /// released baseline (see <see cref="EnsureVerificationCoverageGapAsync"/> — reaching it would take
+    /// corrupting released truth or materializing 1.6). So this holds only when the suspect set is exactly
+    /// the named rework pair and nothing reads Uncovered: any other gap is seed drift, and the detail names
+    /// the offending requirements rather than just reporting unhealthy. On installations carrying
+    /// operator-authored verification work this can legitimately read false; that is the truthful reading,
+    /// consistent with the other seed invariants.
+    /// </summary>
+    private async Task<TraceCoverageCheck> TraceCoverageInvariantAsync(Guid projectId, CancellationToken ct)
+    {
+        // The denominator is the released 1.5 build's baseline — the population the issue calls released
+        // truth — never whichever baseline happened to materialize most recently: an operator who
+        // materializes the 1.6 candidate must not change what this diagnostic measures. The version is
+        // matched explicitly rather than via IsReleased because MarkReleased does not clear the flag on
+        // predecessors, so once 1.6 ships, two releases would qualify.
+        var baseline = await (from candidate in db.CandidateBaselines.AsNoTracking()
+            join release in db.Releases.AsNoTracking() on candidate.ReleaseId equals release.Id
+            where candidate.ProjectId == projectId && release.Version == "1.5"
+            select candidate).FirstOrDefaultAsync(ct);
+        if (baseline is null)
+            return new TraceCoverageCheck(false, "No materialized requirement baseline; trace coverage has no denominator.");
+        var members = await db.BaselineRequirements.AsNoTracking()
+            .Where(x => x.BaselineId == baseline.Id).Select(x => x.RevisionId).Distinct().ToListAsync(ct);
+        if (members.Count == 0)
+            return new TraceCoverageCheck(false, $"The materialized baseline {baseline.Id} carries no requirement revisions.");
+
+        // Scope every coverage judgement to the procedure revisions the released 1.5 build actually
+        // carried, as established by the same resolver the readiness gate reads. That is either the
+        // baseline's exact procedure manifest or — for a genuinely pre-manifest baseline — the resolver's
+        // deterministic compatibility selection of approved revisions at release time; both deliberately
+        // exclude later 1.6 or operator-authored revisions, so coverage can never be settled by a link the
+        // released build did not carry. The resolver's output is the authority in every configuration,
+        // including an exact-empty manifest: an empty effective set means the diagnostic honestly reports
+        // the whole baseline uncovered, never unrestricted current coverage.
+        var procedureEffectivity = await TestProcedureEffectivity.ForBaselineAsync(db, baseline.Id, ct);
+        if (procedureEffectivity is null)
+            return new TraceCoverageCheck(false,
+                "Released-baseline procedure effectivity could not be established; trace coverage has no authoritative scope.");
+        IReadOnlyCollection<Guid> effectiveProcedureRevisionIds = procedureEffectivity.RevisionIds;
+
+        var settled = await VerificationCoverageProjection.SettledCoveredAsync(db, members, ct,
+            effectiveProcedureRevisionIds, buildScoped: false);
+        var linked = (await VerificationCoverageProjection.LinkedRequirementRevisionIds(db, effectiveProcedureRevisionIds)
+            .Where(id => members.Contains(id)).Distinct().ToListAsync(ct)).ToHashSet();
+        var suspect = linked.Where(id => !settled.Contains(id)).ToList();
+        var uncovered = members.Where(id => !settled.Contains(id) && !linked.Contains(id)).ToList();
+
+        var gapProcedureIds = await db.TestProcedures.AsNoTracking()
+            .Where(x => x.ProjectId == projectId && x.BaseNumber == GapProcedureNumber)
+            .Select(x => x.Id).ToListAsync(ct);
+        var gapCoverage = db.TestCoverage.AsNoTracking()
+            .Join(db.TestProcedureRevisions.AsNoTracking(), coverage => coverage.ProcedureRevisionId,
+                revision => revision.Id, (coverage, revision) => new { coverage, revision })
+            .Where(x => gapProcedureIds.Contains(x.revision.ProcedureId)
+                && effectiveProcedureRevisionIds.Contains(x.coverage.ProcedureRevisionId));
+        var gapLinked = await gapCoverage.Select(x => x.coverage.RequirementRevisionId).Distinct().ToListAsync(ct);
+
+        var share = members.Count == 0 ? 0 : Math.Round(suspect.Count * 100.0 / members.Count, 2);
+        var gapPair = await RequirementDisplayNumbersAsync(gapLinked, ct);
+        string Detail() =>
+            $"{members.Count} released-baseline requirement revision(s): {settled.Count} settled-covered, "
+            + $"{suspect.Count} suspect ({share}% — the named {GapProcedureNumber} 1.6 rework scenario covering "
+            + string.Join(" + ", gapPair) + "), "
+            + $"{uncovered.Count} uncovered (allow-list: none). "
+            + $"Scope: {(procedureEffectivity.IsExactManifest ? "exact" : "legacy compatibility")} manifest, "
+            + $"{effectiveProcedureRevisionIds.Count} procedure revision(s).";
+
+        // The seeded contract is exactly this named pair: the requirements the procedure's approved
+        // revision covers, identified by display number so a future seed redistribution that swaps which
+        // requirements carry the gap fails here instead of silently re-deriving a new allow-list.
+        string[] expectedGapPair = ["SYSR-000040.01", "SYSR-000115.01"];
+        if (gapProcedureIds.Count == 0 || gapLinked.Count == 0)
+            return new TraceCoverageCheck(false,
+                "The named verification-coverage gap scenario is absent: no requirement links to the "
+                + $"{GapProcedureNumber} 1.6 rework. " + Detail());
+        var unexpectedInGap = gapPair.Except(expectedGapPair).ToList();
+        var missingFromGap = expectedGapPair.Except(gapPair).ToList();
+        if (unexpectedInGap.Count > 0 || missingFromGap.Count > 0)
+            return new TraceCoverageCheck(false,
+                $"The named {GapProcedureNumber} rework scenario covers "
+                + (gapPair.Count > 0 ? string.Join(", ", gapPair) : "no requirement")
+                + "; the seeded contract is exactly " + string.Join(" + ", expectedGapPair) + ". "
+                + (unexpectedInGap.Count > 0 ? "Unexpected: " + string.Join(", ", unexpectedInGap) + ". " : "")
+                + (missingFromGap.Count > 0 ? "Missing: " + string.Join(", ", missingFromGap) + ". " : "")
+                + Detail());
+        if (gapLinked.Except(suspect).Any())
+            return new TraceCoverageCheck(false,
+                $"A requirement linked to the {GapProcedureNumber} rework is not Suspect, so the named gap no longer bites. " + Detail());
+        var accidentalSuspects = suspect.Except(gapLinked).ToList();
+        if (accidentalSuspects.Count > 0)
+        {
+            var numbers = await RequirementDisplayNumbersAsync(accidentalSuspects, ct);
+            return new TraceCoverageCheck(false,
+                $"Accidental suspect coverage outside the named {GapProcedureNumber} scenario: "
+                + string.Join(", ", numbers.Take(8)) + (numbers.Count > 8 ? ", …" : "") + ". " + Detail());
+        }
+        if (uncovered.Count > 0)
+        {
+            var numbers = await RequirementDisplayNumbersAsync(uncovered, ct);
+            return new TraceCoverageCheck(false,
+                "Uncovered released-baseline requirement(s) outside the allow-list: "
+                + string.Join(", ", numbers.Take(8)) + (numbers.Count > 8 ? ", …" : "") + ". " + Detail());
+        }
+        return new TraceCoverageCheck(true, Detail());
+    }
+
+    private async Task<List<string>> RequirementDisplayNumbersAsync(IReadOnlyCollection<Guid> revisionIds, CancellationToken ct)
+    {
+        var revisions = await db.RequirementRevisions.AsNoTracking()
+            .Where(x => revisionIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.ArtifactId, x.Revision }).ToListAsync(ct);
+        var artifactIds = revisions.Select(x => x.ArtifactId).Distinct().ToList();
+        var artifacts = await db.Requirements.AsNoTracking()
+            .Where(x => artifactIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.BaseNumber }).ToListAsync(ct);
+        var numbers = artifacts.ToDictionary(x => x.Id, x => x.BaseNumber);
+        return revisions
+            .Where(x => numbers.ContainsKey(x.ArtifactId))
+            .OrderBy(x => numbers[x.ArtifactId]).ThenBy(x => x.Revision)
+            .Select(x => $"{numbers[x.ArtifactId]}.{x.Revision:D2}")
+            .ToList();
     }
 
     private async Task<bool> ProblemReportBuildScopeInvariantAsync(IReadOnlyCollection<ProblemReport> reports,
