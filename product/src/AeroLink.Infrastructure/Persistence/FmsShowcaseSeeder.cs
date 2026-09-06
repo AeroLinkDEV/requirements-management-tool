@@ -1174,7 +1174,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (!hasActiveSqa)
             requiredProblemStates = requiredProblemStates.Where(state => state != ProblemReportState.Closed).ToArray();
 
-        return
+        List<ShowcaseInvariant> pendingInvariants =
         [
             new("releases", releases.Count >= 2, $"{releases.Count} release(s); a released 1.5 and an in-work 1.6 are expected."),
             new("materialized-baseline", materialized.Count >= 1, $"{materialized.Count} materialized baseline(s)."),
@@ -1204,6 +1204,81 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             new("problem-report-controlled-evidence", await ProblemReportEvidenceInvariantAsync(programId, projectId, problemReports, ct),
                 "Verified and closed seeded Problem Reports carry controlled resolution links and closure evidence."),
         ];
+        var families = await FamilyInventoryInvariantAsync(projectId, ct);
+        return
+        [
+            .. pendingInvariants,
+            new("family-inventory", families.Holds, families.Detail),
+        ];
+    }
+
+    private sealed record FamilyInventoryCheck(bool Holds, string Detail);
+
+    /// <summary>
+    /// The #913 artifact-family inventory: one diagnostic that counts the representative records the
+    /// showcase carries in every user-visible controlled family, holds the seed to the owner's
+    /// repeated-family minimum (at least five) wherever the domain supports it, and reports the whole
+    /// matrix — including the families that deliberately stay small — so an operator sees the numbers,
+    /// not just a pass.
+    ///
+    /// Families with their own dedicated invariants (procedures, executions volume, documents, Problem
+    /// Report scenarios, active-build change requests) keep those; this adds the cross-family view and
+    /// the state-variety requirements no single-family invariant covers (a pass/fail/retest chain, for
+    /// example). Explicitly out of scope, recorded here rather than in a table nobody can query:
+    /// Interface change control is retired for this project (#889) and its retirement has its own
+    /// invariant; the product line, controlled library, release campaign and leadership positions are
+    /// deliberately singular families. Grouping happens client-side on purpose: SQLite cannot
+    /// ORDER BY or aggregate DateTimeOffset-typed columns the way PostgreSQL can, and this check must
+    /// qualify identically on both.
+    /// </summary>
+    private async Task<FamilyInventoryCheck> FamilyInventoryInvariantAsync(Guid projectId, CancellationToken ct)
+    {
+        var levels = await db.Requirements.AsNoTracking()
+            .Where(x => x.ProjectId == projectId)
+            .Select(x => (RequirementLevel?)x.Level).ToListAsync(ct);
+        var requests = await db.SystemChangeRequests.AsNoTracking()
+            .Where(x => x.ProjectId == projectId)
+            .Select(x => new { x.Type, State = (ChangeRequestState?)x.State }).ToListAsync(ct);
+        var outcomes = await db.TestExecutions.AsNoTracking()
+            .Where(x => x.ProjectId == projectId)
+            .Select(x => new { Outcome = (TestOutcome?)x.Outcome, x.RetestOfExecutionId }).ToListAsync(ct);
+        var testChangeReviews = await db.TestChangeReviews.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
+        var assessments = await db.DownstreamChangeAssessments.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
+        var impactItems = await db.VerificationImpactItems.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
+
+        var systemRequirements = levels.Count(x => x == RequirementLevel.System);
+        var highLevelRequirements = levels.Count(x => x == RequirementLevel.HighLevel);
+        var lowLevelRequirements = levels.Count(x => x == RequirementLevel.LowLevel);
+        var systemRequests = requests.Count(x => x.Type == ChangeRequestType.System);
+        var softwareRequests = requests.Count(x => x.Type == ChangeRequestType.Software);
+        var passes = outcomes.Count(x => x.Outcome == TestOutcome.Pass && x.RetestOfExecutionId == null);
+        var failures = outcomes.Count(x => x.Outcome == TestOutcome.Fail);
+        var retests = outcomes.Count(x => x.RetestOfExecutionId != null);
+
+        string Detail() =>
+            $"Families: SYSR {systemRequirements}, HLR {highLevelRequirements}, LLR {lowLevelRequirements}; "
+            + $"change requests: {systemRequests} System, {softwareRequests} Software; "
+            + $"executions: {passes} pass, {failures} fail, {retests} retest; "
+            + $"test change reviews {testChangeReviews}; downstream assessments {assessments}; "
+            + $"verification impact items {impactItems}. "
+            + "Deliberate exceptions: Interface change control is retired (#889); the product line, "
+            + "controlled library, release campaign and leadership positions are singular families.";
+
+        var failures1 = new List<string>();
+        if (systemRequirements < 5) failures1.Add($"only {systemRequirements} System requirements");
+        if (highLevelRequirements < 5) failures1.Add($"only {highLevelRequirements} HLRs");
+        if (lowLevelRequirements < 5) failures1.Add($"only {lowLevelRequirements} LLRs");
+        if (systemRequests < 5) failures1.Add($"only {systemRequests} System change requests");
+        if (softwareRequests < 5) failures1.Add($"only {softwareRequests} Software change requests");
+        if (failures < 1) failures1.Add("no failed execution (pass/fail/retest chain broken)");
+        if (retests < 1) failures1.Add("no retest execution (pass/fail/retest chain broken)");
+        if (testChangeReviews < 1) failures1.Add("no test change review");
+        if (assessments < 1) failures1.Add("no downstream change assessment");
+        if (impactItems < 1) failures1.Add("no verification impact item");
+        return failures1.Count > 0
+            ? new FamilyInventoryCheck(false, "Family inventory below the repeated-family minimum: "
+                + string.Join("; ", failures1) + ". " + Detail())
+            : new FamilyInventoryCheck(true, Detail());
     }
 
     /// <summary>

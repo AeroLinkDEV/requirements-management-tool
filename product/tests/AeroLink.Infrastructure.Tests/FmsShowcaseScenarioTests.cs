@@ -840,4 +840,36 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         // Uncovered is deliberately not seeded — see EnsureVerificationCoverageGapAsync for why.
         Assert.DoesNotContain(RequirementCoverageState.Uncovered, states.Values);
     }
+
+    /// <summary>
+    /// The family inventory reports the whole cross-family matrix — including the deliberately singular
+    /// and retired families, with the reason in the detail — and holds the seed to the repeated-family
+    /// minimum. It must also bite: removing the retest leg breaks the pass/fail/retest chain and the
+    /// invariant names it instead of silently staying green.
+    /// </summary>
+    [Fact]
+    public async Task Family_inventory_invariant_reports_the_matrix_and_names_a_broken_pass_fail_retest_chain()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+
+        var before = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
+        var baseline = Assert.Single(before, x => x.Key == "family-inventory");
+        Assert.True(baseline.Holds, baseline.Detail);
+        Assert.Contains("SYSR 150", baseline.Detail, StringComparison.Ordinal);
+        Assert.Contains("HLR 400", baseline.Detail, StringComparison.Ordinal);
+        Assert.Contains("LLR 700", baseline.Detail, StringComparison.Ordinal);
+        Assert.Contains("Interface change control is retired (#889)", baseline.Detail, StringComparison.Ordinal);
+
+        var retests = await db.TestExecutions.Where(x => x.RetestOfExecutionId != null).ToListAsync();
+        Assert.NotEmpty(retests);
+        db.TestExecutions.RemoveRange(retests);
+        await db.SaveChangesAsync();
+
+        var after = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
+        var drifted = Assert.Single(after, x => x.Key == "family-inventory");
+        Assert.False(drifted.Holds, drifted.Detail);
+        Assert.Contains("no retest execution", drifted.Detail, StringComparison.Ordinal);
+    }
 }
