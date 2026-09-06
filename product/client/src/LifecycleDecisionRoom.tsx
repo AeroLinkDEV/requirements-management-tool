@@ -213,7 +213,9 @@ function ImpactView({ detail, scr, affected, selectedIndex, selected, onSelect, 
   const [query, setQuery] = useState("");
   if (!scr) return <section className="decisionState"><div className="decisionLoader" /><h1>Loading controlled impact</h1></section>;
   const counts = scr.requirementChanges.reduce<Record<string, number>>((total, item) => ({ ...total, [item.kind]: (total[item.kind] ?? 0) + 1 }), {});
-  const person = demoPerson(scr.authorId, scr.authorId, "Change owner") ?? decisionPeople.systems;
+  // The actor id is not a display name: resolve it through the shared identity mapping so the cast
+  // person (or the manifest directory) presents, while a genuinely supplied name stays authoritative.
+  const person = demoPerson(scr.authorId, undefined, "Change owner") ?? decisionPeople.systems;
   const impact = selected?.impact;
   const artifactNoun = verificationArtifactNoun(selected?.level ?? impact?.tests[0]?.level);
   const tests = impact?.tests.slice(0, 2) ?? [];

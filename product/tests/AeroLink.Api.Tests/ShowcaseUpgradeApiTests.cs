@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.IO;
 using System.Text.Json;
 using AeroLink.Domain.Identity;
 using AeroLink.Infrastructure.Persistence;
@@ -46,6 +47,40 @@ public sealed class ShowcaseUpgradeApiTests(ShowcaseApiFixture showcase)
         Assert.True(body.GetProperty("healthy").GetBoolean());
         Assert.Contains(body.GetProperty("applied").EnumerateArray(), item =>
             item.GetString()!.StartsWith("scenario-richness", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Upgrade_state_reports_the_work_distribution_diagnostic()
+    {
+        using var factory = showcase.CreateFactory();
+        using var client = factory.CreateClient();
+        using var login = await client.PostAsJsonAsync("/api/auth/login",
+            new { userName = IdentityService.SystemAdministratorUserName, password = IdentitySeeder.DemoPassword });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+
+        using var response = await client.GetAsync("/api/showcase/upgrade-state");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(body.GetProperty("seeded").GetBoolean());
+        var distribution = body.GetProperty("distribution");
+
+        // #913: the deterministic showcase must disperse current work across several synthetic
+        // people, with shared-holder and zero-work contrast, and no single holder dominating.
+        Assert.True(distribution.GetProperty("peopleHoldingWork").GetInt32() >= 5,
+            "expected at least five distinct people holding work");
+        Assert.True(distribution.GetProperty("multiHolderItems").GetInt32() >= 1,
+            "expected at least one shared/multi-holder item");
+        foreach (var check in distribution.GetProperty("checks").EnumerateObject())
+            Assert.True(check.Value.GetBoolean(), $"distribution check {check.Name} failed");
+
+        // The holder roster itself: each entry names the person and their holding count.
+        var holders = distribution.GetProperty("holders").EnumerateArray().ToList();
+        Assert.True(holders.Count >= 5);
+        Assert.All(holders, holder =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(holder.GetProperty("userName").GetString()));
+            Assert.True(holder.GetProperty("holds").GetInt32() > 0);
+        });
     }
 
     [Fact]

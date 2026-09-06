@@ -54,7 +54,7 @@ public static class WorkspaceEndpoints
         // What the showcase upgrade has and has not applied to this installation, and whether the invariants
         // it is meant to guarantee actually hold. An upgrade that reports success is not the same as a
         // database that is correct, so this reports the two separately and an operator can read both.
-        app.MapGet("/api/showcase/upgrade-state", async (HttpContext http, AeroLinkDbContext db, FmsShowcaseSeeder seeder, CancellationToken ct) =>
+        app.MapGet("/api/showcase/upgrade-state", async (HttpContext http, AeroLinkDbContext db, FmsShowcaseSeeder seeder, TeamWorkProjectionService teamWork, CancellationToken ct) =>
         {
             if (!http.UserAccount().IsAdministrator) return Results.Forbid();
             var program = await db.Programs.AsNoTracking().SingleOrDefaultAsync(x => x.Code == FmsShowcaseSeeder.ProgramCode, ct);
@@ -62,7 +62,48 @@ public static class WorkspaceEndpoints
             var steps = (await db.ShowcaseUpgradeSteps.AsNoTracking().Where(x => x.ProgramId == program.Id).ToListAsync(ct))
                 .OrderBy(x => x.AppliedAt).Select(x => new { x.StepKey, x.Detail, x.AppliedAt }).ToList();
             var invariants = await seeder.CheckInvariantsAsync(program.Id, ct);
-            return Results.Ok(new { seeded = true, programId = program.Id, steps, healthy = invariants.All(x => x.Holds), invariants });
+
+            // #913: the operator check also reports how the deterministic showcase disperses current
+            // work, computed by the same Team Work projection the board renders — never a second
+            // holder engine. This is a truthful diagnostic, not part of `healthy`: on installations
+            // carrying operator-created records the anti-domination and coverage checks can
+            // legitimately read as failed without any seeded invariant being violated.
+            object? distribution = null;
+            var projectId = await db.Projects.AsNoTracking().Where(x => x.ProgramId == program.Id).Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct);
+            var activeReleaseId = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).OrderByDescending(x => x.Version).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+            if (projectId is { } distProjectId && activeReleaseId is { } distReleaseId)
+            {
+                var board = await teamWork.ProjectAsync(distProjectId, ct);
+                if (board is not null)
+                {
+                    var holders = board.People.Where(p => p.Holds > 0)
+                        .OrderByDescending(p => p.Holds)
+                        .Select(p => new { p.UserName, p.DisplayName, p.Holds }).ToList();
+                    var heldItems = board.Items.Where(i => i.CurrentHolderIds.Count > 0).ToList();
+                    var totalHeld = heldItems.Sum(i => i.CurrentHolderIds.Count);
+                    var bases = heldItems.Select(i => i.HolderBasis).Distinct().OrderBy(x => x).ToList();
+                    var maxHolds = holders.Count > 0 ? holders[0].Holds : 0;
+                    distribution = new
+                    {
+                        board.Totals.Items,
+                        board.Totals.Unheld,
+                        PeopleHoldingWork = holders.Count,
+                        Holders = holders,
+                        MultiHolderItems = board.Items.Count(i => i.CurrentHolderIds.Count >= 2),
+                        HolderBases = bases,
+                        Checks = new Dictionary<string, bool>
+                        {
+                            ["atLeastFiveDistinctHolders"] = holders.Count >= 5,
+                            ["noSingleHolderDominates"] = totalHeld == 0 || maxHolds * 2 <= totalHeld,
+                            ["sharedHolderItemPresent"] = board.Items.Any(i => i.CurrentHolderIds.Count >= 2),
+                            ["zeroHolderContrastPresent"] = board.People.Any(p => p.IsCurrentProjectMember && p.Holds == 0),
+                            ["holderBasesSpanned"] = bases.Count >= 3,
+                        },
+                    };
+                }
+            }
+
+            return Results.Ok(new { seeded = true, programId = program.Id, steps, healthy = invariants.All(x => x.Holds), invariants, distribution });
         });
 
         // The repair command for an existing local showcase: apply any outstanding steps and report what

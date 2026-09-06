@@ -194,6 +194,20 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
 public sealed class IdentitySeeder(AeroLinkDbContext db)
 {
     public const string DemoPassword = "AeroLink!2026";
+
+    /// <summary>
+    /// Every username the identity directory can seed (#913): the curated cast, the generated
+    /// population, and the administrator. Consumer contracts that must cover the whole seeded cast —
+    /// the FMS showcase portrait manifest among them — assert against this list rather than a
+    /// hand-copied roster, so a newly seeded account cannot silently miss them.
+    /// </summary>
+    public static IReadOnlyCollection<string> SeedDirectoryUserNames()
+    {
+        var names = People.Select(x => x.User).ToList();
+        names.AddRange(GeneratedPeople().Select(x => x.User));
+        return names;
+    }
+
     private static readonly (string User, string Name, string Email, ProgramRole[] Roles)[] People =
     [
         ("admin", "AeroLink Administrator", "admin@aerolink.local", [ProgramRole.Administrator]),

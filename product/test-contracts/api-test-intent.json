@@ -1,13 +1,13 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 844,
-    "cases": 937,
-    "classes": 124,
-    "hostedTests": 808,
-    "hostedCases": 887,
-    "nonHostedTests": 28,
-    "nonHostedCases": 42,
+    "tests": 847,
+    "cases": 940,
+    "classes": 125,
+    "hostedTests": 809,
+    "hostedCases": 888,
+    "nonHostedTests": 30,
+    "nonHostedCases": 44,
     "unknownHostTests": 8,
     "unknownHostCases": 8,
     "hostedCandidateTests": 16,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 528,
-      "cases": 589,
+      "tests": 529,
+      "cases": 590,
       "unknownCases": 0,
       "classes": 102
     },
@@ -53,10 +53,10 @@
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
       "level": "API or Infrastructure (must stay hosted)",
-      "tests": 17,
-      "cases": 17,
+      "tests": 19,
+      "cases": 19,
       "unknownCases": 0,
-      "classes": 9
+      "classes": 10
     },
     "startup-config": {
       "label": "Startup, hosting and configuration",
@@ -6510,6 +6510,34 @@
       }
     },
     {
+      "cls": "PeoplePortraitManifestTests",
+      "test": "Manifest_entries_carry_a_file_and_a_display_name",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 35,
+        "end": 47
+      }
+    },
+    {
+      "cls": "PeoplePortraitManifestTests",
+      "test": "Portrait_manifest_covers_every_seeded_identity_service_account",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 19,
+        "end": 33
+      }
+    },
+    {
       "cls": "PersonnelDirectoryApiTests",
       "test": "Adding_a_person_grants_several_base_roles_as_one_operation",
       "kind": "Fact",
@@ -11608,8 +11636,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 14,
-        "end": 49
+        "start": 15,
+        "end": 50
       }
     },
     {
@@ -11626,8 +11654,25 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 51,
-        "end": 107
+        "start": 86,
+        "end": 142
+      }
+    },
+    {
+      "cls": "ShowcaseUpgradeApiTests",
+      "test": "Upgrade_state_reports_the_work_distribution_diagnostic",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "showcase-factory",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 52,
+        "end": 84
       }
     },
     {

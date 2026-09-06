@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 124,
-    "tests": 844,
-    "knownCases": 937,
+    "classes": 125,
+    "tests": 847,
+    "knownCases": 940,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -14,9 +14,9 @@
       "unknownCaseTests": 0
     },
     "fresh-host": {
-      "classes": 46,
-      "tests": 296,
-      "knownCases": 328,
+      "classes": 47,
+      "tests": 299,
+      "knownCases": 331,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -754,6 +754,17 @@
       ]
     },
     {
+      "cls": "ShowcaseUpgradeApiTests",
+      "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ExternalIdentityAdminApiTests",
       "tests": 2,
       "knownCases": 2,
@@ -763,6 +774,17 @@
       "intents": [
         "auth-policy",
         "startup-config"
+      ]
+    },
+    {
+      "cls": "PeoplePortraitManifestTests",
+      "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Owns host-scoped state (filesystem); sharing would leak it between tests.",
+      "intents": [
+        "filesystem"
       ]
     },
     {
@@ -796,17 +818,6 @@
       "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
       "intents": [
         "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ShowcaseUpgradeApiTests",
-      "tests": 2,
-      "knownCases": 2,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
-      "intents": [
         "http-boundary"
       ]
     },

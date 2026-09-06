@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AuthUser } from './IdentityCenter'
 import PortalHeader from './PortalHeader'
 import { apiRequest, operationError } from './apiClient'
+import { PersonAvatar } from './People'
 import './PersonnelCenter.css'
 
 /**
@@ -93,14 +94,15 @@ const baseRoleChoices: { name: string; roles: string[]; hint?: string }[] = [
   },
 ]
 
-const initials = (name: string) =>
-  name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase() ?? '').join('') || '?'
-
 const formatDate = (value?: string) =>
   value ? new Date(value).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : ''
 
-function Avatar({ name, tone }: { name: string; tone?: string }) {
-  return <span className={`personAvatar${tone ? ` ${tone}` : ''}`} aria-hidden="true">{initials(name)}</span>
+// #913: Personnel renders the shared PersonAvatar identity — the same portrait the rest of the
+// product shows for that account — instead of a local initials-only mark. The userName is what the
+// portrait resolves from; the display name only labels it.
+function Avatar({ userName, name, tone }: { userName?: string; name: string; tone?: string }) {
+  void tone
+  return <PersonAvatar userName={userName ?? name} displayName={name} size="small" />
 }
 
 export default function PersonnelCenter({
@@ -389,7 +391,7 @@ export default function PersonnelCenter({
                       <span className="positionName">{label(position.position)}</span>
                       {position.primary ? (
                         <div className="positionHolder">
-                          <Avatar name={position.primary.person.displayName}/>
+                          <Avatar userName={memberByUser.get(position.primary!.person.userId)?.userName} name={position.primary.person.displayName}/>
                           <span className="positionWho">
                             <button type="button" className="personLink" onClick={() => {
                               const member = memberByUser.get(position.primary!.person.userId)
@@ -468,7 +470,7 @@ export default function PersonnelCenter({
                         <p className="assuranceEmpty">Nobody holds this. Anything requiring it cannot be signed.</p>
                       ) : (
                         <ul>{holders.map(holder => (
-                          <li key={holder.userId}><Avatar name={holder.displayName}/> {holder.displayName}</li>
+                          <li key={holder.userId}><Avatar userName={holder.userName} name={holder.displayName}/> {holder.displayName}</li>
                         ))}</ul>
                       )}
                     </article>
@@ -501,7 +503,7 @@ export default function PersonnelCenter({
                         <tr key={member.userId} className={member.isCurrent ? undefined : 'departed'} data-member={member.userName}>
                           <td>
                             <div className="rosterWho">
-                              <Avatar name={member.displayName}/>
+                              <Avatar userName={member.userName} name={member.displayName}/>
                               <span className="rosterName">
                                 <button type="button" className="personLink" disabled={!member.isCurrent} onClick={() => openDetails(member)}>{member.displayName}</button>
                                 <span>{member.userName}</span>
@@ -581,7 +583,7 @@ export default function PersonnelCenter({
                   className={`directoryResult${chosenPerson?.userId === candidate.userId ? ' chosen' : ''}`}
                   onClick={() => setChosenPerson(candidate)}
                 >
-                  <Avatar name={candidate.displayName}/>
+                  <Avatar userName={candidate.userName} name={candidate.displayName}/>
                   <span>{candidate.displayName}<span>{candidate.userName} · {candidate.email || 'No email'}</span></span>
                 </button>
               ))}
