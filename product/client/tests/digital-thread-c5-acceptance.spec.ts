@@ -78,7 +78,7 @@ async function controlsDoNotOverlap(page: Page) {
 
 for (const density of ["comfortable", "compact"]) {
   for (const width of [1280, 1440, 1920]) {
-    test(`branching network labels stay readable at ${width} ${density}`, async ({ page }) => {
+    test(`branching network labels stay readable at ${width} ${density}`, async ({ page }, testInfo) => {
       await open(page, "network", width, density)
       const panel = page.locator(".dtnPanel")
       await expect(panel).toContainText("HLRCR-925.00")
@@ -93,11 +93,12 @@ for (const density of ["comfortable", "compact"]) {
       await expect(panel).toContainText("PR-925.00")
       await expect(panel).toContainText("LLRCR-925.02")
       await expect(panel).not.toContainText("HLRCR-926.00")
+      if (width === 1440) await testInfo.attach(`network-${density}`, { body: await page.screenshot(), contentType: "image/png" })
     })
   }
 }
 
-test("artifact full story retains both verification branches and excludes the sibling", async ({ page }) => {
+test("artifact full story retains both verification branches and excludes the sibling", async ({ page }, testInfo) => {
   await open(page, "artifact", 1920)
   const panel = page.locator(".dtaPanel")
   await expect(panel).toContainText("PR-925.00")
@@ -112,6 +113,7 @@ test("artifact full story retains both verification branches and excludes the si
   await page.locator(`[data-node-id="${ids.hlr}"]`).hover()
   await page.getByText("Synthetic C5 acceptance fixture", { exact: true }).hover()
   await expect(page.locator(".dtCanvasScene")).toHaveAttribute("style", fitted!)
+  await testInfo.attach("artifact-branching-story", { body: await page.screenshot(), contentType: "image/png" })
 })
 
 test("clearing and reselecting the arrival focal uses selection framing instead of replaying landing", async ({ page }) => {
@@ -128,7 +130,7 @@ test("clearing and reselecting the arrival focal uses selection framing instead 
 })
 
 for (const view of ["network", "artifact", "inside"]) {
-  test(`${view} inspector dock controls remain separate from actions and content`, async ({ page }) => {
+  test(`${view} inspector dock controls remain separate from actions and content`, async ({ page }, testInfo) => {
     await open(page, view, 1280, "compact")
     if (view === "inside") await page.locator(".dtCanvasNode").filter({ hasText: "SYSR-00076.02" }).click()
     const panel = page.locator(".dtnPanel, .dtaPanel, .dticPanel")
@@ -136,6 +138,7 @@ for (const view of ["network", "artifact", "inside"]) {
     for (const dock of ["Bottom", "Right", "Auto"]) {
       await panel.getByRole("button", { name: dock, exact: true }).click()
       await controlsDoNotOverlap(page)
+      if (dock === "Bottom") await testInfo.attach(`${view}-bottom-compact`, { body: await page.screenshot(), contentType: "image/png" })
     }
     if (view === "network") {
       await panel.getByRole("button", { name: "Open this change", exact: true }).click()
