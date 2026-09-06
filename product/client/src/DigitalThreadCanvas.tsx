@@ -1107,13 +1107,15 @@ export default function DigitalThreadCanvas({
   const fitSelection = () => {
     if (!framing) return
     const target = { ...framing, intent: "selection" as FrameIntent, key: `${framing.key}|fit-selection` }
-    if (applyFraming(target)) framedFor.current = target.key
+    if (applyFraming(target)) framedFor.current = framing.key
   }
 
   const fitStory = () => {
     if (!framing) return
     const target = { ...framing, intent: "story" as FrameIntent, key: `${framing.key}|fit-story` }
-    if (applyFraming(target)) framedFor.current = target.key
+    // The manual camera choice satisfies this selection's pending automatic framing too. Recording the
+    // synthetic action key instead would replay the landing on the next hover/render.
+    if (applyFraming(target)) framedFor.current = framing.key
   }
 
   return (
