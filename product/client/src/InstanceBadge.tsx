@@ -66,15 +66,27 @@ export default function InstanceBadge() {
   const age = snapshotAge(snapshot?.createdAtUtc);
 
   // Routine surfaces name the installation, not its deployment classification: a declared label may
-  // carry the classification as a suffix ("HOME CANONICAL"), and reading that raw deployment vocabulary
-  // on every page is what #925 P2 removes. The declared label and classification are stated whole in the
-  // tooltip beside the source and database facts, so nothing here is reclassified, renamed, or inferred —
-  // the badge just stops shouting the operator word.
-  const suffix = classification.trim();
-  const visibleLabel =
-    suffix.length > 0 && label.toUpperCase().endsWith(suffix.toUpperCase())
-      ? label.slice(0, label.length - suffix.length).trim() || label
-      : label;
+  // carry the classification as a suffix — "HOME CANONICAL" is declared alongside the classification
+  // `HomeCanonical`, one spaced and one a single PascalCase word — and reading that raw deployment
+  // vocabulary on every page is what #925 P2 removes. Matching therefore splits the classification into
+  // its PascalCase segments and strips the label's trailing words that spell them. When the whole label
+  // is the classification spelled out, the plain name is the classification's own leading segment
+  // ("HOME" for HomeCanonical). The declared label and classification are stated whole in the tooltip
+  // beside the source and database facts, so nothing here is reclassified, renamed, or inferred — the
+  // badge just stops shouting the operator word.
+  const classificationSegments = classification.trim().match(/[A-Z][a-z0-9]*|[a-z0-9]+/gu) ?? [];
+  const labelWords = label.trim().split(/\s+/u).filter(Boolean);
+  let visibleLabel = label;
+  if (classificationSegments.length > 0 && labelWords.length > 0) {
+    let cursor = labelWords.length;
+    for (let index = classificationSegments.length - 1; index >= 0 && cursor > 0; index -= 1) {
+      if (labelWords[cursor - 1].toUpperCase() !== classificationSegments[index].toUpperCase()) break;
+      cursor -= 1;
+    }
+    visibleLabel = cursor > 0
+      ? labelWords.slice(0, cursor).join(" ")
+      : (classificationSegments[0] ?? label).toUpperCase();
+  }
 
   const detail = [
     `Instance: ${label} (${classification})`,

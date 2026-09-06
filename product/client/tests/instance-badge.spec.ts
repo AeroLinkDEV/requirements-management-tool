@@ -13,13 +13,15 @@ import { login, showcaseSeed } from './auth'
 
 test('the badge shows the installation name and keeps the declaration in the tooltip', async ({ page, request }) => {
   await showcaseSeed(request)
+  // The declaration spells the classification as one PascalCase word (`HomeCanonical`) while the label
+  // spaces it — the payload is the production shape, not the display words.
   await page.route('**/health/identity', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({
       sourceShortSha: 'abc1234',
       mode: 'HOME-PRODUCTION',
-      instance: { label: 'HOME CANONICAL', classification: 'Canonical', snapshot: null },
+      instance: { label: 'HOME CANONICAL', classification: 'HomeCanonical', snapshot: null },
       database: { name: 'aerolink' },
     }),
   }))
@@ -28,9 +30,9 @@ test('the badge shows the installation name and keeps the declaration in the too
   const badge = page.getByTestId('instance-badge')
   await expect(badge).toHaveText('HOME')
   await expect(badge).not.toContainText('CANONICAL')
-  await expect(badge).toHaveAttribute('title', /Instance: HOME CANONICAL \(Canonical\)/)
+  await expect(badge).toHaveAttribute('title', /Instance: HOME CANONICAL \(HomeCanonical\)/)
   await expect(badge).toHaveAttribute('title', /Database: aerolink/)
-  await expect(badge).toHaveAttribute('data-classification', 'Canonical')
+  await expect(badge).toHaveAttribute('data-classification', 'HomeCanonical')
 })
 
 test('an undeclared installation keeps its modest label unchanged', async ({ page, request }) => {
