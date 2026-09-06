@@ -412,6 +412,8 @@ export const frameNodes = (
     intent?: FrameIntent
     /** Actual expanded card height in scene units, measured from the rendered card. */
     selectedCardHeight?: number
+    /** Actual rendered heights for direct story cards, keyed by governed node identity. */
+    cardHeights?: ReadonlyMap<string, number>
   } = {},
 ): { x: number; y: number; zoom: number } | null => {
   const wanted = new Set(ids)
@@ -443,8 +445,11 @@ export const frameNodes = (
       y0 = Math.min(y0, y)
       // Expanded cards are measured by the canvas. A fixed allowance here made a detailed selected card
       // overlap the panel after content or density changed; callers pass the actual rendered height.
-      const selectedHeight = node.id === selectedId ? options.selectedCardHeight ?? result.geometry.cardHeight : result.geometry.cardHeight
-      y1 = Math.max(y1, y + selectedHeight)
+      const measuredHeight = options.cardHeights?.get(node.id)
+      const selectedHeight = node.id === selectedId
+        ? options.selectedCardHeight ?? measuredHeight ?? result.geometry.cardHeight
+        : measuredHeight ?? result.geometry.cardHeight
+      y1 = Math.max(y1, y + Math.max(result.geometry.cardHeight, selectedHeight))
     }
     if (x0 > x1) return onlyDrawn ? measure(result, false) : null
     return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
@@ -544,6 +549,9 @@ export interface EdgeLabelCandidate {
   label: string
   from: { x: number; y: number }
   to: { x: number; y: number }
+  /** Actual SVG text bounds in scene units when the caller can measure them. */
+  width?: number
+  height?: number
 }
 
 export interface EdgeLabelPlacement {
@@ -552,6 +560,8 @@ export interface EdgeLabelPlacement {
   anchorX: number
   anchorY: number
   leader: boolean
+  /** Which bounded search supplied this placement; useful when a dense frame is diagnosed in the browser. */
+  placement: "local" | "path" | "overflow"
   exhausted: boolean
 }
 
@@ -595,46 +605,200 @@ export const placeEdgeLabels = (
     const backwards = item.to.x < item.from.x
     const startX = backwards ? item.from.x : item.from.x + geometry.laneWidth
     const endX = backwards ? item.to.x + geometry.laneWidth : item.to.x
-    const anchorX = intra ? item.from.x + geometry.laneWidth + 34.5 : (startX + endX) / 2
-    const baseX = anchorX
-    const baseY = (item.from.y + item.to.y) / 2 + geometry.anchor - 6
-    const anchorY = (item.from.y + item.to.y) / 2 + geometry.anchor
-    const dx = (item.to.x - item.from.x) || 1
-    const dy = item.to.y - item.from.y
-    const length = Math.max(1, Math.sqrt(dx * dx + dy * dy))
-    const normalX = -dy / length
-    const normalY = dx / length
-    const width = Math.max(28, item.label.length * 5.4 + 8)
+    const width = Math.max(28, item.width ?? (item.label.length * 4.2 + 6))
+    const height = Math.max(12, item.height ?? 12)
+
+    // Sample the actual cubic used by edgePath. A straight-line midpoint can fall inside a card when a
+    // connector crosses an intervening lane; choosing a point from the connector itself keeps a moved label
+    // attached to the edge instead of inventing a nearby corner that the edge never visits.
+    const cubic = (a: number, b: number, c: number, d: number, t: number): number => {
+      const inverse = 1 - t
+      return inverse * inverse * inverse * a + 3 * inverse * inverse * t * b + 3 * inverse * t * t * c + t * t * t * d
+    }
+    const cubicDerivative = (a: number, b: number, c: number, d: number, t: number): number =>
+      3 * (1 - t) * (1 - t) * (b - a) + 6 * (1 - t) * t * (c - b) + 3 * t * t * (d - c)
+    const y1 = item.from.y + geometry.anchor
+    const y2 = item.to.y + geometry.anchor
+    const bend = Math.max(30, Math.abs(endX - startX) * 0.42) * (backwards ? -1 : 1)
+    const connectorPoint = (t: number): { x: number; y: number } => {
+      if (intra) {
+        const edge = item.from.x + geometry.laneWidth
+        const bow = edge + INTRA_LANE_BOW
+        return {
+          x: cubic(edge, bow, bow, edge, t),
+          y: cubic(y1, y1, y2, y2, t),
+        }
+      }
+      return {
+        x: cubic(startX, startX + bend, endX - bend, endX, t),
+        y: cubic(y1, y1, y2, y2, t),
+      }
+    }
+    const connectorTangent = (t: number): { x: number; y: number } => {
+      if (intra) {
+        const edge = item.from.x + geometry.laneWidth
+        const bow = edge + INTRA_LANE_BOW
+        return {
+          x: cubicDerivative(edge, bow, bow, edge, t),
+          y: cubicDerivative(y1, y1, y2, y2, t),
+        }
+      }
+      return {
+        x: cubicDerivative(startX, startX + bend, endX - bend, endX, t),
+        y: cubicDerivative(y1, y1, y2, y2, t),
+      }
+    }
+    const contains = (point: { x: number; y: number }, obstacle: CanvasRect): boolean =>
+      point.x > obstacle.x && point.x < obstacle.x + obstacle.width &&
+      point.y > obstacle.y && point.y < obstacle.y + obstacle.height
+    // Expand obstacles while choosing the sample so the attachment has a small amount of breathing room from
+    // a card boundary. Endpoints at a card edge remain valid once the sample has moved past this guard band.
+    const pointClear = (point: { x: number; y: number }): boolean => !obstacles.some(obstacle =>
+      contains(point, { x: obstacle.x - 2, y: obstacle.y - 2, width: obstacle.width + 4, height: obstacle.height + 4 }),
+    )
+    const rawAnchor = connectorPoint(0.5)
+    let anchorT = 0.5
+    if (!pointClear(rawAnchor)) {
+      const candidates: number[] = []
+      for (let step = 0; step <= 240; step += 1) {
+        const t = step / 240
+        if (pointClear(connectorPoint(t))) candidates.push(t)
+      }
+      anchorT = candidates.sort((a, b) => Math.abs(a - 0.5) - Math.abs(b - 0.5))[0] ?? anchorT
+    }
+    const anchor = connectorPoint(anchorT)
+    const anchorX = anchor.x
+    const anchorY = anchor.y
+    const tangent = connectorTangent(anchorT)
+    const tangentLength = Math.max(1, Math.hypot(tangent.x, tangent.y))
+    const normalX = -tangent.y / tangentLength
+    const normalY = tangent.x / tangentLength
+    const moved = Math.abs(anchorT - 0.5) > 0.01
+    const travel = anchorT >= 0.5 ? 1 : -1
+    const alongX = (tangent.x / tangentLength) * travel
+    const alongY = (tangent.y / tangentLength) * travel
+    // Give a moved label room beside the obstacle it was moved around. The short neutral leader then runs in
+    // free space instead of laying the text half over the card boundary.
+    const baseX = anchor.x + (moved ? alongX * (width / 2 + 4) : 0)
+    const baseY = anchor.y - 6 + (moved ? alongY * (height / 2 + 4) : 0)
     // Search outward from the true connector in bounded steps. The leader is only drawn after the segment has
     // passed the same obstacle test, so a farther slot remains attached to this edge rather than becoming a
-    // free-floating midpoint; explicit exhaustion below keeps the required phrase visible when none is free.
+    // free-floating midpoint. A dense crossing can use a different point on the same connector as a second
+    // bounded search; this is still edge placement, and gives the phrase a real path out of an occupied gutter.
     const offsets = [0, -12, 12, -22, 22, -34, 34, -52, 52, -72, 72, -96, 96, -124, 124]
-    let chosen: { x: number; y: number } | null = null
-    for (const offset of offsets) {
-      const x = baseX + (intra ? offset * 0.35 : normalX * offset)
-      const y = baseY + (intra ? normalY * offset : normalY * offset)
-      const rect: CanvasRect = { x: x - width / 2, y: y - 10, width, height: 12 }
+    type Candidate = { x: number; y: number; anchorX: number; anchorY: number }
+    const placedCandidate = (candidate: Candidate): Candidate | null => {
+      const rect: CanvasRect = {
+        x: candidate.x - width / 2,
+        y: candidate.y - height + 2,
+        width,
+        height,
+      }
       if (rect.x < frame.x + 2 || rect.x + rect.width > frame.x + frame.width - 2 ||
-          rect.y < frame.y + 2 || rect.y + rect.height > frame.y + frame.height - 2) continue
-      if (obstacles.some(obstacle => intersects(rect, obstacle)) || placed.some(previous => intersects(rect, previous))) continue
-      if (offset !== 0 && !leaderClear({ x: anchorX, y: anchorY }, { x, y }, [...obstacles, ...placed])) continue
-      chosen = { x, y }
+          rect.y < frame.y + 2 || rect.y + rect.height > frame.y + frame.height - 2) return null
+      if (obstacles.some(obstacle => intersects(rect, obstacle)) || placed.some(previous => intersects(rect, previous))) return null
+      const needsLeader = candidate.x !== candidate.anchorX || candidate.y !== candidate.anchorY - 6
+      if (needsLeader && !leaderClear(
+        { x: candidate.anchorX, y: candidate.anchorY },
+        { x: candidate.x, y: candidate.y },
+        [...obstacles, ...placed],
+      )) return null
       placed.push(rect)
-      break
+      return candidate
     }
-    // A dense graph may exhaust every measured slot. Keep the phrase at the actual connector anchor and visible;
-    // clipping/hiding it would erase a controlled relationship. Mark this explicit exhaustion state so callers
-    // can diagnose the crowded frame, rather than pretending an unchecked midpoint was collision-free.
-    if (chosen) {
-      result.set(item.key, {
-        ...chosen,
+    const candidateAt = (t: number, offset: number): Candidate => {
+      const point = connectorPoint(t)
+      const direction = connectorTangent(t)
+      const directionLength = Math.max(1, Math.hypot(direction.x, direction.y))
+      const candidateNormalX = -direction.y / directionLength
+      const candidateNormalY = direction.x / directionLength
+      return {
+        x: point.x + candidateNormalX * offset,
+        y: point.y - 6 + candidateNormalY * offset,
+        anchorX: point.x,
+        anchorY: point.y,
+      }
+    }
+    let chosen: Candidate | null = null
+    let placement: EdgeLabelPlacement["placement"] = "local"
+    for (const offset of offsets) {
+      chosen = placedCandidate({
+        x: baseX + (intra ? offset * 0.35 : normalX * offset),
+        y: baseY + normalY * offset,
         anchorX,
         anchorY,
-        leader: chosen.x !== baseX || chosen.y !== baseY,
+      })
+      if (chosen) break
+    }
+    if (!chosen) {
+      placement = "path"
+      for (let step = 1; step < 40 && !chosen; step += 1) {
+        const t = step / 40
+        for (const offset of offsets) {
+          chosen = placedCandidate(candidateAt(t, offset))
+          if (chosen) break
+        }
+      }
+    }
+    if (!chosen) {
+      // The ordinary slots are deliberately close to the connector. Only a genuinely dense frame reaches
+      // this pass; widen the search along the same sampled path before reporting exhaustion, so the phrase can
+      // still be attached with a neutral leader rather than falling back to a colliding midpoint.
+      const widerOffsets = [
+        ...offsets,
+        -152, 152, -184, 184, -220, 220, -260, 260, -300, 300, -340, 340,
+      ]
+      for (let step = 0; step <= 80 && !chosen; step += 1) {
+        const t = step / 80
+        for (const offset of widerOffsets) {
+          chosen = placedCandidate(candidateAt(t, offset))
+          if (chosen) break
+        }
+      }
+    }
+    if (!chosen) {
+      // A label may need to leave a crowded gutter entirely. Keep the fallback on the connector itself: sample
+      // its path and a measured normal corridor, then accept only a free label box with a clear neutral leader.
+      // This stays bounded by the usable frame height and avoids a board-wide annotation search.
+      const sampleTs = Array.from({ length: 121 }, (_, index) => index / 120)
+        .sort((a, b) => Math.abs(a - 0.5) - Math.abs(b - 0.5))
+      placement = "overflow"
+      const maxOffset = Math.max(124, Math.ceil(frame.height) + height)
+      const overflowOffsets: number[] = [0]
+      for (let offset = 8; offset <= maxOffset; offset += 8) {
+        overflowOffsets.push(-offset, offset)
+      }
+      for (const t of sampleTs) {
+        if (chosen) break
+        for (const offset of overflowOffsets) {
+          chosen = placedCandidate(candidateAt(t, offset))
+          if (chosen) break
+        }
+      }
+    }
+    // A frame with no free label rectangle cannot satisfy both visibility and non-overlap. Keep that state
+    // explicit for diagnostics; the caller can reserve more frame room and repaint instead of presenting a
+    // colliding phrase as if it were clear. All normal and overflow placements above remain visible on-edge.
+    if (chosen) {
+      result.set(item.key, {
+        x: chosen.x,
+        y: chosen.y,
+        anchorX: chosen.anchorX,
+        anchorY: chosen.anchorY,
+        leader: chosen.x !== chosen.anchorX || chosen.y !== chosen.anchorY - 6,
+        placement,
         exhausted: false,
       })
     } else {
-      result.set(item.key, { x: baseX, y: baseY, anchorX, anchorY, leader: false, exhausted: true })
+      result.set(item.key, {
+        x: anchorX,
+        y: anchorY - 6,
+        anchorX,
+        anchorY,
+        leader: false,
+        placement: "overflow",
+        exhausted: true,
+      })
     }
   }
   return result

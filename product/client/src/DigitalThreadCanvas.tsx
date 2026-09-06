@@ -473,21 +473,56 @@ export default function DigitalThreadCanvas({
         height: Math.max(geometry.cardHeight, card.scrollHeight),
       }]
     })
+    const labelsAtRest = transform.current.zoom > 1.05
+    const currentZoom = transform.current.zoom || 1
+    const shownEdge = (entry: (typeof edgeRefs.current)[number]): boolean => {
+      if (!entry.label) return false
+      const from = positions.get(entry.edge.from)
+      const to = positions.get(entry.edge.to)
+      if (!from || !to) return false
+      const traced = tracedEdges?.has(edgeIdentity(entry.edge.from, entry.edge.to)) ?? false
+      const inWindow = (position: { x: number; y: number }) => {
+        const y = position.y + geometry.anchor
+        return y > -20 && y < bandHeight + 20
+      }
+      const inHorizontalWindow = (position: { x: number; y: number }) => {
+        const left = position.x * currentZoom + transform.current.x
+        const right = left + geometry.laneWidth * currentZoom
+        return right > box.x - 20 && left < box.x + box.width + 20
+      }
+      // Only visible labels take placement slots. Dimmed cards remain obstacles above, while untraced/resting
+      // labels that the next loop hides must not make a crowded frame appear exhausted.
+      return (traced || labelsAtRest) && inWindow(from) && inWindow(to) &&
+        (inHorizontalWindow(from) || inHorizontalWindow(to))
+    }
     const labelCandidates = edgeRefs.current
-      .filter(entry => entry.label && positions.has(entry.edge.from) && positions.has(entry.edge.to))
+      .filter(shownEdge)
       .sort((a, b) => {
         const aTraced = tracedEdges?.has(edgeIdentity(a.edge.from, a.edge.to)) ?? false
         const bTraced = tracedEdges?.has(edgeIdentity(b.edge.from, b.edge.to)) ?? false
         return Number(bTraced) - Number(aTraced)
       })
-      .map(entry => ({
-        key: edgeIdentity(entry.edge.from, entry.edge.to),
-        label: entry.edge.label,
-        from: positions.get(entry.edge.from)!,
-        to: positions.get(entry.edge.to)!,
-      }))
+      .map(entry => {
+        const bounds = (() => {
+          try {
+            return entry.label?.getBBox()
+          } catch {
+            return undefined
+          }
+        })()
+        return {
+          key: edgeIdentity(entry.edge.from, entry.edge.to),
+          label: entry.edge.label,
+          from: positions.get(entry.edge.from)!,
+          to: positions.get(entry.edge.to)!,
+          // SVG gives us the real rendered text width in scene units. A character-count estimate is too wide
+          // for the narrow gutter between two cards and turns a valid connector slot into false exhaustion.
+          width: bounds && Number.isFinite(bounds.width) && bounds.width > 0 ? bounds.width : undefined,
+          height: bounds && Number.isFinite(bounds.height) && bounds.height > 0 ? bounds.height : undefined,
+        }
+      })
     const viewportRect = viewportRef.current?.getBoundingClientRect()
-    const zoom = transform.current.zoom || 1
+    const zoom = currentZoom
     const toSceneRect = (rect: DOMRect): CanvasRect | null => {
       if (!viewportRect) return null
       return {
@@ -518,7 +553,6 @@ export default function DigitalThreadCanvas({
     // Edge labels rest hidden and appear on a traced edge, or once the board is zoomed past 1.05 (#880 §6.7).
     // At the default fit the canvas stays calm; a reader who has selected something, or leaned in, gets the
     // relation words.
-    const labelsAtRest = transform.current.zoom > 1.05
     for (const { path, dot, leader, label, edge } of edgeRefs.current) {
       const from = positions.get(edge.from)
       const to = positions.get(edge.to)
@@ -554,6 +588,7 @@ export default function DigitalThreadCanvas({
         if (position) {
           label.setAttribute("x", String(position.x))
           label.setAttribute("y", String(position.y))
+          label.dataset.edgePlacement = position.exhausted ? "exhausted" : "clear"
         }
         if (leader) {
           leader.setAttribute("x1", String(position?.anchorX ?? 0))
@@ -627,6 +662,15 @@ export default function DigitalThreadCanvas({
       const result = geometryRef.current
       if (!box || !result) return false
 
+      // Read every requested card's actual layout height before choosing a camera. Wrapped identifiers and
+      // state pills can make a direct card taller than its nominal tier height; using only the selected card's
+      // scrollHeight leaves another direct record partly under the panel after a trace selection.
+      const cardHeights = new Map<string, number>()
+      for (const node of nodes) {
+        const measured = cardRefs.current.get(node.id)?.scrollHeight
+        if (measured && Number.isFinite(measured)) cardHeights.set(node.id, measured)
+      }
+
       // Roll every lane to bring the selected record's directed story into its own windows, before framing
       // (#880 §6.4: "the same routine runs on selection"). Panning the camera cannot do this job: a lane
       // scrolls independently, so a linked record can sit outside its lane window no matter where the camera
@@ -653,9 +697,11 @@ export default function DigitalThreadCanvas({
           const { x, y } = nodePosition(node, settled.geometry, offsets.current)
           const left = x * transform.zoom + transform.x
           const right = left + settled.geometry.laneWidth * transform.zoom
-          const measuredHeight = node.id === target.selectedId
-            ? selectedCardHeight ?? settled.geometry.cardHeight
-            : settled.geometry.cardHeight
+          const measuredHeight = Math.max(
+            settled.geometry.cardHeight,
+            node.id === target.selectedId ? selectedCardHeight ?? 0 : 0,
+            cardHeights.get(node.id) ?? 0,
+          )
           const top = y * transform.zoom + transform.y
           const bottom = top + measuredHeight * transform.zoom
           // Direct cards need both an actual lane-window position and complete x/y containment. A card that is
@@ -668,7 +714,7 @@ export default function DigitalThreadCanvas({
 
       // The selected card's expanded body is measured from the rendered DOM. The old fixed allowance made a
       // larger card overlap the panel and made a shorter card reserve unnecessary empty space.
-      const selectedCardHeight = cardRefs.current.get(target.selectedId)?.scrollHeight
+      const selectedCardHeight = cardHeights.get(target.selectedId)
       const next = frameNodes(
         target.wanted,
         nodes,
@@ -678,7 +724,7 @@ export default function DigitalThreadCanvas({
         target.selectedId,
         1.12,
         true,
-        { intent: target.intent, selectedCardHeight },
+        { intent: target.intent, selectedCardHeight, cardHeights },
       )
       if (!next) return false
 

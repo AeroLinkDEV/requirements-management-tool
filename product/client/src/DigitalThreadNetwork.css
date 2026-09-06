@@ -165,14 +165,26 @@
 
 .dtnPanel-right { right: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
 .dtnPanel-left { left: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
-.dtnPanel-bottom { left: 16px; right: 16px; bottom: 18px; height: 150px; overflow: hidden; }
+.dtnPanel-bottom {
+  left: 16px;
+  right: 16px;
+  bottom: 18px;
+  height: 150px;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
 
 .dtnPanelTools { position: static; display: flex; justify-content: flex-end; flex: 0 0 24px; gap: 4px; z-index: 2; margin-bottom: 4px; }
 
-/* In the horizontal dock, the controls belong to the actions column. Keeping them out of the content flow
-   lets identity and relationship headings start at the panel's measured top instead of leaving a toolbar-sized
-   blank band above every fact; side docks retain their normal flow so narrow columns stay readable. */
-.dtnPanel-bottom .dtnPanelTools { position: absolute; top: 8px; right: 10px; }
+/* A bottom dock keeps its tools in normal flow. This gives the panel a measured toolbar row rather than relying
+   on an action-column offset that can overlap the primary action at compact widths. */
+.dtnPanel-bottom .dtnPanelTools {
+  position: static;
+  flex: 0 0 auto;
+  align-self: stretch;
+  margin: 0 0 4px;
+}
 
 .dtnPanelTools button {
   min-height: 24px;
@@ -199,6 +211,7 @@
   align-items: start;
   height: auto;
   min-height: 0;
+  overflow: hidden;
 }
 
 .dtnPanelIdentity { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
@@ -210,7 +223,13 @@
 .dtnRelHead span { color: #8fa0b2; font-size: 9.5px; font-weight: var(--weight-strong); }
 
 .dtnRel { display: grid; gap: 4px; overflow-y: auto; max-height: 152px; }
-.dtnPanel-bottom .dtnRel { grid-template-columns: 1fr 1fr; align-content: start; max-height: 96px; padding-right: 3px; }
+.dtnPanel-bottom .dtnRel {
+  grid-template-columns: 1fr 1fr;
+  align-content: start;
+  max-height: none;
+  min-height: 0;
+  padding-right: 3px;
+}
 
 .dtnRel button {
   display: flex;
@@ -233,7 +252,10 @@
 .dtnRel em { margin-left: auto; color: #8493a6; font-size: 13px; font-style: normal; }
 .dtnRelEmpty { margin: 0; color: #8fa0b2; font-size: 10.5px; padding: 4px 0; }
 
-.dtnPanelActions { display: flex; flex-direction: column; gap: 6px; justify-content: flex-end; }
+.dtnPanelActions { display: flex; flex-direction: column; gap: 6px; justify-content: flex-end; min-width: 0; }
+.dtnPanel-bottom .dtnPanelIdentityCol,
+.dtnPanel-bottom .dtnPanelCol,
+.dtnPanel-bottom .dtnPanelActions { min-height: 0; }
 
 .dtnPanelActions button {
   min-height: 32px;
@@ -247,7 +269,6 @@
 }
 
 .dtnPanelActions button.is-primary { border-color: var(--teal-700); background: var(--teal-700); color: #fff; }
-.dtnPanel-bottom .dtnPanelActions { padding-top: 0; }
 
 .dtnVisuallyHidden {
   position: absolute;

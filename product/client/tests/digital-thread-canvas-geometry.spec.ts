@@ -512,4 +512,79 @@ test.describe("story framing and label obstacles", () => {
     expect(placed.y).toBeGreaterThan(0)
     expect(placed.y).toBeLessThan(300)
   })
+
+  test("a crossing phrase attaches to a free point on its connector", () => {
+    const geometry = geometryFor(1)
+    const obstacle = { x: geometry.lanePitch, y: 80, width: geometry.laneWidth, height: geometry.cardHeight }
+    const placed = placeEdgeLabels(
+      [{
+        key: "a>c",
+        label: "verified by",
+        from: { x: 0, y: 80 },
+        to: { x: geometry.lanePitch * 2, y: 80 },
+        width: 44,
+        height: 10,
+      }],
+      geometry,
+      [obstacle],
+      { x: 0, y: 0, width: 900, height: 300 },
+    ).get("a>c")!
+
+    // The midpoint is covered by the intervening card. The bounded fallback search must choose another
+    // sampled point from the cubic connector and leave the phrase itself outside that measured card.
+    expect(placed.exhausted).toBe(false)
+    expect(placed.anchorX < obstacle.x - 1 || placed.anchorX > obstacle.x + obstacle.width + 1).toBe(true)
+    const labelRect = {
+      x: placed.x - 22,
+      y: placed.y - 8,
+      width: 44,
+      height: 10,
+    }
+    expect(labelRect.x + labelRect.width <= obstacle.x || obstacle.x + obstacle.width <= labelRect.x ||
+      labelRect.y + labelRect.height <= obstacle.y || obstacle.y + obstacle.height <= labelRect.y).toBe(true)
+  })
+
+  test("distinct crossing phrases keep their connector slots after local slots exhaust", () => {
+    const geometry = geometryFor(1)
+    const labels = Array.from({ length: 8 }, (_, index) => ({
+      key: `from-${index}>to-${index}`,
+      label: index % 2 ? "source of" : "verified by",
+      from: { x: 0, y: 96 + index * 5 },
+      to: { x: geometry.lanePitch * 4, y: 131 - index * 5 },
+      width: 44,
+      height: 10,
+    }))
+    const middleCard = {
+      x: geometry.lanePitch * 2,
+      y: 110,
+      width: geometry.laneWidth,
+      height: geometry.cardHeight,
+    }
+    const placed = [...placeEdgeLabels(labels, geometry, [middleCard], { x: 0, y: 0, width: 1440, height: 520 }).values()]
+
+    expect(placed).toHaveLength(labels.length)
+    expect(placed.every(label => !label.exhausted)).toBe(true)
+    // Each phrase remains attached to a point on its own cubic, even when the crossing card occupies the
+    // natural middle slot. At least one must use the path search rather than the local midpoint offsets.
+    expect(placed.some(label => label.placement === "path" || label.placement === "overflow")).toBe(true)
+    for (const label of placed) {
+      expect(label.x - 22).toBeGreaterThanOrEqual(2)
+      expect(label.x + 22).toBeLessThanOrEqual(1438)
+      expect(label.y - 8).toBeGreaterThanOrEqual(2)
+      expect(label.y + 2).toBeLessThanOrEqual(518)
+    }
+    for (let first = 0; first < placed.length; first += 1) {
+      const a = { x: placed[first].x - 22, y: placed[first].y - 8, width: 44, height: 10 }
+      for (let second = first + 1; second < placed.length; second += 1) {
+        const b = { x: placed[second].x - 22, y: placed[second].y - 8, width: 44, height: 10 }
+        expect(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y).toBe(true)
+      }
+    }
+    for (const label of placed) {
+      expect(label.anchorX).toBeGreaterThanOrEqual(0)
+      expect(label.anchorX).toBeLessThanOrEqual(geometry.lanePitch * 4 + geometry.laneWidth)
+      expect(label.anchorY).toBeGreaterThanOrEqual(geometry.anchor)
+      expect(label.anchorY).toBeLessThanOrEqual(260 + geometry.anchor)
+    }
+  })
 })

@@ -288,14 +288,26 @@
 
 .dtaPanel-right { right: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
 .dtaPanel-left { left: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
-.dtaPanel-bottom { left: 16px; right: 16px; bottom: 18px; height: 150px; overflow: hidden; }
+.dtaPanel-bottom {
+  left: 16px;
+  right: 16px;
+  bottom: 18px;
+  height: 150px;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
 
 .dtaPanelTools { position: static; display: flex; justify-content: flex-end; flex: 0 0 24px; gap: 4px; z-index: 2; margin-bottom: 4px; }
 
-/* In the horizontal dock, the controls belong to the actions column. Keeping them out of the content flow
-   lets identity, evidence and relationship headings start at the panel's measured top instead of leaving a
-   toolbar-sized blank band above every fact; side docks retain their normal flow. */
-.dtaPanel-bottom .dtaPanelTools { position: absolute; top: 8px; right: 10px; }
+/* A bottom dock keeps its tools in normal flow. This gives the panel a measured toolbar row rather than relying
+   on an action-column offset that can overlap the primary action at compact widths. */
+.dtaPanel-bottom .dtaPanelTools {
+  position: static;
+  flex: 0 0 auto;
+  align-self: stretch;
+  margin: 0 0 4px;
+}
 
 .dtaPanelTools button {
   min-height: 24px;
@@ -321,6 +333,7 @@
   align-items: start;
   height: auto;
   min-height: 0;
+  overflow: hidden;
 }
 
 .dtaPanelIdentityCol { min-width: 0; overflow: hidden; }
@@ -344,7 +357,13 @@
 .dtaRelHead span { color: #8fa0b2; font-size: 9.5px; font-weight: var(--weight-strong); }
 
 .dtaRel { display: grid; gap: 4px; overflow-y: auto; max-height: 152px; }
-.dtaPanel-bottom .dtaRel { grid-template-columns: 1fr 1fr; align-content: start; max-height: 96px; padding-right: 3px; }
+.dtaPanel-bottom .dtaRel {
+  grid-template-columns: 1fr 1fr;
+  align-content: start;
+  max-height: none;
+  min-height: 0;
+  padding-right: 3px;
+}
 
 .dtaRel button {
   display: flex;
@@ -370,7 +389,9 @@
 .dtaRel em { margin-left: auto; color: #8493a6; font-size: 13px; font-style: normal; }
 .dtaRelEmpty { margin: 0; color: #8fa0b2; font-size: 10.5px; padding: 4px 0; }
 
-.dtaPanelActions { display: flex; flex-direction: column; gap: 6px; justify-content: flex-end; }
+.dtaPanelActions { display: flex; flex-direction: column; gap: 6px; justify-content: flex-end; min-width: 0; }
+.dtaPanel-bottom .dtaPanelCol,
+.dtaPanel-bottom .dtaPanelActions { min-height: 0; }
 
 .dtaPanelActions button {
   min-height: 32px;
@@ -384,7 +405,6 @@
 }
 
 .dtaPanelActions button.is-primary { border-color: var(--teal-700); background: var(--teal-700); color: #fff; }
-.dtaPanel-bottom .dtaPanelActions { padding-top: 0; }
 
 .dtaVisuallyHidden {
   position: absolute;
