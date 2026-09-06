@@ -151,6 +151,7 @@ for (const view of ["network", "artifact", "inside"]) {
     for (const dock of ["Bottom", "Right", "Auto"]) {
       await panel.getByRole("button", { name: dock, exact: true }).click()
       await controlsDoNotOverlap(page)
+      await expect.poll(() => collisions(page)).toEqual([])
       if (dock === "Bottom") await testInfo.attach(`${view}-bottom-compact`, { body: await page.screenshot(), contentType: "image/png" })
     }
     if (view === "network") {
@@ -203,7 +204,11 @@ test("Inside preserves explicit missing-base and target states alongside known b
   await expect(known.locator("ins")).toHaveText("The FMS shall sequence the selected route.")
   await expect(known.locator(".dticOp")).toHaveText("MOD")
   const retired = page.locator(".dtCanvasNode").filter({ hasText: "SYSR-00077.01" })
-  await retired.click()
+  // A sibling may roll outside the lane when the selected Modify expands. Use the supported native keyboard
+  // path to reveal it, rather than assuming every untraced sibling remains concurrently pointer-visible.
+  await known.press("ArrowDown")
+  await expect(retired).toBeFocused()
+  await retired.press("Enter")
   await expect(retired.locator(".dticOp")).toHaveText("RET")
   await expect(page.locator(".dticPanel")).toContainText("Retire")
 })
