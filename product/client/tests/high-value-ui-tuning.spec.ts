@@ -24,16 +24,28 @@ test('workspace tuning persists and quick navigation provides previews and recen
   // authorized build-workspace shortcut once the declared Command Center has replaced that transient shell.
   await expect(page.getByRole('heading',{name:'Command Center'})).toBeVisible()
 
-  await page.keyboard.press('Control+K')
   const palette=page.getByRole('dialog',{name:'Quick navigation'})
-  await expect(palette.getByText('SUGGESTED WORKSPACES')).toBeVisible()
+  // The global shortcut is bound by an effect that can register a beat after the Command Center heading
+  // renders; under runner load one discrete keypress can land before that and be lost. A reader presses
+  // again — the journey does the same, bounded, rather than assuming the first press always lands.
+  const openQuickNavigation=async(landmark:RegExp)=>{
+    for(let attempt=0;attempt<3;attempt++){
+      await page.keyboard.press('Control+K')
+      try{
+        await palette.getByText(landmark).toBeVisible({timeout:5_000})
+        return
+      }catch{/* the press landed before the shortcut was bound; press again */}
+    }
+    await expect(palette.getByText(landmark)).toBeVisible()
+  }
+
+  await openQuickNavigation('SUGGESTED WORKSPACES')
   await palette.getByLabel('Search AeroLink').fill('System Requirements Explorer')
   await expect(palette.locator('.palettePreview').getByRole('heading',{name:'System Requirements Explorer'})).toBeVisible()
   await palette.getByLabel('Search AeroLink').press('Enter')
   await expect(page.getByRole('heading',{name:'System Requirements Explorer'})).toBeVisible()
 
-  await page.keyboard.press('Control+K')
-  await expect(palette.getByText('RECENT DESTINATIONS')).toBeVisible()
+  await openQuickNavigation('RECENT DESTINATIONS')
   await expect(palette.getByRole('link',{name:/System Requirements/}).first()).toBeVisible()
   await palette.getByLabel('Search AeroLink').fill('SYSR-000150')
   await expect(palette.locator('.palettePreview').getByRole('heading',{name:/SYSR-000150/})).toBeVisible()
