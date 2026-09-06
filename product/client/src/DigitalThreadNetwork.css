@@ -119,7 +119,7 @@
   -webkit-line-clamp: 2;
 }
 
-.dtnMeta { display: flex; gap: 10px; color: #8493a6; font-size: 10px; }
+.dtnMeta { display: flex; gap: 10px; color: #5f7080; font-size: 10px; }
 
 /* Suspect carries its word in the pill as well as the colour; colour alone is never the signal. */
 .dtCanvasNode:has(.dtnCard.is-suspect) { border-color: #e0c17e; background: #fffdf6; }
