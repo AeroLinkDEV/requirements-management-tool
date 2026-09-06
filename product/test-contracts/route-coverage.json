@@ -303,6 +303,7 @@
         "ChangeProposalContentApiTests",
         "ChangeRequestNetworkApiTests",
         "ChangeRequestReviewRationaleApiTests",
+        "ChangeRequestTargetReleaseGuardApiTests",
         "ChangeRequestUpstreamTraceApiTests",
         "ClosedReleaseAuthoringTests",
         "ControlledAttachmentMutationApiTests",
@@ -627,6 +628,7 @@
         "AuthoringTracedImpactTests",
         "BuildScopedWorkspaceApiTests",
         "ChangeAuthoringInvariantApiTests",
+        "ChangeRequestTargetReleaseGuardApiTests",
         "ProblemReportImpactEvidenceApiTests",
         "ProgramRoleAuthorityApiTests",
         "ProjectConfigurationApiTests",
@@ -640,6 +642,7 @@
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
         "ChangeRequestRenameApiTests",
+        "ChangeRequestTargetReleaseGuardApiTests",
         "ProblemReportApiTests",
         "ServerAuthorityContractTests",
         "WithdrawChangeRequestApiTests"
@@ -741,7 +744,9 @@
       "method": "POST",
       "path": "/api/change-requests/{id:guid}/retarget",
       "file": "ChangeRequestEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "ChangeRequestTargetReleaseGuardApiTests"
+      ]
     },
     {
       "method": "POST",
@@ -1080,6 +1085,7 @@
       "path": "/api/enterprise-requirements/{artifactId:guid}/propose",
       "file": "RequirementsEndpoints.cs",
       "coveredBy": [
+        "ChangeRequestTargetReleaseGuardApiTests",
         "RequirementProposalOptionsApiTests"
       ]
     },
@@ -1125,7 +1131,9 @@
       "method": "POST",
       "path": "/api/enterprise-requirements/import/{id:guid}/commit",
       "file": "RequirementsEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "ChangeRequestTargetReleaseGuardApiTests"
+      ]
     },
     {
       "method": "POST",
@@ -1222,6 +1230,7 @@
       "path": "/api/integrations/service-identities",
       "file": "IntegrationEndpoints.cs",
       "coveredBy": [
+        "ChangeRequestTargetReleaseGuardApiTests",
         "OpenDigitalThreadTests"
       ]
     },
@@ -1958,6 +1967,7 @@
       "path": "/api/reqif/imports/preview",
       "file": "ReqIfEndpoints.cs",
       "coveredBy": [
+        "ChangeRequestTargetReleaseGuardApiTests",
         "OpenDigitalThreadTests"
       ]
     },
@@ -1972,6 +1982,7 @@
       "path": "/api/reqif/jobs/{id:guid}/commit",
       "file": "ReqIfEndpoints.cs",
       "coveredBy": [
+        "ChangeRequestTargetReleaseGuardApiTests",
         "OpenDigitalThreadTests"
       ]
     },
@@ -1980,6 +1991,7 @@
       "path": "/api/reqif/jobs/{id:guid}/process",
       "file": "ReqIfEndpoints.cs",
       "coveredBy": [
+        "ChangeRequestTargetReleaseGuardApiTests",
         "OpenDigitalThreadTests"
       ]
     },
@@ -2300,7 +2312,9 @@
       "method": "POST",
       "path": "/api/v1/oslc/rm/consume",
       "file": "IntegrationEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "ChangeRequestTargetReleaseGuardApiTests"
+      ]
     },
     {
       "method": "POST",
@@ -2508,7 +2522,9 @@
       "method": "PUT",
       "path": "/api/v1/requirements/{id:guid}",
       "file": "IntegrationEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "ChangeRequestTargetReleaseGuardApiTests"
+      ]
     }
   ]
 }

@@ -683,6 +683,13 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasIndex(x => new { x.ProjectId, x.BaseNumber, x.Revision }).IsUnique();
             b.HasIndex(x => new { x.ProjectId, x.UpdatedAt });
             b.HasIndex(x => new { x.ProjectId, x.State });
+            // The project/release pair is bound referentially, not only by the shared target-release guard:
+            // a change request can never persist a target release belonging to another project, or one that
+            // does not exist, even through a future path that forgets the guard. #849 Finding 4.
+            b.HasOne<SoftwareRelease>().WithMany()
+                .HasForeignKey(x => new { x.ProjectId, x.TargetReleaseId })
+                .HasPrincipalKey(x => new { x.ProjectId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             b.HasMany(x => x.RequirementChanges).WithOne().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.ReviewCycles).WithOne().HasForeignKey(x => x.ChangeRequestId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.AuditEvents).WithOne().HasForeignKey(x => x.AggregateId).OnDelete(DeleteBehavior.Cascade);

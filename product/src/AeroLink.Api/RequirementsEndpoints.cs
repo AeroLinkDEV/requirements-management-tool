@@ -401,13 +401,14 @@ public static class RequirementsEndpoints
             if (!await http.HasProjectRoleAsync(db, identity, artifact.ProjectId, ct, ProgramRole.Engineer))
                 return Results.Forbid();
             var ladderPolicy = await policyResolver.ResolveAsync(artifact.ProjectId, ct);
-            var targetRelease = await db.Releases.AsNoTracking()
-                .Where(x => x.Id == request.TargetReleaseId && x.ProjectId == artifact.ProjectId)
-                .Select(x => new { x.Id, x.Version, x.IsReleased }).SingleOrDefaultAsync(ct);
-            if (targetRelease is null)
-                return Results.BadRequest(new { error = "Select a build from this Project." });
-            if (targetRelease.IsReleased)
-                return Results.BadRequest(new { error = $"Build {targetRelease.Version} is released and read-only.", code = "released_build_read_only" });
+            // This flow family keeps its own stable lifecycle presentation for a released build; the shared
+            // guard owns the decision and the unified not-found posture.
+            var targetReleaseVerdict = await new ChangeRequestTargetReleaseGuard(db)
+                .ValidateAsync(artifact.ProjectId, request.TargetReleaseId, ct);
+            if (!targetReleaseVerdict.Eligible)
+                return targetReleaseVerdict.ToFailureResult(
+                    releasedCode: "released_build_read_only",
+                    releasedErrorTemplate: "Build {version} is released and read-only.");
 
             var current = await CurrentRequirementRevisionAsync(db, artifact, request.TargetReleaseId, ct);
             if (current is null)
@@ -712,7 +713,7 @@ public static class RequirementsEndpoints
 
         app.MapPost("/api/enterprise-requirements/import/{id:guid}/commit",async(Guid id,CommitImportRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,ILadderPolicy ladderPolicy,IProjectLadderPolicyResolver policyResolver,CancellationToken ct)=>
         {
-            var job=await db.RequirementInterchangeJobs.SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();if(job.InvalidRows>0)return Results.BadRequest(new{error="Resolve every invalid row before committing this import."});if(!await http.HasProjectRoleAsync(db,identity,job.ProjectId,ct,ProgramRole.Engineer))return Results.Forbid();ladderPolicy = await policyResolver.ResolveAsync(job.ProjectId, ct);var rows=JsonSerializer.Deserialize<List<InterchangeRequirementRow>>(job.RowsJson)??[];try{var now=DateTimeOffset.UtcNow;var baseNumber=await IdentifierAllocator.NextChangeRequestAsync(db,request.Type,request.SoftwareLevel,ct,ladderPolicy);var scr=new SystemChangeRequest(baseNumber,0,job.ProjectId,request.TargetReleaseId,request.Title,request.Problem,request.Analysis,request.Solution,http.UserAccount().UserName,now,request.Type,softwareLevel:request.SoftwareLevel, ladderPolicy: ladderPolicy);foreach(var row in rows){if(!EnterpriseRequirementsService.TryLevel(row.Level,out var reqLevel,ladderPolicy))throw new DomainException($"The imported row names an unconfigured level: {row.Level}.");scr.AddRequirementChange(http.UserAccount().UserName,row.Identifier,0,reqLevel,RequirementChangeKind.Introduce,row.Statement,row.Rationale,row.VerificationMethod,now,impactDispositionJson:RequirementAuthoringJson.PendingImpactDispositions, ladderPolicy: ladderPolicy);}db.SystemChangeRequests.Add(scr);job.Commit(scr.Id,now);await db.SaveChangesAsync(ct);return Results.Created($"/api/change-requests/{scr.Id}",new{scr.Id,scr.DisplayNumber,imported=rows.Count});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
+            var job=await db.RequirementInterchangeJobs.SingleOrDefaultAsync(x=>x.Id==id,ct);if(job is null)return Results.NotFound();if(job.InvalidRows>0)return Results.BadRequest(new{error="Resolve every invalid row before committing this import."});if(!await http.HasProjectRoleAsync(db,identity,job.ProjectId,ct,ProgramRole.Engineer))return Results.Forbid();ladderPolicy = await policyResolver.ResolveAsync(job.ProjectId, ct);var targetReleaseFailure=(await new ChangeRequestTargetReleaseGuard(db).ValidateAsync(job.ProjectId,request.TargetReleaseId,ct)).ToFailureResult();if(targetReleaseFailure is not null)return targetReleaseFailure;var rows=JsonSerializer.Deserialize<List<InterchangeRequirementRow>>(job.RowsJson)??[];try{var now=DateTimeOffset.UtcNow;var baseNumber=await IdentifierAllocator.NextChangeRequestAsync(db,request.Type,request.SoftwareLevel,ct,ladderPolicy);var scr=new SystemChangeRequest(baseNumber,0,job.ProjectId,request.TargetReleaseId,request.Title,request.Problem,request.Analysis,request.Solution,http.UserAccount().UserName,now,request.Type,softwareLevel:request.SoftwareLevel, ladderPolicy: ladderPolicy);foreach(var row in rows){if(!EnterpriseRequirementsService.TryLevel(row.Level,out var reqLevel,ladderPolicy))throw new DomainException($"The imported row names an unconfigured level: {row.Level}.");scr.AddRequirementChange(http.UserAccount().UserName,row.Identifier,0,reqLevel,RequirementChangeKind.Introduce,row.Statement,row.Rationale,row.VerificationMethod,now,impactDispositionJson:RequirementAuthoringJson.PendingImpactDispositions, ladderPolicy: ladderPolicy);}db.SystemChangeRequests.Add(scr);job.Commit(scr.Id,now);await db.SaveChangesAsync(ct);return Results.Created($"/api/change-requests/{scr.Id}",new{scr.Id,scr.DisplayNumber,imported=rows.Count});}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
         });
 
         // Enterprise hardening: controlled content, durable operations, merge protection,
