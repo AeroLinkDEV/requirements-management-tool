@@ -435,6 +435,96 @@ test.describe("selection and navigation coherence", () => {
     expect(page.url()).toMatch(new RegExp(`/traceability/change-requests/${change.id}\\?view=inside$`))
   })
 
+  test("Inside card links keep native pointer activation within the shared canvas", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const change = (network.nodes ?? []).find((node: { kind: string }) => node.kind === "ChangeRequest") as {
+      id: string; displayNumber: string
+    } | undefined
+    expect(change, "the seeded showcase should carry a Change Request for Inside link activation").toBeTruthy()
+    if (!change) throw new Error("the seeded showcase should carry a Change Request for Inside link activation")
+
+    await page.goto(`${threadRoot(page)}/traceability/change-requests/${change.id}?view=inside`)
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    const link = page.locator(".dticCard .dticId.exactArtifactLink[href]").first()
+    await expect(link).toBeVisible()
+    const href = await link.getAttribute("href")
+    expect(href, "the Inside register should expose an exact native route").toBeTruthy()
+    if (!href) throw new Error("the Inside register should expose an exact native route")
+
+    // This is a real primary pointer activation on a nested anchor. The shared canvas must not capture it as
+    // a card selection, and the browser should navigate once to the exact destination supplied by the link.
+    await Promise.all([
+      page.waitForURL(url => new URL(url).pathname === new URL(href, page.url()).pathname),
+      link.click(),
+    ])
+    expect(new URL(page.url()).pathname).toBe(new URL(href, page.url()).pathname)
+  })
+
+  test("Artifact card actions survive shared canvas pointer and keyboard handling", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const context = await (await request.get(
+      `${apiBase}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const list = await (await request.get(
+      `${apiBase}/api/traceability?projectId=${projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=1`
+    )).json()
+    const row = (Array.isArray(list) ? list : list.items ?? [])[0] as { revisionId: string; displayNumber: string } | undefined
+    expect(row, "the seeded showcase should carry a requirement revision for Artifact actions").toBeTruthy()
+    if (!row) throw new Error("the seeded showcase should carry a requirement revision for Artifact actions")
+    const thread = await (await request.get(
+      `${apiBase}/api/artifact-thread?projectId=${projectId}&baselineId=${context.effectiveBaselineId}`
+      + `&focalKind=Requirement&focalId=${encodeURIComponent(row.revisionId)}`)).json()
+    const change = (thread.nodes ?? []).find((node: { kind: string }) =>
+      node.kind === "ChangeRequest" || node.kind === "TestChangeRequest") as {
+        id: string; displayNumber: string
+      } | undefined
+    expect(change, "the seeded Artifact thread should carry a change action card").toBeTruthy()
+    if (!change) throw new Error("the seeded Artifact thread should carry a change action card")
+
+    const artifactPath = `${threadRoot(page)}/traceability/${row.revisionId}`
+    await page.goto(artifactPath)
+    await expect(page.locator(".dtaRoot")).toBeVisible()
+    const card = page.locator(".dtaCard").filter({ hasText: change.displayNumber }).first()
+    await expect(card).toBeVisible()
+    await card.click()
+    const action = card.getByRole("button", { name: "Open this change" })
+    await expect(action).toBeVisible()
+    await action.click()
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    await expect(page.locator(".dticRoot")).toContainText(`Inside ${change.displayNumber}`)
+    expect(page.url()).toMatch(new RegExp(`/traceability/change-requests/${change.id}\\?view=inside$`))
+
+    // Back to the exact Artifact address and activate the same nested control through Enter. The card wrapper
+    // must not turn that native button event into another selection or a duplicate route transition.
+    await page.goto(artifactPath)
+    await expect(page.locator(".dtaRoot")).toBeVisible()
+    const keyboardCard = page.locator(".dtaCard").filter({ hasText: change.displayNumber }).first()
+    await keyboardCard.click()
+    const keyboardAction = keyboardCard.getByRole("button", { name: "Open this change" })
+    await keyboardAction.focus()
+    await page.keyboard.press("Enter")
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    await expect(page.locator(".dticRoot")).toContainText(`Inside ${change.displayNumber}`)
+    expect(page.url()).toMatch(new RegExp(`/traceability/change-requests/${change.id}\\?view=inside$`))
+  })
+
   test("unsupported Artifact entry is explicit and returning to Network clears its error context", async ({ page, request }) => {
     test.setTimeout(180_000)
     await page.setViewportSize({ width: 1440, height: 900 })
@@ -462,6 +552,84 @@ test.describe("selection and navigation coherence", () => {
     await expect(page.locator(".dtnInFrame-error")).toHaveCount(0)
     await expect(page.locator(".dtPageTableEmpty")).toHaveCount(0)
     expect(new URL(page.url()).pathname).toMatch(/\/traceability$/)
+  })
+
+  test("a failed Artifact read clears after a real retry and successful navigation", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const context = await (await request.get(
+      `${apiBase}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const list = await (await request.get(
+      `${apiBase}/api/traceability?projectId=${projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=1`
+    )).json()
+    const row = (Array.isArray(list) ? list : list.items ?? [])[0] as { revisionId: string } | undefined
+    expect(row, "the seeded showcase should carry a requirement revision for Artifact retry").toBeTruthy()
+    if (!row) throw new Error("the seeded showcase should carry a requirement revision for Artifact retry")
+
+    let artifactRequests = 0
+    await page.route("**/api/artifact-thread*", async route => {
+      artifactRequests += 1
+      if (artifactRequests === 1) {
+        await route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
+      } else {
+        await route.continue()
+      }
+    })
+    await page.goto(`${threadRoot(page)}/traceability/${row.revisionId}`)
+    await expect(page.locator(".dtaInFrame-error")).toContainText("could not be loaded")
+    await page.locator(".dtaInFrame-error").getByRole("button", { name: "Try again" }).click()
+    await expect(page.locator(".dtaRoot .dtaCard").first()).toBeVisible()
+    await expect(page.locator(".dtaInFrame-error")).toHaveCount(0)
+    expect(artifactRequests).toBeGreaterThanOrEqual(2)
+
+    // A successful retry clears the operation's own error. Moving to Network must therefore show the board
+    // without claiming that the network failed during the earlier Artifact request.
+    await page.getByRole("button", { name: "Change network" }).click()
+    await expect(page.locator(".dtnRoot")).toBeVisible()
+    await expect(page.locator(".dtnInFrame-error")).toHaveCount(0)
+  })
+
+  test("a late failed Artifact response cannot poison the Network view", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const context = await (await request.get(
+      `${apiBase}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const list = await (await request.get(
+      `${apiBase}/api/traceability?projectId=${projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=1`
+    )).json()
+    const row = (Array.isArray(list) ? list : list.items ?? [])[0] as { revisionId: string } | undefined
+    expect(row, "the seeded showcase should carry a requirement revision for async Artifact recovery").toBeTruthy()
+    if (!row) throw new Error("the seeded showcase should carry a requirement revision for async Artifact recovery")
+
+    let releaseResponse: (() => void) | undefined
+    const artifactRequest = page.waitForRequest(requestEvent => requestEvent.url().includes("/api/artifact-thread"))
+    await page.route("**/api/artifact-thread*", async route => {
+      await new Promise<void>(resolve => { releaseResponse = resolve })
+      await route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
+    })
+    await page.goto(`${threadRoot(page)}/traceability/${row.revisionId}`)
+    await artifactRequest
+
+    // Leave Artifact while its request is still pending. The request then fails after cleanup, exercising the
+    // cancellation boundary rather than relying on a fast response race.
+    await page.getByRole("button", { name: "Change network" }).click()
+    await expect(page.locator(".dtnRoot")).toBeVisible()
+    releaseResponse?.()
+    await expect(page.locator(".dtnInFrame-error")).toHaveCount(0)
   })
 })
 
