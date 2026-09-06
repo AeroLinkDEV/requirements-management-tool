@@ -34,13 +34,6 @@ export type PanelDock = "auto" | "left" | "right" | "bottom"
 /** `auto` resolved to a real side. */
 export type ResolvedDock = Exclude<PanelDock, "auto">
 
-// Derived from what the panel actually renders, so the reserved free area is the panel plus its margins and
-// not a guess with slack in it. Slack reads as correctness — the board simply never uses the spare band — while
-// hiding whether the real rule holds. Right/left: 300px wide at a 16px offset. Bottom: 150px (#880 §6.6) at an
-// 18px offset. The remainder in each case is the gap between the panel edge and the nearest card.
-const PANEL_WIDTH = 300 + 16 + 14
-const PANEL_HEIGHT = 150 + 18 + 16
-
 export type DigitalThreadNetworkProps = {
   projection: NetworkProjection | null
   loading?: boolean
@@ -300,19 +293,10 @@ export default function DigitalThreadNetwork({
   // Non-occlusion outranks the preference (§6.6), the same contract the artifact thread keeps: when a side
   // cannot leave room for the selection and its direct links at the landing floor, the panel moves rather
   // than a linked record being hidden.
-  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${representation}:${selectedId ?? ""}:${dockPreference}`)
-
-  // The canvas must not lay records out under the panel, so the frame it may use shrinks by the dock.
-  const frameInset = useMemo(
-    () =>
-      selectedId
-        ? dock === "bottom"
-          ? { bottom: PANEL_HEIGHT }
-          : dock === "left"
-            ? { left: PANEL_WIDTH }
-            : { right: PANEL_WIDTH }
-        : undefined,
-    [dock, selectedId],
+  const { dock, reportNeedsRoom, panelRef, frameInset } = usePanelDock(
+    preferredDock,
+    `${representation}:${selectedId ?? ""}:${dockPreference}`,
+    canvasViewRef,
   )
 
   useEffect(() => {
@@ -504,6 +488,9 @@ export default function DigitalThreadNetwork({
             onSelect={setSelectedId}
             onHover={setHoveredId}
             frameInset={frameInset}
+            frameIds={selectedId ? [...(web?.nodes ?? [])] : undefined}
+            framingIntent="landing"
+            landingId={focalId}
             onFramingNeedsRoom={representation === "map" ? reportNeedsRoom : undefined}
             tracedEdges={web?.edges}
             ariaLabel="Change network for this build"
@@ -564,7 +551,7 @@ export default function DigitalThreadNetwork({
       <div className="dtnVisuallyHidden" aria-live="polite" ref={liveRegion} />
 
       {selected ? (
-        <aside className={`dtnPanel dtnPanel-${dock}`} aria-label={`Detail for ${selected.displayNumber}`}>
+        <aside ref={panelRef} className={`dtnPanel dtnPanel-${dock}`} aria-label={`Detail for ${selected.displayNumber}`}>
           <div className="dtnPanelTools">
             {(["bottom", "right", "auto"] as PanelDock[]).map(option => (
               <button

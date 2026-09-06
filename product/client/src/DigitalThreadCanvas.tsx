@@ -4,6 +4,7 @@ import {
   type CanvasEdge,
   type CanvasFrame,
   type CanvasNode,
+  type FrameIntent,
   type LayoutResult,
   anchorInLane,
   clampOffsets,
@@ -12,12 +13,13 @@ import {
   offsetToReveal,
   fitTransform,
   frameNodes,
-  isIntraLane,
   isVisible,
   laneAt,
   layout,
   minimumZoom,
+  MIN_ZOOM,
   nodePosition,
+  placeEdgeLabels,
   rescaleOffsets,
   stepTowards,
   syncTargets,
@@ -58,16 +60,17 @@ export type DigitalThreadCanvasProps = {
    */
   tracedEdges?: ReadonlySet<string>
   /**
-   * The records the camera should frame when the selection changes, instead of the selection and its direct
-   * links.
+   * The records the camera should frame when the selection changes. A view passes the complete directed trace
+   * here when the selected story is the question the reader opened.
    *
-   * §6.6 frames the selection and one hop, which is right when a reader is stepping through a build: it keeps
-   * the zoom close and the next hop large. It is wrong for the moment an artifact thread first opens, because
-   * the view has selected the focal record on the reader's behalf and one hop is not the answer they asked
-   * for — landing on a six-lane thread framed to three of its lanes puts the result and the build off-screen
-   * before the reader has touched anything. A caller that knows the whole web is the answer passes it here.
+   * The traversal remains directed and cycle-safe in `trace`; the canvas only lays out the exact set the view
+   * supplied. Keeping this set explicit prevents a generic one-hop fallback from hiding the far side of a story.
    */
   frameIds?: readonly string[]
+  /** How the current framing request should be interpreted. Deep-link arrival keeps the readable landing floor. */
+  framingIntent?: FrameIntent
+  /** The first selected record supplied by a view on deep-link/arrival. Later user selections use the compact floor. */
+  landingId?: string | null
   /**
    * The free area this dock leaves cannot hold the selection and its direct links at the legibility floor.
    *
@@ -109,6 +112,8 @@ export default function DigitalThreadCanvas({
   frameInset,
   tracedEdges,
   frameIds,
+  framingIntent = "selection",
+  landingId = null,
   onFramingNeedsRoom,
   ariaLabel = "Digital Thread canvas",
 }: DigitalThreadCanvasProps) {
@@ -141,8 +146,11 @@ export default function DigitalThreadCanvas({
   /** The framing key the selection effect last acted on, so a re-render alone cannot reset a rolled lane. */
   const framedFor = useRef<string | null>(null)
   /** The latest framing request, so the resize path can retry one that arrived before the frame was real. */
-  const framingRef = useRef<{ selectedId: string; wanted: string[]; key: string } | null>(null)
+  const framingRef = useRef<{ selectedId: string; wanted: string[]; key: string; intent: FrameIntent } | null>(null)
+  /** Arrival is a one-time intent. A user returning to the focal record must receive ordinary selection framing. */
+  const landingPending = useRef(true)
   const easeTimer = useRef<number | null>(null)
+  const zoomReadoutRef = useRef<HTMLOutputElement | null>(null)
 
   const measuredCounts = lanes.map((_, lane) =>
     laneCount ? laneCount(lane) : nodes.filter(node => node.lane === lane).length,
@@ -204,6 +212,14 @@ export default function DigitalThreadCanvas({
   const framing = useMemo(() => {
     if (!selectedId) return null
 
+    // `landingId` identifies the record the view selected on arrival. The focal identity alone is insufficient:
+    // a reader can deliberately return to that same record after stepping through another card. The pending ref
+    // is consumed after the first successful frame, preserving the initial/deep-link distinction without adding a
+    // user density setting.
+    const intent: FrameIntent = framingIntent === "landing" && landingPending.current && selectedId === landingId
+      ? "landing"
+      : framingIntent === "landing" ? "selection" : framingIntent
+
     const linked = new Set<string>([selectedId])
     for (const edge of edges) {
       if (edge.from === selectedId) linked.add(edge.to)
@@ -223,14 +239,17 @@ export default function DigitalThreadCanvas({
     return {
       selectedId,
       wanted: [...wanted],
+      intent,
       key:
         `${selectedId}|${countsKey}|${placement}` +
-        `|${frameInset?.left ?? 0},${frameInset?.right ?? 0},${frameInset?.bottom ?? 0},${trailingOverhang}`,
+        `|${intent}|${frameInset?.left ?? 0},${frameInset?.right ?? 0},${frameInset?.bottom ?? 0},${trailingOverhang}`,
     }
   }, [
     countsKey,
     edges,
     frameIds,
+    framingIntent,
+    landingId,
     frameInset?.left,
     frameInset?.right,
     frameInset?.bottom,
@@ -249,11 +268,14 @@ export default function DigitalThreadCanvas({
     if (!element) return null
     const rect = element.getBoundingClientRect()
     if (rect.width < 320 || rect.height < 240) return null
+    const width = rect.width - (frameInset?.left ?? 0) - (frameInset?.right ?? 0) - trailingOverhang
+    const height = rect.height - (frameInset?.bottom ?? 0)
+    if (width < 240 || height < 180) return null
     return {
       x: frameInset?.left ?? 0,
       y: 0,
-      width: rect.width - (frameInset?.left ?? 0) - (frameInset?.right ?? 0) - trailingOverhang,
-      height: rect.height - (frameInset?.bottom ?? 0),
+      width,
+      height,
     }
   }, [frameInset?.left, frameInset?.right, frameInset?.bottom, trailingOverhang])
 
@@ -278,6 +300,11 @@ export default function DigitalThreadCanvas({
     scene.style.width = `${result.sceneWidth}px`
     scene.style.height = `${bandHeight}px`
     scene.dataset.tier = String(result.tier)
+    scene.dataset.zoom = String(Math.round(transform.current.zoom * 100))
+    if (zoomReadoutRef.current) {
+      const tierLabel = result.tier === 2 ? "Detailed" : result.tier === 1 ? "Compact" : "Dense"
+      zoomReadoutRef.current.textContent = `${Math.round(transform.current.zoom * 100)}% · ${tierLabel}`
+    }
 
     for (let lane = 0; lane < lanes.length; lane += 1) {
       const band = scene.querySelector<HTMLElement>(`[data-band="${lane}"]`)
@@ -318,6 +345,22 @@ export default function DigitalThreadCanvas({
         "is-offscreen",
         (!isVisible(position.y, geometry, bandHeight) || !inFrame) && selectedId !== node.id,
       )
+      const offscreen = card.classList.contains("is-offscreen")
+      // Descendant links/buttons are real native actions, but an offscreen card must not remain a hidden tab
+      // target. Remember each authored tabindex and restore it when lane rolling reveals the card again.
+      card.querySelectorAll<HTMLElement>("a,button,input,select,textarea,summary,[role='link']").forEach(control => {
+        if (offscreen) {
+          if (control.dataset.dtOriginalTabIndex === undefined) {
+            control.dataset.dtOriginalTabIndex = control.getAttribute("tabindex") ?? ""
+          }
+          control.tabIndex = -1
+        } else if (control.dataset.dtOriginalTabIndex !== undefined) {
+          const original = control.dataset.dtOriginalTabIndex
+          if (original) control.setAttribute("tabindex", original)
+          else control.removeAttribute("tabindex")
+          delete control.dataset.dtOriginalTabIndex
+        }
+      })
       // The density rules exempt the selected card from compaction, and they key off this class on the node
       // element. Without it the exemption silently never applied and a selected card compacted with the rest.
       card.classList.toggle("is-selected", selectedId === node.id)
@@ -367,6 +410,33 @@ export default function DigitalThreadCanvas({
       svg.style.left = "-26px"
       svg.style.top = "-56px"
     }
+    // Label obstacles come from the rendered cards, including dimmed context cards. This is intentionally
+    // measured after positions/classes are written, so a selected card's expanded body is an actual obstacle.
+    const cardObstacles = nodes.flatMap(node => {
+      const card = cardRefs.current.get(node.id)
+      const position = positions.get(node.id)
+      if (!card || !position || card.classList.contains("is-offscreen")) return []
+      return [{
+        x: position.x,
+        y: position.y,
+        width: geometry.laneWidth,
+        height: Math.max(geometry.cardHeight, card.scrollHeight),
+      }]
+    })
+    const labelCandidates = edgeRefs.current
+      .filter(entry => entry.label && positions.has(entry.edge.from) && positions.has(entry.edge.to))
+      .sort((a, b) => {
+        const aTraced = tracedEdges?.has(edgeIdentity(a.edge.from, a.edge.to)) ?? false
+        const bTraced = tracedEdges?.has(edgeIdentity(b.edge.from, b.edge.to)) ?? false
+        return Number(bTraced) - Number(aTraced)
+      })
+      .map(entry => ({
+        key: edgeIdentity(entry.edge.from, entry.edge.to),
+        label: entry.edge.label,
+        from: positions.get(entry.edge.from)!,
+        to: positions.get(entry.edge.to)!,
+      }))
+    const labelPositions = placeEdgeLabels(labelCandidates, geometry, cardObstacles, box)
     // Edge labels rest hidden and appear on a traced edge, or once the board is zoomed past 1.05 (#880 §6.7).
     // At the default fit the canvas stays calm; a reader who has selected something, or leaned in, gets the
     // relation words.
@@ -402,12 +472,11 @@ export default function DigitalThreadCanvas({
         // An intra-lane edge bows into the gutter beside its lane, so its label follows it there. Taking the
         // midpoint of the two endpoints would put the word in the middle of the lane, on top of the very cards
         // the edge is drawn between.
-        const midX = isIntraLane(from, to)
-          ? from.x + geometry.laneWidth + 30
-          : (from.x + geometry.laneWidth + to.x) / 2
-        const midY = (from.y + to.y) / 2 + geometry.anchor - 6
-        label.setAttribute("x", String(midX))
-        label.setAttribute("y", String(midY))
+        const position = labelPositions.get(edgeIdentity(edge.from, edge.to))
+        if (position) {
+          label.setAttribute("x", String(position.x))
+          label.setAttribute("y", String(position.y))
+        }
         label.style.opacity = inWindow && (traced || labelsAtRest) ? "" : "0"
       }
     }
@@ -461,13 +530,13 @@ export default function DigitalThreadCanvas({
    * lane, and no state change was pending to make the effect run again.
    */
   const applyFraming = useCallback(
-    (target: { selectedId: string; wanted: string[] } | null): boolean => {
+    (target: { selectedId: string; wanted: string[]; intent: FrameIntent; key: string } | null): boolean => {
       if (!target) return false
       const box = frame()
       const result = geometryRef.current
       if (!box || !result) return false
 
-      // Roll every lane to bring the selected record's linked records into their own windows, before framing
+      // Roll every lane to bring the selected record's directed story into its own windows, before framing
       // (#880 §6.4: "the same routine runs on selection"). Panning the camera cannot do this job: a lane
       // scrolls independently, so a linked record can sit outside its lane window no matter where the camera
       // is, and framing alone would centre on a card the reader still cannot see. The offsets are applied at
@@ -485,15 +554,6 @@ export default function DigitalThreadCanvas({
       offsets.current = [...synced]
       targets.current = [...synced]
 
-      /**
-       * Frame the requested set, and fall back to the selection and one hop when it will not fit.
-       *
-       * Framing may no longer zoom out past the §10.1 landing floor to make a wide web fit, so on a narrow
-       * viewport — or with the panel docked to a side — the whole traced web can be wider than the area the
-       * panel leaves. Pinning it anyway pushes its far cards under the panel, which is exactly what §6.6
-       * forbids. The wide-web framing is a landing convenience; non-occlusion is a guarantee, so when the two
-       * cannot both hold the convenience gives way and the board frames the smaller set that does fit.
-       */
       const fits = (transform: { x: number; zoom: number }, ids: readonly string[]): boolean => {
         const wanted = new Set(ids)
         for (const node of nodes) {
@@ -506,17 +566,20 @@ export default function DigitalThreadCanvas({
         return true
       }
 
-      const hop = new Set<string>([target.selectedId])
-      for (const edge of edges) {
-        if (edge.from === target.selectedId) hop.add(edge.to)
-        if (edge.to === target.selectedId) hop.add(edge.from)
-      }
-
-      let next = frameNodes(target.wanted, nodes, counts, box, offsets.current, target.selectedId)
-      if (next && target.wanted.length > 1 && !fits(next, target.wanted)) {
-        const narrower = frameNodes([...hop], nodes, counts, box, offsets.current, target.selectedId)
-        if (narrower) next = narrower
-      }
+      // The selected card's expanded body is measured from the rendered DOM. The old fixed allowance made a
+      // larger card overlap the panel and made a shorter card reserve unnecessary empty space.
+      const selectedCardHeight = cardRefs.current.get(target.selectedId)?.scrollHeight
+      const next = frameNodes(
+        target.wanted,
+        nodes,
+        counts,
+        box,
+        offsets.current,
+        target.selectedId,
+        1.12,
+        true,
+        { intent: target.intent, selectedCardHeight },
+      )
       if (!next) return false
 
       /**
@@ -524,16 +587,22 @@ export default function DigitalThreadCanvas({
        *
        * §6.6 is a guarantee, not a preference, and it survived the Option-A ruling untouched. Hiding a linked
        * record that will not fit satisfies "not underneath the panel" only by making it not present, which is
-       * the same failure wearing a different face. When the free area this dock leaves cannot hold the
-       * one-hop set at the legibility floor, the panel has to move rather than the record disappear — so the
+       * the same failure wearing a different face. When the free area this dock leaves cannot hold the selected
+       * record and its direct links at the readable floor, the panel has to move rather than the record disappear — so the
        * canvas says so and the view re-docks. Reported rather than decided here: the canvas owns geometry,
        * the view owns where its own panel may go.
        */
-      if (!fits(next, [...hop])) onFramingNeedsRoom?.()
+      const direct = new Set<string>([target.selectedId])
+      for (const edge of edges) {
+        if (edge.from === target.selectedId) direct.add(edge.to)
+        if (edge.to === target.selectedId) direct.add(edge.from)
+      }
+      if (!fits(next, [...direct])) onFramingNeedsRoom?.()
 
       sceneRef.current?.classList.add("is-easing")
       transform.current = next
       paint()
+      landingPending.current = false
       if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
       easeTimer.current = window.setTimeout(() => {
         sceneRef.current?.classList.remove("is-easing")
@@ -541,7 +610,7 @@ export default function DigitalThreadCanvas({
       }, 420)
       return true
     },
-    [counts, edges, frame, nodes, paint],
+     [counts, edges, frame, nodes, onFramingNeedsRoom, paint],
   )
 
   // Read by the resize path, which must be able to retry a selection that arrived before the frame was real
@@ -704,7 +773,7 @@ export default function DigitalThreadCanvas({
         paint()
       }
       const up = () => {
-        element.classList.remove("is-panning", "is-rolling", "is-idle")
+      element.classList.remove("is-panning", "is-rolling", "is-idle")
         scrubbing.current = false
         if (!start.moved) onSelect?.(card?.dataset.nodeId ?? null)
         element.removeEventListener("pointermove", move)
@@ -783,6 +852,10 @@ export default function DigitalThreadCanvas({
       settle()
 
       const box = frame()
+      // `.dtCanvas` is a transformed viewport, never a native document scrollport. Some browsers still retain a
+      // programmatic scroll offset after focusing an offscreen descendant; clear that stale offset before the
+      // camera correction below so keyboard reveal cannot leave a blank scene.
+      viewportRef.current?.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior })
       if (!box) return
       const { x } = nodePosition(node, result.geometry, offsets.current)
       const left = x * transform.current.zoom + transform.current.x
@@ -805,7 +878,7 @@ export default function DigitalThreadCanvas({
       if (!next || next.id === node.id) return
       setRoving(current => ({ ...current, [node.lane]: next.id }))
       reveal(next)
-      cardRefs.current.get(next.id)?.focus()
+      cardRefs.current.get(next.id)?.focus({ preventScroll: true })
     },
     [byLane, reveal],
   )
@@ -837,6 +910,18 @@ export default function DigitalThreadCanvas({
 
   edgeRefs.current = []
 
+  const fitSelection = () => {
+    if (!framing) return
+    const target = { ...framing, intent: "selection" as FrameIntent, key: `${framing.key}|fit-selection` }
+    if (applyFraming(target)) framedFor.current = target.key
+  }
+
+  const fitStory = () => {
+    if (!framing) return
+    const target = { ...framing, intent: "story" as FrameIntent, key: `${framing.key}|fit-story` }
+    if (applyFraming(target)) framedFor.current = target.key
+  }
+
   return (
     <div
       className="dtCanvas"
@@ -846,11 +931,40 @@ export default function DigitalThreadCanvas({
       tabIndex={0}
       onWheel={onWheel}
       onPointerDown={onPointerDown}
+      onFocusCapture={event => {
+        if (!nestedControl(event.target)) return
+        // Native focus remains native; only prevent the transformed wrapper from becoming its scroll owner.
+        viewportRef.current?.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior })
+      }}
       onKeyDown={onKeyDown}
       onDoubleClick={event => {
         if (!(event.target as HTMLElement).closest("[data-node-id]")) fitAll()
       }}
     >
+      <div
+        className="dtCanvasControls"
+        role="toolbar"
+        aria-label="Canvas framing controls"
+        onPointerDown={event => event.stopPropagation()}
+      >
+        <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => {
+          const box = frame()
+          if (!box) return
+          transform.current = zoomAbout(transform.current, box.width / 2, box.height / 2, 0.81, minimumZoom(box, counts))
+          paint()
+        }}>−</button>
+        <output ref={zoomReadoutRef} aria-label="Current canvas scale">100% · Detailed</output>
+        <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => {
+          const box = frame()
+          if (!box) return
+          transform.current = zoomAbout(transform.current, box.width / 2, box.height / 2, 1.24, MIN_ZOOM)
+          paint()
+        }}>+</button>
+        <span className="dtCanvasControlDivider" aria-hidden="true" />
+        <button type="button" disabled={!framing} onClick={fitSelection}>Fit selected story</button>
+        <button type="button" disabled={!framing} onClick={fitStory}>Fit entire story</button>
+        <button type="button" onClick={fitAll} title="Fit the projected board; tall lanes remain independently scrollable">Fit board</button>
+      </div>
       <div className="dtCanvasScene" ref={sceneRef}>
         <div className="dtCanvasBands">
           {lanes.map((title, lane) => {

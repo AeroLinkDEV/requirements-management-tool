@@ -46,6 +46,9 @@ export interface CanvasGeometry {
 /** 2 detailed, 1 compact, 0 dense. Lower tiers drop card content so more records fit the same lane. */
 export type DensityTier = 0 | 1 | 2
 
+/** The reason a camera moved. Landing keeps the DEC-117 readable floor; reader requested fits may pull back. */
+export type FrameIntent = "landing" | "selection" | "story" | "board"
+
 export interface CanvasFrame {
   /** The area the board may occupy, in viewport pixels. Shrinks when a detail panel is docked. */
   x: number
@@ -69,6 +72,12 @@ const LANE_PAD = 12
 /** Below this the identifiers stop being legible however much more fits, so zooming out stops here. */
 export const MIN_ZOOM = 0.58
 export const MAX_ZOOM = 2.2
+/**
+ * Measured compact selection floor. A deliberate selection may use the compact tier, while arrival remains at
+ * LANDING_MIN_ZOOM. The authored 14px card identifiers therefore remain 11.34px at this floor; the browser
+ * regression checks this rendered size instead of treating the number as a policy by itself.
+ */
+export const READABLE_SELECTION_MIN_ZOOM = 0.81
 
 /** Eased follow for lanes tracking a scrub anchor. Slow enough to read as motion, fast enough not to lag. */
 const SYNC_LERP = 0.18
@@ -399,6 +408,11 @@ export const frameNodes = (
    * different case, and is allowed the wider view.
    */
   programmatic = true,
+  options: {
+    intent?: FrameIntent
+    /** Actual expanded card height in scene units, measured from the rendered card. */
+    selectedCardHeight?: number
+  } = {},
 ): { x: number; y: number; zoom: number } | null => {
   const wanted = new Set(ids)
   /**
@@ -414,7 +428,6 @@ export const frameNodes = (
    */
   const measure = (
     result: LayoutResult,
-    room: boolean,
     onlyDrawn = true,
   ): { x: number; y: number; width: number; height: number } | null => {
     let x0 = Infinity
@@ -428,25 +441,32 @@ export const frameNodes = (
       x0 = Math.min(x0, x)
       x1 = Math.max(x1, x + result.geometry.laneWidth)
       y0 = Math.min(y0, y)
-      y1 = Math.max(y1, y + result.geometry.cardHeight + (room && node.id === selectedId ? 132 : 0))
+      // Expanded cards are measured by the canvas. A fixed allowance here made a detailed selected card
+      // overlap the panel after content or density changed; callers pass the actual rendered height.
+      const selectedHeight = node.id === selectedId ? options.selectedCardHeight ?? result.geometry.cardHeight : result.geometry.cardHeight
+      y1 = Math.max(y1, y + selectedHeight)
     }
-    if (x0 > x1) return onlyDrawn ? measure(result, room, false) : null
+    if (x0 > x1) return onlyDrawn ? measure(result, false) : null
     return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
   }
 
   const first = layout(laneCounts, frame, 1)
-  const want = measure(first, true)
+  const want = measure(first)
   if (!want) return null
   const pad = 46
+  const intent = options.intent ?? (programmatic ? "landing" : "board")
+  const floor = intent === "landing" ? LANDING_MIN_ZOOM : intent === "selection" ? READABLE_SELECTION_MIN_ZOOM : MIN_ZOOM
   const zoom = Math.max(
-    programmatic ? LANDING_MIN_ZOOM : MIN_ZOOM,
+    floor,
     minimumZoom(frame, laneCounts),
     Math.min(maxZoom, Math.min((frame.width - pad * 2) / (want.width + 52), (frame.height - pad * 2) / (want.height + 52))),
   )
 
   const settled = layout(laneCounts, frame, zoom)
-  const room = measure(settled, true)
-  const core = measure(settled, false)
+  const room = measure(settled)
+  // Clamp against the same records that can actually be drawn. Including every rolled-out row here pushes the
+  // camera below the viewport while trying to contain cards the lane has intentionally hidden.
+  const core = room
   if (!room || !core) return null
 
   let x = frame.x + (frame.width - (room.width + 52) * zoom) / 2 - (room.x - 26) * zoom
@@ -515,6 +535,65 @@ export const edgePath = (
   const x2 = backwards ? to.x + geometry.laneWidth : to.x
   const bend = Math.max(30, Math.abs(x2 - x1) * 0.42) * (backwards ? -1 : 1)
   return `M${x1} ${y1} C${x1 + bend} ${y1},${x2 - bend} ${y2},${x2} ${y2}`
+}
+
+export interface CanvasRect { x: number; y: number; width: number; height: number }
+
+export interface EdgeLabelCandidate {
+  key: string
+  label: string
+  from: { x: number; y: number }
+  to: { x: number; y: number }
+}
+
+/**
+ * Place visible edge phrases beside their actual connector while avoiding rendered cards and earlier labels.
+ * The caller supplies DOM-measured card obstacles; this helper deliberately knows nothing about a view's data
+ * model, so Network, Inside and Artifact cannot quietly grow different collision rules.
+ */
+export const placeEdgeLabels = (
+  labels: readonly EdgeLabelCandidate[],
+  geometry: CanvasGeometry,
+  obstacles: readonly CanvasRect[],
+  frame: CanvasRect,
+): Map<string, { x: number; y: number }> => {
+  const placed: CanvasRect[] = []
+  const result = new Map<string, { x: number; y: number }>()
+  const intersects = (a: CanvasRect, b: CanvasRect): boolean =>
+    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+  for (const item of labels) {
+    const intra = isIntraLane(item.from, item.to)
+    const baseX = intra
+      ? item.from.x + geometry.laneWidth + 30
+      : (item.from.x + geometry.laneWidth + item.to.x) / 2
+    const baseY = (item.from.y + item.to.y) / 2 + geometry.anchor - 6
+    const dx = (item.to.x - item.from.x) || 1
+    const dy = item.to.y - item.from.y
+    const length = Math.max(1, Math.sqrt(dx * dx + dy * dy))
+    const normalX = -dy / length
+    const normalY = dx / length
+    const width = Math.max(28, item.label.length * 5.4 + 8)
+    const offsets = [0, -18, 18, -34, 34, -52, 52, -72, 72]
+    let chosen: { x: number; y: number } | null = null
+    for (const offset of offsets) {
+      const x = baseX + (intra ? offset * 0.35 : normalX * offset)
+      const y = baseY + (intra ? normalY * offset : normalY * offset)
+      const rect: CanvasRect = { x: x - width / 2, y: y - 10, width, height: 12 }
+      if (rect.x < frame.x + 2 || rect.x + rect.width > frame.x + frame.width - 2 ||
+          rect.y < frame.y + 2 || rect.y + rect.height > frame.y + frame.height - 2) continue
+      if (obstacles.some(obstacle => intersects(rect, obstacle)) || placed.some(previous => intersects(rect, previous))) continue
+      chosen = { x, y }
+      placed.push(rect)
+      break
+    }
+    // A dense graph may have no collision-free slot. Keep the phrase attached to its connector and visible;
+    // clipping/hiding it would erase a controlled relationship. The selected/traced phrases are processed first
+    // by the canvas, so they retain the most useful slots when space is genuinely scarce.
+    const fallback = chosen ?? { x: baseX, y: baseY }
+    result.set(item.key, fallback)
+    if (!chosen) placed.push({ x: fallback.x - width / 2, y: fallback.y - 10, width, height: 12 })
+  }
+  return result
 }
 
 /**

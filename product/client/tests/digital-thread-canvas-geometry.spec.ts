@@ -17,6 +17,8 @@ import {
   laneHeight,
   layout,
   minimumZoom,
+  placeEdgeLabels,
+  READABLE_SELECTION_MIN_ZOOM,
   rescaleOffsets,
   syncTargets,
   tierFor,
@@ -466,5 +468,48 @@ test.describe("framing ignores records rolled out of their lane", () => {
     const framed = frameNodes(["a", "b"], nodes, [2], frame, [-4000], null)
 
     expect(framed).not.toBeNull()
+  })
+})
+
+test.describe("story framing and label obstacles", () => {
+  test("deliberate selection can use the measured readable compact floor", () => {
+    const nodes: CanvasNode[] = [
+      { id: "selected", lane: 0, row: 0 },
+      { id: "middle", lane: 1, row: 0 },
+      { id: "far", lane: 4, row: 0 },
+    ]
+    const framed = frameNodes(
+      nodes.map(node => node.id),
+      nodes,
+      [1, 1, 0, 0, 1],
+      { x: 0, y: 0, width: 860, height: 560 },
+      [0, 0, 0, 0, 0],
+      "selected",
+      1.12,
+      true,
+      { intent: "selection", selectedCardHeight: 254 },
+    )
+    expect(framed).not.toBeNull()
+    expect(framed!.zoom).toBeGreaterThanOrEqual(READABLE_SELECTION_MIN_ZOOM)
+    expect(framed!.zoom).toBeLessThan(0.86)
+  })
+
+  test("edge phrases choose a connector-adjacent slot clear of measured card bounds", () => {
+    const geometry = geometryFor(1)
+    const labels = placeEdgeLabels(
+      [{
+        key: "a>b",
+        label: "verified by",
+        from: { x: 0, y: 80 },
+        to: { x: geometry.lanePitch, y: 80 },
+      }],
+      geometry,
+      [{ x: 0, y: 30, width: geometry.laneWidth, height: geometry.cardHeight }],
+      { x: 0, y: 0, width: 720, height: 300 },
+    )
+    const placed = labels.get("a>b")!
+    expect(placed.x).toBeGreaterThan(geometry.laneWidth)
+    expect(placed.y).toBeGreaterThan(0)
+    expect(placed.y).toBeLessThan(300)
   })
 })

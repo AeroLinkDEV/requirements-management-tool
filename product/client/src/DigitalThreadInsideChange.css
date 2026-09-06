@@ -57,6 +57,18 @@
 
 .dticOpened b { color: #2b3d54; }
 
+.dticSearch { margin-left: auto; }
+.dticSearch input {
+  width: 208px;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+  padding: 7px 10px;
+  color: #2b3d54;
+  font: var(--weight-body) var(--text-control) var(--font-body);
+}
+
 /* The rebase flag is what makes an empty downstream lane legible, so it is stated in the toolbar as well as
    on the card that is affected. Colour never carries it alone. */
 .dticRebase {

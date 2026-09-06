@@ -4,13 +4,50 @@
 
 .dtCanvas {
   position: relative;
-  overflow: hidden;
+  overflow: clip;
   cursor: grab;
   background-color: var(--canvas);
   background-image: radial-gradient(#d8e1e9 1px, transparent 1px);
   background-size: 24px 24px;
   touch-action: none;
 }
+
+/* Controls live in the viewport rather than the transformed scene. They are real buttons, so the shared
+   pointer handler sees them as nested controls and cannot turn activation into a pan, roll, or selection. */
+.dtCanvasControls {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 24px);
+  overflow-x: auto;
+  border: 1px solid rgba(207, 224, 229, .95);
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .95);
+  box-shadow: 0 4px 14px rgba(15, 35, 58, .1);
+  padding: 4px;
+}
+
+.dtCanvasControls button {
+  min-height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  padding: 3px 9px;
+  color: var(--ink-500);
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dtCanvasControls button:hover:not(:disabled),
+.dtCanvasControls button:focus-visible { border-color: #a9c9c4; color: var(--teal-700); }
+.dtCanvasControls button:disabled { color: #a8b5c2; cursor: default; }
+.dtCanvasControls output { min-width: 82px; color: var(--ink-900); font: var(--weight-bold) 10px var(--font-body); text-align: center; white-space: nowrap; }
+.dtCanvasControlDivider { width: 1px; height: 18px; background: #dce6eb; }
 
 .dtCanvas.is-panning { cursor: grabbing; }
 /* Rolling a lane is vertical, and saying so before the drag starts is most of what makes it discoverable. */
