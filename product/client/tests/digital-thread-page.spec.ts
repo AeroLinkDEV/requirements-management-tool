@@ -696,6 +696,11 @@ test.describe("selection and navigation coherence", () => {
     const artifactPath = `${threadBase}/traceability/${row.revisionId}`
     await page.goto(artifactPath)
     await expect(page.locator(".dtaRoot")).toBeVisible()
+    // An arbitrary authored change may be several hops from the focal requirement. C5 keeps initial
+    // framing readable; use the all-hop inspector to bring this exact action card into the usable window.
+    const revealChange = () => page.locator(".dtaPanel .dtaRel button")
+      .filter({ has: page.getByText(change.displayNumber, { exact: true }) }).click()
+    await revealChange()
     const card = page.locator(".dtaCard").filter({ hasText: change.displayNumber }).first()
     await expect(card).toBeVisible()
     await card.click()
@@ -710,6 +715,7 @@ test.describe("selection and navigation coherence", () => {
     // must not turn that native button event into another selection or a duplicate route transition.
     await page.goto(artifactPath)
     await expect(page.locator(".dtaRoot")).toBeVisible()
+    await revealChange()
     const keyboardCard = page.locator(".dtaCard").filter({ hasText: change.displayNumber }).first()
     await keyboardCard.click()
     const keyboardAction = keyboardCard.getByRole("button", { name: "Open this change" })
