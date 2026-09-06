@@ -25,16 +25,21 @@ test('workspace tuning persists and quick navigation provides previews and recen
   await expect(page.getByRole('heading',{name:'Command Center'})).toBeVisible()
 
   const palette=page.getByRole('dialog',{name:'Quick navigation'})
-  // The global shortcut is bound by an effect that can register a beat after the Command Center heading
-  // renders; under runner load one discrete keypress can land before that and be lost. A reader presses
-  // again — the journey does the same, bounded, rather than assuming the first press always lands.
-  const openQuickNavigation=async(landmark:RegExp)=>{
+  // The global shortcut is bound by an effect, and the captured failure state (Command Center rendered, no
+  // dialog after a single keypress) is consistent with that binding lagging the heading render under runner
+  // load — mechanism inferred, not yet instrumented — so one discrete keypress can be lost. A reader presses
+  // again; the journey does the same, bounded. A timeout of every attempt fails the journey; any other error
+  // (a broken locator, a typo) is re-thrown rather than treated as a missing shortcut.
+  const openQuickNavigation=async(landmark:string)=>{
     for(let attempt=0;attempt<3;attempt++){
       await page.keyboard.press('Control+K')
       try{
-        await palette.getByText(landmark).toBeVisible({timeout:5_000})
+        await expect(palette.getByText(landmark)).toBeVisible({timeout:5_000})
         return
-      }catch{/* the press landed before the shortcut was bound; press again */}
+      }catch(error){
+        const message=error instanceof Error?error.message:String(error)
+        if(!message.includes('Timed out')&&!message.includes('Timeout'))throw error
+      }
     }
     await expect(palette.getByText(landmark)).toBeVisible()
   }
