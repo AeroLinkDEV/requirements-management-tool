@@ -1299,6 +1299,15 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var assessmentCounts = assessmentTargets.ToDictionary(
             level => level,
             level => assessments.Count(x => x == level));
+        // Authored provenance for software-Procedure families: a procedure revision raised from a test
+        // change request. The #726 cutover generates its revisions with migration provenance and no
+        // source TCR, so this distinguishes authored families from migration-only ones independently of
+        // the current review count.
+        var procedureProvenance = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+            join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+            where procedure.ProjectId == projectId && procedure.ArtifactKind == VerificationArtifactKind.Procedure
+            select new { Level = (TestProcedureLevel?)procedure.Level, Authored = revision.SourceTestChangeRequestId != null })
+            .ToListAsync(ct);
         static TestProcedureLevel ToTestProcedureLevel(RequirementLevel level) => level switch
         {
             RequirementLevel.System => TestProcedureLevel.System,
@@ -1367,10 +1376,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             + "controlled library, release campaign and leadership positions are singular families. "
             + "The enforced verification families are exactly the resolved ladder profile's configured "
             + "bindings; enforcement follows that authority rather than the broader kinds listed on the "
-            + "authored ladder steps. After the #726 cutover, software Procedure families carry "
-            + "migration-generated revisions without fabricated reviews; their review/impact minimums "
-            + "are not enforced while they hold zero authored reviews and apply in full once any "
-            + "authored review exists.";
+            + "authored ladder steps. Software-Procedure impact items are never raised (they attach to "
+            + "the originating Case review) and their review minimum applies only once the family carries "
+            + "authored provenance; migration-only families are reported, not enforced.";
 
         var failures1 = new List<string>();
         if (systemRequirements < 5) failures1.Add($"only {systemRequirements} System requirements");
@@ -1384,24 +1392,28 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             var artifactCount = artifactCounts[(family.Level, family.Key.Kind)];
             if (artifactCount < 5)
                 failures1.Add($"only {artifactCount} {family.Level}/{family.Key.Kind} verification artifacts");
-            // The #726 cutover authority generates software Procedure revisions and rebinds impact
-            // references without fabricating reviews or signatures — reviews are authored work. A
-            // software-Procedure key sits in migration-only state while it has zero authored reviews,
-            // and its review/impact minimums are reported but not enforced then; once even one authored
-            // review exists the family is demonstrated and both minima apply in full, so partially lost
-            // authored work still fails. Artifact and execution minimums are always enforced.
-            var migrationOnly = family.Key.Discipline != VerificationDiscipline.System
-                && family.Key.Kind == VerificationArtifactKind.Procedure
-                && reviewCounts[family.Key] == 0;
-            if (!migrationOnly)
+            // Impact items are never raised against Procedure reviews — the service attaches them to the
+            // originating Case review — so software-Procedure keys carry no impact minimum. Their review
+            // minimum applies only once the family carries authored provenance (a procedure revision
+            // raised from a test change request); migration-only families (cutover-generated revisions)
+            // are reported, not enforced. Artifact and execution minimums always apply.
+            var isSoftwareProcedure = family.Key.Discipline != VerificationDiscipline.System
+                && family.Key.Kind == VerificationArtifactKind.Procedure;
+            if (isSoftwareProcedure)
             {
+                var authored = procedureProvenance.Any(x =>
+                    x.Level == ToTestProcedureLevel(family.Level) && x.Authored);
                 var reviewCount = reviewCounts[family.Key];
-                if (reviewCount < 5)
+                if (authored && reviewCount < 5)
                     failures1.Add($"only {reviewCount} {family.Key.Discipline}/{family.Key.Kind} test change reviews");
-                var impactCount = impactCounts[family.Key];
-                if (impactCount < 5)
-                    failures1.Add($"only {impactCount} {family.Key.Discipline}/{family.Key.Kind} verification impact items");
+                continue;
             }
+            var reviewCount2 = reviewCounts[family.Key];
+            if (reviewCount2 < 5)
+                failures1.Add($"only {reviewCount2} {family.Key.Discipline}/{family.Key.Kind} test change reviews");
+            var impactCount = impactCounts[family.Key];
+            if (impactCount < 5)
+                failures1.Add($"only {impactCount} {family.Key.Discipline}/{family.Key.Kind} verification impact items");
         }
         foreach (var level in assessmentTargets)
         {
