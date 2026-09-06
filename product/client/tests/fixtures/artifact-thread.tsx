@@ -34,6 +34,16 @@ const EXECUTION = "44444444-4444-4444-8444-444444444444"
 const RETEST = "4b4b4b4b-4b4b-4b4b-8b4b-4b4b4b4b4b4b"
 const EVIDENCE = "88888888-8888-4888-8888-888888888888"
 
+// The branching-ladder scenario (#925 F5/V5): a System parent, the focal HLR, two LLR children with
+// their own verification, and a sibling HLR sharing the System parent that the directed web must keep out.
+const SIBLING_HLR = "1b1b1b1b-1b1b-4b1b-8b1b-1b1b1b1b1b1b"
+const LLR_A = "5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a"
+const LLR_B = "5b5b5b5b-5b5b-4b5b-8b5b-5b5b5b5b5b5b"
+const LLR_A_CASE = "6a6a6a6a-6a6a-4a6a-8a6a-6a6a6a6a6a6a"
+const LLR_A_PROCEDURE = "7a7a7a7a-7a7a-4a7a-8a7a-7a7a7a7a7a7a"
+const LLR_B_CASE = "6b6b6b6b-6b6b-4b6b-8b6b-6b6b6b6b6b6b"
+const LLR_B_PROCEDURE = "7b7b7b7b-7b7b-4b7b-8b7b-7b7b7b7b7b7b"
+
 /** A real SHA-256 shape. The hash is the fact the evidence record exists to carry, so it is asserted whole. */
 const HASH = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
 const HASH_2 = "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
@@ -336,6 +346,67 @@ const denseThread = () => {
   return thread({ focalKind: "Requirement", focalId: HLR_REQ, nodes, edges })
 }
 
+/**
+ * The corrected hierarchy story (#925 F5/V5) the review requires rendered proof for: a System parent
+ * above the focal HLR, two LLR children below it each carrying its own governed verification, and a
+ * sibling HLR sharing the System parent. Every requirement edge is story-directed with the projection's
+ * own phrasing, exactly as the corrected server emits it: "allocates to" down the allocation, "source
+ * of" down the derivation, "verified by" from a requirement to what covers it.
+ */
+const branchingThread = () => {
+  const llrNode = (id: string, displayNumber: string) => node({
+    id, kind: "Requirement", lane: 2, displayNumber, state: "Effective", level: "LowLevel",
+    title: `Channel-level sequencing behaviour for ${displayNumber}.`,
+    artifactId: id, revision: 1,
+  })
+  const llrCase = (id: string, displayNumber: string) => node({
+    id, kind: "Case", lane: 3, displayNumber, title: `${displayNumber} functional case`,
+    state: "Approved", level: "LowLevel", artifactId: id, revision: 0,
+  })
+  const llrProcedure = (id: string, displayNumber: string) => node({
+    id, kind: "Procedure", lane: 4, displayNumber, title: `${displayNumber} procedure`,
+    state: "Approved", level: "LowLevel", artifactId: id, revision: 0,
+  })
+  return thread({
+    focalKind: "Requirement",
+    focalId: HLR_REQ,
+    nodes: [
+      problemReport,
+      changeRequest,
+      systemRequirement(false),
+      highLevelRequirement(true),
+      testCase(false),
+      procedure(false),
+      node({
+        id: SIBLING_HLR, kind: "Requirement", lane: 2, displayNumber: "HLR-000076.01",
+        title: "Reject duplicate waypoints.", state: "Effective", level: "HighLevel",
+        artifactId: SIBLING_HLR, revision: 1,
+      }),
+      llrNode(LLR_A, "LLR-000075.01"),
+      llrNode(LLR_B, "LLR-000175.01"),
+      llrCase(LLR_A_CASE, "LLRTC-000075.00"),
+      llrProcedure(LLR_A_PROCEDURE, "LLRTP-000075.00"),
+      llrCase(LLR_B_CASE, "LLRTC-000175.00"),
+      llrProcedure(LLR_B_PROCEDURE, "LLRTP-000175.00"),
+    ],
+    edges: [
+      edge(PR, "ProblemReport", CR, "ChangeRequest", "resolved by"),
+      edge(CR, "ChangeRequest", HLR_REQ, "Requirement", "authored"),
+      edge(SYS_REQ, "Requirement", HLR_REQ, "Requirement", "allocates to"),
+      // The sibling hangs off the same System parent. The focal HLR's directed web must not reach it.
+      edge(SYS_REQ, "Requirement", SIBLING_HLR, "Requirement", "allocates to"),
+      edge(HLR_REQ, "Requirement", LLR_A, "Requirement", "source of"),
+      edge(HLR_REQ, "Requirement", LLR_B, "Requirement", "source of"),
+      edge(HLR_REQ, "Requirement", PROCEDURE, "Procedure", "verified by", true),
+      edge(CASE, "Case", PROCEDURE, "Procedure", "run by"),
+      edge(LLR_A, "Requirement", LLR_A_PROCEDURE, "Procedure", "verified by"),
+      edge(LLR_A_CASE, "Case", LLR_A_PROCEDURE, "Procedure", "run by"),
+      edge(LLR_B, "Requirement", LLR_B_PROCEDURE, "Procedure", "verified by"),
+      edge(LLR_B_CASE, "Case", LLR_B_PROCEDURE, "Procedure", "run by"),
+    ],
+  })
+}
+
 const scenario = new URLSearchParams(window.location.search).get("case") ?? "hlr"
 
 const responses: Record<string, unknown> = {
@@ -350,6 +421,7 @@ const responses: Record<string, unknown> = {
   invalid: invalidThread(),
   dense: denseThread(),
   crowded: crowdedThread(),
+  branching: branchingThread(),
   loading: null,
   error: null,
 }

@@ -376,6 +376,52 @@ test.describe("the trace the server returned", () => {
   })
 })
 
+test.describe("the branching hierarchy story (#925 F5/V5)", () => {
+  const evidenceDir = process.env.AEROLINK_V5_EVIDENCE
+
+  test("System above, two LLR children with their verification below, sibling kept out", async ({ page }) => {
+    await open(page, "branching")
+    const panel = page.locator(".dtaPanel")
+
+    // The focal HLR's traced story: its System parent and authoring change upstream, both LLR children
+    // and its own covering procedure downstream. Direct rows speak in the listed record's direction.
+    await expect(panel).toContainText("ALLOCATES TO")
+    await expect(panel).toContainText("AUTHORED")
+    await expect(panel).toContainText("DERIVED FROM")
+    await expect(panel).toContainText("VERIFIES")
+    await expect(panel).toContainText("LLR-000075.01")
+    await expect(panel).toContainText("LLR-000175.01")
+
+    // No sideways leak: the sibling HLR shares the System parent and is not in the directed web. It
+    // recedes on the board rather than disappearing.
+    await expect(panel).not.toContainText("HLR-000076.01")
+    await expect(page.locator('.dtaCard:has-text("HLR-000076.01")')).toHaveClass(/is-untraced/)
+    await expect(page.locator('.dtaCard:has-text("HLR-000076.01")')).toBeVisible()
+
+    // The owner-mandated connector words render on the story's own edges, with the derivation phrase
+    // appearing once per LLR child. SVG text exposes textContent, not innerText.
+    const labels = await page.locator(".dtCanvasEdgeLabel").evaluateAll(elements =>
+      elements.map(element => element.textContent))
+    expect(labels).toContain("allocates to")
+    expect(labels).toContain("verified by")
+    expect(labels.filter(text => text === "source of")).toHaveLength(2)
+
+    // Deeper records carry hop counts instead of a relation they do not have.
+    await expect(panel).toContainText("2 HOPS")
+    if (evidenceDir) await page.screenshot({ path: `${evidenceDir}/artifact-branching-hlr.png`, fullPage: false })
+
+    // Jumping to the System parent re-centres the story: both HLR children — the focal and its sibling —
+    // are genuinely downstream of it, together with both LLRs and their verification.
+    await page.locator('.dtaRel button:has-text("SYSR-000100.01")').first().click()
+    await expect(page.locator('.dtaCard:has-text("SYSR-000100.01")')).toHaveClass(/is-selected/)
+    await expect(panel).toContainText("HLR-000076.01")
+    await expect(panel).toContainText("LLR-000075.01")
+    await expect(panel).toContainText("LLR-000175.01")
+    await expect(panel).toContainText("HLR-000075.02")
+    if (evidenceDir) await page.screenshot({ path: `${evidenceDir}/artifact-branching-system.png`, fullPage: false })
+  })
+})
+
 test.describe("states the canvas must tell apart", () => {
   test("a malformed response draws nothing at all, and says why", async ({ page }) => {
     await open(page, "invalid")
