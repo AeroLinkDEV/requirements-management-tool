@@ -861,6 +861,13 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         Assert.Contains("HLR 400", baseline.Detail, StringComparison.Ordinal);
         Assert.Contains("LLR 700", baseline.Detail, StringComparison.Ordinal);
         Assert.Contains("Interface change control is retired (#889)", baseline.Detail, StringComparison.Ordinal);
+        // Every configured family from the resolved ladder profile is enumerated with its own count —
+        // zeros included — so a family cannot vanish from the report by losing all of its rows.
+        Assert.Contains("System/Procedure 75", baseline.Detail, StringComparison.Ordinal);
+        Assert.Contains("HighLevel/Case 160", baseline.Detail, StringComparison.Ordinal);
+        Assert.Contains("LowLevel/Case 280", baseline.Detail, StringComparison.Ordinal);
+        Assert.Contains("enforced verification families are exactly the resolved ladder profile's configured bindings",
+            baseline.Detail, StringComparison.Ordinal);
 
         var retests = await db.TestExecutions.Where(x => x.RetestOfExecutionId != null).ToListAsync();
         Assert.NotEmpty(retests);

@@ -1248,9 +1248,57 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var verificationFamilies = await db.TestProcedures.AsNoTracking()
             .Where(x => x.ProjectId == projectId)
             .Select(x => new { x.Level, x.ArtifactKind }).ToListAsync(ct);
-        var testChangeReviews = await db.TestChangeReviews.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
-        var assessments = await db.DownstreamChangeAssessments.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
-        var impactItems = await db.VerificationImpactItems.AsNoTracking().CountAsync(x => x.ProjectId == projectId, ct);
+        var reviewRows = await db.TestChangeReviews.AsNoTracking()
+            .Where(x => x.ProjectId == projectId)
+            .Select(x => new { x.Discipline, x.ArtifactKind }).ToListAsync(ct);
+        var impactRows = await (from item in db.VerificationImpactItems.AsNoTracking()
+            join review in db.TestChangeReviews.AsNoTracking() on item.TestChangeReviewId equals review.Id
+            where item.ProjectId == projectId
+            select new { review.Discipline, review.ArtifactKind }).ToListAsync(ct);
+        var assessments = await db.DownstreamChangeAssessments.AsNoTracking()
+            .Where(x => x.ProjectId == projectId)
+            .Select(x => (RequirementLevel?)x.TargetLevel).ToListAsync(ct);
+
+        // The configured families come from the project's own ladder profiles — never from rows that
+        // happen to exist — so a family that loses every row is still enumerated, looked up at zero,
+        // and named instead of silently vanishing from the matrix.
+        var ladderPolicy = await resolver.ResolveAsync(projectId, ct);
+        var configuredFamilies = new List<(VerificationArtifactKey Key, RequirementLevel Level)>();
+        foreach (var level in ladderPolicy.OrderedLevels)
+        {
+            var profile = ladderPolicy.VerificationProfile(level);
+            if (profile is null) continue;
+            foreach (var definition in profile.Definitions)
+                configuredFamilies.Add((definition.Key, level));
+        }
+        static RequirementLevel ToRequirementLevel(TestProcedureLevel level) => level switch
+        {
+            TestProcedureLevel.System => RequirementLevel.System,
+            TestProcedureLevel.HighLevel => RequirementLevel.HighLevel,
+            _ => RequirementLevel.LowLevel,
+        };
+        static VerificationArtifactKey KeyOf(TestChangeReviewDiscipline discipline, VerificationArtifactKind kind) =>
+            new(discipline switch
+            {
+                TestChangeReviewDiscipline.System => VerificationDiscipline.System,
+                TestChangeReviewDiscipline.HighLevelSoftware => VerificationDiscipline.HighLevelSoftware,
+                _ => VerificationDiscipline.LowLevelSoftware,
+            }, kind);
+        var artifactCounts = configuredFamilies.ToDictionary(
+            f => (f.Level, f.Key.Kind),
+            f => verificationFamilies.Count(x => ToRequirementLevel(x.Level) == f.Level && x.ArtifactKind == f.Key.Kind));
+        var reviewCounts = configuredFamilies.ToDictionary(
+            f => f.Key,
+            f => reviewRows.Count(x => KeyOf(x.Discipline, x.ArtifactKind) == f.Key));
+        var impactCounts = configuredFamilies.ToDictionary(
+            f => f.Key,
+            f => impactRows.Count(x => KeyOf(x.Discipline, x.ArtifactKind) == f.Key));
+        var assessmentTargets = ladderPolicy.OrderedLevels
+            .Where(level => ladderPolicy.ParentLevels(level).Count > 0)
+            .ToList();
+        var assessmentCounts = assessmentTargets.ToDictionary(
+            level => level,
+            level => assessments.Count(x => x == level));
 
         var systemRequirements = levels.Count(x => x == RequirementLevel.System);
         var highLevelRequirements = levels.Count(x => x == RequirementLevel.HighLevel);
@@ -1279,22 +1327,25 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         // Each configured verification artifact family is its own user-visible workspace, so the
         // aggregate artifact total cannot stand in for them: an upgraded database that keeps 500+
         // artifacts overall but loses every HLR Case still has an empty family a user opens.
-        var familyCounts = verificationFamilies
-            .GroupBy(x => (x.Level, x.ArtifactKind))
-            .OrderBy(g => (int)g.Key.Level).ThenBy(g => (int)g.Key.ArtifactKind)
-            .Select(g => (Key: g.Key, Count: g.Count()))
-            .ToList();
 
         string Detail() =>
             $"Families: SYSR {systemRequirements}, HLR {highLevelRequirements}, LLR {lowLevelRequirements}; "
             + $"change requests: SRCR {systemRequests}, HLRCR {highLevelChangeRequests}, LLRCR {lowLevelChangeRequests}; "
             + "verification artifacts: "
-            + string.Join(", ", familyCounts.Select(f => $"{f.Key.Level}/{f.Key.ArtifactKind} {f.Count}")) + "; "
+            + string.Join(", ", configuredFamilies.Select(f =>
+                $"{f.Level}/{f.Key.Kind} {artifactCounts[(f.Level, f.Key.Kind)]}")) + "; "
             + $"executions: {passes} pass, {failures} fail, {retests} retest ({healedFailures} failure(s) healed by a passing retest); "
-            + $"test change reviews {testChangeReviews}; downstream assessments {assessments}; "
-            + $"verification impact items {impactItems}. "
+            + "test change reviews: "
+            + string.Join(", ", configuredFamilies.Select(f => $"{f.Key.Discipline}/{f.Key.Kind} {reviewCounts[f.Key]}")) + "; "
+            + "downstream assessments: "
+            + string.Join(", ", assessmentTargets.Select(level => $"{level} {assessmentCounts[level]}")) + "; "
+            + "verification impact items: "
+            + string.Join(", ", configuredFamilies.Select(f => $"{f.Key.Discipline}/{f.Key.Kind} {impactCounts[f.Key]}")) + ". "
             + "Deliberate exceptions: Interface change control is retired (#889); the product line, "
-            + "controlled library, release campaign and leadership positions are singular families.";
+            + "controlled library, release campaign and leadership positions are singular families. "
+            + "The enforced verification families are exactly the resolved ladder profile's configured "
+            + "bindings; enforcement follows that authority rather than the broader kinds listed on the "
+            + "authored ladder steps.";
 
         var failures1 = new List<string>();
         if (systemRequirements < 5) failures1.Add($"only {systemRequirements} System requirements");
@@ -1303,13 +1354,25 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (systemRequests < 5) failures1.Add($"only {systemRequests} System change requests (SRCR)");
         if (highLevelChangeRequests < 5) failures1.Add($"only {highLevelChangeRequests} HighLevel change requests (HLRCR)");
         if (lowLevelChangeRequests < 5) failures1.Add($"only {lowLevelChangeRequests} LowLevel change requests (LLRCR)");
-        foreach (var family in familyCounts.Where(f => f.Count < 5))
-            failures1.Add($"only {family.Count} {family.Key.Level}/{family.Key.ArtifactKind} verification artifacts");
+        foreach (var family in configuredFamilies.Where(f => f.Level != RequirementLevel.System || f.Key.Kind != VerificationArtifactKind.Procedure))
+        {
+            var artifactCount = artifactCounts[(family.Level, family.Key.Kind)];
+            if (artifactCount < 5)
+                failures1.Add($"only {artifactCount} {family.Level}/{family.Key.Kind} verification artifacts");
+            var reviewCount = reviewCounts[family.Key];
+            if (reviewCount < 5)
+                failures1.Add($"only {reviewCount} {family.Key.Discipline}/{family.Key.Kind} test change reviews");
+            var impactCount = impactCounts[family.Key];
+            if (impactCount < 5)
+                failures1.Add($"only {impactCount} {family.Key.Discipline}/{family.Key.Kind} verification impact items");
+        }
+        foreach (var level in assessmentTargets)
+        {
+            if (assessmentCounts[level] < 5)
+                failures1.Add($"only {assessmentCounts[level]} {level} downstream change assessments");
+        }
         if (healedFailures < 1) failures1.Add("no failed execution with a passing same-artifact retest successor that does not precede it (pass/fail/retest chain broken)");
         if (passes < 1) failures1.Add("no passing execution outside the retest chain (pass category empty)");
-        if (testChangeReviews < 5) failures1.Add($"only {testChangeReviews} test change reviews");
-        if (assessments < 5) failures1.Add($"only {assessments} downstream change assessments");
-        if (impactItems < 5) failures1.Add($"only {impactItems} verification impact items");
         return failures1.Count > 0
             ? new FamilyInventoryCheck(false, "Family inventory below the repeated-family minimum: "
                 + string.Join("; ", failures1) + ". " + Detail())
