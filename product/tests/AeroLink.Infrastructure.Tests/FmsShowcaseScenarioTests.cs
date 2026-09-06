@@ -911,4 +911,31 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         Assert.Contains($"only 4 LowLevel change requests (LLRCR)", drifted.Detail, StringComparison.Ordinal);
         Assert.DoesNotContain("HighLevel change requests (HLRCR)", drifted.Detail, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// The product exposes a separate Test Results workspace per executable family, so emptying one
+    /// family's executions — System here — must fail the inventory with that family named, even though
+    /// the other families still hold hundreds of executions and the aggregate volume stays high.
+    /// </summary>
+    [Fact]
+    public async Task Family_inventory_names_an_emptied_executable_results_family()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+
+        var systemExecutions = await (from execution in db.TestExecutions
+            join revision in db.TestProcedureRevisions on execution.ProcedureRevisionId equals revision.Id
+            join procedure in db.TestProcedures on revision.ProcedureId equals procedure.Id
+            where procedure.Level == TestProcedureLevel.System
+            select execution).ToListAsync();
+        Assert.NotEmpty(systemExecutions);
+        db.TestExecutions.RemoveRange(systemExecutions);
+        await db.SaveChangesAsync();
+
+        var after = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
+        var drifted = Assert.Single(after, x => x.Key == "family-inventory");
+        Assert.False(drifted.Holds, drifted.Detail);
+        Assert.Contains("only 0 System executions", drifted.Detail, StringComparison.Ordinal);
+    }
 }
