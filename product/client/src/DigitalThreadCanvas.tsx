@@ -17,9 +17,11 @@ import {
   isVisible,
   laneAt,
   layout,
+  layoutWithMeasuredCards,
   minimumZoom,
   MIN_ZOOM,
   nodePosition,
+  positionsForNodes,
   placeEdgeLabels,
   rescaleOffsets,
   stepTowards,
@@ -335,7 +337,15 @@ export default function DigitalThreadCanvas({
     const scene = sceneRef.current
     if (!box || !scene) return
 
-    const result = layout(counts, box, transform.current.zoom)
+    const rawResult = layout(counts, box, transform.current.zoom)
+    // Selected and wrapped cards can add real scene height. Extend the lane's rolling extent from the same
+    // measurements used for positions so a shifted final card remains reachable by keyboard and scrub.
+    const measuredCardHeights = new Map<string, number>()
+    for (const node of nodes) {
+      const height = cardRefs.current.get(node.id)?.scrollHeight
+      if (height && Number.isFinite(height)) measuredCardHeights.set(node.id, height)
+    }
+    const result = layoutWithMeasuredCards(rawResult, nodes, measuredCardHeights)
     const previous = geometryRef.current
     if (previous && previous.tier !== result.tier) {
       offsets.current = rescaleOffsets(offsets.current, previous, result)
@@ -368,10 +378,12 @@ export default function DigitalThreadCanvas({
       if (head) head.style.left = `${lane * geometry.lanePitch}px`
     }
 
-    const positions = new Map<string, { x: number; y: number }>()
+    // Selected cards keep their expanded body. Read the actual rendered heights before positioning the lane so
+    // a wrapped identity cannot cover the next direct card; the same measured map is consumed by framing and
+    // label obstacles below.
+    const positions = positionsForNodes(nodes, geometry, offsets.current, measuredCardHeights)
     for (const node of nodes) {
-      const position = nodePosition(node, geometry, offsets.current)
-      positions.set(node.id, position)
+      const position = positions.get(node.id) ?? nodePosition(node, geometry, offsets.current)
       const card = cardRefs.current.get(node.id)
       if (!card) continue
       card.style.transform = `translate(${position.x}px,${position.y}px)`
@@ -550,6 +562,18 @@ export default function DigitalThreadCanvas({
       return converted ? [converted] : []
     })
     const labelPositions = placeEdgeLabels(labelCandidates, geometry, [...cardObstacles, ...domObstacles], sceneFrame)
+    // A completely occupied frame is a layout shortfall, not permission to paint a colliding midpoint. Ask the
+    // owning view to re-dock its inspector, using the same measured-room recovery as direct cards; the current
+    // placement remains explicitly marked exhausted until that repaint supplies a real free slot.
+    if ([...labelPositions.values()].some(position => position.exhausted)) onFramingNeedsRoom?.()
+    const placementNotice = viewportRef.current?.querySelector<HTMLElement>(".dtCanvasPlacementNotice")
+    if (placementNotice) {
+      const unavailable = [...labelPositions.values()].some(position => !position.available)
+      placementNotice.hidden = !unavailable
+      placementNotice.textContent = unavailable
+        ? "A relation label needs more room. Resize the canvas or use Table view to read the edge context."
+        : ""
+    }
     // Edge labels rest hidden and appear on a traced edge, or once the board is zoomed past 1.05 (#880 §6.7).
     // At the default fit the canvas stays calm; a reader who has selected something, or leaned in, gets the
     // relation words.
@@ -557,7 +581,8 @@ export default function DigitalThreadCanvas({
       const from = positions.get(edge.from)
       const to = positions.get(edge.to)
       if (!from || !to) continue
-      path.setAttribute("d", edgePath(from, to, geometry))
+      const position = labelPositions.get(edgeIdentity(edge.from, edge.to))
+      path.setAttribute("d", edgePath(from, to, geometry, position?.route))
       const backwards = to.x <= from.x
       dot.setAttribute("cx", String(backwards ? to.x + geometry.laneWidth : to.x))
       dot.setAttribute("cy", String(to.y + geometry.anchor))
@@ -584,7 +609,6 @@ export default function DigitalThreadCanvas({
         // An intra-lane edge bows into the gutter beside its lane, so its label follows it there. Taking the
         // midpoint of the two endpoints would put the word in the middle of the lane, on top of the very cards
         // the edge is drawn between.
-        const position = labelPositions.get(edgeIdentity(edge.from, edge.to))
         if (position) {
           label.setAttribute("x", String(position.x))
           label.setAttribute("y", String(position.y))
@@ -597,10 +621,10 @@ export default function DigitalThreadCanvas({
           leader.setAttribute("y2", String(position?.y ?? 0))
           leader.style.opacity = inWindow && (traced || labelsAtRest) && position?.leader ? "" : "0"
         }
-        label.style.opacity = inWindow && (traced || labelsAtRest) ? "" : "0"
+        label.style.opacity = inWindow && (traced || labelsAtRest) && position?.available !== false ? "" : "0"
       }
     }
-  }, [counts, frame, lanes.length, nodes, selectedId, trailingOverhang, tracedEdges])
+  }, [counts, frame, lanes.length, nodes, onFramingNeedsRoom, selectedId, trailingOverhang, tracedEdges])
 
   const settle = useCallback(() => {
     if (animation.current !== null) return
@@ -685,16 +709,18 @@ export default function DigitalThreadCanvas({
         result.laneMinimums,
         counts.length,
         -1,
+        cardHeights,
       )
       offsets.current = [...synced]
       targets.current = [...synced]
 
       const fits = (transform: { x: number; y: number; zoom: number }, ids: readonly string[]): boolean => {
-        const settled = layout(counts, box, transform.zoom)
+        const settled = layoutWithMeasuredCards(layout(counts, box, transform.zoom), nodes, cardHeights)
         const wanted = new Set(ids)
+        const positions = positionsForNodes(nodes, settled.geometry, offsets.current, cardHeights)
         for (const node of nodes) {
           if (!wanted.has(node.id)) continue
-          const { x, y } = nodePosition(node, settled.geometry, offsets.current)
+          const { x, y } = positions.get(node.id) ?? nodePosition(node, settled.geometry, offsets.current)
           const left = x * transform.zoom + transform.x
           const right = left + settled.geometry.laneWidth * transform.zoom
           const measuredHeight = Math.max(
@@ -900,6 +926,11 @@ export default function DigitalThreadCanvas({
             result.bandHeight,
           )
           if (anchor) {
+            const measuredHeights = new Map<string, number>()
+            for (const candidate of nodes) {
+              const height = cardRefs.current.get(candidate.id)?.scrollHeight
+              if (height && Number.isFinite(height)) measuredHeights.set(candidate.id, height)
+            }
             targets.current = syncTargets(
               anchor.id,
               nodes,
@@ -909,6 +940,7 @@ export default function DigitalThreadCanvas({
               result.laneMinimums,
               lanes.length,
               lane,
+              measuredHeights,
             )
           }
           settle()
@@ -983,11 +1015,18 @@ export default function DigitalThreadCanvas({
     (node: CanvasNode) => {
       const result = geometryRef.current
       if (!result) return
+      const measuredHeights = new Map<string, number>()
+      for (const candidate of nodes) {
+        const height = cardRefs.current.get(candidate.id)?.scrollHeight
+        if (height && Number.isFinite(height)) measuredHeights.set(candidate.id, height)
+      }
+      const measuredPosition = positionsForNodes(nodes, result.geometry, offsets.current, measuredHeights).get(node.id)
       const revealed = offsetToReveal(
         node.row,
         result.geometry,
         result.bandHeight,
         offsets.current[node.lane] ?? 0,
+        measuredPosition?.y,
       )
       // Never past what the lane can actually roll, or the lane would scroll off its own content.
       targets.current[node.lane] = Math.max(result.laneMinimums[node.lane] ?? 0, revealed)
@@ -1002,7 +1041,7 @@ export default function DigitalThreadCanvas({
       // camera correction below so keyboard reveal cannot leave a blank scene.
       viewportRef.current?.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior })
       if (!box) return
-      const { x } = nodePosition(node, result.geometry, offsets.current)
+      const { x } = measuredPosition ?? nodePosition(node, result.geometry, offsets.current)
       const left = x * transform.current.zoom + transform.current.x
       const right = left + result.geometry.laneWidth * transform.current.zoom
       const margin = 16
@@ -1010,7 +1049,7 @@ export default function DigitalThreadCanvas({
       else if (right > box.x + box.width - margin) transform.current.x -= right - (box.x + box.width - margin)
       paint()
     },
-    [frame, paint, settle],
+    [frame, nodes, paint, settle],
   )
 
   /** Arrow navigation within a lane, revealing the card it moves to. */
@@ -1110,6 +1149,7 @@ export default function DigitalThreadCanvas({
         <button type="button" disabled={!framing} onClick={fitStory}>Fit entire story</button>
         <button type="button" onClick={fitAll} title="Fit the projected board; tall lanes remain independently scrollable">Fit board</button>
       </div>
+      <div className="dtCanvasPlacementNotice" role="status" aria-live="polite" hidden />
       <div className="dtCanvasScene" ref={sceneRef}>
         <div className="dtCanvasBands">
           {lanes.map((title, lane) => {

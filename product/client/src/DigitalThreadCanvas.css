@@ -49,6 +49,23 @@
 .dtCanvasControls output { min-width: 82px; color: var(--ink-900); font: var(--weight-bold) 10px var(--font-body); text-align: center; white-space: nowrap; }
 .dtCanvasControlDivider { width: 1px; height: 18px; background: #dce6eb; }
 
+/* Fail closed when a genuinely occupied frame has no measured on-line label slot. This stays in the free
+   viewport chrome and directs the reader to a layout recovery path while preserving the cards and edge data. */
+.dtCanvasPlacementNotice {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 95;
+  border: 1px solid #d7b36a;
+  border-radius: var(--radius-md);
+  background: rgba(255, 252, 242, .96);
+  padding: 7px 10px;
+  color: var(--ink-700);
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
+  text-align: center;
+}
+
 .dtCanvas.is-panning { cursor: grabbing; }
 /* Rolling a lane is vertical, and saying so before the drag starts is most of what makes it discoverable. */
 .dtCanvas.is-rolling { cursor: ns-resize; }

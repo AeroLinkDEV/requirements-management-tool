@@ -16,10 +16,13 @@ import {
   offsetToReveal,
   laneHeight,
   layout,
+  layoutWithMeasuredCards,
   minimumZoom,
   placeEdgeLabels,
+  positionsForNodes,
   READABLE_SELECTION_MIN_ZOOM,
   rescaleOffsets,
+  segmentIntersectsRect,
   syncTargets,
   tierFor,
   trace,
@@ -298,6 +301,14 @@ test.describe("keyboard reveal", () => {
     expect(y).toBeLessThan(band)
   })
 
+  test("a shifted row uses its measured position when keyboard reveal rolls the lane", () => {
+    const shiftedY = geometry.pad + geometry.rowPitch + 29
+    const offset = offsetToReveal(1, geometry, 180, 0, shiftedY)
+    expect(offset).toBeLessThan(0)
+    expect(shiftedY + offset).toBeGreaterThan(-geometry.cardHeight)
+    expect(shiftedY + offset).toBeLessThan(180)
+  })
+
   test("a row above the window rolls the lane back down to reach it", () => {
     // The lane has already been rolled a long way; row 0 is now off the top.
     const rolled = -1200
@@ -472,6 +483,65 @@ test.describe("framing ignores records rolled out of their lane", () => {
 })
 
 test.describe("story framing and label obstacles", () => {
+  test("measured expanded cards move later rows clear of the selected body", () => {
+    const geometry = geometryFor(2)
+    const nodes: CanvasNode[] = [
+      { id: "selected", lane: 0, row: 0 },
+      { id: "direct", lane: 0, row: 1 },
+      { id: "other", lane: 0, row: 2 },
+    ]
+    const positions = positionsForNodes(nodes, geometry, [0], new Map([
+      ["selected", 167],
+      ["direct", 108],
+      ["other", 108],
+    ]))
+    expect(positions.get("direct")!.y).toBeGreaterThanOrEqual(
+      positions.get("selected")!.y + 167,
+    )
+    expect(positions.get("other")!.y).toBeGreaterThanOrEqual(
+      positions.get("direct")!.y + 108,
+    )
+  })
+
+  test("measured expansion extends the lane rolling range", () => {
+    const geometry = geometryFor(2)
+    const base = layout([3], { x: 0, y: 0, width: 720, height: 360 }, 1)
+    const extended = layoutWithMeasuredCards(base, [
+      { id: "selected", lane: 0, row: 0 },
+      { id: "direct", lane: 0, row: 1 },
+      { id: "last", lane: 0, row: 2 },
+    ], new Map([["selected", 167]]))
+    expect(extended.laneHeights[0]).toBe(base.laneHeights[0] + 29)
+    expect(extended.laneMinimums[0]).toBeLessThan(base.laneMinimums[0])
+    expect(geometry.rowPitch).toBe(138)
+  })
+
+  test("leader clearance checks the complete segment, including a short obstacle between samples", () => {
+    expect(segmentIntersectsRect(
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 49, y: -1, width: 2, height: 2 },
+    )).toBe(true)
+    expect(segmentIntersectsRect(
+      { x: 0, y: 0 },
+      { x: 49, y: 0 },
+      { x: 49, y: -1, width: 2, height: 2 },
+    )).toBe(false)
+  })
+
+  test("an occupied frame fails closed instead of painting a colliding midpoint", () => {
+    const geometry = geometryFor(1)
+    const frame = { x: 0, y: 0, width: 720, height: 300 }
+    const placement = placeEdgeLabels(
+      [{ key: "a>b", label: "verified by", from: { x: 0, y: 80 }, to: { x: geometry.lanePitch * 2, y: 80 } }],
+      geometry,
+      [frame],
+      frame,
+    ).get("a>b")!
+    expect(placement.available).toBe(false)
+    expect(placement.exhausted).toBe(true)
+  })
+
   test("deliberate selection can use the measured readable compact floor", () => {
     const nodes: CanvasNode[] = [
       { id: "selected", lane: 0, row: 0 },
