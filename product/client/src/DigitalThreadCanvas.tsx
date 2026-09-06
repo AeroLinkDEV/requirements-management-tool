@@ -3,7 +3,9 @@ import {
   EDGE_LAYER_OVERHANG,
   type CanvasEdge,
   type CanvasFrame,
+  type CanvasRect,
   type CanvasNode,
+  type FrameIntent,
   type LayoutResult,
   anchorInLane,
   clampOffsets,
@@ -12,12 +14,15 @@ import {
   offsetToReveal,
   fitTransform,
   frameNodes,
-  isIntraLane,
   isVisible,
   laneAt,
   layout,
+  layoutWithMeasuredCards,
   minimumZoom,
+  MIN_ZOOM,
   nodePosition,
+  positionsForNodes,
+  placeEdgeLabels,
   rescaleOffsets,
   stepTowards,
   syncTargets,
@@ -58,16 +63,17 @@ export type DigitalThreadCanvasProps = {
    */
   tracedEdges?: ReadonlySet<string>
   /**
-   * The records the camera should frame when the selection changes, instead of the selection and its direct
-   * links.
+   * The records the camera should frame when the selection changes. A view passes the complete directed trace
+   * here when the selected story is the question the reader opened.
    *
-   * §6.6 frames the selection and one hop, which is right when a reader is stepping through a build: it keeps
-   * the zoom close and the next hop large. It is wrong for the moment an artifact thread first opens, because
-   * the view has selected the focal record on the reader's behalf and one hop is not the answer they asked
-   * for — landing on a six-lane thread framed to three of its lanes puts the result and the build off-screen
-   * before the reader has touched anything. A caller that knows the whole web is the answer passes it here.
+   * The traversal remains directed and cycle-safe in `trace`; the canvas only lays out the exact set the view
+   * supplied. Keeping this set explicit prevents a generic one-hop fallback from hiding the far side of a story.
    */
   frameIds?: readonly string[]
+  /** How the current framing request should be interpreted. Deep-link arrival keeps the readable landing floor. */
+  framingIntent?: FrameIntent
+  /** The first selected record supplied by a view on deep-link/arrival. Later user selections use the compact floor. */
+  landingId?: string | null
   /**
    * The free area this dock leaves cannot hold the selection and its direct links at the legibility floor.
    *
@@ -109,6 +115,8 @@ export default function DigitalThreadCanvas({
   frameInset,
   tracedEdges,
   frameIds,
+  framingIntent = "selection",
+  landingId = null,
   onFramingNeedsRoom,
   ariaLabel = "Digital Thread canvas",
 }: DigitalThreadCanvasProps) {
@@ -117,7 +125,13 @@ export default function DigitalThreadCanvas({
   const edgeLayerRef = useRef<SVGSVGElement | null>(null)
   const cardRefs = useRef(new Map<string, HTMLDivElement>())
   const edgeRefs = useRef<
-    { path: SVGPathElement; dot: SVGCircleElement; label: SVGTextElement | null; edge: CanvasEdge }[]
+    {
+      path: SVGPathElement
+      dot: SVGCircleElement
+      leader: SVGLineElement | null
+      label: SVGTextElement | null
+      edge: CanvasEdge
+    }[]
   >([])
 
   const transform = useRef({ x: 0, y: 0, zoom: 1 })
@@ -141,8 +155,48 @@ export default function DigitalThreadCanvas({
   /** The framing key the selection effect last acted on, so a re-render alone cannot reset a rolled lane. */
   const framedFor = useRef<string | null>(null)
   /** The latest framing request, so the resize path can retry one that arrived before the frame was real. */
-  const framingRef = useRef<{ selectedId: string; wanted: string[]; key: string } | null>(null)
+  const framingRef = useRef<{ selectedId: string; wanted: string[]; key: string; intent: FrameIntent } | null>(null)
+  /** Arrival survives measurement retries, but focal -> close -> focal is still a user return, not a new landing. */
+  const landingState = useRef({
+    id: landingId,
+    lastSelected: selectedId,
+    seen: Boolean(selectedId && framingIntent === "landing" && selectedId === landingId),
+    consumed: false,
+    selection: selectedId && framingIntent === "landing" && selectedId === landingId ? selectedId : null,
+  })
+
+  // A measured panel inset can cause more than one framing pass for the same arrival. Keep that pass at the
+  // landing floor until the reader chooses another record, then never mistake a return to the focal record for a
+  // deep link. These refs track identity, not presentation state, and avoid a render-triggering state update.
+  if (landingState.current.id !== landingId) {
+    landingState.current = {
+      id: landingId,
+      lastSelected: selectedId,
+      seen: Boolean(selectedId && framingIntent === "landing" && selectedId === landingId),
+      consumed: false,
+      selection: selectedId && framingIntent === "landing" && selectedId === landingId ? selectedId : null,
+    }
+  } else if (landingState.current.lastSelected !== selectedId) {
+    const previous = landingState.current.lastSelected
+    if (selectedId === null) {
+      if (landingState.current.seen) landingState.current.consumed = true
+      landingState.current.selection = null
+    } else if (
+      previous === null &&
+      selectedId === landingId &&
+      framingIntent === "landing" &&
+      !landingState.current.consumed
+    ) {
+      landingState.current.seen = true
+      landingState.current.selection = selectedId
+    } else {
+      landingState.current.consumed = true
+      landingState.current.selection = null
+    }
+    landingState.current.lastSelected = selectedId
+  }
   const easeTimer = useRef<number | null>(null)
+  const zoomReadoutRef = useRef<HTMLOutputElement | null>(null)
 
   const measuredCounts = lanes.map((_, lane) =>
     laneCount ? laneCount(lane) : nodes.filter(node => node.lane === lane).length,
@@ -204,6 +258,14 @@ export default function DigitalThreadCanvas({
   const framing = useMemo(() => {
     if (!selectedId) return null
 
+    // `landingId` identifies the record the view selected on arrival. The focal identity alone is insufficient:
+    // a reader can deliberately return to that same record after stepping through another card. The identity ref
+    // persists through measurement retries, preserving the initial/deep-link distinction without a user density
+    // setting.
+    const intent: FrameIntent = framingIntent === "landing" && landingState.current.selection === selectedId
+      ? "landing"
+      : framingIntent === "landing" ? "selection" : framingIntent
+
     const linked = new Set<string>([selectedId])
     for (const edge of edges) {
       if (edge.from === selectedId) linked.add(edge.to)
@@ -223,14 +285,16 @@ export default function DigitalThreadCanvas({
     return {
       selectedId,
       wanted: [...wanted],
+      intent,
       key:
         `${selectedId}|${countsKey}|${placement}` +
-        `|${frameInset?.left ?? 0},${frameInset?.right ?? 0},${frameInset?.bottom ?? 0},${trailingOverhang}`,
+        `|${intent}|${frameInset?.left ?? 0},${frameInset?.right ?? 0},${frameInset?.bottom ?? 0},${trailingOverhang}`,
     }
   }, [
     countsKey,
     edges,
     frameIds,
+    framingIntent,
     frameInset?.left,
     frameInset?.right,
     frameInset?.bottom,
@@ -249,13 +313,26 @@ export default function DigitalThreadCanvas({
     if (!element) return null
     const rect = element.getBoundingClientRect()
     if (rect.width < 320 || rect.height < 240) return null
+    const width = rect.width - (frameInset?.left ?? 0) - (frameInset?.right ?? 0)
+    const controls = element.querySelector<HTMLElement>(".dtCanvasControls")
+    // The toolbar may wrap at a narrow width or under a larger text setting. Its rendered bottom, rather than a
+    // fixed constant, is the start of the actual drawing frame; the small breathing gap keeps headings readable.
+    const controlBottom = controls?.getBoundingClientRect().bottom ?? rect.top + 38
+    // Headings extend above the card scene. Reserve that authored offset as well as the toolbar, so a frame
+    // clamped to its first card cannot put its heading back underneath the controls.
+    const heading = element.querySelector<HTMLElement>(".dtCanvasLaneHead")
+    const headingOffset = heading ? Math.max(0, -(parseFloat(getComputedStyle(heading).top) || 0)) : 0
+    // The viewport frame must not depend on the current camera: Fit measures it before changing zoom.
+    const top = Math.max(40, Math.ceil(controlBottom - rect.top + headingOffset + 8))
+    const height = rect.height - top - (frameInset?.bottom ?? 0)
+    if (width < 240 || height < 180) return null
     return {
       x: frameInset?.left ?? 0,
-      y: 0,
-      width: rect.width - (frameInset?.left ?? 0) - (frameInset?.right ?? 0) - trailingOverhang,
-      height: rect.height - (frameInset?.bottom ?? 0),
+      y: top,
+      width,
+      height,
     }
-  }, [frameInset?.left, frameInset?.right, frameInset?.bottom, trailingOverhang])
+  }, [frameInset?.left, frameInset?.right, frameInset?.bottom])
 
   /** Write current geometry to the DOM: transform, band sizes, card positions, edge paths. */
   const paint = useCallback(() => {
@@ -263,7 +340,19 @@ export default function DigitalThreadCanvas({
     const scene = sceneRef.current
     if (!box || !scene) return
 
-    const result = layout(counts, box, transform.current.zoom)
+    const rawResult = layout(counts, box, transform.current.zoom)
+    // Selected and wrapped cards can add real scene height. Extend the lane's rolling extent from the same
+    // measurements used for positions so a shifted final card remains reachable by keyboard and scrub.
+    const measuredCardHeights = new Map<string, number>()
+    for (const node of nodes) {
+      const card = cardRefs.current.get(node.id)
+      // Toggle before measuring so selection's expanded body is included in this settled pass. offsetHeight is
+      // the rendered border box; scrollHeight omits the border and left a small overlap at the next row.
+      card?.classList.toggle("is-selected", selectedId === node.id)
+      const height = card?.offsetHeight || card?.scrollHeight
+      if (height && Number.isFinite(height)) measuredCardHeights.set(node.id, height)
+    }
+    const result = layoutWithMeasuredCards(rawResult, nodes, measuredCardHeights)
     const previous = geometryRef.current
     if (previous && previous.tier !== result.tier) {
       offsets.current = rescaleOffsets(offsets.current, previous, result)
@@ -275,9 +364,14 @@ export default function DigitalThreadCanvas({
 
     const { geometry, bandHeight } = result
     scene.style.transform = `translate(${transform.current.x}px,${transform.current.y}px) scale(${transform.current.zoom})`
-    scene.style.width = `${result.sceneWidth}px`
+    scene.style.width = `${result.sceneWidth + trailingOverhang}px`
     scene.style.height = `${bandHeight}px`
     scene.dataset.tier = String(result.tier)
+    scene.dataset.zoom = String(Math.round(transform.current.zoom * 100))
+    if (zoomReadoutRef.current) {
+      const tierLabel = result.tier === 2 ? "Detailed" : result.tier === 1 ? "Compact" : "Dense"
+      zoomReadoutRef.current.textContent = `${Math.round(transform.current.zoom * 100)}% · ${tierLabel}`
+    }
 
     for (let lane = 0; lane < lanes.length; lane += 1) {
       const band = scene.querySelector<HTMLElement>(`[data-band="${lane}"]`)
@@ -291,10 +385,12 @@ export default function DigitalThreadCanvas({
       if (head) head.style.left = `${lane * geometry.lanePitch}px`
     }
 
-    const positions = new Map<string, { x: number; y: number }>()
+    // Selected cards keep their expanded body. Read the actual rendered heights before positioning the lane so
+    // a wrapped identity cannot cover the next direct card; the same measured map is consumed by framing and
+    // label obstacles below.
+    const positions = positionsForNodes(nodes, geometry, offsets.current, measuredCardHeights)
     for (const node of nodes) {
-      const position = nodePosition(node, geometry, offsets.current)
-      positions.set(node.id, position)
+      const position = positions.get(node.id) ?? nodePosition(node, geometry, offsets.current)
       const card = cardRefs.current.get(node.id)
       if (!card) continue
       card.style.transform = `translate(${position.x}px,${position.y}px)`
@@ -318,9 +414,22 @@ export default function DigitalThreadCanvas({
         "is-offscreen",
         (!isVisible(position.y, geometry, bandHeight) || !inFrame) && selectedId !== node.id,
       )
-      // The density rules exempt the selected card from compaction, and they key off this class on the node
-      // element. Without it the exemption silently never applied and a selected card compacted with the rest.
-      card.classList.toggle("is-selected", selectedId === node.id)
+      const offscreen = card.classList.contains("is-offscreen")
+      // Descendant links/buttons are real native actions, but an offscreen card must not remain a hidden tab
+      // target. Remember each authored tabindex and restore it when lane rolling reveals the card again.
+      card.querySelectorAll<HTMLElement>("a,button,input,select,textarea,summary,[role='link']").forEach(control => {
+        if (offscreen) {
+          if (control.dataset.dtOriginalTabIndex === undefined) {
+            control.dataset.dtOriginalTabIndex = control.getAttribute("tabindex") ?? ""
+          }
+          control.tabIndex = -1
+        } else if (control.dataset.dtOriginalTabIndex !== undefined) {
+          const original = control.dataset.dtOriginalTabIndex
+          if (original) control.setAttribute("tabindex", original)
+          else control.removeAttribute("tabindex")
+          delete control.dataset.dtOriginalTabIndex
+        }
+      })
     }
 
     // Tab stops are authored here, from the positions just written, because a lane rolls under the pointer
@@ -367,15 +476,117 @@ export default function DigitalThreadCanvas({
       svg.style.left = "-26px"
       svg.style.top = "-56px"
     }
+    // Label obstacles come from the rendered cards, including dimmed context cards. This is intentionally
+    // measured after positions/classes are written, so a selected card's expanded body is an actual obstacle.
+    const cardObstacles = nodes.flatMap(node => {
+      const card = cardRefs.current.get(node.id)
+      const position = positions.get(node.id)
+      if (!card || !position || card.classList.contains("is-offscreen")) return []
+      return [{
+        x: position.x,
+        y: position.y,
+        width: geometry.laneWidth,
+        height: Math.max(geometry.cardHeight, card.offsetHeight || card.scrollHeight),
+      }]
+    })
+    const labelsAtRest = transform.current.zoom > 1.05
+    const currentZoom = transform.current.zoom || 1
+    const shownEdge = (entry: (typeof edgeRefs.current)[number]): boolean => {
+      if (!entry.label) return false
+      const from = positions.get(entry.edge.from)
+      const to = positions.get(entry.edge.to)
+      if (!from || !to) return false
+      const traced = tracedEdges?.has(edgeIdentity(entry.edge.from, entry.edge.to)) ?? false
+      const inWindow = (position: { x: number; y: number }) => {
+        const y = position.y + geometry.anchor
+        return y > -20 && y < bandHeight + 20
+      }
+      const inHorizontalWindow = (position: { x: number; y: number }) => {
+        const left = position.x * currentZoom + transform.current.x
+        const right = left + geometry.laneWidth * currentZoom
+        return right > box.x - 20 && left < box.x + box.width + 20
+      }
+      // Only visible labels take placement slots. Dimmed cards remain obstacles above, while untraced/resting
+      // labels that the next loop hides must not make a crowded frame appear exhausted.
+      return (traced || labelsAtRest) && inWindow(from) && inWindow(to) &&
+        (inHorizontalWindow(from) || inHorizontalWindow(to))
+    }
+    const labelCandidates = edgeRefs.current
+      .filter(shownEdge)
+      .sort((a, b) => {
+        const aTraced = tracedEdges?.has(edgeIdentity(a.edge.from, a.edge.to)) ?? false
+        const bTraced = tracedEdges?.has(edgeIdentity(b.edge.from, b.edge.to)) ?? false
+        return Number(bTraced) - Number(aTraced)
+      })
+      .map(entry => {
+        const bounds = (() => {
+          try {
+            return entry.label?.getBBox()
+          } catch {
+            return undefined
+          }
+        })()
+        return {
+          key: edgeIdentity(entry.edge.from, entry.edge.to),
+          label: entry.edge.label,
+          from: positions.get(entry.edge.from)!,
+          to: positions.get(entry.edge.to)!,
+          // SVG gives us the real rendered text width in scene units. A character-count estimate is too wide
+          // for the narrow gutter between two cards and turns a valid connector slot into false exhaustion.
+          width: bounds && Number.isFinite(bounds.width) && bounds.width > 0 ? bounds.width : undefined,
+          height: bounds && Number.isFinite(bounds.height) && bounds.height > 0 ? bounds.height : undefined,
+        }
+      })
+    const viewportRect = viewportRef.current?.getBoundingClientRect()
+    const zoom = currentZoom
+    const toSceneRect = (rect: DOMRect): CanvasRect | null => {
+      if (!viewportRect) return null
+      return {
+        x: (rect.left - viewportRect.left - transform.current.x) / zoom,
+        y: (rect.top - viewportRect.top - transform.current.y) / zoom,
+        width: rect.width / zoom,
+        height: rect.height / zoom,
+      }
+    }
+    // Labels are SVG scene coordinates. Convert the free frame and every untransformed/DOM-measured obstacle to
+    // that same coordinate space before collision testing; mixing viewport pixels with scene units lets labels
+    // appear clear in one pan position and land over a card in another.
+    const sceneFrame: CanvasRect = {
+      x: (box.x - transform.current.x) / zoom,
+      y: (box.y - transform.current.y) / zoom,
+      width: box.width / zoom,
+      height: box.height / zoom,
+    }
+    const domObstacles = [
+      ...Array.from(scene.querySelectorAll<HTMLElement>(".dtCanvasLaneHead")),
+      scene.querySelector<HTMLElement>(".dtCanvasControls"),
+    ].flatMap(element => {
+      const rect = element?.getBoundingClientRect()
+      const converted = rect ? toSceneRect(rect) : null
+      return converted ? [converted] : []
+    })
+    const labelPositions = placeEdgeLabels(labelCandidates, geometry, [...cardObstacles, ...domObstacles], sceneFrame)
+    // A completely occupied frame is a layout shortfall, not permission to paint a colliding midpoint. Ask the
+    // owning view to re-dock its inspector, using the same measured-room recovery as direct cards; the current
+    // placement remains explicitly marked exhausted until that repaint supplies a real free slot.
+    if ([...labelPositions.values()].some(position => position.exhausted)) onFramingNeedsRoom?.()
+    const placementNotice = viewportRef.current?.querySelector<HTMLElement>(".dtCanvasPlacementNotice")
+    if (placementNotice) {
+      const unavailable = [...labelPositions.values()].some(position => !position.available)
+      placementNotice.hidden = !unavailable
+      placementNotice.textContent = unavailable
+        ? "A relation label cannot fit without covering other content. Enlarge the canvas to show it on its connector."
+        : ""
+    }
     // Edge labels rest hidden and appear on a traced edge, or once the board is zoomed past 1.05 (#880 §6.7).
     // At the default fit the canvas stays calm; a reader who has selected something, or leaned in, gets the
     // relation words.
-    const labelsAtRest = transform.current.zoom > 1.05
-    for (const { path, dot, label, edge } of edgeRefs.current) {
+    for (const { path, dot, leader, label, edge } of edgeRefs.current) {
       const from = positions.get(edge.from)
       const to = positions.get(edge.to)
       if (!from || !to) continue
-      path.setAttribute("d", edgePath(from, to, geometry))
+      const position = labelPositions.get(edgeIdentity(edge.from, edge.to))
+      path.setAttribute("d", edgePath(from, to, geometry, position?.route))
       const backwards = to.x <= from.x
       dot.setAttribute("cx", String(backwards ? to.x + geometry.laneWidth : to.x))
       dot.setAttribute("cy", String(to.y + geometry.anchor))
@@ -402,27 +613,41 @@ export default function DigitalThreadCanvas({
         // An intra-lane edge bows into the gutter beside its lane, so its label follows it there. Taking the
         // midpoint of the two endpoints would put the word in the middle of the lane, on top of the very cards
         // the edge is drawn between.
-        const midX = isIntraLane(from, to)
-          ? from.x + geometry.laneWidth + 30
-          : (from.x + geometry.laneWidth + to.x) / 2
-        const midY = (from.y + to.y) / 2 + geometry.anchor - 6
-        label.setAttribute("x", String(midX))
-        label.setAttribute("y", String(midY))
-        label.style.opacity = inWindow && (traced || labelsAtRest) ? "" : "0"
+        if (position) {
+          label.setAttribute("x", String(position.x))
+          label.setAttribute("y", String(position.y))
+          label.dataset.edgePlacement = position.exhausted ? "exhausted" : "clear"
+        }
+        if (leader) {
+          leader.setAttribute("x1", String(position?.anchorX ?? 0))
+          leader.setAttribute("y1", String(position?.anchorY ?? 0))
+          leader.setAttribute("x2", String(position?.x ?? 0))
+          leader.setAttribute("y2", String(position?.y ?? 0))
+          leader.style.opacity = inWindow && (traced || labelsAtRest) && position?.leader ? "" : "0"
+        }
+        // Labels that were outside the current horizontal window have no placement entry. Keep them hidden until
+        // the same shownEdge filter admits them; otherwise the SVG's initial coordinates can leak a stale phrase
+        // into the frame after a lane roll or dock transition.
+        label.style.opacity = inWindow && (traced || labelsAtRest) && position?.available === true ? "" : "0"
       }
     }
-  }, [counts, frame, lanes.length, nodes, selectedId, tracedEdges])
+  }, [counts, frame, lanes.length, nodes, onFramingNeedsRoom, selectedId, trailingOverhang, tracedEdges])
+
+  // A lane's animation can outlive the render that started it (focus is followed by selection).
+  // Paint the committed selection rather than letting an older tick restore stale card visibility.
+  const committedPaint = useRef(paint)
+  useLayoutEffect(() => { committedPaint.current = paint }, [paint])
 
   const settle = useCallback(() => {
     if (animation.current !== null) return
     const tick = () => {
       const stepped = stepTowards(offsets.current, targets.current)
       offsets.current = stepped.offsets
-      paint()
+      committedPaint.current()
       animation.current = stepped.moving || scrubbing.current ? requestAnimationFrame(tick) : null
     }
     animation.current = requestAnimationFrame(tick)
-  }, [paint])
+  }, [])
 
   /**
    * Land the board.
@@ -443,9 +668,15 @@ export default function DigitalThreadCanvas({
   const fitAll = useCallback(() => {
     const box = frame()
     if (!box) return
-    transform.current = fitTransform(box, counts, false)
+    // Fit the edge layer as well as the cards. The final lane's intra-lane connector deliberately extends into
+    // the reserved overhang; leaving that space out of this explicit overview fit makes the scene's DOM box
+    // protrude past the viewport even though every card appears to fit.
+    const fitBox = trailingOverhang
+      ? { ...box, width: Math.max(240, box.width - trailingOverhang) }
+      : box
+    transform.current = fitTransform(fitBox, counts, false)
     paint()
-  }, [counts, frame, paint])
+  }, [counts, frame, paint, trailingOverhang])
 
   /**
    * Reframe onto the selection and its direct links.
@@ -461,62 +692,90 @@ export default function DigitalThreadCanvas({
    * lane, and no state change was pending to make the effect run again.
    */
   const applyFraming = useCallback(
-    (target: { selectedId: string; wanted: string[] } | null): boolean => {
+    (target: { selectedId: string; wanted: string[]; intent: FrameIntent; key: string } | null): boolean => {
       if (!target) return false
       const box = frame()
-      const result = geometryRef.current
-      if (!box || !result) return false
+      if (!box || !geometryRef.current) return false
 
-      // Roll every lane to bring the selected record's linked records into their own windows, before framing
+      // Read every requested card's actual layout height before choosing a camera. Wrapped identifiers and
+      // state pills can make a direct card taller than its nominal tier height; the measured border box keeps
+      // another direct record clear after a trace selection.
+      const cardHeights = new Map<string, number>()
+      for (const node of nodes) {
+        const card = cardRefs.current.get(node.id)
+        card?.classList.toggle("is-selected", target.selectedId === node.id)
+        const measured = card?.offsetHeight || card?.scrollHeight
+        if (measured && Number.isFinite(measured)) cardHeights.set(node.id, measured)
+      }
+      const result = layoutWithMeasuredCards(layout(counts, box, transform.current.zoom), nodes, cardHeights)
+
+      const synchronize = (measuredLayout: typeof result) => {
+        const rolled = clampOffsets(offsets.current, measuredLayout.laneMinimums)
+        const selectedNode = nodes.find(node => node.id === target.selectedId)
+        if (selectedNode) {
+          const position = positionsForNodes(nodes, measuredLayout.geometry, rolled, cardHeights).get(selectedNode.id)
+          if (position) {
+            const height = Math.max(measuredLayout.geometry.cardHeight, cardHeights.get(selectedNode.id) ?? 0)
+            const top = measuredLayout.geometry.pad
+            const bottom = Math.max(top, measuredLayout.bandHeight - height - top)
+            const wantedY = Math.max(top, Math.min(bottom, position.y))
+            // Ordinary lane synchronization preserves its anchor lane. Selection has to reveal the entire
+            // expanded anchor first, including native actions beneath its title, before aligning other lanes.
+            rolled[selectedNode.lane] = Math.max(measuredLayout.laneMinimums[selectedNode.lane] ?? 0,
+              Math.min(0, (rolled[selectedNode.lane] ?? 0) + wantedY - position.y))
+          }
+        }
+        return syncTargets(target.selectedId, nodes, edges, measuredLayout.geometry, rolled,
+          measuredLayout.laneMinimums, counts.length, -1, cardHeights)
+      }
+
+      // Roll every lane to bring the selected record's directed story into its own windows, before framing
       // (#880 §6.4: "the same routine runs on selection"). Panning the camera cannot do this job: a lane
       // scrolls independently, so a linked record can sit outside its lane window no matter where the camera
       // is, and framing alone would centre on a card the reader still cannot see. The offsets are applied at
       // once rather than animated into place so the two-pass framing below measures where the cards landed.
-      const synced = syncTargets(
-        target.selectedId,
-        nodes,
-        edges,
-        result.geometry,
-        offsets.current,
-        result.laneMinimums,
-        counts.length,
-        -1,
-      )
+      const synced = synchronize(result)
       offsets.current = [...synced]
       targets.current = [...synced]
 
-      /**
-       * Frame the requested set, and fall back to the selection and one hop when it will not fit.
-       *
-       * Framing may no longer zoom out past the §10.1 landing floor to make a wide web fit, so on a narrow
-       * viewport — or with the panel docked to a side — the whole traced web can be wider than the area the
-       * panel leaves. Pinning it anyway pushes its far cards under the panel, which is exactly what §6.6
-       * forbids. The wide-web framing is a landing convenience; non-occlusion is a guarantee, so when the two
-       * cannot both hold the convenience gives way and the board frames the smaller set that does fit.
-       */
-      const fits = (transform: { x: number; zoom: number }, ids: readonly string[]): boolean => {
+      const fits = (transform: { x: number; y: number; zoom: number }, ids: readonly string[]): boolean => {
+        const settled = layoutWithMeasuredCards(layout(counts, box, transform.zoom), nodes, cardHeights)
         const wanted = new Set(ids)
+        const positions = positionsForNodes(nodes, settled.geometry, offsets.current, cardHeights)
         for (const node of nodes) {
           if (!wanted.has(node.id)) continue
-          const { x } = nodePosition(node, result.geometry, offsets.current)
+          const { x, y } = positions.get(node.id) ?? nodePosition(node, settled.geometry, offsets.current)
           const left = x * transform.zoom + transform.x
-          const right = left + result.geometry.laneWidth * transform.zoom
-          if (left < box.x - 1 || right > box.x + box.width + 1) return false
+          const right = left + settled.geometry.laneWidth * transform.zoom
+          const measuredHeight = Math.max(
+            settled.geometry.cardHeight,
+            node.id === target.selectedId ? selectedCardHeight ?? 0 : 0,
+            cardHeights.get(node.id) ?? 0,
+          )
+          const top = y * transform.zoom + transform.y
+          const bottom = top + measuredHeight * transform.zoom
+          // Direct cards need both an actual lane-window position and complete x/y containment. A card that is
+          // merely in the same scene but rolled out or sitting beneath the dock is not reachable evidence.
+          if (!isVisible(y, settled.geometry, settled.bandHeight)) return false
+          if (left < box.x - 1 || right > box.x + box.width + 1 || top < box.y - 1 || bottom > box.y + box.height + 1) return false
         }
         return true
       }
 
-      const hop = new Set<string>([target.selectedId])
-      for (const edge of edges) {
-        if (edge.from === target.selectedId) hop.add(edge.to)
-        if (edge.to === target.selectedId) hop.add(edge.from)
-      }
-
-      let next = frameNodes(target.wanted, nodes, counts, box, offsets.current, target.selectedId)
-      if (next && target.wanted.length > 1 && !fits(next, target.wanted)) {
-        const narrower = frameNodes([...hop], nodes, counts, box, offsets.current, target.selectedId)
-        if (narrower) next = narrower
-      }
+      // The selected card's expanded body is measured from the rendered DOM. The old fixed allowance made a
+      // larger card overlap the panel and made a shorter card reserve unnecessary empty space.
+      const selectedCardHeight = cardHeights.get(target.selectedId)
+      const next = frameNodes(
+        target.wanted,
+        nodes,
+        counts,
+        box,
+        offsets.current,
+        target.selectedId,
+        1.12,
+        true,
+        { intent: target.intent, selectedCardHeight, cardHeights },
+      )
       if (!next) return false
 
       /**
@@ -524,16 +783,38 @@ export default function DigitalThreadCanvas({
        *
        * §6.6 is a guarantee, not a preference, and it survived the Option-A ruling untouched. Hiding a linked
        * record that will not fit satisfies "not underneath the panel" only by making it not present, which is
-       * the same failure wearing a different face. When the free area this dock leaves cannot hold the
-       * one-hop set at the legibility floor, the panel has to move rather than the record disappear — so the
+       * the same failure wearing a different face. When the free area this dock leaves cannot hold the selected
+       * record and its direct links at the readable floor, the panel has to move rather than the record disappear — so the
        * canvas says so and the view re-docks. Reported rather than decided here: the canvas owns geometry,
        * the view owns where its own panel may go.
        */
-      if (!fits(next, [...hop])) onFramingNeedsRoom?.()
+      const direct = new Set<string>([target.selectedId])
+      for (const edge of edges) {
+        if (edge.from === target.selectedId) direct.add(edge.to)
+        if (edge.to === target.selectedId) direct.add(edge.from)
+      }
+      if (!fits(next, [...direct])) onFramingNeedsRoom?.()
 
       sceneRef.current?.classList.add("is-easing")
       transform.current = next
       paint()
+      // The new zoom can change row pitch and card height. Reconcile the anchor against that actual tier,
+      // rather than leaving an expanded lower-row card beneath the dock after offsets have been rescaled.
+      for (const node of nodes) {
+        const card = cardRefs.current.get(node.id)
+        const measured = card?.offsetHeight || card?.scrollHeight
+        if (measured && Number.isFinite(measured)) cardHeights.set(node.id, measured)
+      }
+      const settledLayout = layoutWithMeasuredCards(layout(counts, box, next.zoom), nodes, cardHeights)
+      offsets.current = synchronize(settledLayout)
+      targets.current = offsets.current.slice()
+      const settledFrame = frameNodes(target.wanted, nodes, counts, box, offsets.current, target.selectedId,
+        next.zoom, true, { intent: target.intent, selectedCardHeight: cardHeights.get(target.selectedId), cardHeights })
+      if (settledFrame) {
+        transform.current = settledFrame
+        paint()
+        if (!fits(settledFrame, [...direct])) onFramingNeedsRoom?.()
+      }
       if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
       easeTimer.current = window.setTimeout(() => {
         sceneRef.current?.classList.remove("is-easing")
@@ -541,7 +822,7 @@ export default function DigitalThreadCanvas({
       }, 420)
       return true
     },
-    [counts, edges, frame, nodes, paint],
+     [counts, edges, frame, nodes, onFramingNeedsRoom, paint],
   )
 
   // Read by the resize path, which must be able to retry a selection that arrived before the frame was real
@@ -686,6 +967,12 @@ export default function DigitalThreadCanvas({
             result.bandHeight,
           )
           if (anchor) {
+            const measuredHeights = new Map<string, number>()
+            for (const candidate of nodes) {
+              const card = cardRefs.current.get(candidate.id)
+              const height = card?.offsetHeight || card?.scrollHeight
+              if (height && Number.isFinite(height)) measuredHeights.set(candidate.id, height)
+            }
             targets.current = syncTargets(
               anchor.id,
               nodes,
@@ -695,6 +982,7 @@ export default function DigitalThreadCanvas({
               result.laneMinimums,
               lanes.length,
               lane,
+              measuredHeights,
             )
           }
           settle()
@@ -704,7 +992,7 @@ export default function DigitalThreadCanvas({
         paint()
       }
       const up = () => {
-        element.classList.remove("is-panning", "is-rolling", "is-idle")
+      element.classList.remove("is-panning", "is-rolling", "is-idle")
         scrubbing.current = false
         if (!start.moved) onSelect?.(card?.dataset.nodeId ?? null)
         element.removeEventListener("pointermove", move)
@@ -769,11 +1057,19 @@ export default function DigitalThreadCanvas({
     (node: CanvasNode) => {
       const result = geometryRef.current
       if (!result) return
+      const measuredHeights = new Map<string, number>()
+      for (const candidate of nodes) {
+        const card = cardRefs.current.get(candidate.id)
+        const height = card?.offsetHeight || card?.scrollHeight
+        if (height && Number.isFinite(height)) measuredHeights.set(candidate.id, height)
+      }
+      const measuredPosition = positionsForNodes(nodes, result.geometry, offsets.current, measuredHeights).get(node.id)
       const revealed = offsetToReveal(
         node.row,
         result.geometry,
         result.bandHeight,
         offsets.current[node.lane] ?? 0,
+        measuredPosition?.y,
       )
       // Never past what the lane can actually roll, or the lane would scroll off its own content.
       targets.current[node.lane] = Math.max(result.laneMinimums[node.lane] ?? 0, revealed)
@@ -783,8 +1079,12 @@ export default function DigitalThreadCanvas({
       settle()
 
       const box = frame()
+      // `.dtCanvas` is a transformed viewport, never a native document scrollport. Some browsers still retain a
+      // programmatic scroll offset after focusing an offscreen descendant; clear that stale offset before the
+      // camera correction below so keyboard reveal cannot leave a blank scene.
+      viewportRef.current?.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior })
       if (!box) return
-      const { x } = nodePosition(node, result.geometry, offsets.current)
+      const { x } = measuredPosition ?? nodePosition(node, result.geometry, offsets.current)
       const left = x * transform.current.zoom + transform.current.x
       const right = left + result.geometry.laneWidth * transform.current.zoom
       const margin = 16
@@ -792,7 +1092,7 @@ export default function DigitalThreadCanvas({
       else if (right > box.x + box.width - margin) transform.current.x -= right - (box.x + box.width - margin)
       paint()
     },
-    [frame, paint, settle],
+    [frame, nodes, paint, settle],
   )
 
   /** Arrow navigation within a lane, revealing the card it moves to. */
@@ -805,7 +1105,7 @@ export default function DigitalThreadCanvas({
       if (!next || next.id === node.id) return
       setRoving(current => ({ ...current, [node.lane]: next.id }))
       reveal(next)
-      cardRefs.current.get(next.id)?.focus()
+      cardRefs.current.get(next.id)?.focus({ preventScroll: true })
     },
     [byLane, reveal],
   )
@@ -837,6 +1137,20 @@ export default function DigitalThreadCanvas({
 
   edgeRefs.current = []
 
+  const fitSelection = () => {
+    if (!framing) return
+    const target = { ...framing, intent: "selection" as FrameIntent, key: `${framing.key}|fit-selection` }
+    if (applyFraming(target)) framedFor.current = framing.key
+  }
+
+  const fitStory = () => {
+    if (!framing) return
+    const target = { ...framing, intent: "story" as FrameIntent, key: `${framing.key}|fit-story` }
+    // The manual camera choice satisfies this selection's pending automatic framing too. Recording the
+    // synthetic action key instead would replay the landing on the next hover/render.
+    if (applyFraming(target)) framedFor.current = framing.key
+  }
+
   return (
     <div
       className="dtCanvas"
@@ -846,11 +1160,41 @@ export default function DigitalThreadCanvas({
       tabIndex={0}
       onWheel={onWheel}
       onPointerDown={onPointerDown}
+      onFocusCapture={event => {
+        if (!nestedControl(event.target)) return
+        // Native focus remains native; only prevent the transformed wrapper from becoming its scroll owner.
+        viewportRef.current?.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior })
+      }}
       onKeyDown={onKeyDown}
       onDoubleClick={event => {
         if (!(event.target as HTMLElement).closest("[data-node-id]")) fitAll()
       }}
     >
+      <div
+        className="dtCanvasControls"
+        role="toolbar"
+        aria-label="Canvas framing controls"
+        onPointerDown={event => event.stopPropagation()}
+      >
+        <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => {
+          const box = frame()
+          if (!box) return
+          transform.current = zoomAbout(transform.current, box.width / 2, box.height / 2, 0.81, minimumZoom(box, counts))
+          paint()
+        }}>−</button>
+        <output ref={zoomReadoutRef} aria-label="Current canvas scale">100% · Detailed</output>
+        <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => {
+          const box = frame()
+          if (!box) return
+          transform.current = zoomAbout(transform.current, box.width / 2, box.height / 2, 1.24, MIN_ZOOM)
+          paint()
+        }}>+</button>
+        <span className="dtCanvasControlDivider" aria-hidden="true" />
+        <button type="button" disabled={!framing} onClick={fitSelection}>Fit selected story</button>
+        <button type="button" disabled={!framing} onClick={fitStory}>Fit entire story</button>
+        <button type="button" onClick={fitAll} title="Fit the projected board; tall lanes remain independently scrollable">Fit board</button>
+      </div>
+      <div className="dtCanvasPlacementNotice" role="status" aria-live="polite" hidden />
       <div className="dtCanvasScene" ref={sceneRef}>
         <div className="dtCanvasBands">
           {lanes.map((title, lane) => {
@@ -888,15 +1232,19 @@ export default function DigitalThreadCanvas({
                 ref={element => {
                   if (!element) return
                   const dot = element.nextElementSibling as SVGCircleElement | null
-                  const label = dot?.nextElementSibling as SVGTextElement | null
-                  if (dot) edgeRefs.current.push({ path: element, dot, label, edge })
+                  const leader = dot?.nextElementSibling as SVGLineElement | null
+                  const label = leader?.nextElementSibling as SVGTextElement | null
+                  if (dot) edgeRefs.current.push({ path: element, dot, leader, label, edge })
                 }}
               />
               <circle r="3" className={`dtCanvasEdgeDot${edge.kind ? ` is-${edge.kind}` : ""}`} />
               {edge.label ? (
-                <text className="dtCanvasEdgeLabel" textAnchor="middle">
-                  {edge.label}
-                </text>
+                <>
+                  <line className="dtCanvasEdgeLabelLeader" />
+                  <text className="dtCanvasEdgeLabel" textAnchor="middle">
+                    {edge.label}
+                  </text>
+                </>
               ) : null}
             </g>
           ))}

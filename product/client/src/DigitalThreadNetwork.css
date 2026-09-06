@@ -119,7 +119,7 @@
   -webkit-line-clamp: 2;
 }
 
-.dtnMeta { display: flex; gap: 10px; color: #8493a6; font-size: 10px; }
+.dtnMeta { display: flex; gap: 10px; color: #5f7080; font-size: 10px; }
 
 /* Suspect carries its word in the pill as well as the colour; colour alone is never the signal. */
 .dtCanvasNode:has(.dtnCard.is-suspect) { border-color: #e0c17e; background: #fffdf6; }
@@ -153,6 +153,8 @@
 
 .dtnPanel {
   position: absolute;
+  display: flex;
+  flex-direction: column;
   z-index: 70;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -163,9 +165,26 @@
 
 .dtnPanel-right { right: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
 .dtnPanel-left { left: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
-.dtnPanel-bottom { left: 16px; right: 16px; bottom: 18px; height: 150px; overflow: hidden; }
+.dtnPanel-bottom {
+  left: 16px;
+  right: 16px;
+  bottom: 18px;
+  height: 150px;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
 
-.dtnPanelTools { position: absolute; right: 10px; top: 10px; display: flex; gap: 4px; z-index: 2; }
+.dtnPanelTools { position: static; display: flex; justify-content: flex-end; flex: 0 0 24px; gap: 4px; z-index: 2; margin-bottom: 4px; }
+
+/* A bottom dock keeps its tools in normal flow. This gives the panel a measured toolbar row rather than relying
+   on an action-column offset that can overlap the primary action at compact widths. */
+.dtnPanel-bottom .dtnPanelTools {
+  position: static;
+  flex: 0 0 auto;
+  align-self: stretch;
+  margin: 0 0 4px;
+}
 
 .dtnPanelTools button {
   min-height: 24px;
@@ -182,15 +201,17 @@
 .dtnPanelTools button.is-on { border-color: var(--teal-700); background: #eff9f6; color: var(--teal-700); }
 
 .dtnEyebrow { margin: 0; color: var(--teal-600); font: var(--weight-bold) 9px var(--font-body); letter-spacing: .13em; }
-.dtnPanelGrid { display: flex; flex-direction: column; gap: 13px; }
+.dtnPanelGrid { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 13px; }
 
 /* Flattened, the panel is four columns rather than one third of a tall box with empty space beneath it. */
 .dtnPanel-bottom .dtnPanelGrid {
   display: grid;
   grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr) 158px;
   gap: 18px;
-  align-items: start;
-  height: 100%;
+  align-items: stretch;
+  height: auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .dtnPanelIdentity { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
@@ -202,7 +223,14 @@
 .dtnRelHead span { color: #8fa0b2; font-size: 9.5px; font-weight: var(--weight-strong); }
 
 .dtnRel { display: grid; gap: 4px; overflow-y: auto; max-height: 152px; }
-.dtnPanel-bottom .dtnRel { grid-template-columns: 1fr 1fr; align-content: start; max-height: 96px; padding-right: 3px; }
+.dtnPanel-bottom .dtnRel {
+  grid-template-columns: 1fr 1fr;
+  align-content: start;
+  max-height: none;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding-right: 3px;
+}
 
 .dtnRel button {
   display: flex;
@@ -225,7 +253,12 @@
 .dtnRel em { margin-left: auto; color: #8493a6; font-size: 13px; font-style: normal; }
 .dtnRelEmpty { margin: 0; color: #8fa0b2; font-size: 10.5px; padding: 4px 0; }
 
-.dtnPanelActions { display: flex; flex-direction: column; gap: 6px; justify-content: flex-end; }
+.dtnPanelActions { display: flex; flex-direction: column; gap: 6px; justify-content: flex-end; min-width: 0; }
+.dtnPanel-bottom .dtnPanelIdentityCol,
+.dtnPanel-bottom .dtnPanelCol,
+.dtnPanel-bottom .dtnPanelActions { min-height: 0; }
+.dtnPanel-bottom .dtnPanelIdentityCol,
+.dtnPanel-bottom .dtnPanelCol { overflow: hidden; }
 
 .dtnPanelActions button {
   min-height: 32px;
@@ -239,7 +272,6 @@
 }
 
 .dtnPanelActions button.is-primary { border-color: var(--teal-700); background: var(--teal-700); color: #fff; }
-.dtnPanel-bottom .dtnPanelActions { padding-top: 26px; }
 
 .dtnVisuallyHidden {
   position: absolute;

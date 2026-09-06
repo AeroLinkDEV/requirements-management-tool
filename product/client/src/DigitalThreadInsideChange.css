@@ -57,6 +57,18 @@
 
 .dticOpened b { color: #2b3d54; }
 
+.dticSearch { margin-left: auto; }
+.dticSearch input {
+  width: 208px;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+  padding: 7px 10px;
+  color: #2b3d54;
+  font: var(--weight-body) var(--text-control) var(--font-body);
+}
+
 /* The rebase flag is what makes an empty downstream lane legible, so it is stated in the toolbar as well as
    on the card that is affected. Colour never carries it alone. */
 .dticRebase {
@@ -102,6 +114,35 @@
 }
 
 .dticTop { display: flex; align-items: center; gap: 7px; min-width: 0; }
+
+/* The governed identifier is the anchor a reader carries between views. Give a register card's state its own
+   row so a long exact number cannot be squeezed to an ellipsis beside the status pill, especially at compact
+   scale. Other card kinds keep their existing compact single-line treatment. */
+.dticRegister .dticTop {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: "badge id" "badge state";
+  align-items: start;
+  column-gap: 7px;
+  row-gap: 3px;
+}
+.dticRegister .dticBadge { grid-area: badge; }
+.dticRegister .dticId {
+  grid-area: id;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.dticRegister .dticPill {
+  grid-area: state;
+  justify-self: start;
+  max-width: 100%;
+  margin-left: 0;
+  white-space: normal;
+  text-align: left;
+}
 
 .dticBadge {
   flex: none;
@@ -268,6 +309,8 @@
 
 .dticPanel {
   position: absolute;
+  display: flex;
+  flex-direction: column;
   left: 16px;
   right: 16px;
   bottom: 18px;
@@ -281,7 +324,7 @@
   padding: 14px 16px;
 }
 
-.dticPanelTools { position: absolute; right: 10px; top: 8px; }
+.dticPanelTools { position: static; display: flex; justify-content: flex-end; flex: 0 0 24px; gap: 4px; margin-bottom: 4px; }
 
 .dticPanelTools button {
   min-height: 24px;
@@ -340,7 +383,9 @@
 .dticPanel-right { right: 16px; top: 70px; bottom: 22px; left: auto; width: 300px; height: auto; overflow: auto; }
 .dticPanel-left { left: 16px; top: 70px; bottom: 22px; right: auto; width: 300px; height: auto; overflow: auto; }
 
-.dticPanel-bottom { display: grid; grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.dticPanelContent { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 8px; overflow: auto; }
+.dticPanel-bottom .dticPanelContent { display: grid; grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; overflow: hidden; }
+.dticPanelIdentityCol { min-width: 0; overflow-y: auto; }
 
 .dticPanelTools { display: flex; gap: 4px; }
 

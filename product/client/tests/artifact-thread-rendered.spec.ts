@@ -569,6 +569,8 @@ test.describe("shared canvas behaviour", () => {
       const card = page.locator(`.dtCanvasNode:has(.dtaCard:has-text("${identity}"))`).first()
       await expect(card).not.toHaveClass(/is-offscreen/)
     }
+    // A focus-triggered lane animation must not repaint the previous selection after pointer activation.
+    await expect(page.locator('.dtCanvasNode[aria-pressed="true"]')).toHaveClass(/is-selected/)
   })
 
   test("the detail panel never comes to rest on a directly linked record", async ({ page }) => {
@@ -689,7 +691,7 @@ test.describe("keyboard access", () => {
   test("the traced web is announced, not only drawn", async ({ page }) => {
     await open(page, "hlr")
 
-    const live = page.locator('[aria-live="polite"]')
+    const live = page.locator('.dtaVisuallyHidden[aria-live="polite"]')
     await expect(live).toContainText("HLR-000075.02")
     await expect(live).toContainText("upstream")
     await expect(live).toContainText("downstream")
