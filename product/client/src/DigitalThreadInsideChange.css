@@ -69,6 +69,9 @@
 
 .dticStage { position: relative; flex: 1; min-height: 0; }
 .dticStage > .dtCanvas { position: absolute; inset: 0; }
+.dticCanvasView { position: absolute; inset: 0; }
+.dticCanvasView > .dtCanvas { position: absolute; inset: 0; }
+.dticCanvasView.is-hidden { visibility: hidden; pointer-events: none; }
 
 .dticLoading {
   position: absolute;

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import DigitalThreadCanvas from "./DigitalThreadCanvas"
+import DigitalThreadTable, {
+  type DigitalThreadTableColumn,
+  type DigitalThreadTableRow,
+  type ThreadRepresentation,
+} from "./DigitalThreadTable"
 import { usePanelDock } from "./digitalThreadPanelDock"
 import ExactArtifactLink from "./ExactArtifactLink"
 import { type CanvasEdge, type CanvasNode, compactLanes, trace } from "./digitalThreadGeometry"
@@ -70,7 +75,10 @@ export type DigitalThreadNetworkProps = {
   /** Opens the change inside its own view. Slice 4 supplies this. */
   onOpenChange?: (node: NetworkNode) => void
   buildLabel?: string
+  representation?: ThreadRepresentation
 }
+
+type NetworkTableRow = DigitalThreadTableRow & { node: NetworkNode }
 
 /**
  * The build change network: every change request in a build and every typed relation between them.
@@ -90,6 +98,7 @@ export default function DigitalThreadNetwork({
   hrefFor,
   onOpenChange,
   buildLabel,
+  representation = "map",
 }: DigitalThreadNetworkProps) {
   const [uncontrolledSelectedId, setUncontrolledSelectedId] = useState<string | null>(null)
   const selectedId = selectedIdProp === undefined ? uncontrolledSelectedId : selectedIdProp
@@ -112,6 +121,19 @@ export default function DigitalThreadNetwork({
   const [query, setQuery] = useState("")
   const [groups, setGroups] = useState<Set<string>>(new Set())
   const liveRegion = useRef<HTMLDivElement | null>(null)
+  const canvasViewRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const element = canvasViewRef.current
+    if (!element) return
+    if (representation === "table") {
+      element.setAttribute("aria-hidden", "true")
+      element.setAttribute("inert", "")
+    } else {
+      element.removeAttribute("aria-hidden")
+      element.removeAttribute("inert")
+    }
+  }, [representation])
 
   // Memoised because `?? []` would hand every memo below a fresh array on each render and defeat all of them.
   const nodes = useMemo(() => projection?.nodes ?? [], [projection])
@@ -181,6 +203,91 @@ export default function DigitalThreadNetwork({
     [edges, selectedId],
   )
 
+  const matchesFilters = useCallback(
+    (node: NetworkNode): boolean => {
+      // Level chips only. Suspect is a property of a relationship, not of these records, and no relation
+      // this board draws can carry it.
+      if (groups.size && !groups.has(groupOf(node))) return false
+      if (query) {
+        const haystack = `${node.displayNumber} ${node.title ?? ""}`.toLowerCase()
+        if (!haystack.includes(query.toLowerCase())) return false
+      }
+      return true
+    },
+    [groups, query],
+  )
+
+  const tableRows = useMemo<NetworkTableRow[]>(
+    () => canvasNodes
+      .map(canvasNode => byId.get(canvasNode.id))
+      .filter((node): node is NetworkNode => Boolean(node))
+      .filter(matchesFilters)
+      .map(node => ({ id: node.id, label: node.displayNumber, node })),
+    [byId, canvasNodes, matchesFilters],
+  )
+
+  const tableRelations = useCallback(
+    (node: NetworkNode, direction: "upstream" | "downstream") => {
+      const relationEdges = edges.filter(edge =>
+        direction === "upstream" ? edge.toId === node.id : edge.fromId === node.id)
+      if (!relationEdges.length) return <em>None recorded</em>
+      return relationEdges.map(edge => {
+        const relatedId = direction === "upstream" ? edge.fromId : edge.toId
+        const related = byId.get(relatedId)
+        if (!related) return null
+        const hop = web?.hops.get(related.id)
+        return (
+          <span key={`${edge.fromId}:${edge.toId}:${edge.relation}`}>
+            <ExactArtifactLink href={hrefFor?.(related)}>{related.displayNumber}</ExactArtifactLink>
+            <small>
+              {traceRelationLabelFor(edge.relation, edge.fromId === related.id)}
+              {hop && hop > 1 ? ` · ${hop} hops from selected` : ""}
+            </small>
+          </span>
+        )
+      })
+    },
+    [byId, edges, hrefFor, web],
+  )
+
+  const tableColumns = useMemo<readonly DigitalThreadTableColumn<NetworkTableRow>[]>(
+    () => [
+      {
+        key: "change",
+        label: "Change",
+        render: row => (
+          <>
+            <ExactArtifactLink href={hrefFor?.(row.node)}>{row.node.displayNumber}</ExactArtifactLink>
+            <span>{row.node.title ?? "Untitled change"}</span>
+          </>
+        ),
+      },
+      { key: "level", label: "Level", render: row => row.node.level ?? "Unclassified" },
+      { key: "state", label: "State", render: row => stateLabel(row.node.state ?? undefined) },
+      { key: "upstream", label: "Upstream", render: row => tableRelations(row.node, "upstream") },
+      { key: "downstream", label: "Downstream", render: row => tableRelations(row.node, "downstream") },
+      {
+        key: "trace",
+        label: "Trace context",
+        render: row => {
+          if (!selectedId) return <em>No record selected</em>
+          const hop = web?.hops.get(row.id)
+          return row.id === selectedId ? "Selected record" : hop ? `${hop} hop${hop === 1 ? "" : "s"}` : "Outside selected trace"
+        },
+      },
+    ],
+    [hrefFor, selectedId, tableRelations, web],
+  )
+
+  const tableTruncatedMessage = useMemo(() => {
+    const messages: string[] = []
+    if (offLadder.length) {
+      messages.push(`${offLadder.reduce((sum, item) => sum + item.count, 0)} record${offLadder.reduce((sum, item) => sum + item.count, 0) === 1 ? " is" : "s are"} not shown because the project ladder does not configure ${offLadder.map(item => levelLaneLabel(item.level).toLowerCase()).join(" and ")}.`)
+    }
+    if (projection?.truncated) messages.push("This build carries more records than the network returns. Some changes and their links are not shown.")
+    return messages.length ? messages.join(" ") : null
+  }, [offLadder, projection?.truncated])
+
   /**
    * Which side the panel takes. It counts where the selected record's direct links actually are and docks on
    * the emptier one, so the panel is never covering the thing the highlighted edge points at.
@@ -216,20 +323,6 @@ export default function DigitalThreadNetwork({
       `${selected.displayNumber}, ${stateLabel(selected.state ?? undefined)}. ` +
       `${up} upstream and ${down} downstream direct links.`
   }, [directLinks, selected])
-
-  const matchesFilters = useCallback(
-    (node: NetworkNode): boolean => {
-      // Level chips only. Suspect is a property of a relationship, not of these records, and no relation
-      // this board draws can carry it.
-      if (groups.size && !groups.has(groupOf(node))) return false
-      if (query) {
-        const haystack = `${node.displayNumber} ${node.title ?? ""}`.toLowerCase()
-        if (!haystack.includes(query.toLowerCase())) return false
-      }
-      return true
-    },
-    [groups, query],
-  )
 
   /**
    * A lane that holds records but is showing none of them, because the chips or the search hid them all.
@@ -379,7 +472,7 @@ export default function DigitalThreadNetwork({
         </label>
       </div>
 
-      {offLadder.length ? (
+      {representation === "map" && offLadder.length ? (
         <p className="dtnTruncated" role="status">
           {offLadder
             .map(item => `${item.count} ${levelLaneLabel(item.level).toLowerCase()}`)
@@ -389,7 +482,7 @@ export default function DigitalThreadNetwork({
         </p>
       ) : null}
 
-      {projection?.truncated ? (
+      {representation === "map" && projection?.truncated ? (
         <p className="dtnTruncated" role="status">
           This build carries more records than the network returns. Some change requests and their links are
           not shown.
@@ -397,26 +490,49 @@ export default function DigitalThreadNetwork({
       ) : null}
 
       <div className="dtnStage">
-        <DigitalThreadCanvas
-          lanes={lanes}
-          nodes={canvasNodes}
-          edges={canvasEdges}
-          renderCard={renderCard}
-          laneNotice={laneNotice}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          onHover={setHoveredId}
-          frameInset={frameInset}
-          onFramingNeedsRoom={reportNeedsRoom}
-          tracedEdges={web?.edges}
-          ariaLabel="Change network for this build"
-        />
-        {loading ? <div className="dtnLoading">Loading the change network…</div> : null}
+        <div
+          className={`dtnCanvasView${representation === "table" ? " is-hidden" : ""}`}
+          ref={canvasViewRef}
+        >
+          <DigitalThreadCanvas
+            lanes={lanes}
+            nodes={canvasNodes}
+            edges={canvasEdges}
+            renderCard={renderCard}
+            laneNotice={laneNotice}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onHover={setHoveredId}
+            frameInset={frameInset}
+            onFramingNeedsRoom={reportNeedsRoom}
+            tracedEdges={web?.edges}
+            ariaLabel="Change network for this build"
+          />
+        </div>
+        {representation === "table" ? (
+          <DigitalThreadTable
+            ariaLabel="Change network table"
+            caption="Changes and their typed relationships in this build"
+            columns={tableColumns}
+            rows={tableRows}
+            availableCount={canvasNodes.length}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            loading={loading}
+            error={error}
+            onRetry={onRetry}
+            emptyMessage={`No change requests in ${buildLabel ?? "this build"}.`}
+            selectionMessage="No record selected. Select a row to trace its relationships."
+            truncatedMessage={tableTruncatedMessage}
+            reservedInset={frameInset}
+          />
+        ) : null}
+        {representation === "map" && loading ? <div className="dtnLoading">Loading the change network…</div> : null}
 
         {/* Every state below sits inside the frame rather than replacing it (#880 §6.8). Swapping the canvas
             out for a message discards the transform, the zoom and the selection, so recovering from a failed
             refresh would cost the reader the view they had built up. */}
-        {error ? (
+        {representation === "map" && error ? (
           <div className="dtnInFrame dtnInFrame-error" role="alert">
             <b>The change network could not be loaded.</b>
             <p>{error}</p>
@@ -428,7 +544,7 @@ export default function DigitalThreadNetwork({
           </div>
         ) : null}
 
-        {!loading && !error && projection && !nodes.length ? (
+        {representation === "map" && !loading && !error && projection && !nodes.length ? (
           <div className="dtnInFrame" role="status">
             <b>No change requests in {buildLabel ?? "this build"}.</b>
             <p>Change requests appear here as soon as one targets this build.</p>
@@ -437,7 +553,7 @@ export default function DigitalThreadNetwork({
 
         {/* Every lane empty at once earns a board-level line as well, because at that point the reader is
             looking at a board with nothing on it and needs the way out, not one label per lane. */}
-        {!loading && !error && nodes.length > 0 && !nodes.some(matchesFilters) ? (
+        {representation === "map" && !loading && !error && nodes.length > 0 && !nodes.some(matchesFilters) ? (
           <div className="dtnInFrame" role="status">
             <b>No records match.</b>
             <p>Clear a filter chip or the search box to bring records back.</p>

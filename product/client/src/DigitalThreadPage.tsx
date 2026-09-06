@@ -22,9 +22,9 @@ import "./DigitalThreadPage.css"
  * and one trace definition, and none of it is rebuilt here.
  *
  * Two capabilities from the old page survive because they are functions rather than chrome (§4.5): the
- * evidence table, which is the list alternative WCAG 2.2 and `DESIGN_VISION_AND_DASHBOARDS.md` require beside
- * any graph view, and the Trace PDF / DOCX exports that certification reviewers work from. Both are here, as
- * compact toolbar controls rather than the two large buttons they used to be.
+ * accessible table representation of each active Digital Thread view, and the separately named baseline
+ * evidence report with the Trace PDF / DOCX exports certification reviewers work from. The active table and
+ * baseline report have different authorities and scopes, so the latter never stands in for the former.
  *
  * The page owns no header of its own. #880 §4.2 reclaims roughly 210px of vertical space: the back link, the
  * eyebrow, the H1, the description sentence and a tab strip with exactly one tab are all gone, and the canvas
@@ -226,7 +226,7 @@ export default function DigitalThreadPage({
    * second page. The focal artifact and the view — the two things §6.4 names — are both in the URL.
    */
   const [representation, setRepresentation] = useState<"map" | "table">("map")
-  const [exportOpen, setExportOpen] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
 
   const [baselineId, setBaselineId] = useState("")
   const [baselines, setBaselines] = useState<Baseline[]>([])
@@ -242,15 +242,21 @@ export default function DigitalThreadPage({
    */
   const [proposalState, setProposalState] = useState<{ key: string; content: ProposalContent } | null>(null)
   const [threadState, setThreadState] = useState<{ key: string; body: unknown } | null>(null)
-  const [rows, setRows] = useState<TraceRow[]>([])
-  const [rowTotal, setRowTotal] = useState(0)
   const [rowPage, setRowPage] = useState(1)
+  const [reportState, setReportState] = useState<{
+    key: string
+    rows: TraceRow[]
+    total: number
+    loading: boolean
+    error: string | null
+  }>({ key: "", rows: [], total: 0, loading: false, error: null })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   // Artifact resolution/thread failures belong to Artifact. Keeping them separate prevents a failed or
   // unsupported Artifact attempt from being presented as a false Network load failure after navigation (F6).
   const [artifactErrorState, setArtifactErrorState] = useState<{ key: string; message: string } | null>(null)
   const [attempt, setAttempt] = useState(0)
+  const [artifactRefreshAttempt, setArtifactRefreshAttempt] = useState(0)
   /** Network selection is page context so a selected change can become the exact Inside focal. */
   const [networkSelectionId, setNetworkSelectionId] = useState<string | null>(
     focalKind === "change-request" ? focalId ?? null : null,
@@ -258,7 +264,6 @@ export default function DigitalThreadPage({
   // A Problem Report can remain a local Network selection because its kind has no Digital Thread focal
   // segment. This marker distinguishes that intentional selection from a bare route reached by navigation.
   const bareSelectionRef = useRef<string | null>(null)
-  const exportRef = useRef<HTMLDetailsElement | null>(null)
 
   const retry = useCallback(() => setAttempt(value => value + 1), [])
 
@@ -473,7 +478,7 @@ export default function DigitalThreadPage({
     }
     void run()
     return () => { cancelled = true }
-  }, [active, api, artifactRequestKey, attempt, baselineId, focalId, focalKind, projectId, setArtifactError])
+  }, [active, api, artifactRequestKey, artifactRefreshAttempt, attempt, baselineId, focalId, focalKind, projectId, setArtifactError])
 
   /**
    * The artifact thread for the focal record.
@@ -506,24 +511,29 @@ export default function DigitalThreadPage({
     }
     void run()
     return () => { cancelled = true }
-  }, [active, api, attempt, artifactContext, artifactRequestKey, baselineId, projectId, resolvedFocalId, setArtifactError])
+  }, [active, api, attempt, artifactContext, artifactRefreshAttempt, artifactRequestKey, baselineId, projectId, resolvedFocalId, setArtifactError])
 
   /**
-   * The evidence table's rows.
-   *
-   * Fetched as soon as the baseline is known rather than when the reader switches representation. The table is
-   * the accessible alternative to the canvas, not a secondary screen, so it should be ready when it is asked
-   * for — and gating the read on the toggle made the fetch depend on the order two pieces of state happened to
-   * settle in, which is how it came up empty against a baseline holding 1,250 requirements.
-   *
-   * Paged, not truncated. §4.5 and §6.9 require the table to expose the *same* relationships the canvas draws;
-   * a fixed first hundred of a 1,250-requirement baseline leaves most of them unreachable, and saying "showing
-   * the first 100" makes that honest without making it equivalent. One bounded page is read at a time and the
-   * reader moves between pages — pages are never concatenated and presented as one.
-   */
+   * The separately named baseline evidence report. It is lazy and owns its own keyed state so opening or
+   * retrying the report can never turn a report failure into an active Network/Inside/Artifact failure. The
+  * active-view Table representations do not use this endpoint at all.
+  */
+  const reportKey = `${projectId}:${baselineId}:${rowPage}`
+  const [reportAttempt, setReportAttempt] = useState(0)
+  const reportRetry = useCallback(() => setReportAttempt(value => value + 1), [])
+  // A confirmed exact-link decision changes the server-stated edge consumed by Artifact. Refresh that active
+  // projection together with the baseline report, while leaving the Network projection untouched.
+  const relationChanged = useCallback(() => {
+    reportRetry()
+    setArtifactRefreshAttempt(value => value + 1)
+  }, [reportRetry])
   useEffect(() => {
-    if (!baselineId) return undefined
+    if (!reportOpen || !baselineId) {
+      setReportState(state => state.loading ? { ...state, loading: false } : state)
+      return undefined
+    }
     let cancelled = false
+    setReportState({ key: reportKey, rows: [], total: 0, loading: true, error: null })
     const run = async () => {
       try {
         const response = await fetch(
@@ -532,31 +542,32 @@ export default function DigitalThreadPage({
         const body = await response.json() as { items?: TraceRow[]; totalCount?: number } | TraceRow[]
         const items = Array.isArray(body) ? body : body.items ?? []
         if (cancelled) return
-        setRows(items)
-        // The baseline's real size, not the page size. Reporting the rows in hand as the total would state
-        // that a 1,250-requirement baseline holds 100 — the kind of quiet understatement a traceability
-        // surface must never make about what it is showing.
-        setRowTotal(Array.isArray(body) ? items.length : body.totalCount ?? items.length)
+        setReportState({
+          key: reportKey,
+          rows: items,
+          // The baseline's real size, not the page size. Reporting the rows in hand as the total would state
+          // that a 1,250-requirement baseline holds 100 — a false summary of controlled evidence.
+          total: Array.isArray(body) ? items.length : body.totalCount ?? items.length,
+          loading: false,
+          error: null,
+        })
       } catch (failure) {
-        if (!cancelled) setError(failure instanceof Error ? failure.message : "The evidence table could not be loaded.")
+        if (!cancelled) setReportState({
+          key: reportKey,
+          rows: [],
+          total: 0,
+          loading: false,
+          error: failure instanceof Error ? failure.message : "The evidence table could not be loaded.",
+        })
       }
     }
     void run()
     return () => { cancelled = true }
-  }, [api, attempt, baselineId, projectId, rowPage])
+  }, [api, baselineId, projectId, reportAttempt, reportKey, reportOpen, rowPage])
 
   // A different configuration is a different population, so the reader is returned to its first page rather
   // than left on a page number that means something else now.
   useEffect(() => { setRowPage(1) }, [baselineId])
-
-  useEffect(() => {
-    if (!exportOpen) return undefined
-    const close = (event: MouseEvent) => {
-      if (!exportRef.current?.contains(event.target as Node)) setExportOpen(false)
-    }
-    document.addEventListener("mousedown", close)
-    return () => document.removeEventListener("mousedown", close)
-  }, [exportOpen])
 
   const go = useCallback(
     (next: ThreadView, id?: string, kind?: ThreadFocalKind) => onRoute({ view: next, focalId: id, focalKind: kind }),
@@ -615,6 +626,9 @@ export default function DigitalThreadPage({
     ["inside", "Inside a change"],
     ["artifact", "Artifact thread"],
   ]
+  const currentReport = reportState.key === reportKey
+    ? reportState
+    : { key: reportKey, rows: [] as TraceRow[], total: 0, loading: reportOpen && Boolean(baselineId), error: null }
 
   return (
     <main className="dtPage" aria-label="Digital Thread">
@@ -673,36 +687,10 @@ export default function DigitalThreadPage({
             ))}
           </div>
 
-          {/* Grouped behind one compact control rather than the two large buttons the old page spent its
-              width on. The behaviour and authorization of the reports themselves are untouched. */}
-          <details
-            className={`dtPageExport${baselineId ? "" : " is-unavailable"}`}
-            ref={exportRef}
-            open={exportOpen}
-            onToggle={event => setExportOpen((event.currentTarget as HTMLDetailsElement).open)}
-          >
-            <summary aria-label="Export this trace">Export</summary>
-            <div className="dtPageExportMenu">
-              {baselineId ? (
-                <>
-                  <a href={`${api}/api/traceability/${baselineId}/download?format=pdf`}>Trace PDF</a>
-                  <a href={`${api}/api/traceability/${baselineId}/download?format=docx`}>Trace DOCX</a>
-                </>
-              ) : (
-                // Rather than two links that would resolve to a report of nothing.
-                <p className="dtPageExportEmpty">No controlled baseline is in view to export.</p>
-              )}
-            </div>
-          </details>
         </div>
       </div>
 
-      {representation === "table" ? (
-        <EvidenceTable api={api} rows={rows} total={rowTotal} page={rowPage} pageSize={ROW_PAGE_SIZE}
-          onPage={setRowPage} baselines={baselines} baselineId={baselineId}
-          hrefFor={hrefFor} traceArtifactHref={traceArtifactHref} error={error} onRetry={retry}
-          onRelationChanged={retry} />
-      ) : active === "inside" && !opened && !loading ? (
+      {active === "inside" && !opened && !loading ? (
         /**
          * A direct `?view=inside` address whose change this build does not carry.
          *
@@ -721,6 +709,7 @@ export default function DigitalThreadPage({
           opened={opened}
           register={register}
           content={proposal}
+          representation={representation}
           orderedLevels={network?.orderedLevels ?? orderedLevels}
           // The proposal read has its own pending state. Folding it into the page-level `loading` — which
           // belongs to the context, network and baseline reads — let the child paint a one-lane "known" board
@@ -741,6 +730,7 @@ export default function DigitalThreadPage({
       ) : active === "artifact" ? (
         <DigitalThreadArtifact
           response={thread}
+          representation={representation}
           loading={loading || (!!focalId && !thread && !artifactError)}
           error={artifactError}
           onRetry={retry}
@@ -751,6 +741,7 @@ export default function DigitalThreadPage({
       ) : (
         <DigitalThreadNetwork
           projection={network}
+          representation={representation}
           loading={loading}
           error={error}
           onRetry={retry}
@@ -763,17 +754,54 @@ export default function DigitalThreadPage({
           onOpenChange={node => openChange(node)}
         />
       )}
+
+      <details
+        className="dtPageBaselineReport"
+        open={reportOpen}
+        onToggle={event => setReportOpen((event.currentTarget as HTMLDetailsElement).open)}
+      >
+        <summary>Baseline evidence report</summary>
+        <div className="dtPageBaselineReportBody">
+          <div className="dtPageReportExports">
+            <span>Baseline-only exports</span>
+            {baselineId ? (
+              <>
+                <a href={`${api}/api/traceability/${baselineId}/download?format=pdf`}>Baseline trace PDF</a>
+                <a href={`${api}/api/traceability/${baselineId}/download?format=docx`}>Baseline trace DOCX</a>
+              </>
+            ) : (
+              <p className="dtPageExportEmpty">No controlled baseline is in view to export.</p>
+            )}
+          </div>
+          <EvidenceTable
+            api={api}
+            rows={currentReport.rows}
+            total={currentReport.total}
+            page={rowPage}
+            pageSize={ROW_PAGE_SIZE}
+            onPage={setRowPage}
+            baselines={baselines}
+            baselineId={baselineId}
+            hrefFor={hrefFor}
+            traceArtifactHref={traceArtifactHref}
+            loading={currentReport.loading}
+            error={currentReport.error}
+            onRetry={reportRetry}
+            onRelationChanged={relationChanged}
+          />
+        </div>
+      </details>
     </main>
   )
 }
 
 /**
- * The evidence table: the same relationships the canvas draws, reachable without entering the canvas at all.
+ * The baseline evidence report: the baseline-exact requirement/evidence path, kept separate from the active
+ * Network, Inside and Artifact table representations.
  *
- * A real table with real headers, so it is navigable by row and column and announced as a table. #880 §6.9 and
- * `DESIGN_VISION_AND_DASHBOARDS.md` both require the list alternative to expose the same relationships the
- * graph does, which is why the parent, child and verification columns are here rather than a bare list of
- * identifiers.
+ * A real table with real headers, so it is navigable by row and column and announced as a table. Its parent,
+ * child, verification, result and evidence columns preserve the baseline report's existing relationship-editing
+ * and export capability; active-view equivalent tables are rendered by their own authoritative components.
  */
 function EvidenceTable({
   api,
@@ -786,6 +814,7 @@ function EvidenceTable({
   baselineId,
   hrefFor,
   traceArtifactHref,
+  loading,
   error,
   onRetry,
   onRelationChanged,
@@ -800,6 +829,7 @@ function EvidenceTable({
   baselineId: string
   hrefFor?: (record: { id: string; displayNumber: string }) => string | undefined
   traceArtifactHref?: (node: ExactTraceArtifact) => string | undefined
+  loading?: boolean
   error?: string | null
   onRetry?: () => void
   onRelationChanged?: () => void
@@ -829,17 +859,23 @@ function EvidenceTable({
   const first = rows.length ? (page - 1) * pageSize + 1 : 0
   const last = (page - 1) * pageSize + rows.length
   return (
-    <section className="dtPageTable" aria-label="Digital Thread evidence table">
-      <p className="dtPageTableContext">
-        {baseline ? `${baseline.displayNumber} · ${baseline.name}` : "Controlled baseline"} ·{" "}
-        {total.toLocaleString()} requirement{total === 1 ? "" : "s"}
-        {total > pageSize ? ` · showing ${first.toLocaleString()}–${last.toLocaleString()}` : ""}
-      </p>
+    <section className="dtPageTable" aria-label="Baseline evidence report table">
+      {loading ? (
+        <p className="dtPageTableContext">Baseline evidence report · Loading the selected baseline…</p>
+      ) : error ? (
+        <p className="dtPageTableContext">Baseline evidence report · The selected baseline is unavailable.</p>
+      ) : (
+        <p className="dtPageTableContext">
+          Baseline evidence report · {baseline ? `${baseline.displayNumber} · ${baseline.name}` : "Controlled baseline"} ·{" "}
+          {total.toLocaleString()} requirement{total === 1 ? "" : "s"}
+          {total > pageSize ? ` · showing ${first.toLocaleString()}–${last.toLocaleString()}` : ""}
+        </p>
+      )}
       <div className="dtPageTableScroll">
         <table>
           <caption className="dtPageVisuallyHidden">
             Requirements in this baseline with their upstream and downstream relationships, verification
-            artifacts, results and evidence
+            artifacts, results and evidence. This is the baseline report, not the active Digital Thread view.
           </caption>
           <thead>
             <tr>
@@ -914,9 +950,11 @@ function EvidenceTable({
           <button type="button" disabled={page >= pages} onClick={() => onPage(page + 1)}>Next</button>
         </nav>
       ) : null}
-      {error ? (
+      {loading ? (
+        <p className="dtPageTableEmpty" role="status">Loading the baseline evidence report…</p>
+      ) : error ? (
         <div className="dtPageTableEmpty" role="alert">
-          <b>The evidence table could not be loaded.</b> {error}
+          <b>The baseline evidence report could not be loaded.</b> {error}
           {onRetry ? <button type="button" onClick={onRetry}>Try again</button> : null}
         </div>
       ) : !rows.length ? (

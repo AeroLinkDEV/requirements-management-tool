@@ -54,3 +54,92 @@ test('Digital Thread reuses projected lifecycle data and the shared exact-link c
   await expect(page.getByLabel('Exact link lifecycle Acknowledged')).toBeVisible()
   expect(lifecycleGets).toBe(1)
 })
+
+test('a recorded relationship refreshes the active Artifact and keeps a follow-up read failure truthful', async ({ page }) => {
+  let lifecycleState = 'Suspect'
+  let lifecycleGets = 0
+  let artifactReads = 0
+  let networkReads = 0
+  const focalId = 'artifact-focal'
+  const focalRevisionId = 'artifact-focal-revision'
+
+  // The active Artifact response deliberately changes only the server-stated edge fact on its second read.
+  // The page must reread the projection after the controlled POST; it must not infer the new state locally.
+  await page.route('**/api/requirements?*', async route => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [{ id: focalId, revisionId: focalRevisionId }] }),
+    })
+  })
+  await page.route('**/api/artifact-thread?*', async route => {
+    const url = new URL(route.request().url())
+    artifactReads += 1
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        projectId: url.searchParams.get('projectId'),
+        baselineId: url.searchParams.get('baselineId'),
+        buildId: null,
+        focalKind: 'Requirement',
+        focalId: focalRevisionId,
+        nodes: [
+          { id: focalRevisionId, kind: 'Requirement', lane: 2, displayNumber: 'HLR-REFRESH-0001.00',
+            title: 'Refresh focal', state: 'Approved', level: 'HighLevel', isFocal: true, evidence: [] },
+          { id: 'artifact-procedure', kind: 'Procedure', lane: 4, displayNumber: 'HLRTP-REFRESH-0001.00',
+            title: 'Refresh procedure', state: 'Approved', level: 'System', isFocal: false, evidence: [] },
+        ],
+        edges: [{ fromId: focalRevisionId, fromKind: 'Requirement', toId: 'artifact-procedure',
+          toKind: 'Procedure', relation: 'VerifiedBy', isSuspect: artifactReads === 1 }],
+        verification: { isApplicable: true, reason: null },
+      }),
+    })
+  })
+  await page.route('**/api/change-requests/network?*', async route => {
+    networkReads += 1
+    await route.continue()
+  })
+  await page.route('**/api/traceability?*', async route => {
+    const response = await route.fetch()
+    const body = await response.json()
+    if (body.items?.[0]) body.items[0].parents = [{
+      id: 'parent-revision', revisionId: 'parent-revision', artifactId: 'parent-artifact', linkId: 'trace-refresh-link',
+      displayNumber: 'SYSR-REFRESH-0001.00', level: 'System', type: 'AllocatedFrom',
+      lifecycle: { state: lifecycleState, events: [{
+        id: 'trace-raised', type: 'Raised', actorId: 'requirements.materializer', occurredAt: '2026-08-23T00:00:00Z',
+        rationale: 'The exact requirement revision changed.',
+      }] },
+    }]
+    await route.fulfill({ response, json: body })
+  })
+  await page.route('**/api/trace-links/trace-refresh-link/lifecycle', async route => {
+    lifecycleGets += 1
+    await route.fulfill({ status: 503, contentType: 'application/json', body: '{}' })
+  })
+  await page.route('**/api/trace-links/trace-refresh-link/lifecycle/acknowledge', async route => {
+    lifecycleState = 'Acknowledged'
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      linkId: 'trace-refresh-link', state: lifecycleState,
+    }) })
+  })
+
+  await login(page)
+  await openNavigationGroup(page, 'RELEASE & CONFIGURATION')
+  await page.getByRole('link', { name: 'Digital Thread' }).click()
+  const threadRoot = new URL(page.url()).pathname.replace(/\/traceability.*$/, '')
+  await page.goto(`${threadRoot}/traceability/${focalId}`)
+  await expect(page.locator('.dtaRoot')).toBeVisible()
+  await expect(page.locator('.dtaSuspectFlag b')).toHaveText('SUSPECT')
+  const networkReadsBeforeMutation = networkReads
+
+  await page.getByText('Baseline evidence report', { exact: true }).click()
+  await expect(page.getByLabel('Exact link lifecycle Suspect')).toBeVisible()
+  await page.getByPlaceholder('Record why this exact relationship is under assessment.')
+    .fill('Review the refreshed relationship projection.')
+  await page.getByRole('button', { name: 'Acknowledge relationship' }).click()
+
+  await expect(page.getByRole('alert')).toContainText('decision was recorded, but the latest relationship state could not be refreshed')
+  await expect.poll(() => artifactReads).toBeGreaterThan(1)
+  await expect(page.locator('.dtaSuspectFlag')).toHaveCount(0)
+  expect(lifecycleGets).toBe(1)
+  expect(networkReads).toBe(networkReadsBeforeMutation)
+})
