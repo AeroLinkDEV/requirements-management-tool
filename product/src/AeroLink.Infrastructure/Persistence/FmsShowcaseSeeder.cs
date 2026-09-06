@@ -1278,8 +1278,21 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (members.Count == 0)
             return new TraceCoverageCheck(false, $"The materialized baseline {baseline.Id} carries no requirement revisions.");
 
-        var settled = await VerificationCoverageProjection.SettledCoveredAsync(db, members, ct);
-        var linked = (await VerificationCoverageProjection.LinkedRequirementRevisionIds(db)
+        // Scope every coverage judgement to the exact procedure manifest the released 1.5 baseline
+        // carries — the same authority the release readiness gate reads. Judging against all current
+        // procedure revisions instead would let a later 1.6 or operator-authored approved revision make
+        // a requirement look covered on a build that never carried that coverage. A baseline whose exact
+        // manifest exists but is empty (the pre-#726 cutover configuration, which the seeder never
+        // produces) has no manifest rows to judge against, so the scope falls back to unguarded there.
+        var procedureEffectivity = await TestProcedureEffectivity.ForBaselineAsync(db, baseline.Id, ct);
+        IReadOnlyCollection<Guid>? effectiveProcedureRevisionIds =
+            procedureEffectivity is { IsExactManifest: true } exact && exact.RevisionIds.Count > 0
+                ? exact.RevisionIds
+                : null;
+
+        var settled = await VerificationCoverageProjection.SettledCoveredAsync(db, members, ct,
+            effectiveProcedureRevisionIds, buildScoped: false);
+        var linked = (await VerificationCoverageProjection.LinkedRequirementRevisionIds(db, effectiveProcedureRevisionIds)
             .Where(id => members.Contains(id)).Distinct().ToListAsync(ct)).ToHashSet();
         var suspect = linked.Where(id => !settled.Contains(id)).ToList();
         var uncovered = members.Where(id => !settled.Contains(id) && !linked.Contains(id)).ToList();
@@ -1287,10 +1300,14 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var gapProcedureIds = await db.TestProcedures.AsNoTracking()
             .Where(x => x.ProjectId == projectId && x.BaseNumber == GapProcedureNumber)
             .Select(x => x.Id).ToListAsync(ct);
-        var gapLinked = await (from coverage in db.TestCoverage.AsNoTracking()
-            join revision in db.TestProcedureRevisions.AsNoTracking() on coverage.ProcedureRevisionId equals revision.Id
-            where gapProcedureIds.Contains(revision.ProcedureId)
-            select coverage.RequirementRevisionId).Distinct().ToListAsync(ct);
+        var gapCoverage = db.TestCoverage.AsNoTracking()
+            .Join(db.TestProcedureRevisions.AsNoTracking(), coverage => coverage.ProcedureRevisionId,
+                revision => revision.Id, (coverage, revision) => new { coverage, revision })
+            .Where(x => gapProcedureIds.Contains(x.revision.ProcedureId));
+        var gapLinked = effectiveProcedureRevisionIds is null
+            ? await gapCoverage.Select(x => x.coverage.RequirementRevisionId).Distinct().ToListAsync(ct)
+            : await gapCoverage.Where(x => effectiveProcedureRevisionIds.Contains(x.coverage.ProcedureRevisionId))
+                .Select(x => x.coverage.RequirementRevisionId).Distinct().ToListAsync(ct);
 
         var share = members.Count == 0 ? 0 : Math.Round(suspect.Count * 100.0 / members.Count, 2);
         var gapPair = await RequirementDisplayNumbersAsync(gapLinked, ct);
