@@ -104,6 +104,19 @@ test("artifact full story retains both verification branches and excludes the si
   await expect(panel).toContainText("PR-925.00")
   for (const identity of ["LLRTP-925.01", "LLRTP-925.02", "FMS-925.0"]) await expect(panel).toContainText(identity)
   await expect(panel).not.toContainText("HLR-926.01")
+  const cardOverlaps = await page.locator(".dtCanvasNode:not(.is-offscreen)").evaluateAll(nodes => {
+    const collisions: string[] = []
+    nodes.forEach((node, i) => nodes.slice(i + 1).forEach(other => {
+      const a = node.getBoundingClientRect()
+      const b = other.getBoundingClientRect()
+      if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
+          Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1) {
+        collisions.push(`${node.textContent?.slice(0, 45)} overlaps ${other.textContent?.slice(0, 45)}`)
+      }
+    }))
+    return collisions
+  })
+  expect(cardOverlaps).toEqual([])
   const beforeFit = await page.locator(".dtCanvasScene").getAttribute("style")
   await page.getByRole("button", { name: "Fit entire story", exact: true }).click()
   await expect(page.locator(".dtCanvasScene")).not.toHaveAttribute("style", beforeFit!)
