@@ -65,6 +65,17 @@ export default function InstanceBadge() {
   const snapshot = identity.instance?.snapshot ?? null;
   const age = snapshotAge(snapshot?.createdAtUtc);
 
+  // Routine surfaces name the installation, not its deployment classification: a declared label may
+  // carry the classification as a suffix ("HOME CANONICAL"), and reading that raw deployment vocabulary
+  // on every page is what #925 P2 removes. The declared label and classification are stated whole in the
+  // tooltip beside the source and database facts, so nothing here is reclassified, renamed, or inferred —
+  // the badge just stops shouting the operator word.
+  const suffix = classification.trim();
+  const visibleLabel =
+    suffix.length > 0 && label.toUpperCase().endsWith(suffix.toUpperCase())
+      ? label.slice(0, label.length - suffix.length).trim() || label
+      : label;
+
   const detail = [
     `Instance: ${label} (${classification})`,
     identity.database?.name ? `Database: ${identity.database.name}` : undefined,
@@ -80,7 +91,7 @@ export default function InstanceBadge() {
       data-testid="instance-badge"
       data-classification={classification}
     >
-      {label}
+      {visibleLabel}
       {snapshot ? <em className="instanceBadgeSnapshot">snapshot{age ? ` ${age}` : ""}</em> : null}
     </span>
   );
