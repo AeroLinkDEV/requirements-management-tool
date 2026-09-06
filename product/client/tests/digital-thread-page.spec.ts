@@ -500,6 +500,7 @@ test.describe("selection and navigation coherence", () => {
     await selectProgram(page, "Flight Management System Live Program")
     await openThread(page)
 
+    const threadBase = threadRoot(page)
     const { projectId, releaseId } = ids(page)
     const context = await (await request.get(
       `${apiBase}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)).json()
