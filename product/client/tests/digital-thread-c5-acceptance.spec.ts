@@ -117,6 +117,10 @@ test("artifact full story retains both verification branches and excludes the si
     return collisions
   })
   await expect.poll(cardOverlaps).toEqual([])
+  // At a wide viewport the arrival may already fit the entire story. Move the camera first so a broken Fit
+  // handler cannot pass simply because its starting transform happens to be the desired one.
+  await page.getByRole("button", { name: "Zoom in", exact: true }).click()
+  await page.getByRole("button", { name: "Zoom in", exact: true }).click()
   const beforeFit = await page.locator(".dtCanvasScene").getAttribute("style")
   await page.getByRole("button", { name: "Fit entire story", exact: true }).click()
   await expect(page.locator(".dtCanvasScene")).not.toHaveAttribute("style", beforeFit!)
@@ -201,11 +205,15 @@ test("Inside preserves explicit missing-base and target states alongside known b
   await expect(page.locator(".dticPanel")).toContainText("Target not yet created")
   await expect(newCard.locator(".dticOp")).toHaveText("NEW")
   const unresolved = page.locator(".dtCanvasNode").filter({ hasText: "SYSR-00075.02" })
-  await unresolved.click()
+  await newCard.press("ArrowDown")
+  await expect(unresolved).toBeFocused()
+  await unresolved.press("Enter")
   await expect(page.locator(".dticPanel")).toContainText("Base revision unresolved")
   await expect(unresolved.locator("del, ins")).toHaveCount(0)
   const known = page.locator(".dtCanvasNode").filter({ hasText: "SYSR-00076.02" })
-  await known.click()
+  await unresolved.press("ArrowDown")
+  await expect(known).toBeFocused()
+  await known.press("Enter")
   await expect(known.locator("del")).toHaveText("The FMS shall sequence the entered route.")
   await expect(known.locator("ins")).toHaveText("The FMS shall sequence the selected route.")
   await expect(known.locator(".dticOp")).toHaveText("MOD")
