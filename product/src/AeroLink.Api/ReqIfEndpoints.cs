@@ -92,7 +92,8 @@ public static class ReqIfEndpoints
         ladderPolicy = await policyResolver.ResolveAsync(job.ProjectId, ct);
         if(job.Direction!=ReqIfExchangeDirection.Import||job.State!=ReqIfExchangeState.Ready||job.ErrorCount>0)return Results.BadRequest(new{error="This import has unresolved reconciliation errors or is no longer ready."});
         if(string.IsNullOrWhiteSpace(request.Title))return Results.BadRequest(new{error="A controlled change-package title is required."});
-        if(!await db.Releases.AnyAsync(x=>x.Id==request.TargetReleaseId&&x.ProjectId==job.ProjectId,ct))return Results.BadRequest(new{error="The target release does not belong to this Project."});
+        var targetReleaseFailure=(await new ChangeRequestTargetReleaseGuard(db).ValidateAsync(job.ProjectId,request.TargetReleaseId,ct)).ToFailureResult();
+        if(targetReleaseFailure is not null)return targetReleaseFailure;
         await using(var package=service.OpenPackage(job)){var integrity=ReqIfPackageIntegrity.Inspect(package,job.FileName,job.Sha256);if(!integrity.PackageVerified||integrity.Warnings.Any(x=>x.Contains("does not match",StringComparison.OrdinalIgnoreCase)||x.Contains("is missing",StringComparison.OrdinalIgnoreCase)))return Results.Conflict(new{error="The staged package no longer passes binary-integrity verification.",binaryIntegrity=integrity});}
         var manifest=ReqIfExchangeService.ReadManifest(job);var now=DateTimeOffset.UtcNow;var actor=http.UserAccount().UserName;
         try

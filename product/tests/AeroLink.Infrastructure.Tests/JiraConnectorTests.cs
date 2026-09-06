@@ -44,7 +44,7 @@ public sealed class JiraConnectorTests
             Task.FromResult(StatusToReturn);
     }
 
-    private static async Task<(DbContextOptions<AeroLinkDbContext> Options, Guid ProjectId, string Path)> SeedAsync()
+    private static async Task<(DbContextOptions<AeroLinkDbContext> Options, Guid ProjectId, Guid ReleaseId, string Path)> SeedAsync()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-jira-{Guid.NewGuid():N}.db");
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
@@ -52,9 +52,10 @@ public sealed class JiraConnectorTests
         await db.Database.EnsureCreatedAsync();
         var program = new ProgramRecord("Jira Program", "JRA");
         var project = new ProjectRecord(program.Id, "Software", "Jira Software");
-        db.AddRange(program, project);
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        db.AddRange(program, project, release);
         await db.SaveChangesAsync();
-        return (options, project.Id, path);
+        return (options, project.Id, release.Id, path);
     }
 
     private static JiraConnectorService Service(AeroLinkDbContext db, IJiraClient client, string? baseUrl = "https://aerolink.example.test")
@@ -65,8 +66,8 @@ public sealed class JiraConnectorTests
         return new JiraConnectorService(db, client, DataProtectionProvider.Create("AeroLink.Tests"), configuration);
     }
 
-    private static SystemChangeRequest Scr(Guid projectId) =>
-        new("SRCR-00031", 0, projectId, Guid.NewGuid(), "Oceanic routing",
+    private static SystemChangeRequest Scr(Guid projectId, Guid targetReleaseId) =>
+        new("SRCR-00031", 0, projectId, targetReleaseId, "Oceanic routing",
             "Sequencing drifts on long oceanic legs.", "The route mode was analyzed.",
             "Correct the sequencing rule.", "author", Now);
 
@@ -111,7 +112,7 @@ public sealed class JiraConnectorTests
             var jira = new FakeJira();
             var service = Service(db, jira);
             await ConnectAsync(db, service, seed.ProjectId);
-            var scr = Scr(seed.ProjectId);
+            var scr = Scr(seed.ProjectId, seed.ReleaseId);
             db.SystemChangeRequests.Add(scr);
             await db.SaveChangesAsync();
 
@@ -140,7 +141,7 @@ public sealed class JiraConnectorTests
             var jira = new FakeJira();
             var service = Service(db, jira);
             await ConnectAsync(db, service, seed.ProjectId);
-            var scr = Scr(seed.ProjectId);
+            var scr = Scr(seed.ProjectId, seed.ReleaseId);
             db.SystemChangeRequests.Add(scr);
             await db.SaveChangesAsync();
 
@@ -164,7 +165,7 @@ public sealed class JiraConnectorTests
             var jira = new FakeJira { Throw = new HttpRequestException("Connection refused.") };
             var service = Service(db, jira);
             await ConnectAsync(db, service, seed.ProjectId);
-            var scr = Scr(seed.ProjectId);
+            var scr = Scr(seed.ProjectId, seed.ReleaseId);
             db.SystemChangeRequests.Add(scr);
             await db.SaveChangesAsync();
 
@@ -188,7 +189,7 @@ public sealed class JiraConnectorTests
             var jira = new FakeJira { Refusal = new JiraPushResult(false, "", "", "The tracker rejected the credentials.") };
             var service = Service(db, jira);
             await ConnectAsync(db, service, seed.ProjectId);
-            var scr = Scr(seed.ProjectId);
+            var scr = Scr(seed.ProjectId, seed.ReleaseId);
             db.SystemChangeRequests.Add(scr);
             await db.SaveChangesAsync();
 
@@ -216,7 +217,7 @@ public sealed class JiraConnectorTests
             var jira = new FakeJira { StatusToReturn = "In Review" };
             var service = Service(db, jira);
             await ConnectAsync(db, service, seed.ProjectId);
-            var scr = Scr(seed.ProjectId);
+            var scr = Scr(seed.ProjectId, seed.ReleaseId);
             db.SystemChangeRequests.Add(scr);
             await db.SaveChangesAsync();
             await service.PushChangeRequestAsync(scr, "engineer", Now, default);
@@ -241,7 +242,7 @@ public sealed class JiraConnectorTests
             var jira = new FakeJira { StatusToReturn = "In Review" };
             var service = Service(db, jira);
             await ConnectAsync(db, service, seed.ProjectId);
-            var scr = Scr(seed.ProjectId);
+            var scr = Scr(seed.ProjectId, seed.ReleaseId);
             db.SystemChangeRequests.Add(scr);
             await db.SaveChangesAsync();
             await service.PushChangeRequestAsync(scr, "engineer", Now, default);
@@ -263,7 +264,7 @@ public sealed class JiraConnectorTests
         {
             await using var db = new AeroLinkDbContext(seed.Options);
             var service = Service(db, new FakeJira());
-            var scr = Scr(seed.ProjectId);
+            var scr = Scr(seed.ProjectId, seed.ReleaseId);
             db.SystemChangeRequests.Add(scr);
             await db.SaveChangesAsync();
 
@@ -308,7 +309,7 @@ public sealed class JiraConnectorTests
             var jira = new FakeJira();
             var service = Service(db, jira, baseUrl: null);
             await ConnectAsync(db, service, seed.ProjectId);
-            var scr = Scr(seed.ProjectId);
+            var scr = Scr(seed.ProjectId, seed.ReleaseId);
             db.SystemChangeRequests.Add(scr);
             await db.SaveChangesAsync();
 

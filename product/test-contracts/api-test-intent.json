@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 848,
-    "cases": 941,
-    "classes": 125,
-    "hostedTests": 810,
-    "hostedCases": 889,
+    "tests": 856,
+    "cases": 949,
+    "classes": 126,
+    "hostedTests": 818,
+    "hostedCases": 897,
     "nonHostedTests": 30,
     "nonHostedCases": 44,
     "unknownHostTests": 8,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 530,
-      "cases": 591,
+      "tests": 537,
+      "cases": 598,
       "unknownCases": 0,
-      "classes": 102
+      "classes": 103
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 164,
-      "cases": 178,
+      "tests": 165,
+      "cases": 179,
       "unknownCases": 0,
-      "classes": 58
+      "classes": 59
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -3305,6 +3305,146 @@
       "sourceLines": {
         "start": 71,
         "end": 100
+      }
+    },
+    {
+      "cls": "ChangeRequestTargetReleaseGuardApiTests",
+      "test": "Creation_shares_one_not_found_posture_and_refuses_released_and_foreign_releases",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 77,
+        "end": 107
+      }
+    },
+    {
+      "cls": "ChangeRequestTargetReleaseGuardApiTests",
+      "test": "Draft_creation_shares_the_same_invariant",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 109,
+        "end": 127
+      }
+    },
+    {
+      "cls": "ChangeRequestTargetReleaseGuardApiTests",
+      "test": "Import_commit_rejects_a_target_release_before_allocating_an_identifier",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 159,
+        "end": 194
+      }
+    },
+    {
+      "cls": "ChangeRequestTargetReleaseGuardApiTests",
+      "test": "Oslc_consumption_rejects_released_and_foreign_releases",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 317,
+        "end": 372
+      }
+    },
+    {
+      "cls": "ChangeRequestTargetReleaseGuardApiTests",
+      "test": "Proposal_keeps_its_stable_released_build_contract",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 374,
+        "end": 406
+      }
+    },
+    {
+      "cls": "ChangeRequestTargetReleaseGuardApiTests",
+      "test": "Reqif_import_commit_rejects_foreign_nonexistent_and_released_releases",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 196,
+        "end": 246
+      }
+    },
+    {
+      "cls": "ChangeRequestTargetReleaseGuardApiTests",
+      "test": "Retargeting_shares_the_invariant",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 129,
+        "end": 157
+      }
+    },
+    {
+      "cls": "ChangeRequestTargetReleaseGuardApiTests",
+      "test": "Service_conditional_writes_reject_released_and_foreign_releases",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 248,
+        "end": 315
       }
     },
     {

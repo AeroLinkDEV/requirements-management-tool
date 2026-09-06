@@ -13,7 +13,6 @@
     "POST /api/auth/password",
     "POST /api/builds",
     "POST /api/change-requests/{}/jira",
-    "POST /api/change-requests/{}/retarget",
     "POST /api/controlled-editing/sessions/{}/force-unlock",
     "POST /api/controlled-editing/sessions/{}/heartbeat",
     "POST /api/downstream-assessments/{}/return",
@@ -31,7 +30,6 @@
     "POST /api/enterprise-requirements/bulk/{}/commit",
     "POST /api/enterprise-requirements/import-mappings",
     "POST /api/enterprise-requirements/import/preview",
-    "POST /api/enterprise-requirements/import/{}/commit",
     "POST /api/enterprise-requirements/notifications/{}/read",
     "POST /api/enterprise-requirements/schemas",
     "POST /api/enterprise-requirements/schemas/{}/fields",
@@ -88,14 +86,12 @@
     "POST /api/reqif/jobs/{}/cancel",
     "POST /api/reqif/jobs/{}/reject",
     "POST /api/review-workflows/{}/retire",
-    "POST /api/v1/oslc/rm/consume",
     "PUT /api/change-requests/{}/draft",
     "PUT /api/edit-sessions/{}/autosave",
     "PUT /api/enterprise-hardening/edit-sessions/{}",
     "PUT /api/impact-dispositions/{}",
     "PUT /api/integrations/mappings/{}",
     "PUT /api/integrations/webhooks/{}/state",
-    "PUT /api/jira/connection",
-    "PUT /api/v1/requirements/{}"
+    "PUT /api/jira/connection"
   ]
 }

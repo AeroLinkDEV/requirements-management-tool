@@ -39,7 +39,8 @@ public static class ChangeRequestEndpoints
             if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
             var actor = http.UserAccount();
             if (!CanAdminister(scr, actor)) return Results.Forbid();
-            if (!await db.Releases.AnyAsync(x => x.Id == request.TargetReleaseId && x.ProjectId == scr.ProjectId && !x.IsReleased, ct)) return Results.BadRequest(new { error = "Choose an unreleased target release in this project." });
+            var retargetReleaseFailure = (await new ChangeRequestTargetReleaseGuard(db).ValidateAsync(scr.ProjectId, request.TargetReleaseId, ct)).ToFailureResult();
+            if (retargetReleaseFailure is not null) return retargetReleaseFailure;
             // Verification work follows its change request. Left behind, it would hold a release the change no longer
             // belongs to and go missing from the one it does.
             try
@@ -628,8 +629,8 @@ public static class ChangeRequestEndpoints
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
             ladderPolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);
-            var closed = await ReleasedBuildRefusalAsync(db, request.TargetReleaseId, ct);
-            if (closed is not null) return Results.BadRequest(new { error = closed, code = "release_is_closed" });
+            var targetReleaseFailure = (await new ChangeRequestTargetReleaseGuard(db).ValidateAsync(request.ProjectId, request.TargetReleaseId, ct)).ToFailureResult();
+            if (targetReleaseFailure is not null) return targetReleaseFailure;
             if (string.IsNullOrWhiteSpace(request.Title))
                 return Results.BadRequest(new { error = "Title of change request must be filled out before save is available." });
             if (request.Type == ChangeRequestType.Software && !ladderPolicy.IsChangeRequestScopeValid(request.Type, request.SoftwareLevel))
@@ -655,8 +656,8 @@ public static class ChangeRequestEndpoints
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer)) return Results.Forbid();
             ladderPolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);
-            var closed = await ReleasedBuildRefusalAsync(db, request.TargetReleaseId, ct);
-            if (closed is not null) return Results.BadRequest(new { error = closed, code = "release_is_closed" });
+            var draftTargetReleaseFailure = (await new ChangeRequestTargetReleaseGuard(db).ValidateAsync(request.ProjectId, request.TargetReleaseId, ct)).ToFailureResult();
+            if (draftTargetReleaseFailure is not null) return draftTargetReleaseFailure;
             // Reject before synchronization, transaction creation, or identifier allocation: an untouched
             // form is not a controlled record and must not consume the next SCR/SWCR number.
             if (string.IsNullOrWhiteSpace(request.Title))
@@ -1392,32 +1393,6 @@ public static class ChangeRequestEndpoints
 
     private static bool CanAdminister(SystemChangeRequest scr, AuthenticatedUser actor) =>
         actor.IsAdministrator || string.Equals(scr.AuthorId, actor.UserName, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Why a released build takes no new change requests, or null when it will.
-    ///
-    /// A released build is closed. Its content was fixed when it shipped, and a change request allocated to it
-    /// afterwards belongs to nothing: it cannot reach a baseline, cannot be incorporated, and cannot be revised
-    /// — it is a record filed against a decision already made. `retarget` has always refused to *move* a change
-    /// request onto a released build; nothing stopped one being *created* there, so the product offered an
-    /// action whose result was a change request with no future.
-    ///
-    /// It is also the likely mechanism behind a report of a saved draft that never appeared: created while the
-    /// released build was selected, it was allocated to that build, and the list the author then looked at was
-    /// filtered to the in-work one. Refusing at the point of creation removes the whole class.
-    ///
-    /// Checked here rather than in the aggregate because a change request cannot know what its target build has
-    /// done since; the same reason `StartNextRevision` is told rather than asked.
-    /// </summary>
-    private static async Task<string?> ReleasedBuildRefusalAsync(AeroLinkDbContext db, Guid targetReleaseId,
-        CancellationToken ct)
-    {
-        var release = await db.Releases.AsNoTracking().Where(x => x.Id == targetReleaseId)
-            .Select(x => new { x.Version, x.IsReleased }).SingleOrDefaultAsync(ct);
-        if (release is null) return "The target build does not exist.";
-        if (!release.IsReleased) return null;
-        return $"{release.Version} has been released and takes no new change requests. Switch to the in-work build and raise it there.";
-    }
 
     private static async Task<string?> TargetSectionRefusalAsync(AeroLinkDbContext db, Guid projectId,
         ILadderPolicy ladderPolicy, RequirementLevel level, Guid? targetSectionId, CancellationToken ct,
