@@ -59,6 +59,12 @@ export type DigitalThreadNetworkProps = {
    * actually contains it, so a record this build does not carry stays unselected rather than being guessed at.
    */
   focalId?: string
+  /**
+   * Selection owned by the Digital Thread page, so a network selection can become the exact Inside focal.
+   * Omit it for the standalone/uncontrolled presentation used by older callers.
+   */
+  selectedId?: string | null
+  onSelect?: (id: string | null) => void
   /** Exact route for a record, when the current workspace can open it. Absent renders non-openable. */
   hrefFor?: (node: NetworkNode) => string | undefined
   /** Opens the change inside its own view. Slice 4 supplies this. */
@@ -79,17 +85,28 @@ export default function DigitalThreadNetwork({
   onRetry,
   orderedLevels,
   focalId,
+  selectedId: selectedIdProp,
+  onSelect: onSelectProp,
   hrefFor,
   onOpenChange,
   buildLabel,
 }: DigitalThreadNetworkProps) {
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [uncontrolledSelectedId, setUncontrolledSelectedId] = useState<string | null>(null)
+  const selectedId = selectedIdProp === undefined ? uncontrolledSelectedId : selectedIdProp
+  const setSelectedId = useCallback(
+    (id: string | null) => {
+      if (selectedIdProp === undefined) setUncontrolledSelectedId(id)
+      onSelectProp?.(id)
+    },
+    [onSelectProp, selectedIdProp],
+  )
   useEffect(() => {
+    if (selectedIdProp !== undefined) return
     if (!focalId) return
     // Membership decides. A well-formed id that belongs to nothing in this build must not select a card, and
     // must not select some *other* card either — the board says nothing rather than something wrong.
-    setSelectedId(projection?.nodes.some(node => node.id === focalId) ? focalId : null)
-  }, [focalId, projection])
+    setUncontrolledSelectedId(projection?.nodes.some(node => node.id === focalId) ? focalId : null)
+  }, [focalId, projection, selectedIdProp])
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [dockPreference, setDockPreference] = useState<PanelDock>("bottom")
   const [query, setQuery] = useState("")

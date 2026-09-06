@@ -78,6 +78,15 @@ export type DigitalThreadCanvasProps = {
   ariaLabel?: string
 }
 
+/**
+ * A card owns its links and controls. The canvas must not turn their pointer or keyboard activation into a
+ * selection, pan, or lane roll as the event bubbles through the shared viewport.
+ */
+const nestedControl = (target: EventTarget | null): boolean => {
+  const element = target instanceof Element ? target : null
+  return Boolean(element?.closest("a,button,input,select,textarea,summary,[role='link'],[role='checkbox'],[role='radio']"))
+}
+
 
 /**
  * The canvas shell: lanes of cards that pan, zoom, change density with zoom, roll independently, and follow
@@ -631,6 +640,9 @@ export default function DigitalThreadCanvas({
   const onPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) return
+      // A nested card action has its own click/default-action semantics. Returning before pointer capture keeps
+      // the viewport from consuming its eventual pointerup as a card selection (F4).
+      if (nestedControl(event.target)) return
       const element = viewportRef.current
       const result = geometryRef.current
       if (!element || !result) return
@@ -913,6 +925,9 @@ export default function DigitalThreadCanvas({
                 reveal(node)
               }}
               onKeyDown={event => {
+                // Enter/Space on a nested button or link belongs to that control. Preventing the event here would
+                // suppress its default activation and turn it into a card toggle instead (F4).
+                if (nestedControl(event.target)) return
                 if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                   event.preventDefault()
                   event.stopPropagation()

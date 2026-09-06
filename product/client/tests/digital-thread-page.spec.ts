@@ -329,6 +329,142 @@ test.describe("focal deep links", () => {
   })
 })
 
+test.describe("selection and navigation coherence", () => {
+  test("a selected change becomes the exact Inside focal and survives refresh", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const changes = (network.nodes ?? []).filter((node: { kind: string }) => node.kind === "ChangeRequest") as {
+      id: string; displayNumber: string
+    }[]
+    expect(changes.length, "the seeded showcase should carry at least two Change Requests to move between")
+      .toBeGreaterThanOrEqual(2)
+    await expect(page.locator(".dtCanvasScene .dtnCard").first()).toBeVisible()
+    const changeIds = new Set(changes.map(candidate => candidate.id))
+    // Lane and row are presentation assignments, not API fields. Pick two actual rendered cards sharing their
+    // measured lane position, so ArrowDown exercises the same navigation a reader can use on this fixture.
+    const rendered = await page.locator(".dtCanvasNode").evaluateAll(elements => elements.map(element => {
+      const box = element.getBoundingClientRect()
+      return { id: element.getAttribute("data-node-id") ?? "", left: box.left, top: box.top }
+    }))
+    const renderedChanges = rendered.filter(candidate => changeIds.has(candidate.id))
+    const firstRendered = renderedChanges.find(candidate => renderedChanges.some(other =>
+      other.id !== candidate.id && Math.abs(other.left - candidate.left) < 2))
+    expect(firstRendered, "the seeded showcase should render two Change Requests in one navigable lane").toBeTruthy()
+    if (!firstRendered) throw new Error("the seeded showcase should render two Change Requests in one navigable lane")
+    const secondRendered = renderedChanges
+      .filter(candidate => candidate.id !== firstRendered.id && Math.abs(candidate.left - firstRendered.left) < 2
+        && candidate.top > firstRendered.top)
+      .sort((a, b) => a.top - b.top)[0]
+    expect(secondRendered, "the selected Change Request should have a keyboard-reachable neighbor").toBeTruthy()
+    if (!secondRendered) throw new Error("the selected Change Request should have a keyboard-reachable neighbor")
+    const first = changes.find(candidate => candidate.id === firstRendered.id)
+    const second = changes.find(candidate => candidate.id === secondRendered.id)
+    expect(first && second, "rendered Change Requests should retain their API identities").toBeTruthy()
+    if (!first || !second) throw new Error("rendered Change Requests should retain their API identities")
+
+    const cardFor = (displayNumber: string) => page.locator(".dtnCard").filter({ hasText: displayNumber }).first()
+    await cardFor(first.displayNumber).click()
+    await expect(page.locator(".dtnCard.is-selected")).toContainText(first.displayNumber)
+    await expect(page.getByRole("button", { name: "Inside a change" })).toBeEnabled()
+    expect(page.url()).toContain(`/traceability/change-requests/${first.id}`)
+
+    // Changing the selected card changes the addressed focal, so Inside cannot silently reopen the first card.
+    // The expanded first card may cover the next row visually; use the shared canvas keyboard path to reach it,
+    // which is also the usable interaction required for a dense lane.
+    await page.locator(`.dtCanvasNode[data-node-id="${first.id}"]`).focus()
+    await page.keyboard.press("ArrowDown")
+    await page.keyboard.press("Enter")
+    await expect(page.locator(".dtnCard.is-selected")).toContainText(second.displayNumber)
+    await expect(page.getByRole("button", { name: "Inside a change" })).toBeEnabled()
+    expect(page.url()).toContain(`/traceability/change-requests/${second.id}`)
+
+    await page.getByRole("button", { name: "Inside a change" }).click()
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    await expect(page.locator(".dticRoot")).toContainText(`Inside ${second.displayNumber}`)
+    expect(page.url()).toMatch(new RegExp(`/traceability/change-requests/${second.id}\\?view=inside$`))
+
+    await page.reload()
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    await expect(page.locator(".dticRoot")).toContainText(`Inside ${second.displayNumber}`)
+    expect(page.url()).toMatch(new RegExp(`/traceability/change-requests/${second.id}\\?view=inside$`))
+  })
+
+  test("a card action opens Inside once for pointer and keyboard activation", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const change = (network.nodes ?? []).find((node: { kind: string }) => node.kind === "ChangeRequest") as { id: string; displayNumber: string } | undefined
+    expect(change, "the seeded showcase should carry a Change Request to open").toBeTruthy()
+    if (!change) throw new Error("the seeded showcase should carry a Change Request to open")
+
+    const card = page.locator(".dtnCard").filter({ hasText: change.displayNumber }).first()
+    await card.click()
+    await card.getByRole("button", { name: "Open this change" }).click()
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    await expect(page.locator(".dticRoot")).toContainText(`Inside ${change.displayNumber}`)
+    expect(page.url()).toMatch(new RegExp(`/traceability/change-requests/${change.id}\\?view=inside$`))
+
+    // Return to the addressed network entry, then activate the same nested button through the native keyboard
+    // path. The card wrapper must not consume Enter and turn it into a second selection action.
+    await page.goBack()
+    await expect(page.locator(".dtnRoot")).toBeVisible()
+    const selected = page.locator(".dtnCard.is-selected")
+    await expect(selected).toContainText(change.displayNumber)
+    const action = selected.getByRole("button", { name: "Open this change" })
+    await action.focus()
+    await page.keyboard.press("Enter")
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    await expect(page.locator(".dticRoot")).toContainText(`Inside ${change.displayNumber}`)
+    expect(page.url()).toMatch(new RegExp(`/traceability/change-requests/${change.id}\\?view=inside$`))
+  })
+
+  test("unsupported Artifact entry is explicit and returning to Network clears its error context", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const change = (network.nodes ?? []).find((node: { kind: string }) => node.kind === "ChangeRequest") as { id: string } | undefined
+    expect(change, "the seeded showcase should carry a Change Request to exercise unsupported Artifact entry")
+      .toBeTruthy()
+    if (!change) throw new Error("the seeded showcase should carry a Change Request to exercise unsupported Artifact entry")
+
+    // A change request has no materialized Artifact-thread focal kind. A deep link must state that fact instead
+    // of making a request with the wrong kind and leaking its failure into the Network view.
+    await page.goto(`${threadRoot(page)}/traceability/change-requests/${change.id}?view=artifact`)
+    await expect(page.getByRole("button", { name: "Artifact thread" })).toBeDisabled()
+    await expect(page.getByRole("alert")).toContainText("supported exact artifact")
+    await page.getByRole("alert").getByRole("button", { name: "Back to the change network" }).click()
+    await expect(page.locator(".dtnRoot")).toBeVisible()
+    await expect(page.locator(".dtnInFrame-error")).toHaveCount(0)
+    await expect(page.locator(".dtPageTableEmpty")).toHaveCount(0)
+    expect(new URL(page.url()).pathname).toMatch(/\/traceability$/)
+  })
+})
+
 /**
  * Slices 4A/4B established two authoritative proposal resources, and which one applies is decided by the
  * record's kind — Change Requests at `/api/change-requests/{id}/proposal-content`, Test Change Requests at
