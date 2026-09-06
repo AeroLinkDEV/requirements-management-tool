@@ -187,6 +187,125 @@ public sealed class ChangeAuthoringInvariantApiTests
     }
 
     [Fact]
+    public async Task A_draft_scoped_to_the_LLR_workspace_refuses_an_HLR_proposal_identity()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var scenario = await SeedAsync(factory);
+        await SignInAsync(client);
+
+        // The F1 reproduction: a proposal opened in the LLR workspace whose identity was silently
+        // re-levelled to an HLR. Whether it arrives through the picker or a crafted call, the draft is
+        // scoped to LLR change control and the aggregate must refuse the cross-level identity rather
+        // than save a package whose workspace and content disagree.
+        using var crafted = await client.PostAsJsonAsync("/api/change-request-drafts", new
+        {
+            projectId = scenario.ProjectId, targetReleaseId = scenario.ReleaseId, type = "Software",
+            softwareLevel = "LowLevel",
+            title = "Reject cross-level proposal", problem = "P", analysis = "A", solution = "S",
+            requirementChanges = new[]
+            {
+                new { level = "HighLevel", kind = "Introduce", statement = "The software shall refuse cross-level proposals.",
+                    rationale = "Controlled identity boundary", verificationMethod = "Test", isDerived = true }
+            }
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, crafted.StatusCode);
+        Assert.Contains("belongs to the LLR workspace", await crafted.Content.ReadAsStringAsync());
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.False(await db.SystemChangeRequests.AnyAsync(x => x.Title == "Reject cross-level proposal"));
+        }
+
+        // The same shape as the observed defect, as a modification naming an existing HLR identity: the
+        // artifact-level checks agree (the proposal names an HLR and declares HLR), so it is exactly the
+        // proposal-versus-workspace scope disagreement that the aggregate boundary must catch.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var origin = new SystemChangeRequest("SRCR-00888", 0, scenario.ProjectId, scenario.ReleaseId,
+                "Level boundary origin", "P", "A", "S", "invariant.author", now);
+            var baseline = new CandidateBaseline("SW-88.00", 0, scenario.ProjectId, scenario.ReleaseId, null,
+                "Level boundary baseline", "cm", now);
+            var hlr = new RequirementArtifact(scenario.ProjectId, "HLR-000733", RequirementLevel.HighLevel, now);
+            db.AddRange(origin, baseline, hlr, new RequirementRevision(hlr.Id, 0,
+                "The software shall keep its declared workspace.", "Rationale", "Test",
+                RequirementRevisionState.Active, origin.Id, baseline.Id, now,
+                RequirementParentKind.Derived, "Boundary fixture derives without a recorded parent."));
+            await db.SaveChangesAsync();
+        }
+        using var craftedModify = await client.PostAsJsonAsync("/api/change-request-drafts", new
+        {
+            projectId = scenario.ProjectId, targetReleaseId = scenario.ReleaseId, type = "Software",
+            softwareLevel = "LowLevel",
+            title = "Reject cross-level modification", problem = "P", analysis = "A", solution = "S",
+            requirementChanges = new[]
+            {
+                new { baseNumber = "HLR-000733", revision = 1, level = "HighLevel", kind = "Modify",
+                    statement = "The software shall keep its declared workspace, modified.",
+                    rationale = "Controlled identity boundary", verificationMethod = "Test" }
+            }
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, craftedModify.StatusCode);
+        Assert.Contains("belongs to the LLR workspace", await craftedModify.Content.ReadAsStringAsync());
+
+        // The honest counterpart: the same LLR-scoped draft with an LLR identity saves normally.
+        using var honest = await client.PostAsJsonAsync("/api/change-request-drafts", new
+        {
+            projectId = scenario.ProjectId, targetReleaseId = scenario.ReleaseId, type = "Software",
+            softwareLevel = "LowLevel",
+            title = "Accept matching level proposal", problem = "P", analysis = "A", solution = "S",
+            requirementChanges = new[]
+            {
+                new { level = "LowLevel", kind = "Introduce", statement = "The software shall accept its own level.",
+                    rationale = "Controlled identity boundary", verificationMethod = "Test", isDerived = true }
+            }
+        });
+        Assert.Equal(HttpStatusCode.Created, honest.StatusCode);
+    }
+
+    [Fact]
+    public async Task Adding_a_proposal_to_an_existing_LLR_draft_refuses_an_HLR_identity()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var scenario = await SeedAsync(factory);
+        await SignInAsync(client);
+        using var created = await client.PostAsJsonAsync("/api/change-request-drafts", new
+        {
+            projectId = scenario.ProjectId, targetReleaseId = scenario.ReleaseId, type = "Software",
+            softwareLevel = "LowLevel",
+            title = "LLR draft for extension", problem = "P", analysis = "A", solution = "S",
+            requirementChanges = new[]
+            {
+                new { level = "LowLevel", kind = "Introduce", statement = "The software shall hold one proposal.",
+                    rationale = "Controlled identity boundary", verificationMethod = "Test", isDerived = true }
+            }
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var draft = JsonSerializer.Deserialize<JsonElement>(await created.Content.ReadAsStringAsync());
+        var draftId = draft.GetProperty("id").GetGuid();
+
+        using var crafted = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/requirements", new
+        {
+            baseNumber = "", revision = 0, level = "HighLevel", kind = "Introduce",
+            statement = "The software shall refuse a foreign-level extension.",
+            rationale = "Controlled identity boundary", verificationMethod = "Test"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, crafted.StatusCode);
+        Assert.Contains("belongs to the LLR workspace", await crafted.Content.ReadAsStringAsync());
+
+        using var honest = await client.PostAsJsonAsync($"/api/change-requests/{draftId}/requirements", new
+        {
+            baseNumber = "", revision = 0, level = "LowLevel", kind = "Introduce",
+            statement = "The software shall accept a matching-level extension.",
+            rationale = "Controlled identity boundary", verificationMethod = "Test"
+        });
+        Assert.Equal(HttpStatusCode.OK, honest.StatusCode);
+    }
+
+    [Fact]
     public async Task Legacy_impact_disposition_metadata_does_not_block_selection_or_freeze()
     {
         using var factory = new AeroLinkApiFactory();

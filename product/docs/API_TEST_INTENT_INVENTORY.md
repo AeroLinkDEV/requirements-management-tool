@@ -21,18 +21,18 @@ tokens that supplied host evidence.
 ## Result
 
 <!-- BEGIN GENERATED API TEST INTENT SUMMARY -->
-**841 test methods, 934 known invocations, 124 classes.** This source-exact forecast supports planning only;
+**844 test methods, 937 known invocations, 124 classes.** This source-exact forecast supports planning only;
 it is not migration or rollout authority. All current theories use explicit `InlineData`,
 so every case count is known.
 The inventory does not infer host use from a whole class:
-**805 methods / 884 cases have direct host evidence**,
+**808 methods / 887 cases have direct host evidence**,
 **28 methods / 42 cases are explicitly non-hosted**, and
 **8 methods / 8 cases remain unknown** because their class contains a host fixture or factory but
 the method body does not show the host operation.
 
 | Intent | Tests | Cases | Classes | Correct level |
 |---|---:|---:|---:|---|
-| HTTP boundary: route, status, JSON shape | 525 | 586 | 102 | API (must stay hosted) |
+| HTTP boundary: route, status, JSON shape | 528 | 589 | 102 | API (must stay hosted) |
 | EF translation / relational constraints | 164 | 178 | 58 | Infrastructure (needs a database, not a host) |
 | Authentication / authorization wiring | 91 | 95 | 53 | API (must stay hosted) |
 | In-process logic with no HTTP and no client | 35 | 35 | 12 | Domain or Infrastructure (migration candidate) |
@@ -41,7 +41,7 @@ the method body does not show the host operation.
 | Business-rule matrix over data variations | 2 | 16 | 2 | Domain (migration candidate) |
 
 The machine-readable artifact records **16 explicitly hosted candidate methods / 16 cases** and **4 unknown candidate methods / 4 cases**.
-The known hosted candidate share is **16 of 884 cases (1.8%)**,
+The known hosted candidate share is **16 of 887 cases (1.8%)**,
 but that is not a safe ceiling while unknown invocations remain. The static criterion-7 result is therefore
 **unresolved**; it does not close #566 and does not justify closing #563.
 <!-- END GENERATED API TEST INTENT SUMMARY -->

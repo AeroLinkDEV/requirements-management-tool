@@ -504,6 +504,73 @@ public sealed class AuthoringTracedImpactTests
     }
 
     [Fact]
+    public async Task Modification_picker_constrains_candidates_to_the_proposal_exact_level_before_limiting()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var (projectId, _, _, _) = await SeedAsync(factory);
+        await SignInAsync(client);
+
+        // Enough HLRs sharing the LLR's wording to fill a limited response on their own. With the whole
+        // software scope admitted and candidates cut after ordering by identifier, every HLR sorts ahead
+        // of the LLR and the eligible LLR never reaches the client — which is exactly why the level has
+        // to be applied server-side before the limit rather than filtered in the browser (#925 F1).
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var originId = await db.SystemChangeRequests.Where(x => x.ProjectId == projectId).Select(x => x.Id).SingleAsync();
+            var baselineId = await db.CandidateBaselines.Where(x => x.ProjectId == projectId).Select(x => x.Id).SingleAsync();
+            for (var i = 10; i < 18; i++)
+            {
+                var extra = new RequirementArtifact(projectId, $"HLR-0005{i}", RequirementLevel.HighLevel, now);
+                db.AddRange(extra, new RequirementRevision(extra.Id, 0,
+                    $"The software shall compute the sequence for case {i}.", "Rationale", "Test",
+                    RequirementRevisionState.Active, originId, baselineId, now,
+                    RequirementParentKind.Derived, $"Search-fixture case {i} derives without a recorded parent."));
+            }
+            await db.SaveChangesAsync();
+        }
+
+        const string term = "compute%20the%20sequence";
+        using var unLeveled = await client.GetAsync(
+            $"/api/authoring/requirements?projectId={projectId}&scope=Software&search={term}&limit=8");
+        Assert.Equal(HttpStatusCode.OK, unLeveled.StatusCode);
+        var broad = JsonSerializer.Deserialize<JsonElement>(await unLeveled.Content.ReadAsStringAsync());
+        Assert.DoesNotContain(broad.EnumerateArray(), x => x.GetProperty("level").GetString() == "LowLevel");
+
+        using var llrResponse = await client.GetAsync(
+            $"/api/authoring/requirements?projectId={projectId}&scope=Software&level=LowLevel&search={term}&limit=8");
+        Assert.Equal(HttpStatusCode.OK, llrResponse.StatusCode);
+        var llrRows = JsonSerializer.Deserialize<JsonElement>(await llrResponse.Content.ReadAsStringAsync());
+        var llr = Assert.Single(llrRows.EnumerateArray());
+        Assert.Equal("LowLevel", llr.GetProperty("level").GetString());
+
+        using var hlrResponse = await client.GetAsync(
+            $"/api/authoring/requirements?projectId={projectId}&scope=Software&level=HighLevel&search={term}&limit=8");
+        Assert.Equal(HttpStatusCode.OK, hlrResponse.StatusCode);
+        var hlrRows = JsonSerializer.Deserialize<JsonElement>(await hlrResponse.Content.ReadAsStringAsync());
+        Assert.All(hlrRows.EnumerateArray(), x => Assert.Equal("HighLevel", x.GetProperty("level").GetString()));
+        Assert.DoesNotContain(hlrRows.EnumerateArray(), x => x.GetProperty("level").GetString() == "LowLevel");
+
+        // A level the ladder does not bind to software change control fails closed to no candidates
+        // rather than falling back to the broad scope answer.
+        using var systemResponse = await client.GetAsync(
+            $"/api/authoring/requirements?projectId={projectId}&scope=Software&level=System&search={term}");
+        Assert.Equal(HttpStatusCode.OK, systemResponse.StatusCode);
+        var systemRows = JsonSerializer.Deserialize<JsonElement>(await systemResponse.Content.ReadAsStringAsync());
+        Assert.Empty(systemRows.EnumerateArray());
+
+        // A numeric undefined enum value binds to a non-null level no ladder defines; it must fail closed
+        // to the same empty answer rather than escaping as a server error on a read.
+        using var undefinedResponse = await client.GetAsync(
+            $"/api/authoring/requirements?projectId={projectId}&scope=System&level=999&search={term}");
+        Assert.Equal(HttpStatusCode.OK, undefinedResponse.StatusCode);
+        var undefinedRows = JsonSerializer.Deserialize<JsonElement>(await undefinedResponse.Content.ReadAsStringAsync());
+        Assert.Empty(undefinedRows.EnumerateArray());
+    }
+
+    [Fact]
     public async Task Upstream_picker_hydrates_an_exact_selected_parent_from_an_older_revision()
     {
         using var factory = new AeroLinkApiFactory();
