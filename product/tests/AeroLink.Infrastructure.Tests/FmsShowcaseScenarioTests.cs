@@ -873,4 +873,32 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         Assert.Contains("no failed execution with a passing same-artifact retest successor",
             drifted.Detail, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// HLRCR and LLRCR are separate controlled families, so reclassifying almost every LLRCR into the
+    /// HighLevel family — leaving the Software aggregate far above the minimum — must make the
+    /// inventory fail while naming the deficient LowLevel family explicitly.
+    /// </summary>
+    [Fact]
+    public async Task Family_inventory_names_a_deficient_change_request_family_below_the_aggregate()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var seeder = new FmsShowcaseSeeder(db);
+
+        var lowLevelRequests = await db.SystemChangeRequests
+            .Where(x => x.ProjectId == showcase.Summary.ProjectId
+                && x.Type == ChangeRequestType.Software
+                && x.SoftwareLevel == RequirementLevel.LowLevel).ToListAsync();
+        Assert.True(lowLevelRequests.Count >= 5);
+        foreach (var request in lowLevelRequests.Skip(4))
+            db.Entry(request).Property(x => x.SoftwareLevel).CurrentValue = RequirementLevel.HighLevel;
+        await db.SaveChangesAsync();
+
+        var after = await seeder.CheckInvariantsAsync(showcase.Summary.ProgramId);
+        var drifted = Assert.Single(after, x => x.Key == "family-inventory");
+        Assert.False(drifted.Holds, drifted.Detail);
+        Assert.Contains($"only 4 LowLevel change requests (LLRCR)", drifted.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("HighLevel change requests (HLRCR)", drifted.Detail, StringComparison.Ordinal);
+    }
 }

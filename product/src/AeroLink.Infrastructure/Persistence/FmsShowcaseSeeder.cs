@@ -1238,7 +1238,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             .Select(x => (RequirementLevel?)x.Level).ToListAsync(ct);
         var requests = await db.SystemChangeRequests.AsNoTracking()
             .Where(x => x.ProjectId == projectId)
-            .Select(x => new { x.Type, State = (ChangeRequestState?)x.State }).ToListAsync(ct);
+            .Select(x => new { x.Type, x.SoftwareLevel, State = (ChangeRequestState?)x.State }).ToListAsync(ct);
         var executionRows = await (from execution in db.TestExecutions.AsNoTracking()
             join revision in db.TestProcedureRevisions.AsNoTracking() on execution.ProcedureRevisionId equals revision.Id
             where execution.ProjectId == projectId
@@ -1256,7 +1256,11 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         var highLevelRequirements = levels.Count(x => x == RequirementLevel.HighLevel);
         var lowLevelRequirements = levels.Count(x => x == RequirementLevel.LowLevel);
         var systemRequests = requests.Count(x => x.Type == ChangeRequestType.System);
-        var softwareRequests = requests.Count(x => x.Type == ChangeRequestType.Software);
+        // HLRCR and LLRCR are separate controlled families worked and reviewed separately, so the
+        // governed SoftwareLevel — not the aggregate Software type — decides which family a request
+        // belongs to and what the diagnostic reports.
+        var highLevelChangeRequests = requests.Count(x => x.SoftwareLevel == RequirementLevel.HighLevel);
+        var lowLevelChangeRequests = requests.Count(x => x.SoftwareLevel == RequirementLevel.LowLevel);
         var passes = outcomes.Count(x => x.Outcome == TestOutcome.Pass && x.RetestOfExecutionId == null);
         var failures = outcomes.Count(x => x.Outcome == TestOutcome.Fail);
         var retests = outcomes.Count(x => x.RetestOfExecutionId != null);
@@ -1283,7 +1287,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
 
         string Detail() =>
             $"Families: SYSR {systemRequirements}, HLR {highLevelRequirements}, LLR {lowLevelRequirements}; "
-            + $"change requests: {systemRequests} System, {softwareRequests} Software; "
+            + $"change requests: SRCR {systemRequests}, HLRCR {highLevelChangeRequests}, LLRCR {lowLevelChangeRequests}; "
             + "verification artifacts: "
             + string.Join(", ", familyCounts.Select(f => $"{f.Key.Level}/{f.Key.ArtifactKind} {f.Count}")) + "; "
             + $"executions: {passes} pass, {failures} fail, {retests} retest ({healedFailures} failure(s) healed by a passing retest); "
@@ -1296,8 +1300,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (systemRequirements < 5) failures1.Add($"only {systemRequirements} System requirements");
         if (highLevelRequirements < 5) failures1.Add($"only {highLevelRequirements} HLRs");
         if (lowLevelRequirements < 5) failures1.Add($"only {lowLevelRequirements} LLRs");
-        if (systemRequests < 5) failures1.Add($"only {systemRequests} System change requests");
-        if (softwareRequests < 5) failures1.Add($"only {softwareRequests} Software change requests");
+        if (systemRequests < 5) failures1.Add($"only {systemRequests} System change requests (SRCR)");
+        if (highLevelChangeRequests < 5) failures1.Add($"only {highLevelChangeRequests} HighLevel change requests (HLRCR)");
+        if (lowLevelChangeRequests < 5) failures1.Add($"only {lowLevelChangeRequests} LowLevel change requests (LLRCR)");
         foreach (var family in familyCounts.Where(f => f.Count < 5))
             failures1.Add($"only {family.Count} {family.Key.Level}/{family.Key.ArtifactKind} verification artifacts");
         if (healedFailures < 1) failures1.Add("no failed execution with a passing same-artifact retest successor that does not precede it (pass/fail/retest chain broken)");
