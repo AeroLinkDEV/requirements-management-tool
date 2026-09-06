@@ -275,13 +275,16 @@ public static class ChangeRequestTraceProjection
 
         // A relation row is the traversal authority. Walk both directions over the exact CR identities and
         // retain one deterministic edge per pair; assessment and authored facts are merged, never duplicated.
+        // The link is stored child → parent, but the story (#925 F5) reads upstream → downstream, so the
+        // emitted edge points from the upstream change to the change that names it. The stored "Upstream"
+        // relation and its provenance are unchanged, and the client phrases it for that reading.
         var pairEdges = new Dictionary<PairKey, EdgeBuilder>();
         void AddPair(Guid child, Guid parent, ChangeRequestTraceProvenance provenance)
         {
             if (!byCr.ContainsKey(child) || !byCr.ContainsKey(parent) || child == parent) return;
             var key = new PairKey(child, parent);
             if (!pairEdges.TryGetValue(key, out var edge))
-                pairEdges[key] = edge = new(child, "ChangeRequest", parent, "ChangeRequest", "Upstream");
+                pairEdges[key] = edge = new(parent, "ChangeRequest", child, "ChangeRequest", "Upstream");
             if (!edge.Provenance.Contains(provenance)) edge.Provenance.Add(provenance);
         }
         foreach (var link in authored)

@@ -121,3 +121,49 @@ test.describe("the detail panel never rests on a directly linked record", () => 
     })
   }
 })
+
+test.describe("the server-truth change chain (#925 F5/V5)", () => {
+  const evidenceDir = process.env.AEROLINK_V5_EVIDENCE
+
+  test("resolved by, allocates to, and verified by render along the story's arrows", async ({ page }) => {
+    test.setTimeout(120_000)
+    await page.goto("/tests/fixtures/change-network.html?case=server")
+    await settled(page)
+
+    // Select the LLR change: its directed story reaches the problem report three hops upstream and its
+    // own verification change downstream, so every mandated phrase is on a story edge at once.
+    await page.locator('.dtCanvasNode:has(.dtnCard:has-text("LLRCR-00061.00"))').first().click()
+    await page.waitForTimeout(500)
+    const panel = page.locator(".dtnPanel")
+    await expect(panel).toBeVisible()
+
+    // SVG text exposes textContent, not innerText.
+    const labels = await page.locator(".dtCanvasEdgeLabel").evaluateAll(elements =>
+      elements.map(element => element.textContent))
+    expect(labels).toContain("resolved by")
+    expect(labels).toContain("verified by")
+    expect(labels.filter(text => text === "allocates to").length).toBeGreaterThanOrEqual(2)
+    if (evidenceDir) await page.screenshot({ path: `${evidenceDir}/network-chain-llr.png`, fullPage: false })
+
+    // The upstream rows speak in the listed change's own direction, and deeper records carry hops.
+    await expect(panel).toContainText("ALLOCATES TO")
+    await expect(panel).toContainText("2 HOPS")
+    await expect(panel).toContainText("3 HOPS")
+    await expect(panel).toContainText("VERIFIES")
+    // No sideways leak: the sibling LLR and HLR changes sharing the upstream parents stay out.
+    await expect(panel).not.toContainText("LLRCR-00062.00")
+    await expect(panel).not.toContainText("HLRCR-00128.00")
+
+    // Jumping to the System change flips the story: both HLR children and both LLRs are downstream of
+    // it, the problem report reads "resolved by" upstream, and the inspector rows re-voice.
+    await page.locator('.dtnRel button:has-text("SRCR-00039.00")').first().click()
+    await page.waitForTimeout(500)
+    await expect(page.locator('.dtCanvasNode:has(.dtnCard:has-text("SRCR-00039.00")) .dtnCard').first()).toHaveClass(/is-selected/)
+    await expect(panel).toContainText("RESOLVED BY")
+    await expect(panel).toContainText("HLRCR-00127.00")
+    await expect(panel).toContainText("HLRCR-00128.00")
+    await expect(panel).toContainText("LLRCR-00061.00")
+    await expect(panel).toContainText("LLRCR-00062.00")
+    if (evidenceDir) await page.screenshot({ path: `${evidenceDir}/network-chain-system.png`, fullPage: false })
+  })
+})

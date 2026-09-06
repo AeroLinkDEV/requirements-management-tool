@@ -292,9 +292,10 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
         var composedBeforeReopenAgain = await client.GetStringAsync($"/api/change-requests/{fixture.ChildId}/trace");
         Assert.Equal(composedBeforeReopen, composedBeforeReopenAgain);
         var liveAndFrozen = JsonSerializer.Deserialize<JsonElement>(composedBeforeReopen);
+        // Story direction (#925 F5): the upstream change is the presented edge source.
         var dualPair = Assert.Single(liveAndFrozen.GetProperty("edges").EnumerateArray(), edge =>
-            edge.GetProperty("fromId").GetGuid() == fixture.ChildId
-            && edge.GetProperty("toId").GetGuid() == fixture.CurrentSourceId);
+            edge.GetProperty("fromId").GetGuid() == fixture.CurrentSourceId
+            && edge.GetProperty("toId").GetGuid() == fixture.ChildId);
         var provenanceKinds = dualPair.GetProperty("provenance").EnumerateArray()
             .Select(x => x.GetProperty("kind").GetString()).ToHashSet();
         Assert.Contains("AssessmentDerived", provenanceKinds);
@@ -339,9 +340,10 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
         Assert.Contains(fixture.AssessmentLinkId.Value.ToString(), preserved, StringComparison.OrdinalIgnoreCase);
         using var composedResponse = await client.GetAsync($"/api/change-requests/{fixture.ChildId}/trace");
         var composed = JsonSerializer.Deserialize<JsonElement>(await composedResponse.Content.ReadAsStringAsync());
+        // Story direction (#925 F5): the upstream change is the presented edge source.
         var frozenPair = Assert.Single(composed.GetProperty("edges").EnumerateArray(), edge =>
-            edge.GetProperty("fromId").GetGuid() == fixture.ChildId
-            && edge.GetProperty("toId").GetGuid() == fixture.CurrentSourceId);
+            edge.GetProperty("fromId").GetGuid() == fixture.CurrentSourceId
+            && edge.GetProperty("toId").GetGuid() == fixture.ChildId);
         var frozenEvidence = Assert.Single(frozenPair.GetProperty("provenance").EnumerateArray(), provenance =>
             provenance.GetProperty("kind").GetString() == "FrozenReviewEvidence");
         Assert.False(frozenEvidence.GetProperty("isLive").GetBoolean());
@@ -375,9 +377,10 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
             && node.GetProperty("kind").GetString() == "ChangeRequest");
         Assert.Contains(nodes, node => node.GetProperty("id").GetGuid() == fixture.CurrentSourceId
             && node.GetProperty("kind").GetString() == "ChangeRequest");
+        // Story direction (#925 F5): the upstream change is the presented edge source.
         var pair = Assert.Single(trace.GetProperty("edges").EnumerateArray(), edge =>
-            edge.GetProperty("fromId").GetGuid() == fixture.ChildId
-            && edge.GetProperty("toId").GetGuid() == fixture.CurrentSourceId);
+            edge.GetProperty("fromId").GetGuid() == fixture.CurrentSourceId
+            && edge.GetProperty("toId").GetGuid() == fixture.ChildId);
         Assert.Equal("Upstream", pair.GetProperty("relation").GetString());
         Assert.Equal("AssessmentDerived", Assert.Single(pair.GetProperty("provenance").EnumerateArray())
             .GetProperty("kind").GetString());

@@ -489,7 +489,9 @@ public sealed class ChangeRequestTraceProjectionTests
         Assert.NotNull(firstProjection);
         Assert.Equal(3, firstProjection!.Nodes.Count(x => x.Kind == "ChangeRequest"));
         Assert.Equal(JsonSerializer.Serialize(firstProjection), JsonSerializer.Serialize(secondProjection));
-        var dual = Assert.Single(firstProjection.Edges, x => x.FromId == second.Id && x.ToId == first.Id);
+        // Story direction (#925 F5): the upstream change is the presented edge source, even inside a
+        // cycle; provenance from both the authored link and the assessment still folds onto one edge.
+        var dual = Assert.Single(firstProjection.Edges, x => x.FromId == first.Id && x.ToId == second.Id);
         var kinds = dual.Provenance.Select(x => x.Kind).ToHashSet();
         Assert.Contains("AuthorStated", kinds);
         Assert.Contains("AssessmentDerived", kinds);
