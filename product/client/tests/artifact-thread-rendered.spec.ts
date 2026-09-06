@@ -689,7 +689,7 @@ test.describe("keyboard access", () => {
   test("the traced web is announced, not only drawn", async ({ page }) => {
     await open(page, "hlr")
 
-    const live = page.locator('[aria-live="polite"]')
+    const live = page.locator('.dtaVisuallyHidden[aria-live="polite"]')
     await expect(live).toContainText("HLR-000075.02")
     await expect(live).toContainText("upstream")
     await expect(live).toContainText("downstream")
