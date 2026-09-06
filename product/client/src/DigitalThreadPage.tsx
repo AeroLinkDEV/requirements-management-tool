@@ -241,7 +241,7 @@ export default function DigitalThreadPage({
    * that way.
    */
   const [proposalState, setProposalState] = useState<{ key: string; content: ProposalContent } | null>(null)
-  const [thread, setThread] = useState<unknown>(null)
+  const [threadState, setThreadState] = useState<{ key: string; body: unknown } | null>(null)
   const [rows, setRows] = useState<TraceRow[]>([])
   const [rowTotal, setRowTotal] = useState(0)
   const [rowPage, setRowPage] = useState(1)
@@ -249,7 +249,7 @@ export default function DigitalThreadPage({
   const [error, setError] = useState<string | null>(null)
   // Artifact resolution/thread failures belong to Artifact. Keeping them separate prevents a failed or
   // unsupported Artifact attempt from being presented as a false Network load failure after navigation (F6).
-  const [artifactError, setArtifactError] = useState<string | null>(null)
+  const [artifactErrorState, setArtifactErrorState] = useState<{ key: string; message: string } | null>(null)
   const [attempt, setAttempt] = useState(0)
   /** Network selection is page context so a selected change can become the exact Inside focal. */
   const [networkSelectionId, setNetworkSelectionId] = useState<string | null>(
@@ -265,7 +265,7 @@ export default function DigitalThreadPage({
   /** A transport/projection error belongs to the view that raised it. Navigation starts a new read context. */
   useEffect(() => {
     setError(null)
-    setArtifactError(null)
+    setArtifactErrorState(null)
   }, [active, focalId, focalKind])
 
   // A routed change is the network's initial selection. A bare network address intentionally starts empty,
@@ -399,6 +399,23 @@ export default function DigitalThreadPage({
     return () => { cancelled = true }
   }, [active, api, attempt, opened, proposalKey])
 
+  /** Artifact-thread entry is valid only when the address names a supported exact focal kind. */
+  const artifactContext = useMemo<ArtifactThreadFocalKind | undefined>(() => {
+    if (!focalId) return undefined
+    return focalKind ? ARTIFACT_FOCAL_KIND[focalKind] : "Requirement"
+  }, [focalId, focalKind])
+  const artifactEntryAvailable = Boolean(focalId && artifactContext)
+  // The request identity is part of the state key. A requirement A response must never render for requirement B
+  // while B is resolving, even when both requests map to the same Artifact focal kind (Requirement).
+  const artifactRequestKey = active === "artifact" && focalId && artifactContext && baselineId
+    ? `${projectId}:${baselineId}:${artifactContext}:${focalId}`
+    : ""
+  const thread = threadState?.key === artifactRequestKey ? threadState.body : null
+  const artifactError = artifactErrorState?.key === artifactRequestKey ? artifactErrorState.message : null
+  const setArtifactError = useCallback((message: string | null) => {
+    setArtifactErrorState(message && artifactRequestKey ? { key: artifactRequestKey, message } : null)
+  }, [artifactRequestKey])
+
   /**
    * The exact revision a requirement focal names.
    *
@@ -413,13 +430,22 @@ export default function DigitalThreadPage({
    * carries — not the newest one that happens to exist. An id that is already a revision comes back as
    * itself, so the per-kind addresses introduced by §4.4 are unaffected.
    */
-  const [resolvedFocalId, setResolvedFocalId] = useState<string | undefined>(undefined)
+  const [resolutionState, setResolutionState] = useState<{ key: string; revisionId?: string } | null>(null)
+  const resolvedFocalId = resolutionState?.key === artifactRequestKey ? resolutionState.revisionId : undefined
   useEffect(() => {
     const isRequirement = !focalKind || focalKind === "requirement"
     // Resolution is an Artifact concern. Cancelling it when the reader leaves Artifact prevents a late
     // requirement response from writing an error into the newly active Network context.
-    if (active !== "artifact" || !focalId || !isRequirement) { setResolvedFocalId(focalId); return undefined }
-    if (!baselineId) { setResolvedFocalId(undefined); return undefined }
+    if (active !== "artifact" || !focalId || !isRequirement) {
+      setResolutionState({ key: artifactRequestKey, revisionId: focalId })
+      return undefined
+    }
+    if (!baselineId) { setResolutionState({ key: artifactRequestKey }); return undefined }
+    // Clear the previous resolution before reading this focal. Otherwise the Artifact effect can fetch the
+    // previous revision for one render while the new requirement is still being resolved.
+    setResolutionState({ key: artifactRequestKey })
+    setThreadState(null)
+    setArtifactError(null)
     let cancelled = false
     const run = async () => {
       try {
@@ -432,24 +458,22 @@ export default function DigitalThreadPage({
         // Unresolved stays unresolved. Falling back to the address as given would send an artifact id to a
         // read rooted on a revision, and the reader would be told the thread is unavailable rather than that
         // this build does not carry the record they named.
-        setResolvedFocalId(match?.revisionId)
+        if (!match) {
+          setResolutionState({ key: artifactRequestKey })
+          setArtifactError("That exact requirement is not present in the selected Project and build.")
+          return
+        }
+        setResolutionState({ key: artifactRequestKey, revisionId: match.revisionId })
       } catch (failure) {
         if (!cancelled) {
-          setResolvedFocalId(undefined)
+          setResolutionState({ key: artifactRequestKey })
           setArtifactError(failure instanceof Error ? failure.message : "That requirement could not be resolved.")
         }
       }
     }
     void run()
     return () => { cancelled = true }
-  }, [active, api, attempt, baselineId, focalId, focalKind, projectId])
-
-  /** Artifact-thread entry is valid only when the address names a supported focal kind. */
-  const artifactContext = useMemo<ArtifactThreadFocalKind | undefined>(() => {
-    if (!focalId) return undefined
-    return focalKind ? ARTIFACT_FOCAL_KIND[focalKind] : "Requirement"
-  }, [focalId, focalKind])
-  const artifactEntryAvailable = Boolean(focalId && artifactContext)
+  }, [active, api, artifactRequestKey, attempt, baselineId, focalId, focalKind, projectId, setArtifactError])
 
   /**
    * The artifact thread for the focal record.
@@ -459,12 +483,12 @@ export default function DigitalThreadPage({
    */
   useEffect(() => {
     if (active !== "artifact" || !artifactContext || !resolvedFocalId || !baselineId) {
-      setThread(null)
-      setArtifactError(null)
+      setThreadState(null)
       return undefined
     }
     let cancelled = false
     const run = async () => {
+      setThreadState(null)
       setArtifactError(null)
       try {
         const response = await fetch(api + artifactThreadUrl({
@@ -473,7 +497,7 @@ export default function DigitalThreadPage({
         if (!response.ok) throw new Error("This artifact thread is unavailable in the selected Project and build.")
         const body = await response.json() as unknown
         if (!cancelled) {
-          setThread(body)
+          setThreadState({ key: artifactRequestKey, body })
           setArtifactError(null)
         }
       } catch (failure) {
@@ -482,7 +506,7 @@ export default function DigitalThreadPage({
     }
     void run()
     return () => { cancelled = true }
-  }, [active, api, attempt, artifactContext, baselineId, projectId, resolvedFocalId])
+  }, [active, api, attempt, artifactContext, artifactRequestKey, baselineId, projectId, resolvedFocalId, setArtifactError])
 
   /**
    * The evidence table's rows.

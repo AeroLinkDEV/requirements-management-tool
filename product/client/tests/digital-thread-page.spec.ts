@@ -591,6 +591,118 @@ test.describe("selection and navigation coherence", () => {
     expect(new URL(page.url()).pathname).toMatch(/\/traceability$/)
   })
 
+  test("an exact requirement that is absent from the build fails closed instead of loading forever", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const change = (network.nodes ?? []).find((node: { kind: string }) => node.kind === "ChangeRequest") as {
+      id: string
+    } | undefined
+    expect(change, "the seeded showcase should carry an id that is not a requirement identity").toBeTruthy()
+    if (!change) throw new Error("the seeded showcase should carry an id that is not a requirement identity")
+
+    // The legacy /traceability/{id} address means Requirement. Supplying a current ChangeRequest id therefore
+    // produces a real, empty requirement resolution response and must state the absence truthfully.
+    await page.goto(`${threadRoot(page)}/traceability/${change.id}`)
+    await expect(page.locator(".dtaInFrame-error")).toContainText("not present in the selected Project and build")
+    await expect(page.locator(".dtaLoading")).toHaveCount(0)
+  })
+
+  test("a failed requirement resolution clears on retry and then opens the exact revision", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const context = await (await request.get(
+      `${apiBase}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const list = await (await request.get(
+      `${apiBase}/api/traceability?projectId=${projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=1`
+    )).json()
+    const row = (Array.isArray(list) ? list : list.items ?? [])[0] as { revisionId: string; displayNumber: string } | undefined
+    expect(row, "the seeded showcase should carry a requirement revision for resolution retry").toBeTruthy()
+    if (!row) throw new Error("the seeded showcase should carry a requirement revision for resolution retry")
+
+    let resolutionRequests = 0
+    await page.route("**/api/requirements?*", async route => {
+      resolutionRequests += 1
+      if (resolutionRequests === 1) {
+        await route.fulfill({ status: 500, contentType: "application/json", body: "{}" })
+      } else {
+        await route.continue()
+      }
+    })
+    await page.goto(`${threadRoot(page)}/traceability/${row.revisionId}`)
+    await expect(page.locator(".dtaInFrame-error")).toContainText("could not be resolved")
+    await page.locator(".dtaInFrame-error").getByRole("button", { name: "Try again" }).click()
+    await expect(page.locator(".dtaRoot .dtaCard.is-focal")).toBeVisible()
+    await expect(page.locator(".dtaCard.is-focal .dtaId")).toContainText(row.displayNumber)
+    await expect(page.locator(".dtaInFrame-error")).toHaveCount(0)
+    expect(resolutionRequests).toBeGreaterThanOrEqual(2)
+  })
+
+  test("a new Artifact focal cannot render the previous thread while its exact requirement resolves", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const context = await (await request.get(
+      `${apiBase}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const list = await (await request.get(
+      `${apiBase}/api/traceability?projectId=${projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=2`
+    )).json()
+    const rows = (Array.isArray(list) ? list : list.items ?? []) as { revisionId: string; displayNumber: string }[]
+    expect(rows.length, "the seeded showcase should carry two requirement revisions for focal transition")
+      .toBeGreaterThanOrEqual(2)
+    if (rows.length < 2) throw new Error("the seeded showcase should carry two requirement revisions for focal transition")
+    const [first, second] = rows
+
+    await page.goto(`${threadRoot(page)}/traceability/${first.revisionId}`)
+    await expect(page.locator(".dtaCard.is-focal .dtaId")).toContainText(first.displayNumber)
+
+    let releaseResolution: (() => void) | undefined
+    const resolutionRequest = page.waitForRequest(requestEvent => {
+      const url = new URL(requestEvent.url())
+      return url.pathname.endsWith("/api/requirements") && url.searchParams.get("ids") === second.revisionId
+    })
+    const resolutionResponse = page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return url.pathname.endsWith("/api/requirements") && url.searchParams.get("ids") === second.revisionId
+    })
+    await page.route("**/api/requirements?*", async route => {
+      const url = new URL(route.request().url())
+      if (url.searchParams.get("ids") === second.revisionId) {
+        await new Promise<void>(resolve => { releaseResolution = resolve })
+      }
+      await route.continue()
+    })
+    await page.goto(`${threadRoot(page)}/traceability/${second.revisionId}`)
+    await resolutionRequest
+    await expect(page.locator(".dtaLoading")).toBeVisible()
+    // The old thread may still exist in memory, but it is not associated with this request key and cannot paint.
+    await expect(page.locator(".dtaCard.is-focal")).toHaveCount(0)
+    releaseResolution?.()
+    expect((await resolutionResponse).status()).toBe(200)
+    await expect(page.locator(".dtaCard.is-focal .dtaId")).toContainText(second.displayNumber)
+  })
+
   test("a failed Artifact read clears after a real retry and successful navigation", async ({ page, request }) => {
     test.setTimeout(180_000)
     await page.setViewportSize({ width: 1440, height: 900 })
