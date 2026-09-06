@@ -58,6 +58,14 @@ async function controlsDoNotOverlap(page: Page) {
       controls.forEach((control, i) => controls.slice(i + 1).forEach(other => {
         if (overlaps(control.getBoundingClientRect(), other.getBoundingClientRect())) failures.push(`${control.textContent} / ${other.textContent}`)
       }))
+      // Lists may scroll independently, but their viewport must fit inside the bottom inspector. Moving its
+      // tools into a new row must not simply move the defect into clipped list content below the panel edge.
+      if (panel.matches(".dtnPanel-bottom, .dtaPanel-bottom, .dticPanel-bottom")) {
+        const bounds = panel.getBoundingClientRect()
+        for (const list of panel.querySelectorAll(".dtnRel, .dtaRel, .dticRel")) {
+          if (visible(list) && list.getBoundingClientRect().bottom > bounds.bottom - 1) failures.push(`${list.className} extends below bottom inspector`)
+        }
+      }
     }
     const toolbar = document.querySelector(".dtCanvasControls")!.getBoundingClientRect()
     for (const head of document.querySelectorAll(".dtCanvasLaneHead")) {
