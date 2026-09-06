@@ -1264,14 +1264,13 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         // happen to exist — so a family that loses every row is still enumerated, looked up at zero,
         // and named instead of silently vanishing from the matrix.
         var ladderPolicy = await resolver.ResolveAsync(projectId, ct);
-        var configuredFamilies = new List<(VerificationArtifactKey Key, RequirementLevel Level)>();
-        foreach (var level in ladderPolicy.OrderedLevels)
-        {
-            var profile = ladderPolicy.VerificationProfile(level);
-            if (profile is null) continue;
-            foreach (var definition in profile.Definitions)
-                configuredFamilies.Add((definition.Key, level));
-        }
+        // Iterate the definitions themselves: levels whose ladder step has no verification profile are
+        // legitimately configured without one, and ILadderPolicy.VerificationProfile throws for them
+        // rather than returning null.
+        var configuredFamilies = ladderPolicy.Definitions
+            .Where(x => x.VerificationProfile is not null)
+            .SelectMany(x => x.VerificationProfile!.Definitions.Select(d => (Key: d.Key, Level: x.Level)))
+            .ToList();
         static RequirementLevel ToRequirementLevel(TestProcedureLevel level) => level switch
         {
             TestProcedureLevel.System => RequirementLevel.System,
@@ -1310,8 +1309,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         // exposes separate Test Results workspaces per family, so the aggregate outcome totals cannot
         // stand in for them. The family is the level's profile executable key — kind included, not just
         // level — so a Case execution can never stand in for a Procedure one (or vice versa).
-        var executableLevels = ladderPolicy.OrderedLevels
-            .Where(level => ladderPolicy.VerificationProfile(level) is not null)
+        var executableLevels = ladderPolicy.Definitions
+            .Where(x => x.VerificationProfile is not null)
+            .Select(x => x.Level)
             .ToList();
         var executionCounts = executableLevels.ToDictionary(
             level => level,
