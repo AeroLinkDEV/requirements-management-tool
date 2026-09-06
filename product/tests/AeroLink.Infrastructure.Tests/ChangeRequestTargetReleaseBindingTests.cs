@@ -6,7 +6,6 @@ using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
-using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using System.Net;
 
@@ -58,27 +57,28 @@ public sealed class ChangeRequestTargetReleaseBindingTests
 /// <summary>
 /// PostgreSQL qualification of the #849 Finding 4 composite binding on the real provider, through the real
 /// migration set: a clean install; an upgrade from the immediately preceding migration carrying valid
-/// existing history, which the upgrade must preserve verbatim and then protect; and an upgrade whose
-/// inherited history is incompatible with the new binding, which must fail closed and leave that history in
-/// place exactly as it was — migration tooling must never rewrite or drop controlled rows to satisfy a new
-/// constraint.
+/// existing history, which the upgrade must preserve with unchanged row identities and controlled field
+/// values; and an upgrade whose inherited history is incompatible with the new binding, which must fail
+/// closed on the foreign-key violation itself and leave that history — including its incompatible target
+/// identity — in place unchanged. Migration tooling must never rewrite or drop controlled rows to satisfy a
+/// new constraint.
 ///
-/// Skipped unless AEROLINK_MIGRATIONS_CONNECTION points at a disposable PostgreSQL server; a run without it
-/// is NOT EXECUTED and is no provider evidence. Each test creates and drops its own aerolink_849_target_*
-/// database; the connection must be loopback and must never name the persistent developer port 54329.
+/// Each test skips (never silently passes) unless AEROLINK_MIGRATIONS_CONNECTION points at a disposable
+/// PostgreSQL server; a skipped run is not provider evidence. Each run creates and drops its own
+/// aerolink_849_target_* database; the connection must be loopback and must never name the persistent
+/// developer port 54329.
 /// </summary>
 public sealed class ChangeRequestTargetReleasePostgresQualificationTests
 {
     private const string ConnectionVariable = "AEROLINK_MIGRATIONS_CONNECTION";
-    private const string RequiredVariable = "AEROLINK_REQUIRE_POSTGRES_QUALIFICATION";
     private const string PredecessorMigration = "20260831033526_AddControlledAttachmentStorageOperations";
+    private const string ThisMigration = "20260905222930_AddChangeRequestTargetReleaseProjectBinding";
     private const string ProtectedPort = "54329";
 
-    [Fact]
+    [Issue849PostgresFact]
     public async Task A_clean_install_enforces_the_composite_binding()
     {
         var server = ResolveServerConnection();
-        if (server is null) return;
         var database = $"aerolink_849_target_{Guid.NewGuid():N}";
         try
         {
@@ -107,24 +107,27 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
         }
     }
 
-    [Fact]
+    [Issue849PostgresFact]
     public async Task An_upgrade_from_the_predecessor_preserves_valid_history_and_then_enforces_the_binding()
     {
         var server = ResolveServerConnection();
-        if (server is null) return;
         var database = $"aerolink_849_target_{Guid.NewGuid():N}";
         try
         {
             var connection = await CreateDisposableDatabaseAsync(server, database);
             var options = Options(connection);
 
-            // At the predecessor schema the pair is unbound, so valid history seeds cleanly.
+            // At the predecessor schema the pair is unbound, so valid history seeds cleanly. The snapshot is
+            // what "preserved" is measured against after the upgrade.
+            HistoryRow[] snapshot;
             await using (var db = new AeroLinkDbContext(options))
             {
                 await db.Database.GetService<IMigrator>().MigrateAsync(PredecessorMigration);
                 var seed = await SeedValidHistoryAsync(db);
-                db.SystemChangeRequests.Add(Scr("SRCR-00002", seed.ProjectA, seed.HonestRelease));
+                db.SystemChangeRequests.Add(Scr("SRCR-00002", seed.ProjectA, seed.NextRelease));
                 await db.SaveChangesAsync();
+                snapshot = await SnapshotHistoryAsync(db);
+                Assert.Equal(2, snapshot.Length);
             }
 
             // The upgrade applies the new binding over the populated database.
@@ -133,15 +136,11 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
                 await db.Database.MigrateAsync();
             }
 
-            // Every valid historical row survived the upgrade unchanged, and the binding is live: a foreign
-            // pair is refused while a new honest row persists beside the carried history.
+            // Every historical row survived with unchanged identity and controlled values, and the binding
+            // is live: a foreign pair is refused while a new honest row persists beside the carried history.
             await using (var db = new AeroLinkDbContext(options))
             {
-                Assert.Equal(2, await db.SystemChangeRequests.CountAsync());
-                Assert.Equal(3, await db.Releases.CountAsync());
-                var carried = await db.SystemChangeRequests.SingleAsync(x => x.Title == "Carried history");
-                Assert.Equal("1.0", await db.Releases.Where(r => r.Id == carried.TargetReleaseId)
-                    .Select(r => r.Version).SingleAsync());
+                Assert.Equal(snapshot, await SnapshotHistoryAsync(db));
 
                 var projectA = await db.Projects.SingleAsync(x => x.Name == "Project A");
                 var foreignRelease = await db.Releases.SingleAsync(x => x.Version == "9.9");
@@ -149,8 +148,8 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
                 await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
                 db.ChangeTracker.Clear();
 
-                var honestRelease = await db.Releases.SingleAsync(x => x.Version == "2.0");
-                db.SystemChangeRequests.Add(Scr("SRCR-00003", projectA.Id, honestRelease.Id));
+                var nextRelease = await db.Releases.SingleAsync(x => x.Version == "2.0");
+                db.SystemChangeRequests.Add(Scr("SRCR-00003", projectA.Id, nextRelease.Id));
                 await db.SaveChangesAsync();
                 Assert.Equal(3, await db.SystemChangeRequests.CountAsync());
             }
@@ -161,11 +160,10 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
         }
     }
 
-    [Fact]
+    [Issue849PostgresFact]
     public async Task An_upgrade_over_incompatible_history_fails_closed_without_rewriting_it()
     {
         var server = ResolveServerConnection();
-        if (server is null) return;
         var database = $"aerolink_849_target_{Guid.NewGuid():N}";
         try
         {
@@ -174,31 +172,35 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
 
             // At the predecessor schema a change request pointing at a release that never existed is
             // recordable. Exactly this row is what the new binding must refuse to carry forward.
+            HistoryRow[] historyBefore;
+            HistoryRow incompatibleRow;
             await using (var db = new AeroLinkDbContext(options))
             {
                 await db.Database.GetService<IMigrator>().MigrateAsync(PredecessorMigration);
                 var seed = await SeedValidHistoryAsync(db);
                 db.SystemChangeRequests.Add(Scr("SRCR-00009", seed.ProjectA, Guid.NewGuid()));
                 await db.SaveChangesAsync();
-                var incompatible = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Title == "Incompatible history");
+                historyBefore = await SnapshotHistoryAsync(db);
+                incompatibleRow = historyBefore.Single(x => x.Title == "Incompatible history");
             }
 
-            // The upgrade fails closed instead of rewriting, dropping, or "repairing" the incompatible row.
+            // The upgrade fails closed on the foreign-key violation itself.
             await using (var db = new AeroLinkDbContext(options))
             {
-                await Assert.ThrowsAnyAsync<Exception>(() => db.Database.MigrateAsync());
+                var failure = await Assert.ThrowsAsync<PostgresException>(() => db.Database.MigrateAsync());
+                Assert.Equal("23503", failure.SqlState);
             }
 
-            // The incompatible row is still there, untouched by the failed upgrade, and the
-            // schema sits between migrations: an operator must decide, never the upgrade path.
+            // The history is untouched by the failed upgrade — same row identities, same controlled values,
+            // incompatible target identity included — and the schema sits between migrations: an operator
+            // must decide, never the upgrade path.
             await using (var db = new AeroLinkDbContext(options))
             {
-                Assert.Equal(2, await db.SystemChangeRequests.CountAsync());
-                Assert.True(await db.SystemChangeRequests.AnyAsync(x => x.Title == "Incompatible history"));
-                Assert.Equal(3, await db.Releases.CountAsync());
+                Assert.Equal(historyBefore, await SnapshotHistoryAsync(db));
+                Assert.Contains(incompatibleRow, await SnapshotHistoryAsync(db));
                 var applied = await db.Database.GetAppliedMigrationsAsync();
                 Assert.Contains(PredecessorMigration, applied);
-                Assert.DoesNotContain("20260905222930_AddChangeRequestTargetReleaseProjectBinding", applied);
+                Assert.DoesNotContain(ThisMigration, applied);
             }
         }
         finally
@@ -207,19 +209,48 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
         }
     }
 
-    private sealed record SeedSeed(Guid ProgramId, Guid ProjectA, Guid ProjectB, Guid HonestRelease, Guid SecondRelease, Guid ForeignRelease);
+    /// <summary>The controlled identity and values of one change-request row, for before/after comparison.</summary>
+    private sealed record HistoryRow(Guid Id, Guid ProjectId, Guid TargetReleaseId, string BaseNumber, int Revision,
+        string Title, string AuthorId, DateTimeOffset CreatedAt);
 
-    private static string? ResolveServerConnection()
+    private static async Task<HistoryRow[]> SnapshotHistoryAsync(AeroLinkDbContext db) =>
+        await db.SystemChangeRequests.AsNoTracking()
+            .OrderBy(x => x.Title)
+            .Select(x => new HistoryRow(x.Id, x.ProjectId, x.TargetReleaseId, x.BaseNumber, x.Revision,
+                x.Title, x.AuthorId, x.CreatedAt))
+            .ToArrayAsync();
+
+    private static async Task<(HistoryRow[] Valid, HistoryRow Incompatible)> SnapshotHistoryIncludingIncompatibleAsync(
+        AeroLinkDbContext db) =>
+        (await db.SystemChangeRequests.AsNoTracking().Where(x => x.Title != "Incompatible history")
+                .OrderBy(x => x.Title)
+                .Select(x => new HistoryRow(x.Id, x.ProjectId, x.TargetReleaseId, x.BaseNumber, x.Revision,
+                    x.Title, x.AuthorId, x.CreatedAt))
+                .ToArrayAsync(),
+            await db.SystemChangeRequests.AsNoTracking().Where(x => x.Title == "Incompatible history")
+                .Select(x => new HistoryRow(x.Id, x.ProjectId, x.TargetReleaseId, x.BaseNumber, x.Revision,
+                    x.Title, x.AuthorId, x.CreatedAt))
+                .SingleAsync());
+
+    /// <summary>
+    /// Skips — visibly, as a skipped result rather than a silent pass — when no disposable PostgreSQL server
+    /// is configured. A skipped run is not provider evidence.
+    /// </summary>
+    private sealed class Issue849PostgresFactAttribute : FactAttribute
+    {
+        public Issue849PostgresFactAttribute()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ConnectionVariable)))
+                Skip = "#849 target-release qualification NOT EXECUTED: AEROLINK_MIGRATIONS_CONNECTION names no disposable PostgreSQL server.";
+        }
+    }
+
+    private static string ResolveServerConnection()
     {
         var raw = Environment.GetEnvironmentVariable(ConnectionVariable);
         if (string.IsNullOrWhiteSpace(raw))
-        {
-            var required = Environment.GetEnvironmentVariable(RequiredVariable);
-            if (!string.IsNullOrWhiteSpace(required) && !required.Equals("false", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException(
-                    $"{RequiredVariable} is set, so this qualification must actually run, but {ConnectionVariable} names no disposable PostgreSQL server.");
-            return null; // NOT EXECUTED: no disposable provider configured; SQLite coverage still applies.
-        }
+            throw new InvalidOperationException(
+                "The skip gate should have prevented an unqualified run, but the connection variable is empty.");
         var builder = new NpgsqlConnectionStringBuilder(raw);
         var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
         var loopback = string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
@@ -230,6 +261,8 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
             throw new InvalidOperationException("#849 qualification refuses the protected developer port 54329.");
         return raw;
     }
+
+    private sealed record SeedSeed(Guid ProgramId, Guid ProjectA, Guid ProjectB, Guid HonestRelease, Guid NextRelease, Guid ForeignRelease);
 
     private static async Task<SeedSeed> SeedValidHistoryAsync(AeroLinkDbContext db)
     {
@@ -264,7 +297,12 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
         new(number, 0, projectId, targetReleaseId, TitleFor(number), "P", "A", "S", "author", DateTimeOffset.UtcNow);
 
     private static string TitleFor(string number) =>
-        number == "SRCR-00001" ? "Carried history" : number == "SRCR-00009" ? "Incompatible history" : $"Qualified {number}";
+        number switch
+        {
+            "SRCR-00001" => "Carried history",
+            "SRCR-00009" => "Incompatible history",
+            _ => $"Qualified {number}",
+        };
 
     private static DbContextOptions<AeroLinkDbContext> Options(string connectionString) =>
         new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connectionString).Options;
