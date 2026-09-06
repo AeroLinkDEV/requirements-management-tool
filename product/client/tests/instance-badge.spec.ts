@@ -53,3 +53,29 @@ test('an undeclared installation keeps its modest label unchanged', async ({ pag
   await expect(badge).toHaveText('AEROLINK')
   await expect(badge).toHaveAttribute('data-classification', 'Undeclared')
 })
+
+test('custom declared labels render verbatim under other supported classifications', async ({ page, request }) => {
+  await showcaseSeed(request)
+  await login(page, 'admin')
+  // The explicit rule names HOME CANONICAL and nothing else: a Demo or work-laptop declaration keeps
+  // its operator's own label, word for word (#925 P2 / Astra C-ASTRA-R2-F01).
+  for (const declared of [
+    { label: 'Customer Demo', classification: 'LocalDemo' },
+    { label: 'Flight Test Local', classification: 'WorkLaptopLocal' },
+  ]) {
+    await page.route('**/health/identity', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        sourceShortSha: 'abc1234',
+        mode: 'UNKNOWN',
+        instance: { label: declared.label, classification: declared.classification, snapshot: null },
+        database: { name: 'aerolink' },
+      }),
+    }))
+    await page.reload()
+    const badge = page.getByTestId('instance-badge')
+    await expect(badge).toHaveText(declared.label)
+    await expect(badge).toHaveAttribute('data-classification', declared.classification)
+  }
+})

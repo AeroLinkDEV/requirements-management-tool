@@ -65,28 +65,21 @@ export default function InstanceBadge() {
   const snapshot = identity.instance?.snapshot ?? null;
   const age = snapshotAge(snapshot?.createdAtUtc);
 
-  // Routine surfaces name the installation, not its deployment classification: a declared label may
-  // carry the classification as a suffix — "HOME CANONICAL" is declared alongside the classification
-  // `HomeCanonical`, one spaced and one a single PascalCase word — and reading that raw deployment
-  // vocabulary on every page is what #925 P2 removes. Matching therefore splits the classification into
-  // its PascalCase segments and strips the label's trailing words that spell them. When the whole label
-  // is the classification spelled out, the plain name is the classification's own leading segment
-  // ("HOME" for HomeCanonical). The declared label and classification are stated whole in the tooltip
-  // beside the source and database facts, so nothing here is reclassified, renamed, or inferred — the
-  // badge just stops shouting the operator word.
-  const classificationSegments = classification.trim().match(/[A-Z][a-z0-9]*|[a-z0-9]+/gu) ?? [];
-  const labelWords = label.trim().split(/\s+/u).filter(Boolean);
-  let visibleLabel = label;
-  if (classificationSegments.length > 0 && labelWords.length > 0) {
-    let cursor = labelWords.length;
-    for (let index = classificationSegments.length - 1; index >= 0 && cursor > 0; index -= 1) {
-      if (labelWords[cursor - 1].toUpperCase() !== classificationSegments[index].toUpperCase()) break;
-      cursor -= 1;
-    }
-    visibleLabel = cursor > 0
-      ? labelWords.slice(0, cursor).join(" ")
-      : (classificationSegments[0] ?? label).toUpperCase();
-  }
+  // Routine surfaces name the installation, not its deployment classification. The owner asked for one
+  // specific thing (#925 P2): the declared HOME CANONICAL label reads as the plain installation name it
+  // identifies. That is handled by the single explicit rule below — same declared label, same declared
+  // classification, spaced or not — because a general suffix-stripping algorithm guesses at other
+  // operators' labels and can erase meaningful distinctions like a Demo declaration. Every label the
+  // rule does not name is shown verbatim, and the tooltip keeps the whole declared label,
+  // classification, source, database, mode and snapshot facts, so nothing is reclassified, renamed, or
+  // inferred — the badge just stops shouting the operator word.
+  const plainLabelRules: ReadonlyArray<{ declaredLabel: string; classification: string; plain: string }> = [
+    { declaredLabel: "HOME CANONICAL", classification: "HomeCanonical", plain: "HOME" },
+  ];
+  const normalize = (value: string) => value.replace(/\s+/gu, " ").trim().toUpperCase();
+  const matched = plainLabelRules.find(rule =>
+    rule.classification === classification.trim() && normalize(rule.declaredLabel) === normalize(label));
+  const visibleLabel = matched ? matched.plain : label;
 
   const detail = [
     `Instance: ${label} (${classification})`,
