@@ -127,7 +127,9 @@ const highLevelThread = (focal: string, focalKind: string) => thread({
   edges: [
     edge(PR, "ProblemReport", CR, "ChangeRequest", "resolved by"),
     edge(CR, "ChangeRequest", HLR_REQ, "Requirement", "authored"),
-    edge(SYS_REQ, "Requirement", HLR_REQ, "Requirement", "allocated from"),
+    // Story-directed requirement edges (#925 F5): the projection presents parent → child, phrased for
+    // that reading.
+    edge(SYS_REQ, "Requirement", HLR_REQ, "Requirement", "allocates to"),
     // Server-stated suspect. The artifact thread is the first view whose vocabulary can carry one (#880 §10.2).
     edge(HLR_REQ, "Requirement", PROCEDURE, "Procedure", "verified by", true),
     edge(CASE, "Case", PROCEDURE, "Procedure", "run by"),
@@ -304,7 +306,7 @@ const denseThread = () => {
   const edges: Edge[] = [
     edge(PR, "ProblemReport", CR, "ChangeRequest", "resolved by"),
     edge(CR, "ChangeRequest", HLR_REQ, "Requirement", "authored"),
-    edge(SYS_REQ, "Requirement", HLR_REQ, "Requirement", "allocated from"),
+    edge(SYS_REQ, "Requirement", HLR_REQ, "Requirement", "allocates to"),
   ]
   for (let index = 0; index < 9; index += 1) {
     const suffix = String(index).padStart(2, "0")

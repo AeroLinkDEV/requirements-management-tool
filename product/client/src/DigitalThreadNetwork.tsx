@@ -4,7 +4,7 @@ import { usePanelDock } from "./digitalThreadPanelDock"
 import ExactArtifactLink from "./ExactArtifactLink"
 import { type CanvasEdge, type CanvasNode, compactLanes, trace } from "./digitalThreadGeometry"
 import { stateLabel } from "./presentation"
-import { traceRelationLabel } from "./tracePresentation"
+import { traceRelationLabel, traceRelationLabelFor } from "./tracePresentation"
 import {
   OFF_LADDER,
   laneModel,
@@ -469,8 +469,16 @@ export default function DigitalThreadNetwork({
                 .map(id => ({ node: byId.get(id), hop: web?.hops.get(id) ?? 1 }))
                 .filter((row): row is { node: NetworkNode; hop: number } => Boolean(row.node))
                 .sort((a, b) => a.hop - b.hop || a.node.displayNumber.localeCompare(b.node.displayNumber))
-              const relationFor = (id: string) =>
-                directLinks.find(edge => edge.fromId === id || edge.toId === id)?.relation
+              const relationFor = (id: string) => {
+                // The edge between the listed record and the selection — not merely any edge touching
+                // the listed record, which could name a relationship it has with a third record.
+                const edge = directLinks.find(item =>
+                  (item.fromId === id && item.toId === selected.id) ||
+                  (item.toId === id && item.fromId === selected.id))
+                // The listed record speaks in its own direction: an upstream parent reads "allocates
+                // to" toward the selection, a downstream child reads "allocated from" (#925 V5).
+                return edge ? traceRelationLabelFor(edge.relation, edge.fromId === id) : undefined
+              }
               return (
                 <div className="dtnPanelCol" key={direction}>
                   <div className="dtnRelHead">
@@ -489,7 +497,7 @@ export default function DigitalThreadNetwork({
                           <span>
                             <small>
                               {hop === 1
-                                ? traceRelationLabel(relationFor(node.id) ?? "linked").toUpperCase()
+                                ? (relationFor(node.id) ?? "linked").toUpperCase()
                                 : `${hop} HOPS`}
                             </small>
                             <span>{node.displayNumber}</span>

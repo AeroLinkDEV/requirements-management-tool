@@ -4,7 +4,7 @@ import ExactArtifactLink from "./ExactArtifactLink"
 import { type CanvasNode, resolveDockByLane, trace } from "./digitalThreadGeometry"
 import { usePanelDock } from "./digitalThreadPanelDock"
 import { stateLabel } from "./presentation"
-import { traceRelationLabel } from "./tracePresentation"
+import { traceRelationLabel, traceRelationLabelFor } from "./tracePresentation"
 import {
   ARTIFACT_THREAD_LANES,
   type ArtifactThread,
@@ -607,8 +607,13 @@ export default function DigitalThreadArtifact({
                 .sort(
                   (a, b) => a.hop - b.hop || identityLabel(a.node).localeCompare(identityLabel(b.node)),
                 )
-              const relationFor = (id: string) =>
-                directLinks.find(edge => edge.fromId === id || edge.toId === id)
+              const relationFor = (id: string) => {
+                // The edge between the listed record and the selection — not merely any edge touching
+                // the listed record, which could name a relationship it has with a third record.
+                return directLinks.find(item =>
+                  (item.fromId === id && item.toId === selected?.id) ||
+                  (item.toId === id && item.fromId === selected?.id))
+              }
               return (
                 <div className="dtaPanelCol" key={direction}>
                   <div className="dtaRelHead">
@@ -629,7 +634,7 @@ export default function DigitalThreadArtifact({
                             <span>
                               <small>
                                 {hop === 1
-                                  ? traceRelationLabel(link?.relation ?? "linked").toUpperCase()
+                                  ? traceRelationLabelFor(link?.relation ?? "linked", link?.fromId === node.id).toUpperCase()
                                   : `${hop} HOPS`}
                                 {link?.isSuspect ? " · SUSPECT" : ""}
                               </small>

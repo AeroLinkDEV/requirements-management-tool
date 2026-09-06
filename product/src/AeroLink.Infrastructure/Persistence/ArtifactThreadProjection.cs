@@ -200,10 +200,15 @@ public static class ArtifactThreadProjection
     private static string VerificationKindOf(Accumulator acc, Guid revisionId) =>
         acc.Nodes.TryGetValue(revisionId, out var node) ? node.Kind : KindProcedure;
 
+    /// <summary>
+    /// The human phrase for a stored trace type, phrased for the story direction the projection emits —
+    /// parent → child (#925 F5). The stored type itself is unchanged; only the reading differs from the
+    /// storage orientation.
+    /// </summary>
     private static string RelationFor(RequirementTraceType type) => type switch
     {
-        RequirementTraceType.AllocatedFrom => "allocated from",
-        RequirementTraceType.DerivedFrom => "derived from",
+        RequirementTraceType.AllocatedFrom => "allocates to",
+        RequirementTraceType.DerivedFrom => "source of",
         _ => type.ToString(),
     };
 
@@ -526,18 +531,25 @@ public static class ArtifactThreadProjection
     }
 
     /// <summary>
-    /// Two direction-pure walks from the seeds: every ancestor, and every descendant.
+    /// Two direction-pure walks from the seeds: every ancestor, and — for a requirement focal — every
+    /// descendant, plus the set of requirements whose verification belongs to the story.
     ///
     /// <para>
-    /// Source is the child and Target its parent, matching the rest of the repository. Ancestors follow
-    /// Source → Target and descendants follow Target → Source, neither ever turning round. An undirected walk
-    /// reaches a sibling through the shared parent, and a sibling is neither upstream nor downstream of the
-    /// focal artifact.
+    /// Source is the child and Target its parent, matching the rest of the repository, but that is the
+    /// <i>stored</i> orientation, not the story (#925 F5). A configured ladder makes System the parent of
+    /// HLR and HLR the parent of LLR, so the human reading is System upstream of HLR upstream of LLR:
+    /// ancestors follow Source → Target and descendants follow Target → Source, neither ever turning
+    /// round. An undirected walk reaches a sibling through the shared parent, and a sibling is neither
+    /// upstream nor downstream of the focal artifact.
     /// </para>
     /// <para>
-    /// Only a requirement focal owns a downstream chain. A Case, Procedure, Execution or Build is reached from
-    /// the requirement side, so walking down from the requirements it covers would report peer requirements it
-    /// has no recorded relationship with.
+    /// Verification belongs downstream of the requirement it verifies. A requirement focal therefore
+    /// pivots into coverage from itself and its downstream descendants only: walking up to the System
+    /// parent and into that parent's procedures would present an ancestor's verification branch as if it
+    /// hung below the focal record. A Case, Procedure, Execution or Build is reached from the requirement
+    /// side, so it keeps the anchored restriction applied in <see cref="AddVerificationAsync"/> and no
+    /// descendant walk at all — walking down from the requirements a procedure covers would report peer
+    /// requirements it has no recorded relationship with.
     /// </para>
     /// </summary>
     private static async Task<(IReadOnlyCollection<Guid> All, IReadOnlyCollection<Guid> VerificationSources)> WalkAsync(
@@ -554,25 +566,30 @@ public static class ArtifactThreadProjection
         var upward = links.ToLookup(x => x.SourceRevisionId);
         var downward = links.ToLookup(x => x.TargetRevisionId);
 
-        // Keep the Source → Target half separate. Verification edges also leave a Requirement, so only the
-        // focal and Requirements reached by continuing this same half may pivot into verification. A Requirement
-        // reached through Target → Source remains a legitimate trace node, but turning around there into its
-        // Case/Procedure branch would be the sideways reversal §6.5 forbids.
-        var verificationSources = new HashSet<Guid>(seeds);
+        var ancestors = new HashSet<Guid>(seeds);
         var queue = new Queue<Guid>(seeds);
         while (queue.Count > 0)
             foreach (var link in upward[queue.Dequeue()])
-                if (verificationSources.Add(link.TargetRevisionId)) queue.Enqueue(link.TargetRevisionId);
+                if (ancestors.Add(link.TargetRevisionId)) queue.Enqueue(link.TargetRevisionId);
 
-        var reachable = new HashSet<Guid>(verificationSources);
+        var reachable = new HashSet<Guid>(ancestors);
+        HashSet<Guid> verificationSources;
         if (focalKind == ArtifactThreadFocalKind.Requirement)
         {
-            var down = new HashSet<Guid>(seeds);
+            var descendants = new HashSet<Guid>(seeds);
             queue = new Queue<Guid>(seeds);
             while (queue.Count > 0)
                 foreach (var link in downward[queue.Dequeue()])
-                    if (down.Add(link.SourceRevisionId)) queue.Enqueue(link.SourceRevisionId);
-            reachable.UnionWith(down);
+                    if (descendants.Add(link.SourceRevisionId)) queue.Enqueue(link.SourceRevisionId);
+            // Only the focal and its descendants pivot into verification. An ancestor stays a legitimate
+            // upstream trace node, but turning from it into its Case/Procedure branch would draw an
+            // unrelated sibling branch below the focal record (#925 F5).
+            verificationSources = descendants;
+            reachable.UnionWith(descendants);
+        }
+        else
+        {
+            verificationSources = ancestors;
         }
 
         if (reachable.Count == 0) return ([], []);
@@ -598,7 +615,10 @@ public static class ArtifactThreadProjection
                 .Select(x => x.ExactLinkSuspectLifecycleId!.Value).ToList(), ct);
 
         foreach (var link in links)
-            acc.Link(new ArtifactThreadEdge(link.SourceRevisionId, KindRequirement, link.TargetRevisionId,
+            // Stored child → parent, presented in story direction: the arrow reads down the ladder
+            // (System → HLR → LLR), and RelationFor phrases it for that reading (#925 F5). The stored
+            // type and its suspect provenance are unchanged.
+            acc.Link(new ArtifactThreadEdge(link.TargetRevisionId, KindRequirement, link.SourceRevisionId,
                 KindRequirement, RelationFor(link.Type),
                 SuspectFromLifecycle(link.ExactLinkSuspectLifecycleId, states)));
 

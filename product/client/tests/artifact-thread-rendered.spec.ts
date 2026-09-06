@@ -355,9 +355,12 @@ test.describe("the trace the server returned", () => {
     await open(page, "hlr")
 
     const panel = page.locator(".dtaPanel")
-    await expect(panel).toContainText("ALLOCATED FROM")
+    // Each direct row speaks in the listed record's own direction (#925 V5): the System parent
+    // allocates to the focal HLR, the authoring change authored it, and the covering procedure
+    // verifies it.
+    await expect(panel).toContainText("ALLOCATES TO")
     await expect(panel).toContainText("AUTHORED")
-    await expect(panel).toContainText("VERIFIED BY")
+    await expect(panel).toContainText("VERIFIES")
     // A suspect direct link is marked in the row as well as on the board.
     await expect(panel.locator(".dtaRel button.is-suspect")).toContainText("SUSPECT")
     // Deeper hops are counted rather than given a relation they do not have.

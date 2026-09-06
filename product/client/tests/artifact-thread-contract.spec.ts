@@ -123,8 +123,9 @@ test("exact identities survive normalization unchanged", () => {
 test("edge endpoint kinds and the authoritative relation survive unchanged", () => {
   const thread = parsed()
 
-  // "allocated from" and "derived from" are different controlled claims, as are "verified by" and "run by".
-  // Flattening any of them into one generic word would lose trace meaning the domain records.
+  // "authored" from a change request and from a test change request are different provenance, as are
+  // "verified by" and "run by". Flattening any of them into one generic word would lose trace meaning
+  // the domain records.
   expect(thread.edges.map(edge => edge.relation)).toEqual([
     "resolved by", "authored", "authored", "verified by", "run by", "produced", "evidence for",
   ])
