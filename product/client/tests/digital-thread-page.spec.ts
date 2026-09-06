@@ -688,14 +688,17 @@ test.describe("selection and navigation coherence", () => {
     // active build, so the honest action result may be the exact Inside route followed by the page's explicit
     // missing-current-build response. This still exercises native pointer and keyboard activation on the real
     // Artifact card without inventing membership by searching unrelated rows.
-    const change = (thread.nodes ?? []).find(node => node.kind === "ChangeRequest" || node.kind === "TestChangeRequest")
-    expect(change, "the authoritative inherited baseline Artifact thread should carry a change action card")
-      .toBeTruthy()
-    if (!change) throw new Error("the authoritative inherited baseline Artifact thread should carry a change action card")
-
     const artifactPath = `${threadBase}/traceability/${row.revisionId}`
     await page.goto(artifactPath)
     await expect(page.locator(".dtaRoot")).toBeVisible()
+    await expect(page.locator(".dtaPanel .dtaRel button").first()).toBeVisible()
+    const tracedIdentities = await page.locator(".dtaPanel .dtaRel button > span > span").allTextContents()
+    // The projection includes background context as well as the directed trace. Do not depend on its node
+    // order or pick an unrelated change merely because it happens to be returned first.
+    const change = (thread.nodes ?? []).find(node =>
+      (node.kind === "ChangeRequest" || node.kind === "TestChangeRequest") && tracedIdentities.includes(node.displayNumber))
+    expect(change, "the authoritative inherited baseline trace should carry a change action card").toBeTruthy()
+    if (!change) throw new Error("the authoritative inherited baseline trace should carry a change action card")
     // An arbitrary authored change may be several hops from the focal requirement. C5 keeps initial
     // framing readable; use the all-hop inspector to bring this exact action card into the usable window.
     const revealChange = () => page.locator(".dtaPanel .dtaRel button")
