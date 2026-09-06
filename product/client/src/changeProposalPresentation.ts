@@ -353,7 +353,7 @@ export const downstreamNotice = (item: ProposalItem): string | null => {
         : "This proposal targets an older revision than the requirement now has. Nothing is shown against the revision it names."
     }
     case "BaseRevisionUnresolved":
-      return "The revision this proposal names could not be resolved, so what sits below it is unknown."
+      return "Base revision unresolved: the prior revision needed to determine this relationship could not be resolved."
     case "NoAllocationRecorded":
       return "Nothing is allocated below this requirement."
     default:

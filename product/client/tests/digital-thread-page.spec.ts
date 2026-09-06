@@ -103,7 +103,7 @@ test.describe("the reclaimed header", () => {
 })
 
 test.describe("the toolbar", () => {
-  test("carries the view switch, the representation toggle and a compact Export", async ({ page, request }) => {
+  test("carries the view switch, representation toggle and explicit baseline report", async ({ page, request }) => {
     test.setTimeout(180_000)
     await page.setViewportSize({ width: 1440, height: 900 })
     await apiLogin(request)
@@ -119,11 +119,11 @@ test.describe("the toolbar", () => {
     await expect(toolbar.getByRole("button", { name: "Map" })).toBeVisible()
     await expect(toolbar.getByRole("button", { name: "Table" })).toBeVisible()
 
-    // The exports survive, grouped rather than spending the width two large buttons used to (§4.5).
-    await expect(page.getByRole("link", { name: "Trace PDF" })).toBeHidden()
-    await toolbar.locator(".dtPageExport summary").click()
-    await expect(page.getByRole("link", { name: "Trace PDF" })).toBeVisible()
-    await expect(page.getByRole("link", { name: "Trace DOCX" })).toBeVisible()
+    // Baseline exports remain available, but only under an explicitly named baseline report.
+    await expect(page.getByRole("link", { name: "Baseline trace PDF" })).toBeHidden()
+    await page.getByText("Baseline evidence report", { exact: true }).click()
+    await expect(page.getByRole("link", { name: "Baseline trace PDF" })).toBeVisible()
+    await expect(page.getByRole("link", { name: "Baseline trace DOCX" })).toBeVisible()
   })
 
   test("the export links keep their existing report behaviour", async ({ page, request }) => {
@@ -136,8 +136,8 @@ test.describe("the toolbar", () => {
     await openThread(page)
 
     await expect(page.locator(".dtPageBaseline select")).toBeVisible()
-    await page.locator(".dtPageExport summary").click()
-    for (const [name, format] of [["Trace PDF", "pdf"], ["Trace DOCX", "docx"]] as const) {
+    await page.getByText("Baseline evidence report", { exact: true }).click()
+    for (const [name, format] of [["Baseline trace PDF", "pdf"], ["Baseline trace DOCX", "docx"]] as const) {
       const href = await page.getByRole("link", { name }).getAttribute("href")
       // Same report resource the replaced page used; the generator is untouched by this slice.
       expect(href).toMatch(new RegExp(`/api/traceability/[^/]+/download\\?format=${format}$`))
@@ -155,7 +155,7 @@ test.describe("the evidence table", () => {
     await selectProgram(page, "Flight Management System Live Program")
     await openThread(page)
 
-    await page.locator(".dtPageToolbar").getByRole("button", { name: "Table" }).click()
+    await page.getByText("Baseline evidence report", { exact: true }).click()
     const table = page.locator(".dtPageTable table")
     await expect(table).toBeVisible()
 
@@ -181,7 +181,7 @@ test.describe("the evidence table", () => {
     const before = page.url()
 
     await page.locator(".dtPageToolbar").getByRole("button", { name: "Table" }).click()
-    await expect(page.locator(".dtPageTable")).toBeVisible()
+    await expect(page.locator(".dtThreadTable")).toBeVisible()
     await page.locator(".dtPageToolbar").getByRole("button", { name: "Map" }).click()
     await expect(page.locator(".dtCanvas")).toBeVisible()
 
@@ -198,7 +198,7 @@ test.describe("the evidence table", () => {
     await selectProgram(page, "Flight Management System Live Program")
     await openThread(page)
 
-    await page.locator(".dtPageToolbar").getByRole("button", { name: "Table" }).click()
+    await page.getByText("Baseline evidence report", { exact: true }).click()
     const table = page.locator(".dtPageTable")
     await expect(table.locator("tbody tr").first()).toBeVisible()
 
@@ -220,6 +220,175 @@ test.describe("the evidence table", () => {
     // The last page is reachable and says so, rather than paging forever.
     const pages = Number(/Page \d+ of ([\d,]+)/.exec(await pager.innerText())![1].replace(/,/g, ""))
     expect(pages).toBeGreaterThan(1)
+  })
+})
+
+test.describe("active-view table representations", () => {
+  test("Network Table keeps its selected change, search and typed relationships", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json() as {
+        nodes: { id: string; kind: string; displayNumber: string; level?: string | null }[]
+      }
+    const target = network.nodes.find(node => node.kind === "ChangeRequest")
+    expect(target, "the network projection should carry a Change Request").toBeTruthy()
+    if (!target) throw new Error("the network projection should carry a Change Request")
+
+    // Search and select a real projection card before switching representation. The table must use this same
+    // projection rather than the unrelated baseline requirement population.
+    const search = page.locator(".dtnSearch input")
+    await search.fill(target.displayNumber)
+    const card = page.locator(".dtnCard").filter({ hasText: target.displayNumber }).first()
+    await expect(card).toBeVisible()
+    await card.click()
+    await expect(page.locator(".dtnCard.is-selected")).toContainText(target.displayNumber)
+    const networkPanel = page.locator(".dtnPanel")
+
+    let traceabilityRequests = 0
+    page.on("request", requestEvent => {
+      if (new URL(requestEvent.url()).pathname.endsWith("/api/traceability")) traceabilityRequests += 1
+    })
+    await page.getByRole("button", { name: "Table" }).click()
+    await expect(page.locator(".dtThreadTable")).toBeVisible()
+    // Map may move a side preference to Bottom when the canvas cannot preserve non-occlusion. Set Right
+    // against the active table, whose mounted canvas cannot report a map framing shortfall.
+    await networkPanel.getByRole("button", { name: "Right", exact: true }).click()
+    await expect(networkPanel).toHaveClass(/dtnPanel-right/)
+    const networkLastRow = page.locator(".dtThreadTable tbody tr").last()
+    await networkLastRow.scrollIntoViewIfNeeded()
+    await expect(networkLastRow).toBeVisible()
+    await expect(page.locator(".dtThreadTable").getByRole("link", { name: target.displayNumber, exact: true })).toBeVisible()
+    await expect(page.locator(".dtThreadTable tbody tr").filter({ hasText: target.displayNumber }).getByRole("button", { name: /Selected/ })).toBeVisible()
+    await expect(page.locator(".dtThreadTable")).not.toContainText("1,250 requirement")
+    expect(traceabilityRequests, "active-view representation switching must not load baseline rows").toBe(0)
+
+    // Returning to Map keeps the child mounted: the query, selected card and routed focal remain intact.
+    await page.getByRole("button", { name: "Map" }).click()
+    await expect(page.locator(".dtnSearch input")).toHaveValue(target.displayNumber)
+    await expect(page.locator(".dtnCard.is-selected")).toContainText(target.displayNumber)
+    await page.getByRole("button", { name: "Table" }).click()
+    await expect(page.locator(".dtThreadTable tbody tr").filter({ hasText: target.displayNumber })).toHaveCount(1)
+  })
+
+  test("Inside Table keeps the opened change and type filter across the round trip", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json() as {
+        nodes: { id: string; kind: string; displayNumber: string; level?: string | null }[]
+      }
+    const target = network.nodes.find(node => node.kind === "ChangeRequest" && node.level === "System")
+    expect(target, "the network projection should carry a Change Request").toBeTruthy()
+    if (!target) throw new Error("the network projection should carry a Change Request")
+
+    const networkCard = page.locator(".dtnCard").filter({ hasText: target.displayNumber }).first()
+    await networkCard.click()
+    await networkCard.getByRole("button", { name: "Open this change" }).click()
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    // Entering Inside opens the focal change but deliberately starts with no selected card. Select the real
+    // register node through the canvas's native button contract before exercising its inspector.
+    const insideNode = page.locator(".dtCanvasNode").filter({ hasText: target.displayNumber }).first()
+    await insideNode.focus()
+    await page.keyboard.press("Enter")
+    await expect(insideNode).toHaveAttribute("aria-pressed", "true")
+    await page.getByRole("button", { name: "SYS", exact: true }).click()
+    const insidePanel = page.locator(".dticPanel")
+    await page.getByRole("button", { name: "Table" }).click()
+    await expect(page.locator(".dtThreadTable")).toBeVisible()
+    await insidePanel.getByRole("button", { name: "Right", exact: true }).click()
+    await expect(insidePanel).toHaveClass(/dticPanel-right/)
+    const insideLastRow = page.locator(".dtThreadTable tbody tr").last()
+    await insideLastRow.scrollIntoViewIfNeeded()
+    await expect(insideLastRow).toBeVisible()
+    await expect(page.locator(".dtThreadTable")).toContainText(target.displayNumber)
+    await expect(page.locator(".dtThreadTable")).not.toContainText("1,250 requirement")
+    await expect(page.locator(".dticTypes").getByRole("button", { name: "SYS", exact: true })).toHaveAttribute("aria-pressed", "true")
+
+    const selector = page.locator(".dtThreadTable").getByRole("button", { name: /^Select / }).first()
+    const selectorLabel = await selector.getAttribute("aria-label")
+    expect(selectorLabel, "the Inside table should expose an unselected row control").toMatch(/^Select /)
+    if (!selectorLabel) throw new Error("the Inside table should expose an unselected row control")
+    const selectedLabel = selectorLabel.replace(/^Select /, "Selected ")
+    await selector.focus()
+    await page.keyboard.press("Enter")
+    await expect(page.locator(".dtThreadTable").getByRole("button", { name: selectedLabel, exact: true })).toBeVisible()
+    await page.getByRole("button", { name: "Map" }).click()
+    await expect(page.locator(".dticTypes").getByRole("button", { name: "SYS", exact: true })).toHaveAttribute("aria-pressed", "true")
+    await expect(page.locator(".dticRoot .dtCanvas")).toBeVisible()
+    await page.getByRole("button", { name: "Table" }).click()
+    await expect(page.locator(".dtThreadTable").getByRole("button", { name: selectedLabel, exact: true })).toBeVisible()
+  })
+
+  test("Artifact Table keeps a non-focal exact record selected and searchable", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await apiLogin(request)
+    const showcase = await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const context = await (await request.get(
+      `${apiBase}/api/build-context?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`)).json() as { effectiveBaselineId: string }
+    const list = await (await request.get(
+      `${apiBase}/api/traceability?projectId=${showcase.projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=1`)).json() as { items?: { revisionId: string }[] }
+    const row = (Array.isArray(list) ? list : list.items ?? [])[0] as { revisionId: string } | undefined
+    expect(row, "the baseline should carry a requirement revision").toBeTruthy()
+    if (!row) throw new Error("the baseline should carry a requirement revision")
+
+    const thread = await (await request.get(
+      `${apiBase}/api/artifact-thread?projectId=${showcase.projectId}&baselineId=${context.effectiveBaselineId}&focalKind=Requirement&focalId=${row.revisionId}`)).json() as {
+        nodes?: { id: string; displayNumber: string | null; isFocal: boolean }[]
+      }
+    const nonFocal = thread.nodes?.find(node => !node.isFocal && node.displayNumber)
+    expect(nonFocal, "the artifact thread should carry a non-focal exact record").toBeTruthy()
+    if (!nonFocal || !nonFocal.displayNumber) throw new Error("the artifact thread should carry a non-focal exact record")
+
+    const root = threadRoot(page)
+    await page.goto(`${root}/traceability/${row.revisionId}`)
+    await expect(page.locator(".dtaRoot")).toBeVisible()
+    const artifactPanel = page.locator(".dtaPanel")
+    await page.getByRole("button", { name: "Table" }).click()
+    const table = page.locator(".dtThreadTable")
+    await artifactPanel.getByRole("button", { name: "Right", exact: true }).click()
+    await expect(artifactPanel).toHaveClass(/dtaPanel-right/)
+    const artifactLastRow = table.locator("tbody tr").last()
+    await artifactLastRow.scrollIntoViewIfNeeded()
+    await expect(artifactLastRow).toBeVisible()
+    const rowSelect = table.getByRole("button", { name: `Select ${nonFocal.displayNumber}`, exact: true })
+    const nonFocalRow = rowSelect.locator("xpath=ancestor::tr")
+    const rowLink = nonFocalRow.locator("td").nth(1)
+      .getByRole("link", { name: nonFocal.displayNumber, exact: true })
+    await expect(rowLink).toBeVisible()
+    const selectedIdentity = await rowLink.innerText()
+    await rowSelect.focus()
+    await page.keyboard.press("Enter")
+    await expect(table.getByRole("button", { name: `Selected ${nonFocal.displayNumber}`, exact: true })).toBeVisible()
+
+    await page.getByRole("button", { name: "Map" }).click()
+    await expect(page.locator(".dtaSearch input")).toBeVisible()
+    await expect(page.locator(".dtaCard.is-selected")).toHaveCount(1)
+    await expect(page.locator(".dtaCard.is-selected .dtaId")).toContainText(selectedIdentity)
+    await page.locator(".dtaSearch input").fill(selectedIdentity)
+    await page.getByRole("button", { name: "Table" }).click()
+    await expect(page.locator(".dtaSearch input")).toHaveValue(selectedIdentity)
+    await expect(table.locator("tbody tr").filter({ hasText: selectedIdentity })).toHaveCount(1)
+    await expect(table.getByRole("button", { name: `Selected ${nonFocal.displayNumber}`, exact: true })).toBeVisible()
   })
 })
 
@@ -326,6 +495,464 @@ test.describe("focal deep links", () => {
     await page.goto(`${threadRoot(page)}/traceability/change-requests/${absent}?view=inside`)
     await expect(page.getByRole("alert")).toContainText(/does not contain the change/i)
     await expect(page.locator(".dticRoot")).toHaveCount(0)
+  })
+})
+
+test.describe("selection and navigation coherence", () => {
+  test("a selected change becomes the exact Inside focal and survives refresh", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const changes = (network.nodes ?? []).filter((node: { kind: string }) => node.kind === "ChangeRequest") as {
+      id: string; displayNumber: string
+    }[]
+    expect(changes.length, "the seeded showcase should carry at least two Change Requests to move between")
+      .toBeGreaterThanOrEqual(2)
+    await expect(page.locator(".dtCanvasScene .dtnCard").first()).toBeVisible()
+    const changeIds = new Set(changes.map(candidate => candidate.id))
+    // Lane and row are presentation assignments, not API fields. Pick two actual rendered cards sharing their
+    // measured lane position, so ArrowDown exercises the same navigation a reader can use on this fixture.
+    const rendered = await page.locator(".dtCanvasNode").evaluateAll(elements => elements.map(element => {
+      const box = element.getBoundingClientRect()
+      return { id: element.getAttribute("data-node-id") ?? "", left: box.left, top: box.top }
+    }))
+    const renderedChanges = rendered.filter(candidate => changeIds.has(candidate.id))
+    const firstRendered = renderedChanges.find(candidate => renderedChanges.some(other =>
+      other.id !== candidate.id && Math.abs(other.left - candidate.left) < 2))
+    expect(firstRendered, "the seeded showcase should render two Change Requests in one navigable lane").toBeTruthy()
+    if (!firstRendered) throw new Error("the seeded showcase should render two Change Requests in one navigable lane")
+    const secondRendered = renderedChanges
+      .filter(candidate => candidate.id !== firstRendered.id && Math.abs(candidate.left - firstRendered.left) < 2
+        && candidate.top > firstRendered.top)
+      .sort((a, b) => a.top - b.top)[0]
+    expect(secondRendered, "the selected Change Request should have a keyboard-reachable neighbor").toBeTruthy()
+    if (!secondRendered) throw new Error("the selected Change Request should have a keyboard-reachable neighbor")
+    const first = changes.find(candidate => candidate.id === firstRendered.id)
+    const second = changes.find(candidate => candidate.id === secondRendered.id)
+    expect(first && second, "rendered Change Requests should retain their API identities").toBeTruthy()
+    if (!first || !second) throw new Error("rendered Change Requests should retain their API identities")
+
+    const cardFor = (displayNumber: string) => page.locator(".dtnCard").filter({ hasText: displayNumber }).first()
+    await cardFor(first.displayNumber).click()
+    await expect(page.locator(".dtnCard.is-selected")).toContainText(first.displayNumber)
+    await expect(page.getByRole("button", { name: "Inside a change" })).toBeEnabled()
+    expect(page.url()).toContain(`/traceability/change-requests/${first.id}`)
+
+    // Changing the selected card changes the addressed focal, so Inside cannot silently reopen the first card.
+    // The expanded first card may cover the next row visually; use the shared canvas keyboard path to reach it,
+    // which is also the usable interaction required for a dense lane.
+    await page.locator(`.dtCanvasNode[data-node-id="${first.id}"]`).focus()
+    await page.keyboard.press("ArrowDown")
+    await page.keyboard.press("Enter")
+    await expect(page.locator(".dtnCard.is-selected")).toContainText(second.displayNumber)
+    await expect(page.getByRole("button", { name: "Inside a change" })).toBeEnabled()
+    expect(page.url()).toContain(`/traceability/change-requests/${second.id}`)
+
+    await page.getByRole("button", { name: "Inside a change" }).click()
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    await expect(page.locator(".dticRoot")).toContainText(`Inside ${second.displayNumber}`)
+    expect(page.url()).toMatch(new RegExp(`/traceability/change-requests/${second.id}\\?view=inside$`))
+
+    await page.reload()
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    await expect(page.locator(".dticRoot")).toContainText(`Inside ${second.displayNumber}`)
+    expect(page.url()).toMatch(new RegExp(`/traceability/change-requests/${second.id}\\?view=inside$`))
+  })
+
+  test("a card action opens Inside once for pointer and keyboard activation", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const change = (network.nodes ?? []).find((node: { kind: string }) => node.kind === "ChangeRequest") as { id: string; displayNumber: string } | undefined
+    expect(change, "the seeded showcase should carry a Change Request to open").toBeTruthy()
+    if (!change) throw new Error("the seeded showcase should carry a Change Request to open")
+
+    const card = page.locator(".dtnCard").filter({ hasText: change.displayNumber }).first()
+    await card.click()
+    await card.getByRole("button", { name: "Open this change" }).click()
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    await expect(page.locator(".dticRoot")).toContainText(`Inside ${change.displayNumber}`)
+    expect(page.url()).toMatch(new RegExp(`/traceability/change-requests/${change.id}\\?view=inside$`))
+
+    // Return to the addressed network entry, then activate the same nested button through the native keyboard
+    // path. The card wrapper must not consume Enter and turn it into a second selection action.
+    await page.goBack()
+    await expect(page.locator(".dtnRoot")).toBeVisible()
+    const selected = page.locator(".dtnCard.is-selected")
+    await expect(selected).toContainText(change.displayNumber)
+    const action = selected.getByRole("button", { name: "Open this change" })
+    await action.focus()
+    await page.keyboard.press("Enter")
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    await expect(page.locator(".dticRoot")).toContainText(`Inside ${change.displayNumber}`)
+    expect(page.url()).toMatch(new RegExp(`/traceability/change-requests/${change.id}\\?view=inside$`))
+  })
+
+  test("Inside card links keep native pointer activation within the shared canvas", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const threadBase = threadRoot(page)
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const change = (network.nodes ?? []).find((node: { kind: string }) => node.kind === "ChangeRequest") as {
+      id: string; displayNumber: string
+    } | undefined
+    expect(change, "the seeded showcase should carry a Change Request for Inside link activation").toBeTruthy()
+    if (!change) throw new Error("the seeded showcase should carry a Change Request for Inside link activation")
+
+    await page.goto(`${threadBase}/traceability/change-requests/${change.id}?view=inside`)
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    const link = page.locator(".dticCard .dticId.exactArtifactLink[href]").first()
+    await expect(link).toBeVisible()
+    const href = await link.getAttribute("href")
+    expect(href, "the Inside register should expose an exact native route").toBeTruthy()
+    if (!href) throw new Error("the Inside register should expose an exact native route")
+
+    // This is a real primary pointer activation on a nested anchor. The shared canvas must not capture it as
+    // a card selection, and the browser should navigate once to the exact destination supplied by the link.
+    await Promise.all([
+      page.waitForURL(url => new URL(url).pathname === new URL(href, page.url()).pathname),
+      link.click(),
+    ])
+    expect(new URL(page.url()).pathname).toBe(new URL(href, page.url()).pathname)
+
+    // Fresh route, then a native Enter activation on a link that is actually in the usable canvas window.
+    await page.goto(`${threadBase}/traceability/change-requests/${change.id}?view=inside`)
+    await expect(page.locator(".dticRoot")).toBeVisible()
+    const links = page.locator(".dticCard .dticId.exactArtifactLink[href]")
+    const keyboardLinkIndex = await links.evaluateAll(elements => elements.findIndex(element => {
+      const box = element.getBoundingClientRect()
+      return box.width > 10 && box.height > 10 && box.bottom > 0 && box.top < window.innerHeight
+    }))
+    expect(keyboardLinkIndex, "Inside should expose a visible exact link for keyboard activation").toBeGreaterThanOrEqual(0)
+    const keyboardLink = links.nth(keyboardLinkIndex)
+    const keyboardHref = await keyboardLink.getAttribute("href")
+    expect(keyboardHref, "the keyboard target should remain an exact native route").toBeTruthy()
+    if (!keyboardHref) throw new Error("the keyboard target should remain an exact native route")
+    await keyboardLink.focus()
+    await Promise.all([
+      page.waitForURL(url => new URL(url).pathname === new URL(keyboardHref, page.url()).pathname),
+      page.keyboard.press("Enter"),
+    ])
+    expect(new URL(page.url()).pathname).toBe(new URL(keyboardHref, page.url()).pathname)
+  })
+
+  test("Artifact card actions survive shared canvas pointer and keyboard handling", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const threadBase = threadRoot(page)
+    const { projectId, releaseId } = ids(page)
+    const context = await (await request.get(
+      `${apiBase}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const list = await (await request.get(
+      `${apiBase}/api/traceability?projectId=${projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=1`
+    )).json()
+    const rows = (Array.isArray(list) ? list : list.items ?? []) as { revisionId: string; displayNumber: string }[]
+    expect(rows.length, "the seeded showcase should carry requirement revisions for Artifact actions").toBeGreaterThan(0)
+    const row = rows[0]
+    const thread = await (await request.get(
+      `${apiBase}/api/artifact-thread?projectId=${projectId}&baselineId=${context.effectiveBaselineId}`
+      + `&focalKind=Requirement&focalId=${encodeURIComponent(row.revisionId)}`)).json() as {
+        nodes?: { id: string; kind: string; displayNumber: string }[]
+      }
+    // Build 1.6 inherits the released Build 1.5 baseline. Its authored change cards are historical to the
+    // active build, so the honest action result may be the exact Inside route followed by the page's explicit
+    // missing-current-build response. This still exercises native pointer and keyboard activation on the real
+    // Artifact card without inventing membership by searching unrelated rows.
+    const artifactPath = `${threadBase}/traceability/${row.revisionId}`
+    await page.goto(artifactPath)
+    await expect(page.locator(".dtaRoot")).toBeVisible()
+    await expect(page.locator(".dtaPanel .dtaRel button").first()).toBeVisible()
+    const tracedIdentities = await page.locator(".dtaPanel .dtaRel button > span > span").allTextContents()
+    // The projection includes background context as well as the directed trace. Do not depend on its node
+    // order or pick an unrelated change merely because it happens to be returned first.
+    const change = (thread.nodes ?? []).find(node =>
+      (node.kind === "ChangeRequest" || node.kind === "TestChangeRequest") && tracedIdentities.includes(node.displayNumber))
+    expect(change, "the authoritative inherited baseline trace should carry a change action card").toBeTruthy()
+    if (!change) throw new Error("the authoritative inherited baseline trace should carry a change action card")
+    // An arbitrary authored change may be several hops from the focal requirement. C5 keeps initial
+    // framing readable; use the all-hop inspector to bring this exact action card into the usable window.
+    const revealChange = () => page.locator(".dtaPanel .dtaRel button")
+      .filter({ has: page.getByText(change.displayNumber, { exact: true }) }).click()
+    await revealChange()
+    const card = page.locator(".dtaCard").filter({ hasText: change.displayNumber }).first()
+    await expect(card).toBeVisible()
+    await card.click()
+    const action = card.getByRole("button", { name: "Open this change" })
+    await expect(action).toBeVisible()
+    await action.click()
+    await expect(page).toHaveURL(`${threadBase}/traceability/change-requests/${change.id}?view=inside`)
+    await expect(page.getByRole("alert")).toContainText("does not contain the change")
+    expect(page.url()).toMatch(new RegExp(`/traceability/change-requests/${change.id}\\?view=inside$`))
+
+    // Back to the exact Artifact address and activate the same nested control through Enter. The card wrapper
+    // must not turn that native button event into another selection or a duplicate route transition.
+    await page.goto(artifactPath)
+    await expect(page.locator(".dtaRoot")).toBeVisible()
+    await revealChange()
+    const keyboardCard = page.locator(".dtaCard").filter({ hasText: change.displayNumber }).first()
+    await keyboardCard.click()
+    const keyboardAction = keyboardCard.getByRole("button", { name: "Open this change" })
+    await keyboardAction.focus()
+    await page.keyboard.press("Enter")
+    await expect(page).toHaveURL(`${threadBase}/traceability/change-requests/${change.id}?view=inside`)
+    await expect(page.getByRole("alert")).toContainText("does not contain the change")
+    expect(page.url()).toMatch(new RegExp(`/traceability/change-requests/${change.id}\\?view=inside$`))
+  })
+
+  test("unsupported Artifact entry is explicit and returning to Network clears its error context", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const change = (network.nodes ?? []).find((node: { kind: string }) => node.kind === "ChangeRequest") as { id: string } | undefined
+    expect(change, "the seeded showcase should carry a Change Request to exercise unsupported Artifact entry")
+      .toBeTruthy()
+    if (!change) throw new Error("the seeded showcase should carry a Change Request to exercise unsupported Artifact entry")
+
+    // A change request has no materialized Artifact-thread focal kind. A deep link must state that fact instead
+    // of making a request with the wrong kind and leaking its failure into the Network view.
+    await page.goto(`${threadRoot(page)}/traceability/change-requests/${change.id}?view=artifact`)
+    await expect(page.getByRole("button", { name: "Artifact thread" })).toBeDisabled()
+    await expect(page.getByRole("alert")).toContainText("supported exact artifact")
+    await page.getByRole("alert").getByRole("button", { name: "Back to the change network" }).click()
+    await expect(page.locator(".dtnRoot")).toBeVisible()
+    await expect(page.locator(".dtnInFrame-error")).toHaveCount(0)
+    await expect(page.locator(".dtPageTableEmpty:visible")).toHaveCount(0)
+    expect(new URL(page.url()).pathname).toMatch(/\/traceability$/)
+  })
+
+  test("an exact requirement that is absent from the build fails closed instead of loading forever", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const change = (network.nodes ?? []).find((node: { kind: string }) => node.kind === "ChangeRequest") as {
+      id: string
+    } | undefined
+    expect(change, "the seeded showcase should carry an id that is not a requirement identity").toBeTruthy()
+    if (!change) throw new Error("the seeded showcase should carry an id that is not a requirement identity")
+
+    // The legacy /traceability/{id} address means Requirement. Supplying a current ChangeRequest id therefore
+    // produces a real, empty requirement resolution response and must state the absence truthfully.
+    await page.goto(`${threadRoot(page)}/traceability/${change.id}`)
+    await expect(page.locator(".dtaInFrame-error")).toContainText("not present in the selected Project and build")
+    await expect(page.locator(".dtaLoading")).toHaveCount(0)
+  })
+
+  test("a failed requirement resolution clears on retry and then opens the exact revision", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const context = await (await request.get(
+      `${apiBase}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const list = await (await request.get(
+      `${apiBase}/api/traceability?projectId=${projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=1`
+    )).json()
+    const row = (Array.isArray(list) ? list : list.items ?? [])[0] as { revisionId: string; displayNumber: string } | undefined
+    expect(row, "the seeded showcase should carry a requirement revision for resolution retry").toBeTruthy()
+    if (!row) throw new Error("the seeded showcase should carry a requirement revision for resolution retry")
+
+    let resolutionRequests = 0
+    await page.route("**/api/requirements?*", async route => {
+      resolutionRequests += 1
+      if (resolutionRequests === 1) {
+        await route.fulfill({ status: 500, contentType: "application/json", body: "{}" })
+      } else {
+        await route.continue()
+      }
+    })
+    await page.goto(`${threadRoot(page)}/traceability/${row.revisionId}`)
+    await expect(page.locator(".dtaInFrame-error")).toContainText("could not be resolved")
+    await page.locator(".dtaInFrame-error").getByRole("button", { name: "Try again" }).click()
+    await expect(page.locator(".dtaRoot .dtaCard.is-focal")).toBeVisible()
+    await expect(page.locator(".dtaCard.is-focal .dtaId")).toContainText(row.displayNumber)
+    await expect(page.locator(".dtaInFrame-error")).toHaveCount(0)
+    expect(resolutionRequests).toBeGreaterThanOrEqual(2)
+  })
+
+  test("a new Artifact focal cannot render the previous thread while its exact requirement resolves", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const threadBase = threadRoot(page)
+    const { projectId, releaseId } = ids(page)
+    const context = await (await request.get(
+      `${apiBase}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const list = await (await request.get(
+      `${apiBase}/api/traceability?projectId=${projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=2`
+    )).json()
+    const rows = (Array.isArray(list) ? list : list.items ?? []) as { revisionId: string; displayNumber: string }[]
+    expect(rows.length, "the seeded showcase should carry two requirement revisions for focal transition")
+      .toBeGreaterThanOrEqual(2)
+    if (rows.length < 2) throw new Error("the seeded showcase should carry two requirement revisions for focal transition")
+    const [first, second] = rows
+
+    await page.goto(`${threadBase}/traceability/${first.revisionId}`)
+    await expect(page.locator(".dtaCard.is-focal .dtaId")).toContainText(first.displayNumber)
+
+    let releaseResolution: (() => void) | undefined
+    const resolutionRequest = page.waitForRequest(requestEvent => {
+      const url = new URL(requestEvent.url())
+      return url.pathname.endsWith("/api/requirements") && url.searchParams.get("ids") === second.revisionId
+    })
+    const resolutionResponse = page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return url.pathname.endsWith("/api/requirements") && url.searchParams.get("ids") === second.revisionId
+    })
+    await page.route("**/api/requirements?*", async route => {
+      const url = new URL(route.request().url())
+      if (url.searchParams.get("ids") === second.revisionId) {
+        await new Promise<void>(resolve => { releaseResolution = resolve })
+      }
+      await route.continue()
+    })
+    const secondPath = `${threadBase}/traceability/${second.revisionId}`
+    await page.evaluate(path => {
+      window.history.pushState({}, "", path)
+      window.dispatchEvent(new PopStateEvent("popstate"))
+    }, secondPath)
+    await resolutionRequest
+    await expect(page.locator(".dtaLoading")).toBeVisible()
+    // The old thread may still exist in memory, but it is not associated with this request key and cannot paint.
+    await expect(page.locator(".dtaCard.is-focal")).toHaveCount(0)
+    releaseResolution?.()
+    expect((await resolutionResponse).status()).toBe(200)
+    await expect(page.locator(".dtaCard.is-focal .dtaId")).toContainText(second.displayNumber)
+  })
+
+  test("a failed Artifact read clears after a real retry and successful navigation", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const context = await (await request.get(
+      `${apiBase}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const list = await (await request.get(
+      `${apiBase}/api/traceability?projectId=${projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=1`
+    )).json()
+    const row = (Array.isArray(list) ? list : list.items ?? [])[0] as { revisionId: string } | undefined
+    expect(row, "the seeded showcase should carry a requirement revision for Artifact retry").toBeTruthy()
+    if (!row) throw new Error("the seeded showcase should carry a requirement revision for Artifact retry")
+
+    let artifactRequests = 0
+    await page.route("**/api/artifact-thread*", async route => {
+      artifactRequests += 1
+      if (artifactRequests === 1) {
+        await route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
+      } else {
+        await route.continue()
+      }
+    })
+    await page.goto(`${threadRoot(page)}/traceability/${row.revisionId}`)
+    await expect(page.locator(".dtaInFrame-error")).toContainText("could not be loaded")
+    await page.locator(".dtaInFrame-error").getByRole("button", { name: "Try again" }).click()
+    await expect(page.locator(".dtaRoot .dtaCard").first()).toBeVisible()
+    await expect(page.locator(".dtaInFrame-error")).toHaveCount(0)
+    expect(artifactRequests).toBeGreaterThanOrEqual(2)
+
+    // A successful retry clears the operation's own error. Moving to Network must therefore show the board
+    // without claiming that the network failed during the earlier Artifact request.
+    await page.getByRole("button", { name: "Change network" }).click()
+    await expect(page.locator(".dtnRoot")).toBeVisible()
+    await expect(page.locator(".dtnInFrame-error")).toHaveCount(0)
+  })
+
+  test("a late failed Artifact response cannot poison the Network view", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+
+    const { projectId, releaseId } = ids(page)
+    const context = await (await request.get(
+      `${apiBase}/api/build-context?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const list = await (await request.get(
+      `${apiBase}/api/traceability?projectId=${projectId}&baselineId=${context.effectiveBaselineId}&page=1&pageSize=1`
+    )).json()
+    const row = (Array.isArray(list) ? list : list.items ?? [])[0] as { revisionId: string } | undefined
+    expect(row, "the seeded showcase should carry a requirement revision for async Artifact recovery").toBeTruthy()
+    if (!row) throw new Error("the seeded showcase should carry a requirement revision for async Artifact recovery")
+
+    let releaseResponse: (() => void) | undefined
+    const artifactRequest = page.waitForRequest(requestEvent => requestEvent.url().includes("/api/artifact-thread"))
+    const artifactResponse = page.waitForResponse(response => response.url().includes("/api/artifact-thread"))
+    await page.route("**/api/artifact-thread*", async route => {
+      await new Promise<void>(resolve => { releaseResponse = resolve })
+      await route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
+    })
+    await page.goto(`${threadRoot(page)}/traceability/${row.revisionId}`)
+    await artifactRequest
+
+    // Leave Artifact while its request is still pending. The request then fails after cleanup, exercising the
+    // cancellation boundary rather than relying on a fast response race.
+    await page.getByRole("button", { name: "Change network" }).click()
+    await expect(page.locator(".dtnRoot")).toBeVisible()
+    releaseResponse?.()
+    expect((await artifactResponse).status()).toBe(503)
+    await expect(page.locator(".dtnInFrame-error")).toHaveCount(0)
   })
 })
 

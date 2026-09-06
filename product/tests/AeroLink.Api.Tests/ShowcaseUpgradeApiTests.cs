@@ -81,6 +81,23 @@ public sealed class ShowcaseUpgradeApiTests(ShowcaseApiFixture showcase)
             Assert.False(string.IsNullOrWhiteSpace(holder.GetProperty("userName").GetString()));
             Assert.True(holder.GetProperty("holds").GetInt32() > 0);
         });
+
+        // By-basis counts: every held item is accounted on exactly one holder basis, several
+        // bases are exercised, and at least one legitimate no-current-holder item exists.
+        var basisCounts = distribution.GetProperty("holderBasisCounts");
+        var basisEntries = basisCounts.EnumerateObject().ToList();
+        Assert.True(basisEntries.Count >= 3, "expected at least three distinct holder bases");
+        var countedHeldItems = 0;
+        foreach (var basis in basisEntries)
+        {
+            Assert.True(basis.Value.GetInt32() > 0, $"holder basis {basis.Name} carries no items");
+            countedHeldItems += basis.Value.GetInt32();
+        }
+        Assert.Equal(
+            distribution.GetProperty("items").GetInt32() - distribution.GetProperty("unheld").GetInt32(),
+            countedHeldItems);
+        Assert.True(distribution.GetProperty("unheld").GetInt32() >= 1,
+            "expected at least one legitimate no-current-holder item");
     }
 
     [Fact]

@@ -68,7 +68,9 @@ test('showcase-critical surfaces are readable, focused, and progressively disclo
   await expect(page.getByRole('heading',{name:'Digital Thread'})).toHaveCount(0)
   await expect(page.locator('.dtnRoot')).toBeVisible()
   // The evidence table survives the replacement as the list alternative a graph view owes (§4.5), reached
-  // from the representation toggle rather than from a second tab.
+  // from the representation toggle rather than from a second tab. It is an explicitly named baseline report,
+  // so open that disclosure before asserting its table.
+  await page.getByText('Baseline evidence report',{exact:true}).click()
   await page.locator('.dtPageToolbar').getByRole('button',{name:'Table'}).click()
   await expect(page.locator('.dtPageTable table')).toBeVisible()
   await expect(page.locator('.dtPageTable tbody tr').first()).toBeVisible()

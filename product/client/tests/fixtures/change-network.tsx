@@ -56,6 +56,41 @@ const projection: NetworkProjection = {
   orderedLevels: ["Customer", "Interface", "System", "HighLevel", "LowLevel"],
 }
 
+/**
+ * The corrected change network in the server's own relation vocabulary (#925 F5/V5): a problem report
+ * resolved by a System change, an upstream chain presented upstream → downstream, and verification
+ * branches off the HLR and LLR changes. `Upstream` edges are emitted parent → child by the corrected
+ * projection, so the canvas phrases them "allocates to" reading along the arrow.
+ */
+const serverChainProjection: NetworkProjection = {
+  projectId: projection.projectId,
+  releaseId: projection.releaseId,
+  nodes: [
+    node({ id: "pr-1", kind: "ProblemReport", displayNumber: "PR-00003.00", state: "Open" }),
+    node({ id: "sys-1", kind: "ChangeRequest", displayNumber: "SRCR-00039.00", level: "System", state: "Approved" }),
+    node({ id: "hlr-1", kind: "ChangeRequest", displayNumber: "HLRCR-00127.00", level: "HighLevel" }),
+    node({ id: "hlr-2", kind: "ChangeRequest", displayNumber: "HLRCR-00128.00", level: "HighLevel" }),
+    node({ id: "llr-1", kind: "ChangeRequest", displayNumber: "LLRCR-00061.00", level: "LowLevel", state: "Draft" }),
+    node({ id: "llr-2", kind: "ChangeRequest", displayNumber: "LLRCR-00062.00", level: "LowLevel", state: "Draft" }),
+    node({ id: "tcr-1", kind: "TestChangeRequest", displayNumber: "HLRTPCR-000007.00" }),
+    node({ id: "tcr-2", kind: "TestChangeRequest", displayNumber: "LLRTPCR-000009.00" }),
+  ],
+  edges: [
+    edge("pr-1", "ProblemReport", "sys-1", "ChangeRequest", "ProblemReportResolution"),
+    edge("sys-1", "ChangeRequest", "hlr-1", "ChangeRequest", "Upstream"),
+    edge("sys-1", "ChangeRequest", "hlr-2", "ChangeRequest", "Upstream"),
+    edge("hlr-1", "ChangeRequest", "llr-1", "ChangeRequest", "Upstream"),
+    edge("hlr-1", "ChangeRequest", "llr-2", "ChangeRequest", "Upstream"),
+    edge("hlr-1", "ChangeRequest", "tcr-1", "TestChangeRequest", "CoveredByTestChangeRequest"),
+    edge("llr-1", "ChangeRequest", "tcr-2", "TestChangeRequest", "CoveredByTestChangeRequest"),
+  ],
+  truncated: false,
+  orderedLevels: ["System", "HighLevel", "LowLevel"],
+}
+
+const scenario = new URLSearchParams(window.location.search).get("case") ?? "default"
+const chosen = scenario === "server" ? serverChainProjection : projection
+
 createRoot(document.getElementById("root")!).render(
-  <DigitalThreadNetwork projection={projection} buildLabel="Build 1.6" />,
+  <DigitalThreadNetwork projection={chosen} buildLabel="Build 1.6" />,
 )

@@ -16,8 +16,13 @@ import {
   offsetToReveal,
   laneHeight,
   layout,
+  layoutWithMeasuredCards,
   minimumZoom,
+  placeEdgeLabels,
+  positionsForNodes,
+  READABLE_SELECTION_MIN_ZOOM,
   rescaleOffsets,
+  segmentIntersectsRect,
   syncTargets,
   tierFor,
   trace,
@@ -296,6 +301,14 @@ test.describe("keyboard reveal", () => {
     expect(y).toBeLessThan(band)
   })
 
+  test("a shifted row uses its measured position when keyboard reveal rolls the lane", () => {
+    const shiftedY = geometry.pad + geometry.rowPitch + 29
+    const offset = offsetToReveal(1, geometry, 180, 0, shiftedY)
+    expect(offset).toBeLessThan(0)
+    expect(shiftedY + offset).toBeGreaterThan(-geometry.cardHeight)
+    expect(shiftedY + offset).toBeLessThan(180)
+  })
+
   test("a row above the window rolls the lane back down to reach it", () => {
     // The lane has already been rolled a long way; row 0 is now off the top.
     const rolled = -1200
@@ -466,5 +479,194 @@ test.describe("framing ignores records rolled out of their lane", () => {
     const framed = frameNodes(["a", "b"], nodes, [2], frame, [-4000], null)
 
     expect(framed).not.toBeNull()
+  })
+})
+
+test.describe("story framing and label obstacles", () => {
+  test("measured expanded cards move later rows clear of the selected body", () => {
+    const geometry = geometryFor(2)
+    const nodes: CanvasNode[] = [
+      { id: "selected", lane: 0, row: 0 },
+      { id: "direct", lane: 0, row: 1 },
+      { id: "other", lane: 0, row: 2 },
+    ]
+    const positions = positionsForNodes(nodes, geometry, [0], new Map([
+      ["selected", 167],
+      ["direct", 108],
+      ["other", 108],
+    ]))
+    expect(positions.get("direct")!.y).toBeGreaterThanOrEqual(
+      positions.get("selected")!.y + 167,
+    )
+    expect(positions.get("other")!.y).toBeGreaterThanOrEqual(
+      positions.get("direct")!.y + 108,
+    )
+  })
+
+  test("measured expansion extends the lane rolling range", () => {
+    const geometry = geometryFor(2)
+    const base = layout([3], { x: 0, y: 0, width: 720, height: 360 }, 1)
+    const extended = layoutWithMeasuredCards(base, [
+      { id: "selected", lane: 0, row: 0 },
+      { id: "direct", lane: 0, row: 1 },
+      { id: "last", lane: 0, row: 2 },
+    ], new Map([["selected", 167]]))
+    expect(extended.laneHeights[0]).toBe(base.laneHeights[0] + 33)
+    expect(extended.laneMinimums[0]).toBeLessThan(base.laneMinimums[0])
+    expect(geometry.rowPitch).toBe(138)
+  })
+
+  test("a same-lane direct card uses spare viewport height after the selected card expands", () => {
+    const frame = { x: 0, y: 0, width: 720, height: 600 }
+    const nodes = [{ id: "selected", lane: 0, row: 0 }, { id: "direct", lane: 0, row: 1 }]
+    const heights = new Map([["selected", 280], ["direct", 130]])
+    const measured = layoutWithMeasuredCards(layout([2], frame, 1), nodes, heights)
+    const direct = positionsForNodes(nodes, measured.geometry, [], heights).get("direct")!
+    expect(isVisible(direct.y, measured.geometry, measured.bandHeight)).toBe(true)
+    expect(direct.y + 130).toBeLessThanOrEqual(measured.bandHeight)
+    expect(measured.bandHeight).toBeLessThanOrEqual(windowHeight(frame, 1))
+    expect(measured.laneMinimums[0]).toBe(0)
+  })
+
+  test("leader clearance checks the complete segment, including a short obstacle between samples", () => {
+    expect(segmentIntersectsRect(
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 49, y: -1, width: 2, height: 2 },
+    )).toBe(true)
+    expect(segmentIntersectsRect(
+      { x: 0, y: 0 },
+      { x: 49, y: 0 },
+      { x: 49, y: -1, width: 2, height: 2 },
+    )).toBe(false)
+  })
+
+  test("an occupied frame fails closed instead of painting a colliding midpoint", () => {
+    const geometry = geometryFor(1)
+    const frame = { x: 0, y: 0, width: 720, height: 300 }
+    const placement = placeEdgeLabels(
+      [{ key: "a>b", label: "verified by", from: { x: 0, y: 80 }, to: { x: geometry.lanePitch * 2, y: 80 } }],
+      geometry,
+      [frame],
+      frame,
+    ).get("a>b")!
+    expect(placement.available).toBe(false)
+    expect(placement.exhausted).toBe(true)
+  })
+
+  test("deliberate selection can use the measured readable compact floor", () => {
+    const nodes: CanvasNode[] = [
+      { id: "selected", lane: 0, row: 0 },
+      { id: "middle", lane: 1, row: 0 },
+      { id: "far", lane: 4, row: 0 },
+    ]
+    const framed = frameNodes(
+      nodes.map(node => node.id),
+      nodes,
+      [1, 1, 0, 0, 1],
+      { x: 0, y: 0, width: 860, height: 560 },
+      [0, 0, 0, 0, 0],
+      "selected",
+      1.12,
+      true,
+      { intent: "selection", selectedCardHeight: 254 },
+    )
+    expect(framed).not.toBeNull()
+    expect(framed!.zoom).toBeGreaterThanOrEqual(READABLE_SELECTION_MIN_ZOOM)
+    expect(framed!.zoom).toBeLessThan(0.86)
+  })
+
+  test("edge phrases choose a connector-adjacent slot clear of measured card bounds", () => {
+    const geometry = geometryFor(1)
+    const labels = placeEdgeLabels(
+      [{
+        key: "a>b",
+        label: "verified by",
+        from: { x: 0, y: 80 },
+        to: { x: geometry.lanePitch, y: 80 },
+      }],
+      geometry,
+      [{ x: 0, y: 30, width: geometry.laneWidth, height: geometry.cardHeight }],
+      { x: 0, y: 0, width: 720, height: 300 },
+    )
+    const placed = labels.get("a>b")!
+    expect(placed.x).toBeGreaterThan(geometry.laneWidth)
+    expect(placed.y).toBeGreaterThan(0)
+    expect(placed.y).toBeLessThan(300)
+  })
+
+  test("a crossing phrase attaches to a free point on its connector", () => {
+    const geometry = geometryFor(1)
+    const obstacle = { x: geometry.lanePitch, y: 80, width: geometry.laneWidth, height: geometry.cardHeight }
+    const placed = placeEdgeLabels(
+      [{
+        key: "a>c",
+        label: "verified by",
+        from: { x: 0, y: 80 },
+        to: { x: geometry.lanePitch * 2, y: 80 },
+        width: 44,
+        height: 10,
+      }],
+      geometry,
+      [obstacle],
+      { x: 0, y: 0, width: 900, height: 300 },
+    ).get("a>c")!
+
+    // The midpoint is covered by the intervening card. The bounded fallback search must choose another
+    // sampled point from the cubic connector and leave the phrase itself outside that measured card.
+    expect(placed.exhausted).toBe(false)
+    expect(placed.anchorX < obstacle.x - 1 || placed.anchorX > obstacle.x + obstacle.width + 1).toBe(true)
+    const labelRect = {
+      x: placed.x - 22,
+      y: placed.y - 8,
+      width: 44,
+      height: 10,
+    }
+    expect(labelRect.x + labelRect.width <= obstacle.x || obstacle.x + obstacle.width <= labelRect.x ||
+      labelRect.y + labelRect.height <= obstacle.y || obstacle.y + obstacle.height <= labelRect.y).toBe(true)
+  })
+
+  test("distinct crossing phrases keep their connector slots after local slots exhaust", () => {
+    const geometry = geometryFor(1)
+    const labels = Array.from({ length: 8 }, (_, index) => ({
+      key: `from-${index}>to-${index}`,
+      label: index % 2 ? "source of" : "verified by",
+      from: { x: 0, y: 96 + index * 5 },
+      to: { x: geometry.lanePitch * 4, y: 131 - index * 5 },
+      width: 44,
+      height: 10,
+    }))
+    const middleCard = {
+      x: geometry.lanePitch * 2,
+      y: 110,
+      width: geometry.laneWidth,
+      height: geometry.cardHeight,
+    }
+    const placed = [...placeEdgeLabels(labels, geometry, [middleCard], { x: 0, y: 0, width: 1440, height: 520 }).values()]
+
+    expect(placed).toHaveLength(labels.length)
+    expect(placed.every(label => !label.exhausted)).toBe(true)
+    // Each phrase remains attached to a point on its own cubic, even when the crossing card occupies the
+    // natural middle slot. At least one must use the path search rather than the local midpoint offsets.
+    expect(placed.some(label => label.placement === "path" || label.placement === "overflow")).toBe(true)
+    for (const label of placed) {
+      expect(label.x - 22).toBeGreaterThanOrEqual(2)
+      expect(label.x + 22).toBeLessThanOrEqual(1438)
+      expect(label.y - 8).toBeGreaterThanOrEqual(2)
+      expect(label.y + 2).toBeLessThanOrEqual(518)
+    }
+    for (let first = 0; first < placed.length; first += 1) {
+      const a = { x: placed[first].x - 22, y: placed[first].y - 8, width: 44, height: 10 }
+      for (let second = first + 1; second < placed.length; second += 1) {
+        const b = { x: placed[second].x - 22, y: placed[second].y - 8, width: 44, height: 10 }
+        expect(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y).toBe(true)
+      }
+    }
+    for (const label of placed) {
+      expect(label.anchorX).toBeGreaterThanOrEqual(0)
+      expect(label.anchorX).toBeLessThanOrEqual(geometry.lanePitch * 4 + geometry.laneWidth)
+      expect(label.anchorY).toBeGreaterThanOrEqual(geometry.anchor)
+      expect(label.anchorY).toBeLessThanOrEqual(260 + geometry.anchor)
+    }
   })
 })

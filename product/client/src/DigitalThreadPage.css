@@ -130,6 +130,39 @@ html .workspaceView > main.dtPage { padding: 0; }
 .dtPage > .dticRoot,
 .dtPage > .dtaRoot { flex: 1; min-height: 0; }
 
+/* The active view remains the page's main investigation. The baseline report is an explicit, secondary
+   disclosure so its historical evidence rows never masquerade as the Network/Inside/Artifact table. */
+.dtPageBaselineReport {
+  flex: 0 1 44%;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid #d9e3eb;
+  background: var(--surface);
+}
+.dtPageBaselineReport:not([open]) { flex: 0 0 auto; }
+.dtPageBaselineReport > summary {
+  padding: 9px 18px;
+  color: #2b3d54;
+  font: var(--weight-strong) var(--text-sm) var(--font-body);
+  cursor: pointer;
+}
+.dtPageBaselineReport > summary:hover { color: var(--teal-700); }
+.dtPageBaselineReportBody { display: flex; flex-direction: column; min-height: 0; }
+.dtPageReportExports {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid #eef2f6;
+  border-bottom: 1px solid #eef2f6;
+  padding: 7px 18px;
+  color: var(--ink-500);
+  font-size: var(--text-xs);
+}
+.dtPageReportExports span { font-weight: var(--weight-strong); }
+.dtPageReportExports a { color: var(--teal-700); font-weight: var(--weight-strong); }
+.dtPageReportExports .dtPageExportEmpty { padding: 0; }
+.dtPageBaselineReport .dtPageTable { flex: 1 1 auto; min-height: 260px; padding-top: 10px; }
+
 /* ---- evidence table ----------------------------------------------------
 
    The list alternative required beside a graph view, not decoration: it exposes the same relationships the
@@ -158,7 +191,7 @@ html .workspaceView > main.dtPage { padding: 0; }
   border-bottom: 1px solid var(--line);
   background: var(--surface);
   padding: 10px 12px;
-  color: var(--teal-600);
+  color: var(--teal-700);
   font: var(--weight-bold) var(--text-xs) var(--font-body);
   letter-spacing: .08em;
   text-align: left;

@@ -1,0 +1,98 @@
+/* Shared accessible table mechanics. Domain-specific relation wording and cells remain in each view. */
+.dtThreadTable {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 14px 18px 18px;
+  background: var(--canvas, #f3f6f9);
+}
+
+.dtThreadTableScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.dtThreadTable table { width: 100%; border-collapse: collapse; }
+.dtThreadTable caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.dtThreadTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  padding: 10px 12px;
+  color: var(--teal-600);
+  font: var(--weight-bold) var(--text-xs) var(--font-body);
+  letter-spacing: .08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.dtThreadTable tbody tr { border-bottom: 1px solid #eef2f6; }
+.dtThreadTable tbody tr:hover,
+.dtThreadTable tbody tr.is-selected { background: #f2f9f8; }
+.dtThreadTable td,
+.dtThreadTable tbody th { vertical-align: top; padding: 9px 12px; font-size: var(--text-sm); text-align: left; }
+.dtThreadTable td span { display: block; color: #2b3d54; }
+.dtThreadTable td span + span { margin-top: 4px; }
+.dtThreadTable td .dtThreadTableRelation {
+  display: flex;
+  align-items: baseline;
+  gap: .35rem;
+  flex-wrap: wrap;
+}
+.dtThreadTable td .dtThreadTableRelation small { margin-left: .15rem; }
+.dtThreadTable td small { color: #8493a6; font-size: var(--text-xs); }
+.dtThreadTable td em { color: #8fa0b2; font-style: normal; font-size: var(--text-xs); }
+.dtThreadTable td code { color: #5f7080; font: var(--text-xs) ui-monospace, SFMono-Regular, Consolas, monospace; }
+.dtThreadTableSelectHead,
+.dtThreadTableSelectCell { width: 72px; }
+.dtThreadTableSelect {
+  min-height: 28px;
+  border: 1px solid #cfe0e5;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  padding: 3px 8px;
+  color: var(--teal-700);
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
+  cursor: pointer;
+}
+.dtThreadTableSelect:hover,
+.dtThreadTableSelect[aria-pressed="true"] { border-color: var(--teal-700); background: var(--teal-700); color: #fff; }
+.dtThreadTableSelection,
+.dtThreadTableTruncated,
+.dtThreadTableState { margin: 0 0 10px; color: var(--ink-500); font-size: var(--text-sm); }
+.dtThreadTableTruncated { border: 1px solid #e6cd94; background: #fff8e8; padding: 9px 12px; color: #765313; }
+.dtThreadTableState { padding: 18px; text-align: center; }
+.dtThreadTableState-error { border: 1px solid #e3b7b7; border-radius: var(--radius-lg); background: rgba(255, 250, 250, .97); }
+.dtThreadTableState b { display: block; margin-bottom: 4px; color: #2b3d54; }
+.dtThreadTableState p { margin: 0; }
+.dtThreadTableState button {
+  margin-top: 10px;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  padding: 4px 14px;
+  color: #5d6d82;
+  font: var(--weight-strong) var(--text-xs) var(--font-body);
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dtThreadTableSelect { transition: none; }
+}

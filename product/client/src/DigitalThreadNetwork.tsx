@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import DigitalThreadCanvas from "./DigitalThreadCanvas"
+import DigitalThreadTable, {
+  type DigitalThreadTableColumn,
+  type DigitalThreadTableRow,
+  type ThreadRepresentation,
+} from "./DigitalThreadTable"
 import { usePanelDock } from "./digitalThreadPanelDock"
 import ExactArtifactLink from "./ExactArtifactLink"
 import { type CanvasEdge, type CanvasNode, compactLanes, trace } from "./digitalThreadGeometry"
 import { stateLabel } from "./presentation"
-import { traceRelationLabel } from "./tracePresentation"
+import { traceRelationLabel, traceRelationLabelFor } from "./tracePresentation"
 import {
   OFF_LADDER,
   laneModel,
@@ -29,13 +34,6 @@ export type PanelDock = "auto" | "left" | "right" | "bottom"
 /** `auto` resolved to a real side. */
 export type ResolvedDock = Exclude<PanelDock, "auto">
 
-// Derived from what the panel actually renders, so the reserved free area is the panel plus its margins and
-// not a guess with slack in it. Slack reads as correctness — the board simply never uses the spare band — while
-// hiding whether the real rule holds. Right/left: 300px wide at a 16px offset. Bottom: 150px (#880 §6.6) at an
-// 18px offset. The remainder in each case is the gap between the panel edge and the nearest card.
-const PANEL_WIDTH = 300 + 16 + 14
-const PANEL_HEIGHT = 150 + 18 + 16
-
 export type DigitalThreadNetworkProps = {
   projection: NetworkProjection | null
   loading?: boolean
@@ -59,12 +57,21 @@ export type DigitalThreadNetworkProps = {
    * actually contains it, so a record this build does not carry stays unselected rather than being guessed at.
    */
   focalId?: string
+  /**
+   * Selection owned by the Digital Thread page, so a network selection can become the exact Inside focal.
+   * Omit it for the standalone/uncontrolled presentation used by older callers.
+   */
+  selectedId?: string | null
+  onSelect?: (id: string | null) => void
   /** Exact route for a record, when the current workspace can open it. Absent renders non-openable. */
   hrefFor?: (node: NetworkNode) => string | undefined
   /** Opens the change inside its own view. Slice 4 supplies this. */
   onOpenChange?: (node: NetworkNode) => void
   buildLabel?: string
+  representation?: ThreadRepresentation
 }
+
+type NetworkTableRow = DigitalThreadTableRow & { node: NetworkNode }
 
 /**
  * The build change network: every change request in a build and every typed relation between them.
@@ -79,22 +86,47 @@ export default function DigitalThreadNetwork({
   onRetry,
   orderedLevels,
   focalId,
+  selectedId: selectedIdProp,
+  onSelect: onSelectProp,
   hrefFor,
   onOpenChange,
   buildLabel,
+  representation = "map",
 }: DigitalThreadNetworkProps) {
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [uncontrolledSelectedId, setUncontrolledSelectedId] = useState<string | null>(null)
+  const selectedId = selectedIdProp === undefined ? uncontrolledSelectedId : selectedIdProp
+  const setSelectedId = useCallback(
+    (id: string | null) => {
+      if (selectedIdProp === undefined) setUncontrolledSelectedId(id)
+      onSelectProp?.(id)
+    },
+    [onSelectProp, selectedIdProp],
+  )
   useEffect(() => {
+    if (selectedIdProp !== undefined) return
     if (!focalId) return
     // Membership decides. A well-formed id that belongs to nothing in this build must not select a card, and
     // must not select some *other* card either — the board says nothing rather than something wrong.
-    setSelectedId(projection?.nodes.some(node => node.id === focalId) ? focalId : null)
-  }, [focalId, projection])
+    setUncontrolledSelectedId(projection?.nodes.some(node => node.id === focalId) ? focalId : null)
+  }, [focalId, projection, selectedIdProp])
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [dockPreference, setDockPreference] = useState<PanelDock>("bottom")
   const [query, setQuery] = useState("")
   const [groups, setGroups] = useState<Set<string>>(new Set())
   const liveRegion = useRef<HTMLDivElement | null>(null)
+  const canvasViewRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const element = canvasViewRef.current
+    if (!element) return
+    if (representation === "table") {
+      element.setAttribute("aria-hidden", "true")
+      element.setAttribute("inert", "")
+    } else {
+      element.removeAttribute("aria-hidden")
+      element.removeAttribute("inert")
+    }
+  }, [representation])
 
   // Memoised because `?? []` would hand every memo below a fresh array on each render and defeat all of them.
   const nodes = useMemo(() => projection?.nodes ?? [], [projection])
@@ -164,42 +196,6 @@ export default function DigitalThreadNetwork({
     [edges, selectedId],
   )
 
-  /**
-   * Which side the panel takes. It counts where the selected record's direct links actually are and docks on
-   * the emptier one, so the panel is never covering the thing the highlighted edge points at.
-   */
-  const preferredDock: ResolvedDock = useMemo(() => {
-    if (dockPreference !== "auto") return dockPreference
-    return selected ? resolveDock(selected, directLinks, byId, model) : "right"
-  }, [byId, directLinks, dockPreference, model, selected])
-
-  // Non-occlusion outranks the preference (§6.6), the same contract the artifact thread keeps: when a side
-  // cannot leave room for the selection and its direct links at the landing floor, the panel moves rather
-  // than a linked record being hidden.
-  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${selectedId ?? ""}:${dockPreference}`)
-
-  // The canvas must not lay records out under the panel, so the frame it may use shrinks by the dock.
-  const frameInset = useMemo(
-    () =>
-      selectedId
-        ? dock === "bottom"
-          ? { bottom: PANEL_HEIGHT }
-          : dock === "left"
-            ? { left: PANEL_WIDTH }
-            : { right: PANEL_WIDTH }
-        : undefined,
-    [dock, selectedId],
-  )
-
-  useEffect(() => {
-    if (!selected || !liveRegion.current) return
-    const up = directLinks.filter(edge => edge.toId === selected.id).length
-    const down = directLinks.filter(edge => edge.fromId === selected.id).length
-    liveRegion.current.textContent =
-      `${selected.displayNumber}, ${stateLabel(selected.state ?? undefined)}. ` +
-      `${up} upstream and ${down} downstream direct links.`
-  }, [directLinks, selected])
-
   const matchesFilters = useCallback(
     (node: NetworkNode): boolean => {
       // Level chips only. Suspect is a property of a relationship, not of these records, and no relation
@@ -213,6 +209,104 @@ export default function DigitalThreadNetwork({
     },
     [groups, query],
   )
+
+  const tableRows = useMemo<NetworkTableRow[]>(
+    () => canvasNodes
+      .map(canvasNode => byId.get(canvasNode.id))
+      .filter((node): node is NetworkNode => Boolean(node))
+      .filter(matchesFilters)
+      .map(node => ({ id: node.id, label: node.displayNumber, node })),
+    [byId, canvasNodes, matchesFilters],
+  )
+
+  const tableRelations = useCallback(
+    (node: NetworkNode, direction: "upstream" | "downstream") => {
+      const relationEdges = edges.filter(edge =>
+        direction === "upstream" ? edge.toId === node.id : edge.fromId === node.id)
+      if (!relationEdges.length) return <em>None recorded</em>
+      return relationEdges.map(edge => {
+        const relatedId = direction === "upstream" ? edge.fromId : edge.toId
+        const related = byId.get(relatedId)
+        if (!related) return null
+        const hop = web?.hops.get(related.id)
+        return (
+          <span className="dtThreadTableRelation" key={`${edge.fromId}:${edge.toId}:${edge.relation}`}>
+            <ExactArtifactLink href={hrefFor?.(related)}>{related.displayNumber}</ExactArtifactLink>
+            {" "}<small>
+              {traceRelationLabelFor(edge.relation, edge.fromId === related.id)}
+              {hop && hop > 1 ? ` · ${hop} hops from selected` : ""}
+            </small>
+          </span>
+        )
+      })
+    },
+    [byId, edges, hrefFor, web],
+  )
+
+  const tableColumns = useMemo<readonly DigitalThreadTableColumn<NetworkTableRow>[]>(
+    () => [
+      {
+        key: "change",
+        label: "Change",
+        render: row => (
+          <>
+            <ExactArtifactLink href={hrefFor?.(row.node)}>{row.node.displayNumber}</ExactArtifactLink>
+            <span>{row.node.title ?? "Untitled change"}</span>
+          </>
+        ),
+      },
+      { key: "level", label: "Level", render: row => row.node.level ?? "Unclassified" },
+      { key: "state", label: "State", render: row => stateLabel(row.node.state ?? undefined) },
+      { key: "upstream", label: "Upstream", render: row => tableRelations(row.node, "upstream") },
+      { key: "downstream", label: "Downstream", render: row => tableRelations(row.node, "downstream") },
+      {
+        key: "trace",
+        label: "Trace context",
+        render: row => {
+          if (!selectedId) return <em>No record selected</em>
+          const hop = web?.hops.get(row.id)
+          return row.id === selectedId ? "Selected record" : hop ? `${hop} hop${hop === 1 ? "" : "s"}` : "Outside selected trace"
+        },
+      },
+    ],
+    [hrefFor, selectedId, tableRelations, web],
+  )
+
+  const tableTruncatedMessage = useMemo(() => {
+    const messages: string[] = []
+    if (offLadder.length) {
+      messages.push(`${offLadder.reduce((sum, item) => sum + item.count, 0)} record${offLadder.reduce((sum, item) => sum + item.count, 0) === 1 ? " is" : "s are"} not shown because the project ladder does not configure ${offLadder.map(item => levelLaneLabel(item.level).toLowerCase()).join(" and ")}.`)
+    }
+    if (projection?.truncated) messages.push("This build carries more records than the network returns. Some changes and their links are not shown.")
+    return messages.length ? messages.join(" ") : null
+  }, [offLadder, projection?.truncated])
+
+  /**
+   * Which side the panel takes. It counts where the selected record's direct links actually are and docks on
+   * the emptier one, so the panel is never covering the thing the highlighted edge points at.
+   */
+  const preferredDock: ResolvedDock = useMemo(() => {
+    if (dockPreference !== "auto") return dockPreference
+    return selected ? resolveDock(selected, directLinks, byId, model) : "right"
+  }, [byId, directLinks, dockPreference, model, selected])
+
+  // Non-occlusion outranks the preference (§6.6), the same contract the artifact thread keeps: when a side
+  // cannot leave room for the selection and its direct links at the landing floor, the panel moves rather
+  // than a linked record being hidden.
+  const { dock, reportNeedsRoom, panelRef, frameInset } = usePanelDock(
+    preferredDock,
+    `${representation}:${selectedId ?? ""}:${dockPreference}`,
+    canvasViewRef,
+  )
+
+  useEffect(() => {
+    if (!selected || !liveRegion.current) return
+    const up = directLinks.filter(edge => edge.toId === selected.id).length
+    const down = directLinks.filter(edge => edge.fromId === selected.id).length
+    liveRegion.current.textContent =
+      `${selected.displayNumber}, ${stateLabel(selected.state ?? undefined)}. ` +
+      `${up} upstream and ${down} downstream direct links.`
+  }, [directLinks, selected])
 
   /**
    * A lane that holds records but is showing none of them, because the chips or the search hid them all.
@@ -362,7 +456,7 @@ export default function DigitalThreadNetwork({
         </label>
       </div>
 
-      {offLadder.length ? (
+      {representation === "map" && offLadder.length ? (
         <p className="dtnTruncated" role="status">
           {offLadder
             .map(item => `${item.count} ${levelLaneLabel(item.level).toLowerCase()}`)
@@ -372,7 +466,7 @@ export default function DigitalThreadNetwork({
         </p>
       ) : null}
 
-      {projection?.truncated ? (
+      {representation === "map" && projection?.truncated ? (
         <p className="dtnTruncated" role="status">
           This build carries more records than the network returns. Some change requests and their links are
           not shown.
@@ -380,26 +474,52 @@ export default function DigitalThreadNetwork({
       ) : null}
 
       <div className="dtnStage">
-        <DigitalThreadCanvas
-          lanes={lanes}
-          nodes={canvasNodes}
-          edges={canvasEdges}
-          renderCard={renderCard}
-          laneNotice={laneNotice}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          onHover={setHoveredId}
-          frameInset={frameInset}
-          onFramingNeedsRoom={reportNeedsRoom}
-          tracedEdges={web?.edges}
-          ariaLabel="Change network for this build"
-        />
-        {loading ? <div className="dtnLoading">Loading the change network…</div> : null}
+        <div
+          className={`dtnCanvasView${representation === "table" ? " is-hidden" : ""}`}
+          ref={canvasViewRef}
+        >
+          <DigitalThreadCanvas
+            lanes={lanes}
+            nodes={canvasNodes}
+            edges={canvasEdges}
+            renderCard={renderCard}
+            laneNotice={laneNotice}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onHover={setHoveredId}
+            frameInset={frameInset}
+            frameIds={selectedId ? [...(web?.nodes ?? [])] : undefined}
+            framingIntent="landing"
+            landingId={focalId}
+            onFramingNeedsRoom={representation === "map" ? reportNeedsRoom : undefined}
+            tracedEdges={web?.edges}
+            ariaLabel="Change network for this build"
+          />
+        </div>
+        {representation === "table" ? (
+          <DigitalThreadTable
+            ariaLabel="Change network table"
+            caption="Changes and their typed relationships in this build"
+            columns={tableColumns}
+            rows={tableRows}
+            availableCount={canvasNodes.length}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            loading={loading}
+            error={error}
+            onRetry={onRetry}
+            emptyMessage={`No change requests in ${buildLabel ?? "this build"}.`}
+            selectionMessage="No record selected. Select a row to trace its relationships."
+            truncatedMessage={tableTruncatedMessage}
+            reservedInset={frameInset}
+          />
+        ) : null}
+        {representation === "map" && loading ? <div className="dtnLoading">Loading the change network…</div> : null}
 
         {/* Every state below sits inside the frame rather than replacing it (#880 §6.8). Swapping the canvas
             out for a message discards the transform, the zoom and the selection, so recovering from a failed
             refresh would cost the reader the view they had built up. */}
-        {error ? (
+        {representation === "map" && error ? (
           <div className="dtnInFrame dtnInFrame-error" role="alert">
             <b>The change network could not be loaded.</b>
             <p>{error}</p>
@@ -411,7 +531,7 @@ export default function DigitalThreadNetwork({
           </div>
         ) : null}
 
-        {!loading && !error && projection && !nodes.length ? (
+        {representation === "map" && !loading && !error && projection && !nodes.length ? (
           <div className="dtnInFrame" role="status">
             <b>No change requests in {buildLabel ?? "this build"}.</b>
             <p>Change requests appear here as soon as one targets this build.</p>
@@ -420,7 +540,7 @@ export default function DigitalThreadNetwork({
 
         {/* Every lane empty at once earns a board-level line as well, because at that point the reader is
             looking at a board with nothing on it and needs the way out, not one label per lane. */}
-        {!loading && !error && nodes.length > 0 && !nodes.some(matchesFilters) ? (
+        {representation === "map" && !loading && !error && nodes.length > 0 && !nodes.some(matchesFilters) ? (
           <div className="dtnInFrame" role="status">
             <b>No records match.</b>
             <p>Clear a filter chip or the search box to bring records back.</p>
@@ -431,7 +551,7 @@ export default function DigitalThreadNetwork({
       <div className="dtnVisuallyHidden" aria-live="polite" ref={liveRegion} />
 
       {selected ? (
-        <aside className={`dtnPanel dtnPanel-${dock}`} aria-label={`Detail for ${selected.displayNumber}`}>
+        <aside ref={panelRef} className={`dtnPanel dtnPanel-${dock}`} aria-label={`Detail for ${selected.displayNumber}`}>
           <div className="dtnPanelTools">
             {(["bottom", "right", "auto"] as PanelDock[]).map(option => (
               <button
@@ -469,8 +589,16 @@ export default function DigitalThreadNetwork({
                 .map(id => ({ node: byId.get(id), hop: web?.hops.get(id) ?? 1 }))
                 .filter((row): row is { node: NetworkNode; hop: number } => Boolean(row.node))
                 .sort((a, b) => a.hop - b.hop || a.node.displayNumber.localeCompare(b.node.displayNumber))
-              const relationFor = (id: string) =>
-                directLinks.find(edge => edge.fromId === id || edge.toId === id)?.relation
+              const relationFor = (id: string) => {
+                // The edge between the listed record and the selection — not merely any edge touching
+                // the listed record, which could name a relationship it has with a third record.
+                const edge = directLinks.find(item =>
+                  (item.fromId === id && item.toId === selected.id) ||
+                  (item.toId === id && item.fromId === selected.id))
+                // The listed record speaks in its own direction: an upstream parent reads "allocates
+                // to" toward the selection, a downstream child reads "allocated from" (#925 V5).
+                return edge ? traceRelationLabelFor(edge.relation, edge.fromId === id) : undefined
+              }
               return (
                 <div className="dtnPanelCol" key={direction}>
                   <div className="dtnRelHead">
@@ -489,7 +617,7 @@ export default function DigitalThreadNetwork({
                           <span>
                             <small>
                               {hop === 1
-                                ? traceRelationLabel(relationFor(node.id) ?? "linked").toUpperCase()
+                                ? (relationFor(node.id) ?? "linked").toUpperCase()
                                 : `${hop} HOPS`}
                             </small>
                             <span>{node.displayNumber}</span>

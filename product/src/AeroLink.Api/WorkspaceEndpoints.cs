@@ -82,6 +82,8 @@ public static class WorkspaceEndpoints
                     var heldItems = board.Items.Where(i => i.CurrentHolderIds.Count > 0).ToList();
                     var totalHeld = heldItems.Sum(i => i.CurrentHolderIds.Count);
                     var bases = heldItems.Select(i => i.HolderBasis).Distinct().OrderBy(x => x).ToList();
+                    var basisCounts = heldItems.GroupBy(i => i.HolderBasis).OrderBy(g => g.Key)
+                        .ToDictionary(g => g.Key, g => g.Count());
                     var maxHolds = holders.Count > 0 ? holders[0].Holds : 0;
                     distribution = new
                     {
@@ -91,6 +93,7 @@ public static class WorkspaceEndpoints
                         Holders = holders,
                         MultiHolderItems = board.Items.Count(i => i.CurrentHolderIds.Count >= 2),
                         HolderBases = bases,
+                        HolderBasisCounts = basisCounts,
                         Checks = new Dictionary<string, bool>
                         {
                             ["atLeastFiveDistinctHolders"] = holders.Count >= 5,
@@ -98,6 +101,7 @@ public static class WorkspaceEndpoints
                             ["sharedHolderItemPresent"] = board.Items.Any(i => i.CurrentHolderIds.Count >= 2),
                             ["zeroHolderContrastPresent"] = board.People.Any(p => p.IsCurrentProjectMember && p.Holds == 0),
                             ["holderBasesSpanned"] = bases.Count >= 3,
+                            ["unheldItemPresent"] = board.Totals.Unheld >= 1,
                         },
                     };
                 }

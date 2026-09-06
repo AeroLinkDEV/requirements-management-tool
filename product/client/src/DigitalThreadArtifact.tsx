@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import DigitalThreadCanvas from "./DigitalThreadCanvas"
+import DigitalThreadTable, {
+  type DigitalThreadTableColumn,
+  type DigitalThreadTableRow,
+  type ThreadRepresentation,
+} from "./DigitalThreadTable"
 import ExactArtifactLink from "./ExactArtifactLink"
 import { type CanvasNode, resolveDockByLane, trace } from "./digitalThreadGeometry"
 import { usePanelDock } from "./digitalThreadPanelDock"
 import { stateLabel } from "./presentation"
-import { traceRelationLabel } from "./tracePresentation"
+import { traceRelationLabel, traceRelationLabelFor } from "./tracePresentation"
 import {
   ARTIFACT_THREAD_LANES,
   type ArtifactThread,
@@ -33,12 +38,6 @@ import "./DigitalThreadArtifact.css"
 export type PanelDock = "auto" | "left" | "right" | "bottom"
 export type ResolvedDock = Exclude<PanelDock, "auto">
 
-// The same reservations the change network makes, for the same reason: the free area is the panel plus its
-// margins, measured from what the panel actually renders rather than padded with slack. Slack would read as
-// correctness while hiding whether the non-occlusion rule holds.
-const PANEL_WIDTH = 300 + 16 + 14
-const PANEL_HEIGHT = 150 + 18 + 16
-
 export type DigitalThreadArtifactProps = {
   /**
    * The raw `GET /api/artifact-thread` body, exactly as the server sent it.
@@ -60,7 +59,10 @@ export type DigitalThreadArtifactProps = {
   onOpenChange?: (node: ArtifactThreadNode) => void
   /** Selection to start on. Defaults to the thread's own focal artifact. */
   initialSelectedId?: string | null
+  representation?: ThreadRepresentation
 }
+
+type ArtifactTableRow = DigitalThreadTableRow & { node: ArtifactThreadNode }
 
 const CHIPS: readonly (readonly [string, string])[] = [
   ["sys", "System"],
@@ -89,6 +91,7 @@ export default function DigitalThreadArtifact({
   evidenceHref,
   onOpenChange,
   initialSelectedId,
+  representation = "map",
 }: DigitalThreadArtifactProps) {
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
@@ -96,6 +99,19 @@ export default function DigitalThreadArtifact({
   const [query, setQuery] = useState("")
   const [groups, setGroups] = useState<Set<string>>(new Set())
   const liveRegion = useRef<HTMLDivElement | null>(null)
+  const canvasViewRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const element = canvasViewRef.current
+    if (!element) return
+    if (representation === "table") {
+      element.setAttribute("aria-hidden", "true")
+      element.setAttribute("inert", "")
+    } else {
+      element.removeAttribute("aria-hidden")
+      element.removeAttribute("inert")
+    }
+  }, [representation])
 
   /**
    * The validated thread, or the reason it could not be read.
@@ -174,11 +190,12 @@ export default function DigitalThreadArtifact({
    * A thread opens with its focal record already selected, so the reader has not chosen anything yet and the
    * question they asked was about the whole chain. Framing one hop put the result and the build off the right
    * edge of a six-lane thread before they had touched the board. Once they select something themselves, the
-   * canvas returns to §6.6's direct-link framing, which is the right behaviour for stepping through a trace.
+   * canvas returns to the ordinary compact selection framing, which is the right behaviour for stepping through
+   * a trace.
    */
-  const framedForFocal = useMemo(
-    () => (selectedId && selectedId === focalId && web ? [...web.nodes] : undefined),
-    [focalId, selectedId, web],
+  const framedForSelection = useMemo(
+    () => (selectedId && web ? [...web.nodes] : undefined),
+    [selectedId, web],
   )
 
   const selected = selectedId ? byId.get(selectedId) ?? null : null
@@ -199,19 +216,10 @@ export default function DigitalThreadArtifact({
   }, [directLinks, dockPreference, laneOfNode, selected])
 
   // Non-occlusion outranks the preference: a linked record must not vanish to honour a side (§6.6).
-  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${selectedId ?? ""}:${dockPreference}`)
-
-  // The canvas must not lay records out under the panel, so the frame it may use shrinks by the dock.
-  const frameInset = useMemo(
-    () =>
-      selectedId
-        ? dock === "bottom"
-          ? { bottom: PANEL_HEIGHT }
-          : dock === "left"
-            ? { left: PANEL_WIDTH }
-            : { right: PANEL_WIDTH }
-        : undefined,
-    [dock, selectedId],
+  const { dock, reportNeedsRoom, panelRef, frameInset } = usePanelDock(
+    preferredDock,
+    `${representation}:${selectedId ?? ""}:${dockPreference}`,
+    canvasViewRef,
   )
 
   useEffect(() => {
@@ -257,6 +265,73 @@ export default function DigitalThreadArtifact({
       return visible.length ? null : "No records match"
     },
     [byId, matchesFilters, model.nodes],
+  )
+
+  const tableIdentity = useCallback(
+    (node: ArtifactThreadNode) => isUnnumbered(node)
+      ? <span>{identityLabel(node)}</span>
+      : <ExactArtifactLink href={hrefFor?.(node)}>{node.displayNumber}</ExactArtifactLink>,
+    [hrefFor],
+  )
+
+  const tableRelations = useCallback(
+    (node: ArtifactThreadNode, direction: "upstream" | "downstream") => {
+      const relationEdges = edges.filter(edge =>
+        direction === "upstream" ? edge.toId === node.id : edge.fromId === node.id)
+      if (!relationEdges.length) return <em>None recorded</em>
+      return relationEdges.map(edge => {
+        const relatedId = direction === "upstream" ? edge.fromId : edge.toId
+        const related = byId.get(relatedId)
+        if (!related) return null
+        const hop = web?.hops.get(related.id)
+        return (
+          <span className="dtThreadTableRelation" key={`${edge.fromId}:${edge.toId}:${edge.relation}`}>
+            {tableIdentity(related)}
+            {" "}<small>
+              {traceRelationLabelFor(edge.relation, edge.fromId === related.id)}
+              {edge.isSuspect ? " · SUSPECT" : ""}
+              {hop && hop > 1 ? ` · ${hop} hops from selected` : ""}
+            </small>
+          </span>
+        )
+      })
+    },
+    [byId, edges, tableIdentity, web],
+  )
+
+  const tableRows = useMemo<ArtifactTableRow[]>(
+    () => nodes.filter(matchesFilters).map(node => ({ id: node.id, label: identityLabel(node), node })),
+    [matchesFilters, nodes],
+  )
+
+  const tableColumns = useMemo<readonly DigitalThreadTableColumn<ArtifactTableRow>[]>(
+    () => [
+      {
+        key: "record",
+        label: "Record",
+        render: row => (
+          <>
+            {tableIdentity(row.node)}
+            <span>{row.node.title ?? "Untitled record"}</span>
+          </>
+        ),
+      },
+      { key: "kind", label: "Type", render: row => row.node.kind },
+      { key: "state", label: "State", render: row => stateLabel(row.node.state ?? undefined) },
+      { key: "upstream", label: "Upstream", render: row => tableRelations(row.node, "upstream") },
+      { key: "downstream", label: "Downstream", render: row => tableRelations(row.node, "downstream") },
+      {
+        key: "trace",
+        label: "Trace context",
+        render: row => {
+          if (!selectedId) return <em>No record selected</em>
+          if (row.id === selectedId) return "Selected record"
+          const hop = web?.hops.get(row.id)
+          return hop ? `${hop} hop${hop === 1 ? "" : "s"}` : "Outside selected trace"
+        },
+      },
+    ],
+    [selectedId, tableIdentity, tableRelations, web],
   )
 
   const renderCard = useCallback(
@@ -470,28 +545,52 @@ export default function DigitalThreadArtifact({
       ) : null}
 
       <div className="dtaStage">
-        <DigitalThreadCanvas
-          lanes={model.lanes}
-          nodes={model.nodes}
-          edges={model.edges}
-          renderCard={renderCard}
-          laneNotice={laneNotice}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          onHover={setHoveredId}
-          frameInset={frameInset}
-          tracedEdges={web?.edges}
-          frameIds={framedForFocal}
-          onFramingNeedsRoom={reportNeedsRoom}
-          ariaLabel={
-            focal ? `Artifact thread for ${identityLabel(focal)}` : "Artifact thread"
-          }
-        />
-        {loading ? <div className="dtaLoading">Loading the artifact thread…</div> : null}
+        <div
+          className={`dtaCanvasView${representation === "table" ? " is-hidden" : ""}`}
+          ref={canvasViewRef}
+        >
+          <DigitalThreadCanvas
+            lanes={model.lanes}
+            nodes={model.nodes}
+            edges={model.edges}
+            renderCard={renderCard}
+            laneNotice={laneNotice}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onHover={setHoveredId}
+            frameInset={frameInset}
+            tracedEdges={web?.edges}
+            frameIds={framedForSelection}
+            framingIntent="landing"
+            landingId={initialSelectedId ?? focalId}
+            onFramingNeedsRoom={representation === "map" ? reportNeedsRoom : undefined}
+            ariaLabel={
+              focal ? `Artifact thread for ${identityLabel(focal)}` : "Artifact thread"
+            }
+          />
+        </div>
+        {representation === "table" ? (
+          <DigitalThreadTable
+            ariaLabel="Artifact thread table"
+            caption="Exact records and relationships in this artifact thread"
+            columns={tableColumns}
+            rows={tableRows}
+            availableCount={nodes.length}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            loading={loading}
+            error={error ?? contractError}
+            onRetry={onRetry}
+            emptyMessage="No records are present in this artifact thread."
+            selectionMessage="No record selected. Select a row to inspect its thread relationships."
+            reservedInset={frameInset}
+          />
+        ) : null}
+        {representation === "map" && loading ? <div className="dtaLoading">Loading the artifact thread…</div> : null}
 
         {/* Every state below sits inside the frame rather than replacing it (#880 §6.8), so a failed refresh
             does not cost the reader the zoom, pan and selection they had built up. */}
-        {error ? (
+        {representation === "map" && error ? (
           <div className="dtaInFrame dtaInFrame-error" role="alert">
             <b>The artifact thread could not be loaded.</b>
             <p>{error}</p>
@@ -506,7 +605,7 @@ export default function DigitalThreadArtifact({
         {/* A malformed response is its own state, and a loud one. The canvas stays empty rather than showing
             the records that happened to parse: a partial trace presented as a whole one is a false negative
             about traceability, which is worse than showing nothing. */}
-        {contractError ? (
+        {representation === "map" && contractError ? (
           <div className="dtaInFrame dtaInFrame-error" role="alert">
             <b>This artifact thread could not be shown.</b>
             <p>
@@ -522,7 +621,7 @@ export default function DigitalThreadArtifact({
           </div>
         ) : null}
 
-        {!loading && !error && !contractError && thread && nodes.length > 0 && !nodes.some(matchesFilters) ? (
+        {representation === "map" && !loading && !error && !contractError && thread && nodes.length > 0 && !nodes.some(matchesFilters) ? (
           <div className="dtaInFrame" role="status">
             <b>No records match.</b>
             <p>Clear a filter chip or the search box to bring records back.</p>
@@ -542,7 +641,7 @@ export default function DigitalThreadArtifact({
       <div className="dtaVisuallyHidden" aria-live="polite" ref={liveRegion} />
 
       {selected ? (
-        <aside className={`dtaPanel dtaPanel-${dock}`} aria-label={`Detail for ${identityLabel(selected)}`}>
+        <aside ref={panelRef} className={`dtaPanel dtaPanel-${dock}`} aria-label={`Detail for ${identityLabel(selected)}`}>
           <div className="dtaPanelTools">
             {(["bottom", "right", "auto"] as PanelDock[]).map(option => (
               <button
@@ -607,8 +706,13 @@ export default function DigitalThreadArtifact({
                 .sort(
                   (a, b) => a.hop - b.hop || identityLabel(a.node).localeCompare(identityLabel(b.node)),
                 )
-              const relationFor = (id: string) =>
-                directLinks.find(edge => edge.fromId === id || edge.toId === id)
+              const relationFor = (id: string) => {
+                // The edge between the listed record and the selection — not merely any edge touching
+                // the listed record, which could name a relationship it has with a third record.
+                return directLinks.find(item =>
+                  (item.fromId === id && item.toId === selected?.id) ||
+                  (item.toId === id && item.fromId === selected?.id))
+              }
               return (
                 <div className="dtaPanelCol" key={direction}>
                   <div className="dtaRelHead">
@@ -629,7 +733,7 @@ export default function DigitalThreadArtifact({
                             <span>
                               <small>
                                 {hop === 1
-                                  ? traceRelationLabel(link?.relation ?? "linked").toUpperCase()
+                                  ? traceRelationLabelFor(link?.relation ?? "linked", link?.fromId === node.id).toUpperCase()
                                   : `${hop} HOPS`}
                                 {link?.isSuspect ? " · SUSPECT" : ""}
                               </small>

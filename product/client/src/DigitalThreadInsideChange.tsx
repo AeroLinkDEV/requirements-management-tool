@@ -1,5 +1,10 @@
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import DigitalThreadCanvas from "./DigitalThreadCanvas"
+import DigitalThreadTable, {
+  type DigitalThreadTableColumn,
+  type DigitalThreadTableRow,
+  type ThreadRepresentation,
+} from "./DigitalThreadTable"
 import { usePanelDock } from "./digitalThreadPanelDock"
 import ExactArtifactLink from "./ExactArtifactLink"
 import {
@@ -78,6 +83,7 @@ export type DigitalThreadInsideChangeProps = {
   /** Opens a different change request in place, from the lane-0 register. */
   onOpenChange?: (node: NetworkNode) => void
   onBackToNetwork?: () => void
+  representation?: ThreadRepresentation
 }
 
 type Card =
@@ -89,6 +95,21 @@ type Card =
   | { kind: "covering"; record: CoveringArtifact }
   | { kind: "execution"; record: VerificationExecution }
   | { kind: "baseline"; record: BaselineEffect }
+
+type InsideTableRow = DigitalThreadTableRow & { card: Card }
+
+const insideCardLabel = (card: Card): string => {
+  switch (card.kind) {
+    case "register": return card.node.displayNumber
+    case "proposal": return card.item.displayNumber
+    case "verification": return card.item.displayNumber
+    case "allocation": return card.target.displayNumber || "Unnamed proposal"
+    case "coverage": return card.target.displayNumber
+    case "covering": return card.record.displayNumber
+    case "execution": return `Run by ${card.record.executedBy}`
+    case "baseline": return card.record.displayNumber
+  }
+}
 
 /**
  * Inside one change: what it proposes, what that allocates to, what verifies it, and what it does to the build.
@@ -108,12 +129,27 @@ export default function DigitalThreadInsideChange({
   hrefFor,
   onOpenChange,
   onBackToNetwork,
+  representation = "map",
 }: DigitalThreadInsideChangeProps) {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [dockPreference, setDockPreference] = useState<PanelDock>("bottom")
+  const [identifierQuery, setIdentifierQuery] = useState("")
   const liveRegion = useRef<HTMLDivElement | null>(null)
+  const canvasViewRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const element = canvasViewRef.current
+    if (!element) return
+    if (representation === "table") {
+      element.setAttribute("aria-hidden", "true")
+      element.setAttribute("inert", "")
+    } else {
+      element.removeAttribute("aria-hidden")
+      element.removeAttribute("inert")
+    }
+  }, [representation])
 
   const isTestChange = opened.kind === "TestChangeRequest"
   const labels = useMemo(
@@ -263,6 +299,30 @@ export default function DigitalThreadInsideChange({
     verificationItems,
   ])
 
+  const normalizedIdentifierQuery = identifierQuery.trim().toLowerCase()
+  const searchMatches = useMemo(() => {
+    if (!normalizedIdentifierQuery) return new Set(cards.keys())
+    const matching = new Set<string>()
+    for (const [id, card] of cards) {
+      // This field is explicitly an identifier search. Titles, statements and status text can explain a card,
+      // but matching them here would claim a non-identifier query was an exact controlled identity.
+      const haystack = insideCardLabel(card).toLowerCase()
+      if (haystack.includes(normalizedIdentifierQuery)) {
+        matching.add(id)
+      }
+    }
+    return matching
+  }, [cards, normalizedIdentifierQuery])
+  const searchVisibleMatches = useMemo(() => {
+    if (!normalizedIdentifierQuery) return searchMatches
+    const visible = new Set(searchMatches)
+    // Keep the opened register in view as context even when it does not match; this retained row is distinct from
+    // a genuine search hit, so the no-match state remains truthful and can be shared with the Table view.
+    if (cards.has(opened.id)) visible.add(opened.id)
+    return visible
+  }, [cards, normalizedIdentifierQuery, opened.id, searchMatches])
+  const searchHasRecord = !normalizedIdentifierQuery || searchMatches.size > 0
+
   /**
    * Whether the proposal payload has actually been answered.
    *
@@ -294,7 +354,11 @@ export default function DigitalThreadInsideChange({
     // the lane bands and headings the reader is looking at do not move when the answer arrives.
     if (!contentKnown) return { lanes: laneLabels, canvasNodes: placed }
 
-    const compacted = compactLanes(laneLabels, placed)
+    const filtered = normalizedIdentifierQuery ? placed.filter(node => searchVisibleMatches.has(node.id)) : placed
+    // Keep the conceptual lanes while searching to avoid a structural jump and to give the no-match message a
+    // stable board to live in. The opened register remains searchable context even when the query matches none.
+    if (normalizedIdentifierQuery && !filtered.length) return { lanes: laneLabels, canvasNodes: [] }
+    const compacted = compactLanes(laneLabels, filtered)
     return { lanes: compacted.lanes, canvasNodes: compacted.nodes }
   }, [
     allocations,
@@ -306,7 +370,9 @@ export default function DigitalThreadInsideChange({
     labels,
     registerNodes,
     requirementItems,
+    normalizedIdentifierQuery,
     verificationItems,
+    searchVisibleMatches,
   ])
 
   /**
@@ -360,22 +426,10 @@ export default function DigitalThreadInsideChange({
   }, [canvasEdges, canvasNodes, dockPreference, selectedId])
 
   // Non-occlusion outranks the preference (§6.6), the same contract the other two views keep.
-  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${selectedId ?? ""}:${dockPreference}`)
-
-  /**
-   * The frame the board may use. It shrinks by the docked edge, so the canvas never lays a record out
-   * underneath the panel — the non-occlusion rule, not merely a tidier overlap.
-   */
-  const frameInset = useMemo(
-    () =>
-      selectedId
-        ? dock === "bottom"
-          ? { bottom: PANEL_HEIGHT }
-          : dock === "left"
-            ? { left: PANEL_WIDTH }
-            : { right: PANEL_WIDTH }
-        : undefined,
-    [dock, selectedId],
+  const { dock, reportNeedsRoom, panelRef, frameInset } = usePanelDock(
+    preferredDock,
+    `${representation}:${selectedId ?? ""}:${dockPreference}`,
+    canvasViewRef,
   )
 
   const renderCard = useCallback(
@@ -719,6 +773,116 @@ export default function DigitalThreadInsideChange({
     [cards, onOpenChange, opened.id],
   )
 
+  const tableIdentity = useCallback(
+    (card: Card) => {
+      switch (card.kind) {
+        case "register":
+          return <ExactArtifactLink href={hrefFor?.(card.node)}>{card.node.displayNumber}</ExactArtifactLink>
+        case "proposal":
+          return <span>{card.item.displayNumber}</span>
+        case "verification":
+          return <span>{card.item.displayNumber}</span>
+        case "allocation":
+          return card.target.isProposed
+            ? <span>{card.target.displayNumber || "Unnamed proposal"}</span>
+            : <ExactArtifactLink href={hrefFor?.({ id: card.target.revisionId ?? "", kind: "Requirement", displayNumber: card.target.displayNumber, level: card.target.level, artifactId: card.target.id })}>{card.target.displayNumber}</ExactArtifactLink>
+        case "coverage":
+          return <ExactArtifactLink href={hrefFor?.({ id: card.target.revisionId, kind: "Requirement", displayNumber: card.target.displayNumber, level: card.target.level, artifactId: card.target.artifactId })}>{card.target.displayNumber}</ExactArtifactLink>
+        case "covering":
+          return <ExactArtifactLink href={hrefFor?.({ id: card.record.artifactRevisionId, kind: card.record.artifactKind, displayNumber: card.record.displayNumber, artifactId: card.record.artifactId })}>{card.record.displayNumber}</ExactArtifactLink>
+        case "execution":
+          return <span>{insideCardLabel(card)}</span>
+        case "baseline":
+          return <span>{card.record.displayNumber}</span>
+      }
+    },
+    [hrefFor],
+  )
+
+  const tableRelations = useCallback(
+    (cardId: string, direction: "upstream" | "downstream") => {
+      const relationEdges = canvasEdges.filter(edge =>
+        direction === "upstream" ? edge.to === cardId : edge.from === cardId)
+      if (!relationEdges.length) return <em>None recorded</em>
+      return relationEdges.map(edge => {
+        const relatedId = direction === "upstream" ? edge.from : edge.to
+        const related = cards.get(relatedId)
+        if (!related) return null
+        const hop = web?.hops.get(relatedId)
+        return (
+          <span className="dtThreadTableRelation" key={`${edge.from}:${edge.to}:${edge.label}`}>
+            {tableIdentity(related)}
+            {" "}<small>
+              {edge.label}
+              {hop && hop > 1 ? ` · ${hop} hops from selected` : ""}
+            </small>
+          </span>
+        )
+      })
+    },
+    [cards, canvasEdges, tableIdentity, web],
+  )
+
+  const allTableRows = useMemo<InsideTableRow[]>(
+    () => [...cards.entries()].map(([id, card]) => ({ id, label: insideCardLabel(card), card })),
+    [cards],
+  )
+  const tableRows = useMemo<InsideTableRow[]>(
+    () => [...cards.entries()]
+      .filter(([id]) => !normalizedIdentifierQuery || searchVisibleMatches.has(id))
+      .map(([id, card]) => ({ id, label: insideCardLabel(card), card })),
+    [cards, normalizedIdentifierQuery, searchVisibleMatches],
+  )
+
+  const tableColumns = useMemo<readonly DigitalThreadTableColumn<InsideTableRow>[]>(
+    () => [
+      {
+        key: "record",
+        label: "Record",
+        render: row => (
+          <>
+            {tableIdentity(row.card)}
+            <span>{row.card.kind === "register" ? row.card.node.title : row.card.kind === "proposal" ? row.card.item.statement : row.card.kind === "verification" ? row.card.item.proposedContent?.title ?? row.card.item.artifactKind : row.card.kind === "allocation" ? row.card.target.statement : row.card.kind === "coverage" ? row.card.target.statement : row.card.kind === "covering" ? row.card.record.title : row.card.kind === "execution" ? row.card.record.determination : row.card.record.name}</span>
+          </>
+        ),
+      },
+      {
+        key: "kind",
+        label: "Type",
+        render: row => row.card.kind === "register" ? row.card.node.kind : row.card.kind === "verification" ? row.card.item.artifactKind : row.card.kind,
+      },
+      {
+        key: "state",
+        label: "State",
+        render: row => {
+          switch (row.card.kind) {
+            case "register": return stateLabel(row.card.node.state ?? undefined)
+            case "proposal": return operationLabel(row.card.item.kind)
+            case "verification": return operationLabel(row.card.item.kind)
+            case "allocation": return row.card.target.isProposed ? "Proposed" : "In the build"
+            case "coverage": return "Covered by this package"
+            case "covering": return stateLabel(row.card.record.artifactState)
+            case "execution": return row.card.record.outcome
+            case "baseline": return stateLabel(row.card.record.state)
+          }
+        },
+      },
+      { key: "upstream", label: "Upstream", render: row => tableRelations(row.id, "upstream") },
+      { key: "downstream", label: "Downstream", render: row => tableRelations(row.id, "downstream") },
+      {
+        key: "trace",
+        label: "Trace context",
+        render: row => {
+          if (!selectedId) return <em>No record selected</em>
+          if (row.id === selectedId) return "Selected record"
+          const hop = web?.hops.get(row.id)
+          return hop ? `${hop} hop${hop === 1 ? "" : "s"}` : "Outside selected trace"
+        },
+      },
+    ],
+    [selectedId, tableIdentity, tableRelations, web],
+  )
+
   return (
     <div className="dticRoot">
       <div className="dticToolbar">
@@ -744,28 +908,65 @@ export default function DigitalThreadInsideChange({
           Inside <b>{opened.displayNumber}</b>
           {rebaseRequired ? <span className="dticRebase">Behind its target — rebase required</span> : null}
         </p>
+        <label className="dticSearch">
+          <span className="dticVisuallyHidden">Find an identifier inside this change</span>
+          <input
+            type="search"
+            value={identifierQuery}
+            placeholder="Find an identifier"
+            aria-label="Find an identifier inside this change"
+            onChange={event => setIdentifierQuery(event.target.value)}
+          />
+        </label>
       </div>
 
       <div className="dticStage">
-        <DigitalThreadCanvas
-          lanes={lanes}
-          nodes={canvasNodes}
-          edges={canvasEdges}
-          renderCard={renderCard}
-          selectedId={selectedId}
-          onSelect={handleSelect}
-          onHover={setHoveredId}
-          tracedEdges={web?.edges}
-          frameInset={frameInset}
-          onFramingNeedsRoom={reportNeedsRoom}
-          ariaLabel={`Inside ${opened.displayNumber}`}
-        />
-        {loading ? <div className="dticLoading">Loading what this change proposes…</div> : null}
+        <div
+          className={`dticCanvasView${representation === "table" ? " is-hidden" : ""}`}
+          ref={canvasViewRef}
+        >
+          <DigitalThreadCanvas
+            lanes={lanes}
+            nodes={canvasNodes}
+            edges={canvasEdges}
+            renderCard={renderCard}
+            selectedId={selectedId}
+            onSelect={handleSelect}
+            onHover={setHoveredId}
+            tracedEdges={web?.edges}
+            frameInset={frameInset}
+            frameIds={selectedId ? [...(web?.nodes ?? [])] : undefined}
+            framingIntent="selection"
+            landingId={opened.id}
+            onFramingNeedsRoom={representation === "map" ? reportNeedsRoom : undefined}
+            ariaLabel={`Inside ${opened.displayNumber}`}
+          />
+        </div>
+        {representation === "table" ? (
+          <DigitalThreadTable
+            ariaLabel={`Inside ${opened.displayNumber} table`}
+            caption={`Content and relationships inside ${opened.displayNumber}`}
+            columns={tableColumns}
+            rows={tableRows}
+            availableCount={allTableRows.length}
+            noMatch={Boolean(normalizedIdentifierQuery && !searchHasRecord)}
+            noMatchMessage={`No records match “${identifierQuery.trim()}”. The opened record remains visible for context.`}
+            selectedId={selectedId}
+            onSelect={handleSelect}
+            loading={loading}
+            error={error}
+            onRetry={onRetry}
+            emptyMessage={content ? emptyHeading(content) : "No content is available for this change yet."}
+            selectionMessage="No record selected. Select a row to inspect its change content and relationships."
+            reservedInset={frameInset}
+          />
+        ) : null}
+        {representation === "map" && loading ? <div className="dticLoading">Loading what this change proposes…</div> : null}
 
         {/* Failure renders inside the frame rather than replacing it (#880 §6.8). Swapping the canvas out for
             a message discards the transform, the zoom, the lane offsets and the selection, so recovering from
             a failed refresh would cost the reader the view they had built. */}
-        {error ? (
+        {representation === "map" && error ? (
           <div className="dticInFrame dticInFrame-error" role="alert">
             <b>This change could not be opened.</b>
             <p>{error}</p>
@@ -777,15 +978,21 @@ export default function DigitalThreadInsideChange({
           </div>
         ) : null}
 
-        {!loading && !error && content && itemCount === 0 ? (
+        {representation === "map" && !loading && !error && content && itemCount === 0 ? (
           <div className="dticInFrame" role="status">
             <b>{emptyHeading(content)}</b>
+          </div>
+        ) : null}
+        {representation === "map" && normalizedIdentifierQuery && !searchHasRecord ? (
+          <div className="dticInFrame" role="status">
+            <b>No records match “{identifierQuery.trim()}”.</b>
+            <p>Clear the search to restore the full change context.</p>
           </div>
         ) : null}
       </div>
 
       {selectedCard ? (
-        <aside className={`dticPanel dticPanel-${dock}`} aria-label={`Detail for ${panelTitle(selectedCard)}`}>
+        <aside ref={panelRef} className={`dticPanel dticPanel-${dock}`} aria-label={`Detail for ${panelTitle(selectedCard)}`}>
           <div className="dticPanelTools">
             {(["bottom", "right", "auto"] as PanelDock[]).map(option => (
               <button
@@ -802,45 +1009,49 @@ export default function DigitalThreadInsideChange({
               ×
             </button>
           </div>
-          <p className="dticEyebrow">SELECTED RECORD</p>
-          <div className="dticPanelIdentity">{panelTitle(selectedCard)}</div>
-          {panelRows(selectedCard).map(row => (
-            <div className="dticKv" key={row.label}>
-              <i>{row.label}</i>
-              <b>{row.value}</b>
-            </div>
-          ))}
-          {/* The whole traced web, not the first hop. Deeper records show their hop count and a dashed
-              border, and every row re-centres the board on that record. */}
-          {(["up", "down"] as const).map(direction => {
-            const set = direction === "up" ? web?.up : web?.down
-            const rows = [...(set ?? [])]
-              .map(id => ({ id, hop: web?.hops.get(id) ?? 1, card: cards.get(id) }))
-              .filter(row => row.card)
-              .sort((a, b) => a.hop - b.hop)
-            return (
-              <div className="dticPanelCol" key={direction}>
-                <p className="dticEyebrow">{direction === "up" ? "UPSTREAM" : "DOWNSTREAM"}</p>
-                <div className="dticRel">
-                  {rows.length ? (
-                    rows.map(row => (
-                      <button
-                        type="button"
-                        key={row.id}
-                        className={row.hop > 1 ? "is-far" : ""}
-                        onClick={() => setSelectedId(row.id)}
-                      >
-                        <small>{row.hop === 1 ? "DIRECT" : `${row.hop} HOPS`}</small>
-                        <span>{panelTitle(row.card!)}</span>
-                      </button>
-                    ))
-                  ) : (
-                    <p className="dticRelEmpty">No recorded relationships</p>
-                  )}
+          <div className="dticPanelContent">
+            <section className="dticPanelIdentityCol" aria-label="Selected record details">
+              <p className="dticEyebrow">SELECTED RECORD</p>
+              <div className="dticPanelIdentity">{panelTitle(selectedCard)}</div>
+              {panelRows(selectedCard).map(row => (
+                <div className="dticKv" key={row.label}>
+                  <i>{row.label}</i>
+                  <b>{row.value}</b>
                 </div>
-              </div>
-            )
-          })}
+              ))}
+            </section>
+            {/* The whole traced web, not the first hop. Deeper records show their hop count and a dashed
+                border, and every row re-centres the board on that record. */}
+            {(["up", "down"] as const).map(direction => {
+              const set = direction === "up" ? web?.up : web?.down
+              const rows = [...(set ?? [])]
+                .map(id => ({ id, hop: web?.hops.get(id) ?? 1, card: cards.get(id) }))
+                .filter(row => row.card)
+                .sort((a, b) => a.hop - b.hop)
+              return (
+                <div className="dticPanelCol" key={direction}>
+                  <p className="dticEyebrow">{direction === "up" ? "UPSTREAM" : "DOWNSTREAM"}</p>
+                  <div className="dticRel">
+                    {rows.length ? (
+                      rows.map(row => (
+                        <button
+                          type="button"
+                          key={row.id}
+                          className={row.hop > 1 ? "is-far" : ""}
+                          onClick={() => setSelectedId(row.id)}
+                        >
+                          <small>{row.hop === 1 ? "DIRECT" : `${row.hop} HOPS`}</small>
+                          <span>{panelTitle(row.card!)}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <p className="dticRelEmpty">No recorded relationships</p>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </aside>
       ) : null}
 
@@ -865,9 +1076,6 @@ export type ResolvedDock = Exclude<PanelDock, "auto">
  * placement and edge all use this one function, so an edge can never point at an identity no card carries.
  */
 const allocationNodeId = (target: AllocationTarget): string => target.revisionId ?? target.id
-
-const PANEL_HEIGHT = 150 + 18 + 16
-const PANEL_WIDTH = 300 + 16 + 14
 
 /** The identity a panel names, taken from whichever card kind is selected. */
 const panelTitle = (card: Card): string => {
@@ -902,7 +1110,7 @@ const panelRows = (card: Card): { label: string; value: string }[] => {
       return [
         { label: "Operation", value: operationLabel(card.item.kind) },
         { label: "Level", value: card.item.level },
-        { label: "Downstream", value: card.item.disposition },
+        { label: "Relationship status", value: proposalDispositionLabel(card.item) },
       ]
     case "verification":
       return [
@@ -926,6 +1134,16 @@ const panelRows = (card: Card): { label: string; value: string }[] => {
       return [{ label: "Outcome", value: card.record.outcome }]
     case "baseline":
       return [{ label: "State", value: card.record.state }]
+  }
+}
+
+const proposalDispositionLabel = (item: ProposalItem): string => {
+  switch (item.disposition) {
+    case "Allocated": return "Allocated to the recorded target"
+    case "TargetNotYetCreated": return "Target not yet created"
+    case "NoAllocationRecorded": return "No allocation recorded"
+    case "BehindTarget": return "Behind the current target revision"
+    case "BaseRevisionUnresolved": return "Base revision unresolved: prior revision needed to determine the relationship could not be resolved"
   }
 }
 

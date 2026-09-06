@@ -37,12 +37,14 @@ export default function ExactLinkLifecyclePanel({ api, routeRoot, linkId, initia
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<boolean> => {
     try {
       setLifecycle(await apiRequest<ExactLinkLifecycle>(`${api}/api/${routeRoot}/${linkId}/lifecycle`))
       setError('')
+      return true
     } catch (reason) {
       setError(operationError(reason, 'The exact-link lifecycle could not be loaded.'))
+      return false
     }
   }, [api, linkId, routeRoot])
 
@@ -56,6 +58,7 @@ export default function ExactLinkLifecyclePanel({ api, routeRoot, linkId, initia
   const mutate = async (event: FormEvent<HTMLFormElement>, action: 'acknowledge' | 'resolve') => {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
+    let recorded = false
     try {
       setBusy(true)
       setError('')
@@ -67,10 +70,23 @@ export default function ExactLinkLifecyclePanel({ api, routeRoot, linkId, initia
           ...(action === 'resolve' ? { outcome: form.get('outcome') } : {}),
         }),
       })
-      await load()
-      await onChanged?.()
+      // The POST is the controlled decision. Notify the owning projection immediately after it succeeds so
+      // an active Artifact thread is invalidated even when its follow-up lifecycle GET cannot be read.
+      recorded = true
+      let refreshed = true
+      try {
+        await onChanged?.()
+      } catch {
+        refreshed = false
+      }
+      refreshed = (await load()) && refreshed
+      if (!refreshed) {
+        setError('The lifecycle decision was recorded, but the latest relationship state could not be refreshed.')
+      }
     } catch (reason) {
-      setError(operationError(reason, 'The lifecycle decision could not be recorded.'))
+      setError(operationError(reason, recorded
+        ? 'The lifecycle decision was recorded, but the latest relationship state could not be refreshed.'
+        : 'The lifecycle decision could not be recorded.'))
     } finally {
       setBusy(false)
     }

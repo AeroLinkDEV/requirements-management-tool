@@ -169,9 +169,11 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
         await SignInAsync(client, fixture.Member);
 
         var body = await NetworkAsync(client, fixture);
+        // The link is stored child → parent, but the network presents the story direction (#925 F5):
+        // the upstream parent is the edge source, so the connector reads downstream with its phrase.
         var edge = body.GetProperty("edges").EnumerateArray().Single(x =>
-            x.GetProperty("fromId").GetString() == fixture.ChildId.ToString()
-            && x.GetProperty("toId").GetString() == fixture.ParentId.ToString());
+            x.GetProperty("fromId").GetString() == fixture.ParentId.ToString()
+            && x.GetProperty("toId").GetString() == fixture.ChildId.ToString());
 
         Assert.Equal("ChangeRequest", edge.GetProperty("fromKind").GetString());
         Assert.Equal("Upstream", edge.GetProperty("relation").GetString());

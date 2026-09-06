@@ -140,6 +140,9 @@ test('every surface meets WCAG 2.2 AA contrast in both densities', async ({ page
     for (const [name, path] of surfaces) {
       await page.goto(new URL(portalPaths.has(path) ? path : root + path, page.url()).toString(), { waitUntil: 'load' })
       await surfacePainted(page)
+      if (name === 'Digital Thread') {
+        await expect(page.locator('.dtnCard').first()).toBeVisible({ timeout: 30_000 })
+      }
       // Data-driven surfaces paint a header, then an empty state, then their rows. Measuring on first paint
       // audited a transient "no matching accounts" that no settled page ever shows.
       await layoutSettled(page)

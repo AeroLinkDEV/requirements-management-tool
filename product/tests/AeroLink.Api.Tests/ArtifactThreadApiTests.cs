@@ -186,9 +186,11 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
             && edge.GetProperty("toId").GetString() == world.FirstProcedureRevisionId.ToString()
             && edge.GetProperty("relation").GetString() == "run by");
 
-        // Both cases covering this requirement are present, and every one of them sits in the Test Case lane.
+        // Both cases covering this requirement are present, plus the LLR descendant's case reached
+        // through the corrected verification-branch admission (#925 F5), and every one of them sits in
+        // the Test Case lane.
         var cases = Nodes(thread, "Case");
-        Assert.Equal(2, cases.Count);
+        Assert.Equal(3, cases.Count);
         Assert.All(cases, node => Assert.Equal(3, node.GetProperty("lane").GetInt32()));
     }
 
@@ -425,7 +427,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     }
 
     [Fact]
-    public async Task A_system_focal_still_reaches_every_child_below_it()
+    public async Task A_system_focal_reaches_its_descendants_verification_below_it()
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
@@ -436,16 +438,47 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
         var cases = Nodes(thread, "Case").Select(x => x.GetProperty("id").GetString()).ToList();
 
-        // An HLR is reached from System only on the Target-to-Source half, because a trace edge runs child to
-        // parent. Verification edges leave a requirement in the other orientation, so continuing from that
-        // reached HLR into its case would switch halves mid-walk — the turn-around §6.5 forbids. The HLR stays
-        // as a trace node; it just does not become a new pivot. System keeps its own procedure, which is
-        // reached without changing direction.
+        // Story direction (#925 F5): System is upstream of its HLR children and its LLR grandchild, and
+        // verification belongs downstream of the requirement it verifies. The System focal therefore
+        // keeps its own directly covered procedure AND the verification branches of its descendants —
+        // the HLR's case and procedures and the LLR's case and procedure all hang below it now. The old
+        // reading admitted only the System's own procedure and left the descendants' verification out,
+        // which presented a certification record that was missing its own downstream evidence.
         Assert.Contains(world.HighLevelRevisionId.ToString(), requirements);
         Assert.Contains(world.SiblingHighLevelRevisionId.ToString(), requirements);
+        Assert.Contains(world.LowLevelRevisionId.ToString(), requirements);
         Assert.Contains(world.SystemProcedureRevisionId.ToString(), procedures);
+        Assert.Contains(world.FirstProcedureRevisionId.ToString(), procedures);
+        Assert.Contains(world.LowProcedureRevisionId.ToString(), procedures);
+        Assert.Contains(world.CaseRevisionId.ToString(), cases);
+        Assert.Contains(world.LowCaseRevisionId.ToString(), cases);
+
+        // Descendant reach is not component reach: an unrelated level with no trace to the focal stays out.
+        Assert.DoesNotContain(world.InterfaceRevisionId.ToString(), requirements);
+    }
+
+    [Fact]
+    public async Task A_low_level_focal_reads_its_ancestors_upstream_without_their_verification()
+    {
+        var world = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+
+        var thread = await ThreadAsync(client, world, "Requirement", world.LowLevelRevisionId);
+        var requirements = Nodes(thread, "Requirement").Select(x => x.GetProperty("id").GetString()).ToList();
+        var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
+        var cases = Nodes(thread, "Case").Select(x => x.GetProperty("id").GetString()).ToList();
+
+        // The LLR's story: its HLR parent and System grandparent are upstream trace nodes, its own case
+        // and procedure are downstream verification, and neither ancestor's verification belongs below
+        // it — the System procedure verifies the System, and the HLR's case verifies the HLR (#925 F5).
+        Assert.Contains(world.HighLevelRevisionId.ToString(), requirements);
+        Assert.Contains(world.SystemRevisionId.ToString(), requirements);
+        Assert.Contains(world.LowCaseRevisionId.ToString(), cases);
+        Assert.Contains(world.LowProcedureRevisionId.ToString(), procedures);
+        Assert.DoesNotContain(world.SystemProcedureRevisionId.ToString(), procedures);
         Assert.DoesNotContain(world.CaseRevisionId.ToString(), cases);
-        Assert.DoesNotContain(world.FirstProcedureRevisionId.ToString(), procedures);
+        Assert.DoesNotContain(world.SiblingHighLevelRevisionId.ToString(), requirements);
     }
 
     // ---- focal-first, and exact kind --------------------------------------------------------------------
@@ -479,16 +512,18 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         var edges = thread.GetProperty("edges").EnumerateArray().ToList();
 
         // RequirementTraceType distinguishes these and they are different controlled claims. Collapsing both to
-        // one generic word at a new server boundary loses trace meaning the domain already records.
+        // one generic word at a new server boundary loses trace meaning the domain already records. The edges
+        // arrive in story direction — parent → child (#925 F5) — and the phrase is chosen for that reading,
+        // so the stored child→parent orientation is presented without reversing its meaning.
         var allocated = edges.Single(x =>
-            x.GetProperty("fromId").GetString() == world.HighLevelRevisionId.ToString()
-            && x.GetProperty("toId").GetString() == world.SystemRevisionId.ToString());
-        Assert.Equal("allocated from", allocated.GetProperty("relation").GetString());
+            x.GetProperty("fromId").GetString() == world.SystemRevisionId.ToString()
+            && x.GetProperty("toId").GetString() == world.HighLevelRevisionId.ToString());
+        Assert.Equal("allocates to", allocated.GetProperty("relation").GetString());
 
         var derived = edges.Single(x =>
-            x.GetProperty("fromId").GetString() == world.SystemRevisionId.ToString()
-            && x.GetProperty("toId").GetString() == world.SupersededSystemRevisionId.ToString());
-        Assert.Equal("derived from", derived.GetProperty("relation").GetString());
+            x.GetProperty("fromId").GetString() == world.SupersededSystemRevisionId.ToString()
+            && x.GetProperty("toId").GetString() == world.SystemRevisionId.ToString());
+        Assert.Equal("source of", derived.GetProperty("relation").GetString());
     }
 
     [Fact]
@@ -733,7 +768,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     }
 
     [Fact]
-    public async Task A_requirement_focal_still_keeps_every_verification_branch_below_it()
+    public async Task A_requirement_focal_keeps_its_own_verification_branch_and_its_descendants()
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
@@ -742,6 +777,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
         var requirements = Nodes(thread, "Requirement").Select(x => x.GetProperty("id").GetString()).ToList();
+        var cases = Nodes(thread, "Case").Select(x => x.GetProperty("id").GetString()).ToList();
 
         // Its own fan-out: every covering case and every procedure those cases run. This is what direction
         // purity must not cost.
@@ -750,11 +786,16 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         Assert.Contains(Nodes(thread, "Case"),
             x => x.GetProperty("id").GetString() == world.CaseRevisionId.ToString());
 
-        // The ancestor's verification also belongs, and for a reason worth stating: a trace edge runs child to
-        // parent and a coverage edge runs requirement to verification, so HLR to System to the System procedure
-        // never changes direction. Ancestor verification is kept where the walk stays on one half, and dropped
-        // where reaching the requirement required the other half — as the System-focal case shows.
-        Assert.Contains(world.SystemProcedureRevisionId.ToString(), procedures);
+        // The corrected semantic direction (#925 F5): verification belongs downstream of the requirement
+        // it verifies, so the focal HLR's thread also carries its LLR descendant's verification branch.
+        // The System ancestor stays reachable as an upstream trace node, but its own procedure no longer
+        // hangs below the HLR — walking up to an ancestor and into its verification presents an
+        // unrelated branch as if it were the focal record's downstream evidence.
+        Assert.Contains(world.SystemRevisionId.ToString(), requirements);
+        Assert.Contains(world.LowLevelRevisionId.ToString(), requirements);
+        Assert.Contains(world.LowCaseRevisionId.ToString(), cases);
+        Assert.Contains(world.LowProcedureRevisionId.ToString(), procedures);
+        Assert.DoesNotContain(world.SystemProcedureRevisionId.ToString(), procedures);
 
         // The sibling HLR is reached only by reversing at the shared System parent, and stays out.
         Assert.DoesNotContain(world.SiblingHighLevelRevisionId.ToString(), requirements);
@@ -925,8 +966,9 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         Guid UncoveredCaseRevisionId, Guid UncoveredProcedureRevisionId, Guid SystemArtifactId, Guid SystemRevisionId, Guid SupersededSystemRevisionId,
         Guid ClosedProcedureRevisionId, Guid RevisedCaseRevisionId, Guid HighLevelRevisionId, Guid SiblingHighLevelRevisionId,
         Guid InterfaceRevisionId, Guid CaseRevisionId, Guid FirstProcedureRevisionId,
-        Guid SecondProcedureRevisionId, Guid SystemProcedureRevisionId, Guid PassExecutionId,
-        Guid FailExecutionId, Guid BuildId, Guid LaterBuildId, Guid ForeignRevisionId,
+        Guid SecondProcedureRevisionId, Guid SystemProcedureRevisionId,
+        Guid LowLevelRevisionId, Guid LowCaseRevisionId, Guid LowProcedureRevisionId,
+        Guid PassExecutionId, Guid FailExecutionId, Guid BuildId, Guid LaterBuildId, Guid ForeignRevisionId,
         string Member, string Outsider);
 
     /// <summary>
@@ -988,6 +1030,12 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         var (closedChild, closedChildRevision) = Requirement(db, project.Id, $"HLR-97003", RequirementLevel.HighLevel,
             "The sequencer shall log each ordering decision.", scr.Id, baseline.Id, now, currentSystem.Id);
 
+        // An LLR child of the focal HLR with its own verification (#925 F5): the corrected direction
+        // contract must admit a descendant's verification branch below the HLR and the System focal,
+        // while the System ancestor's own procedure no longer hangs below the HLR.
+        var (lowLevel, lowLevelRevision) = Requirement(db, project.Id, $"LLR-97001", RequirementLevel.LowLevel,
+            "The sequencer shall order waypoints per channel.", scr.Id, baseline.Id, now, highLevelRevision.Id);
+
         // An Interface requirement: a level with no verification discipline at all.
         var (interfaceArtifact, interfaceRevision) = Requirement(db, project.Id, $"IRS-97001",
             RequirementLevel.Interface, "The FMS shall expose waypoints on ARINC 429 label 310.",
@@ -1001,7 +1049,12 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
             RequirementTraceType.AllocatedFrom, "Allocated.", now);
         var supersededTrace = new RequirementTraceLink(project.Id, currentSystem.Id, supersededSystem.Id,
             RequirementTraceType.DerivedFrom, "Supersedes.", now);
-        db.AddRange(traceToSystem, siblingTrace, closedTrace, supersededTrace);
+        var lowTrace = new RequirementTraceLink(project.Id, lowLevelRevision.Id, highLevelRevision.Id,
+            RequirementTraceType.AllocatedFrom, "Allocated.", now);
+        db.AddRange(traceToSystem, siblingTrace, closedTrace, supersededTrace, lowTrace);
+        // The parent has to be a governed-baseline member before a child may allocate to it, so the HLR
+        // joins the baseline now that the LLR allocates to it.
+        db.Add(new BaselineRequirementSelection(baseline.Id, highLevel.Id, highLevelRevision.Id));
 
         // Verification: a Case running two procedures for the HLR, and a System procedure covering directly.
         var (caseArtifact, caseRevision) = Verification(db, project.Id, "HLRTC-97001", "Oceanic sequencing case",
@@ -1026,6 +1079,15 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         db.Add(suspectCoverage);
         db.Add(new TestRequirementCoverage(systemProcedureRevision.Id, currentSystem.Id));
         db.Add(new TestRequirementCoverage(revisedCaseRevision.Id, highLevelRevision.Id));
+
+        // The LLR's verification: a software Case covers the requirement, and its procedure hangs off it —
+        // a software Procedure is refused a direct coverage row.
+        var (lowCase, lowCaseRevision) = Verification(db, project.Id, "LLRTC-97001", "Channel ordering case",
+            TestProcedureLevel.LowLevel, VerificationArtifactKind.Case, member, now);
+        var (lowProcedure, lowProcedureRevision) = Verification(db, project.Id, "LLRTP-97001",
+            "Channel ordering procedure", TestProcedureLevel.LowLevel, VerificationArtifactKind.Procedure, member, now);
+        db.Add(new TestRequirementCoverage(lowCaseRevision.Id, lowLevelRevision.Id));
+        db.Add(new TestCaseProcedureLink(lowCaseRevision.Id, lowProcedureRevision.Id));
 
         // Authored parentage: every software procedure hangs off the first case by a lifecycle-free link.
         var settledRun = new TestCaseProcedureLink(caseRevision.Id, firstRevision.Id);
@@ -1186,6 +1248,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
             uncoveredCaseRevision.Id, uncoveredProcedureRevision.Id, systemArtifact.Id, currentSystem.Id, supersededSystem.Id,
             closedProcedureRevision.Id, revisedCaseRevision.Id, highLevelRevision.Id, siblingRevision.Id, interfaceRevision.Id,
             caseRevision.Id, firstRevision.Id, secondRevision.Id, systemProcedureRevision.Id,
+            lowLevelRevision.Id, lowCaseRevision.Id, lowProcedureRevision.Id,
             pass.Id, fail.Id, build.Id, laterBuild.Id, foreignRevision.Id, member, outsider);
     }
 

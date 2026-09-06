@@ -9,6 +9,9 @@
  * The scenario is chosen by `?case=` so one fixture serves every rendered assertion.
  */
 import { createRoot } from "react-dom/client"
+// Use the product typography and surface tokens, as the Network and Artifact fixtures do. Without them the
+// component's font shorthands fall back to browser defaults and its measured card geometry is not production.
+import "../../src/index.css"
 import DigitalThreadInsideChange from "../../src/DigitalThreadInsideChange"
 import type {
   ProposalContent,

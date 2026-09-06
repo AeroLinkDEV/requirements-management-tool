@@ -2300,6 +2300,23 @@ successful when the reviewed merge candidate contains no trace of it.
   single-entry path. Issue #549 remains the live authority for that proof and the remaining composition,
   deliberate-failure, stale-base, and non-cancellation evidence before final closeout.
 
+### DEC-120 - Digital Thread Story Framing Separates Arrival from Deliberate Selection
+
+- **Date:** 2026-09-06
+- **Status:** Accepted
+- **Decision:** Digital Thread arrival and deep-link framing retain DEC-117's readable detailed floor of `.86`.
+  After the reader deliberately selects a record, the canvas may use the measured compact floor of `.81` (about
+  11.34px for the authored 14px identifier) while preserving the complete directed, cycle-safe trace supplied by
+  the server. An explicit **Fit selected story** action frames that selected trace, **Fit entire story** frames the
+  complete directed trace down to the existing `.58` floor, and **Fit board** frames the whole projected board.
+  The canvas does not replace a complete story with a one-hop fallback, and pan or lane roll remains available when
+  the complete story cannot fit at a readable scale.
+- **Intent boundary:** The `.81` measurement applies to ordinary deliberate selection only. A user returning to the
+  focal record receives the selection treatment; the initial/deep-link landing treatment is consumed once by the
+  view's arrival selection. This clarification does not rewrite DEC-117's landing floor.
+- **Authority:** The directed `trace()` projection and the view-supplied node set remain authoritative. Framing is a
+  presentation operation over that set and must not discover siblings, invent edges, or alter controlled identity.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
