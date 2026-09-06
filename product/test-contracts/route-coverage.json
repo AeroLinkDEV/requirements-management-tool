@@ -716,6 +716,7 @@
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
         "AdministratorChangeRequestApiTests",
+        "ChangeAuthoringInvariantApiTests",
         "WithdrawChangeRequestApiTests"
       ]
     },

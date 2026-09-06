@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 844,
-    "cases": 937,
+    "tests": 847,
+    "cases": 940,
     "classes": 125,
-    "hostedTests": 806,
-    "hostedCases": 885,
+    "hostedTests": 809,
+    "hostedCases": 888,
     "nonHostedTests": 30,
     "nonHostedCases": 44,
     "unknownHostTests": 8,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 526,
-      "cases": 587,
+      "tests": 529,
+      "cases": 590,
       "unknownCases": 0,
       "classes": 102
     },
@@ -1627,8 +1627,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 851,
-        "end": 865
+        "start": 918,
+        "end": 932
       }
     },
     {
@@ -1644,8 +1644,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 808,
-        "end": 823
+        "start": 875,
+        "end": 890
       }
     },
     {
@@ -1682,6 +1682,24 @@
       "sourceLines": {
         "start": 322,
         "end": 426
+      }
+    },
+    {
+      "cls": "AuthoringTracedImpactTests",
+      "test": "Modification_picker_constrains_candidates_to_the_proposal_exact_level_before_limiting",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 506,
+        "end": 571
       }
     },
     {
@@ -1732,8 +1750,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 830,
-        "end": 844
+        "start": 897,
+        "end": 911
       }
     },
     {
@@ -1749,8 +1767,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 874,
-        "end": 914
+        "start": 941,
+        "end": 981
       }
     },
     {
@@ -1803,8 +1821,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 544,
-        "end": 806
+        "start": 611,
+        "end": 873
       }
     },
     {
@@ -1821,8 +1839,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 506,
-        "end": 542
+        "start": 573,
+        "end": 609
       }
     },
     {
@@ -2577,6 +2595,41 @@
     },
     {
       "cls": "ChangeAuthoringInvariantApiTests",
+      "test": "A_draft_scoped_to_the_LLR_workspace_refuses_an_HLR_proposal_identity",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 189,
+        "end": 266
+      }
+    },
+    {
+      "cls": "ChangeAuthoringInvariantApiTests",
+      "test": "Adding_a_proposal_to_an_existing_LLR_draft_refuses_an_HLR_identity",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 268,
+        "end": 306
+      }
+    },
+    {
+      "cls": "ChangeAuthoringInvariantApiTests",
       "test": "Authored_attributes_and_sections_survive_creation_and_server_owned_derived_cannot_be_spoofed",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -2641,8 +2694,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 189,
-        "end": 265
+        "start": 308,
+        "end": 384
       }
     },
     {

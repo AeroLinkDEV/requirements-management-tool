@@ -179,7 +179,7 @@ export default function ControlledRequirementEditor({
       setLookupError("");
       try {
         const response = await fetch(
-          `${api}/api/authoring/requirements?projectId=${projectId}&scope=${scope}&search=${encodeURIComponent(term)}&limit=8`,
+          `${api}/api/authoring/requirements?projectId=${projectId}&scope=${scope}&level=${item.level}&search=${encodeURIComponent(term)}&limit=8`,
         );
         if (!response.ok) throw new Error("Requirement lookup is unavailable.");
         const rows = (await response.json()) as ExistingRequirement[];
@@ -197,7 +197,7 @@ export default function ControlledRequirementEditor({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [api, identityLocked, item.kind, projectId, query, scope]);
+  }, [api, identityLocked, item.kind, item.level, projectId, query, scope]);
 
   /**
    * The approved wording this proposal is changing, held separately from the proposal itself.
@@ -220,7 +220,7 @@ export default function ControlledRequirementEditor({
     (async () => {
       try {
         const response = await fetch(
-          `${api}/api/authoring/requirements?projectId=${projectId}&scope=${scope}&search=${encodeURIComponent(item.baseNumber)}&limit=5`,
+          `${api}/api/authoring/requirements?projectId=${projectId}&scope=${scope}&level=${item.level}&search=${encodeURIComponent(item.baseNumber)}&limit=5`,
         );
         if (!response.ok) return;
         const rows = (await response.json()) as ExistingRequirement[];
@@ -238,9 +238,14 @@ export default function ControlledRequirementEditor({
     return () => {
       cancelled = true;
     };
-  }, [api, item.baseNumber, item.kind, item.targetSectionId, projectId, scope]);
+  }, [api, item.baseNumber, item.kind, item.level, item.targetSectionId, projectId, scope]);
 
   const selectExisting = (selected: ExistingRequirement) => {
+    // The lookup already asks for this proposal's exact level, so a differing row can only come from a
+    // response resolved before a level change. Applying it would silently re-level the proposal while the
+    // page still names the original workspace (#925 F1), so the selection is refused here as well as
+    // being excluded at the server.
+    if (selected.level !== item.level) return;
     onChange("baseNumber", selected.baseNumber);
     onChange("revision", selected.nextRevision);
     onChange("level", selected.level);
