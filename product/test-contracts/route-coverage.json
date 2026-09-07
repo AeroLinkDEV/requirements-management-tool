@@ -363,6 +363,7 @@
         "ReopenBaselineConsequencesApiTests",
         "RequirementFilterExactnessApiTests",
         "RequirementProposalOptionsApiTests",
+        "RequirementRedlineApiTests",
         "RestartReviewApiTests",
         "ReviewCommentApiTests",
         "ReviewLinkOutlivedCycleTests",
