@@ -1308,6 +1308,14 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             where procedure.ProjectId == projectId && procedure.ArtifactKind == VerificationArtifactKind.Procedure
             select new { Level = (TestProcedureLevel?)procedure.Level, Authored = revision.SourceTestChangeRequestId != null })
             .ToListAsync(ct);
+        // Each configured key also owns its own controlled procedure document register (one per key, by
+        // design), so the separate ControlledDocuments aggregate cannot stand in for them either.
+        var documentRegisters = await db.TestProcedureDocuments.AsNoTracking()
+            .Where(x => x.ProjectId == projectId)
+            .Select(x => new { Level = (TestProcedureLevel?)x.Level, x.ArtifactKind }).ToListAsync(ct);
+        var registerCounts = configuredFamilies.ToDictionary(
+            f => (f.Level, f.Key.Kind),
+            f => documentRegisters.Count(x => x.Level == ToTestProcedureLevel(f.Level) && x.ArtifactKind == f.Key.Kind));
         static TestProcedureLevel ToTestProcedureLevel(RequirementLevel level) => level switch
         {
             RequirementLevel.System => TestProcedureLevel.System,
@@ -1371,7 +1379,10 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             + "downstream assessments: "
             + string.Join(", ", assessmentTargets.Select(level => $"{level} {assessmentCounts[level]}")) + "; "
             + "verification impact items: "
-            + string.Join(", ", configuredFamilies.Select(f => $"{f.Key.Discipline}/{f.Key.Kind} {impactCounts[f.Key]}")) + ". "
+            + string.Join(", ", configuredFamilies.Select(f => $"{f.Key.Discipline}/{f.Key.Kind} {impactCounts[f.Key]}")) + "; "
+            + "procedure document registers: "
+            + string.Join(", ", configuredFamilies.Select(f =>
+                $"{f.Level}/{f.Key.Kind} {registerCounts[(f.Level, f.Key.Kind)]}")) + ". "
             + "Deliberate exceptions: Interface change control is retired (#889); the product line, "
             + "controlled library, release campaign and leadership positions are singular families. "
             + "The enforced verification families are exactly the resolved ladder profile's configured "
@@ -1392,6 +1403,9 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             var artifactCount = artifactCounts[(family.Level, family.Key.Kind)];
             if (artifactCount < 5)
                 failures1.Add($"only {artifactCount} {family.Level}/{family.Key.Kind} verification artifacts");
+            var registerCount = registerCounts[(family.Level, family.Key.Kind)];
+            if (registerCount < 1)
+                failures1.Add($"missing {family.Level}/{family.Key.Kind} procedure document register");
             // Impact items are never raised against Procedure reviews — the service attaches them to the
             // originating Case review — so software-Procedure keys carry no impact minimum. Their review
             // minimum applies only once the family carries authored provenance (a procedure revision
