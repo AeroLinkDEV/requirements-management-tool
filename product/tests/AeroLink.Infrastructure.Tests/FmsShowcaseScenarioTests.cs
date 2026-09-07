@@ -1088,12 +1088,11 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
     }
 
     /// <summary>
-    /// <summary>
     /// The migration-only exemption for software-Procedure keys: on a post-cutover profile (simulated
     /// through the seeder's policy seam), those keys enter the configured matrix with zero authored
     /// reviews; the artifact minimum bites immediately while the review/impact minima stay unenforced —
     /// impact items never attach to Procedure reviews, and the review minimum resumes only with authored
-    /// provenance, which SQLite's neutral-identity CHECK cannot persist outside the PostgreSQL cutover.
+    /// provenance. This policy-only case is complemented by the typed Procedure fixtures below.
     /// </summary>
     [Fact]
     public async Task Family_inventory_treats_post_cutover_procedure_families_as_migration_only()
@@ -1126,5 +1125,101 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
             migratedInventory.Detail, StringComparison.Ordinal);
         Assert.DoesNotContain("HighLevelSoftware/Procedure verification impact items",
             migratedInventory.Detail, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(TestProcedureLevel.HighLevel, 0, false)]
+    [InlineData(TestProcedureLevel.HighLevel, 1, false)]
+    [InlineData(TestProcedureLevel.HighLevel, 5, false)]
+    [InlineData(TestProcedureLevel.HighLevel, 1, true)]
+    [InlineData(TestProcedureLevel.HighLevel, 0, true)]
+    [InlineData(TestProcedureLevel.LowLevel, 0, false)]
+    [InlineData(TestProcedureLevel.LowLevel, 1, false)]
+    [InlineData(TestProcedureLevel.LowLevel, 5, false)]
+    [InlineData(TestProcedureLevel.LowLevel, 1, true)]
+    [InlineData(TestProcedureLevel.LowLevel, 0, true)]
+    public async Task Family_inventory_distinguishes_migration_and_authored_procedure_review_provenance(
+        TestProcedureLevel level, int retainedReviews, bool retainAuthoredRevision)
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var configuration = await db.ProjectLadderConfigurations.AsNoTracking()
+            .Include(x => x.Steps).Include(x => x.AllowedUpstream)
+            .SingleAsync(x => x.ProjectId == showcase.Summary.ProjectId);
+        var resolved = ProjectLadderResolver.Resolve(configuration, LegacyLadderPolicy.Instance);
+        var fullProfile = new ResolvedProjectLadderPolicy(resolved with
+        {
+            Steps = resolved.Steps.Select(x => x.Level is RequirementLevel.HighLevel or RequirementLevel.LowLevel
+                ? x with { EnabledArtifactKinds = [VerificationArtifactKind.Case, VerificationArtifactKind.Procedure] }
+                : x).ToArray()
+        }, LegacyLadderPolicy.Instance);
+        var discipline = level == TestProcedureLevel.HighLevel
+            ? TestChangeReviewDiscipline.HighLevelSoftware : TestChangeReviewDiscipline.LowLevelSoftware;
+        var key = new VerificationArtifactKey(level == TestProcedureLevel.HighLevel
+            ? VerificationDiscipline.HighLevelSoftware : VerificationDiscipline.LowLevelSoftware,
+            VerificationArtifactKind.Procedure);
+        var prefix = level == TestProcedureLevel.HighLevel ? "HLRTP" : "LLRTP";
+        var now = DateTimeOffset.UtcNow;
+        var sources = await db.TestChangeReviews.AsNoTracking()
+            .Where(x => x.ProjectId == showcase.Summary.ProjectId && x.Discipline == discipline
+                && x.ArtifactKind == VerificationArtifactKind.Case && x.State == TestChangeReviewState.Approved)
+            .OrderBy(x => x.Id).Take(5).ToListAsync();
+        Assert.Equal(5, sources.Count);
+        var reviews = sources.Take(retainAuthoredRevision ? 5 : retainedReviews)
+            .Select(source => TestChangeReview.FromCaseReview(source.ProjectId, source.ReleaseId, source.Id,
+                key, source.DisplayNumber, now, authorId: "software.author")).ToArray();
+        db.TestChangeReviews.AddRange(reviews);
+        await db.SaveChangesAsync();
+
+        var cases = await (from revision in db.TestProcedureRevisions.AsNoTracking()
+            join artifact in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals artifact.Id
+            where artifact.ProjectId == showcase.Summary.ProjectId && artifact.Level == level
+                && artifact.ArtifactKind == VerificationArtifactKind.Case
+                && revision.State == TestProcedureState.Approved
+            orderby revision.Id
+            select revision).Take(5).ToListAsync();
+        Assert.Equal(5, cases.Count);
+        for (var index = 0; index < cases.Count; index++)
+        {
+            var artifact = new TestProcedure(showcase.Summary.ProjectId, $"{prefix}-{990001 + index:D6}",
+                "Procedure inventory fixture", "software.author", now, level, fullProfile,
+                VerificationArtifactKind.Procedure, VerificationProcedureParentKind.Allocated);
+            var revision = new TestProcedureRevision(artifact.Id, 0, "Objective", "Preconditions", "Steps",
+                "Expected result", TestProcedureState.Draft, "software.author", now,
+                sourceTestChangeRequestId: retainAuthoredRevision && index == 0 ? reviews[0].Id : null,
+                environmentSetup: "Setup", testData: "Data", orderedSteps: "Steps",
+                expectedObservations: "Expected", cleanup: "Cleanup", toolingAutomation: "Tooling",
+                parentKind: VerificationProcedureParentKind.Allocated);
+            db.AddRange(artifact, revision, new TestCaseProcedureLink(cases[index].Id, revision.Id));
+            if (!retainAuthoredRevision || index != 0)
+                db.Add(new TestProcedureMigrationSource(showcase.Summary.ProjectId, cases[index].Id,
+                    artifact.Id, revision.Id));
+        }
+        // Real typed headers, classified revisions and exact Case parents pass normal identity guards.
+        // This is an isolated provenance fixture, not a claim that a PostgreSQL cutover was executed.
+        await db.SaveChangesAsync();
+        if (retainAuthoredRevision)
+        {
+            // Simulate lost review rows only in this test-owned copy, preserving durable revision provenance.
+            await db.Database.OpenConnectionAsync();
+            await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
+            foreach (var review in reviews.Skip(retainedReviews))
+                await db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM test_change_reviews WHERE Id = {review.Id}");
+            await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = ON;");
+            db.ChangeTracker.Clear();
+        }
+        var inventory = Assert.Single(await new FmsShowcaseSeeder(db,
+            new FixedProjectLadderPolicyResolver(fullProfile)).CheckInvariantsAsync(showcase.Summary.ProgramId),
+            x => x.Key == "family-inventory");
+        Assert.Contains($"{level}/Procedure 5", inventory.Detail, StringComparison.Ordinal);
+        Assert.Equal(retainedReviews, await db.TestChangeReviews.CountAsync(x =>
+            x.ProjectId == showcase.Summary.ProjectId && x.Discipline == discipline
+            && x.ArtifactKind == VerificationArtifactKind.Procedure));
+        var deficient = (retainedReviews > 0 || retainAuthoredRevision) && retainedReviews < 5;
+        Assert.Equal(deficient, inventory.Detail.Contains(
+            $"only {retainedReviews} {key.Discipline}/Procedure test change reviews", StringComparison.Ordinal));
+        Assert.DoesNotContain($"{key.Discipline}/Procedure verification impact items",
+            inventory.Detail, StringComparison.Ordinal);
+        // Other unpopulated full-profile families/results may still fail; only this family's contract is asserted.
     }
 }
