@@ -27,6 +27,8 @@ public sealed class FmsShowcaseWorkflowScenarioTests(ShowcaseDatabaseFixture sho
             var original = await db.RequirementRevisions.SingleAsync(x => x.Id == originalId);
             Assert.Equal(original.Statement, Assert.Single(request.RequirementChanges).Statement);
             var cycle = Assert.Single(request.ReviewCycles);
+            using var snapshot = JsonDocument.Parse(cycle.SnapshotJson);
+            Assert.True(snapshot.RootElement.GetProperty("isTopOfLadder").GetBoolean());
             Assert.NotNull(cycle.WorkflowId);
             var notifications = await db.UserNotifications.Where(x => x.ArtifactId == id).ToListAsync();
             Assert.Equal(3, notifications.Count);
@@ -74,6 +76,7 @@ public sealed class FmsShowcaseWorkflowScenarioTests(ShowcaseDatabaseFixture sho
     [Theory]
     [InlineData("selected-approver")]
     [InlineData("signature-hash")]
+    [InlineData("signature-account")]
     [InlineData("missing-marker")]
     public async Task The_diagnostic_exposes_workflow_drift_and_the_upgrade_does_not_adopt_it(string drift)
     {
@@ -88,6 +91,12 @@ public sealed class FmsShowcaseWorkflowScenarioTests(ShowcaseDatabaseFixture sho
         {
             var signature = await db.ElectronicSignatures.FirstAsync(x => x.ArtifactId == requestId);
             db.Entry(signature).Property(x => x.ContentHash).CurrentValue = "invalid fixture hash";
+        }
+        else if (drift == "signature-account")
+        {
+            var signature = await db.ElectronicSignatures.FirstAsync(x => x.ArtifactId == requestId);
+            var other = await db.UserAccounts.FirstAsync(x => x.Id != signature.UserId);
+            db.Entry(signature).Property(x => x.UserId).CurrentValue = other.Id;
         }
         else
         {
