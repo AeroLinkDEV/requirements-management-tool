@@ -178,7 +178,8 @@ one current revision per controlled number and withdrawn current revisions exclu
 both upstream and coverage gaps is counted once. Each population reports its own total and exact named
 gaps; the combined incomplete share must remain between 5% and 10%.
 
-A fresh Build 1.6 retains its waiting-for-materialization lifecycle. Its materialized populations are zero
+A fresh Build 1.6 retains its waiting-for-materialization lifecycle. Until both requirement and verification
+manifests are materialized, its scored materialized populations are zero
 and explicitly waiting; Build 1.5 members are never substituted into this count. Other artifact-family
 relationships, checksummed execution evidence, external code samples and full release readiness remain
 separate evidence. This percentage is not a claim that the build is ready to release.
@@ -194,6 +195,8 @@ synthetic engineering owners are assigned by package responsibility and checked 
 The original review, approval, deferred and incomplete-authoring examples remain intact. Immutable scenario
 ownership metadata records each proposal's exact source baseline, requirement revision and upstream revision;
 the diagnostic checks the mutable draft against those identities.
+Each new draft also adds four pending campaign impacts (requirement, traceability, verification and document).
+These remain explicit release blockers until dispositioned through the normal controlled workflow.
 
 For an existing materialized Build 1.6 with an exact Procedure manifest, the supported upgrade selects its
 effective software Procedures and adds explicitly labelled synthetic demonstration results only where no

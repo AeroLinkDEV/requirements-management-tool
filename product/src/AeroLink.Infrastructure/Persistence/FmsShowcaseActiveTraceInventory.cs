@@ -81,7 +81,7 @@ public sealed partial class FmsShowcaseSeeder
             .Select(x => new ShowcaseTraceGap(x.Id, x.DisplayNumber, states[x.Id].Warnings, IsNamedChangeGap(x, states[x.Id]))).ToList();
         var populations = new List<ShowcaseTracePopulation> { new("Current change requests", requests.Count, changeGaps) };
         var baseline = await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x => x.ReleaseId == releaseId, ct);
-        var waiting = baseline?.RequirementsMaterializedAt is null;
+        var waiting = baseline?.RequirementsMaterializedAt is null || baseline.TestProceduresMaterializedAt is null;
         if (!waiting)
             await AddMaterializedTracePopulationsAsync(programId, projectId, releaseId, baseline!.Id, policy, populations, problems, ct);
         else
@@ -164,6 +164,11 @@ public sealed partial class FmsShowcaseSeeder
             select new { revision.Id, artifact.BaseNumber, revision.Revision, artifact.Level }).ToListAsync(ct);
         var memberIds = members.Select(x => x.Id).ToList();
         var manifest = await TestProcedureEffectivity.ForBaselineAsync(db, baselineId, ct);
+        if (manifest?.IsExactManifest != true)
+        {
+            problems.Add("The active build has no exact verification manifest; inferred verification populations were not scored.");
+            return;
+        }
         IReadOnlyCollection<Guid> coverageIds = manifest is null ? [] : await CoveragePopulationAsync(manifest, policy, ct);
         var coverage = await VerificationCoverageProjection.StatesAsync(db, memberIds, ct, coverageIds, buildScoped: false);
         // Same exact source/target membership test as the release-readiness upstream gate.

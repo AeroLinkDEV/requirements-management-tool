@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Releases;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -32,8 +33,39 @@ public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase
             Assert.NotEqual("admin", x.AuthorId);
             Assert.True(x.CreatedAt <= DateTimeOffset.UtcNow);
         });
+        var impacts = await db.ImpactDispositions.Where(x => ids.Contains(x.ChangeRequestId)).ToListAsync();
+        Assert.All(drafts, request =>
+        {
+            var pending = impacts.Where(x => x.ChangeRequestId == request.Id).ToList();
+            Assert.Equal(4, pending.Count);
+            Assert.Equal(4, pending.Select(x => x.Kind).Distinct().Count());
+            Assert.All(pending, x => Assert.Equal(ImpactDispositionState.Pending, x.State));
+        });
+        var campaign = await db.ReleaseCampaigns.SingleAsync(x => x.ReleaseId == showcase.Summary.ActiveReleaseId);
+        var gate = Assert.Single((await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default)).Gates,
+            x => x.Code == "impact_disposition");
+        Assert.False(gate.Complete);
+        Assert.Equal(32 + FmsShowcaseSeeder.ActiveTraceDraftCount * 4, gate.Total);
         Assert.Empty(await seeder.UpgradeAsync(showcase.Summary.ProgramId));
+        Assert.Equal(impacts.Count, await db.ImpactDispositions.CountAsync(x => ids.Contains(x.ChangeRequestId)));
         Assert.Equal(1250, await db.BaselineRequirements.CountAsync(x => x.BaselineId == showcase.Summary.ReleasedBaselineId));
+    }
+
+    [Fact]
+    public async Task Requirements_without_a_materialized_verification_manifest_keep_the_trace_population_waiting()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var baseline = await db.CandidateBaselines.SingleAsync(x => x.ReleaseId == showcase.Summary.ActiveReleaseId);
+        db.Entry(baseline).Property(x => x.RequirementsMaterializedAt).CurrentValue = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+        Assert.Null(baseline.TestProceduresMaterializedAt);
+        var inventory = await new FmsShowcaseSeeder(db).ActiveTraceInventoryAsync(showcase.Summary.ProgramId);
+        Assert.True(inventory.WaitingForMaterialization);
+        Assert.True(inventory.Holds, string.Join(" ", inventory.Problems));
+        Assert.Equal(inventory.CurrentChanges, inventory.EligibleArtifacts);
+        Assert.All(inventory.Populations.Skip(1), x => { Assert.Equal(0, x.Total); Assert.Empty(x.Gaps); });
+        Assert.False(await FmsShowcaseSeeder.ActiveBuildVerificationMustResumeAsync(db, showcase.Summary.ProgramId));
     }
 
     [Theory]

@@ -4,6 +4,7 @@ using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Releases;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -27,6 +28,9 @@ public sealed partial class FmsShowcaseSeeder
         var release = await db.Releases.SingleAsync(x => x.ProjectId == project.Id && x.Version == "1.6", ct);
         if (release.IsReleased)
             throw new InvalidOperationException("The #913 authoring scenarios require the exact in-work FMS 1.6 build.");
+        var campaign = await db.ReleaseCampaigns.AsNoTracking().SingleAsync(x => x.ReleaseId == release.Id, ct);
+        if (campaign.State is ReleaseCampaignState.InReview or ReleaseCampaignState.Released)
+            throw new InvalidOperationException("A frozen release package cannot receive showcase authoring scenarios.");
         var policy = await resolver.ResolveAsync(project.Id, ct);
         RequirementLevel[] levels = [RequirementLevel.System, RequirementLevel.HighLevel, RequirementLevel.LowLevel];
         if (levels.Any(level => !policy.OrderedLevels.Contains(level)))
@@ -125,6 +129,17 @@ public sealed partial class FmsShowcaseSeeder
                     request.AddUpstreamLink(author, parent.Id, parent.DisplayNumber, release.Id, release.Version,
                         $"This {level} proposal develops the same {topic} {scenario.Name} change at the next configured level.", at);
                 db.SystemChangeRequests.Add(request);
+                // The campaign predates these authoring scenarios. Register their real pending work;
+                // never let the older campaign snapshot imply these new impacts were dispositioned.
+                db.ImpactDispositions.AddRange(
+                    new ChangeImpactDisposition(campaign.Id, request.Id, ImpactKind.Requirement,
+                        request.RequirementChanges.Single().DisplayNumber, "Review the proposed requirement revision and its allocation."),
+                    new ChangeImpactDisposition(campaign.Id, request.Id, ImpactKind.Traceability,
+                        request.DisplayNumber, "Review the upstream and downstream links affected by this proposal."),
+                    new ChangeImpactDisposition(campaign.Id, request.Id, ImpactKind.Verification,
+                        request.DisplayNumber, "Review affected verification and required execution on the selected 1.6 build."),
+                    new ChangeImpactDisposition(campaign.Id, request.Id, ImpactKind.Document,
+                        request.DisplayNumber, "Review the controlled outputs affected by this proposal."));
                 db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId, key, request.Id.ToString("D"), at));
                 db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId,
                     $"{ActiveTraceProposalPrefix}{index:D2}/{level}",
