@@ -79,7 +79,7 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Fast feedback is advisory. Persistent PostgreSQL and product/.local are forbidden; the existing Product quality gate remains merge authority.'
 
   client-fast:
-    name: Fast client lint and type-check
+    name: Fast client behavior and static checks
     runs-on: windows-latest
     timeout-minutes: 10
     outputs:
@@ -109,6 +109,10 @@ jobs:
                 'npm ci' { npm ci }
                 'npm run lint' { npm run lint }
                 'npm run typecheck' { npm run typecheck }
+                'npm run test:fast:routes' { npm run test:fast:routes }
+                'npm run test:fast:logic' { npm run test:fast:logic }
+                'npx playwright install chromium' { npx playwright install chromium }
+                'npm run test:fast:rendered' { npm run test:fast:rendered }
                 default { throw "Unreviewed Fast client command: $command" }
               }
               if ($LASTEXITCODE -ne 0) { throw "Fast client command failed: $command" }
@@ -119,6 +123,16 @@ jobs:
             $clock.Stop()
             "elapsed_ms=$([int64]$clock.ElapsedMilliseconds)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
+
+      - name: Retain Fast client discovery and failure diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fast-client-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            product/client/test-results/fast
+            product/client/playwright-report/fast
+          retention-days: 7
 
       - name: State advisory resource boundary
         if: always()
@@ -149,7 +163,8 @@ jobs:
             "- client-fast: $client ($clientMs ms command time)",
             "- command critical path: $commandCriticalPathMs ms",
             '- target: 240000 ms',
-            '- browser/PostgreSQL/full matrices: intentionally Full-only in phase 1',
+            '- API-independent client logic and rendered fixtures: additive Fast proof; all identities remain in Full',
+            '- integrated browsers/PostgreSQL/full matrices: Full proof',
             '- merge authority: unchanged Product quality gate',
             '- workflow start-to-aggregate timing must be measured from Actions job timestamps before phase 2'
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

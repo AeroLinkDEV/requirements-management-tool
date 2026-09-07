@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, logicTest as test } from "./isolated-client-test"
 import {
   MIN_ZOOM,
   EDGE_LAYER_OVERHANG,

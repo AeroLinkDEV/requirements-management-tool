@@ -41,6 +41,27 @@ different concurrency groups; development feedback cannot cancel final Full evid
 collector remains the source for post-switch full-gates-per-merge, cancellation waste, queue/final-push-to-merge
 timing and regression data; re-measure the new cadence rather than assuming savings.
 
+## API-independent client feedback
+
+The advisory Fast client job runs the explicit logic and rendered-fixture files in
+`product/client/fast-client-tests.json` after static checks. Logic uses no browser or server;
+rendered fixtures use one Chromium worker and Vite, with no API or showcase setup. Neither tier retries.
+The fixture boundary rejects API request fixtures and records and refuses browser API/external requests,
+including swallowed failures. The Full workflow still discovers and executes all of these tests.
+
+From `product/client`, run `npm run test:fast:routes`, `npm run test:fast:logic`, then
+`npx playwright install chromium` and `npm run test:fast:rendered`. The routing check compares actual
+Playwright discovery by file and title, rejects missing/duplicate/substituted identities, and records
+every remaining file as Full-only. Newly added files therefore retain integrated Full coverage until
+their dependencies and assertions are reviewed for early execution. Mixed integrated/fixture files must
+not be added to the isolated manifest merely because they mock one response.
+
+Fast retains its routing report, JSON results and available traces under a per-run artifact, including
+failed runs. This addition is intended to expose defects earlier; it does not establish a reduction in
+Full wall time. Measure hosted command time, workflow latency and first-pass results before expanding
+the subset or moving any identities out of Full. The existing local changed-area planner remains a
+broader local plan; these commands provide the same isolated client checks used by advisory CI.
+
 ## Merge-queue cutover, 2026-09-04
 
 Issue #549 moved the repository to the `AeroLinkDEV` organization and PR #911 supplied the trusted repository
