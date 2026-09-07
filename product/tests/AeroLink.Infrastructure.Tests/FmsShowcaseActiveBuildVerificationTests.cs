@@ -14,12 +14,13 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixture showcase)
 {
     [Theory]
-    [InlineData(false, true, false)]
-    [InlineData(true, true, false)]
-    [InlineData(false, false, false)]
-    [InlineData(false, true, true)]
-    [InlineData(true, true, true)]
-    public async Task Materialized_enrichment_preserves_existing_results_and_names_the_exact_waiting_cases(bool existingFailure, bool configureStore, bool sharedProcedure)
+    [InlineData(false, true, false, false)]
+    [InlineData(true, true, false, false)]
+    [InlineData(false, false, false, false)]
+    [InlineData(false, true, true, false)]
+    [InlineData(true, true, true, false)]
+    [InlineData(false, true, false, true)]
+    public async Task Materialized_enrichment_preserves_existing_results_and_names_the_exact_waiting_cases(bool existingFailure, bool configureStore, bool sharedProcedure, bool rejectWorkflow)
     {
         using var database = showcase.Create();
         await using var db = database.Context();
@@ -82,6 +83,25 @@ public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixt
         try
         {
             var seeder = new FmsShowcaseSeeder(db, new FixedProjectLadderPolicyResolver(policy), configureStore ? store : null);
+            if (rejectWorkflow)
+            {
+                // Missing completion with surviving owned scenarios must fail closed. In the old
+                // order this rejection happened after evidence promotion and left an orphan file.
+                db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x =>
+                    x.ProgramId == showcase.Summary.ProgramId && x.StepKey == "workflow-holder-scenarios"));
+                await db.SaveChangesAsync();
+                var executionCount = await db.TestExecutions.CountAsync();
+                var evidenceCount = await db.EvidenceRecords.CountAsync();
+                for (var attempt = 0; attempt < 2; attempt++)
+                {
+                    await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.UpgradeAsync(showcase.Summary.ProgramId));
+                    db.ChangeTracker.Clear();
+                    Assert.Equal(executionCount, await db.TestExecutions.CountAsync());
+                    Assert.Equal(evidenceCount, await db.EvidenceRecords.CountAsync());
+                    Assert.Empty(Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories));
+                }
+                return;
+            }
             if (!configureStore)
             {
                 var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.UpgradeAsync(showcase.Summary.ProgramId));

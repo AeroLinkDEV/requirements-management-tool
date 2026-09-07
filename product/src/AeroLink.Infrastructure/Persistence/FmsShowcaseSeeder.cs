@@ -588,8 +588,8 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
         "interface-scenario-retirement",
         "scenario-richness",
         "active-trace-network",
-        "active-build-verification",
         "workflow-holder-scenarios",
+        "active-build-verification",
     ];
 
     private async Task<IReadOnlyList<string>> ApplyUpgradeStepsAsync(Guid programId, CancellationToken ct)
@@ -617,8 +617,10 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
             ("interface-scenario-retirement", RetireInterfaceScenariosAsync),
             ("scenario-richness", EnsureScenarioRichnessAsync),
             ("active-trace-network", EnsureActiveTraceScenariosAsync),
-            ("active-build-verification", EnsureActiveBuildVerificationAsync),
             ("workflow-holder-scenarios", EnsureWorkflowScenariosAsync),
+            // Resolve every configured workflow/authority/proposal precondition before the final
+            // evidence-producing step. A rejected workflow must never promote an unreferenced file.
+            ("active-build-verification", EnsureActiveBuildVerificationAsync),
         };
         if (!steps.Select(x => x.Key).SequenceEqual(UpgradeStepKeys))
             throw new InvalidOperationException(

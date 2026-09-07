@@ -35,7 +35,9 @@ public sealed class ShowcaseUpgradeTests(ShowcaseDatabaseFixture showcase)
         // fixtures. Losing those identities would describe corruption, not an earlier upgrade version.
         db.ShowcaseUpgradeSteps.RemoveRange(await db.ShowcaseUpgradeSteps.Where(x =>
             !x.StepKey.StartsWith(FmsShowcaseSeeder.ActiveTraceScenarioPrefix)
-            && !x.StepKey.StartsWith("active-trace-proposal-913/")).ToListAsync());
+            && !x.StepKey.StartsWith("active-trace-proposal-913/")
+            && !x.StepKey.StartsWith(FmsShowcaseSeeder.WorkflowScenarioPrefix)
+            && x.StepKey != "workflow-holder-scenarios").ToListAsync());
         await db.SaveChangesAsync();
     }
 
