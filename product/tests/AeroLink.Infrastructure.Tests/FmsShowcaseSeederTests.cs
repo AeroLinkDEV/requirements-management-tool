@@ -88,7 +88,11 @@ public sealed class FmsShowcaseSeederTests
             Assert.True(await db.RequirementRevisions.GroupBy(x => x.ArtifactId).AllAsync(x => x.Count() >= 1));
             var active = db.SystemChangeRequests.Where(x => x.TargetReleaseId == first.ActiveReleaseId);
             Assert.Equal(10 + FmsShowcaseSeeder.ActiveTraceRequestCount, await active.CountAsync()); Assert.Equal(2, await active.CountAsync(x => x.State == ChangeRequestState.SelectedForBaseline));
-            Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Approved)); Assert.Equal(2, await active.CountAsync(x => x.State == ChangeRequestState.InReview)); Assert.Equal(2 + FmsShowcaseSeeder.ActiveTraceRequestCount, await active.CountAsync(x => x.State == ChangeRequestState.Draft)); Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Deferred)); Assert.Equal(0, await active.CountAsync(x => x.State == ChangeRequestState.Withdrawn));
+            // The two owned editorial examples add one approved request awaiting assessment approval
+            // and one request whose native Approval stage is active.
+            Assert.Equal(2, await active.CountAsync(x => x.State == ChangeRequestState.Approved));
+            Assert.Equal(3, await active.CountAsync(x => x.State == ChangeRequestState.InReview));
+            Assert.Equal(2 + FmsShowcaseSeeder.ActiveTraceRequestCount, await active.CountAsync(x => x.State == ChangeRequestState.Draft)); Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Deferred)); Assert.Equal(0, await active.CountAsync(x => x.State == ChangeRequestState.Withdrawn));
             // #889: the FMS ladder configures [System, HighLevel, LowLevel], so no Interface change requests are seeded.
             Assert.Equal(0, await active.CountAsync(x => x.Type == ChangeRequestType.Interface));
             Assert.Equal(0, await db.SystemChangeRequests.CountAsync(x => x.ProjectId == project.Id && x.Type == ChangeRequestType.Interface));
