@@ -10,7 +10,7 @@ namespace AeroLink.Infrastructure.Persistence;
 public sealed partial class FmsShowcaseSeeder
 {
     private const string ActiveVerificationPrefix = "active-verification-913/";
-    private const string ActiveVerificationWaitingDetail = "Build 1.6 is waiting for requirement materialization; no predecessor or execution population was substituted.";
+    private const string ActiveVerificationWaitingDetail = "Build 1.6 is waiting for exact requirement and verification materialization; no predecessor or execution population was substituted.";
 
     public static async Task<bool> ActiveBuildVerificationMustResumeAsync(AeroLinkDbContext context, Guid programId, CancellationToken ct = default)
     {
@@ -20,6 +20,7 @@ public sealed partial class FmsShowcaseSeeder
                 join release in context.Releases.AsNoTracking() on project.Id equals release.ProjectId
                 join baseline in context.CandidateBaselines.AsNoTracking() on release.Id equals baseline.ReleaseId
                 where project.ProgramId == programId && release.Version == "1.6" && baseline.RequirementsMaterializedAt != null
+                    && baseline.TestProceduresMaterializedAt != null
                 select baseline.Id).AnyAsync(ct);
     }
 
@@ -34,7 +35,7 @@ public sealed partial class FmsShowcaseSeeder
         var release = await db.Releases.SingleAsync(x => x.ProjectId == projectId && x.Version == "1.6", ct);
         if (release.IsReleased) throw new InvalidOperationException("Synthetic active-build enrichment cannot alter a released build.");
         var baseline = await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x => x.ReleaseId == release.Id, ct);
-        if (baseline?.RequirementsMaterializedAt is null)
+        if (baseline?.RequirementsMaterializedAt is null || baseline.TestProceduresMaterializedAt is null)
             return ActiveVerificationWaitingDetail;
         var manifest = await TestProcedureEffectivity.ForBaselineAsync(db, baseline.Id, ct);
         if (manifest is null || !manifest.IsExactManifest)

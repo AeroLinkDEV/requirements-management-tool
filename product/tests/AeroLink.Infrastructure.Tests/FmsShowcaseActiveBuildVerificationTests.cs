@@ -123,6 +123,7 @@ public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixt
                 x => x.Id == trace.SourceRevisionId && x.Warnings.Contains("SuspectUpstream") && !x.NamedNegative);
             lifecycle.RecordResolution(ExactLinkResolutionOutcome.NoDownstreamChangeRequired,
                 "systems.author", "Close the deliberate regression.", DateTimeOffset.UtcNow);
+            db.ExactLinkSuspectEvents.Add(lifecycle.Events.Last());
             await db.SaveChangesAsync();
             Assert.DoesNotContain((await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId)).Populations
                 .Single(x => x.Family == "Exact active-baseline requirements").Gaps,

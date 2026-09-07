@@ -26,7 +26,7 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
             await using var db = showcase.Context(); var summary = showcaseFixture.Summary;
             var campaign = await db.ReleaseCampaigns.SingleAsync(x => x.ProjectId == summary.ProjectId && x.ReleaseId == summary.ActiveReleaseId); Assert.Equal(ReleaseCampaignState.Verification, campaign.State);
             Assert.Equal(32, await db.ImpactDispositions.CountAsync(x => x.CampaignId == campaign.Id)); Assert.Equal(8, await db.ImpactDispositions.CountAsync(x => x.CampaignId == campaign.Id && x.State == ImpactDispositionState.Addressed));
-            var readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default); Assert.False(readiness.ReadyForRelease); Assert.Contains(readiness.Gates, x => x.Code == "change_control" && x.Completed == 2 && x.Total == 7);
+            var readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default); Assert.False(readiness.ReadyForRelease); Assert.Contains(readiness.Gates, x => x.Code == "change_control" && x.Completed == 2 && x.Total == 7 + FmsShowcaseSeeder.ActiveTraceDraftCount);
             var blocker = new ProblemReport(summary.ProjectId, "PR-00001", "Unresolved release-impacting failure", "A failed verification result remains unresolved.", "", "verification.engineer", DateTimeOffset.UtcNow);
             blocker.SetReleaseBlocker("verification.engineer", true, DateTimeOffset.UtcNow); db.ProblemReports.Add(blocker); await db.SaveChangesAsync(); db.ChangeTracker.Clear();
             readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default);

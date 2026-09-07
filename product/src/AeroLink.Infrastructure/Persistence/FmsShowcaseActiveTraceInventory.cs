@@ -156,10 +156,11 @@ public sealed partial class FmsShowcaseSeeder
     private async Task AddMaterializedTracePopulationsAsync(Guid programId, Guid projectId, Guid releaseId, Guid baselineId,
         ILadderPolicy policy, List<ShowcaseTracePopulation> populations, List<string> problems, CancellationToken ct)
     {
+        var configuredLevels = policy.OrderedLevels.ToArray();
         var members = await (from member in db.BaselineRequirements.AsNoTracking()
             join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id
             join artifact in db.Requirements.AsNoTracking() on member.ArtifactId equals artifact.Id
-            where member.BaselineId == baselineId && artifact.ProjectId == projectId
+            where member.BaselineId == baselineId && artifact.ProjectId == projectId && configuredLevels.Contains(artifact.Level)
             select new { revision.Id, artifact.BaseNumber, revision.Revision, artifact.Level }).ToListAsync(ct);
         var memberIds = members.Select(x => x.Id).ToList();
         var manifest = await TestProcedureEffectivity.ForBaselineAsync(db, baselineId, ct);

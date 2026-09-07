@@ -197,11 +197,18 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         // nothing on the released build settles coverage any more, and the diagnostic says so instead of
         // silently falling back to unrestricted current coverage. Every other seed invariant holds.
         var invariants = await seeder.CheckInvariantsAsync(summary.ProgramId);
-        Assert.All(invariants.Where(x => x.Key != "trace-gap-inventory"),
+        Assert.All(invariants.Where(x => x.Key != "trace-gap-inventory" && x.Key != "active-trace-network"),
             invariant => Assert.True(invariant.Holds, $"{invariant.Key}: {invariant.Detail}"));
         var trace = invariants.Single(x => x.Key == "trace-gap-inventory");
         Assert.False(trace.Holds, trace.Detail);
         Assert.Contains("Scope: exact manifest, 0 procedure revision(s).", trace.Detail, StringComparison.Ordinal);
+        // This fixture also materializes the Case-only active build. Its larger real denominator no
+        // longer has the initial showcase gap ratio; the diagnostic must report that, not substitute 1.5.
+        var activeTrace = await seeder.ActiveTraceInventoryAsync(summary.ProgramId);
+        Assert.False(activeTrace.Holds);
+        Assert.False(activeTrace.WaitingForMaterialization);
+        Assert.Equal(1251, activeTrace.Populations.Single(x => x.Family == "Exact active-baseline requirements").Total);
+        Assert.True(activeTrace.IncompletePercent < 5);
     }
 
     /// <summary>
@@ -886,7 +893,16 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
             .Where(x => legacyIds.Contains(x.Id) && x.Id != selectedScenarioId)
             .ToDictionaryAsync(x => x.Id, x => x.State);
         Assert.All(closed.Values, state => Assert.Equal(ChangeRequestState.Withdrawn, state));
-        Assert.All(await seeder.CheckInvariantsAsync(summary.ProgramId), x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
+        var invariants = await seeder.CheckInvariantsAsync(summary.ProgramId);
+        Assert.All(invariants.Where(x => x.Key != "active-trace-network"), x => Assert.True(x.Holds, $"{x.Key}: {x.Detail}"));
+        // The test deliberately changes the active baseline population. Keep that drift visible while
+        // proving the frozen Interface history is preserved by the unrelated retirement operation.
+        var activeTrace = await seeder.ActiveTraceInventoryAsync(summary.ProgramId);
+        Assert.False(activeTrace.Holds);
+        Assert.False(activeTrace.WaitingForMaterialization);
+        Assert.True(activeTrace.IncompletePercent < 5);
+        Assert.Contains(activeTrace.Populations.Single(x => x.Family == "Exact active-baseline requirements").Gaps,
+            x => x.Identifier == "SYSR-000151.00" && x.Warnings.Contains("Uncovered"));
     }
 
     /// <summary>
