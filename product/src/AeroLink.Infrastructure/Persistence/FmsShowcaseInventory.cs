@@ -35,7 +35,8 @@ public sealed partial class FmsShowcaseSeeder
             where artifact.ProjectId == projectId
             select new { member.BaselineId, revision.Id, artifact.BaseNumber, revision.Revision, artifact.Level })
             .ToListAsync(ct);
-        var requests = await db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
+        var requests = await db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId)
+            .Include(x => x.RequirementChanges).ToListAsync(ct);
         var reviews = await db.TestChangeReviews.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
         var artifacts = await db.TestProcedures.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
         var artifactIds = artifacts.Select(x => x.Id).ToList();
@@ -90,6 +91,14 @@ public sealed partial class FmsShowcaseSeeder
                             .Select(x => new ShowcaseInventoryExample(x.Id, x.SourceChangeRequestNumber,
                                 $"{x.State}/{x.Outcome}", x.AssignedEngineerId))));
             }
+            // Pre-scope mixed Software history has no governed HLRCR/LLRCR family. Keep it visible
+            // without guessing a scope or using it to satisfy either governed family's minimum.
+            var legacySoftware = requests.Where(x => x.TargetReleaseId == release.Id
+                && x.Type == ChangeRequestType.Software && x.SoftwareLevel is null).ToList();
+            var legacySoftwareIds = legacySoftware.Select(x => x.Id).ToHashSet();
+            rows.Add(Summarize("Legacy unscoped software change requests", "Change-request history",
+                "Retained pre-scope software history; authored levels are reported separately, not reassigned to a governed HLRCR/LLRCR family",
+                legacySoftware.Select(x => new ShowcaseInventoryExample(x.Id, x.DisplayNumber, x.State.ToString(), x.AuthorId))));
             // Resolve only this build's baselines. A legacy compatibility selection is not an exact
             // manifest; retain that provenance alongside every count that uses the resolved population.
             var ownRevisionIds = new HashSet<Guid>();
@@ -146,7 +155,13 @@ public sealed partial class FmsShowcaseSeeder
                     Scope = "All change requests targeting this exact build; native Digital Thread states for configured levels; off-ladder history explicitly retained below",
                     Total = buildRequests.Count,
                     OnLadder = onLadderRequests.Count,
-                    OffLadder = buildRequests.Where(x => !onLadderIds.Contains(x.Id)).Select(x => new
+                    LegacyUnscopedSoftware = legacySoftware.Select(x => new
+                    {
+                        x.Id, x.DisplayNumber, NativeState = x.State.ToString(),
+                        AuthoredLevels = x.RequirementChanges.Select(change => change.Level.ToString()).Distinct().OrderBy(level => level).ToList(),
+                        Reason = "Retained software history without a governed SoftwareLevel; no current single-level trace state is asserted"
+                    }).ToList(),
+                    OffLadder = buildRequests.Where(x => !onLadderIds.Contains(x.Id) && !legacySoftwareIds.Contains(x.Id)).Select(x => new
                     { x.Id, x.DisplayNumber, NativeState = x.State.ToString(), Reason = "Level is not configured by this project's current ladder" }).ToList(),
                     Upstream = traceStates.Values.GroupBy(x => x.Upstream).ToDictionary(x => x.Key, x => x.Count()),
                     Downstream = traceStates.Values.GroupBy(x => x.Downstream).ToDictionary(x => x.Key, x => x.Count()),

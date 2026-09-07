@@ -14,6 +14,37 @@ public sealed class FmsShowcaseInventoryTests(ShowcaseDatabaseFixture showcase)
         JsonSerializer.SerializeToElement(await new FmsShowcaseSeeder(db).InventoryAsync(showcase.Summary.ProgramId));
 
     [Fact]
+    public async Task Legacy_mixed_software_history_is_visible_without_inventing_a_governed_family_or_off_ladder_state()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var high = await db.SystemChangeRequests.Include(x => x.RequirementChanges).FirstAsync(x =>
+            x.TargetReleaseId == showcase.Summary.ActiveReleaseId && x.Type == ChangeRequestType.Software
+            && x.SoftwareLevel == RequirementLevel.HighLevel);
+        var low = await db.SystemChangeRequests.Include(x => x.RequirementChanges).FirstAsync(x =>
+            x.TargetReleaseId == showcase.Summary.ActiveReleaseId && x.Type == ChangeRequestType.Software
+            && x.SoftwareLevel == RequirementLevel.LowLevel);
+        // Reproduce the retained pre-ScopeSoftwareDrafts shape in this disposable fixture.
+        db.Entry(high).Property(x => x.SoftwareLevel).CurrentValue = null;
+        db.Entry(low.RequirementChanges.First()).Property(x => x.ChangeRequestId).CurrentValue = high.Id;
+        await db.SaveChangesAsync();
+        var inventory = await ReadAsync(db);
+        var build = Assert.Single(inventory.GetProperty("Builds").EnumerateArray(), x => x.GetProperty("Version").GetString() == "1.6");
+        var family = Assert.Single(build.GetProperty("Families").EnumerateArray(), x => x.GetProperty("Family").GetString() == "Legacy unscoped software change requests");
+        Assert.Equal(1, family.GetProperty("Count").GetInt32());
+        Assert.Equal(high.Id, Assert.Single(family.GetProperty("Examples").EnumerateArray()).GetProperty("Id").GetGuid());
+        var trace = Assert.Single(inventory.GetProperty("Traces").EnumerateArray(), x => x.GetProperty("Version").GetString() == "1.6").GetProperty("ChangeControl");
+        var legacy = Assert.Single(trace.GetProperty("LegacyUnscopedSoftware").EnumerateArray());
+        Assert.Equal(high.Id, legacy.GetProperty("Id").GetGuid());
+        Assert.Equal(new[] { "HighLevel", "LowLevel" }, legacy.GetProperty("AuthoredLevels").EnumerateArray().Select(x => x.GetString()));
+        Assert.DoesNotContain(trace.GetProperty("OffLadder").EnumerateArray(), x => x.GetProperty("Id").GetGuid() == high.Id);
+        Assert.Equal(trace.GetProperty("Total").GetInt32(), trace.GetProperty("OnLadder").GetInt32()
+            + trace.GetProperty("OffLadder").GetArrayLength() + trace.GetProperty("LegacyUnscopedSoftware").GetArrayLength());
+        var highFamily = Assert.Single(build.GetProperty("Families").EnumerateArray(), x => x.GetProperty("Family").GetString() == "Change requests/HighLevel");
+        Assert.DoesNotContain(highFamily.GetProperty("Examples").EnumerateArray(), x => x.GetProperty("Id").GetGuid() == high.Id);
+    }
+
+    [Fact]
     public async Task Legacy_compatibility_counts_remain_explicitly_non_exact_on_every_inventory_surface()
     {
         using var database = showcase.Create();

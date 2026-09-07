@@ -156,6 +156,8 @@ Each build and coverage summary exposes `VerificationScopes` with baseline ident
 Verification rows from a pre-manifest baseline explicitly say **legacy compatibility selection**, including
 when mixed with exact selections. Such counts never claim an exact historical manifest.
 
+Pre-scope software change requests without a governed `SoftwareLevel` have a separate legacy-history row
+and retain their authored levels. They do not pad HLRCR/LLRCR counts or receive an invented off-ladder state.
 The inventory is descriptive evidence, not permission to reset an older installation or infer missing
 historical manifests. Qualification must inspect the actual target's inventory; a fresh-seed result does not
 establish that an already-used HOME dataset has the same lifecycle or build state.
