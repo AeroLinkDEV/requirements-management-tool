@@ -54,17 +54,25 @@ test('administrator actions work identically for another authors System and Soft
     const approvedReady = discipline.type === 'Software'
       ? await authorNoUpstreamAnswer(author, approved.id, 'This derived software recovery change has no direct upstream change request.')
       : approved
+    const approvers = discipline.type === 'System'
+      ? ['systems.reviewer', 'systems.lead', 'software.lead']
+      : ['admin']
     const submitted = await author.post(`${apiBase}/api/change-requests/${approved.id}/submit`, { data: {
       expectedVersion: approvedReady.version,
-      approvers: [{ userId: 'admin', name: 'Caller supplied name ignored' }],
+      approvers: approvers.map(userId => ({ userId, name: 'Caller supplied name ignored' })),
       mode: 'Sequential',
     } })
     expect(submitted.ok(), await submitted.text()).toBeTruthy()
-    const approval = await request.post(`${apiBase}/api/change-requests/${approved.id}/approve`, { data: {
-      password: 'AeroLink!2026',
-      meaning: 'Approved for administrator recovery journey coverage.',
-    } })
-    expect(approval.ok(), await approval.text()).toBeTruthy()
+    for (const approver of approvers) {
+      await apiLogin(request, approver)
+      const approval = await request.post(`${apiBase}/api/change-requests/${approved.id}/approve`, { data: {
+        password: 'AeroLink!2026',
+        meaning: 'Approved for administrator recovery journey coverage.',
+      } })
+      expect(approval.ok(), await approval.text()).toBeTruthy()
+      if (approver === approvers.at(-1)) expect((await approval.json()).state).toBe('Approved')
+    }
+    await apiLogin(request)
     records.push({ route: discipline.route, draft, approved })
   }
   await author.dispose()

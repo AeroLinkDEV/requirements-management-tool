@@ -38,20 +38,23 @@ test('configured reviewer identity remains canonical from assignment through sig
   const submitResponse = await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, { data: {
     expectedVersion: draft.version,
     mode: 'Sequential',
-    approvers: [{ userId: 'test.engineer', name: 'Caller supplied name is ignored' }],
+    approvers: ['systems.reviewer', 'systems.lead', 'software.lead'].map(userId => ({
+      userId, name: 'Caller supplied name is ignored',
+    })),
   } })
   expect(submitResponse.ok(), await submitResponse.text()).toBeTruthy()
   const submitted = await submitResponse.json()
+  expect(submitted.reviewCycles.at(-1).steps).toHaveLength(3)
   expect(submitted.reviewCycles.at(-1).steps[0]).toMatchObject({
-    approverId: 'test.engineer',
-    approverName: 'Ethan Brooks',
-    authority: 'Approver',
+    approverId: 'systems.reviewer',
+    approverName: 'Systems Engineer',
+    authority: 'SystemEngineer',
     state: 'Active',
   })
 
   const reviewer = await playwright.request.newContext()
   const reviewerLogin = await reviewer.post(`${apiBase}/api/auth/login`, {
-    data: { userName: 'test.engineer', password: 'AeroLink!2026' },
+    data: { userName: 'systems.reviewer', password: 'AeroLink!2026' },
   })
   expect(reviewerLogin.ok(), await reviewerLogin.text()).toBeTruthy()
   const queueResponse = await reviewer.get(`${apiBase}/api/enterprise-requirements/work-queue?projectId=${showcase.projectId}`)
@@ -64,7 +67,7 @@ test('configured reviewer identity remains canonical from assignment through sig
   }))
   await reviewer.dispose()
 
-  await login(page, 'test.engineer')
+  await login(page, 'systems.reviewer')
   await page.getByRole('link', { name: 'My Work' }).click()
   const assigned = page.locator('.workQueue article').filter({ hasText: draft.displayNumber })
   await expect(assigned).toContainText('Change request approval')
@@ -72,9 +75,9 @@ test('configured reviewer identity remains canonical from assignment through sig
   await expect(page).toHaveURL(new RegExp(`/systems/change-requests/${draft.id}$`))
 
   const review = page.getByRole('heading', { name: 'Review cycle 1' }).locator('..').locator('..').locator('..')
-  await expect(review).toContainText('Ethan Brooks')
-  await expect(review).toContainText('Approver')
-  await expect(review).toContainText('Ethan Brooks is the active reviewer')
+  await expect(review).toContainText('Systems Engineer')
+  await expect(review).toContainText(submitted.reviewCycles.at(-1).steps[0].stageName)
+  await expect(review).toContainText('Systems Engineer is the active reviewer')
   await expect(review).not.toContainText('Maya Patel')
 
   await page.getByRole('button', { name: 'Review & electronically approve' }).click()
@@ -85,9 +88,9 @@ test('configured reviewer identity remains canonical from assignment through sig
   const signatureResponse = await request.get(`${apiBase}/api/signatures?artifactId=${draft.id}`)
   expect(signatureResponse.ok(), await signatureResponse.text()).toBeTruthy()
   expect(await signatureResponse.json()).toContainEqual(expect.objectContaining({
-    userName: 'test.engineer',
-    displayName: 'Ethan Brooks',
+    userName: 'systems.reviewer',
+    displayName: 'Systems Engineer',
     artifactId: draft.id,
   }))
-  await expect(page.locator('.auditRow').filter({ hasText: 'Approval Recorded' }).first()).toContainText('Ethan Brooks')
+  await expect(page.locator('.auditRow').filter({ hasText: 'Approval Recorded' }).first()).toContainText('Systems Engineer')
 })
