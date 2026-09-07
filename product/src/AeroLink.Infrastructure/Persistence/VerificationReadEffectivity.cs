@@ -23,16 +23,36 @@ public static class VerificationReadEffectivity
         var executable = await TestProcedureEffectivity.ForReleaseAsync(db, projectId, releaseId, ct);
         if (executable is null) return null;
         var revisionIds = executable.RevisionIds.ToHashSet();
+        var policy = await (policyResolver ?? new EffectiveProjectLadderPolicyResolver(db)).ResolveAsync(projectId, ct);
+        var levels = policy.OrderedLevels.Where(level =>
+                policy.Definition(level).VerificationProfile?.Enables(VerificationArtifactKind.Case) == true
+                && policy.Definition(level).VerificationProfile?.Enables(VerificationArtifactKind.Procedure) == true)
+            .Select(policy.ProcedureLevel).ToHashSet();
         if (executable.IsExactManifest)
         {
-            var policy = await (policyResolver ?? new EffectiveProjectLadderPolicyResolver(db)).ResolveAsync(projectId, ct);
-            var levels = policy.OrderedLevels.Where(level =>
-                    policy.Definition(level).VerificationProfile?.Enables(VerificationArtifactKind.Case) == true
-                    && policy.Definition(level).VerificationProfile?.Enables(VerificationArtifactKind.Procedure) == true)
-                .Select(policy.ProcedureLevel).ToHashSet();
             var population = await BaselineExecutableMembership.ForPopulationAsync(
                 db, executable.BaselineId, levels, ct);
             revisionIds.UnionWith(population.CoverageRevisionIds);
+        }
+        else
+        {
+            // Pre-manifest coverage still names Cases after the governed execution cutover. Its typed
+            // migration source preserves the exact generated Procedure, including historical mirrors.
+            // Read that recorded identity, never a later authored Procedure merely linked to the Case.
+            // This does not turn the compatibility population into an executable manifest.
+            var carriedIds = revisionIds.ToList();
+            var generated = await (from source in db.TestProcedureMigrationSources.AsNoTracking()
+                                   where source.ProjectId == projectId && carriedIds.Contains(source.SourceCaseRevisionId)
+                                   join revision in db.TestProcedureRevisions.AsNoTracking()
+                                       on source.GeneratedProcedureRevisionId equals revision.Id
+                                   join procedure in db.TestProcedures.AsNoTracking()
+                                       on revision.ProcedureId equals procedure.Id
+                                   where procedure.Id == source.GeneratedProcedureArtifactId
+                                       && procedure.ProjectId == projectId
+                                       && procedure.ArtifactKind == VerificationArtifactKind.Procedure
+                                       && levels.Contains(procedure.Level)
+                                   select revision.Id).ToListAsync(ct);
+            revisionIds.UnionWith(generated);
         }
         var ids = revisionIds.ToList();
         var revisions = await db.TestProcedureRevisions.AsNoTracking().Where(x => ids.Contains(x.Id))

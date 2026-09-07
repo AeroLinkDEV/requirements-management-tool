@@ -4,6 +4,7 @@ using System.Text.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
@@ -14,6 +15,124 @@ namespace AeroLink.Api.Tests;
 
 public sealed class VerificationReadEffectivityApiTests
 {
+    [Theory]
+    [InlineData(TestProcedureLevel.HighLevel, false)]
+    [InlineData(TestProcedureLevel.HighLevel, true)]
+    [InlineData(TestProcedureLevel.LowLevel, false)]
+    [InlineData(TestProcedureLevel.LowLevel, true)]
+    public async Task Legacy_reads_follow_only_typed_migration_sources_of_carried_cases(
+        TestProcedureLevel level, bool historicalMirror)
+    {
+        using var factory = new AeroLinkApiFactory(testLadderPolicy: ProcedureEnabledTestPolicy.Create());
+        using var client = factory.CreateClient();
+        Guid projectId, releaseId, otherReleaseId, procedureId, generatedId, laterId, authoredId, authoredRevisionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow.AddDays(-10);
+            var migratedAt = now.AddDays(5); // Migration time is not the historical release cutoff.
+            var requirementLevel = level == TestProcedureLevel.HighLevel ? RequirementLevel.HighLevel : RequirementLevel.LowLevel;
+            var prefix = level == TestProcedureLevel.HighLevel ? "HLR" : "LLR";
+            var program = new ProgramRecord("Legacy read provenance", "LRP");
+            var project = new ProjectRecord(program.Id, "Legacy reads", "FMS");
+            var release = new SoftwareRelease(project.Id, "1.5", true);
+            var other = new SoftwareRelease(project.Id, "2.0", false);
+            var user = new UserAccount("legacy.reader", "Legacy Reader", "legacy.reader@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var request = new SystemChangeRequest(prefix + "CR-91500", 0, project.Id, release.Id,
+                "Legacy read fixture", "Problem", "Analysis", "Solution", user.UserName, now,
+                ChangeRequestType.Software, softwareLevel: requirementLevel);
+            request.AddRequirementChange(user.UserName, prefix + "-091500", 0, requirementLevel,
+                RequirementChangeKind.Introduce, "The software shall retain historical verification identity.",
+                "Historical read fixture", "Test", now, attributesJson: "{\"derived\":true}");
+            request.SubmitForReview(user.UserName, [new ApproverSelection("reviewer", "Reviewer")], now);
+            request.ApproveActiveStage("reviewer", now);
+            var baseline = new CandidateBaseline("SW-91.50", 0, project.Id, release.Id, null,
+                "Legacy baseline", "cm", now);
+            baseline.Select(request, "cm", now); baseline.Freeze("cm", now);
+            baseline.MarkRequirementsMaterialized("cm", new string('a', 64), 1, now);
+            var requirement = new RequirementArtifact(project.Id, prefix + "-091500", requirementLevel, now);
+            var requirementRevision = new RequirementRevision(requirement.Id, 0,
+                "The software shall retain historical verification identity.", "Historical read fixture", "Test",
+                RequirementRevisionState.Active, request.Id, baseline.Id, now,
+                RequirementParentKind.Derived, "Historical read fixture");
+            var testCase = new TestProcedure(project.Id, prefix + "TC-091500", "Legacy Case", user.UserName, now, level);
+            var case00 = new TestProcedureRevision(testCase.Id, 0, "Objective", "Ready", "Steps", "Expected",
+                TestProcedureState.Approved, user.UserName, now);
+            var case01 = new TestProcedureRevision(testCase.Id, 1, "Later Case", "Ready", "Steps", "Expected",
+                TestProcedureState.Approved, user.UserName, migratedAt);
+            var procedure = new TestProcedure(project.Id, prefix + "TP-091500", "Generated Procedure",
+                VerificationArtifactProfileSchema.GovernedMigrationActor, migratedAt, level,
+                artifactKind: VerificationArtifactKind.Procedure, parentKind: VerificationProcedureParentKind.Allocated);
+            var generated = ProcedureRevision(procedure.Id, 0, historicalMirror ? TestProcedureState.Retired : TestProcedureState.Approved);
+            var later = ProcedureRevision(procedure.Id, 1, TestProcedureState.Approved);
+            var authored = new TestProcedure(project.Id, prefix + "TP-091501", "Later authored Procedure",
+                user.UserName, migratedAt, level, artifactKind: VerificationArtifactKind.Procedure,
+                parentKind: VerificationProcedureParentKind.Allocated);
+            var authoredRevision = new TestProcedureRevision(authored.Id, 0, "Objective", "Ready", "Steps", "Expected",
+                TestProcedureState.Draft, user.UserName, migratedAt, environmentSetup: "Ready", testData: "Data",
+                orderedSteps: "Steps", expectedObservations: "Expected", cleanup: "Cleanup", toolingAutomation: "Manual",
+                parentKind: VerificationProcedureParentKind.Allocated);
+            db.AddRange(program, project, release, other, user, request, baseline, requirement, requirementRevision,
+                new ProgramMembership(user.Id, program.Id, ProgramRole.Engineer, "test.setup", now),
+                new BaselineRequirementSelection(baseline.Id, requirement.Id, requirementRevision.Id),
+                testCase, case00, procedure, generated, authored, authoredRevision,
+                new TestRequirementCoverage(case00.Id, requirementRevision.Id),
+                new TestProcedureMigrationSource(project.Id, case00.Id, procedure.Id, generated.Id),
+                new TestCaseProcedureLink(case00.Id, authoredRevision.Id));
+            if (!historicalMirror) db.Add(new TestCaseProcedureLink(case00.Id, generated.Id));
+            await db.SaveChangesAsync();
+            // Author the original relation while .00 is current, then retain it as immutable evidence
+            // when .01 arrives; ordinary authoring cannot create a new link to an obsolete Case.
+            db.AddRange(case01, later, new TestRequirementCoverage(case01.Id, requirementRevision.Id),
+                new TestProcedureMigrationSource(project.Id, case01.Id, procedure.Id, later.Id),
+                new TestCaseProcedureLink(case01.Id, later.Id));
+            await db.SaveChangesAsync();
+            var legacy = await TestProcedureEffectivity.ForReleaseAsync(db, project.Id, release.Id, default);
+            Assert.False(legacy!.IsExactManifest);
+            Assert.Equal(case00.Id, Assert.Single(legacy.RevisionIds));
+            var readable = await VerificationReadEffectivity.ForReleaseAsync(db, project.Id, release.Id, default,
+                new FixedProjectLadderPolicyResolver(ProcedureEnabledTestPolicy.Create()));
+            Assert.Contains(generated.Id, readable!.RevisionIds);
+            Assert.DoesNotContain(later.Id, readable.RevisionIds);
+            Assert.DoesNotContain(authoredRevision.Id, readable.RevisionIds);
+            Assert.False(readable.IsExactManifest);
+            Assert.Empty(db.BaselineTestProcedures);
+            var caseOnly = await VerificationReadEffectivity.ForReleaseAsync(db, project.Id, release.Id, default,
+                new FixedProjectLadderPolicyResolver(LegacyLadderPolicy.Instance));
+            Assert.DoesNotContain(generated.Id, caseOnly!.RevisionIds);
+            projectId = project.Id; releaseId = release.Id; otherReleaseId = other.Id;
+            procedureId = procedure.Id; generatedId = generated.Id; laterId = later.Id;
+            authoredId = authored.Id; authoredRevisionId = authoredRevision.Id;
+
+            TestProcedureRevision ProcedureRevision(Guid id, int number, TestProcedureState state) =>
+                new(id, number, "Objective", "Ready", "Steps", "Expected", state,
+                    VerificationArtifactProfileSchema.GovernedMigrationActor, migratedAt,
+                    environmentSetup: "Ready", orderedSteps: "Steps", expectedObservations: "Expected",
+                    parentKind: VerificationProcedureParentKind.Allocated,
+                    retirementRationale: state == TestProcedureState.Retired ? "Historical non-executable mirror" : null);
+        }
+        using var login = await client.PostAsJsonAsync("/api/auth/login",
+            new { userName = "legacy.reader", password = AeroLinkApiFactory.MemberPassword });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        foreach (var revisionQuery in new[] { "", $"&revisionId={generatedId}" })
+        {
+            using var response = await client.GetAsync($"/api/artifacts/test-procedure/{procedureId}?releaseId={releaseId}{revisionQuery}");
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+            var artifact = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(generatedId, artifact.GetProperty("details").GetProperty("revisionId").GetGuid());
+            Assert.Equal(historicalMirror ? "Retired" : "Approved", artifact.GetProperty("state").GetString());
+        }
+        foreach (var path in new[] {
+            $"/api/artifacts/test-procedure/{procedureId}?releaseId={releaseId}&revisionId={laterId}",
+            $"/api/artifacts/test-procedure/{authoredId}?releaseId={releaseId}&revisionId={authoredRevisionId}",
+            $"/api/artifacts/test-procedure/{procedureId}?releaseId={otherReleaseId}&revisionId={generatedId}" })
+        {
+            using var response = await client.GetAsync(path);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+    }
+
     [Theory]
     [InlineData(TestProcedureLevel.HighLevel, "HLRTC", "HLRTP")]
     [InlineData(TestProcedureLevel.LowLevel, "LLRTC", "LLRTP")]

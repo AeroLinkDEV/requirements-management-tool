@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 857,
-    "cases": 951,
+    "tests": 858,
+    "cases": 955,
     "classes": 127,
-    "hostedTests": 819,
-    "hostedCases": 899,
+    "hostedTests": 820,
+    "hostedCases": 903,
     "nonHostedTests": 30,
     "nonHostedCases": 44,
     "unknownHostTests": 8,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 538,
-      "cases": 600,
+      "tests": 539,
+      "cases": 604,
       "unknownCases": 0,
       "classes": 104
     },
@@ -14351,6 +14351,24 @@
     },
     {
       "cls": "VerificationReadEffectivityApiTests",
+      "test": "Legacy_reads_follow_only_typed_migration_sources_of_carried_cases",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 4,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 18,
+        "end": 134
+      }
+    },
+    {
+      "cls": "VerificationReadEffectivityApiTests",
       "test": "Source_cases_open_from_exact_links_without_becoming_executable_selections",
       "kind": "Theory",
       "intent": "http-boundary",
@@ -14363,8 +14381,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 17,
-        "end": 147
+        "start": 136,
+        "end": 266
       }
     },
     {
