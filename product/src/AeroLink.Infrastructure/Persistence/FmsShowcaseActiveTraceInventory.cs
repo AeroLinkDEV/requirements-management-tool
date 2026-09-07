@@ -47,7 +47,7 @@ public sealed partial class FmsShowcaseSeeder
             if (!Guid.TryParse(marker.Detail, out var id)) problems.Add($"Invalid scenario identity: {marker.StepKey}.");
             else positive.Add(marker.StepKey, id);
         if (positive.Values.Distinct().Count() != ActiveTraceScenarioChains * 3)
-            problems.Add($"Expected {ActiveTraceScenarioChains * 3} distinct connected authoring drafts; found {positive.Values.Distinct().Count()}.");
+            problems.Add($"Expected {ActiveTraceScenarioChains * 3} distinct connected authoring requests; found {positive.Values.Distinct().Count()}.");
         var missing = positive.Values.Except(currentIds).ToList();
         if (missing.Count > 0) problems.Add("Named scenarios are missing from the exact current build population: " + string.Join(", ", missing));
         var positiveIds = positive.Values.ToHashSet();
@@ -119,8 +119,8 @@ public sealed partial class FmsShowcaseSeeder
                 || !identities.TryAdd(requestId, identity))
                 problems.Add($"Invalid exact proposal identity: {marker.StepKey}.");
         }
-        if (identities.Count != ActiveTraceDraftCount)
-            problems.Add($"Expected {ActiveTraceDraftCount} exact proposal identities; found {identities.Count}.");
+        if (identities.Count != ActiveTraceRequestCount)
+            problems.Add($"Expected {ActiveTraceRequestCount} exact proposal identities; found {identities.Count}.");
         var baselineIds = identities.Values.Select(x => x.BaselineId).Distinct().ToList();
         var members = await (from member in db.BaselineRequirements.AsNoTracking()
             join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id

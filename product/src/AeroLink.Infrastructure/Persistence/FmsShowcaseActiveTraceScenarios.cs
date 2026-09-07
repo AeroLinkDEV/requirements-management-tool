@@ -12,7 +12,7 @@ namespace AeroLink.Infrastructure.Persistence;
 public sealed partial class FmsShowcaseSeeder
 {
     public const int ActiveTraceScenarioChains = 30;
-    public const int ActiveTraceDraftCount = ActiveTraceScenarioChains * 3;
+    public const int ActiveTraceRequestCount = ActiveTraceScenarioChains * 3;
     public const string ActiveTraceScenarioPrefix = "active-trace-913/";
     private const string ActiveTraceProposalPrefix = "active-trace-proposal-913/";
     private sealed record ActiveTraceProposalIdentity(Guid RequestId, Guid BaselineId, Guid RequirementRevisionId, Guid? UpstreamRevisionId);
@@ -128,6 +128,8 @@ public sealed partial class FmsShowcaseSeeder
                 if (parent is not null)
                     request.AddUpstreamLink(author, parent.Id, parent.DisplayNumber, release.Id, release.Version,
                         $"This {level} proposal develops the same {topic} {scenario.Name} change at the next configured level.", at);
+                if (index == 1 && level == RequirementLevel.HighLevel)
+                    await SubmitActiveTraceParallelReviewAsync(request, programId, policy, at, ct);
                 db.SystemChangeRequests.Add(request);
                 // The campaign predates these authoring scenarios. Register their real pending work;
                 // never let the older campaign snapshot imply these new impacts were dispositioned.
@@ -150,6 +152,48 @@ public sealed partial class FmsShowcaseSeeder
             }
         }
         await db.SaveChangesAsync(ct);
-        return $"Added {added} current-build drafts: {ActiveTraceScenarioChains} named System/HLR/LLR chains. The existing named incomplete scenarios remain visible; released history is unchanged.";
+        return $"Added {added} current-build authoring requests: {ActiveTraceScenarioChains} named System/HLR/LLR chains, including one live parallel review. The existing named incomplete scenarios remain visible; released history is unchanged.";
+    }
+
+    private async Task SubmitActiveTraceParallelReviewAsync(SystemChangeRequest request, Guid programId,
+        ILadderPolicy policy, DateTimeOffset at, CancellationToken ct)
+    {
+        // HOME has a configured System sequence, which must not be bypassed. This named software
+        // scenario uses the existing unconfigured-workflow contract: independently eligible Approvers.
+        var subject = policy.WorkflowSubject(request.Type);
+        if (await db.ReviewWorkflows.AnyAsync(x => x.ProjectId == request.ProjectId && x.AppliesTo == subject
+            && x.State == ReviewWorkflowState.Active, ct))
+            throw new InvalidOperationException("The named FMS parallel software review cannot replace a configured approval workflow. Qualify that customized showcase separately.");
+        var number = request.RequirementChanges.Single().BaseNumber;
+        var claimed = await (from change in db.RequirementChanges.AsNoTracking()
+            join other in db.SystemChangeRequests.AsNoTracking() on change.ChangeRequestId equals other.Id
+            where other.ProjectId == request.ProjectId && other.Id != request.Id && change.BaseNumber == number
+                && (change.Kind == RequirementChangeKind.Modify || change.Kind == RequirementChangeKind.Retire)
+                && (other.State == ChangeRequestState.InReview || other.State == ChangeRequestState.Approved
+                    || other.State == ChangeRequestState.SelectedForBaseline)
+            select other.Id).AnyAsync(ct);
+        if (claimed) throw new InvalidOperationException($"The named parallel review cannot claim {number}; another controlled change already holds it.");
+        var approvers = new List<ApproverSelection>();
+        var authority = new ProjectAuthorityResolver(db);
+        // Older HOME carries direct Approver grants; fresh showcases use governed leadership.
+        // Resolve the same demand as normal submission, preserving the actual source row and never
+        // manufacturing a grant or falling back to an administrator to fill the review.
+        foreach (var userName in new[] { "lead.reviewer", "manager.reviewer", "systems.lead", "software.lead" })
+        {
+            var account = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x => x.UserName == userName
+                && x.State == AccountState.Active, ct);
+            if (account is null || account.UserName == request.AuthorId) continue;
+            var decision = await authority.ResolveAsync(account.Id, programId,
+                ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.Approver), at, ct);
+            if (!decision.Granted || decision.Source is ProjectAuthoritySource.AdministratorSubstitution or ProjectAuthoritySource.None) continue;
+            approvers.Add(new(account.UserName, account.DisplayName, ProgramRole.Approver,
+                decision.Source, decision.SourceId));
+            if (approvers.Count == 2) break;
+        }
+        if (approvers.Count != 2) throw new InvalidOperationException("The named parallel review requires two independently eligible current Approvers.");
+        var vocabulary = await new ProjectVerificationVocabularyService(db, resolver)
+            .ResolveForSubmissionAsync(request.ProjectId, request.AuthorId, "showcase-upgrade", at, ct);
+        request.SubmitForReviewWithResolvedTrace(request.AuthorId, approvers, at, ReviewMode.Parallel,
+            ladderPolicy: policy, verificationPolicy: vocabulary, traceEvidence: new(false, []));
     }
 }

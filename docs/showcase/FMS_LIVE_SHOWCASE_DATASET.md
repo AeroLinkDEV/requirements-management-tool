@@ -190,7 +190,13 @@ is not retried to hide later selection, result or evidence drift.
 
 Thirty named System/HLR/LLR authoring packages provide connected current work. They cover two input/recovery
 boundaries across the fifteen FMS topic areas, use exact effective requirement revisions and their actual
-System/HLR/LLR relationships, and remain Draft. They add no historical approvals or signatures. Eligible
+System/HLR/LLR relationships. Eighty-nine remain Draft; the first HLR request enters a parallel review held
+by two independently eligible Approvers from the explicit priority list `lead.reviewer`, `manager.reviewer`,
+`systems.lead`, `software.lead`. The normal authority resolver preserves older direct grants or current
+governed leadership provenance; no grants or administrator substitution are invented. It uses the current
+resolved trace snapshot and verification vocabulary, checks contention, and refuses to replace a configured
+software approval workflow. Existing System workflow configuration and historical reviews remain intact.
+They add no historical approvals or signatures. Eligible
 synthetic engineering owners are assigned by package responsibility and checked against current authority.
 The original review, approval, deferred and incomplete-authoring examples remain intact. Immutable scenario
 ownership metadata records each proposal's exact source baseline, requirement revision and upstream revision;

@@ -17,22 +17,31 @@ public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase
         var seeder = new FmsShowcaseSeeder(db);
         var inventory = await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId);
         Assert.True(inventory.Holds, string.Join(" ", inventory.Problems));
-        Assert.Equal(8 + FmsShowcaseSeeder.ActiveTraceDraftCount, inventory.CurrentChanges);
+        Assert.Equal(8 + FmsShowcaseSeeder.ActiveTraceRequestCount, inventory.CurrentChanges);
         Assert.InRange(inventory.IncompletePercent, 5, 10);
         Assert.All(inventory.Records.Where(x => x.Overall == "ActionRequired"), x => Assert.True(x.NamedNegative));
         var ownedIds = await db.ShowcaseUpgradeSteps.Where(x => x.ProgramId == showcase.Summary.ProgramId
             && x.StepKey.StartsWith(FmsShowcaseSeeder.ActiveTraceScenarioPrefix)
             && !x.StepKey.Contains("observed")).Select(x => x.Detail).ToListAsync();
         var ids = ownedIds.Select(Guid.Parse).ToList();
-        Assert.Equal(FmsShowcaseSeeder.ActiveTraceDraftCount, ids.Distinct().Count());
-        var drafts = await db.SystemChangeRequests.Where(x => ids.Contains(x.Id)).ToListAsync();
+        Assert.Equal(FmsShowcaseSeeder.ActiveTraceRequestCount, ids.Distinct().Count());
+        var sharedMarker = await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == showcase.Summary.ProgramId
+            && x.StepKey == FmsShowcaseSeeder.ActiveTraceScenarioPrefix + "01/HighLevel");
+        var sharedId = Guid.Parse(sharedMarker.Detail);
+        var drafts = await db.SystemChangeRequests.Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
+            .Where(x => ids.Contains(x.Id)).ToListAsync();
         Assert.All(drafts, x =>
         {
-            Assert.Equal(ChangeRequestState.Draft, x.State);
+            Assert.Equal(x.Id == sharedId ? ChangeRequestState.InReview : ChangeRequestState.Draft, x.State);
             Assert.Equal(showcase.Summary.ActiveReleaseId, x.TargetReleaseId);
             Assert.NotEqual("admin", x.AuthorId);
             Assert.True(x.CreatedAt <= DateTimeOffset.UtcNow);
         });
+        var cycle = Assert.Single(drafts.Single(x => x.Id == sharedId).ReviewCycles);
+        Assert.Equal(ReviewMode.Parallel, cycle.Mode);
+        Assert.Equal(SystemChangeRequest.CurrentSnapshotContractVersion, cycle.SnapshotContractVersion);
+        Assert.All(cycle.Steps, x => Assert.Equal(ApprovalStepState.Active, x.State));
+        Assert.Equal(new[] { "software.lead", "systems.lead" }, cycle.Steps.Select(x => x.ApproverId).OrderBy(x => x));
         var impacts = await db.ImpactDispositions.Where(x => ids.Contains(x.ChangeRequestId)).ToListAsync();
         Assert.All(drafts, request =>
         {
@@ -46,7 +55,7 @@ public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase
             x => x.Code == "impact_disposition");
         Assert.False(gate.Complete);
         // The native gate excludes the original deferred request's four historical impacts.
-        Assert.Equal(28 + FmsShowcaseSeeder.ActiveTraceDraftCount * 4, gate.Total);
+        Assert.Equal(28 + FmsShowcaseSeeder.ActiveTraceRequestCount * 4, gate.Total);
         Assert.Empty(await seeder.UpgradeAsync(showcase.Summary.ProgramId));
         Assert.Equal(impacts.Count, await db.ImpactDispositions.CountAsync(x => ids.Contains(x.ChangeRequestId)));
         Assert.Equal(1250, await db.BaselineRequirements.CountAsync(x => x.BaselineId == showcase.Summary.ReleasedBaselineId));
@@ -78,7 +87,7 @@ public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase
         await using var db = database.Context();
         var programId = showcase.Summary.ProgramId;
         var marker = await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == programId
-            && x.StepKey == FmsShowcaseSeeder.ActiveTraceScenarioPrefix + "01/HighLevel");
+            && x.StepKey == FmsShowcaseSeeder.ActiveTraceScenarioPrefix + "02/HighLevel");
         var id = Guid.Parse(marker.Detail);
         var request = await db.SystemChangeRequests.Include(x => x.UpstreamLinks).SingleAsync(x => x.Id == id);
         var link = Assert.Single(request.UpstreamLinks);
@@ -86,7 +95,7 @@ public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase
         if (wrongParent)
         {
             var other = await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == programId
-                && x.StepKey == FmsShowcaseSeeder.ActiveTraceScenarioPrefix + "02/System");
+                && x.StepKey == FmsShowcaseSeeder.ActiveTraceScenarioPrefix + "03/System");
             var parentId = Guid.Parse(other.Detail);
             var parent = await db.SystemChangeRequests.SingleAsync(x => x.Id == parentId);
             request.AddUpstreamLink(request.AuthorId, parent.Id, parent.DisplayNumber, parent.TargetReleaseId,
@@ -96,7 +105,7 @@ public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase
         var seeder = new FmsShowcaseSeeder(db);
         var before = await seeder.ActiveTraceInventoryAsync(programId);
         Assert.False(before.Holds);
-        Assert.Contains(before.Problems, x => x.Contains("scenario 01", StringComparison.Ordinal));
+        Assert.Contains(before.Problems, x => x.Contains("scenario 02", StringComparison.Ordinal));
         if (!wrongParent) Assert.Contains(before.Problems, x => x.Contains(request.DisplayNumber, StringComparison.Ordinal));
         Assert.Empty(await seeder.UpgradeAsync(programId));
         Assert.False((await seeder.ActiveTraceInventoryAsync(programId)).Holds);
@@ -111,7 +120,7 @@ public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase
         using var database = showcase.Create();
         await using var db = database.Context();
         var marker = await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == showcase.Summary.ProgramId
-            && x.StepKey == FmsShowcaseSeeder.ActiveTraceScenarioPrefix + "01/HighLevel");
+            && x.StepKey == FmsShowcaseSeeder.ActiveTraceScenarioPrefix + "02/HighLevel");
         var requestId = Guid.Parse(marker.Detail);
         var request = await db.SystemChangeRequests.Include(x => x.RequirementChanges).Include(x => x.UpstreamLinks)
             .SingleAsync(x => x.Id == requestId);
@@ -122,7 +131,7 @@ public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase
             where artifact.ProjectId == showcase.Summary.ProjectId && artifact.Level == RequirementLevel.System
                 && !upstream.Contains(revision.Id) select revision.Id).FirstAsync();
         request.RemoveRequirementChange(request.AuthorId, original.Id, DateTimeOffset.UtcNow);
-        request.AddRequirementChange(request.AuthorId, field == "number" ? "HLR-000002" : original.BaseNumber,
+        request.AddRequirementChange(request.AuthorId, field == "number" ? "HLR-000003" : original.BaseNumber,
             field == "revision" ? original.Revision + 1 : original.Revision, original.Level, original.Kind,
             original.Statement, original.Rationale, original.VerificationMethod, DateTimeOffset.UtcNow,
             impactDispositionJson: original.ImpactDispositionJson,
