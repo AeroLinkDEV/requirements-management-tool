@@ -1,4 +1,5 @@
 using AeroLink.Domain.Verification;
+using AeroLink.Domain.Releases;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -29,7 +30,7 @@ public static class TestProcedureEffectivity
             .Where(x => x.Id == baselineId && x.RequirementsMaterializedAt != null)
             .Select(x => new
             {
-                x.Id, x.ReleaseId, x.TestProceduresMaterializedAt, x.RequirementsMaterializedAt, x.FrozenAt, x.CreatedAt
+                x.Id, x.ProjectId, x.ReleaseId, x.TestProceduresMaterializedAt, x.RequirementsMaterializedAt, x.FrozenAt, x.CreatedAt
             })
             .SingleOrDefaultAsync(ct);
         if (baseline is null) return null;
@@ -67,12 +68,27 @@ public static class TestProcedureEffectivity
             .Distinct().ToListAsync(ct);
         var release = await db.Releases.AsNoTracking().Where(x => x.Id == baseline.ReleaseId)
             .Select(x => new { x.IsReleased, x.ReleasedAt }).SingleAsync(ct);
+        DateTimeOffset? campaignReleasedAt = null;
+        if (release.IsReleased && release.ReleasedAt is null)
+        {
+            // Older installations recorded release completion on the campaign before the release header
+            // gained ReleasedAt. Use only an unambiguous completed campaign for this exact baseline and
+            // release. A sibling build's date cannot widen this historical compatibility window. This is
+            // still a non-exact projection: no manifest, approval, timestamp or coverage row is written.
+            var campaignDates = await db.ReleaseCampaigns.AsNoTracking()
+                .Where(x => x.ProjectId == baseline.ProjectId && x.ReleaseId == baseline.ReleaseId
+                    && x.BaselineId == baseline.Id && x.State == ReleaseCampaignState.Released
+                    && x.ReleasedAt != null && x.ReleaseHash != null && x.ReleaseHash != "")
+                .Select(x => x.ReleasedAt).Distinct().ToListAsync(ct);
+            if (campaignDates.Count == 1 && campaignDates[0] >= baseline.CreatedAt)
+                campaignReleasedAt = campaignDates[0];
+        }
         // Materialize before comparing DateTimeOffset values because SQLite cannot reliably translate their
         // ordering/comparison. A revision created after a released baseline closed is successor evidence, not
         // a defensible compatibility candidate for that historical build. An active pre-manifest baseline is
         // intentionally different: approved procedure work may still arrive until its exact manifest closes.
         var releasedAt = release.IsReleased
-            ? release.ReleasedAt ?? baseline.FrozenAt ?? baseline.RequirementsMaterializedAt ?? baseline.CreatedAt
+            ? release.ReleasedAt ?? campaignReleasedAt ?? baseline.FrozenAt ?? baseline.RequirementsMaterializedAt ?? baseline.CreatedAt
             : (DateTimeOffset?)null;
         var compatibleRows = releasedAt is null ? rows : rows.Where(x => x.CreatedAt <= releasedAt.Value);
         var legacy = compatibleRows.GroupBy(x => x.ProcedureId).ToDictionary(

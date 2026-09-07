@@ -138,3 +138,33 @@ automatic incomplete-enrichment retry.
 Local development enables the dataset through `DemoData:Enabled`. The generator creates `FMSLIVE` only when it does not already exist and never deletes or modifies unrelated programs.
 
 Automated validation proves exact counts, idempotence, complete baseline membership, complete test coverage, active-release state distribution, artifact searchability, trace/document access, and clean onboarding when demonstration data is disabled.
+
+The administrator-only `GET /api/showcase/upgrade-state` also returns a structured `inventory` alongside the
+invariants and Team Work distribution. Each build reports its own materialized requirement membership,
+verification membership, change requests, test change reviews, assessments, impact items, executions,
+Problem Reports, publications, code traces and baselines. Rows include native states, attributable authors or
+assigned engineers, and exact example identities. Those people are not presented as current holders; the
+separate Team Work projection owns current-holder meaning.
+
+An in-work build with no materialized requirements reports zero members and `waitingForPrerequisite`, rather
+than copying its predecessor's population into that build's count. Managed document revisions remain in the
+project library unless explicit build provenance exists. Verification coverage follows the baseline's exact
+coverage population: System Procedures and software Cases, including the exact source Cases of selected
+software Procedures. Executable membership and coverage membership are separate facts. Retained off-ladder
+change requests are explicitly reported and are not sent through the current ladder's trace-state classifier.
+Each build and coverage summary exposes `VerificationScopes` with baseline identity and `IsExactManifest`.
+Verification rows from a pre-manifest baseline explicitly say **legacy compatibility selection**, including
+when mixed with exact selections. Such counts never claim an exact historical manifest.
+
+Pre-scope software change requests without a governed `SoftwareLevel` have a separate legacy-history row
+and retain their authored levels. They do not pad HLRCR/LLRCR counts or receive an invented off-ladder state.
+The inventory is descriptive evidence, not permission to reset an older installation or infer missing
+historical manifests. Qualification must inspect the actual target's inventory; a fresh-seed result does not
+establish that an already-used HOME dataset has the same lifecycle or build state.
+
+The explicit upgrade archives the obsolete, unapproved `SYSTP-000001.01` coverage-warning fixture left by
+early HOME runs. Eligibility requires the exact original body, author, timestamp and empty provenance,
+with no baseline, coverage, execution or Case/Procedure references. Changed or controlled records remain
+untouched. The complete original draft is retained in a `ShowcaseLegacyDraftArchived` operator audit event;
+the audit and removal from the working revision register commit in the same transaction. The maintained
+warning scenario remains `SYSTP-000040`; no approved revision, coverage or manifest is repaired by rewriting it.

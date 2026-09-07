@@ -25,7 +25,7 @@ public sealed record FmsShowcaseSummary(Guid ProgramId, Guid ProjectId, Guid Rel
     int SystemRequirements, int HighLevelRequirements, int LowLevelRequirements, int HistoricalScrs,
     int HistoricalSwcrs, int TraceLinks, int TestProcedures, int TestExecutions, int Documents);
 
-public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicyResolver? policyResolver = null)
+public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicyResolver? policyResolver = null)
 {
     private static readonly SemaphoreSlim UpgradeGate = new(1, 1);
     private readonly IProjectLadderPolicyResolver resolver = policyResolver ?? new EffectiveProjectLadderPolicyResolver(db);
@@ -580,6 +580,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         "problem-report-build-scope",
         "controlled-test-change-identity",
         "verification-coverage-gap",
+        "legacy-gap-draft-archive",
         "approver-identity",
         "released-campaign",
         "code-traceability-demo",
@@ -605,6 +606,7 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             ("problem-report-build-scope", ReconcileProblemReportBuildScopeAsync),
             ("controlled-test-change-identity", ReconcileControlledTestChangeIdentityAsync),
             ("verification-coverage-gap", async (id, token) => { await EnsureVerificationCoverageGapAsync(id, token); return "In-work suspect coverage present."; }),
+            ("legacy-gap-draft-archive", ArchiveObsoleteGapDraftAsync),
             ("approver-identity", ReconcileApproverIdentityAsync),
             ("released-campaign", EnsureReleasedCampaignAsync),
             ("code-traceability-demo", EnsureCodeTraceabilityAsync),
@@ -1531,7 +1533,11 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
         if (procedureEffectivity is null)
             return new TraceCoverageCheck(false,
                 "Released-baseline procedure effectivity could not be established; trace coverage has no authoritative scope.");
-        IReadOnlyCollection<Guid> effectiveProcedureRevisionIds = procedureEffectivity.RevisionIds;
+        // The executable and coverage populations differ after the software Procedure cutover. Read
+        // exact source Cases through the same membership contract as release readiness; Procedure IDs
+        // alone cannot match Case-owned TestCoverage rows.
+        var ladderPolicy = await resolver.ResolveAsync(projectId, ct);
+        IReadOnlyCollection<Guid> effectiveProcedureRevisionIds = await CoveragePopulationAsync(procedureEffectivity, ladderPolicy, ct);
 
         var settled = await VerificationCoverageProjection.SettledCoveredAsync(db, members, ct,
             effectiveProcedureRevisionIds, buildScoped: false);
@@ -1558,7 +1564,8 @@ public sealed class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicy
             + string.Join(" + ", gapPair) + "), "
             + $"{uncovered.Count} uncovered (allow-list: none). "
             + $"Scope: {(procedureEffectivity.IsExactManifest ? "exact" : "legacy compatibility")} manifest, "
-            + $"{effectiveProcedureRevisionIds.Count} procedure revision(s).";
+            + $"{procedureEffectivity.RevisionIds.Count} procedure revision(s). "
+            + $"Coverage population: {effectiveProcedureRevisionIds.Count} exact or compatible coverage revision(s).";
 
         // The seeded contract is exactly this named pair: the requirements the procedure's approved
         // revision covers, identified by display number so a future seed redistribution that swaps which
