@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { apiBase, apiLogin, login, openNavigationGroup, selectProgram, showcaseSeed } from './auth'
+import { approveShowcaseSystemFixture } from './showcase-review'
 
 const completedImpacts = JSON.stringify({
   trace: 'Not Affected',
@@ -9,7 +10,7 @@ const completedImpacts = JSON.stringify({
   collaboration: 'Not Affected',
 })
 
-test('modified requirement coverage stays suspect until an exact approved procedure is reconfirmed', async ({ page, request }) => {
+test('modified requirement coverage stays suspect until an exact approved procedure is reconfirmed', async ({ page, request, playwright }) => {
   // Longer than it was: coverage and the decision about it now live on two pages, so this journey walks
   // between them three times rather than reading both from one screen.
   test.setTimeout(180_000)
@@ -54,14 +55,12 @@ test('modified requirement coverage stays suspect until an exact approved proced
   } })
   expect(draftResponse.ok(), await draftResponse.text()).toBeTruthy()
   const draft = await draftResponse.json()
-  const submitted = await request.post(`${apiBase}/api/change-requests/${draft.id}/submit`, {
-    data: { approvers: [{ userId: 'admin', name: 'AeroLink Administrator' }] },
-  })
-  expect(submitted.ok(), await submitted.text()).toBeTruthy()
-  const approved = await request.post(`${apiBase}/api/change-requests/${draft.id}/approve`, {
-    data: { password: 'AeroLink!2026', meaning: 'Approved for suspect-coverage journey verification.' },
-  })
-  expect(approved.ok(), await approved.text()).toBeTruthy()
+  const signer = await playwright.request.newContext()
+  try {
+    await approveShowcaseSystemFixture(request, signer, draft, 'Approved for suspect-coverage journey verification.')
+  } finally {
+    await signer.dispose()
+  }
 
   // The in-work build's own baseline, rather than a throwaway second one. A release now carries exactly one
   // software build, because the build number is derived from the release version — two would collide on the
