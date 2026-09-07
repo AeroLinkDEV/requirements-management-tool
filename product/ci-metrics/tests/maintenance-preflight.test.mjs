@@ -206,3 +206,9 @@ test('operator command has no check publisher, approval endpoint, candidate exec
   assert.match(cli, /windowsHide: true/)
   assert.doesNotMatch(cli, /publishMergeAuthorityCheck|MERGE_AUTHORITY_TOKEN|pending_deployments|method.*(?:PATCH|PUT|DELETE)|git checkout/)
 })
+
+test('hosted metrics tooling executes the maintenance refusal suite', () => {
+  const workflow = readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const invocation = workflow.split('\n').find(line => line.includes('run: node --test') && line.includes('merge-authority-github.test.mjs'))
+  assert.ok(invocation?.includes('product/ci-metrics/tests/maintenance-preflight.test.mjs'))
+})
