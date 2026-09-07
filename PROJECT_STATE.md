@@ -214,6 +214,11 @@ Released baselines/builds remain immutable. Successor/in-work builds are explici
 
 Exact manifests/effectivity are authoritative for what a build carries.
 
+For genuinely pre-manifest builds, the compatibility projection remains explicitly non-exact. If an older
+released-build header has no release timestamp, its completed release campaign can supply the cutoff only
+when it names that exact project, release and baseline and retains its release hash. This reads an existing
+release fact; it does not create a manifest or rewrite historical metadata.
+
 ## FMS live showcase context
 
 The FMS Product Development dataset remains the principal deterministic live demonstration context.

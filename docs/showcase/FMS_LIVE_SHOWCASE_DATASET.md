@@ -156,3 +156,10 @@ change requests are explicitly reported and are not sent through the current lad
 The inventory is descriptive evidence, not permission to reset an older installation or infer missing
 historical manifests. Qualification must inspect the actual target's inventory; a fresh-seed result does not
 establish that an already-used HOME dataset has the same lifecycle or build state.
+
+The explicit upgrade archives the obsolete, unapproved `SYSTP-000001.01` coverage-warning fixture left by
+early HOME runs. Eligibility requires the exact original body, author, timestamp and empty provenance,
+with no baseline, coverage, execution or Case/Procedure references. Changed or controlled records remain
+untouched. The complete original draft is retained in a `ShowcaseLegacyDraftArchived` operator audit event;
+the audit and removal from the working revision register commit in the same transaction. The maintained
+warning scenario remains `SYSTP-000040`; no approved revision, coverage or manifest is repaired by rewriting it.
