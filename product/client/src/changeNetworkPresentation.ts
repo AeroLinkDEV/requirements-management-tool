@@ -194,7 +194,7 @@ export const pillFor = (state?: string | null): Pill => {
     case "Effective":
       return { background: "#dff3ee", color: "#176f68" }
     case "Deferred":
-      return { background: "#f3ebe2", color: "#8a6a4a" }
+      return { background: "#f3ebe2", color: "#765313" }
     default:
       return { background: "#eef1f5", color: "#5f7080" }
   }

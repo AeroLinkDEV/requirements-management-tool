@@ -32,6 +32,9 @@ export type DigitalThreadTableProps<Row extends DigitalThreadTableRow> = {
   emptyMessage: string
   selectionMessage?: string
   truncatedMessage?: string | null
+  /** A view may retain its opened record while reporting that no row genuinely matched its search. */
+  noMatch?: boolean
+  noMatchMessage?: string
   /** Space reserved by the active view's inspector, so table rows remain reachable beside the panel. */
   reservedInset?: { right?: number; left?: number; bottom?: number }
 }
@@ -57,9 +60,11 @@ export default function DigitalThreadTable<Row extends DigitalThreadTableRow>({
   emptyMessage,
   selectionMessage,
   truncatedMessage,
+  noMatch = false,
+  noMatchMessage = "No records match. Clear a filter chip or the search box to bring records back.",
   reservedInset,
 }: DigitalThreadTableProps<Row>) {
-  const showNoMatch = !loading && !error && availableCount > 0 && rows.length === 0
+  const showNoMatch = !loading && !error && availableCount > 0 && (rows.length === 0 || noMatch)
 
   return (
     <section
@@ -89,7 +94,7 @@ export default function DigitalThreadTable<Row extends DigitalThreadTableRow>({
       ) : null}
       {showNoMatch ? (
         <p className="dtThreadTableState" role="status">
-          No records match. Clear a filter chip or the search box to bring records back.
+        {noMatchMessage}
         </p>
       ) : null}
       {!loading && !error && !showNoMatch && !rows.length ? (

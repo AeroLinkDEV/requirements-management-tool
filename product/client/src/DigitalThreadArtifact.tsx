@@ -38,12 +38,6 @@ import "./DigitalThreadArtifact.css"
 export type PanelDock = "auto" | "left" | "right" | "bottom"
 export type ResolvedDock = Exclude<PanelDock, "auto">
 
-// The same reservations the change network makes, for the same reason: the free area is the panel plus its
-// margins, measured from what the panel actually renders rather than padded with slack. Slack would read as
-// correctness while hiding whether the non-occlusion rule holds.
-const PANEL_WIDTH = 300 + 16 + 14
-const PANEL_HEIGHT = 150 + 18 + 16
-
 export type DigitalThreadArtifactProps = {
   /**
    * The raw `GET /api/artifact-thread` body, exactly as the server sent it.
@@ -196,11 +190,12 @@ export default function DigitalThreadArtifact({
    * A thread opens with its focal record already selected, so the reader has not chosen anything yet and the
    * question they asked was about the whole chain. Framing one hop put the result and the build off the right
    * edge of a six-lane thread before they had touched the board. Once they select something themselves, the
-   * canvas returns to §6.6's direct-link framing, which is the right behaviour for stepping through a trace.
+   * canvas returns to the ordinary compact selection framing, which is the right behaviour for stepping through
+   * a trace.
    */
-  const framedForFocal = useMemo(
-    () => (selectedId && selectedId === focalId && web ? [...web.nodes] : undefined),
-    [focalId, selectedId, web],
+  const framedForSelection = useMemo(
+    () => (selectedId && web ? [...web.nodes] : undefined),
+    [selectedId, web],
   )
 
   const selected = selectedId ? byId.get(selectedId) ?? null : null
@@ -221,19 +216,10 @@ export default function DigitalThreadArtifact({
   }, [directLinks, dockPreference, laneOfNode, selected])
 
   // Non-occlusion outranks the preference: a linked record must not vanish to honour a side (§6.6).
-  const { dock, reportNeedsRoom } = usePanelDock(preferredDock, `${representation}:${selectedId ?? ""}:${dockPreference}`)
-
-  // The canvas must not lay records out under the panel, so the frame it may use shrinks by the dock.
-  const frameInset = useMemo(
-    () =>
-      selectedId
-        ? dock === "bottom"
-          ? { bottom: PANEL_HEIGHT }
-          : dock === "left"
-            ? { left: PANEL_WIDTH }
-            : { right: PANEL_WIDTH }
-        : undefined,
-    [dock, selectedId],
+  const { dock, reportNeedsRoom, panelRef, frameInset } = usePanelDock(
+    preferredDock,
+    `${representation}:${selectedId ?? ""}:${dockPreference}`,
+    canvasViewRef,
   )
 
   useEffect(() => {
@@ -574,7 +560,9 @@ export default function DigitalThreadArtifact({
             onHover={setHoveredId}
             frameInset={frameInset}
             tracedEdges={web?.edges}
-            frameIds={framedForFocal}
+            frameIds={framedForSelection}
+            framingIntent="landing"
+            landingId={initialSelectedId ?? focalId}
             onFramingNeedsRoom={representation === "map" ? reportNeedsRoom : undefined}
             ariaLabel={
               focal ? `Artifact thread for ${identityLabel(focal)}` : "Artifact thread"
@@ -653,7 +641,7 @@ export default function DigitalThreadArtifact({
       <div className="dtaVisuallyHidden" aria-live="polite" ref={liveRegion} />
 
       {selected ? (
-        <aside className={`dtaPanel dtaPanel-${dock}`} aria-label={`Detail for ${identityLabel(selected)}`}>
+        <aside ref={panelRef} className={`dtaPanel dtaPanel-${dock}`} aria-label={`Detail for ${identityLabel(selected)}`}>
           <div className="dtaPanelTools">
             {(["bottom", "right", "auto"] as PanelDock[]).map(option => (
               <button

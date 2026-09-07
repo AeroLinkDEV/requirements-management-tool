@@ -46,6 +46,9 @@ export interface CanvasGeometry {
 /** 2 detailed, 1 compact, 0 dense. Lower tiers drop card content so more records fit the same lane. */
 export type DensityTier = 0 | 1 | 2
 
+/** The reason a camera moved. Landing keeps the DEC-117 readable floor; reader requested fits may pull back. */
+export type FrameIntent = "landing" | "selection" | "story" | "board"
+
 export interface CanvasFrame {
   /** The area the board may occupy, in viewport pixels. Shrinks when a detail panel is docked. */
   x: number
@@ -65,10 +68,18 @@ const TIERS: Record<DensityTier, { rowPitch: number; cardHeight: number }> = {
 const LANE_WIDTH = 236
 const LANE_PITCH = 296
 const LANE_PAD = 12
+/** A measured border-box gap keeps an expanded card from touching the next governed record. */
+export const MEASURED_CARD_GAP = 4
 
 /** Below this the identifiers stop being legible however much more fits, so zooming out stops here. */
 export const MIN_ZOOM = 0.58
 export const MAX_ZOOM = 2.2
+/**
+ * Measured compact selection floor. A deliberate selection may use the compact tier, while arrival remains at
+ * LANDING_MIN_ZOOM. The authored 14px card identifiers therefore remain 11.34px at this floor; the browser
+ * regression checks this rendered size instead of treating the number as a policy by itself.
+ */
+export const READABLE_SELECTION_MIN_ZOOM = 0.81
 
 /** Eased follow for lanes tracking a scrub anchor. Slow enough to read as motion, fast enough not to lag. */
 const SYNC_LERP = 0.18
@@ -134,6 +145,8 @@ export interface LayoutResult {
   laneHeights: number[]
   /** Visible height shared by every band: the window, or the tallest lane when everything already fits. */
   bandHeight: number
+  /** Maximum band height available in this viewport, before nominal card counts shorten the bands. */
+  availableBandHeight: number
   /** Most negative offset each lane may take. Zero means the lane cannot roll. */
   laneMinimums: number[]
   sceneWidth: number
@@ -148,12 +161,14 @@ export const layout = (
   const geometry = geometryFor(tier)
   const laneHeights = laneCounts.map(count => laneHeight(count, tier))
   const tallest = laneHeights.length ? Math.max(...laneHeights) : geometry.cardHeight
-  const bandHeight = Math.min(windowHeight(frame, zoom), tallest)
+  const availableBandHeight = windowHeight(frame, zoom)
+  const bandHeight = Math.min(availableBandHeight, tallest)
   return {
     tier,
     geometry,
     laneHeights,
     bandHeight,
+    availableBandHeight,
     laneMinimums: laneHeights.map(height => Math.min(0, bandHeight - height)),
     sceneWidth: sceneWidth(laneCounts.length),
   }
@@ -170,6 +185,67 @@ export const nodePosition = (
   x: node.lane * geometry.lanePitch,
   y: node.row * geometry.rowPitch + geometry.pad + (offsets[node.lane] ?? 0),
 })
+
+/**
+ * Positions after measured card expansion has been accounted for.
+ *
+ * A selected card keeps its detailed body while the lane remains compactly pitched. When that body is taller
+ * than the active row pitch, subsequent cards need the measured extra height or their governed identifiers can
+ * sit under the selected card. The adjustment is per lane and follows row order; ordinary cards keep the tier's
+ * authored pitch, while a wrapped card contributes only its actual excess. Keeping this in one helper lets the
+ * paint, framing and collision passes agree about the same card rectangles.
+ */
+export const positionsForNodes = (
+  nodes: readonly CanvasNode[],
+  geometry: CanvasGeometry,
+  offsets: readonly number[],
+  measuredHeights?: ReadonlyMap<string, number>,
+): Map<string, { x: number; y: number }> => {
+  const result = new Map<string, { x: number; y: number }>()
+  const byLane = new Map<number, CanvasNode[]>()
+  for (const node of nodes) {
+    const bucket = byLane.get(node.lane)
+    if (bucket) bucket.push(node)
+    else byLane.set(node.lane, [node])
+  }
+  for (const bucket of byLane.values()) {
+    bucket.sort((a, b) => a.row - b.row)
+    let extra = 0
+    for (const node of bucket) {
+      const base = nodePosition(node, geometry, offsets)
+      result.set(node.id, { x: base.x, y: base.y + extra })
+      const measured = measuredHeights?.get(node.id) ?? geometry.cardHeight
+      const excess = Math.max(0, measured - geometry.rowPitch)
+      extra += excess + (excess > 0 ? MEASURED_CARD_GAP : 0)
+    }
+  }
+  return result
+}
+
+/** Use spare viewport room for measured cards before requiring a lane to roll. */
+export const layoutWithMeasuredCards = (
+  result: LayoutResult,
+  nodes: readonly CanvasNode[],
+  measuredHeights?: ReadonlyMap<string, number>,
+): LayoutResult => {
+  if (!measuredHeights?.size) return result
+  const positions = positionsForNodes(nodes, result.geometry, [], measuredHeights)
+  const laneHeights = [...result.laneHeights]
+  for (const node of nodes) {
+    const position = positions.get(node.id)
+    if (!position) continue
+    const measured = measuredHeights.get(node.id) ?? result.geometry.cardHeight
+    const height = Number.isFinite(measured) ? Math.max(result.geometry.cardHeight, measured) : result.geometry.cardHeight
+    laneHeights[node.lane] = Math.max(laneHeights[node.lane] ?? 0, position.y + height + result.geometry.pad)
+  }
+  const bandHeight = Math.min(result.availableBandHeight, Math.max(result.geometry.cardHeight, ...laneHeights))
+  return {
+    ...result,
+    laneHeights,
+    bandHeight,
+    laneMinimums: laneHeights.map(height => Math.min(0, bandHeight - height)),
+  }
+}
 
 /** A card is drawn only while it is inside its lane's window; outside it fades and stops taking pointers. */
 export const isVisible = (y: number, geometry: CanvasGeometry, bandHeight: number): boolean =>
@@ -222,11 +298,13 @@ export const syncTargets = (
   minimums: readonly number[],
   laneCount: number,
   exceptLane: number,
+  measuredHeights?: ReadonlyMap<string, number>,
 ): number[] => {
   const anchor = nodes.find(node => node.id === anchorId)
   const targets = offsets.slice()
   if (!anchor) return targets
-  const anchorY = anchor.row * geometry.rowPitch + (offsets[anchor.lane] ?? 0)
+  const positions = positionsForNodes(nodes, geometry, offsets, measuredHeights)
+  const anchorY = (positions.get(anchor.id)?.y ?? nodePosition(anchor, geometry, offsets).y) - geometry.pad
   for (let lane = 0; lane < laneCount; lane += 1) {
     if (lane === exceptLane || lane === anchor.lane) {
       targets[lane] = offsets[lane] ?? 0
@@ -245,10 +323,13 @@ export const syncTargets = (
       targets[lane] = offsets[lane] ?? 0
       continue
     }
-    const averageRow = linked.reduce((sum, node) => sum + node.row, 0) / linked.length
+    const averageRow = linked.reduce((sum, node) => {
+      const position = positions.get(node.id) ?? nodePosition(node, geometry, offsets)
+      return sum + position.y - (offsets[lane] ?? 0) - geometry.pad
+    }, 0) / linked.length
     targets[lane] = Math.max(
       minimums[lane] ?? 0,
-      Math.min(0, anchorY - averageRow * geometry.rowPitch),
+      Math.min(0, anchorY - averageRow),
     )
   }
   return targets
@@ -399,6 +480,13 @@ export const frameNodes = (
    * different case, and is allowed the wider view.
    */
   programmatic = true,
+  options: {
+    intent?: FrameIntent
+    /** Actual expanded card height in scene units, measured from the rendered card. */
+    selectedCardHeight?: number
+    /** Actual rendered heights for direct story cards, keyed by governed node identity. */
+    cardHeights?: ReadonlyMap<string, number>
+  } = {},
 ): { x: number; y: number; zoom: number } | null => {
   const wanted = new Set(ids)
   /**
@@ -414,39 +502,49 @@ export const frameNodes = (
    */
   const measure = (
     result: LayoutResult,
-    room: boolean,
     onlyDrawn = true,
   ): { x: number; y: number; width: number; height: number } | null => {
+    const positions = positionsForNodes(nodes, result.geometry, offsets, options.cardHeights)
     let x0 = Infinity
     let y0 = Infinity
     let x1 = -Infinity
     let y1 = -Infinity
     for (const node of nodes) {
       if (!wanted.has(node.id)) continue
-      const { x, y } = nodePosition(node, result.geometry, offsets)
+      const { x, y } = positions.get(node.id) ?? nodePosition(node, result.geometry, offsets)
       if (onlyDrawn && node.id !== selectedId && !isVisible(y, result.geometry, result.bandHeight)) continue
       x0 = Math.min(x0, x)
       x1 = Math.max(x1, x + result.geometry.laneWidth)
       y0 = Math.min(y0, y)
-      y1 = Math.max(y1, y + result.geometry.cardHeight + (room && node.id === selectedId ? 132 : 0))
+      // Expanded cards are measured by the canvas. A fixed allowance here made a detailed selected card
+      // overlap the panel after content or density changed; callers pass the actual rendered height.
+      const measuredHeight = options.cardHeights?.get(node.id)
+      const selectedHeight = node.id === selectedId
+        ? options.selectedCardHeight ?? measuredHeight ?? result.geometry.cardHeight
+        : measuredHeight ?? result.geometry.cardHeight
+      y1 = Math.max(y1, y + Math.max(result.geometry.cardHeight, selectedHeight))
     }
-    if (x0 > x1) return onlyDrawn ? measure(result, room, false) : null
+    if (x0 > x1) return onlyDrawn ? measure(result, false) : null
     return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
   }
 
-  const first = layout(laneCounts, frame, 1)
-  const want = measure(first, true)
+  const first = layoutWithMeasuredCards(layout(laneCounts, frame, 1), nodes, options.cardHeights)
+  const want = measure(first)
   if (!want) return null
   const pad = 46
+  const intent = options.intent ?? (programmatic ? "landing" : "board")
+  const floor = intent === "landing" ? LANDING_MIN_ZOOM : intent === "selection" ? READABLE_SELECTION_MIN_ZOOM : MIN_ZOOM
   const zoom = Math.max(
-    programmatic ? LANDING_MIN_ZOOM : MIN_ZOOM,
+    floor,
     minimumZoom(frame, laneCounts),
     Math.min(maxZoom, Math.min((frame.width - pad * 2) / (want.width + 52), (frame.height - pad * 2) / (want.height + 52))),
   )
 
-  const settled = layout(laneCounts, frame, zoom)
-  const room = measure(settled, true)
-  const core = measure(settled, false)
+  const settled = layoutWithMeasuredCards(layout(laneCounts, frame, zoom), nodes, options.cardHeights)
+  const room = measure(settled)
+  // Clamp against the same records that can actually be drawn. Including every rolled-out row here pushes the
+  // camera below the viewport while trying to contain cards the lane has intentionally hidden.
+  const core = room
   if (!room || !core) return null
 
   let x = frame.x + (frame.width - (room.width + 52) * zoom) / 2 - (room.x - 26) * zoom
@@ -490,6 +588,73 @@ const INTRA_LANE_BOW = 46
  */
 export const EDGE_LAYER_OVERHANG = INTRA_LANE_BOW + 30
 
+export interface EdgeCurve {
+  x1: number
+  y1: number
+  c1x: number
+  c1y: number
+  c2x: number
+  c2y: number
+  x2: number
+  y2: number
+}
+
+const edgeCurve = (
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  geometry: CanvasGeometry,
+  bendOffset = 0,
+): EdgeCurve => {
+  const y1 = from.y + geometry.anchor
+  const y2 = to.y + geometry.anchor
+  if (isIntraLane(from, to)) {
+    const edge = from.x + geometry.laneWidth
+    const bow = edge + INTRA_LANE_BOW
+    return { x1: edge, y1, c1x: bow, c1y: y1 + bendOffset, c2x: bow, c2y: y2 + bendOffset, x2: edge, y2 }
+  }
+  const backwards = to.x < from.x
+  const x1 = backwards ? from.x : from.x + geometry.laneWidth
+  const x2 = backwards ? to.x + geometry.laneWidth : to.x
+  const bend = Math.max(30, Math.abs(x2 - x1) * 0.42) * (backwards ? -1 : 1)
+  return { x1, y1, c1x: x1 + bend, c1y: y1 + bendOffset, c2x: x2 - bend, c2y: y2 + bendOffset, x2, y2 }
+}
+
+/** Build one bounded cubic that passes through a measured free frame slot at its midpoint. */
+const edgeCurveViaWaypoint = (
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  geometry: CanvasGeometry,
+  waypoint: { x: number; y: number },
+): EdgeCurve => {
+  const base = edgeCurve(from, to, geometry)
+  // P(.5) = (P0 + 3C1 + 3C2 + P3) / 8. Equal controls make the connector pass exactly through the selected
+  // waypoint while retaining one cubic path and the same source/target attachment points.
+  return {
+    ...base,
+    c1x: (8 * waypoint.x - base.x1 - base.x2) / 6,
+    c1y: (8 * waypoint.y - base.y1 - base.y2) / 6,
+    c2x: (8 * waypoint.x - base.x1 - base.x2) / 6,
+    c2y: (8 * waypoint.y - base.y1 - base.y2) / 6,
+  }
+}
+
+const curvePoint = (curve: EdgeCurve, t: number): { x: number; y: number } => {
+  const inverse = 1 - t
+  return {
+    x: inverse * inverse * inverse * curve.x1 + 3 * inverse * inverse * t * curve.c1x +
+      3 * inverse * t * t * curve.c2x + t * t * t * curve.x2,
+    y: inverse * inverse * inverse * curve.y1 + 3 * inverse * inverse * t * curve.c1y +
+      3 * inverse * t * t * curve.c2y + t * t * t * curve.y2,
+  }
+}
+
+const curveTangent = (curve: EdgeCurve, t: number): { x: number; y: number } => ({
+  x: 3 * (1 - t) * (1 - t) * (curve.c1x - curve.x1) + 6 * (1 - t) * t * (curve.c2x - curve.c1x) +
+    3 * t * t * (curve.x2 - curve.c2x),
+  y: 3 * (1 - t) * (1 - t) * (curve.c1y - curve.y1) + 6 * (1 - t) * t * (curve.c2y - curve.c1y) +
+    3 * t * t * (curve.y2 - curve.c2y),
+})
+
 /**
  * The cubic path for an edge, routed from the source's right edge to the target's left edge.
  *
@@ -502,19 +667,337 @@ export const edgePath = (
   from: { x: number; y: number },
   to: { x: number; y: number },
   geometry: CanvasGeometry,
+  route?: EdgeCurve,
 ): string => {
-  const y1 = from.y + geometry.anchor
-  const y2 = to.y + geometry.anchor
-  if (isIntraLane(from, to)) {
-    const edge = from.x + geometry.laneWidth
-    const bow = edge + INTRA_LANE_BOW
-    return `M${edge} ${y1} C${bow} ${y1},${bow} ${y2},${edge} ${y2}`
+  const curve = route ?? edgeCurve(from, to, geometry)
+  return `M${curve.x1} ${curve.y1} C${curve.c1x} ${curve.c1y},${curve.c2x} ${curve.c2y},${curve.x2} ${curve.y2}`
+}
+
+export interface CanvasRect { x: number; y: number; width: number; height: number }
+
+export interface EdgeLabelCandidate {
+  key: string
+  label: string
+  from: { x: number; y: number }
+  to: { x: number; y: number }
+  /** Actual SVG text bounds in scene units when the caller can measure them. */
+  width?: number
+  height?: number
+}
+
+export interface EdgeLabelPlacement {
+  x: number
+  y: number
+  anchorX: number
+  anchorY: number
+  leader: boolean
+  /** Which bounded search supplied this placement; useful when a dense frame is diagnosed in the browser. */
+  placement: "local" | "path" | "overflow" | "reroute"
+  exhausted: boolean
+  /** False only when the measured frame has no collision-free on-line slot at all. */
+  available: boolean
+  /** A checked reroute shared by the rendered edge and its label when normal slots are occupied. */
+  route?: EdgeCurve
+}
+
+/**
+ * Exact open-segment/AABB intersection used for neutral leaders.
+ *
+ * Sampling points made a short card or an existing phrase easy to skip entirely. Liang-Barsky clipping gives
+ * the complete parameter interval where the segment is inside the rectangle; endpoint contact is allowed so a
+ * leader may leave a card edge without treating that attachment as a collision.
+ */
+export const segmentIntersectsRect = (
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  rect: CanvasRect,
+): boolean => {
+  const left = rect.x
+  const right = rect.x + rect.width
+  const top = rect.y
+  const bottom = rect.y + rect.height
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  const epsilon = 1e-7
+  let lower = 0
+  let upper = 1
+
+  const clip = (origin: number, delta: number, minimum: number, maximum: number): boolean => {
+    if (Math.abs(delta) < epsilon) return origin > minimum && origin < maximum
+    const first = (minimum - origin) / delta
+    const second = (maximum - origin) / delta
+    const near = Math.min(first, second)
+    const far = Math.max(first, second)
+    lower = Math.max(lower, near)
+    upper = Math.min(upper, far)
+    return lower < upper
   }
-  const backwards = to.x < from.x
-  const x1 = backwards ? from.x : from.x + geometry.laneWidth
-  const x2 = backwards ? to.x + geometry.laneWidth : to.x
-  const bend = Math.max(30, Math.abs(x2 - x1) * 0.42) * (backwards ? -1 : 1)
-  return `M${x1} ${y1} C${x1 + bend} ${y1},${x2 - bend} ${y2},${x2} ${y2}`
+
+  if (!clip(from.x, dx, left, right) || !clip(from.y, dy, top, bottom)) return false
+  // A leader touching an obstacle at either endpoint is an attachment, not a crossing through its interior.
+  return upper > epsilon && lower < 1 - epsilon
+}
+
+/**
+ * Place visible edge phrases beside their actual connector while avoiding rendered cards and earlier labels.
+ * The caller supplies DOM-measured card obstacles; this helper deliberately knows nothing about a view's data
+ * model, so Network, Inside and Artifact cannot quietly grow different collision rules.
+ */
+export const placeEdgeLabels = (
+  labels: readonly EdgeLabelCandidate[],
+  geometry: CanvasGeometry,
+  obstacles: readonly CanvasRect[],
+  frame: CanvasRect,
+): Map<string, EdgeLabelPlacement> => {
+  const placed: CanvasRect[] = []
+  const result = new Map<string, EdgeLabelPlacement>()
+  const intersects = (a: CanvasRect, b: CanvasRect): boolean =>
+    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+  const leaderClear = (
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    blocked: readonly CanvasRect[],
+  ): boolean => {
+    // A leader is a visual attachment to an existing edge, so a displaced phrase must not draw through another
+    // controlled card or an earlier phrase. Exact clipping catches short obstacles between sample points while
+    // allowing the leader to touch the connector and the label edge at its endpoints.
+    return !blocked.some(obstacle => segmentIntersectsRect(from, to, obstacle))
+  }
+  for (const item of labels) {
+    const intra = isIntraLane(item.from, item.to)
+    const width = Math.max(28, item.width ?? (item.label.length * 4.2 + 6))
+    const height = Math.max(12, item.height ?? 12)
+    // Label coordinates and the SVG connector share this curve. If a crowded frame needs a reroute, the
+    // placement carries its curve back to Canvas so the phrase never floats beside a path the reader cannot see.
+    const connector = (bendOffset = 0): EdgeCurve => edgeCurve(item.from, item.to, geometry, bendOffset)
+    let activeCurve = connector()
+    const connectorPoint = (t: number): { x: number; y: number } => curvePoint(activeCurve, t)
+    const connectorTangent = (t: number): { x: number; y: number } => curveTangent(activeCurve, t)
+    const contains = (point: { x: number; y: number }, obstacle: CanvasRect): boolean =>
+      point.x > obstacle.x && point.x < obstacle.x + obstacle.width &&
+      point.y > obstacle.y && point.y < obstacle.y + obstacle.height
+    // Expand obstacles while choosing the sample so the attachment has a small amount of breathing room from
+    // a card boundary. Endpoints at a card edge remain valid once the sample has moved past this guard band.
+    const pointClear = (point: { x: number; y: number }): boolean => !obstacles.some(obstacle =>
+      contains(point, { x: obstacle.x - 2, y: obstacle.y - 2, width: obstacle.width + 4, height: obstacle.height + 4 }),
+    )
+    const rawAnchor = connectorPoint(0.5)
+    let anchorT = 0.5
+    if (!pointClear(rawAnchor)) {
+      const candidates: number[] = []
+      for (let step = 0; step <= 240; step += 1) {
+        const t = step / 240
+        if (pointClear(connectorPoint(t))) candidates.push(t)
+      }
+      anchorT = candidates.sort((a, b) => Math.abs(a - 0.5) - Math.abs(b - 0.5))[0] ?? anchorT
+    }
+    const anchor = connectorPoint(anchorT)
+    const anchorX = anchor.x
+    const anchorY = anchor.y
+    const tangent = connectorTangent(anchorT)
+    const tangentLength = Math.max(1, Math.hypot(tangent.x, tangent.y))
+    const normalX = -tangent.y / tangentLength
+    const normalY = tangent.x / tangentLength
+    const moved = Math.abs(anchorT - 0.5) > 0.01
+    const travel = anchorT >= 0.5 ? 1 : -1
+    const alongX = (tangent.x / tangentLength) * travel
+    const alongY = (tangent.y / tangentLength) * travel
+    // Give a moved label room beside the obstacle it was moved around. The short neutral leader then runs in
+    // free space instead of laying the text half over the card boundary.
+    const baseX = anchor.x + (moved ? alongX * (width / 2 + 4) : 0)
+    const baseY = anchor.y - 6 + (moved ? alongY * (height / 2 + 4) : 0)
+    // Search outward from the true connector in bounded steps. The leader is only drawn after the segment has
+    // passed the same obstacle test, so a farther slot remains attached to this edge rather than becoming a
+    // free-floating midpoint. A dense crossing can use a different point on the same connector as a second
+    // bounded search; this is still edge placement, and gives the phrase a real path out of an occupied gutter.
+    const offsets = [0, -12, 12, -22, 22, -34, 34, -52, 52, -72, 72, -96, 96, -124, 124]
+    type Candidate = { x: number; y: number; anchorX: number; anchorY: number; route?: EdgeCurve }
+    const placedCandidate = (candidate: Candidate): Candidate | null => {
+      const rect: CanvasRect = {
+        x: candidate.x - width / 2,
+        y: candidate.y - height + 2,
+        width,
+        height,
+      }
+      if (rect.x < frame.x + 2 || rect.x + rect.width > frame.x + frame.width - 2 ||
+          rect.y < frame.y + 2 || rect.y + rect.height > frame.y + frame.height - 2) return null
+      if (obstacles.some(obstacle => intersects(rect, obstacle)) || placed.some(previous => intersects(rect, previous))) return null
+      const needsLeader = candidate.x !== candidate.anchorX || candidate.y !== candidate.anchorY - 6
+      if (needsLeader && !leaderClear(
+        { x: candidate.anchorX, y: candidate.anchorY },
+        { x: candidate.x, y: candidate.y },
+        [...obstacles, ...placed],
+      )) return null
+      placed.push(rect)
+      return candidate
+    }
+    const candidateAt = (t: number, offset: number, route = activeCurve): Candidate => {
+      const point = curvePoint(route, t)
+      const direction = curveTangent(route, t)
+      const directionLength = Math.max(1, Math.hypot(direction.x, direction.y))
+      const candidateNormalX = -direction.y / directionLength
+      const candidateNormalY = direction.x / directionLength
+      return {
+        x: point.x + candidateNormalX * offset,
+        y: point.y - 6 + candidateNormalY * offset,
+        anchorX: point.x,
+        anchorY: point.y,
+      }
+    }
+    const distanceToLine = (point: { x: number; y: number }, start: { x: number; y: number }, end: { x: number; y: number }): number => {
+      const dx = end.x - start.x
+      const dy = end.y - start.y
+      const length = Math.hypot(dx, dy)
+      return length < 1e-7
+        ? Math.hypot(point.x - start.x, point.y - start.y)
+        : Math.abs(dy * point.x - dx * point.y + end.x * start.y - end.y * start.x) / length
+    }
+    const splitCurve = (curve: EdgeCurve): [EdgeCurve, EdgeCurve] => {
+      const midpoint = (a: { x: number; y: number }, b: { x: number; y: number }) => ({
+        x: (a.x + b.x) / 2,
+        y: (a.y + b.y) / 2,
+      })
+      const p0 = { x: curve.x1, y: curve.y1 }
+      const p1 = { x: curve.c1x, y: curve.c1y }
+      const p2 = { x: curve.c2x, y: curve.c2y }
+      const p3 = { x: curve.x2, y: curve.y2 }
+      const p01 = midpoint(p0, p1)
+      const p12 = midpoint(p1, p2)
+      const p23 = midpoint(p2, p3)
+      const p012 = midpoint(p01, p12)
+      const p123 = midpoint(p12, p23)
+      const middle = midpoint(p012, p123)
+      return [
+        { x1: p0.x, y1: p0.y, c1x: p01.x, c1y: p01.y, c2x: p012.x, c2y: p012.y, x2: middle.x, y2: middle.y },
+        { x1: middle.x, y1: middle.y, c1x: p123.x, c1y: p123.y, c2x: p23.x, c2y: p23.y, x2: p3.x, y2: p3.y },
+      ]
+    }
+    const curveClear = (route: EdgeCurve, blocked: readonly CanvasRect[]): boolean => {
+      const clear = (curve: EdgeCurve, depth: number): boolean => {
+        const start = { x: curve.x1, y: curve.y1 }
+        const end = { x: curve.x2, y: curve.y2 }
+        const flat = Math.max(
+          distanceToLine({ x: curve.c1x, y: curve.c1y }, start, end),
+          distanceToLine({ x: curve.c2x, y: curve.c2y }, start, end),
+        )
+        // Exact segment/AABB checks are applied after the cubic is flat to sub-pixel tolerance. The depth cap
+        // keeps a pathological route bounded while ensuring short obstacles cannot hide between coarse samples.
+        if (flat <= 0.5 || depth >= 8) return !blocked.some(obstacle => segmentIntersectsRect(start, end, obstacle))
+        const [left, right] = splitCurve(curve)
+        return clear(left, depth + 1) && clear(right, depth + 1)
+      }
+      return clear(route, 0)
+    }
+    let chosen: Candidate | null = null
+    let placement: EdgeLabelPlacement["placement"] = "local"
+    for (const offset of offsets) {
+      chosen = placedCandidate({
+        x: baseX + (intra ? offset * 0.35 : normalX * offset),
+        y: baseY + normalY * offset,
+        anchorX,
+        anchorY,
+      })
+      if (chosen) break
+    }
+    if (!chosen) {
+      placement = "path"
+      for (let step = 1; step < 40 && !chosen; step += 1) {
+        const t = step / 40
+        for (const offset of offsets) {
+          chosen = placedCandidate(candidateAt(t, offset))
+          if (chosen) break
+        }
+      }
+    }
+    if (!chosen) {
+      // The ordinary slots are deliberately close to the connector. Only a genuinely dense frame reaches
+      // this pass; widen the search along the same sampled path before reporting exhaustion, so the phrase can
+      // still be attached with a neutral leader rather than falling back to a colliding midpoint.
+      const widerOffsets = [
+        ...offsets,
+        -152, 152, -184, 184, -220, 220, -260, 260, -300, 300, -340, 340,
+      ]
+      for (let step = 0; step <= 80 && !chosen; step += 1) {
+        const t = step / 80
+        for (const offset of widerOffsets) {
+          chosen = placedCandidate(candidateAt(t, offset))
+          if (chosen) break
+        }
+      }
+    }
+    if (!chosen) {
+      // A label may need to leave a crowded gutter entirely. Keep the fallback on the connector itself: sample
+      // its path and a measured normal corridor, then accept only a free label box with a clear neutral leader.
+      // This stays bounded by the usable frame height and avoids a board-wide annotation search.
+      const sampleTs = Array.from({ length: 121 }, (_, index) => index / 120)
+        .sort((a, b) => Math.abs(a - 0.5) - Math.abs(b - 0.5))
+      placement = "overflow"
+      const maxOffset = Math.max(124, Math.ceil(frame.height) + height)
+      const overflowOffsets: number[] = [0]
+      for (let offset = 8; offset <= maxOffset; offset += 8) {
+        overflowOffsets.push(-offset, offset)
+      }
+      for (const t of sampleTs) {
+        if (chosen) break
+        for (const offset of overflowOffsets) {
+          chosen = placedCandidate(candidateAt(t, offset))
+          if (chosen) break
+        }
+      }
+    }
+    if (!chosen && !intra) {
+      // Last resort: route this connector through a measured free slot in the frame. The slot is not a legend or
+      // a second representation — it is the midpoint of the connector's checked cubic, so the phrase remains
+      // on the connecting line. Both the cubic and its label box must clear every card and prior phrase before
+      // this route is accepted. Keep the grid bounded to the frame; impossible duplicate edges are rejected by
+      // the server before they reach this renderer and must not turn into an unbounded layout solver.
+      placement = "reroute"
+      const minX = frame.x + 2 + width / 2
+      const maxX = frame.x + frame.width - 2 - width / 2
+      const minY = frame.y + height
+      const maxY = frame.y + frame.height - 2
+      const columns = Math.min(10, Math.max(1, Math.floor((maxX - minX) / Math.max(width + 18, 32)) + 1))
+      const rows = Math.min(10, Math.max(1, Math.floor((maxY - minY) / Math.max(height + 18, 30)) + 1))
+      const blocked = [...obstacles, ...placed]
+      for (let row = 0; row < rows && !chosen; row += 1) {
+        const y = rows === 1 ? (minY + maxY) / 2 : minY + ((maxY - minY) * row) / (rows - 1)
+        for (let column = 0; column < columns && !chosen; column += 1) {
+          const x = columns === 1 ? (minX + maxX) / 2 : minX + ((maxX - minX) * column) / (columns - 1)
+          const route = edgeCurveViaWaypoint(item.from, item.to, geometry, { x, y: y + 6 })
+          if (!curveClear(route, blocked)) continue
+          chosen = placedCandidate({ x, y, anchorX: x, anchorY: y + 6, route })
+        }
+      }
+    }
+    // A frame with no free label rectangle cannot satisfy both visibility and non-overlap. Keep that state
+    // explicit for diagnostics; the caller can reserve more frame room and repaint instead of presenting a
+    // colliding phrase as if it were clear. All normal and overflow placements above remain visible on-edge.
+    if (chosen) {
+      result.set(item.key, {
+        x: chosen.x,
+        y: chosen.y,
+        anchorX: chosen.anchorX,
+        anchorY: chosen.anchorY,
+        leader: chosen.x !== chosen.anchorX || chosen.y !== chosen.anchorY - 6,
+        placement,
+        exhausted: false,
+        available: true,
+        route: chosen.route,
+      })
+    } else {
+      result.set(item.key, {
+        x: frame.x + frame.width / 2,
+        y: frame.y + frame.height / 2,
+        anchorX,
+        anchorY,
+        leader: false,
+        placement: "overflow",
+        exhausted: true,
+        available: false,
+      })
+    }
+  }
+  return result
 }
 
 /**
@@ -577,8 +1060,10 @@ export const offsetToReveal = (
   geometry: CanvasGeometry,
   bandHeight: number,
   currentOffset: number,
+  /** Measured scene Y when an earlier expanded card shifted this row. */
+  measuredY?: number,
 ): number => {
-  const y = row * geometry.rowPitch + geometry.pad + currentOffset
+  const y = measuredY ?? (row * geometry.rowPitch + geometry.pad + currentOffset)
   if (isVisible(y, geometry, bandHeight)) return currentOffset
   // Above the window: bring the row to the top of the band. Below: bring it to the bottom.
   const desired =
