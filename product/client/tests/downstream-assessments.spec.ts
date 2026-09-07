@@ -2,6 +2,9 @@ import { expect, test } from '@playwright/test'
 import { apiLogin, login, openNavigationGroup, showcaseSeed } from './auth'
 
 test('downstream assessment actions follow authority and submit without a form-navigation no-op', async ({page,request,browser}) => {
+  // Three authenticated readers and a persisted submit/return need the same journey budget as the
+  // other assessment lifecycles below. A queued runner spent 23s in the first successful login alone.
+  test.setTimeout(90_000)
   const showcase=await showcaseSeed(request)
   await apiLogin(request)
   const apiResponse=await request.get(`${process.env.AEROLINK_E2E_API_BASE}/api/downstream-assessments?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`)
