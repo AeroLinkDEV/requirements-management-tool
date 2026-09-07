@@ -128,7 +128,7 @@ public sealed class FmsShowcaseInventoryTests(ShowcaseDatabaseFixture showcase)
             .Sum(x => x.GetProperty("Count").GetInt32());
         Assert.Equal(1250, Count(released, "Requirements/"));
         Assert.Equal(0, Count(active, "Requirements/"));
-        Assert.Equal(8 + FmsShowcaseSeeder.ActiveTraceRequestCount, Count(active, "Change requests/"));
+        Assert.Equal(10 + FmsShowcaseSeeder.ActiveTraceRequestCount, Count(active, "Change requests/"));
         Assert.Equal(0, Count(active, "Verification/"));
         var trace = Assert.Single(inventory.GetProperty("Traces").EnumerateArray(), x => x.GetProperty("Version").GetString() == "1.6");
         Assert.True(trace.GetProperty("RequirementCoverage").GetProperty("WaitingForPrerequisite").GetBoolean());
@@ -148,8 +148,8 @@ public sealed class FmsShowcaseInventoryTests(ShowcaseDatabaseFixture showcase)
         var inventory = await ReadAsync(db);
         var trace = Assert.Single(inventory.GetProperty("Traces").EnumerateArray(), x => x.GetProperty("Version").GetString() == "1.6");
         var changes = trace.GetProperty("ChangeControl");
-        Assert.Equal(8 + FmsShowcaseSeeder.ActiveTraceRequestCount, changes.GetProperty("Total").GetInt32());
-        Assert.Equal(7 + FmsShowcaseSeeder.ActiveTraceRequestCount, changes.GetProperty("OnLadder").GetInt32());
+        Assert.Equal(10 + FmsShowcaseSeeder.ActiveTraceRequestCount, changes.GetProperty("Total").GetInt32());
+        Assert.Equal(9 + FmsShowcaseSeeder.ActiveTraceRequestCount, changes.GetProperty("OnLadder").GetInt32());
         var retained = Assert.Single(changes.GetProperty("OffLadder").EnumerateArray());
         Assert.Equal(request.Id, retained.GetProperty("Id").GetGuid());
         Assert.Equal(request.DisplayNumber, retained.GetProperty("DisplayNumber").GetString());
