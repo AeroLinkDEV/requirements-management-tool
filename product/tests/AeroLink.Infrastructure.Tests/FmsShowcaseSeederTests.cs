@@ -228,6 +228,11 @@ public sealed class FmsShowcaseSeederTests
             }
 
             await seeder.EnsureSeededAsync();
+            // The operator path runs the procedure document bootstrap after the seeder (the
+            // /api/showcase/seed endpoint does this); mirror it so the invariant contract, which counts
+            // the per-key registers, sees the same installation a real seeding produces.
+            await new TestProcedureDocumentBootstrap(db).EnsureForProjectAsync(summary.ProjectId);
+            await db.SaveChangesAsync();
             interfaceScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/interface/");
             reportScenarioIds = await OwnedScenarioIdsAsync(db, summary.ProgramId, "scenario-richness/problem-report/");
             var secondReports = await db.ProblemReports.AsNoTracking().Where(x => reportScenarioIds.Contains(x.Id))

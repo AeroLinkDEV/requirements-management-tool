@@ -45,6 +45,11 @@ public sealed class ShowcaseDatabaseFixture : IAsyncLifetime
             // package records the real quality.analyst account rather than a synthetic empty identity.
             await new IdentitySeeder(db).EnsureSeededAsync();
             Summary = await new FmsShowcaseSeeder(db).EnsureSeededAsync();
+            // The operator seeding path (the /api/showcase/seed endpoint) also runs the procedure
+            // document bootstrap after the seeder; the fixture mirrors that so its template matches a
+            // real installation's per-key registers.
+            await new TestProcedureDocumentBootstrap(db).EnsureForProjectAsync(Summary.ProjectId);
+            await db.SaveChangesAsync();
         }
         // Pooling is off on the connection string, but clearing pools is what guarantees the file handle is
         // released before anything copies it. A copy taken while a connection is still open is a copy of a
