@@ -93,7 +93,9 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
             var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleAsync(x => x.ProjectId == summary.ProjectId && x.ReleaseId == summary.ActiveReleaseId);
             var baseline = await db.CandidateBaselines.Include(x => x.Selections).Include(x => x.Events).SingleAsync(x => x.Id == campaign.BaselineId);
             var requests = await db.SystemChangeRequests.Include(x => x.RequirementChanges).Include(x => x.ReviewCycles).ThenInclude(x => x.Steps).Where(x => x.TargetReleaseId == campaign.ReleaseId).ToListAsync();
-            var now = new DateTimeOffset(2025, 1, 10, 14, 0, 0, TimeSpan.Zero);
+            var now = DateTimeOffset.UtcNow;
+            Assert.All(requests, request => Assert.True(request.UpdatedAt <= now));
+            Assert.All(requests.SelectMany(request => request.ReviewCycles), cycle => Assert.True(cycle.StartedAt <= now));
             foreach (var request in requests.Where(x => x.State != ChangeRequestState.Deferred
                 && x.State != ChangeRequestState.Withdrawn
                 && x.State != ChangeRequestState.SelectedForBaseline))
