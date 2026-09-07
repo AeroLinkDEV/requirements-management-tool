@@ -152,6 +152,9 @@ project library unless explicit build provenance exists. Verification coverage f
 coverage population: System Procedures and software Cases, including the exact source Cases of selected
 software Procedures. Executable membership and coverage membership are separate facts. Retained off-ladder
 change requests are explicitly reported and are not sent through the current ladder's trace-state classifier.
+Each build and coverage summary exposes `VerificationScopes` with baseline identity and `IsExactManifest`.
+Verification rows from a pre-manifest baseline explicitly say **legacy compatibility selection**, including
+when mixed with exact selections. Such counts never claim an exact historical manifest.
 
 The inventory is descriptive evidence, not permission to reset an older installation or infer missing
 historical manifests. Qualification must inspect the actual target's inventory; a fresh-seed result does not

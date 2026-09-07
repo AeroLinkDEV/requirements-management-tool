@@ -11,7 +11,10 @@ public sealed record ShowcaseInventoryFamily(string Family, string Surface, stri
     IReadOnlyDictionary<string, int> States, IReadOnlyDictionary<string, int> Owners,
     IReadOnlyList<ShowcaseInventoryExample> Examples);
 public sealed record ShowcaseBuildInventory(Guid BuildId, string Version, bool Released,
-    bool RequirementsMaterialized, IReadOnlyList<ShowcaseInventoryFamily> Families);
+    bool RequirementsMaterialized, IReadOnlyList<ShowcaseInventoryFamily> Families,
+    IReadOnlyList<ShowcaseVerificationScope> VerificationScopes);
+public sealed record ShowcaseVerificationScope(Guid BaselineId, bool IsExactManifest,
+    int ResolvedRevisionCount, int CoverageRevisionCount);
 
 public sealed partial class FmsShowcaseSeeder
 {
@@ -87,16 +90,27 @@ public sealed partial class FmsShowcaseSeeder
                             .Select(x => new ShowcaseInventoryExample(x.Id, x.SourceChangeRequestNumber,
                                 $"{x.State}/{x.Outcome}", x.AssignedEngineerId))));
             }
-            // Use only this build's own materialized manifests. Inherited availability is a different fact.
+            // Resolve only this build's baselines. A legacy compatibility selection is not an exact
+            // manifest; retain that provenance alongside every count that uses the resolved population.
             var ownRevisionIds = new HashSet<Guid>();
             var ownCoverageRevisionIds = new HashSet<Guid>();
+            var verificationScopes = new List<ShowcaseVerificationScope>();
             foreach (var baselineId in materializedIds)
             {
                 var manifest = await TestProcedureEffectivity.ForBaselineAsync(db, baselineId, ct);
                 if (manifest is null) continue;
+                var coveragePopulation = await CoveragePopulationAsync(manifest, policy, ct);
                 ownRevisionIds.UnionWith(manifest.RevisionIds);
-                ownCoverageRevisionIds.UnionWith(await CoveragePopulationAsync(manifest, policy, ct));
+                ownCoverageRevisionIds.UnionWith(coveragePopulation);
+                verificationScopes.Add(new(baselineId, manifest.IsExactManifest, manifest.RevisionIds.Count, coveragePopulation.Count));
             }
+            var verificationScope = verificationScopes.Count == 0
+                ? "No verification membership established for this build"
+                : verificationScopes.All(x => x.IsExactManifest)
+                    ? "Own baseline exact verification membership and its coverage Case population"
+                    : verificationScopes.All(x => !x.IsExactManifest)
+                        ? "Legacy compatibility selection; not an exact verification manifest"
+                        : "Mixed exact and legacy compatibility selections; see each baseline's VerificationScopes provenance";
             var buildRequirementIds = requirements.Where(x => materializedIds.Contains(x.BaselineId))
                 .Select(x => x.Id).Distinct().ToList();
             var settled = await VerificationCoverageProjection.SettledCoveredAsync(db, buildRequirementIds, ct,
@@ -120,7 +134,8 @@ public sealed partial class FmsShowcaseSeeder
                 BuildId = release.Id, release.Version,
                 RequirementCoverage = new
                 {
-                    Scope = "This build's materialized requirements and own procedure manifest; current rework remains suspect",
+                    Scope = $"This build's materialized requirements. {verificationScope}; current rework remains suspect",
+                    VerificationScopes = verificationScopes,
                     WaitingForPrerequisite = materializedIds.Count == 0,
                     Total = buildRequirementIds.Count, Settled = settled.Count,
                     Suspect = linked.Count(id => !settled.Contains(id)),
@@ -146,7 +161,7 @@ public sealed partial class FmsShowcaseSeeder
                     .Select(x => x.Id).ToHashSet();
                 var familyReviewIds = reviews.Where(x => (int)x.Discipline == (int)family.Key.Discipline && x.ArtifactKind == family.Key.Kind)
                     .Select(x => x.Id).ToHashSet();
-                rows.Add(Summarize($"Verification/{key}", "Verification artifact workspace", "Own baseline executable membership and its exact coverage Case population",
+                rows.Add(Summarize($"Verification/{key}", "Verification artifact workspace", verificationScope,
                     revisions.Where(x => (ownRevisionIds.Contains(x.Id) || ownCoverageRevisionIds.Contains(x.Id)) && familyArtifactIds.Contains(x.ProcedureId))
                         .Select(x => new ShowcaseInventoryExample(x.Id, $"{artifactById[x.ProcedureId].BaseNumber}.{x.Revision:D2}", x.State.ToString(), x.AuthorId))));
                 rows.Add(Summarize($"Test change reviews/{key}", "Test change reviews", "Review release",
@@ -175,10 +190,10 @@ public sealed partial class FmsShowcaseSeeder
                     $"{managedById[x.DocumentId].DocumentNumber}.{x.Revision:D2}", x.State.ToString(), x.ResponsibleOwnerId))));
             rows.Add(Summarize("Baselines", "Build baseline", "Owning release",
                 buildBaselines.Select(x => new ShowcaseInventoryExample(x.Id, $"{x.BaseNumber}.{x.Revision:D2}", x.State.ToString(), null))));
-            result.Add(new(release.Id, release.Version, release.IsReleased, materializedIds.Count > 0, rows));
+            result.Add(new(release.Id, release.Version, release.IsReleased, materializedIds.Count > 0, rows, verificationScopes));
         }
         return new { ProjectId = projectId, Builds = result, ProjectFamilies = projectFamilies, Traces = traces,
-            Scope = "Build counts retain exact membership or authored release provenance. Zero materialized requirements on an in-work build means waiting for prerequisite; no predecessor population is substituted.",
+            Scope = "Build counts retain requirement membership, explicit exact/legacy verification provenance, or authored release provenance. Zero materialized requirements on an in-work build means waiting for prerequisite; no predecessor population is substituted.",
             OwnerMeaning = "Attributable author/assigned engineer, not a current-holder claim. Current holder counts and bases are reported by the Team Work projection.",
             Exceptions = "Minimums apply across the project inventory. Baselines, builds and per-family document registers are singular. Software Procedure impacts belong to the originating Case review. Interface is retired from the FMS ladder." };
     }

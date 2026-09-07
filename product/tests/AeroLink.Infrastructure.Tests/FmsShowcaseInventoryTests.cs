@@ -13,6 +13,31 @@ public sealed class FmsShowcaseInventoryTests(ShowcaseDatabaseFixture showcase)
     private async Task<JsonElement> ReadAsync(AeroLinkDbContext db) =>
         JsonSerializer.SerializeToElement(await new FmsShowcaseSeeder(db).InventoryAsync(showcase.Summary.ProgramId));
 
+    [Fact]
+    public async Task Legacy_compatibility_counts_remain_explicitly_non_exact_on_every_inventory_surface()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var baseline = await db.CandidateBaselines.SingleAsync(x => x.Id == showcase.Summary.ReleasedBaselineId);
+        db.Entry(baseline).Property(x => x.TestProceduresMaterializedAt).CurrentValue = null;
+        var release = await db.Releases.SingleAsync(x => x.Id == baseline.ReleaseId);
+        db.Entry(release).Property(x => x.ReleasedAt).CurrentValue = null;
+        await db.SaveChangesAsync();
+        var inventory = await ReadAsync(db);
+        var build = Assert.Single(inventory.GetProperty("Builds").EnumerateArray(), x => x.GetProperty("Version").GetString() == "1.5");
+        var provenance = Assert.Single(build.GetProperty("VerificationScopes").EnumerateArray());
+        Assert.Equal(baseline.Id, provenance.GetProperty("BaselineId").GetGuid());
+        Assert.False(provenance.GetProperty("IsExactManifest").GetBoolean());
+        Assert.True(provenance.GetProperty("ResolvedRevisionCount").GetInt32() > 0);
+        foreach (var row in build.GetProperty("Families").EnumerateArray().Where(x =>
+                     x.GetProperty("Family").GetString()!.StartsWith("Verification/", StringComparison.Ordinal)))
+            Assert.Contains("Legacy compatibility selection; not an exact", row.GetProperty("Scope").GetString());
+        var trace = Assert.Single(inventory.GetProperty("Traces").EnumerateArray(), x => x.GetProperty("Version").GetString() == "1.5");
+        var coverage = trace.GetProperty("RequirementCoverage");
+        Assert.Contains("Legacy compatibility selection; not an exact", coverage.GetProperty("Scope").GetString());
+        Assert.False(Assert.Single(coverage.GetProperty("VerificationScopes").EnumerateArray()).GetProperty("IsExactManifest").GetBoolean());
+    }
+
     [Theory]
     [InlineData(TestProcedureLevel.HighLevel)]
     [InlineData(TestProcedureLevel.LowLevel)]
@@ -65,6 +90,7 @@ public sealed class FmsShowcaseInventoryTests(ShowcaseDatabaseFixture showcase)
         var released = Assert.Single(builds, x => x.GetProperty("Version").GetString() == "1.5");
         var active = Assert.Single(builds, x => x.GetProperty("Version").GetString() == "1.6");
         Assert.True(released.GetProperty("RequirementsMaterialized").GetBoolean());
+        Assert.True(Assert.Single(released.GetProperty("VerificationScopes").EnumerateArray()).GetProperty("IsExactManifest").GetBoolean());
         Assert.False(active.GetProperty("RequirementsMaterialized").GetBoolean());
         static int Count(JsonElement build, string prefix) => build.GetProperty("Families").EnumerateArray()
             .Where(x => x.GetProperty("Family").GetString()!.StartsWith(prefix, StringComparison.Ordinal))
