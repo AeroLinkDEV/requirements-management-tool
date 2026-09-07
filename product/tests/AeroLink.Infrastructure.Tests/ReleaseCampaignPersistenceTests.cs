@@ -102,6 +102,8 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
                 // Re-enter those packages through their ordinary lifecycle before making the author's new
                 // classification decision.  This preserves their historical review evidence while ensuring
                 // the successor review is current and cannot rely on the seed-only v1 materialization seam.
+                if (request.State == ChangeRequestState.InReview)
+                    request.CancelReview(request.AuthorId, "Re-author this package for the test's combined release-execution baseline.", now);
                 if (request.SnapshotContractVersion < SystemChangeRequest.CurrentSnapshotContractVersion)
                 {
                     if (request.State == ChangeRequestState.Approved)
@@ -109,8 +111,6 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
                         request.Defer(request.AuthorId, "Re-open the historical package for release-execution qualification.", now);
                         request.Reinstate(request.AuthorId, now);
                     }
-                    else if (request.State == ChangeRequestState.InReview)
-                        request.CancelReview(request.AuthorId, "Re-open the historical package for release-execution qualification.", now);
                 }
                 if (request.State == ChangeRequestState.Draft)
                 {
