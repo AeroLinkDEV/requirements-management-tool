@@ -158,6 +158,8 @@ test('schedule and default-branch dispatch select the full browser lanes and ski
       assert.equal(result.status, 0, result.stderr)
       assert.ok(instances(meta).includes('browser-full-1'))
       assert.ok(instances(meta).includes('browser-full-3'))
+      assert.ok(meta.expectedJobs.find((job) => job.instance === 'gate').needs.includes('browser-full'),
+        'scheduled critical path must wait for the full browser proof')
       assert.ok(instances(meta).includes('browser-production'))
       assert.ok(!instances(meta).includes('browser-pr-1'))
       assert.ok(!instances(meta).includes('warm-chromium-cache'))

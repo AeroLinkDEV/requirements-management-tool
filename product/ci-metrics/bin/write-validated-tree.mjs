@@ -8,6 +8,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { deriveEligibility } from '../lib/provenance.mjs'
 
 const env = (name) => process.env[name] ?? ''
 
@@ -33,7 +34,6 @@ function main() {
   const jobs = Array.isArray(record.jobs) ? record.jobs : []
   const gate = jobs.find((job) => job.instance === 'gate')
   const selected = jobs.filter((job) => job.result === 'success' || job.result === 'failure' || job.result === 'cancelled')
-  const failedOrCancelled = jobs.filter((job) => job.result === 'failure' || job.result === 'cancelled')
   const gatePassed = gate?.result === 'success'
   const allSelectedPassed = selected.every((job) => job.result === 'success')
   const counts = record.counts ?? {}
@@ -65,7 +65,7 @@ function main() {
     gates: {
       selected: selected.map((job) => ({ instance: job.instance, result: job.result })),
       skipped: Array.isArray(record.skipped) ? record.skipped.map((job) => ({ instance: job.instance, reason: bounded(job.reason, 300) })) : [],
-      missing: Array.isArray(record.missing) ? record.missing.map((entry) => ({ job: bounded(entry.job, 120), reason: bounded(entry.reason, 300) })) : [],
+      missing: Array.isArray(record.missing) ? record.missing.map((entry) => ({ job: bounded(entry.job, 120), reason: bounded(entry.reason, 300) })) : null,
       gatePassed,
       allSelectedPassed,
     },
@@ -78,8 +78,11 @@ function main() {
       flaky: counts.flaky ?? null,
     },
     validatedAt: env('VALIDATED_AT') || new Date().toISOString(),
-    canAuthorizePostMergeSkip: gatePassed && allSelectedPassed && failedOrCancelled.length === 0 && record.missingTotal === 0,
+    canAuthorizePostMergeSkip: false,
   }
+  // Use the same gate/count predicate as the trusted consumer. The producer's
+  // claim is advisory, but it must not advertise contradictory evidence.
+  manifest.canAuthorizePostMergeSkip = record.missingTotal === 0 && deriveEligibility(manifest).eligible
 
   mkdirSync(dirname(outputPath), { recursive: true })
   writeFileSync(outputPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')

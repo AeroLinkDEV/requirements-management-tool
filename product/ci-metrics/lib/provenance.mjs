@@ -195,12 +195,13 @@ export function deriveEligibility(manifest) {
     if (Array.isArray(gates.selected) && gates.selected.some((job) => !job || job.result !== 'success')) {
       reasons.push('A selected gate did not succeed.')
     }
-    if (Array.isArray(gates.missing) && gates.missing.length > 0) reasons.push('Missing gate evidence is present.')
+    if (!Array.isArray(gates.missing) || gates.missing.length > 0) reasons.push('Missing gate evidence is present or unavailable.')
   }
   const totals = manifest?.verifiedTotals ?? {}
   for (const key of ['expected', 'executed', 'passed', 'failed', 'skipped']) {
     if (!Number.isInteger(totals[key]) || totals[key] < 0) reasons.push(`verifiedTotals.${key} is not a non-negative integer.`)
   }
+  if (totals.failed !== 0) reasons.push('Failed tests cannot authorize a post-merge skip.')
   if (Number.isInteger(totals.expected) && Number.isInteger(totals.executed) && Number.isInteger(totals.skipped) &&
     totals.expected !== totals.executed + totals.skipped) {
     reasons.push('verifiedTotals are incoherent: expected must equal executed + skipped.')

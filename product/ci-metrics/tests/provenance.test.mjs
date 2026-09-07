@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -116,22 +118,61 @@ test('decideProvenance picks the newest acceptable manifest', () => {
 })
 
 test('canAuthorizePostMergeSkip cannot override contradictory raw gate evidence', () => {
-  const base = manifest()
   const cases = [
     { name: 'gate-flags-false', mutate: (m) => { m.gates.gatePassed = false; m.gates.allSelectedPassed = false } },
     { name: 'failed-selected', mutate: (m) => { m.gates.selected = [{ instance: 'gate', result: 'failure' }] } },
     { name: 'missing-evidence', mutate: (m) => { m.gates.missing = [{ job: 'backend-api-1', reason: 'absent' }] } },
     { name: 'incoherent-totals', mutate: (m) => { m.verifiedTotals = { expected: 100, executed: 99, passed: 99, failed: 0, skipped: 0, flaky: 0 } } },
     { name: 'no-selected', mutate: (m) => { m.gates.selected = [] } },
+    { name: 'missing-list-absent', mutate: (m) => { delete m.gates.missing } },
+    { name: 'failed-totals', mutate: (m) => { m.verifiedTotals.passed = 99; m.verifiedTotals.failed = 1 } },
   ]
   for (const entry of cases) {
-    const crafted = base
+    const crafted = manifest()
     entry.mutate(crafted)
     const result = decide({ pushTreeSha: 'd'.repeat(40), mergedPr: { number: 1 }, manifests: [crafted] })
     assert.equal(result.outcome, 'fallback-needed', entry.name)
     assert.match(result.reason, /eligible|incoherent|No selected|Missing gate/, entry.name)
     const eligibility = deriveEligibility(crafted)
     assert.equal(eligibility.eligible, false, entry.name)
+  }
+})
+
+test('the real manifest writer agrees with consumer eligibility, including the observed queue totals', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aerolink-942-manifest-'))
+  try {
+    const input = join(directory, 'run.json')
+    const output = join(directory, 'manifest.json')
+    const good = {
+      run: { repository: 'owner/repo', workflow: 'Product quality gate', id: 100, attempt: 1,
+        sha: 'a'.repeat(40), tree: 'b'.repeat(40), event: 'merge_group' },
+      jobs: [{ instance: 'gate', result: 'success' }, { instance: 'backend-core-infrastructure', result: 'success' }],
+      missing: [], missingTotal: 0,
+      counts: { expected: 100, executed: 99, passed: 99, failed: 0, skipped: 1, flaky: 0 },
+    }
+    const cases = [
+      { record: good, eligible: true },
+      // Retained manifest from queue run 34118753501 advertised authorization.
+      { record: { ...good, counts: { expected: 3435, executed: 3384, passed: 3384, failed: 0, skipped: 1, flaky: 2 } }, eligible: false },
+      { record: { ...good, counts: { ...good.counts, passed: 98, failed: 1 } }, eligible: false },
+      { record: { ...good, counts: {} }, eligible: false },
+      { record: { ...good, missing: [{ job: 'backend-api-1', reason: 'No fragment' }] }, eligible: false },
+      { record: { ...good, missingTotal: 1 }, eligible: false },
+      { record: { ...good, missing: undefined }, eligible: false },
+      { record: { ...good, jobs: [{ instance: 'gate', result: 'failure' }] }, eligible: false },
+    ]
+    for (const { record, eligible } of cases) {
+      writeFileSync(input, JSON.stringify(record))
+      const child = spawnSync(process.execPath, [join(repoRoot, 'product/ci-metrics/bin/write-validated-tree.mjs')], {
+        encoding: 'utf8', env: { ...process.env, VALIDATED_RUN_METRICS_PATH: input, VALIDATED_TREE_OUTPUT_PATH: output },
+      })
+      assert.equal(child.status, 0, child.stderr)
+      const emitted = JSON.parse(readFileSync(output, 'utf8'))
+      assert.equal(emitted.canAuthorizePostMergeSkip, eligible)
+      assert.equal(emitted.canAuthorizePostMergeSkip, record.missingTotal === 0 && deriveEligibility(emitted).eligible)
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
   }
 })
 

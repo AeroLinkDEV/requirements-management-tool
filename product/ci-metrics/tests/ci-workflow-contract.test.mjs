@@ -14,12 +14,76 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const workflowPath = join(repoRoot, '.github', 'workflows', 'ci.yml')
+
+test('all browser lanes retain actual reports and failure traces after retry success', () => {
+  for (const [job, results, report] of [
+    ['browser-pr', 'test-results', 'journey-durations-${{ matrix.shard }}.json'],
+    ['browser-production', 'test-results-production', 'journey-durations-production.json'],
+    ['browser-full', 'test-results', 'journey-durations-full-${{ matrix.shard }}.json'],
+  ]) {
+    const uploads = stepBlocks(jobBodies(workflowLines())[job])
+      .filter((block) => /uses: actions\/upload-artifact/.test(block.lines.join('\n')))
+    for (const path of [results, report]) {
+      const upload = uploads.find((block) => block.lines.some((line) => line.trim() === `product/client/${path}` || line.trim() === `path: product/client/${path}`))
+      assert.ok(upload, `${job} must upload ${path}`)
+      assert.match(upload.lines.join('\n'), /^        if: always\(\)$/m, `${job} must retain evidence on retry-pass and cancellation`)
+      assert.match(upload.lines.join('\n'), /retention-days: 7/)
+    }
+  }
+})
+
+test('scheduled proof uses bounded duration packing and cannot be cancelled by a main push', () => {
+  const workflow = workflowLines().join('\n')
+  const group = workflow.split('\n').find((line) => line.startsWith('  group: quality-'))
+  assert.ok(group.includes("github.event_name == 'schedule' && 'scheduled'"))
+  assert.ok(group.includes("github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && format('diagnostics-{0}', github.ref)"))
+  assert.ok(group.includes('inputs.pull_request_number || github.event.pull_request.number || github.ref'))
+  const full = jobBodies(workflowLines())['browser-full'].join('\n')
+  assert.match(full, /timeout-minutes: 30/)
+  assert.match(full, /shard: \[1, 2, 3\]/)
+  assert.match(full, /scripts\/plan-journey-shard\.mjs listed\.txt/)
+  assert.match(full, /\[ "\$actual" != "\$expected" \]/)
+  assert.doesNotMatch(full, /playwright test --shard/)
+})
+
+test('the actual aggregate shell rejects incomplete scheduled and manual browser proof', () => {
+  const gate = jobBodies(workflowLines()).gate
+  assert.match(gate.join('\n'), /needs: \[[^\n]*browser-full/)
+  const step = stepBlocks(gate).find((block) => block.name === 'Summarise and enforce')
+  const runStart = step.lines.findIndex((line) => line === '        run: |')
+  assert.ok(runStart >= 0, 'the aggregate must execute a shell script')
+  const script = step.lines.slice(runStart + 1).filter((line) => line.startsWith('          ')).map((line) => line.slice(10)).join('\n')
+  const envNames = step.lines.slice(0, runStart).flatMap((line) => /^          ([A-Z_]+):/.exec(line)?.[1] ?? [])
+  const directory = mkdtempSync(join(tmpdir(), 'aerolink-942-gate-'))
+  const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash'
+  try {
+    for (const event of ['schedule', 'workflow_dispatch', 'pull_request', 'merge_group', 'push']) {
+      for (const result of ['success', 'failure', 'cancelled', 'skipped', '']) {
+        const env = { ...process.env, ...Object.fromEntries(envNames.map((name) => [name, ''])),
+          BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'success', BACKEND_CORE_INFRASTRUCTURE: 'success',
+          CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success',
+          POSTGRESQL: 'success', METRICS_TOOLING: 'success', DOCS_ONLY: 'false', LAUNCHERS_ONLY: 'false',
+          POST_MERGE_SKIP: 'false', EVENT_NAME: event, FULL_DIAGNOSTICS: 'true', BROWSER_FULL: result,
+          GITHUB_STEP_SUMMARY: join(directory, 'summary.md').replaceAll('\\', '/'),
+        }
+        const child = spawnSync(bash, ['-c', script], { encoding: 'utf8', env })
+        const required = event === 'schedule' || event === 'workflow_dispatch'
+        const shouldFail = ['failure', 'cancelled'].includes(result) || (required && result !== 'success')
+        assert.equal(child.status, shouldFail ? 1 : 0, `${event}/${result}: ${child.error ?? child.stderr}\n${child.stdout}`)
+      }
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
 
 function workflowLines() {
   return readFileSync(workflowPath, 'utf8').split(/\r?\n/)

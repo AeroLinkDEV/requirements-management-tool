@@ -143,7 +143,7 @@ if (isPushEvent) {
 // path and never a "dependency group has no instances" contradiction.
 const selectedGroups = new Set(selected.map((job) => job.group))
 const gateNeeds = ['changes', 'metrics-tooling']
-for (const group of ['backend-api', 'backend-core-domain', 'backend-core-infrastructure', 'client', 'script-contracts', 'browser-pr', 'browser-production', 'postgresql-smoke']) {
+for (const group of ['backend-api', 'backend-core-domain', 'backend-core-infrastructure', 'client', 'script-contracts', 'browser-pr', 'browser-production', 'browser-full', 'postgresql-smoke']) {
   if (selectedGroups.has(group)) gateNeeds.push(group)
 }
 addSelected('gate', 'gate', gateNeeds)
