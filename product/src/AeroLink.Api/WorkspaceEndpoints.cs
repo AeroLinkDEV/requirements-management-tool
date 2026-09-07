@@ -108,7 +108,8 @@ public static class WorkspaceEndpoints
             }
 
             var inventory = await seeder.InventoryAsync(program.Id, ct);
-            return Results.Ok(new { seeded = true, programId = program.Id, steps, healthy = invariants.All(x => x.Holds), invariants, distribution, inventory });
+            var activeTrace = await seeder.ActiveTraceInventoryAsync(program.Id, ct);
+            return Results.Ok(new { seeded = true, programId = program.Id, steps, healthy = invariants.All(x => x.Holds), invariants, distribution, inventory, activeTrace });
         });
 
         // The repair command for an existing local showcase: apply any outstanding steps and report what

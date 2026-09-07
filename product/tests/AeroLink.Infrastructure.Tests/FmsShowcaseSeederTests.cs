@@ -87,8 +87,8 @@ public sealed class FmsShowcaseSeederTests
             Assert.Equal(historicalReviews.Count, historicalReviews.Select(x => new { x.ChangeRequestId, x.Discipline }).Distinct().Count());
             Assert.True(await db.RequirementRevisions.GroupBy(x => x.ArtifactId).AllAsync(x => x.Count() >= 1));
             var active = db.SystemChangeRequests.Where(x => x.TargetReleaseId == first.ActiveReleaseId);
-            Assert.Equal(8, await active.CountAsync()); Assert.Equal(2, await active.CountAsync(x => x.State == ChangeRequestState.SelectedForBaseline));
-            Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Approved)); Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.InReview)); Assert.Equal(3, await active.CountAsync(x => x.State == ChangeRequestState.Draft)); Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Deferred)); Assert.Equal(0, await active.CountAsync(x => x.State == ChangeRequestState.Withdrawn));
+            Assert.Equal(8 + FmsShowcaseSeeder.ActiveTraceDraftCount, await active.CountAsync()); Assert.Equal(2, await active.CountAsync(x => x.State == ChangeRequestState.SelectedForBaseline));
+            Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Approved)); Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.InReview)); Assert.Equal(3 + FmsShowcaseSeeder.ActiveTraceDraftCount, await active.CountAsync(x => x.State == ChangeRequestState.Draft)); Assert.Equal(1, await active.CountAsync(x => x.State == ChangeRequestState.Deferred)); Assert.Equal(0, await active.CountAsync(x => x.State == ChangeRequestState.Withdrawn));
             // #889: the FMS ladder configures [System, HighLevel, LowLevel], so no Interface change requests are seeded.
             Assert.Equal(0, await active.CountAsync(x => x.Type == ChangeRequestType.Interface));
             Assert.Equal(0, await db.SystemChangeRequests.CountAsync(x => x.ProjectId == project.Id && x.Type == ChangeRequestType.Interface));
@@ -145,7 +145,7 @@ public sealed class FmsShowcaseSeederTests
             // [System, HighLevel, LowLevel] — and no ownership records for them remain.
             Assert.Empty(interfaceScenarioIds);
             Assert.Equal(8, firstReports.Count);
-            Assert.Equal(8, await db.SystemChangeRequests.CountAsync(x => x.ProjectId == summary.ProjectId && x.TargetReleaseId == summary.ActiveReleaseId));
+            Assert.Equal(8 + FmsShowcaseSeeder.ActiveTraceDraftCount, await db.SystemChangeRequests.CountAsync(x => x.ProjectId == summary.ProjectId && x.TargetReleaseId == summary.ActiveReleaseId));
             Assert.Equal(6, firstReports.Count(x => x.TargetReleaseId == release15Id));
             Assert.Equal(2, firstReports.Count(x => x.TargetReleaseId == summary.ActiveReleaseId));
             var eligibleOwners = new[] { "systems.author", "software.author", "test.engineer", "engineer.demo", "test.author" };

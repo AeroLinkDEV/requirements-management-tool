@@ -25,7 +25,8 @@ public sealed record FmsShowcaseSummary(Guid ProgramId, Guid ProjectId, Guid Rel
     int SystemRequirements, int HighLevelRequirements, int LowLevelRequirements, int HistoricalScrs,
     int HistoricalSwcrs, int TraceLinks, int TestProcedures, int TestExecutions, int Documents);
 
-public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicyResolver? policyResolver = null)
+public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicyResolver? policyResolver = null,
+    EvidenceFileStore? evidenceStore = null)
 {
     private static readonly SemaphoreSlim UpgradeGate = new(1, 1);
     private readonly IProjectLadderPolicyResolver resolver = policyResolver ?? new EffectiveProjectLadderPolicyResolver(db);
@@ -586,6 +587,8 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
         "code-traceability-demo",
         "interface-scenario-retirement",
         "scenario-richness",
+        "active-trace-network",
+        "active-build-verification",
     ];
 
     private async Task<IReadOnlyList<string>> ApplyUpgradeStepsAsync(Guid programId, CancellationToken ct)
@@ -612,6 +615,8 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
             ("code-traceability-demo", EnsureCodeTraceabilityAsync),
             ("interface-scenario-retirement", RetireInterfaceScenariosAsync),
             ("scenario-richness", EnsureScenarioRichnessAsync),
+            ("active-trace-network", EnsureActiveTraceScenariosAsync),
+            ("active-build-verification", EnsureActiveBuildVerificationAsync),
         };
         if (!steps.Select(x => x.Key).SequenceEqual(UpgradeStepKeys))
             throw new InvalidOperationException(
@@ -1210,6 +1215,10 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
         invariants.Add(new("trace-gap-inventory", traceCoverage.Holds, traceCoverage.Detail));
         var families = await FamilyInventoryInvariantAsync(projectId, ct);
         invariants.Add(new("family-inventory", families.Holds, families.Detail));
+        var activeTrace = await ActiveTraceInventoryAsync(programId, ct);
+        invariants.Add(new("active-trace-network", activeTrace.Holds,
+            $"{activeTrace.IncompleteArtifacts}/{activeTrace.EligibleArtifacts} active Build 1.6 trace artifacts are incomplete ({activeTrace.IncompletePercent}%). "
+            + activeTrace.Scope + " " + string.Join(" ", activeTrace.Problems)));
         return invariants;
     }
 

@@ -168,3 +168,39 @@ with no baseline, coverage, execution or Case/Procedure references. Changed or c
 untouched. The complete original draft is retained in a `ShowcaseLegacyDraftArchived` operator audit event;
 the audit and removal from the working revision register commit in the same transaction. The maintained
 warning scenario remains `SYSTP-000040`; no approved revision, coverage or manifest is repaired by rewriting it.
+
+### Active Build 1.6 trace completeness
+
+The showcase's `activeTrace` diagnostic scores the native completeness populations for the exact active
+build: current governed change-request revisions, the build's own materialized requirement revisions, and
+its exact software Case-to-Procedure obligations. The denominator includes existing operator changes, with
+one current revision per controlled number and withdrawn current revisions excluded. A requirement with
+both upstream and coverage gaps is counted once. Each population reports its own total and exact named
+gaps; the combined incomplete share must remain between 5% and 10%.
+
+A fresh Build 1.6 retains its waiting-for-materialization lifecycle. Its materialized populations are zero
+and explicitly waiting; Build 1.5 members are never substituted into this count. Other artifact-family
+relationships, checksummed execution evidence, external code samples and full release readiness remain
+separate evidence. This percentage is not a claim that the build is ready to release.
+
+Thirty named System/HLR/LLR authoring packages provide connected current work. They cover two input/recovery
+boundaries across the fifteen FMS topic areas, use exact effective requirement revisions and their actual
+System/HLR/LLR relationships, and remain Draft. They add no historical approvals or signatures. Eligible
+synthetic engineering owners are assigned by package responsibility and checked against current authority.
+The original review, approval, deferred and incomplete-authoring examples remain intact.
+
+For an existing materialized Build 1.6 with an exact Procedure manifest, the supported upgrade selects its
+effective software Procedures and adds explicitly labelled synthetic demonstration results only where no
+applicable result already exists. Existing Pass, Fail and Blocked determinations are preserved. The final
+quarter of each exact Case family remains named waiting work; no existing result is removed to manufacture
+a gap. New fixture results share a checksummed, downloadable JSON evidence artifact that explicitly states
+that no external bench execution or binary qualification is asserted. All new timestamps and attribution
+describe the current enrichment operation. Direct qualification must supply an owned evidence store; there
+is no persistent-store fallback.
+
+The exact existing HOME requirement and change-control warning identities are catalogued in source as
+retained incomplete scenarios. Their warning classes and revision identities must still match; the upgrade
+does not automatically adopt arbitrary gaps or invent missing historical upstream answers. A removed
+positive link, missing Case selection/effectivity, absent owned execution/evidence link, or changed scenario
+identity fails the diagnostic with the offending identifier. Rerunning the upgrade cannot normalize that
+drift by silently calling it intentional.
