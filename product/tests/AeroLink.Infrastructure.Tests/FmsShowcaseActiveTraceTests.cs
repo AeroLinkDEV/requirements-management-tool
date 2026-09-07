@@ -39,6 +39,15 @@ public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase
         });
         var cycle = Assert.Single(drafts.Single(x => x.Id == sharedId).ReviewCycles);
         Assert.Equal(ReviewMode.Parallel, cycle.Mode);
+        var notifications = await db.UserNotifications.Where(x => x.ArtifactId == sharedId).ToListAsync();
+        Assert.Equal(cycle.Steps.Select(x => x.ApproverId).OrderBy(x => x),
+            notifications.Select(x => x.Recipient).OrderBy(x => x));
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal("ReviewActivated", notification.Type);
+            Assert.Equal($"swcr:{sharedId}", notification.Route);
+            Assert.Equal(showcase.Summary.ProjectId, notification.ProjectId);
+        });
         Assert.Equal(SystemChangeRequest.CurrentSnapshotContractVersion, cycle.SnapshotContractVersion);
         Assert.All(cycle.Steps, x => Assert.Equal(ApprovalStepState.Active, x.State));
         Assert.Equal(new[] { "software.lead", "systems.lead" }, cycle.Steps.Select(x => x.ApproverId).OrderBy(x => x));
@@ -57,6 +66,7 @@ public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase
         // The native gate excludes the original deferred request's four historical impacts.
         Assert.Equal(28 + FmsShowcaseSeeder.ActiveTraceRequestCount * 4, gate.Total);
         Assert.Empty(await seeder.UpgradeAsync(showcase.Summary.ProgramId));
+        Assert.Equal(notifications.Count, await db.UserNotifications.CountAsync(x => x.ArtifactId == sharedId));
         Assert.Equal(impacts.Count, await db.ImpactDispositions.CountAsync(x => ids.Contains(x.ChangeRequestId)));
         Assert.Equal(1250, await db.BaselineRequirements.CountAsync(x => x.BaselineId == showcase.Summary.ReleasedBaselineId));
     }

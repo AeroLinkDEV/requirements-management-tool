@@ -201,7 +201,18 @@ public sealed partial class FmsShowcaseSeeder
         if (approvers.Count != 2) throw new InvalidOperationException("The named parallel review requires two independently eligible current Approvers.");
         var vocabulary = await new ProjectVerificationVocabularyService(db, resolver)
             .ResolveForSubmissionAsync(request.ProjectId, request.AuthorId, "showcase-upgrade", at, ct);
-        request.SubmitForReviewWithResolvedTrace(request.AuthorId, approvers, at, ReviewMode.Parallel,
+        var cycle = request.SubmitForReviewWithResolvedTrace(request.AuthorId, approvers, at, ReviewMode.Parallel,
             ladderPolicy: policy, verificationPolicy: vocabulary, traceEvidence: new(false, []));
+        foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
+        {
+            // This unconfigured workflow creates Review stages. Match the normal submission
+            // notification contract, including one exact deep link for each active reviewer.
+            if (step.StageKind != ReviewStageKind.Review)
+                throw new InvalidOperationException("The named parallel scenario expected a Review obligation.");
+            db.UserNotifications.Add(new(request.ProjectId, step.ApproverId, "ReviewActivated",
+                $"Review {request.DisplayNumber}",
+                $"You are now authorized to review {request.DisplayNumber}: {request.Title}",
+                $"swcr:{request.Id}", request.Id, at));
+        }
     }
 }
