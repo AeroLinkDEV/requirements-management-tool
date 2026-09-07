@@ -129,7 +129,14 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
                     request.SubmitForReview(request.AuthorId, [new ApproverSelection("release.reviewer", "Release Reviewer")], now);
                     await db.SaveChangesAsync();
                 }
-                while (request.State == ChangeRequestState.InReview) { request.ApproveActiveStage(request.ActiveReviewCycle!.Steps.Single(x => x.State == ApprovalStepState.Active).ApproverId, now); await db.SaveChangesAsync(); }
+                while (request.State == ChangeRequestState.InReview)
+                {
+                    // Complete every real obligation, including independently active parallel steps.
+                    var active = request.ActiveReviewCycle!.Steps
+                        .Where(x => x.State == ApprovalStepState.Active).OrderBy(x => x.Position).First();
+                    request.ApproveActiveStage(active.ApproverId, now);
+                    await db.SaveChangesAsync();
+                }
                 baseline.Select(request, "cm.test", now); await db.SaveChangesAsync();
             }
             baseline.Freeze("cm.test", now); await db.SaveChangesAsync();
