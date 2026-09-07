@@ -151,13 +151,16 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
         // change request was approved. Each one carries an owed decision: a procedure that covers it, or a
         // recorded confirmation that no test is required. A release with no requirement changes raises none,
         // and is complete by having nothing to decide.
-        var verificationImpacts = await db.VerificationImpactItems.AsNoTracking()
-            .Where(x => x.ReleaseId == campaign.ReleaseId && eligibleRequestIds.Contains(x.ChangeRequestId)).ToListAsync(ct);
-        var currentImpacts = verificationImpacts.Where(x => x.State != VerificationImpactState.Superseded).ToList();
+        // Historical superseded work remains queryable as evidence, but is not an obligation of the
+        // current release. Counts, detail and completion must all use this same current population.
+        var currentImpacts = await db.VerificationImpactItems.AsNoTracking()
+            .Where(x => x.ReleaseId == campaign.ReleaseId && eligibleRequestIds.Contains(x.ChangeRequestId)
+                && x.State != VerificationImpactState.Superseded).ToListAsync(ct);
         var impactDecided = currentImpacts.Count(x => x.State == VerificationImpactState.Resolved);
         var undecided = currentImpacts.Where(x => x.State != VerificationImpactState.Resolved).ToList();
         var testChangeReviews = await db.TestChangeReviews.AsNoTracking()
-            .Where(x => x.ReleaseId == campaign.ReleaseId && configuredDisciplines.Contains(x.Discipline)).ToListAsync(ct);
+            .Where(x => x.ReleaseId == campaign.ReleaseId && configuredDisciplines.Contains(x.Discipline)
+                && x.State != TestChangeReviewState.Superseded).ToListAsync(ct);
         var approvedTestChangeReviews = testChangeReviews.Count(x => x.State == TestChangeReviewState.Approved);
         // What this build was planned to run, and whether it has run it.
         //
@@ -230,7 +233,7 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                     AssurancePolicyLever.ChangeImpactDispositionBeforeRelease, assurance,
                     $"{impacts.Count-disposed} impact finding(s) remain pending."),
             new("baseline","Requirement baseline materialized",baseline.State is CandidateBaselineState.Frozen or CandidateBaselineState.Released && baseline.RequirementsMaterializedAt is not null,baseline.RequirementsMaterializedAt is null?0:1,1,"The release needs an exact frozen and materialized requirement set.","Freeze the candidate and materialize its requirements."),
-            new("verification_impact","Verification impact decided",impactDecided == verificationImpacts.Count,impactDecided,verificationImpacts.Count,undecided.Count==0?"Every new, modified, and orphaned requirement in this release has a recorded verification decision.":$"{undecided.Count} changed requirement(s) await a verification decision: {string.Join(", ",undecided.Take(3).Select(x=>x.SubjectDisplayNumber))}.","Assign each item to a test engineer, then record an approved verification artifact or a confirmation that no test is required."),
+            new("verification_impact","Verification impact decided",impactDecided == currentImpacts.Count,impactDecided,currentImpacts.Count,undecided.Count==0?"Every new, modified, and orphaned requirement in this release has a recorded verification decision.":$"{undecided.Count} changed requirement(s) await a verification decision: {string.Join(", ",undecided.Take(3).Select(x=>x.SubjectDisplayNumber))}.","Assign each item to a test engineer, then record an approved verification artifact or a confirmation that no test is required."),
             new("test_change_reviews","Test change requests approved",
                 configuredDisciplines.Count == 0 || (testChangeReviews.Count > 0 && approvedTestChangeReviews == testChangeReviews.Count),
                 approvedTestChangeReviews,testChangeReviews.Count,
