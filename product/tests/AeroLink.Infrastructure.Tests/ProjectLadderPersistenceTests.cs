@@ -10,6 +10,7 @@ using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -594,6 +595,63 @@ public sealed class ProjectLadderPersistenceTests : IAsyncLifetime
         var persisted = await db.ProjectLadderConfigurations.AsNoTracking().SingleAsync(x => x.ProjectId == project.Id);
         Assert.Equal(ProjectLadderConfigurationState.Draft, persisted.State);
         Assert.Null(persisted.ActivationManifestHash);
+    }
+
+    [Fact]
+    public async Task Bulk_first_content_preserves_every_record_and_seal_order_without_per_record_graph_scans()
+    {
+        async Task<int> SaveBatch(Guid projectId, int count)
+        {
+            var detections = 0;
+            var options = new DbContextOptionsBuilder<AeroLinkDbContext>(_options)
+                .LogTo(_ => detections++, [CoreEventId.DetectChangesCompleted])
+                .Options;
+            await using var db = new AeroLinkDbContext(options);
+            // Reverse insertion order must not change the attributable first seal.
+            var artifacts = Enumerable.Range(1, count).Reverse()
+                .Select(i => new RequirementArtifact(projectId, $"SYSR-{i:D8}",
+                    RequirementLevel.System, DateTimeOffset.UtcNow)).ToArray();
+            db.Requirements.AddRange(artifacts);
+            detections = 0;
+            await db.SaveChangesAsync();
+            var saveDetections = detections;
+
+            await using var check = Context();
+            Assert.Equal(count, await check.Requirements.CountAsync(x => x.ProjectId == projectId));
+            var configuration = await check.ProjectLadderConfigurations.SingleAsync(x => x.ProjectId == projectId);
+            Assert.True(configuration.IsSealed);
+            Assert.Equal("requirement-artifact", configuration.SealedContentKind);
+            Assert.Equal("SYSR-00000001", configuration.SealedContentIdentity);
+            Assert.Equal("system.persistence", configuration.SealedBy);
+            Assert.Single(await check.ProjectLadderConfigurationHistories.Where(x => x.ProjectId == projectId).ToListAsync());
+            return saveDetections;
+        }
+
+        var small = await SaveBatch(_fmsProjectId, 1);
+        var large = await SaveBatch(_otherProjectId, 100);
+        Assert.True(small > 0, "The EF diagnostic probe must observe real change detection.");
+        Assert.True(large <= small + 2,
+            $"A 100-record batch caused {large} full graph scans versus {small} for one record.");
+    }
+
+    [Fact]
+    public async Task Invalid_later_content_cannot_hide_behind_an_earlier_valid_seal_in_the_same_batch()
+    {
+        await using var db = Context();
+        var now = DateTimeOffset.UtcNow;
+        db.Requirements.Add(new RequirementArtifact(_fmsProjectId, "SYSR-00000001", RequirementLevel.System, now));
+        // This sorts after the valid requirement. Skipping already-sealed projects
+        // must never skip each remaining candidate's attributable-actor validation.
+        db.TestProcedures.Add(new TestProcedure(_fmsProjectId, "SYSTP-00001", "Invalid actor", "", now,
+            TestProcedureLevel.System));
+
+        var error = await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
+        Assert.Contains("attributable actor", error.Message);
+        await using var check = Context();
+        Assert.False((await check.ProjectLadderConfigurations.SingleAsync(x => x.ProjectId == _fmsProjectId)).IsSealed);
+        Assert.Empty(await check.Requirements.ToListAsync());
+        Assert.Empty(await check.TestProcedures.ToListAsync());
+        Assert.Empty(await check.ProjectLadderConfigurationHistories.ToListAsync());
     }
 
     private AeroLinkDbContext Context() => new(_options);
