@@ -45,7 +45,7 @@ public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase
         var gate = Assert.Single((await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default)).Gates,
             x => x.Code == "impact_disposition");
         Assert.False(gate.Complete);
-        // The native gate excludes the original withdrawn request's four historical impacts.
+        // The native gate excludes the original deferred request's four historical impacts.
         Assert.Equal(28 + FmsShowcaseSeeder.ActiveTraceDraftCount * 4, gate.Total);
         Assert.Empty(await seeder.UpgradeAsync(showcase.Summary.ProgramId));
         Assert.Equal(impacts.Count, await db.ImpactDispositions.CountAsync(x => ids.Contains(x.ChangeRequestId)));
