@@ -44,6 +44,9 @@ public static class PngImage
 
     private static bool HasSignature(byte[] bytes) => bytes.Length >= 8 && bytes.AsSpan(0, 8).SequenceEqual(Signature);
 
+    /// <summary>Whether the bytes carry the PNG signature — the byte-format identity, independent of decodability.</summary>
+    public static bool HasPngSignature(byte[] bytes) => HasSignature(bytes);
+
     private static bool ValidChunkType(ReadOnlySpan<byte> type) => type.Length == 4
         && type.ToArray().All(value => value is >= (byte)'A' and <= (byte)'Z'
             or >= (byte)'a' and <= (byte)'z');
