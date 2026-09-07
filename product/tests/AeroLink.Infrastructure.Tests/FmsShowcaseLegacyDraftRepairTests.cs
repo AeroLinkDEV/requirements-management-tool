@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +15,9 @@ public sealed class FmsShowcaseLegacyDraftRepairTests(ShowcaseDatabaseFixture sh
     [InlineData("approved", false)]
     [InlineData("coverage-reference", false)]
     [InlineData("selected", false)]
+    [InlineData("discussion", false)]
+    [InlineData("attachment", false)]
+    [InlineData("edit-session", false)]
     public async Task Upgrade_archives_only_the_exact_unreferenced_legacy_draft_and_is_idempotent(string scenario, bool archived)
     {
         using var database = showcase.Create();
@@ -28,6 +32,17 @@ public sealed class FmsShowcaseLegacyDraftRepairTests(ShowcaseDatabaseFixture sh
             scenario == "approved" ? TestProcedureState.Approved : TestProcedureState.Draft,
             scenario == "authored" ? "operator.author" : "test.author", new DateTimeOffset(2024, 11, 18, 9, 30, 0, TimeSpan.Zero));
         db.Add(legacy);
+        var now = DateTimeOffset.UtcNow;
+        if (scenario == "discussion")
+            db.ArtifactComments.Add(new ArtifactComment(projectId, "TestProcedure", procedure.Id, legacy.Id,
+                null, "Operator discussion must retain its exact revision.", "[]", "test.author", now));
+        if (scenario == "attachment")
+            db.ControlledAttachments.Add(new ControlledAttachment(projectId, "TestProcedure", procedure.Id, legacy.Id,
+                Guid.NewGuid(), 1, "Operator evidence", "Supporting authoring evidence", "fixture.txt", "text/plain",
+                4, new string('a', 64), "owned-fixture-metadata", null, "test.author", now));
+        if (scenario == "edit-session")
+            db.ArtifactEditSessions.Add(new ArtifactEditSession(projectId, "TestProcedure", procedure.Id, legacy.Id,
+                new string('a', 64), "{}", "test.author", now));
         if (scenario == "coverage-reference")
         {
             var requirement = await (from coverage in db.TestCoverage
@@ -47,6 +62,8 @@ public sealed class FmsShowcaseLegacyDraftRepairTests(ShowcaseDatabaseFixture sh
         db.Remove(marker);
         await db.SaveChangesAsync();
         var originalJson = JsonSerializer.Serialize(legacy);
+        var discussionJson = JsonSerializer.Serialize(await db.ArtifactComments.AsNoTracking()
+            .Where(x => x.RevisionId == legacy.Id).OrderBy(x => x.Id).ToListAsync());
         var approvedBefore = await db.TestProcedureRevisions.AsNoTracking().Where(x => x.State == TestProcedureState.Approved)
             .OrderBy(x => x.Id).ToListAsync();
         var approvedJson = JsonSerializer.Serialize(approvedBefore);
@@ -64,6 +81,8 @@ public sealed class FmsShowcaseLegacyDraftRepairTests(ShowcaseDatabaseFixture sh
             Assert.Equal("showcase.upgrade", record.ActorId);
         }
         else Assert.Empty(audit);
+        Assert.Equal(discussionJson, JsonSerializer.Serialize(await db.ArtifactComments.AsNoTracking()
+            .Where(x => x.RevisionId == legacy.Id).OrderBy(x => x.Id).ToListAsync()));
         Assert.Equal(approvedJson, JsonSerializer.Serialize(await db.TestProcedureRevisions.AsNoTracking()
             .Where(x => x.State == TestProcedureState.Approved).OrderBy(x => x.Id).ToListAsync()));
         Assert.Empty(await seeder.UpgradeAsync(showcase.Summary.ProgramId));

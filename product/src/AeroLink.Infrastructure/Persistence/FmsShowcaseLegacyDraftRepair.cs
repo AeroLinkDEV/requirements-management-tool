@@ -41,7 +41,15 @@ public sealed partial class FmsShowcaseSeeder
         if (await db.BaselineTestProcedures.AnyAsync(x => x.RevisionId == draft.Id, ct)
             || await db.TestCoverage.AnyAsync(x => x.ProcedureRevisionId == draft.Id, ct)
             || await db.TestExecutions.AnyAsync(x => x.ProcedureRevisionId == draft.Id, ct)
-            || await db.TestCaseProcedureLinks.AnyAsync(x => x.CaseRevisionId == draft.Id || x.ProcedureRevisionId == draft.Id, ct))
+            || await db.TestCaseProcedureLinks.AnyAsync(x => x.CaseRevisionId == draft.Id || x.ProcedureRevisionId == draft.Id, ct)
+            // These polymorphic references deliberately have no FK to verification revisions. Keep
+            // discussion, attached evidence and authoring-session history attached to a real revision.
+            || await db.ArtifactComments.AnyAsync(x => x.RevisionId == draft.Id, ct)
+            || await db.ControlledAttachments.AnyAsync(x => x.RevisionId == draft.Id, ct)
+            || await db.ControlledAttachmentStorageOperations.AnyAsync(x => x.RevisionId == draft.Id, ct)
+            || await db.ArtifactEditSessions.AnyAsync(x => x.RevisionId == draft.Id, ct)
+            || await db.ManagedDocumentLinks.AnyAsync(x => x.ArtifactId == draft.Id, ct)
+            || await db.ProblemReportLinks.AnyAsync(x => x.ArtifactId == draft.Id, ct))
             return "Preserved SYSTP-000001.01: the legacy draft has controlled references and needs operator disposition.";
 
         // Audit and removal commit atomically. Remaining restrictive foreign keys also fail closed if an
