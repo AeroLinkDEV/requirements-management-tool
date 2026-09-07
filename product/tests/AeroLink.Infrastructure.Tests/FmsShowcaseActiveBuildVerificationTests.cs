@@ -50,6 +50,7 @@ public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixt
                 cleanup: "Cleanup", toolingAutomation: "Tooling", parentKind: VerificationProcedureParentKind.Allocated);
             db.AddRange(artifact, revision, new TestCaseProcedureLink(source.RevisionId, revision.Id),
                 new TestProcedureMigrationSource(showcase.Summary.ProjectId, source.RevisionId, artifact.Id, revision.Id),
+                new BaselineTestProcedureSelection(showcase.Summary.ReleasedBaselineId, artifact.Id, revision.Id),
                 new BaselineTestProcedureSelection(baseline.Id, artifact.Id, revision.Id));
             procedures.Add(revision);
             var requirement = await (from coverage in db.TestCoverage
