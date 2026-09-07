@@ -22,7 +22,8 @@ public sealed class VerificationReadEffectivityApiTests
     {
         using var factory = new AeroLinkApiFactory(testLadderPolicy: ProcedureEnabledTestPolicy.Create());
         using var client = factory.CreateClient();
-        Guid projectId, releaseId, nextReleaseId, caseId, case00, case01, case02, procedureId, procedure00, executionId;
+        Guid projectId, releaseId, nextReleaseId, caseId, case00, case01, case02, procedureId, procedure00, executionId,
+            legacyExecutionId, unscopedExecutionId;
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -55,11 +56,17 @@ public sealed class VerificationReadEffectivityApiTests
             nextBaseline.MarkTestProceduresMaterialized("cm", new string('c', 64), 1, now);
             var execution = new TestExecution(project.Id, executable.Id, null, null, TestOutcome.Pass,
                 user.UserName, "Synthetic fixture", "Exact Procedure result", "fixture.json", now, now, release.Id);
-            db.Add(execution);
+            var build = new SoftwareBuild(project.Id, release.Id, baseline.Id, "SW-91.60", "Legacy result ownership", "cm", now);
+            var legacyExecution = new TestExecution(project.Id, executable.Id, build.Id, null, TestOutcome.Pass,
+                user.UserName, "Synthetic fixture", "Legacy Procedure result", "legacy.json", now, now);
+            var unscopedExecution = new TestExecution(project.Id, executable.Id, null, null, TestOutcome.Pass,
+                user.UserName, "Synthetic fixture", "Historical unscoped result", "unscoped.json", now, now);
+            db.AddRange(execution, build, legacyExecution, unscopedExecution);
             await db.SaveChangesAsync();
             projectId = project.Id; releaseId = release.Id; nextReleaseId = next.Id;
             caseId = testCase.Id; case00 = first.Id; case01 = carriedSuccessor.Id; case02 = future.Id;
             procedureId = procedure.Id; procedure00 = executable.Id; executionId = execution.Id;
+            legacyExecutionId = legacyExecution.Id; unscopedExecutionId = unscopedExecution.Id;
 
             var manifest = await TestProcedureEffectivity.ForBaselineAsync(db, baseline.Id, default);
             Assert.Single(manifest!.RevisionIds);
@@ -121,6 +128,15 @@ public sealed class VerificationReadEffectivityApiTests
         Assert.Equal("test-procedure", related.GetProperty("kind").GetString());
         Assert.Equal(procedureId, related.GetProperty("id").GetGuid());
         Assert.Equal(procedure00, related.GetProperty("revisionId").GetGuid());
+        await Read($"/api/artifacts/test-execution/{legacyExecutionId}?releaseId={releaseId}");
+        foreach (var resultId in new[] { executionId, legacyExecutionId, unscopedExecutionId })
+        {
+            using var crossRelease = await client.GetAsync($"/api/artifacts/test-execution/{resultId}?releaseId={nextReleaseId}");
+            Assert.Equal(HttpStatusCode.NotFound, crossRelease.StatusCode);
+        }
+        using var noInventedRelease = await client.GetAsync($"/api/artifacts/test-execution/{unscopedExecutionId}?releaseId={releaseId}");
+        Assert.Equal(HttpStatusCode.NotFound, noInventedRelease.StatusCode);
+        await Read($"/api/artifacts/test-execution/{unscopedExecutionId}");
 
         async Task<JsonElement> Read(string path)
         {
