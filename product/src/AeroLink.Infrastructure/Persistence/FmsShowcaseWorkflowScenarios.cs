@@ -55,13 +55,22 @@ public sealed partial class FmsShowcaseSeeder
                 && cycle.Steps.Count == 3 && cycle.SnapshotContractVersion == SystemChangeRequest.CurrentSnapshotContractVersion;
             if (cycle is not null)
             {
+                try
+                {
+                    using var snapshot = JsonDocument.Parse(cycle.SnapshotJson);
+                    valid &= snapshot.RootElement.TryGetProperty("isTopOfLadder", out var root) && root.ValueKind == JsonValueKind.True;
+                }
+                catch (JsonException) { valid = false; }
                 var steps = cycle.Steps.OrderBy(x => x.Position).ToList();
                 valid &= steps.Count == 3 && steps[0].StageKind == ReviewStageKind.Review
                     && steps[1].StageKind == ReviewStageKind.Review && steps[2].StageKind == ReviewStageKind.Approval
                     && steps.All(x => x.AuthoritySourceId is not null && x.AuthoritySource is not (null or ProjectAuthoritySource.AdministratorSubstitution));
                 var signatures = await db.ElectronicSignatures.AsNoTracking().Where(x => x.ArtifactId == identity.RequestId).ToListAsync(ct);
+                var signerIds = signatures.Select(x => x.UserId).Distinct().ToList();
+                var accounts = await db.UserAccounts.AsNoTracking().Where(x => signerIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
                 valid &= signatures.Count == (assessmentScenario ? 3 : 2)
                     && signatures.All(x => x.ContentHash == cycle.SnapshotHash && x.WorkflowId == cycle.WorkflowId
+                        && accounts.TryGetValue(x.UserId, out var signer) && signer.UserName == x.UserName
                         && x.Meaning.StartsWith("Synthetic showcase fixture", StringComparison.Ordinal)
                         && steps.Any(step => step.Id == x.ReviewStepId && step.ApproverId == x.UserName
                             && step.AuthoritySourceId == x.AuthoritySourceId && step.State == ApprovalStepState.Approved));
@@ -178,7 +187,8 @@ public sealed partial class FmsShowcaseSeeder
                 request.Id, kind, request.DisplayNumber, "Pending disposition of the synthetic editorial proposal.")));
             await db.SaveChangesAsync(ct);
             var cycle = request.SubmitForReviewWithResolvedTrace(request.AuthorId, selections, at, ReviewMode.Sequential,
-                workflow.Specification(), ladderPolicy: policy, verificationPolicy: vocabulary, traceEvidence: new(false, []));
+                workflow.Specification(), ladderPolicy: policy, verificationPolicy: vocabulary,
+                traceEvidence: new(policy.ParentLevels(RequirementLevel.System).Count == 0, []));
             void NotifyActiveStage()
             {
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
