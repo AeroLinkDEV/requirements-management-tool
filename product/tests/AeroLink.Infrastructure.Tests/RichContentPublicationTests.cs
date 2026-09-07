@@ -194,6 +194,87 @@ public sealed class RichContentPublicationTests
     }
 
     [Fact]
+    public void A_single_decompressed_byte_beyond_the_declared_scanlines_is_refused()
+    {
+        // #849 Finding 3's exact boundary: the decoder reads only the four bytes the 1x1 IHDR permits and
+        // then reads one more byte. A single byte of decompressed excess — far too small to trip the
+        // megabyte bomb above — must refuse the image at that check.
+        var oneByteOver = Png(1, 1, [0, 255, 0, 0, 0]);
+        Assert.False(PngImage.IsPng(oneByteOver));
+        Assert.False(PngImage.TryDecodeRgb(oneByteOver, out _, out _, out _));
+    }
+
+    [Fact]
+    public void Declared_scanlines_that_decompress_short_are_refused()
+    {
+        // IHDR declares 2x2 (fourteen filtered bytes: two rows of one filter byte plus three RGB pixels)
+        // but the compressed stream yields only the first scanline (seven bytes). The exact-sized buffer
+        // can never fill, so the image is refused rather than decoded with rows missing.
+        var shortScanlines = Png(2, 2, [0, 255, 0, 0, 0, 255, 0]);
+        Assert.False(PngImage.IsPng(shortScanlines));
+        Assert.False(PngImage.TryDecodeRgb(shortScanlines, out _, out _, out _));
+    }
+
+    [Fact]
+    public void Dimensions_over_the_decoded_pixel_ceiling_are_refused_even_with_a_completely_valid_payload()
+    {
+        // 4,096 x 2,442 is 10,002,432 pixels — just over the ten-million ceiling. Each payload below is a
+        // fully valid, complete scanline stream for its declared height, so the ceiling check is the only
+        // possible refusal reason for the over-ceiling image; its under-ceiling sibling (4,096 x 2,441 =
+        // 9,998,336 pixels) decodes, isolating the cap as the gate.
+        var over = Png(4_096, 2_442, new byte[(3 * 4_096 + 1) * 2_442]);
+        Assert.False(PngImage.IsPng(over));
+        Assert.False(PngImage.TryDecodeRgb(over, out _, out _, out _));
+
+        var under = Png(4_096, 2_441, new byte[(3 * 4_096 + 1) * 2_441]);
+        Assert.True(PngImage.TryDecodeRgb(under, out _, out _, out _));
+    }
+
+    [Fact]
+    public void An_image_at_the_decoded_pixel_ceiling_still_decodes()
+    {
+        // The total-pixel boundary is inclusive for honest artifacts: 4,000 x 2,500 is exactly ten million
+        // pixels, and decodes completely.
+        const int width = 4_000;
+        const int height = 2_500;
+        var raw = new byte[(3 * width + 1) * height]; // per row: one filter byte (0) plus the RGB pixels
+        Assert.True(PngImage.TryDecodeRgb(Png(width, height, raw), out var decodedWidth, out var decodedHeight, out var rgb));
+        Assert.Equal(width, decodedWidth);
+        Assert.Equal(height, decodedHeight);
+        Assert.Equal((long)width * height * 3, rgb.Length);
+    }
+
+    [Fact]
+    public void A_decoder_refused_png_is_omitted_from_the_pdf_rather_than_published_as_a_jpeg()
+    {
+        // IsPng runs the full decoder, so a refused PNG reports IsPng=false — which used to route its
+        // bytes into the JPEG pass-through and emit them as a DCTDecode image. The publication must
+        // instead omit the figure and name the omission beside its alt text.
+        var refused = Png(1, 1, [0, 255, 0, 0, 0]);
+        var uri = "data:image/png;base64," + Convert.ToBase64String(refused);
+        var rich = "{\"blocks\":[{\"type\":\"image\",\"dataUri\":\"" + uri + "\",\"alt\":\"Cap 1\",\"caption\":\"Cap 1\"}]}";
+
+        var output = ProfessionalPublicationRenderer.Render(Publication(rich), "pdf", "inline-images");
+        var pdf = Encoding.ASCII.GetString(output.Content);
+
+        Assert.DoesNotContain("DCTDecode", pdf);
+        Assert.DoesNotContain("/Subtype /Image", pdf);
+        Assert.Contains("[Image not retrieved: Cap 1]", pdf);
+    }
+
+    [Fact]
+    public void A_structural_jpeg_still_reaches_the_pdf_as_a_dct_image()
+    {
+        var uri = "data:image/jpeg;base64," + Convert.ToBase64String(MinimalJpeg());
+        var rich = "{\"blocks\":[{\"type\":\"image\",\"dataUri\":\"" + uri + "\",\"alt\":\"Cap 1\",\"caption\":\"Cap 1\"}]}";
+
+        var output = ProfessionalPublicationRenderer.Render(Publication(rich), "pdf", "inline-images");
+        var pdf = Encoding.ASCII.GetString(output.Content);
+
+        Assert.Contains("DCTDecode", pdf);
+    }
+
+    [Fact]
     public void An_authored_image_reaches_the_document_as_its_bytes()
     {
         var id = Guid.NewGuid();

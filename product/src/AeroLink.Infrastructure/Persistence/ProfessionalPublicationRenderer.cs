@@ -177,9 +177,11 @@ public static class ProfessionalPublicationRenderer
     private static void Entry(ZipArchive zip, string name, string content) { var entry = zip.CreateEntry(name, CompressionLevel.Optimal);entry.LastWriteTime=DeterministicArchiveTime; using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false)); writer.Write(content); }
     private static void BinaryEntry(ZipArchive zip,string name,byte[] content){var entry=zip.CreateEntry(name,CompressionLevel.Optimal);entry.LastWriteTime=DeterministicArchiveTime;using var stream=entry.Open();stream.Write(content);}
 
-    private sealed record PublicationImage(int Index,string Key,byte[] Bytes,int Width,int Height,bool IsPng)
+    private sealed record PublicationImage(int Index,string Key,byte[] Bytes,int Width,int Height,bool IsPng,bool PngFormatted)
     {
-        public string Extension => IsPng ? "png" : "jpg";
+        // The extension names the byte format: a PNG whose deep decode was refused is still PNG-formatted
+        // history, and Word renders it; only the PDF publication path refuses to carry it further.
+        public string Extension => PngFormatted ? "png" : "jpg";
     }
 
     /// <summary>One authored occurrence of an image. Bytes are shared through <see cref="Asset"/>, while
@@ -205,9 +207,10 @@ public static class ProfessionalPublicationRenderer
             if (bytes is null) continue;
             var key = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             if (!seen.Add(key)) continue;
-            var isPng = PngImage.IsPng(bytes);
-            var size = isPng ? PngImage.Size(bytes) : JpegSize(bytes);
-            result.Add(new(result.Count + 1, key, bytes, size.Width, size.Height, isPng));
+            var pngFormatted = PngImage.HasPngSignature(bytes);
+            var isPng = pngFormatted && PngImage.IsPng(bytes);
+            var size = pngFormatted ? PngImage.Size(bytes) : JpegSize(bytes);
+            result.Add(new(result.Count + 1, key, bytes, size.Width, size.Height, isPng, pngFormatted));
         }
         return result;
     }
@@ -379,13 +382,24 @@ public static class ProfessionalPublicationRenderer
         long decodedPixels = 0;
         foreach (var image in Images(publication))
         {
-            if (!image.IsPng) { result.Add((image with { Index = result.Count + 1 }, image.Bytes, "DCTDecode")); continue; }
-            var expectedPixels = (long)image.Width * image.Height;
-            if (expectedPixels > MaximumPdfDecodedPixels - decodedPixels) continue;
-            if (!PngImage.TryDecodeRgb(image.Bytes, out var width, out var height, out var rgb)) continue;
-            var pixels = (long)width * height;
-            result.Add((image with { Index = result.Count + 1, Width = width, Height = height }, Deflate(rgb), "FlateDecode"));
-            decodedPixels += pixels;
+            // A PNG the decoder refused (short or excessive inflated data, unsupported profile) is
+            // PNG-formatted bytes, not a JPEG stream: emitting it as DCTDecode would publish a wrongly
+            // typed image. It is omitted instead, and the document names the omission beside the figure's
+            // alt text; Word keeps embedding the original bytes it renders natively.
+            if (image.IsPng)
+            {
+                var expectedPixels = (long)image.Width * image.Height;
+                if (expectedPixels > MaximumPdfDecodedPixels - decodedPixels) continue;
+                if (!PngImage.TryDecodeRgb(image.Bytes, out var width, out var height, out var rgb)) continue;
+                var pixels = (long)width * height;
+                result.Add((image with { Index = result.Count + 1, Width = width, Height = height }, Deflate(rgb), "FlateDecode"));
+                decodedPixels += pixels;
+                continue;
+            }
+            if (image.PngFormatted) continue;
+            // Non-PNG bytes keep the pre-existing DCT pass-through: this finding is about PNG
+            // decompression, and gating legacy non-PNG streams is deliberately out of scope here.
+            result.Add((image with { Index = result.Count + 1 }, image.Bytes, "DCTDecode"));
         }
         return result;
     }
