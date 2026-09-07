@@ -215,12 +215,22 @@ that no external bench execution or binary qualification is asserted. All new ti
 describe the current enrichment operation. Direct qualification must supply an owned evidence store; there
 is no persistent-store fallback.
 
+New evidence remains staged until its database transaction commits. Its storage identity commits with
+the evidence and executions; the supported upgrade can resume a failed post-commit promotion without
+recreating results. A confirmed rollback removes only the new uncommitted staging file. If the database
+cannot establish whether a commit succeeded, staging is retained rather than risking committed evidence.
+
 The exact existing HOME requirement and change-control warning identities are catalogued in source as
 retained incomplete scenarios. Their warning classes and revision identities must still match; the upgrade
 does not automatically adopt arbitrary gaps or invent missing historical upstream answers. A removed
 positive link, missing Case selection/effectivity, absent owned execution/evidence link, or changed scenario
 identity fails the diagnostic with the offending identifier. Rerunning the upgrade cannot normalize that
 drift by silently calling it intentional.
+
+The specifically owned parallel-review example must retain its two active Review steps and their exact
+notifications. Reviewer progress, author cancellation or a missing notification makes that fixture's
+diagnostic fail; another shared item cannot conceal the changed scenario, and the upgrade does not undo
+the user's workflow action.
 
 Two additional, explicitly labelled synthetic editorial proposals demonstrate the native approval-stage
 holder and selected downstream-assessment approver. They retain the exact normative statements and

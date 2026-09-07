@@ -1,12 +1,15 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Data.Common;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Releases;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -14,16 +17,22 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixture showcase)
 {
     [Theory]
-    [InlineData(false, true, false, false)]
-    [InlineData(true, true, false, false)]
-    [InlineData(false, false, false, false)]
-    [InlineData(false, true, true, false)]
-    [InlineData(true, true, true, false)]
-    [InlineData(false, true, false, true)]
-    public async Task Materialized_enrichment_preserves_existing_results_and_names_the_exact_waiting_cases(bool existingFailure, bool configureStore, bool sharedProcedure, bool rejectWorkflow)
+    [InlineData(false, true, false, false, null)]
+    [InlineData(true, true, false, false, null)]
+    [InlineData(false, false, false, false, null)]
+    [InlineData(false, true, true, false, null)]
+    [InlineData(true, true, true, false, null)]
+    [InlineData(false, true, false, true, null)]
+    [InlineData(false, true, false, false, "save")]
+    [InlineData(false, true, false, false, "cancel")]
+    [InlineData(false, true, false, false, "commit")]
+    [InlineData(false, true, false, false, "promote")]
+    public async Task Materialized_enrichment_preserves_existing_results_and_names_the_exact_waiting_cases(bool existingFailure, bool configureStore, bool sharedProcedure, bool rejectWorkflow, string? failureMode)
     {
         using var database = showcase.Create();
-        await using var db = database.Context();
+        var failure = new EvidenceSaveFailure();
+        await using var db = new AeroLinkDbContext(new DbContextOptionsBuilder<AeroLinkDbContext>(database.Options)
+            .AddInterceptors(failure, new EvidenceCommitFailure(failure)).Options);
         var configuration = await db.ProjectLadderConfigurations.AsNoTracking().Include(x => x.Steps)
             .Include(x => x.AllowedUpstream).SingleAsync(x => x.ProjectId == showcase.Summary.ProjectId);
         var resolved = ProjectLadderResolver.Resolve(configuration, LegacyLadderPolicy.Instance);
@@ -80,9 +89,45 @@ public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixt
         var originalJson = JsonSerializer.Serialize(original);
         var root = Path.Combine(Path.GetTempPath(), "aerolink-913-evidence-" + Guid.NewGuid().ToString("N"));
         var store = new EvidenceFileStore(root);
+        failure.Root = root;
+        failure.Mode = failureMode;
         try
         {
             var seeder = new FmsShowcaseSeeder(db, new FixedProjectLadderPolicyResolver(policy), configureStore ? store : null);
+            if (failureMode is "save" or "cancel" or "commit")
+            {
+                var executionCount = await db.TestExecutions.CountAsync();
+                var evidenceCount = await db.EvidenceRecords.CountAsync();
+                for (var attempt = 0; attempt < 2; attempt++)
+                {
+                    using var cancellation = new CancellationTokenSource();
+                    failure.Cancellation = cancellation;
+                    if (failureMode == "cancel")
+                        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => seeder.UpgradeAsync(showcase.Summary.ProgramId, cancellation.Token));
+                    else
+                        await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.UpgradeAsync(showcase.Summary.ProgramId, cancellation.Token));
+                    db.ChangeTracker.Clear();
+                    Assert.Equal(executionCount, await db.TestExecutions.CountAsync());
+                    Assert.Equal(evidenceCount, await db.EvidenceRecords.CountAsync());
+                    Assert.Empty(Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories));
+                }
+                Assert.Equal(2, failure.Interruptions);
+                return;
+            }
+            if (failureMode == "promote")
+            {
+                await Assert.ThrowsAnyAsync<IOException>(() => seeder.UpgradeAsync(showcase.Summary.ProgramId));
+                db.ChangeTracker.Clear();
+                Assert.Single(store.EnumerateStagedKeys());
+                Assert.Single(await db.ShowcaseUpgradeSteps.Where(x => x.ProgramId == showcase.Summary.ProgramId
+                    && x.StepKey.StartsWith("active-verification-913/storage/")).ToListAsync());
+                File.Delete(failure.BlockedDirectory!);
+                failure.Mode = null;
+                // The database is already committed. The supported retry promotes its durable staged
+                // object and must neither duplicate results nor reapply a showcase step.
+                Assert.Empty(await seeder.UpgradeAsync(showcase.Summary.ProgramId));
+                Assert.Empty(store.EnumerateStagedKeys());
+            }
             if (rejectWorkflow)
             {
                 // Missing completion with surviving owned scenarios must fail closed. In the old
@@ -104,8 +149,8 @@ public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixt
             }
             if (!configureStore)
             {
-                var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.UpgradeAsync(showcase.Summary.ProgramId));
-                Assert.Contains("explicitly configured evidence store", failure.Message);
+                var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.UpgradeAsync(showcase.Summary.ProgramId));
+                Assert.Contains("explicitly configured evidence store", exception.Message);
                 Assert.Equal(originalJson, JsonSerializer.Serialize(await db.TestExecutions.AsNoTracking().SingleAsync(x => x.Id == original.Id)));
                 Assert.Empty(Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories));
                 return;
@@ -199,6 +244,55 @@ public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixt
             if (!Path.GetFullPath(root).StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Unexpected temporary evidence root.");
             Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private sealed class EvidenceSaveFailure : SaveChangesInterceptor
+    {
+        public string? Mode { get; set; }
+        public string Root { get; set; } = "";
+        public string? BlockedDirectory { get; private set; }
+        public CancellationTokenSource? Cancellation { get; set; }
+        public int Interruptions { get; set; }
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            var evidence = eventData.Context!.ChangeTracker.Entries<EvidenceRecord>()
+                .FirstOrDefault(x => x.State == EntityState.Added)?.Entity;
+            if (Mode is null || evidence is null) return ValueTask.FromResult(result);
+            var files = Directory.GetFiles(Root, "*", SearchOption.AllDirectories);
+            Assert.NotEmpty(files);
+            Assert.All(files, file => Assert.EndsWith(".stage", file));
+            if (Mode == "promote")
+            {
+                BlockedDirectory = Path.Combine(Root, evidence.StorageKey.Split('/')[0]);
+                File.WriteAllText(BlockedDirectory, "Owned fixture blocking only the final promotion directory.");
+            }
+            if (Mode == "cancel")
+            {
+                Interruptions++;
+                Cancellation!.Cancel();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            if (Mode == "save") { Interruptions++; throw new InvalidOperationException("Injected evidence save failure."); }
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class EvidenceCommitFailure(EvidenceSaveFailure failure) : DbTransactionInterceptor
+    {
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(DbTransaction transaction,
+            TransactionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
+        {
+            if (failure.Mode == "commit")
+            {
+                var files = Directory.GetFiles(failure.Root, "*", SearchOption.AllDirectories);
+                Assert.NotEmpty(files);
+                Assert.All(files, file => Assert.EndsWith(".stage", file));
+                failure.Interruptions++;
+                throw new InvalidOperationException("Injected database commit failure.");
+            }
+            return ValueTask.FromResult(result);
         }
     }
 }

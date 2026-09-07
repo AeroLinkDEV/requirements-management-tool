@@ -221,10 +221,17 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
         await EnsureFreshLeadershipRosterAsync(program.Id, FreshSqaMembershipGrantedAt, ct);
         await ApplyUpgradeStepsAsync(program.Id, ct);
         await transaction.CommitAsync(ct);
+        await PromoteCommittedShowcaseEvidenceAsync(program.Id);
         return await SummarizeAsync(program.Id, ct);
+        }
+        catch
+        {
+            await DiscardUncommittedShowcaseEvidenceAsync();
+            throw;
         }
         finally
         {
+            stagedUpgradeEvidence.Clear();
             UpgradeGate.Release();
         }
     }
@@ -534,12 +541,20 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
                 await AcquirePostgresAdvisoryLockAsync(
                     $"SELECT pg_advisory_xact_lock(hashtext({"aerolink-showcase-upgrade"}), hashtext({programId.ToString("D")}))", ct);
 
+            await PromoteCommittedShowcaseEvidenceAsync(programId);
             var applied = await ApplyUpgradeStepsAsync(programId, ct);
             await transaction.CommitAsync(ct);
+            await PromoteCommittedShowcaseEvidenceAsync(programId);
             return applied;
+        }
+        catch
+        {
+            await DiscardUncommittedShowcaseEvidenceAsync();
+            throw;
         }
         finally
         {
+            stagedUpgradeEvidence.Clear();
             UpgradeGate.Release();
         }
     }

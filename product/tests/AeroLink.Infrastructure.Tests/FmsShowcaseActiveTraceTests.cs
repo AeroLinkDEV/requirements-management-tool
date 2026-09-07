@@ -9,6 +9,35 @@ namespace AeroLink.Infrastructure.Tests;
 [Collection(ShowcaseCollection.Name)]
 public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase)
 {
+    [Theory]
+    [InlineData("approve")]
+    [InlineData("cancel")]
+    [InlineData("notification")]
+    public async Task Owned_parallel_review_drift_is_not_hidden_by_other_shared_work(string drift)
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var marker = await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == showcase.Summary.ProgramId
+            && x.StepKey == FmsShowcaseSeeder.ActiveTraceScenarioPrefix + "01/HighLevel");
+        var id = Guid.Parse(marker.Detail);
+        var request = await db.SystemChangeRequests.Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
+            .SingleAsync(x => x.Id == id);
+        var seeder = new FmsShowcaseSeeder(db);
+        Assert.True((await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId)).Holds);
+        if (drift == "approve")
+            request.ApproveActiveStage(request.ActiveReviewCycle!.Steps.First().ApproverId, DateTimeOffset.UtcNow, "Exercise normal reviewer progress.");
+        else if (drift == "cancel")
+            request.CancelReview(request.AuthorId, "Exercise normal author cancellation.", DateTimeOffset.UtcNow);
+        else
+            db.UserNotifications.Remove(await db.UserNotifications.FirstAsync(x => x.ArtifactId == id));
+        await db.SaveChangesAsync();
+        var inventory = await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId);
+        Assert.False(inventory.Holds);
+        Assert.Contains(inventory.Problems, x => x.Contains("owned active-trace-913/01/HighLevel parallel review"));
+        Assert.Empty(await seeder.UpgradeAsync(showcase.Summary.ProgramId));
+        Assert.False((await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId)).Holds);
+    }
+
     [Fact]
     public async Task Current_build_trace_population_has_named_native_gaps_and_idempotent_draft_enrichment()
     {

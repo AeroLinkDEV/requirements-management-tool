@@ -54,6 +54,21 @@ public sealed partial class FmsShowcaseSeeder
             problems.Add($"Expected {ActiveTraceScenarioChains * 3} distinct connected authoring requests; found {positive.Values.Distinct().Count()}.");
         var missing = positive.Values.Except(currentIds).ToList();
         if (missing.Count > 0) problems.Add("Named scenarios are missing from the exact current build population: " + string.Join(", ", missing));
+        if (positive.TryGetValue(ActiveTraceScenarioPrefix + "01/HighLevel", out var parallelId))
+        {
+            var parallel = await db.SystemChangeRequests.AsNoTracking().Include(x => x.ReviewCycles)
+                .ThenInclude(x => x.Steps).SingleOrDefaultAsync(x => x.Id == parallelId, ct);
+            var cycle = parallel?.ReviewCycles.Count == 1 ? parallel.ReviewCycles.Single() : null;
+            var notices = await db.UserNotifications.AsNoTracking().Where(x => x.ArtifactId == parallelId).ToListAsync(ct);
+            if (parallel?.State != ChangeRequestState.InReview || cycle is null
+                || cycle.State != ReviewCycleState.Active || cycle.Mode != ReviewMode.Parallel
+                || cycle.SnapshotContractVersion != SystemChangeRequest.CurrentSnapshotContractVersion
+                || cycle.Steps.Count != 2 || cycle.Steps.Select(x => x.ApproverId).Distinct().Count() != 2
+                || cycle.Steps.Any(x => x.State != ApprovalStepState.Active || x.StageKind != ReviewStageKind.Review)
+                || notices.Count != 2 || cycle.Steps.Any(step => notices.Count(x => x.Recipient == step.ApproverId
+                    && x.ProjectId == projectId && x.Type == "ReviewActivated" && x.Route == $"swcr:{parallelId}") != 1))
+                problems.Add("The owned active-trace-913/01/HighLevel parallel review or its two active reviewer notifications has drifted.");
+        }
         var positiveIds = positive.Values.ToHashSet();
         var links = await db.ChangeRequestUpstreamLinks.AsNoTracking().Where(x => positiveIds.Contains(x.ChangeRequestId)).ToListAsync(ct);
         var proposalIdentities = await ValidateActiveTraceProposalsAsync(programId, projectId, requests, positive, problems, ct);

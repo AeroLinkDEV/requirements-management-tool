@@ -115,11 +115,7 @@ public sealed partial class FmsShowcaseSeeder
                 CreatedAt = at, Author = actor,
                 Results = newProcedures.Select(x => new { ProcedureRevisionId = x.Id, Identifier = $"{x.BaseNumber}.{x.Revision:D2}", Outcome = "Pass", IsDemonstration = true })
             }, new JsonSerializerOptions { WriteIndented = true });
-            using var stream = new MemoryStream(bytes);
-            var stored = await evidenceStore.StoreAsync(stream, "fms-1.6-synthetic-verification-fixture.json", "application/json", ct);
-            evidence = new EvidenceRecord(projectId, stored.OriginalFileName, stored.ContentType, stored.Size,
-                stored.Sha256, stored.StorageKey, actor, at);
-            db.EvidenceRecords.Add(evidence);
+            evidence = await StageShowcaseEvidenceAsync(programId, projectId, bytes, actor, at, ct);
             foreach (var procedure in newProcedures)
             {
                 var execution = new TestExecution(projectId, procedure.Id, campaign?.SoftwareBuildId, null,
