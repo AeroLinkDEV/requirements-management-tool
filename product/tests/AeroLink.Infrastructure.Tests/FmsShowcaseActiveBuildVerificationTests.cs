@@ -121,6 +121,9 @@ public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixt
                 Assert.Single(store.EnumerateStagedKeys());
                 Assert.Single(await db.ShowcaseUpgradeSteps.Where(x => x.ProgramId == showcase.Summary.ProgramId
                     && x.StepKey.StartsWith("active-verification-913/storage/")).ToListAsync());
+                var pending = await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId);
+                Assert.False(pending.Holds);
+                Assert.Contains(pending.Problems, x => x.Contains("Owned synthetic evidence") && x.Contains("storage recovery"));
                 File.Delete(failure.BlockedDirectory!);
                 failure.Mode = null;
                 // The database is already committed. The supported retry promotes its durable staged

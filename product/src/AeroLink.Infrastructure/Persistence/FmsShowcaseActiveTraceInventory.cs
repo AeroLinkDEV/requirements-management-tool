@@ -261,6 +261,25 @@ public sealed partial class FmsShowcaseSeeder
             join evidence in db.EvidenceRecords.AsNoTracking() on link.EvidenceId equals evidence.Id
             where resultIds.Contains(link.TestExecutionId) && evidence.ProjectId == projectId
             select link.TestExecutionId).Distinct().ToListAsync(ct);
+        if (evidenceStore is not null)
+        {
+            var ownedEvidence = await (from link in db.TestExecutionEvidence.AsNoTracking()
+                join evidence in db.EvidenceRecords.AsNoTracking() on link.EvidenceId equals evidence.Id
+                where resultIds.Contains(link.TestExecutionId) && evidence.ProjectId == projectId
+                select evidence).Distinct().ToListAsync(ct);
+            foreach (var evidence in ownedEvidence)
+            {
+                try
+                {
+                    await using var verified = await evidenceStore.OpenVerifiedReadAsync(evidence.StorageKey,
+                        evidence.Size, evidence.Sha256, ct);
+                }
+                catch (EvidenceIntegrityException ex)
+                {
+                    problems.Add($"Owned synthetic evidence {evidence.Id:D} is unavailable or invalid ({ex.Code}); complete its supported storage recovery before accepting the showcase.");
+                }
+            }
+        }
         foreach (var marker in resultMarkers)
             if (!Guid.TryParse(marker.Detail, out var resultId) || !executions.TryGetValue(resultId, out var execution)
                 || !Guid.TryParse(marker.StepKey[resultPrefix.Length..], out var procedureId) || execution.ProcedureRevisionId != procedureId
