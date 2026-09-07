@@ -589,6 +589,7 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
         "scenario-richness",
         "active-trace-network",
         "active-build-verification",
+        "workflow-holder-scenarios",
     ];
 
     private async Task<IReadOnlyList<string>> ApplyUpgradeStepsAsync(Guid programId, CancellationToken ct)
@@ -617,6 +618,7 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
             ("scenario-richness", EnsureScenarioRichnessAsync),
             ("active-trace-network", EnsureActiveTraceScenariosAsync),
             ("active-build-verification", EnsureActiveBuildVerificationAsync),
+            ("workflow-holder-scenarios", EnsureWorkflowScenariosAsync),
         };
         if (!steps.Select(x => x.Key).SequenceEqual(UpgradeStepKeys))
             throw new InvalidOperationException(

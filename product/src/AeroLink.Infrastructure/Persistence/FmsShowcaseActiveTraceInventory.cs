@@ -42,6 +42,10 @@ public sealed partial class FmsShowcaseSeeder
         var markers = await db.ShowcaseUpgradeSteps.AsNoTracking()
             .Where(x => x.ProgramId == programId && x.StepKey.StartsWith(ActiveTraceScenarioPrefix)).ToListAsync(ct);
         var problems = new List<string>();
+        var workflowGaps = await ValidateWorkflowScenariosAsync(programId, projectId, releaseId, problems, ct);
+        bool NamedGap(SystemChangeRequest request) => IsNamedChangeGap(request, states[request.Id])
+            || (workflowGaps.Contains(request.Id) && states[request.Id].Upstream == "Root"
+                && states[request.Id].Downstream == "ApprovalPending");
         var positive = new Dictionary<string, Guid>(StringComparer.Ordinal);
         foreach (var marker in markers)
             if (!Guid.TryParse(marker.Detail, out var id)) problems.Add($"Invalid scenario identity: {marker.StepKey}.");
@@ -78,7 +82,7 @@ public sealed partial class FmsShowcaseSeeder
         foreach (var request in requests.Where(x => positiveIds.Contains(x.Id) && x.RequirementChanges.Count != 1))
             problems.Add($"The exact proposal of {request.DisplayNumber} has drifted.");
         var changeGaps = requests.Where(x => states[x.Id].Overall == "ActionRequired")
-            .Select(x => new ShowcaseTraceGap(x.Id, x.DisplayNumber, states[x.Id].Warnings, IsNamedChangeGap(x, states[x.Id]))).ToList();
+            .Select(x => new ShowcaseTraceGap(x.Id, x.DisplayNumber, states[x.Id].Warnings, NamedGap(x))).ToList();
         var populations = new List<ShowcaseTracePopulation> { new("Current change requests", requests.Count, changeGaps) };
         var baseline = await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x => x.ReleaseId == releaseId, ct);
         var waiting = baseline?.RequirementsMaterializedAt is null || baseline.TestProceduresMaterializedAt is null;
@@ -99,7 +103,7 @@ public sealed partial class FmsShowcaseSeeder
         return new(projectId, releaseId, requests.Count, changeGaps.Count, total, gaps, percentage, problems.Count == 0,
             "Native completeness populations in exact FMS Build 1.6: current on-ladder CR revisions (including operator work, one per controlled number, excluding withdrawn current revisions), this build's own materialized requirement revisions, and its exact software Case-to-Procedure obligations. Each artifact is counted once within its distinct family; a requirement with two gaps is one incomplete requirement. Pending assessments are incomplete native CR states. No released predecessor is substituted. Other artifact-family relationships, execution evidence and release readiness remain separately inventoried and do not inflate this denominator.",
             waiting, populations, requests.Select(x => new ShowcaseActiveTraceRow(x.Id, x.DisplayNumber, x.State.ToString(), states[x.Id].Upstream,
-                states[x.Id].Downstream, states[x.Id].Overall, IsNamedChangeGap(x, states[x.Id]), states[x.Id].Warnings)).ToList(), problems);
+                states[x.Id].Downstream, states[x.Id].Overall, NamedGap(x), states[x.Id].Warnings)).ToList(), problems);
     }
 
     private async Task<Dictionary<Guid, ActiveTraceProposalIdentity>> ValidateActiveTraceProposalsAsync(Guid programId,

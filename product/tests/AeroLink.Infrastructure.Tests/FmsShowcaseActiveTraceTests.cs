@@ -17,7 +17,7 @@ public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase
         var seeder = new FmsShowcaseSeeder(db);
         var inventory = await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId);
         Assert.True(inventory.Holds, string.Join(" ", inventory.Problems));
-        Assert.Equal(8 + FmsShowcaseSeeder.ActiveTraceRequestCount, inventory.CurrentChanges);
+        Assert.Equal(10 + FmsShowcaseSeeder.ActiveTraceRequestCount, inventory.CurrentChanges);
         Assert.InRange(inventory.IncompletePercent, 5, 10);
         Assert.All(inventory.Records.Where(x => x.Overall == "ActionRequired"), x => Assert.True(x.NamedNegative));
         var ownedIds = await db.ShowcaseUpgradeSteps.Where(x => x.ProgramId == showcase.Summary.ProgramId
@@ -64,7 +64,7 @@ public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase
             x => x.Code == "impact_disposition");
         Assert.False(gate.Complete);
         // The native gate excludes the original deferred request's four historical impacts.
-        Assert.Equal(28 + FmsShowcaseSeeder.ActiveTraceRequestCount * 4, gate.Total);
+        Assert.Equal(36 + FmsShowcaseSeeder.ActiveTraceRequestCount * 4, gate.Total);
         Assert.Empty(await seeder.UpgradeAsync(showcase.Summary.ProgramId));
         Assert.Equal(notifications.Count, await db.UserNotifications.CountAsync(x => x.ArtifactId == sharedId));
         Assert.Equal(impacts.Count, await db.ImpactDispositions.CountAsync(x => ids.Contains(x.ChangeRequestId)));

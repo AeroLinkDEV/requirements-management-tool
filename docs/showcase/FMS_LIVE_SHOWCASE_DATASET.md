@@ -221,3 +221,24 @@ does not automatically adopt arbitrary gaps or invent missing historical upstrea
 positive link, missing Case selection/effectivity, absent owned execution/evidence link, or changed scenario
 identity fails the diagnostic with the offending identifier. Rerunning the upgrade cannot normalize that
 drift by silently calling it intentional.
+
+Two additional, explicitly labelled synthetic editorial proposals demonstrate the native approval-stage
+holder and selected downstream-assessment approver. They retain the exact normative statements and
+verification methods of the authoritative source revisions of SYSR-000149 and SYSR-000150, changing only
+the proposed engineering rationale. Neither proposal is selected into a baseline. The configured System
+workflow is preserved; a fresh showcase with none records the same peer-review, system-lead-review and
+software-lead-approval arrangement already used by HOME, with modern explicit authority kinds.
+Incompatible workflow customization or existing requirement contention refuses enrichment.
+
+The first proposal stops at the active Approval stage. The second completes its synthetic review sequence
+and opens the native HLR downstream assessment; `software.author` records an explicitly synthetic no-change
+conclusion, and independent `software.lead` holds its pending approval. The conclusion is justified by the
+unchanged normative statement, and is not presented as an approved assessment. Each generated review
+decision is labelled as a synthetic showcase fixture, including its signature meaning, rationale and
+origin; it is not a claim of human review. Account identity, authority source, frozen step, workflow version,
+snapshot hash and current timestamp are recorded. Original reviews, signatures and assessments are untouched.
+Every activated stage receives its normal review/approval notification.
+
+The exact ownership maps, unchanged proposal content, signature hashes and native pending holder states are
+validated. The one pending no-change assessment is a named `ApprovalPending` trace gap; it increases the
+same current-build denominator by two requests, without substituting another requirement or build population.
