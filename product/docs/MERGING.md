@@ -102,6 +102,29 @@ candidate code cannot mint that check. Changes to `.github/`, `product/test-plan
 `product/ci-metrics/` deliberately refuse automatic queue binding and require an explicitly reviewed
 authority-maintenance cutover.
 
+## Prepare a maintenance review packet
+
+The read-only preflight collects current GitHub PR, queue, run, native check publisher, complete protected
+Git trees, ruleset and credential-environment metadata. Run it from a reviewed checkout, with an output path
+outside `product/.local`:
+
+```text
+node product/ci-metrics/bin/prepare-authority-maintenance.mjs <pr-number> <product-run-id> <new-output.json>
+node --test product/ci-metrics/tests/maintenance-preflight.test.mjs
+```
+
+The output includes a digest of the evidence and all existing verifier refusals. `REVIEW_REQUIRED` means
+only that the packet can be reviewed; it cannot authorize an App check or a merge. `REFUSE` retains the
+missing, failed, stale or mismatched evidence. A diagnostic run, an obsolete queue candidate or a PR-head
+green check cannot replace the current composed candidate. Truncated responses and changes observed during
+collection fail closed. The command does not execute candidate code, read candidate artifacts, approve an
+environment, retrieve the App key or alter repository settings. Existing output files cannot be overwritten.
+
+This preparation tool does not supply the approval/publishing path or solve its initial trust-root bootstrap.
+The current verifier continues to refuse protected changes. Activation still requires an explicitly reviewed
+procedure, exact candidate qualification, owner approval of the live cutover and restoration steps, and
+verification of the unchanged required publishers and main-only secret boundary.
+
 ## Related
 
 - [Feedback time](BROWSER_AND_BACKEND_FEEDBACK_TIME.md) — **read before changing CI.** Where a pull request's
