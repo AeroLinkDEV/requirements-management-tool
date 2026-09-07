@@ -63,6 +63,7 @@ public sealed partial class FmsShowcaseSeeder
             ("interrupted-update recovery", "An interrupted update shall retain the last validated state and report recovery required before accepting another update.")
         };
         var added = 0;
+        SystemChangeRequest? parallelReviewRequest = null;
         for (var index = 1; index <= ActiveTraceScenarioChains; index++)
         {
             var topic = Topics[(index - 1) % Topics.Length];
@@ -129,7 +130,7 @@ public sealed partial class FmsShowcaseSeeder
                     request.AddUpstreamLink(author, parent.Id, parent.DisplayNumber, release.Id, release.Version,
                         $"This {level} proposal develops the same {topic} {scenario.Name} change at the next configured level.", at);
                 if (index == 1 && level == RequirementLevel.HighLevel)
-                    await SubmitActiveTraceParallelReviewAsync(request, programId, policy, at, ct);
+                    parallelReviewRequest = request;
                 db.SystemChangeRequests.Add(request);
                 // The campaign predates these authoring scenarios. Register their real pending work;
                 // never let the older campaign snapshot imply these new impacts were dispositioned.
@@ -152,6 +153,13 @@ public sealed partial class FmsShowcaseSeeder
             }
         }
         await db.SaveChangesAsync(ct);
+        if (parallelReviewRequest is not null)
+        {
+            // PostgreSQL protects authored upstream history with the persisted Draft state. Store
+            // the draft first, then cross the review boundary inside the same upgrade transaction.
+            await SubmitActiveTraceParallelReviewAsync(parallelReviewRequest, programId, policy, at, ct);
+            await db.SaveChangesAsync(ct);
+        }
         return $"Added {added} current-build authoring requests: {ActiveTraceScenarioChains} named System/HLR/LLR chains, including one live parallel review. The existing named incomplete scenarios remain visible; released history is unchanged.";
     }
 
