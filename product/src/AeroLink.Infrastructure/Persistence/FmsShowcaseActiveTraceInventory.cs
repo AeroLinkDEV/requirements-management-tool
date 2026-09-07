@@ -202,6 +202,8 @@ public sealed partial class FmsShowcaseSeeder
             .Select(policy.ProcedureLevel).ToHashSet();
         var campaign = await db.ReleaseCampaigns.AsNoTracking().SingleOrDefaultAsync(x => x.ReleaseId == releaseId && x.BaselineId == baselineId, ct);
         var obligations = await CaseProcedureSatisfaction.ForBaselineAsync(db, baselineId, releaseId, campaign?.SoftwareBuildId, levels, ct);
+        var latestResults = await ExecutionScope.LatestByProcedureAsync(db,
+            obligations.SelectMany(x => x.RequiredProcedureRevisionIds).Distinct().ToList(), releaseId, campaign?.SoftwareBuildId, ct);
         var caseIds = obligations.Select(x => x.CaseRevisionId).ToList();
         var cases = await (from revision in db.TestProcedureRevisions.AsNoTracking()
             join artifact in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals artifact.Id
@@ -229,6 +231,7 @@ public sealed partial class FmsShowcaseSeeder
         var caseGaps = obligations.Where(x => !x.Satisfied).Select(x => new ShowcaseTraceGap(x.CaseRevisionId, names[x.CaseRevisionId],
             [x.HasSuspectLink ? "Suspect Case-to-Procedure link" : x.RequiredProcedureRevisionIds.Count == 0 ? "No required Procedure" : "No complete selected, effective, build-scoped Pass"],
             waitingIds.Contains(x.CaseRevisionId) && !x.HasSuspectLink && x.RequiredProcedureRevisionIds.Count > 0
+            && x.RequiredProcedureRevisionIds.All(id => !latestResults.ContainsKey(id))
             && manifest?.IsExactManifest == true && x.RequiredProcedureRevisionIds.All(id => manifest.RevisionIds.Contains(id) && selected.Contains(id)))).ToList();
         populations.Add(new("Exact software Case-to-Procedure obligations", obligations.Count, caseGaps));
         var resultPrefix = ActiveVerificationPrefix + "result/";

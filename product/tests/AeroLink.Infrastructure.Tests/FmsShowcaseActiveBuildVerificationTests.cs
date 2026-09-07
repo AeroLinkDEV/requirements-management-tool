@@ -148,10 +148,30 @@ public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixt
             await db.SaveChangesAsync();
             if (!sharedProcedure)
             {
-                db.ShowcaseUpgradeSteps.RemoveRange(await db.ShowcaseUpgradeSteps.Where(x => x.ProgramId == showcase.Summary.ProgramId && x.StepKey.StartsWith("active-verification-913/waiting/")).ToListAsync());
+                var waitingMarkers = await db.ShowcaseUpgradeSteps.Where(x => x.ProgramId == showcase.Summary.ProgramId && x.StepKey.StartsWith("active-verification-913/waiting/")).ToListAsync();
+                db.ShowcaseUpgradeSteps.RemoveRange(waitingMarkers);
                 await db.SaveChangesAsync();
                 Assert.Contains((await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId)).Problems,
                     x => x.Contains("Case-to-Procedure") && x.Contains("HLRTC-000004"));
+                db.ShowcaseUpgradeSteps.AddRange(waitingMarkers);
+                await db.SaveChangesAsync();
+                foreach (var outcome in new[] { TestOutcome.Fail, TestOutcome.Blocked })
+                {
+                    var recordedAt = DateTimeOffset.UtcNow;
+                    var operatorResult = new TestExecution(showcase.Summary.ProjectId, procedures[3].Id, null, null,
+                        outcome, "test.engineer", "Operator result on a previously waiting Procedure",
+                        "An actual unsuccessful result is not intentional waiting work.", "operator-evidence",
+                        recordedAt, recordedAt, showcase.Summary.ActiveReleaseId);
+                    db.TestExecutions.Add(operatorResult);
+                    await db.SaveChangesAsync();
+                    var failedInventory = await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId);
+                    var gap = Assert.Single(failedInventory.Populations.Single(x => x.Family == "Exact software Case-to-Procedure obligations").Gaps,
+                        x => x.Id == sources[3].RevisionId);
+                    Assert.False(gap.NamedNegative);
+                    Assert.Contains(failedInventory.Problems, x => x.Contains("Unplanned") && x.Contains("HLRTC-000004"));
+                    Assert.Empty(await seeder.UpgradeAsync(showcase.Summary.ProgramId));
+                    Assert.Equal(outcome, (await db.TestExecutions.AsNoTracking().SingleAsync(x => x.Id == operatorResult.Id)).Outcome);
+                }
             }
         }
         finally
