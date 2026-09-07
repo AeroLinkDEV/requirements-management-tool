@@ -161,7 +161,7 @@ function githubFixture({ advanceQueue = false, truncate = false, incomplete = fa
     [`${root}/git/trees/${sha('d')}?recursive=1`, tree(sha('d'), sha('1'))],
     [`${root}/git/trees/${sha('e')}?recursive=1`, { ...tree(sha('e'), sha('2')), truncated: truncate }],
   ])
-  return { calls, prNumber, runId,
+  return { calls, prNumber, runId, preparer: { commitSha: sha('4'), treeSha: sha('5') },
     read: async path => { calls.push(path); assert.ok(table.has(path), `Unexpected read: ${path}`); return structuredClone(table.get(path)) },
     graphql: async query => {
       assert.match(query, /^query /)
@@ -176,9 +176,21 @@ test('collector binds real endpoint shapes, complete trees, native publisher and
   const inputs = githubFixture()
   const packet = await collectMaintenancePreflight(inputs)
   assert.equal(packet.assessment.disposition, 'REVIEW_REQUIRED')
-  assert.equal(packet.digest, evidenceDigest(packet.evidence))
+  const { digest, ...payload } = packet
+  assert.equal(digest, evidenceDigest(payload))
   assert.equal(inputs.calls.filter(path => path.includes('/jobs?filter=latest')).length, 1)
   assert.ok(inputs.calls.includes(`/repos/${repository}/check-suites/43/check-runs?filter=latest&per_page=100`))
+})
+
+test('review digest binds the preparer revision and its decision, not just the raw GitHub evidence', async () => {
+  const inputs = githubFixture()
+  const packet = await collectMaintenancePreflight(inputs)
+  const changed = await collectMaintenancePreflight({ ...githubFixture(), preparer: { commitSha: sha('6'), treeSha: sha('7') } })
+  assert.notEqual(packet.digest, changed.digest)
+  const { digest, ...payload } = packet
+  payload.assessment.reasons.push('additional-refusal')
+  assert.notEqual(digest, evidenceDigest(payload))
+  await assert.rejects(collectMaintenancePreflight({ ...githubFixture(), preparer: undefined }), /preparer commit/)
 })
 
 for (const [option, error] of [['advanceQueue', /advanced/], ['truncate', /untruncated/], ['incomplete', /pagination/]]) {

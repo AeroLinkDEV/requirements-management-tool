@@ -8,8 +8,10 @@ const requireSha = (value, label) => {
 }
 
 /** Only read functions are injected. No artifact contents, candidate code or credentials enter the bundle. */
-export async function collectMaintenancePreflight({ read, graphql, prNumber, runId }) {
+export async function collectMaintenancePreflight({ read, graphql, prNumber, runId, preparer }) {
   if (!Number.isSafeInteger(prNumber) || prNumber < 1 || !Number.isSafeInteger(runId) || runId < 1) throw new Error('Positive integer PR and run IDs are required.')
+  requireSha(preparer?.commitSha, 'reviewed preparer commit')
+  requireSha(preparer?.treeSha, 'reviewed preparer tree')
   const root = `/repos/${repository}`
   const queueQuery = `query { repository(owner:"AeroLinkDEV",name:"requirements-management-tool") { pullRequest(number:${prNumber}) { number headRefOid mergeQueueEntry { position state headCommit { oid } baseCommit { oid } } } } }`
   const [pr, run, rawRun, jobs, main, ruleset, environment, branchPolicies, queueBody] = await Promise.all([
@@ -63,6 +65,7 @@ export async function collectMaintenancePreflight({ read, graphql, prNumber, run
   if (currentRun.runAttempt !== run.runAttempt || currentRun.status !== run.status || currentRun.headSha !== run.headSha ||
       currentMain.sha !== main.sha || currentPr.head?.sha !== pr.head?.sha || currentPr.state !== pr.state ||
       evidenceDigest(currentQueue) !== evidenceDigest(queueBody)) throw new Error('Evidence advanced during collection; collect a fresh packet.')
-  return { schemaVersion: 'aerolink-authority-maintenance-preflight/v1',
-    digest: evidenceDigest(evidence), assessment: evaluateMaintenancePreflight(evidence), evidence }
+  const packet = { schemaVersion: 'aerolink-authority-maintenance-preflight/v1', preparer,
+    assessment: evaluateMaintenancePreflight(evidence), evidence }
+  return { ...packet, digest: evidenceDigest(packet) }
 }

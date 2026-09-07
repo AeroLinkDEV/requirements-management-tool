@@ -113,7 +113,8 @@ node product/ci-metrics/bin/prepare-authority-maintenance.mjs <pr-number> <produ
 node --test product/ci-metrics/tests/maintenance-preflight.test.mjs
 ```
 
-The output includes a digest of the evidence and all existing verifier refusals. `REVIEW_REQUIRED` means
+The output includes the clean preparer commit/tree and a digest of that identity, the evidence and all
+existing verifier refusals. The preparer's identity is checked again after collection. `REVIEW_REQUIRED` means
 only that the packet can be reviewed; it cannot authorize an App check or a merge. `REFUSE` retains the
 missing, failed, stale or mismatched evidence. A diagnostic run, an obsolete queue candidate or a PR-head
 green check cannot replace the current composed candidate. Truncated responses and changes observed during
