@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -66,5 +67,39 @@ public sealed class FmsShowcaseActiveTraceTests(ShowcaseDatabaseFixture showcase
         if (!wrongParent) Assert.Contains(before.Problems, x => x.Contains(request.DisplayNumber, StringComparison.Ordinal));
         Assert.Empty(await seeder.UpgradeAsync(programId));
         Assert.False((await seeder.ActiveTraceInventoryAsync(programId)).Holds);
+    }
+
+    [Theory]
+    [InlineData("number")]
+    [InlineData("revision")]
+    [InlineData("upstream")]
+    public async Task Editing_one_proposal_to_the_wrong_exact_requirement_fails_without_changing_its_CR_links(string field)
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var marker = await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == showcase.Summary.ProgramId
+            && x.StepKey == FmsShowcaseSeeder.ActiveTraceScenarioPrefix + "01/HighLevel");
+        var requestId = Guid.Parse(marker.Detail);
+        var request = await db.SystemChangeRequests.Include(x => x.RequirementChanges).Include(x => x.UpstreamLinks)
+            .SingleAsync(x => x.Id == requestId);
+        var original = Assert.Single(request.RequirementChanges);
+        var upstream = JsonSerializer.Deserialize<Guid[]>(original.ProposedUpstreamRevisionIdsJson)!;
+        var otherParent = await (from revision in db.RequirementRevisions
+            join artifact in db.Requirements on revision.ArtifactId equals artifact.Id
+            where artifact.ProjectId == showcase.Summary.ProjectId && artifact.Level == RequirementLevel.System
+                && !upstream.Contains(revision.Id) select revision.Id).FirstAsync();
+        request.RemoveRequirementChange(request.AuthorId, original.Id, DateTimeOffset.UtcNow);
+        request.AddRequirementChange(request.AuthorId, field == "number" ? "HLR-000002" : original.BaseNumber,
+            field == "revision" ? original.Revision + 1 : original.Revision, original.Level, original.Kind,
+            original.Statement, original.Rationale, original.VerificationMethod, DateTimeOffset.UtcNow,
+            impactDispositionJson: original.ImpactDispositionJson,
+            proposedUpstreamRevisionIdsJson: field == "upstream" ? JsonSerializer.Serialize(new[] { otherParent }) : original.ProposedUpstreamRevisionIdsJson);
+        await db.SaveChangesAsync();
+        Assert.Single(request.UpstreamLinks);
+        var seeder = new FmsShowcaseSeeder(db);
+        Assert.Contains((await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId)).Problems,
+            x => x.Contains($"exact proposal of {request.DisplayNumber}"));
+        Assert.Empty(await seeder.UpgradeAsync(showcase.Summary.ProgramId));
+        Assert.False((await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId)).Holds);
     }
 }

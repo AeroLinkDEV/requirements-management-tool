@@ -633,7 +633,8 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
                 // recorded its marker before the final rows/links were committed; do not let that marker
                 // turn an incomplete showcase into a permanent no-op. Removing only the upgrade marker
                 // makes the same atomic run retry the owned additive work.
-                if (step.Key == "scenario-richness" && !await ScenarioRichnessCompleteAsync(programId, ct))
+                if ((step.Key == "scenario-richness" && !await ScenarioRichnessCompleteAsync(programId, ct))
+                    || (step.Key == "active-build-verification" && await ActiveBuildVerificationMustResumeAsync(db, programId, ct)))
                 {
                     db.ShowcaseUpgradeSteps.Remove(recorded);
                     await db.SaveChangesAsync(ct);

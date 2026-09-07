@@ -31,7 +31,11 @@ public sealed class ShowcaseUpgradeTests(ShowcaseDatabaseFixture showcase)
         db.VerificationImpactDecisionHistory.RemoveRange(await db.VerificationImpactDecisionHistory.ToListAsync());
         db.VerificationImpactItems.RemoveRange(await db.VerificationImpactItems.ToListAsync());
         db.TestChangeReviews.RemoveRange(await db.TestChangeReviews.ToListAsync());
-        db.ShowcaseUpgradeSteps.RemoveRange(await db.ShowcaseUpgradeSteps.ToListAsync());
+        // Rewind operational completion, retaining exact ownership of the current additive authoring
+        // fixtures. Losing those identities would describe corruption, not an earlier upgrade version.
+        db.ShowcaseUpgradeSteps.RemoveRange(await db.ShowcaseUpgradeSteps.Where(x =>
+            !x.StepKey.StartsWith(FmsShowcaseSeeder.ActiveTraceScenarioPrefix)
+            && !x.StepKey.StartsWith("active-trace-proposal-913/")).ToListAsync());
         await db.SaveChangesAsync();
     }
 

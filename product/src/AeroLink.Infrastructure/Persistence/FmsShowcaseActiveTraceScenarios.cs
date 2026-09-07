@@ -13,6 +13,8 @@ public sealed partial class FmsShowcaseSeeder
     public const int ActiveTraceScenarioChains = 30;
     public const int ActiveTraceDraftCount = ActiveTraceScenarioChains * 3;
     public const string ActiveTraceScenarioPrefix = "active-trace-913/";
+    private const string ActiveTraceProposalPrefix = "active-trace-proposal-913/";
+    private sealed record ActiveTraceProposalIdentity(Guid RequestId, Guid BaselineId, Guid RequirementRevisionId, Guid? UpstreamRevisionId);
 
     /// <summary>
     /// Adds named, connected authoring work to the active build. The eight original packages retain their
@@ -124,6 +126,9 @@ public sealed partial class FmsShowcaseSeeder
                         $"This {level} proposal develops the same {topic} {scenario.Name} change at the next configured level.", at);
                 db.SystemChangeRequests.Add(request);
                 db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId, key, request.Id.ToString("D"), at));
+                db.ShowcaseUpgradeSteps.Add(new ShowcaseUpgradeStep(programId,
+                    $"{ActiveTraceProposalPrefix}{index:D2}/{level}",
+                    JsonSerializer.Serialize(new ActiveTraceProposalIdentity(request.Id, baselineId, member.Id, parentRequirement)), at));
                 parent = request;
                 parentRequirement = member.Id;
                 added++;

@@ -1,5 +1,7 @@
+using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
 
@@ -50,6 +52,7 @@ public sealed partial class FmsShowcaseSeeder
         if (missing.Count > 0) problems.Add("Named scenarios are missing from the exact current build population: " + string.Join(", ", missing));
         var positiveIds = positive.Values.ToHashSet();
         var links = await db.ChangeRequestUpstreamLinks.AsNoTracking().Where(x => positiveIds.Contains(x.ChangeRequestId)).ToListAsync(ct);
+        var proposalIdentities = await ValidateActiveTraceProposalsAsync(programId, projectId, requests, positive, problems, ct);
         for (var index = 1; index <= ActiveTraceScenarioChains; index++)
         {
             var prefix = $"{ActiveTraceScenarioPrefix}{index:D2}/";
@@ -63,6 +66,14 @@ public sealed partial class FmsShowcaseSeeder
                 || links.Count(x => x.ChangeRequestId == low) != 1
                 || !links.Any(x => x.ChangeRequestId == low && x.UpstreamChangeRequestId == high))
                 problems.Add($"The exact System/HLR/LLR links of scenario {index:D2} have drifted.");
+            if (!proposalIdentities.TryGetValue(system, out var systemProposal)
+                || !proposalIdentities.TryGetValue(high, out var highProposal)
+                || !proposalIdentities.TryGetValue(low, out var lowProposal)
+                || systemProposal.UpstreamRevisionId is not null
+                || highProposal.UpstreamRevisionId != systemProposal.RequirementRevisionId
+                || lowProposal.UpstreamRevisionId != highProposal.RequirementRevisionId
+                || systemProposal.BaselineId != highProposal.BaselineId || highProposal.BaselineId != lowProposal.BaselineId)
+                problems.Add($"The exact requirement proposal chain of scenario {index:D2} has drifted.");
         }
         foreach (var request in requests.Where(x => positiveIds.Contains(x.Id) && x.RequirementChanges.Count != 1))
             problems.Add($"The exact proposal of {request.DisplayNumber} has drifted.");
@@ -91,6 +102,57 @@ public sealed partial class FmsShowcaseSeeder
                 states[x.Id].Downstream, states[x.Id].Overall, IsNamedChangeGap(x, states[x.Id]), states[x.Id].Warnings)).ToList(), problems);
     }
 
+    private async Task<Dictionary<Guid, ActiveTraceProposalIdentity>> ValidateActiveTraceProposalsAsync(Guid programId,
+        Guid projectId, IReadOnlyCollection<SystemChangeRequest> requests, Dictionary<string, Guid> positive,
+        List<string> problems, CancellationToken ct)
+    {
+        var markers = await db.ShowcaseUpgradeSteps.AsNoTracking().Where(x => x.ProgramId == programId
+            && x.StepKey.StartsWith(ActiveTraceProposalPrefix)).ToListAsync(ct);
+        var identities = new Dictionary<Guid, ActiveTraceProposalIdentity>();
+        foreach (var marker in markers)
+        {
+            ActiveTraceProposalIdentity? identity;
+            try { identity = JsonSerializer.Deserialize<ActiveTraceProposalIdentity>(marker.Detail ?? "null"); }
+            catch (JsonException) { identity = null; }
+            var key = ActiveTraceScenarioPrefix + marker.StepKey[ActiveTraceProposalPrefix.Length..];
+            if (identity is null || !positive.TryGetValue(key, out var requestId) || identity.RequestId != requestId
+                || !identities.TryAdd(requestId, identity))
+                problems.Add($"Invalid exact proposal identity: {marker.StepKey}.");
+        }
+        if (identities.Count != ActiveTraceDraftCount)
+            problems.Add($"Expected {ActiveTraceDraftCount} exact proposal identities; found {identities.Count}.");
+        var baselineIds = identities.Values.Select(x => x.BaselineId).Distinct().ToList();
+        var members = await (from member in db.BaselineRequirements.AsNoTracking()
+            join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id
+            join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+            where baselineIds.Contains(member.BaselineId) && artifact.ProjectId == projectId
+            select new { member.BaselineId, revision.Id, artifact.BaseNumber, revision.Revision, artifact.Level }).ToListAsync(ct);
+        var exactMembers = members.ToDictionary(x => (x.BaselineId, x.Id));
+        var memberIds = members.Select(x => x.Id).ToList();
+        var traces = await db.RequirementTraces.AsNoTracking().Where(x => x.ProjectId == projectId
+            && memberIds.Contains(x.SourceRevisionId) && memberIds.Contains(x.TargetRevisionId)).ToListAsync(ct);
+        foreach (var request in requests.Where(x => identities.ContainsKey(x.Id)))
+        {
+            var identity = identities[request.Id];
+            var proposal = request.RequirementChanges.Count == 1 ? request.RequirementChanges.Single() : null;
+            Guid[] upstream;
+            try { upstream = JsonSerializer.Deserialize<Guid[]>(proposal?.ProposedUpstreamRevisionIdsJson ?? "[]") ?? []; }
+            catch (JsonException) { upstream = [Guid.Empty]; }
+            Guid[] expectedUpstream = identity.UpstreamRevisionId is { } parent ? [parent] : [];
+            if (!exactMembers.TryGetValue((identity.BaselineId, identity.RequirementRevisionId), out var member)
+                || proposal is null || proposal.BaseNumber != member.BaseNumber || proposal.Revision != member.Revision + 1
+                || proposal.Level != member.Level || proposal.Kind != RequirementChangeKind.Modify
+                || request.Type != (member.Level == RequirementLevel.System ? ChangeRequestType.System : ChangeRequestType.Software)
+                || request.SoftwareLevel != (member.Level == RequirementLevel.System ? (RequirementLevel?)null : member.Level)
+                || !upstream.SequenceEqual(expectedUpstream)
+                || (identity.UpstreamRevisionId is { } parentId
+                    && (!exactMembers.ContainsKey((identity.BaselineId, parentId))
+                        || !traces.Any(x => x.SourceRevisionId == identity.RequirementRevisionId && x.TargetRevisionId == parentId))))
+                problems.Add($"The exact proposal of {request.DisplayNumber} has drifted from its recorded source baseline/revisions.");
+        }
+        return identities;
+    }
+
     private async Task AddMaterializedTracePopulationsAsync(Guid programId, Guid projectId, Guid releaseId, Guid baselineId,
         ILadderPolicy policy, List<ShowcaseTracePopulation> populations, List<string> problems, CancellationToken ct)
     {
@@ -107,6 +169,13 @@ public sealed partial class FmsShowcaseSeeder
         var traced = await db.RequirementTraces.AsNoTracking().Where(x => x.ProjectId == projectId
             && memberIds.Contains(x.SourceRevisionId) && memberIds.Contains(x.TargetRevisionId))
             .Select(x => x.SourceRevisionId).Distinct().ToListAsync(ct);
+        var suspectSources = await (from link in db.RequirementTraces.AsNoTracking()
+            join lifecycle in db.ExactLinkSuspectLifecycles.AsNoTracking()
+                on new { LinkKind = ExactLinkKind.RequirementTrace, LinkId = link.Id }
+                equals new { lifecycle.LinkKind, lifecycle.LinkId }
+            where link.ProjectId == projectId && memberIds.Contains(link.SourceRevisionId)
+                && memberIds.Contains(link.TargetRevisionId) && lifecycle.State != ExactLinkLifecycleState.Closed
+            select link.SourceRevisionId).Distinct().ToListAsync(ct);
         var requirementGaps = new List<ShowcaseTraceGap>();
         foreach (var member in members)
         {
@@ -114,6 +183,7 @@ public sealed partial class FmsShowcaseSeeder
             if (policy.Definition(member.Level).Verification is not null && coverage[member.Id] != RequirementCoverageState.Covered)
                 warnings.Add(coverage[member.Id]);
             if (policy.ParentLevels(member.Level).Count > 0 && !traced.Contains(member.Id)) warnings.Add("UpstreamGap");
+            if (suspectSources.Contains(member.Id)) warnings.Add("SuspectUpstream");
             if (warnings.Count == 0) continue;
             var number = $"{member.BaseNumber}.{member.Revision:D2}";
             var named = HomeRequirementGaps.TryGetValue(member.Id, out var expected)

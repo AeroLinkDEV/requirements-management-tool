@@ -3,6 +3,7 @@ using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -13,10 +14,12 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixture showcase)
 {
     [Theory]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    [InlineData(false, false)]
-    public async Task Materialized_enrichment_preserves_existing_results_and_names_the_exact_waiting_cases(bool existingFailure, bool configureStore)
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
+    public async Task Materialized_enrichment_preserves_existing_results_and_names_the_exact_waiting_cases(bool existingFailure, bool configureStore, bool sharedProcedure)
     {
         using var database = showcase.Create();
         await using var db = database.Context();
@@ -29,6 +32,7 @@ public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixt
                 ? x with { EnabledArtifactKinds = [VerificationArtifactKind.Case, VerificationArtifactKind.Procedure] } : x).ToArray()
         }, LegacyLadderPolicy.Instance);
         var baseline = await db.CandidateBaselines.SingleAsync(x => x.ReleaseId == showcase.Summary.ActiveReleaseId);
+        Assert.False(await FmsShowcaseSeeder.ActiveBuildVerificationMustResumeAsync(db, showcase.Summary.ProgramId));
         var now = DateTimeOffset.UtcNow;
         db.Entry(baseline).Property(x => x.RequirementsMaterializedAt).CurrentValue = now;
         db.Entry(baseline).Property(x => x.TestProceduresMaterializedAt).CurrentValue = now;
@@ -60,12 +64,18 @@ public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixt
             if (requirementIds.Add(requirement.RevisionId))
                 db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, requirement.ArtifactId, requirement.RevisionId));
         }
+        if (sharedProcedure)
+            db.TestCaseProcedureLinks.Add(new TestCaseProcedureLink(sources[3].RevisionId, procedures[0].Id));
+        var trace = await db.RequirementTraces.FirstAsync(x => requirementIds.Contains(x.SourceRevisionId));
+        var parent = await db.BaselineRequirements.SingleAsync(x => x.BaselineId == showcase.Summary.ReleasedBaselineId
+            && x.RevisionId == trace.TargetRevisionId);
+        db.BaselineRequirements.Add(new BaselineRequirementSelection(baseline.Id, parent.ArtifactId, parent.RevisionId));
         var original = new TestExecution(showcase.Summary.ProjectId, procedures[0].Id, null, null,
             existingFailure ? TestOutcome.Fail : TestOutcome.Pass, "test.engineer", "Existing operator fixture",
             "Existing determination must remain byte-for-byte intact.", "existing-evidence", now.AddMinutes(-1), now.AddMinutes(-1), showcase.Summary.ActiveReleaseId);
         db.TestExecutions.Add(original);
-        db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == showcase.Summary.ProgramId && x.StepKey == "active-build-verification"));
         await db.SaveChangesAsync();
+        Assert.True(await FmsShowcaseSeeder.ActiveBuildVerificationMustResumeAsync(db, showcase.Summary.ProgramId));
         var originalJson = JsonSerializer.Serialize(original);
         var root = Path.Combine(Path.GetTempPath(), "aerolink-913-evidence-" + Guid.NewGuid().ToString("N"));
         var store = new EvidenceFileStore(root);
@@ -81,9 +91,10 @@ public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixt
                 return;
             }
             await seeder.UpgradeAsync(showcase.Summary.ProgramId);
+            Assert.False(await FmsShowcaseSeeder.ActiveBuildVerificationMustResumeAsync(db, showcase.Summary.ProgramId));
             Assert.Equal(originalJson, JsonSerializer.Serialize(await db.TestExecutions.AsNoTracking().SingleAsync(x => x.Id == original.Id)));
             var created = await db.TestExecutions.AsNoTracking().Where(x => x.ReleaseId == showcase.Summary.ActiveReleaseId && x.Id != original.Id).ToListAsync();
-            Assert.Equal(2, created.Count);
+            Assert.Equal(sharedProcedure ? 3 : 2, created.Count);
             Assert.All(created, x => Assert.Contains("Synthetic demonstration", x.Determination));
             var evidenceIds = await db.TestExecutionEvidence.Where(x => created.Select(e => e.Id).Contains(x.TestExecutionId)).Select(x => x.EvidenceId).Distinct().ToListAsync();
             var evidence = Assert.Single(await db.EvidenceRecords.Where(x => evidenceIds.Contains(x.Id)).ToListAsync());
@@ -98,10 +109,24 @@ public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixt
             var inventory = await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId);
             var population = Assert.Single(inventory.Populations, x => x.Family == "Exact software Case-to-Procedure obligations");
             Assert.Equal(4, population.Total);
-            Assert.Equal(existingFailure ? 2 : 1, population.Gaps.Count);
-            Assert.Single(population.Gaps, x => x.NamedNegative);
-            Assert.Equal(existingFailure ? 1 : 0, population.Gaps.Count(x => !x.NamedNegative));
+            Assert.Equal(sharedProcedure ? (existingFailure ? 2 : 0) : (existingFailure ? 2 : 1), population.Gaps.Count);
+            Assert.Equal(sharedProcedure ? 0 : 1, population.Gaps.Count(x => x.NamedNegative));
+            Assert.Equal(existingFailure ? (sharedProcedure ? 2 : 1) : 0, population.Gaps.Count(x => !x.NamedNegative));
             if (existingFailure) Assert.Contains(inventory.Problems, x => x.Contains("Case-to-Procedure") && x.Contains("HLRTC-000001"));
+            var lifecycle = ExactLinkSuspectLifecycle.Raise(showcase.Summary.ProjectId, ExactLinkKind.RequirementTrace,
+                trace.Id, ExactLinkLifecycleCauseKind.InternalRequirementRevision, trace.TargetRevisionId, null,
+                "systems.author", "Deliberate open upstream-link regression.", DateTimeOffset.UtcNow);
+            db.ExactLinkSuspectLifecycles.Add(lifecycle);
+            await db.SaveChangesAsync();
+            var suspectInventory = await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId);
+            Assert.Contains(suspectInventory.Populations.Single(x => x.Family == "Exact active-baseline requirements").Gaps,
+                x => x.Id == trace.SourceRevisionId && x.Warnings.Contains("SuspectUpstream") && !x.NamedNegative);
+            lifecycle.RecordResolution(ExactLinkResolutionOutcome.NoDownstreamChangeRequired,
+                "systems.author", "Close the deliberate regression.", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+            Assert.DoesNotContain((await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId)).Populations
+                .Single(x => x.Family == "Exact active-baseline requirements").Gaps,
+                x => x.Warnings.Contains("SuspectUpstream"));
             var evidenceLink = await db.TestExecutionEvidence.SingleAsync(x => x.TestExecutionId == created[0].Id);
             db.TestExecutionEvidence.Remove(evidenceLink);
             await db.SaveChangesAsync();
@@ -120,10 +145,13 @@ public sealed class FmsShowcaseActiveBuildVerificationTests(ShowcaseDatabaseFixt
             waitingSet.Include("program.manager", procedures[3].Id, TestSelectionReason.Chosen,
                 "Restore the fixture after the deliberate selection-drift check.", DateTimeOffset.UtcNow);
             await db.SaveChangesAsync();
-            db.ShowcaseUpgradeSteps.RemoveRange(await db.ShowcaseUpgradeSteps.Where(x => x.ProgramId == showcase.Summary.ProgramId && x.StepKey.StartsWith("active-verification-913/waiting/")).ToListAsync());
-            await db.SaveChangesAsync();
-            Assert.Contains((await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId)).Problems,
-                x => x.Contains("Case-to-Procedure") && x.Contains("HLRTC-000004"));
+            if (!sharedProcedure)
+            {
+                db.ShowcaseUpgradeSteps.RemoveRange(await db.ShowcaseUpgradeSteps.Where(x => x.ProgramId == showcase.Summary.ProgramId && x.StepKey.StartsWith("active-verification-913/waiting/")).ToListAsync());
+                await db.SaveChangesAsync();
+                Assert.Contains((await seeder.ActiveTraceInventoryAsync(showcase.Summary.ProgramId)).Problems,
+                    x => x.Contains("Case-to-Procedure") && x.Contains("HLRTC-000004"));
+            }
         }
         finally
         {

@@ -183,17 +183,25 @@ and explicitly waiting; Build 1.5 members are never substituted into this count.
 relationships, checksummed execution evidence, external code samples and full release readiness remain
 separate evidence. This percentage is not a claim that the build is ready to release.
 
+The waiting verification step becomes pending again after that exact build materializes. The maintenance
+analyzer reports it and the explicit supported showcase upgrade resumes it. A completed materialized step
+is not retried to hide later selection, result or evidence drift.
+
 Thirty named System/HLR/LLR authoring packages provide connected current work. They cover two input/recovery
 boundaries across the fifteen FMS topic areas, use exact effective requirement revisions and their actual
 System/HLR/LLR relationships, and remain Draft. They add no historical approvals or signatures. Eligible
 synthetic engineering owners are assigned by package responsibility and checked against current authority.
-The original review, approval, deferred and incomplete-authoring examples remain intact.
+The original review, approval, deferred and incomplete-authoring examples remain intact. Immutable scenario
+ownership metadata records each proposal's exact source baseline, requirement revision and upstream revision;
+the diagnostic checks the mutable draft against those identities.
 
 For an existing materialized Build 1.6 with an exact Procedure manifest, the supported upgrade selects its
 effective software Procedures and adds explicitly labelled synthetic demonstration results only where no
 applicable result already exists. Existing Pass, Fail and Blocked determinations are preserved. The final
-quarter of each exact Case family remains named waiting work; no existing result is removed to manufacture
-a gap. New fixture results share a checksummed, downloadable JSON evidence artifact that explicitly states
+quarter of each exact Case family supplies candidate waiting work. Cases connected to positive Cases through
+shared required Procedures join the positive population, so withholding a shared result cannot break an
+unnamed obligation. No existing result is removed to manufacture a gap. New fixture results share a
+checksummed, downloadable JSON evidence artifact that explicitly states
 that no external bench execution or binary qualification is asserted. All new timestamps and attribution
 describe the current enrichment operation. Direct qualification must supply an owned evidence store; there
 is no persistent-store fallback.

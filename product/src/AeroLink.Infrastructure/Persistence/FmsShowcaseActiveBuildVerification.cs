@@ -10,6 +10,18 @@ namespace AeroLink.Infrastructure.Persistence;
 public sealed partial class FmsShowcaseSeeder
 {
     private const string ActiveVerificationPrefix = "active-verification-913/";
+    private const string ActiveVerificationWaitingDetail = "Build 1.6 is waiting for requirement materialization; no predecessor or execution population was substituted.";
+
+    public static async Task<bool> ActiveBuildVerificationMustResumeAsync(AeroLinkDbContext context, Guid programId, CancellationToken ct = default)
+    {
+        return await context.ShowcaseUpgradeSteps.AsNoTracking().AnyAsync(x => x.ProgramId == programId
+            && x.StepKey == "active-build-verification" && x.Detail == ActiveVerificationWaitingDetail, ct)
+            && await (from project in context.Projects.AsNoTracking()
+                join release in context.Releases.AsNoTracking() on project.Id equals release.ProjectId
+                join baseline in context.CandidateBaselines.AsNoTracking() on release.Id equals baseline.ReleaseId
+                where project.ProgramId == programId && release.Version == "1.6" && baseline.RequirementsMaterializedAt != null
+                select baseline.Id).AnyAsync(ct);
+    }
 
     /// <summary>
     /// Enriches an already materialized synthetic build with explicitly labelled demonstration results.
@@ -23,7 +35,7 @@ public sealed partial class FmsShowcaseSeeder
         if (release.IsReleased) throw new InvalidOperationException("Synthetic active-build enrichment cannot alter a released build.");
         var baseline = await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x => x.ReleaseId == release.Id, ct);
         if (baseline?.RequirementsMaterializedAt is null)
-            return "Build 1.6 is waiting for requirement materialization; no predecessor or execution population was substituted.";
+            return ActiveVerificationWaitingDetail;
         var manifest = await TestProcedureEffectivity.ForBaselineAsync(db, baseline.Id, ct);
         if (manifest is null || !manifest.IsExactManifest)
             throw new InvalidOperationException("Materialized Build 1.6 requires its own exact verification manifest before synthetic execution enrichment.");
@@ -69,6 +81,21 @@ public sealed partial class FmsShowcaseSeeder
         // result untouched; the diagnostic reads actual satisfaction and does not manufacture failure.
         var waiting = cases.GroupBy(x => x.Level).SelectMany(group => group.OrderBy(x => x.BaseNumber, StringComparer.Ordinal)
             .Skip((int)Math.Ceiling(group.Count() * .75))).Select(x => x.Id).ToHashSet();
+        // A shared Procedure must not withhold a positive Case's result. Expand the positive component
+        // through the many-to-many graph until no waiting Case shares a required Procedure with it.
+        var positiveProcedures = obligations.Where(x => !waiting.Contains(x.CaseRevisionId))
+            .SelectMany(x => x.RequiredProcedureRevisionIds).ToHashSet();
+        while (true)
+        {
+            var shared = obligations.Where(x => waiting.Contains(x.CaseRevisionId)
+                && x.RequiredProcedureRevisionIds.Any(positiveProcedures.Contains)).ToList();
+            if (shared.Count == 0) break;
+            foreach (var obligation in shared)
+            {
+                waiting.Remove(obligation.CaseRevisionId);
+                positiveProcedures.UnionWith(obligation.RequiredProcedureRevisionIds);
+            }
+        }
         var waitingProcedureIds = obligations.Where(x => waiting.Contains(x.CaseRevisionId))
             .SelectMany(x => x.RequiredProcedureRevisionIds).ToHashSet();
         var latest = await ExecutionScope.LatestByProcedureAsync(db, requiredIds, release.Id, campaign?.SoftwareBuildId, ct);
