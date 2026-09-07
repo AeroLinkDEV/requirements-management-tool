@@ -37,7 +37,9 @@ public sealed class ShowcaseSeedApiTests
         var activeReleaseId = summary.GetProperty("activeReleaseId").GetGuid();
         var overview = await client.GetFromJsonAsync<JsonElement>(
             $"/api/showcase/overview?projectId={projectId}&releaseId={activeReleaseId}");
-        Assert.Equal(7, overview.GetProperty("activeRequests").GetInt32());
+        // Seven original visible requests plus 90 named trace-chain requests and two explicit
+        // System workflow scenarios belong to this exact active build.
+        Assert.Equal(99, overview.GetProperty("activeRequests").GetInt32());
 
         // The endpoint is the operator-facing retry boundary. A second request must reuse the durable
         // ownership rows and preserve the exact controlled summary on the same disposable database. Remove

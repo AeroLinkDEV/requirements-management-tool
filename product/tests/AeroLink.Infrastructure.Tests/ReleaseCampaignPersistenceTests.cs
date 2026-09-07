@@ -25,8 +25,8 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
         {
             await using var db = showcase.Context(); var summary = showcaseFixture.Summary;
             var campaign = await db.ReleaseCampaigns.SingleAsync(x => x.ProjectId == summary.ProjectId && x.ReleaseId == summary.ActiveReleaseId); Assert.Equal(ReleaseCampaignState.Verification, campaign.State);
-            Assert.Equal(32, await db.ImpactDispositions.CountAsync(x => x.CampaignId == campaign.Id)); Assert.Equal(8, await db.ImpactDispositions.CountAsync(x => x.CampaignId == campaign.Id && x.State == ImpactDispositionState.Addressed));
-            var readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default); Assert.False(readiness.ReadyForRelease); Assert.Contains(readiness.Gates, x => x.Code == "change_control" && x.Completed == 2 && x.Total == 7);
+            Assert.Equal(40 + FmsShowcaseSeeder.ActiveTraceRequestCount * 4, await db.ImpactDispositions.CountAsync(x => x.CampaignId == campaign.Id)); Assert.Equal(8, await db.ImpactDispositions.CountAsync(x => x.CampaignId == campaign.Id && x.State == ImpactDispositionState.Addressed));
+            var readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default); Assert.False(readiness.ReadyForRelease); Assert.Contains(readiness.Gates, x => x.Code == "change_control" && x.Completed == 2 && x.Total == 9 + FmsShowcaseSeeder.ActiveTraceRequestCount);
             var blocker = new ProblemReport(summary.ProjectId, "PR-00001", "Unresolved release-impacting failure", "A failed verification result remains unresolved.", "", "verification.engineer", DateTimeOffset.UtcNow);
             blocker.SetReleaseBlocker("verification.engineer", true, DateTimeOffset.UtcNow); db.ProblemReports.Add(blocker); await db.SaveChangesAsync(); db.ChangeTracker.Clear();
             readiness = await new ReleaseReadinessService(db).CalculateAsync(campaign.Id, default);
@@ -93,7 +93,9 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
             var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleAsync(x => x.ProjectId == summary.ProjectId && x.ReleaseId == summary.ActiveReleaseId);
             var baseline = await db.CandidateBaselines.Include(x => x.Selections).Include(x => x.Events).SingleAsync(x => x.Id == campaign.BaselineId);
             var requests = await db.SystemChangeRequests.Include(x => x.RequirementChanges).Include(x => x.ReviewCycles).ThenInclude(x => x.Steps).Where(x => x.TargetReleaseId == campaign.ReleaseId).ToListAsync();
-            var now = new DateTimeOffset(2025, 1, 10, 14, 0, 0, TimeSpan.Zero);
+            var now = DateTimeOffset.UtcNow;
+            Assert.All(requests, request => Assert.True(request.UpdatedAt <= now));
+            Assert.All(requests.SelectMany(request => request.ReviewCycles), cycle => Assert.True(cycle.StartedAt <= now));
             foreach (var request in requests.Where(x => x.State != ChangeRequestState.Deferred
                 && x.State != ChangeRequestState.Withdrawn
                 && x.State != ChangeRequestState.SelectedForBaseline))
@@ -102,6 +104,8 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
                 // Re-enter those packages through their ordinary lifecycle before making the author's new
                 // classification decision.  This preserves their historical review evidence while ensuring
                 // the successor review is current and cannot rely on the seed-only v1 materialization seam.
+                if (request.State == ChangeRequestState.InReview)
+                    request.CancelReview(request.AuthorId, "Re-author this package for the test's combined release-execution baseline.", now);
                 if (request.SnapshotContractVersion < SystemChangeRequest.CurrentSnapshotContractVersion)
                 {
                     if (request.State == ChangeRequestState.Approved)
@@ -109,8 +113,6 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
                         request.Defer(request.AuthorId, "Re-open the historical package for release-execution qualification.", now);
                         request.Reinstate(request.AuthorId, now);
                     }
-                    else if (request.State == ChangeRequestState.InReview)
-                        request.CancelReview(request.AuthorId, "Re-open the historical package for release-execution qualification.", now);
                 }
                 if (request.State == ChangeRequestState.Draft)
                 {
@@ -129,7 +131,14 @@ public sealed class ReleaseCampaignPersistenceTests(ShowcaseDatabaseFixture show
                     request.SubmitForReview(request.AuthorId, [new ApproverSelection("release.reviewer", "Release Reviewer")], now);
                     await db.SaveChangesAsync();
                 }
-                while (request.State == ChangeRequestState.InReview) { request.ApproveActiveStage(request.ActiveReviewCycle!.Steps.Single(x => x.State == ApprovalStepState.Active).ApproverId, now); await db.SaveChangesAsync(); }
+                while (request.State == ChangeRequestState.InReview)
+                {
+                    // Complete every real obligation, including independently active parallel steps.
+                    var active = request.ActiveReviewCycle!.Steps
+                        .Where(x => x.State == ApprovalStepState.Active).OrderBy(x => x.Position).First();
+                    request.ApproveActiveStage(active.ApproverId, now);
+                    await db.SaveChangesAsync();
+                }
                 baseline.Select(request, "cm.test", now); await db.SaveChangesAsync();
             }
             baseline.Freeze("cm.test", now); await db.SaveChangesAsync();

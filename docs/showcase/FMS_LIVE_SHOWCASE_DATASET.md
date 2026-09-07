@@ -168,3 +168,87 @@ with no baseline, coverage, execution or Case/Procedure references. Changed or c
 untouched. The complete original draft is retained in a `ShowcaseLegacyDraftArchived` operator audit event;
 the audit and removal from the working revision register commit in the same transaction. The maintained
 warning scenario remains `SYSTP-000040`; no approved revision, coverage or manifest is repaired by rewriting it.
+
+### Active Build 1.6 trace completeness
+
+The showcase's `activeTrace` diagnostic scores the native completeness populations for the exact active
+build: current governed change-request revisions, the build's own materialized requirement revisions, and
+its exact software Case-to-Procedure obligations. The denominator includes existing operator changes, with
+one current revision per controlled number and withdrawn current revisions excluded. A requirement with
+both upstream and coverage gaps is counted once. Each population reports its own total and exact named
+gaps; the combined incomplete share must remain between 5% and 10%.
+
+A fresh Build 1.6 retains its waiting-for-materialization lifecycle. Until both requirement and verification
+manifests are materialized, its scored materialized populations are zero
+and explicitly waiting; Build 1.5 members are never substituted into this count. Other artifact-family
+relationships, checksummed execution evidence, external code samples and full release readiness remain
+separate evidence. This percentage is not a claim that the build is ready to release.
+
+The waiting verification step becomes pending again after that exact build materializes. The maintenance
+analyzer reports it and the explicit supported showcase upgrade resumes it. A completed materialized step
+is not retried to hide later selection, result or evidence drift.
+
+Thirty named System/HLR/LLR authoring packages provide connected current work. They cover two input/recovery
+boundaries across the fifteen FMS topic areas, use exact effective requirement revisions and their actual
+System/HLR/LLR relationships. Eighty-nine remain Draft; the first HLR request enters a parallel review held
+by two independently eligible Approvers from the explicit priority list `lead.reviewer`, `manager.reviewer`,
+`systems.lead`, `software.lead`. The normal authority resolver preserves older direct grants or current
+governed leadership provenance; no grants or administrator substitution are invented. It uses the current
+resolved trace snapshot and verification vocabulary, checks contention, and refuses to replace a configured
+software approval workflow. Existing System workflow configuration and historical reviews remain intact.
+They add no historical approvals or signatures. Eligible
+synthetic engineering owners are assigned by package responsibility and checked against current authority.
+The original review, approval, deferred and incomplete-authoring examples remain intact. Immutable scenario
+ownership metadata records each proposal's exact source baseline, requirement revision and upstream revision;
+the diagnostic checks the mutable draft against those identities.
+Each new draft also adds four pending campaign impacts (requirement, traceability, verification and document).
+These remain explicit release blockers until dispositioned through the normal controlled workflow.
+
+For an existing materialized Build 1.6 with an exact Procedure manifest, the supported upgrade selects its
+effective software Procedures and adds explicitly labelled synthetic demonstration results only where no
+applicable result already exists. Existing Pass, Fail and Blocked determinations are preserved. The final
+quarter of each exact Case family supplies candidate waiting work. Cases connected to positive Cases through
+shared required Procedures join the positive population, so withholding a shared result cannot break an
+unnamed obligation. No existing result is removed to manufacture a gap. New fixture results share a
+checksummed, downloadable JSON evidence artifact that explicitly states
+that no external bench execution or binary qualification is asserted. All new timestamps and attribution
+describe the current enrichment operation. Direct qualification must supply an owned evidence store; there
+is no persistent-store fallback.
+
+New evidence remains staged until its database transaction commits. Its storage identity commits with
+the evidence and executions; the supported upgrade can resume a failed post-commit promotion without
+recreating results. A confirmed rollback removes only the new uncommitted staging file. If the database
+cannot establish whether a commit succeeded, staging is retained rather than risking committed evidence.
+
+The exact existing HOME requirement and change-control warning identities are catalogued in source as
+retained incomplete scenarios. Their warning classes and revision identities must still match; the upgrade
+does not automatically adopt arbitrary gaps or invent missing historical upstream answers. A removed
+positive link, missing Case selection/effectivity, absent owned execution/evidence link, or changed scenario
+identity fails the diagnostic with the offending identifier. Rerunning the upgrade cannot normalize that
+drift by silently calling it intentional.
+
+The specifically owned parallel-review example must retain its two active Review steps and their exact
+notifications. Reviewer progress, author cancellation or a missing notification makes that fixture's
+diagnostic fail; another shared item cannot conceal the changed scenario, and the upgrade does not undo
+the user's workflow action.
+
+Two additional, explicitly labelled synthetic editorial proposals demonstrate the native approval-stage
+holder and selected downstream-assessment approver. They retain the exact normative statements and
+verification methods of the authoritative source revisions of SYSR-000149 and SYSR-000150, changing only
+the proposed engineering rationale. Neither proposal is selected into a baseline. The configured System
+workflow is preserved; a fresh showcase with none records the same peer-review, system-lead-review and
+software-lead-approval arrangement already used by HOME, with modern explicit authority kinds.
+Incompatible workflow customization or existing requirement contention refuses enrichment.
+
+The first proposal stops at the active Approval stage. The second completes its synthetic review sequence
+and opens the native HLR downstream assessment; `software.author` records an explicitly synthetic no-change
+conclusion, and independent `software.lead` holds its pending approval. The conclusion is justified by the
+unchanged normative statement, and is not presented as an approved assessment. Each generated review
+decision is labelled as a synthetic showcase fixture, including its signature meaning, rationale and
+origin; it is not a claim of human review. Account identity, authority source, frozen step, workflow version,
+snapshot hash and current timestamp are recorded. Original reviews, signatures and assessments are untouched.
+Every activated stage receives its normal review/approval notification.
+
+The exact ownership maps, unchanged proposal content, signature hashes and native pending holder states are
+validated. The one pending no-change assessment is a named `ApprovalPending` trace gap; it increases the
+same current-build denominator by two requests, without substituting another requirement or build population.

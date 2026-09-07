@@ -129,6 +129,8 @@ public sealed class AeroLinkUpgradeAnalyzer(
 
         var recorded = await db.ShowcaseUpgradeSteps.AsNoTracking()
             .Where(x => x.ProgramId == programId.Value).Select(x => x.StepKey).ToListAsync(ct);
+        if (await FmsShowcaseSeeder.ActiveBuildVerificationMustResumeAsync(db, programId.Value, ct))
+            recorded.Remove("active-build-verification");
         return new AeroLinkShowcaseUpgradeState(true, FmsShowcaseSeeder.ProgramCode,
             [.. FmsShowcaseSeeder.UpgradeStepKeys.Where(x => !recorded.Contains(x))]);
     }

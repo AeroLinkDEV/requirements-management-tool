@@ -277,6 +277,8 @@ public sealed class SecondShowcaseSeederTests
             await new IdentitySeeder(db).EnsureSeededAsync();
             var fms = await new FmsShowcaseSeeder(db).EnsureSeededAsync();
             var before = await SnapshotFmsAsync(db, fms.ProjectId);
+            var nextFmsChange = await IdentifierAllocator.PreviewChangeRequestAsync(db,
+                ChangeRequestType.System, null, CancellationToken.None);
             var consumers = LadderConsumerManifestCatalog.RequiredConsumerIds
                 .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id)).ToArray();
             var resolver = new EffectiveProjectLadderPolicyResolver(db);
@@ -296,7 +298,7 @@ public sealed class SecondShowcaseSeederTests
             Assert.Equal(before.Steps, after.Steps);
             Assert.Equal(before.Relationships, after.Relationships);
             Assert.Equal("SYSR-000152", await IdentifierAllocator.NextRequirementAsync(db, "SYSR", CancellationToken.None));
-            Assert.Equal("SRCR-00033", await IdentifierAllocator.NextChangeRequestAsync(
+            Assert.Equal(nextFmsChange, await IdentifierAllocator.NextChangeRequestAsync(
                 db, ChangeRequestType.System, null, CancellationToken.None));
         }
         finally

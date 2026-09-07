@@ -225,18 +225,22 @@ test('the first protected production mutation after deep-linked sign-in creates 
   await page.getByRole('textbox', { name: 'Analysis', exact: true }).fill('A durable server query must prove the write rather than trusting the success ceremony.')
   await page.getByLabel('Solution').fill('Resolve relative API URLs and bind CSRF state to the signed-in session.')
   await page.getByLabel('Requirement statement').fill('The production client shall preserve authenticated mutation capability.')
+  const savedResponse = page.waitForResponse(response =>
+    response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/change-request-drafts')
   await page.getByRole('button', { name: 'Save SRCR Draft' }).click()
+  const saved = await savedResponse
+  expect(saved.status(), await saved.text()).toBe(201)
+  const created = await saved.json()
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
 
   await apiLogin(request)
-  const list = await request.get(`/api/change-requests?projectId=${showcase.projectId}&releaseId=${showcase.activeReleaseId}`)
-  expect(list.ok(), await list.text()).toBeTruthy()
-  const body = await list.json()
-  const persisted = body.items.find((item: { title: string }) => item.title === title)
-  expect(persisted, 'the success view must correspond to a durable server record').toBeTruthy()
-  const detail = await request.get(`/api/change-requests/${persisted.id}`)
+  // Independently read the exact saved record; the populated register spans several pages.
+  const detail = await request.get(`/api/change-requests/${created.id}`)
   expect(detail.ok(), await detail.text()).toBeTruthy()
   expect(await detail.json()).toEqual(expect.objectContaining({
+    id: created.id,
+    projectId: showcase.projectId,
+    targetReleaseId: showcase.activeReleaseId,
     title,
     problem: 'The compiled production client must perform protected writes.',
   }))
