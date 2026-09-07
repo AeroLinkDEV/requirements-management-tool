@@ -145,5 +145,7 @@ html .appNavigation .signOut[aria-busy="true"] { color: #8fa1b9; }
    workspace at phone widths. */
 @media (max-width: 760px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
-  .shell aside.appNavigation { min-width: 0; }
+  /* The navigation is now a row above the workspace. A viewport-height sticky row would cover the
+     entire work area as the user scrolls, even though its controls remain present in the DOM. */
+  .shell aside.appNavigation { min-width: 0; position: static; height: auto; overflow-y: visible; }
 }

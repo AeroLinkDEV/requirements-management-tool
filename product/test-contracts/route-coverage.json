@@ -389,6 +389,7 @@
         "TestProposalContentApiTests",
         "VerificationImpactApiTests",
         "VerificationProgramIsolationApiTests",
+        "VerificationReadEffectivityApiTests",
         "VerificationVocabularyApiTests",
         "WithdrawChangeRequestApiTests",
         "WorkflowAuthorityCutoverApiTests"
