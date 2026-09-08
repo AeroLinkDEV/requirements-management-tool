@@ -15,7 +15,7 @@ export const logicTest = base.extend({
 })
 
 export const renderedTest = base.extend<RenderedFixtureState>({
-  apiRequestViolations: async (_fixtures, provide) => {
+  apiRequestViolations: async ({ baseURL: _baseURL }, provide) => {
     const violations: string[] = []
     await provide(violations)
     expect(violations, apiRequestContextDiagnostic).toEqual([])
