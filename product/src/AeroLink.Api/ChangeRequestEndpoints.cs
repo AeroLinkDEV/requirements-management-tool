@@ -192,8 +192,17 @@ public static class ChangeRequestEndpoints
             if (projectId is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
             var policy = await policyResolver.ResolveAsync(projectId.Value, ct);
-            var trace = await ChangeRequestTraceProjection.ForChangeRequestAsync(db, projectId.Value, id, policy, ct);
-            return trace is null ? Results.NotFound() : Results.Ok(trace);
+            try
+            {
+                var trace = await ChangeRequestTraceProjection.ForChangeRequestAsync(db, projectId.Value, id, policy, ct);
+                return trace is null ? Results.NotFound() : Results.Ok(trace);
+            }
+            catch (TraceWorkLimitException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
+                    title: "Trace work limit exceeded", detail: ex.Message,
+                    extensions: new Dictionary<string, object?> { ["code"] = "trace_work_limit" });
+            }
         });
 
         // The build-scoped change network. The rooted trace above answers "what is this change connected to";
@@ -208,9 +217,18 @@ public static class ChangeRequestEndpoints
                 .AnyAsync(x => x.Id == releaseId && x.ProjectId == projectId, ct);
             if (!releaseExists) return Results.NotFound();
             var policy = await policyResolver.ResolveAsync(projectId, ct);
-            var network = await ChangeRequestTraceProjection.ForBuildAsync(db, projectId, releaseId, policy,
-                maxNodes is null or < 1 ? DefaultNetworkNodeCeiling : maxNodes.Value, ct);
-            return Results.Ok(network);
+            try
+            {
+                var network = await ChangeRequestTraceProjection.ForBuildAsync(db, projectId, releaseId, policy,
+                    maxNodes is null or < 1 ? DefaultNetworkNodeCeiling : maxNodes.Value, ct);
+                return Results.Ok(network);
+            }
+            catch (TraceWorkLimitException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
+                    title: "Trace work limit exceeded", detail: ex.Message,
+                    extensions: new Dictionary<string, object?> { ["code"] = "trace_work_limit" });
+            }
         });
 
         // What a change request proposes, for the Digital Thread's inside-a-change view: the before text of

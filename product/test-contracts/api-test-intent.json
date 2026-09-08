@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 870,
-    "cases": 967,
+    "tests": 871,
+    "cases": 968,
     "classes": 130,
-    "hostedTests": 830,
-    "hostedCases": 913,
+    "hostedTests": 831,
+    "hostedCases": 914,
     "nonHostedTests": 32,
     "nonHostedCases": 46,
     "unknownHostTests": 8,
@@ -37,8 +37,8 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 93,
-      "cases": 97,
+      "tests": 94,
+      "cases": 98,
       "unknownCases": 0,
       "classes": 55
     },
@@ -3053,8 +3053,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 184,
-        "end": 201
+        "start": 185,
+        "end": 202
       }
     },
     {
@@ -3071,8 +3071,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 90,
-        "end": 105
+        "start": 91,
+        "end": 106
       }
     },
     {
@@ -3089,8 +3089,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 164,
-        "end": 182
+        "start": 165,
+        "end": 183
       }
     },
     {
@@ -3107,8 +3107,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 203,
-        "end": 222
+        "start": 204,
+        "end": 223
       }
     },
     {
@@ -3125,8 +3125,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 152,
-        "end": 162
+        "start": 153,
+        "end": 163
       }
     },
     {
@@ -3143,8 +3143,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 224,
-        "end": 240
+        "start": 266,
+        "end": 282
       }
     },
     {
@@ -3161,8 +3161,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 107,
-        "end": 132
+        "start": 108,
+        "end": 133
       }
     },
     {
@@ -3179,8 +3179,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 134,
-        "end": 150
+        "start": 135,
+        "end": 151
+      }
+    },
+    {
+      "cls": "ChangeRequestNetworkApiTests",
+      "test": "Oversized_rooted_traces_return_an_explicit_work_limit_after_project_authorization",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 225,
+        "end": 264
       }
     },
     {
