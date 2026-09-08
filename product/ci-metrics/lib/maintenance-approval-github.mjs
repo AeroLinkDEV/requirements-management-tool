@@ -1,5 +1,5 @@
 import { collectMaintenancePreflight } from './maintenance-preflight-github.mjs'
-import { MAINTENANCE_REPOSITORY as repository } from './maintenance-preflight.mjs'
+import { evidenceDigest, MAINTENANCE_REPOSITORY as repository } from './maintenance-preflight.mjs'
 import { createMaintenanceReview, evaluateMaintenanceApproval, MAINTENANCE_REVIEW_ENVIRONMENT } from './maintenance-approval.mjs'
 
 export async function collectMaintenanceReview({ read, graphql, preparer, prNumber, runId, bindingRunId, bindingRunAttempt, expectedProduct }) {
@@ -19,6 +19,11 @@ export async function collectMaintenanceReview({ read, graphql, preparer, prNumb
   if (packet.evidence.run.headSha !== expectedProduct?.headSha || packet.evidence.run.runAttempt !== expectedProduct?.runAttempt) {
     throw new Error('Product run no longer matches the triggering candidate and attempt.')
   }
+  const currentBinding = await read(`${root}/actions/runs/${bindingRunId}`)
+  if (['id', 'run_attempt', 'status', 'head_sha', 'head_branch', 'path', 'event', 'name'].some(key =>
+    currentBinding[key] !== bindingRun[key]) || currentBinding.repository?.full_name !== bindingRun.repository?.full_name) {
+    throw new Error('Binding workflow advanced during evidence collection.')
+  }
   // Status changes while waiting for the owner; immutable execution identity is what the digest binds.
   return createMaintenanceReview({ packet, environment, branchPolicies, binding: {
     id: bindingRun.id, attempt: bindingRun.run_attempt, repository: bindingRun.repository?.full_name,
@@ -31,5 +36,7 @@ export async function collectMaintenanceReview({ read, graphql, preparer, prNumb
 export async function verifyApprovedMaintenance({ expectedDigest, ...input }) {
   const approvals = await input.read(`/repos/${repository}/actions/runs/${input.bindingRunId}/approvals`)
   const review = await collectMaintenanceReview(input)
-  return { ...evaluateMaintenanceApproval({ review, expectedDigest, approvals }), review }
+  const currentApprovals = await input.read(`/repos/${repository}/actions/runs/${input.bindingRunId}/approvals`)
+  if (evidenceDigest(approvals) !== evidenceDigest(currentApprovals)) throw new Error('Approval history changed during revalidation.')
+  return { ...evaluateMaintenanceApproval({ review, expectedDigest, approvals: currentApprovals }), review }
 }

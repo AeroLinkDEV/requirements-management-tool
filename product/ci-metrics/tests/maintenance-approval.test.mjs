@@ -108,6 +108,8 @@ for (const [name, mutate] of [
 ]) test(`cannot prepare ${name}`, () => {
   const input = fixture()
   mutate(input)
+  const { digest, ...payload } = input.packet
+  input.packet.digest = evidenceDigest(payload)
   assert.throws(() => createMaintenanceReview(input))
 })
 
@@ -191,7 +193,34 @@ test('complete API handoff reads this binding run approval, then recollects curr
   const result = await verifyApprovedMaintenance({ ...input, expectedDigest: review.digest })
   assert.equal(result.decision, 'PASS')
   assert.equal(calls[0], `${root}/actions/runs/50/approvals`)
+  assert.equal(calls.at(-1), `${root}/actions/runs/50/approvals`)
   assert.ok(calls.lastIndexOf(`${root}/actions/runs/42`) > 0)
+})
+
+test('cancellation of the binding during collection refuses the prepared handoff', async () => {
+  const { input } = githubFixture()
+  const read = input.read
+  let bindingReads = 0
+  input.read = async path => {
+    const value = await read(path)
+    if (path === `${root}/actions/runs/50` && ++bindingReads > 1) value.status = 'completed'
+    return value
+  }
+  await assert.rejects(collectMaintenanceReview(input), /advanced during/)
+})
+
+test('approval history changing during collection cannot produce PASS', async () => {
+  const { input, values } = githubFixture()
+  const review = await collectMaintenanceReview(input)
+  values.set(`${root}/actions/runs/50/approvals`, approval(review))
+  const read = input.read
+  let approvalReads = 0
+  input.read = async path => {
+    const value = await read(path)
+    if (path.endsWith('/approvals') && ++approvalReads > 1) value.push({ state: 'rejected' })
+    return value
+  }
+  await assert.rejects(verifyApprovedMaintenance({ ...input, expectedDigest: review.digest }), /history changed/)
 })
 
 for (const [name, mutate] of [
