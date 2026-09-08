@@ -64,7 +64,7 @@ public sealed class EnterpriseRequirementsWorkspaceTests
     {
         var csv="Identifier,Level,Statement,Rationale,VerificationMethod\r\nSYSR-00000001,System,The FMS shall navigate.,Needed,Test\r\nBAD,Unknown,,None,";using var stream=new MemoryStream(System.Text.Encoding.UTF8.GetBytes(csv));var rows=EnterpriseRequirementsService.ParseImport(stream,"requirements.csv");
         Assert.Equal(2,rows.Count);Assert.True(rows[0].Valid);Assert.False(rows[1].Valid);Assert.True(rows[1].Errors.Count>=3);
-        var diff=EnterpriseRequirementsService.Diff("The FMS shall navigate.","The FMS shall safely navigate.");Assert.Contains(diff,x=>x.Kind=="added"&&x.Text.Contains("safely"));
+        var diff=EnterpriseRequirementsService.Diff("The FMS shall navigate.","The FMS shall safely navigate.");Assert.Contains(diff.Spans,x=>x.Kind=="added"&&x.Text.Contains("safely"));
     }
 
     [Fact]

@@ -6,6 +6,8 @@ import type { FormEvent } from "react";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useFormDraft } from "./autosave";
 import DocumentActions from "./DocumentActions";
+import RequirementRedline from "./RequirementRedline";
+import type { RequirementRedlineData } from "./RequirementRedline";
 import {
   ControlledArtifactExplorerHeader,
   ControlledArtifactExplorerLayout,
@@ -297,15 +299,7 @@ export default function RequirementsWorkspace({
     [error, setError] = useState(""),
     [showSave, setShowSave] = useState(false),
     [showSchema, setShowSchema] = useState(false),
-    [redline, setRedline] = useState<{
-      from: number;
-      to: number;
-      statement: { kind: string; text: string }[];
-      rationale: { kind: string; text: string }[];
-      verificationChanged: boolean;
-      fromVerification: string;
-      toVerification: string;
-    }>(),
+    [redline, setRedline] = useState<RequirementRedlineData>(),
     [proposalTarget, setProposalTarget] = useState<Requirement>(),
     [proposalSearch, setProposalSearch] = useState(""),
     [proposalOptions, setProposalOptions] = useState<ProposalOptions>(),
@@ -1745,42 +1739,7 @@ export default function RequirementsWorkspace({
         </div>
       )}
       {redline && (
-        <div className="reqModal redlineModal">
-          <div>
-            <button
-              className="modalClose"
-              onClick={() => setRedline(undefined)}
-            >
-              ×
-            </button>
-            <p className="eyebrow">
-              CONTROLLED REDLINE / REV {redline.from} → {redline.to}
-            </p>
-            <h2>Revision comparison</h2>
-            <h3>Statement</h3>
-            <div className="redlineText">
-              {redline.statement.map((x, i) => (
-                <span className={x.kind} key={i}>
-                  {x.text}{" "}
-                </span>
-              ))}
-            </div>
-            <h3>Rationale</h3>
-            <div className="redlineText">
-              {redline.rationale.map((x, i) => (
-                <span className={x.kind} key={i}>
-                  {x.text}{" "}
-                </span>
-              ))}
-            </div>
-            {redline.verificationChanged && (
-              <p className="verificationDiff">
-                Verification changed: <del>{redline.fromVerification}</del> →{" "}
-                <ins>{redline.toVerification}</ins>
-              </p>
-            )}
-          </div>
-        </div>
+        <RequirementRedline data={redline} onClose={() => setRedline(undefined)} />
       )}
     </main>
   );

@@ -15,6 +15,10 @@ namespace AeroLink.Infrastructure.Persistence;
 
 public sealed record InterchangeRequirementRow(int RowNumber,string Identifier,string Level,string Statement,string Rationale,string VerificationMethod,bool Valid,IReadOnlyList<string> Errors);
 public sealed record DiffSpan(string Kind,string Text);
+public sealed record TextDiff(IReadOnlyList<DiffSpan> Spans, string Mode)
+{
+    public bool IsComplete => true;
+}
 
 public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderPolicy? policy = null,
     IProjectLadderPolicyResolver? policyResolver = null)
@@ -300,14 +304,53 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderP
 
     public static string Hash(byte[] bytes)=>Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
-    public static IReadOnlyList<DiffSpan> Diff(string oldText,string newText)
+    public static TextDiff Diff(string oldText, string newText, CancellationToken ct = default)
     {
-        var a=Tokenize(oldText).Take(400).ToArray();var b=Tokenize(newText).Take(400).ToArray();var dp=new int[a.Length+1,b.Length+1];
-        for(var i=a.Length-1;i>=0;i--)for(var j=b.Length-1;j>=0;j--)dp[i,j]=a[i]==b[j]?dp[i+1,j+1]+1:Math.Max(dp[i+1,j],dp[i,j+1]);
-        var raw=new List<DiffSpan>();var x=0;var y=0;while(x<a.Length||y<b.Length){if(x<a.Length&&y<b.Length&&a[x]==b[y]){raw.Add(new("same",a[x++]));y++;}else if(y<b.Length&&(x==a.Length||dp[x,y+1]>=dp[x+1,y]))raw.Add(new("added",b[y++]));else raw.Add(new("removed",a[x++]));}
-        return raw.GroupAdjacent().Select(g=>new DiffSpan(g.Kind,string.Join(" ",g.Text))).ToList();
+        ct.ThrowIfCancellationRequested();
+        if (oldText == newText) return new([new("same", oldText)], "Detailed");
+
+        const int maximumDetailedTokens = 400;
+        var a = Tokenize(oldText, ct).Take(maximumDetailedTokens + 1).ToArray();
+        var b = Tokenize(newText, ct).Take(maximumDetailedTokens + 1).ToArray();
+        // Bound the comparison matrix, never the controlled content. A large field remains fully readable
+        // on both sides; the caller must explain that individual changed words are not highlighted.
+        if (a.Length > maximumDetailedTokens || b.Length > maximumDetailedTokens)
+            return new([new("removed", oldText), new("added", newText)], "WholeField");
+
+        var dp = new int[a.Length + 1, b.Length + 1];
+        for (var i = a.Length - 1; i >= 0; i--)
+        {
+            ct.ThrowIfCancellationRequested();
+            for (var j = b.Length - 1; j >= 0; j--)
+                dp[i, j] = a[i] == b[j] ? dp[i + 1, j + 1] + 1 : Math.Max(dp[i + 1, j], dp[i, j + 1]);
+        }
+        var raw = new List<DiffSpan>();
+        var x = 0;
+        var y = 0;
+        while (x < a.Length || y < b.Length)
+        {
+            if (x < a.Length && y < b.Length && a[x] == b[y])
+            {
+                raw.Add(new("same", a[x++]));
+                y++;
+            }
+            else if (y < b.Length && (x == a.Length || dp[x, y + 1] >= dp[x + 1, y]))
+                raw.Add(new("added", b[y++]));
+            else raw.Add(new("removed", a[x++]));
+        }
+        return new(raw.GroupAdjacent().Select(g => new DiffSpan(g.Kind, string.Join(" ", g.Text))).ToList(), "Detailed");
     }
-    private static IEnumerable<string> Tokenize(string value)=>value.Split((char[]?)null,StringSplitOptions.RemoveEmptyEntries);
+    private static IEnumerable<string> Tokenize(string value, CancellationToken ct)
+    {
+        var start = -1;
+        for (var i = 0; i < value.Length; i++)
+        {
+            if ((i & 1023) == 0) ct.ThrowIfCancellationRequested();
+            if (!char.IsWhiteSpace(value[i])) { if (start < 0) start = i; }
+            else if (start >= 0) { yield return value[start..i]; start = -1; }
+        }
+        if (start >= 0) yield return value[start..];
+    }
     private static string NormalizeHeader(string value)=>new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
     private static int StableNumber(string value)=>int.TryParse(new string(value.Where(char.IsDigit).ToArray()),out var n)?n:Math.Abs(value.GetHashCode());
     private static readonly string[] DefaultSubsections=["Built-In Test","Fault Annunciation"];

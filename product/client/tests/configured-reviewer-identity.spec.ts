@@ -9,10 +9,44 @@ const completeImpacts = JSON.stringify({
   collaboration: 'Not Affected',
 })
 
+let ownedWorkflowId: string | undefined
+
+test.afterEach(async ({ request }) => {
+  if (!ownedWorkflowId) return
+  await apiLogin(request)
+  const retired = await request.post(`${apiBase}/api/review-workflows/${ownedWorkflowId}/retire`, { data: {} })
+  expect(retired.ok(), await retired.text()).toBeTruthy()
+  ownedWorkflowId = undefined
+})
+
 test('configured reviewer identity remains canonical from assignment through signature', async ({ page, request, playwright }) => {
   test.setTimeout(120_000)
   const suffix = Date.now().toString().slice(-7)
   const showcase = await showcaseSeed(request)
+
+  // Cancellation journeys can retire the shared showcase policy. This test specifically requires a
+  // configured review, so supply that precondition without replacing an existing active policy.
+  await apiLogin(request)
+  const applicable = await request.get(`${apiBase}/api/review-workflows/applicable?projectId=${showcase.projectId}&type=System`)
+  expect(applicable.ok(), await applicable.text()).toBeTruthy()
+  if (!(await applicable.json()).required) {
+    const created = await request.post(`${apiBase}/api/review-workflows`, { data: {
+      projectId: showcase.projectId,
+      name: `Canonical reviewer fixture ${suffix}`,
+      appliesTo: 'System',
+      mode: 'Sequential',
+      stages: [
+        { name: 'Systems review', kind: 'Review', requiredAuthority: { kind: 'BaseRole', role: 'SystemEngineer' } },
+        { name: 'Systems lead review', kind: 'Review', requiredAuthority: { kind: 'LeadershipPosition', position: 'SystemEngineeringLead' } },
+        { name: 'Software lead approval', kind: 'Approval', requiredAuthority: { kind: 'LeadershipPosition', position: 'SoftwareEngineeringLead' } },
+      ],
+    } })
+    expect(created.ok(), await created.text()).toBeTruthy()
+    const workflow = await created.json()
+    const activated = await request.post(`${apiBase}/api/review-workflows/${workflow.id}/activate`, { data: {} })
+    expect(activated.ok(), await activated.text()).toBeTruthy()
+    ownedWorkflowId = workflow.id
+  }
 
   await apiLogin(request, 'systems.author')
   const draftResponse = await request.post(`${apiBase}/api/change-request-drafts`, { data: {
