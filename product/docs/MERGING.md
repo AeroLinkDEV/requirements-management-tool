@@ -200,7 +200,8 @@ Authority token. The owner-review job has no token permissions or secret access.
 The binding workflow first uses protected-main code to establish an exact completed queue candidate: the
 ordinary verifier must refuse only the opted-in protected-surface change, the PR must carry the maintenance
 request label, and no kernel path may change. Only that trusted step output can mint the evidence token. Ordinary
-polling and ordinary merge-group candidates never mint it. Missing configuration, unverified installation
+polling and ordinary merge-group candidates never mint it. After the owner review wait, the publisher repeats the
+same current-candidate detector before minting a fresh evidence token. Missing configuration, unverified installation
 identity/scope, an omitted or nonempty ruleset bypass list, or any changed native evidence remains a refusal.
 The privileged response stays in process and is never written to a step summary, output, artifact, or check
 message.

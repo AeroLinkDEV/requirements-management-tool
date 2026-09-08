@@ -139,6 +139,10 @@ test('workflow mints the privileged token only from the protected candidate outp
   assert.match(workflow, /id: maintenance-evidence-token[\s\S]*?if: steps\.detect-maintenance\.outputs\.maintenance-needed == 'true'/)
   const evidenceBlocks = workflow.split('      - name: Mint the repository-scoped maintenance evidence token').slice(1)
   assert.equal(evidenceBlocks.length, 2)
+  assert.match(evidenceBlocks[1], /if: steps\.detect-maintenance-after-review\.outputs\.maintenance-needed == 'true'/)
+  const publishBlock = evidenceBlocks[1]
+  assert.ok(publishBlock.indexOf('if: steps.detect-maintenance-after-review.outputs.maintenance-needed') < publishBlock.indexOf('uses: actions/create-github-app-token'))
+  assert.ok(workflow.indexOf('id: detect-maintenance-after-review') < workflow.indexOf('id: maintenance-evidence-token', workflow.indexOf('id: detect-maintenance-after-review')))
   for (const block of evidenceBlocks) {
     assert.match(block, /permission-administration: write/)
     assert.match(block, /permission-metadata: read/)

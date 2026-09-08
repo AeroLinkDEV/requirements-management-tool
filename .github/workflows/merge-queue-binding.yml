@@ -121,8 +121,16 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      - name: Revalidate exact maintenance candidate before privileged mint
+        id: detect-maintenance-after-review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: node product/ci-metrics/bin/detect-maintenance-candidate.mjs
       - name: Mint the repository-scoped maintenance evidence token
         id: maintenance-evidence-token
+        if: steps.detect-maintenance-after-review.outputs.maintenance-needed == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.MAINTENANCE_EVIDENCE_APP_CLIENT_ID }}
