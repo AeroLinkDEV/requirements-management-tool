@@ -35,6 +35,12 @@ eligible to enter the queue. If another commit is pushed, the trusted synchroniz
 `ready-for-full-ci`; the old Full result and App check belong to the old SHA and cannot authorize the new one.
 Finish the fix, then request readiness again.
 
+The readiness publisher checks the complete current queue before dispatch and again before publishing. It
+refuses a PR head that equals any current composed candidate, including another PR's candidate. Both paths
+use the same required App context, so a second PR must not provide readiness for an existing queue commit.
+An incomplete queue response also refuses. Historical queue membership alone does not permanently disqualify
+a reopened head; current membership and the normal in-progress invalidator provide the boundary.
+
 To disarm auto-merge:
 
 ```bash
@@ -151,7 +157,8 @@ exact digest. The approval job executes no repository code and has no token perm
 The final publisher runs from the same protected-main workflow SHA in the existing `merge-authority`
 environment. It reads GitHub's authenticated approval history for this binding workflow and recollects live
 PR/queue, native run/jobs/check publisher, Git trees, ruleset and both environment policies. A changed digest
-refuses publication. The live Product attempt is checked once more immediately before publishing. The normal
+refuses publication. Both the live Product attempt and binding workflow identity/status are checked once more
+immediately before publishing. These reads cannot make the GitHub read-and-publish boundary atomic. The normal
 in-progress invalidator and paired native check remain required throughout the wait.
 
 GitHub approval history does not carry an attempt identifier. Maintenance therefore refuses reruns of the

@@ -1,6 +1,7 @@
 import { collectMaintenancePreflight } from './maintenance-preflight-github.mjs'
 import { evidenceDigest, MAINTENANCE_REPOSITORY as repository } from './maintenance-preflight.mjs'
 import { createMaintenanceReview, evaluateMaintenanceApproval, MAINTENANCE_REVIEW_ENVIRONMENT } from './maintenance-approval.mjs'
+import { fetchWorkflowRun } from './merge-authority-github.mjs'
 
 export async function collectMaintenanceReview({ read, graphql, preparer, prNumber, runId, bindingRunId, bindingRunAttempt, expectedProduct }) {
   if (!Number.isSafeInteger(bindingRunId) || bindingRunId < 1 || bindingRunAttempt !== 1) {
@@ -39,4 +40,28 @@ export async function verifyApprovedMaintenance({ expectedDigest, ...input }) {
   const currentApprovals = await input.read(`/repos/${repository}/actions/runs/${input.bindingRunId}/approvals`)
   if (evidenceDigest(approvals) !== evidenceDigest(currentApprovals)) throw new Error('Approval history changed during revalidation.')
   return { ...evaluateMaintenanceApproval({ review, expectedDigest, approvals: currentApprovals }), review }
+}
+
+/** Publication is injected so tests can prove that late cancellation/rerun never posts a PASS. */
+export async function publishApprovedMaintenance({ publish, ...input }) {
+  await publish({ decision: 'PENDING', reasons: [] })
+  const result = await verifyApprovedMaintenance(input)
+  const [currentProduct, currentBinding] = await Promise.all([
+    fetchWorkflowRun({ request: input.read, repository, runId: input.runId }),
+    input.read(`/repos/${repository}/actions/runs/${input.bindingRunId}`),
+  ])
+  const binding = result.review.binding
+  if (currentProduct.status !== 'completed' || currentProduct.runAttempt !== input.expectedProduct.runAttempt ||
+      currentProduct.headSha !== input.expectedProduct.headSha || currentProduct.repository !== repository ||
+      currentProduct.runId !== input.runId || currentProduct.event !== 'merge_group' ||
+      currentProduct.workflowPath !== '.github/workflows/ci.yml' || currentProduct.workflowName !== 'Product quality gate' ||
+      currentProduct.headBranch !== result.review.packet.evidence.run.headBranch ||
+      currentBinding.id !== binding.id || currentBinding.run_attempt !== 1 || currentBinding.status !== 'in_progress' ||
+      currentBinding.repository?.full_name !== binding.repository || currentBinding.event !== binding.event ||
+      currentBinding.path !== binding.path || currentBinding.name !== binding.name ||
+      currentBinding.head_sha !== binding.headSha || currentBinding.head_branch !== binding.headBranch) {
+    throw new Error('Product or binding execution advanced immediately before publication.')
+  }
+  await publish({ decision: result.decision, reasons: result.reasons })
+  return result
 }

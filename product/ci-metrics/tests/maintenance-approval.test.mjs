@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { createMaintenanceReview, evaluateMaintenanceApproval, maintenanceReviewSummary,
   MAINTENANCE_OWNER, MAINTENANCE_REVIEW_ENVIRONMENT as environmentName,
   MAINTENANCE_REQUEST_LABEL as requestLabel } from '../lib/maintenance-approval.mjs'
-import { collectMaintenanceReview, verifyApprovedMaintenance } from '../lib/maintenance-approval-github.mjs'
+import { collectMaintenanceReview, publishApprovedMaintenance, verifyApprovedMaintenance } from '../lib/maintenance-approval-github.mjs'
 import { evidenceDigest, evaluateMaintenancePreflight, MAINTENANCE_REPOSITORY as repository } from '../lib/maintenance-preflight.mjs'
 import { REQUIRED_JOBS, CLASSIFIER_JOB_NAME, AGGREGATE_JOB_NAME } from '../lib/merge-authority.mjs'
 import { trustedMaintenanceContext } from '../lib/maintenance-runtime.mjs'
@@ -224,6 +224,36 @@ test('approval history changing during collection cannot produce PASS', async ()
 })
 
 for (const [name, mutate] of [
+  ['no late mutation', () => {}],
+  ['binding cancelled', (v, path) => { if (path.endsWith('/runs/50')) v.status = 'completed' }],
+  ['binding rerun', (v, path) => { if (path.endsWith('/runs/50')) v.run_attempt = 2 }],
+  ['binding executable changed', (v, path) => { if (path.endsWith('/runs/50')) v.head_sha = sha('9') }],
+  ['binding workflow changed', (v, path) => { if (path.endsWith('/runs/50')) v.path = '.github/workflows/ci.yml' }],
+  ['Product rerun active', (v, path) => { if (path.endsWith('/runs/42')) v.status = 'in_progress' }],
+]) test(`final publishing boundary: ${name}`, async () => {
+  const { input, values } = githubFixture()
+  const review = await collectMaintenanceReview(input)
+  values.set(`${root}/actions/runs/50/approvals`, approval(review))
+  let approvalReads = 0
+  const read = input.read
+  input.read = async path => {
+    const value = await read(path)
+    if (path.endsWith('/approvals')) approvalReads++
+    if (approvalReads >= 2) mutate(value, path)
+    return value
+  }
+  const published = []
+  const run = publishApprovedMaintenance({ ...input, expectedDigest: review.digest, publish: async result => published.push(result.decision) })
+  if (name === 'no late mutation') {
+    assert.equal((await run).decision, 'PASS')
+    assert.deepEqual(published, ['PENDING', 'PASS'])
+  } else {
+    await assert.rejects(run, /immediately before publication/)
+    assert.deepEqual(published, ['PENDING'])
+  }
+})
+
+for (const [name, mutate] of [
   ['new Product attempt', v => { v.get(`${root}/actions/runs/42`).run_attempt++ }],
   ['active Product attempt', v => { v.get(`${root}/actions/runs/42`).status = 'in_progress' }],
   ['binding rerun', v => { v.get(`${root}/actions/runs/50`).run_attempt++ }],
@@ -263,8 +293,8 @@ test('workflow keeps owner approval free of credentials and candidate execution;
   assert.match(workflow, /needs: \[bind, review-maintenance\]/)
   assert.match(workflow, /needs.review-maintenance.result == 'success'/)
   const publisher = readFileSync(new URL('../bin/publish-approved-maintenance.mjs', import.meta.url), 'utf8')
-  assert.ok(publisher.indexOf("decision: 'PENDING'") < publisher.indexOf('await verifyApprovedMaintenance'))
-  assert.ok(publisher.indexOf('const current = await fetchWorkflowRun') < publisher.indexOf('decision: result.decision'))
+  assert.match(publisher, /await publishApprovedMaintenance/)
+  assert.match(publisher, /publish: decision => publishMergeAuthorityCheck/)
   assert.doesNotMatch(publisher, /pending_deployments|changedPaths: \[\]|checkout|eval\(/)
   for (const path of ['../../../.github/workflows/ci.yml', '../README.md']) {
     assert.ok(readFileSync(new URL(path, import.meta.url), 'utf8').includes('product/ci-metrics/tests/maintenance-approval.test.mjs'))
