@@ -136,8 +136,14 @@ try {
     if (-not $principal.IsInRole([Security.Principal.SecurityIdentifier]'S-1-5-3')) { throw 'Deployment helper requires the scheduled batch logon context.' }
     Import-Module $Module
     $lease = Enter-AeroLinkTransition -InstallationRoot $Installation
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Source 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser *> $Log
-    $code = $LASTEXITCODE
+    # Windows PowerShell turns redirected native stderr into ErrorRecords. A notice on
+    # stderr is not a failed deployment; the child controller's exit code is authority.
+    $savedPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Source 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser *> $Log
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $savedPreference }
 } catch { $_ | Out-String | Add-Content -LiteralPath $Log }
 finally {
     if ($lease) { Exit-AeroLinkTransition $lease }

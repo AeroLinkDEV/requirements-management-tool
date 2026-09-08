@@ -46,6 +46,19 @@ try {
         Start-Sleep -Milliseconds 100
     }
     Check ($helper.HasExited -and $helper.ExitCode -eq 7) 'A real redirected Windows PowerShell helper must retain its non-zero exit code.'
+    $setup = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Initialize-AeroLinkHomeProcessControl.ps1') -Raw
+    $invocation = [regex]::Match($setup, '(?s)    \$savedPreference = \$ErrorActionPreference.*?finally \{ \$ErrorActionPreference = \$savedPreference \}')
+    if (-not $invocation.Success) { throw 'First-deployment native invocation was not found.' }
+    foreach ($expectedCode in @(0, 7)) {
+        Set-Content -LiteralPath (Join-Path $helperScripts 'Start-AeroLinkProduction.ps1') -Value ('[Console]::Error.WriteLine("native notice"); exit ' + $expectedCode) -Encoding UTF8
+        $Source = $root
+        $Log = Join-Path $root "deployment-stderr-$expectedCode.log"
+        $code = -1
+        . ([scriptblock]::Create($invocation.Value))
+        Check ($code -eq $expectedCode) 'First-deployment stderr must preserve both successful and failed native exit codes.'
+        Check ($ErrorActionPreference -eq 'Stop') 'First-deployment invocation must restore terminating error handling.'
+        Check ((Get-Content -LiteralPath $Log -Raw) -match 'native notice') 'Native stderr must remain in the deployment log.'
+    }
 
     $lease = Enter-AeroLinkTransition -InstallationRoot $root -Policy Preserve
     $module = Join-Path $PSScriptRoot 'AeroLinkTransition.psm1'
