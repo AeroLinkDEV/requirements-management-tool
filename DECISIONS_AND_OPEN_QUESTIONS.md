@@ -2353,6 +2353,20 @@ successful when the reviewed merge candidate contains no trace of it.
   but not the expected base/result tree. The maintenance window, pre-merge tree proof and post-operation checks
   remain mandatory. Failure to satisfy these conditions means the installation stays blocked. The exception
   expires after this installation; future kernel changes or rollback require a separately approved transition.
+### DEC-122 - One-Time HOME Process-Control Deployment Setup
+
+- **Date:** 2026-09-08
+- **Status:** Accepted
+- **Decision:** The first deployment of #924 may require one explicitly elevated setup invocation to adopt
+  strongly attributed legacy HOME processes and establish access across the S4U/interactive logon boundary.
+  Subsequent ordinary production launches and updates remain non-admin and preserve the initiating service
+  policy. The setup uses approved main, the existing dedicated source, and the existing canonical installation.
+- **Authority:** The owner answered **"Yes approved !"** to the explicit question authorizing a one-time
+  elevated setup after merge, with subsequent launches and updates remaining non-admin. The approval is
+  recorded on [issue #924](https://github.com/AeroLinkDEV/requirements-management-tool/issues/924#issuecomment-5585911172).
+- **Boundary:** This is a first-deployment allowance, not permission to run unmerged code against HOME data,
+  weaken ownership checks, reset/reseed the database, bypass the source gate, or require elevation for normal
+  use. Actual S4U and final HOME acceptance remain required.
 
 ## Working Assumptions
 

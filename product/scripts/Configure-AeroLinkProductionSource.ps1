@@ -37,6 +37,12 @@ $productRoot = Join-Path $repositoryRoot 'product'
 if (-not $SourceRoot) { $SourceRoot = Join-Path (Split-Path $repositoryRoot -Parent) 'AeroLink Production' }
 if (-not $InstallationRoot) { $InstallationRoot = (Get-AeroLinkInstallationPaths -ProductRoot $productRoot).InstallationRoot }
 
+$transitionLease = $null
+if ($Action -eq 'Update') {
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1') -Force
+    $transitionLease = Enter-AeroLinkTransition -InstallationRoot $InstallationRoot -Policy Preserve
+}
+try {
 switch ($Action) {
     'Preview' {
         Write-Host 'AeroLink dedicated production source - preview' -ForegroundColor Cyan
@@ -308,3 +314,5 @@ switch ($Action) {
         exit ($(if ($updateHappened -or $result.Canonical) { 0 } else { 1 }))
     }
 }
+
+} finally { if ($transitionLease) { Exit-AeroLinkTransition -Lease $transitionLease } }

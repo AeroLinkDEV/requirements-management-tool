@@ -121,19 +121,27 @@ function Start-AeroLinkService {
         [int]$TailLines = 25,
         # Applied to this process before starting the child, which inherits it. Scoped to the run, so nothing
         # here outlives the launcher.
-        [hashtable]$Environment
+        [hashtable]$Environment,
+        [scriptblock]$OnStarted
     )
     if ($Environment) {
         foreach ($entry in $Environment.GetEnumerator()) {
             [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
         }
     }
-    Start-Process -FilePath $FilePath `
+    $startedProcess = Start-Process -FilePath $FilePath `
         -ArgumentList $ArgumentList `
         -WorkingDirectory $WorkingDirectory `
         -WindowStyle Hidden `
         -RedirectStandardOutput $StandardOutput `
-        -RedirectStandardError $StandardError | Out-Null
+        -RedirectStandardError $StandardError -PassThru
+    if ($OnStarted) {
+        try { & $OnStarted $startedProcess }
+        catch {
+            if (-not $startedProcess.HasExited) { $startedProcess.Kill(); $startedProcess.WaitForExit() }
+            throw
+        }
+    }
     try {
         Wait-HttpEndpoint -Uri $ReadyUri -ServiceName $ServiceName -TimeoutSeconds $TimeoutSeconds -SuccessBelow $SuccessBelow
     }

@@ -316,6 +316,14 @@ An installation may declare its own identity (`instance.json`), which the API pu
 from the hostname. `/health/identity` also carries the source SHA and launcher mode, which is what lets a
 launcher tell a matching process from a stale one — readiness alone never could.
 
+HOME production transitions preserve the prior protected-tunnel ON/OFF state under the initiating policy.
+Exact runtime reuse skips rebuild and PostgreSQL startup. A shared installation lease coordinates manual and
+scheduled controllers through fresh-process continuation; an owed origin is supplied before API startup and
+attributed to the new listener before protected-tunnel restoration. Incomplete restoration is a failed
+transition even if local service remains available. Managed process creators establish account-SID Windows
+access across S4U and interactive logons, and stops verify executable and process start identity. Legacy
+installations have an explicitly approved one-time elevated setup; ordinary subsequent operation is non-admin.
+
 Database upgrade posture is answered before a web server starts, by a maintenance mode of the application
 host that reuses the same migration authorities startup runs. A deterministic upgrade is backed up and
 validated on an isolated restored copy before the real database is touched; a modelled controlled-data
