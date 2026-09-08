@@ -94,7 +94,7 @@ public sealed class TestChangeReviewWorkflowServiceBoundaryTests
         var authorActor = new AuthenticatedUser(author.Id, author.UserName, author.DisplayName,
             author.Email, false, []);
         var approverActor = new AuthenticatedUser(approver.Id, approver.UserName, approver.DisplayName,
-            approver.Email, false, []);
+            approver.Email, false, [new UserProgramAccess(program.Id, [ProgramRole.Approver.ToString()])]);
 
         var submitted = await service.SubmitAsync(review,
             new SubmitTestChangeReviewCommand(approver.UserName, []), authorActor,
