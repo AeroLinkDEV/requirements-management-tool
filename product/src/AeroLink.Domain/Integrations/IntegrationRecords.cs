@@ -1,10 +1,21 @@
 using AeroLink.Domain.Common;
+using System.Text.Json;
 
 namespace AeroLink.Domain.Integrations;
 
 public enum ServiceIdentityState { Active, Revoked }
 public enum IntegrationEventState { Pending, Dispatched, Failed }
 public enum WebhookDeliveryState { Pending, Delivering, Delivered, RetryScheduled, DeadLettered }
+
+public sealed record WebhookDeliveryAttempt(
+    int Attempt,
+    Guid? ClaimToken,
+    string? Worker,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? FinishedAt,
+    string Outcome,
+    int? ResponseStatusCode,
+    string? Error);
 
 public sealed class IntegrationServiceIdentity
 {
@@ -83,6 +94,9 @@ public sealed class IntegrationEvent
 
 public sealed class WebhookDelivery
 {
+    public const int MaximumAttempts = 5;
+    public const int MaximumAttemptHistory = 20;
+
     private WebhookDelivery() { }
     public WebhookDelivery(Guid projectId, Guid integrationEventId, Guid subscriptionId, DateTimeOffset now)
     {
@@ -101,13 +115,111 @@ public sealed class WebhookDelivery
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public DateTimeOffset? DeliveredAt { get; private set; }
-    public void BeginAttempt(DateTimeOffset now) { if (State == WebhookDeliveryState.Delivered) throw new DomainException("A delivered webhook cannot be redelivered without replay."); State = WebhookDeliveryState.Delivering; AttemptCount++; UpdatedAt = now; }
-    public void Complete(int statusCode, DateTimeOffset now) { State = WebhookDeliveryState.Delivered; ResponseStatusCode = statusCode; LastError = null; DeliveredAt = now; UpdatedAt = now; }
-    public void Fail(int? statusCode, string error, int maximumAttempts, DateTimeOffset now)
+    public Guid? ClaimToken { get; private set; }
+    public string? ClaimedBy { get; private set; }
+    public DateTimeOffset? ClaimedAt { get; private set; }
+    public DateTimeOffset? ClaimExpiresAt { get; private set; }
+    public string AttemptHistoryJson { get; private set; } = "[]";
+    public long Version { get; private set; }
+
+    public void BeginAttempt(string worker, Guid claimToken, DateTimeOffset now, TimeSpan lease)
     {
-        ResponseStatusCode = statusCode; LastError = error.Length > 2000 ? error[..2000] : error; UpdatedAt = now;
-        if (AttemptCount >= maximumAttempts) { State = WebhookDeliveryState.DeadLettered; return; }
-        State = WebhookDeliveryState.RetryScheduled; NextAttemptAt = now.AddMinutes(Math.Min(60, Math.Pow(2, Math.Max(0, AttemptCount - 1))));
+        if (State == WebhookDeliveryState.Delivered) throw new DomainException("A delivered webhook cannot be redelivered without replay.");
+        if (State == WebhookDeliveryState.Delivering) throw new DomainException("A webhook delivery is already claimed.");
+        if (claimToken == Guid.Empty) throw new DomainException("A webhook claim token is required.");
+        if (string.IsNullOrWhiteSpace(worker)) throw new DomainException("A claiming webhook worker is required.");
+        if (lease <= TimeSpan.Zero) throw new DomainException("A webhook claim lease must be positive.");
+        State = WebhookDeliveryState.Delivering; AttemptCount++; UpdatedAt = now;
+        ClaimToken = claimToken; ClaimedBy = worker.Trim(); ClaimedAt = now; ClaimExpiresAt = now + lease;
+        ResponseStatusCode = null; LastError = null;
+        RecordAttempt(new WebhookDeliveryAttempt(AttemptCount, claimToken, ClaimedBy, now, null, "Delivering", null, null));
+        Touch();
     }
-    public void Replay(DateTimeOffset now) { State = WebhookDeliveryState.Pending; AttemptCount = 0; ResponseStatusCode = null; LastError = null; DeliveredAt = null; NextAttemptAt = now; UpdatedAt = now; }
+
+    public bool ClaimExpired(DateTimeOffset now) => State == WebhookDeliveryState.Delivering && ClaimExpiresAt is not null && ClaimExpiresAt <= now;
+
+    public bool RecoverExpired(DateTimeOffset now)
+    {
+        if (!ClaimExpired(now)) throw new DomainException("Only an expired webhook claim can be recovered.");
+        var token = ClaimToken ?? Guid.Empty;
+        var error = $"Worker claim expired after attempt {AttemptCount}.";
+        CompleteAttempt(token, now, AttemptCount >= MaximumAttempts ? "DeadLettered" : "RetryScheduled", null, error);
+        ReleaseClaim();
+        LastError = error; UpdatedAt = now;
+        if (AttemptCount >= MaximumAttempts)
+        {
+            State = WebhookDeliveryState.DeadLettered;
+        }
+        else
+        {
+            State = WebhookDeliveryState.RetryScheduled;
+            NextAttemptAt = now.AddMinutes(Math.Min(60, Math.Pow(2, Math.Max(0, AttemptCount - 1))));
+        }
+        Touch();
+        return true;
+    }
+
+    public bool Complete(Guid claimToken, int statusCode, DateTimeOffset now)
+    {
+        if (!OwnsClaim(claimToken)) return false;
+        State = WebhookDeliveryState.Delivered; ResponseStatusCode = statusCode; LastError = null; DeliveredAt = now; UpdatedAt = now;
+        CompleteAttempt(claimToken, now, "Delivered", statusCode, null);
+        ReleaseClaim();
+        Touch();
+        return true;
+    }
+
+    public bool Fail(Guid claimToken, int? statusCode, string error, DateTimeOffset now)
+    {
+        if (!OwnsClaim(claimToken)) return false;
+        ResponseStatusCode = statusCode; LastError = error.Length > 2000 ? error[..2000] : error; UpdatedAt = now;
+        var deadLetter = AttemptCount >= MaximumAttempts;
+        CompleteAttempt(claimToken, now, deadLetter ? "DeadLettered" : "RetryScheduled", statusCode, LastError);
+        ReleaseClaim();
+        if (deadLetter) State = WebhookDeliveryState.DeadLettered;
+        else { State = WebhookDeliveryState.RetryScheduled; NextAttemptAt = now.AddMinutes(Math.Min(60, Math.Pow(2, Math.Max(0, AttemptCount - 1)))); }
+        Touch();
+        return true;
+    }
+
+    public bool ReleaseForShutdown(Guid claimToken, DateTimeOffset now, string reason = "Worker shut down before finishing; returned to the queue.")
+    {
+        if (!OwnsClaim(claimToken)) return false;
+        CompleteAttempt(claimToken, now, "Cancelled", null, reason);
+        // A claim is an ownership lease, not a failed receiver attempt. Returning it before send must
+        // leave the ordinary five-failure budget available while retaining the physical cancelled attempt.
+        AttemptCount = Math.Max(0, AttemptCount - 1);
+        ReleaseClaim(); State = WebhookDeliveryState.RetryScheduled; LastError = reason; NextAttemptAt = now; UpdatedAt = now;
+        Touch();
+        return true;
+    }
+
+    public void Replay(DateTimeOffset now)
+    {
+        if (State == WebhookDeliveryState.Delivering && !ClaimExpired(now)) throw new DomainException("A live webhook delivery claim cannot be replayed.");
+        if (State == WebhookDeliveryState.Delivering && ClaimToken is Guid token)
+            CompleteAttempt(token, now, "Replayed", null, "Expired webhook claim replayed by an operator.");
+        State = WebhookDeliveryState.Pending; AttemptCount = 0; ResponseStatusCode = null; LastError = null; DeliveredAt = null; NextAttemptAt = now; UpdatedAt = now;
+        ReleaseClaim();
+        Touch();
+    }
+
+    public IReadOnlyList<WebhookDeliveryAttempt> AttemptHistory() =>
+        JsonSerializer.Deserialize<WebhookDeliveryAttempt[]>(AttemptHistoryJson) ?? [];
+
+    private bool OwnsClaim(Guid claimToken) => State == WebhookDeliveryState.Delivering && ClaimToken == claimToken;
+    private void ReleaseClaim() { ClaimToken = null; ClaimedBy = null; ClaimedAt = null; ClaimExpiresAt = null; }
+    private void CompleteAttempt(Guid claimToken, DateTimeOffset now, string outcome, int? statusCode, string? error)
+    {
+        var entries = AttemptHistory().ToList();
+        var index = entries.FindLastIndex(x => x.ClaimToken == claimToken);
+        if (index >= 0) entries[index] = entries[index] with { FinishedAt = now, Outcome = outcome, ResponseStatusCode = statusCode, Error = error };
+        AttemptHistoryJson = JsonSerializer.Serialize(entries.TakeLast(MaximumAttemptHistory));
+    }
+    private void RecordAttempt(WebhookDeliveryAttempt attempt)
+    {
+        var entries = AttemptHistory().ToList(); entries.Add(attempt);
+        AttemptHistoryJson = JsonSerializer.Serialize(entries.TakeLast(MaximumAttemptHistory));
+    }
+    private void Touch() => Version++;
 }

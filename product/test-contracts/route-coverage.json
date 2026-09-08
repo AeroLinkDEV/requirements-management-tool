@@ -392,6 +392,7 @@
         "VerificationProgramIsolationApiTests",
         "VerificationReadEffectivityApiTests",
         "VerificationVocabularyApiTests",
+        "WebhookDeliveryOperationsApiTests",
         "WithdrawChangeRequestApiTests",
         "WorkflowAuthorityCutoverApiTests"
       ]
@@ -1211,7 +1212,9 @@
       "method": "POST",
       "path": "/api/integrations/deliveries/{id:guid}/replay",
       "file": "IntegrationEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "WebhookDeliveryOperationsApiTests"
+      ]
     },
     {
       "method": "POST",
@@ -1233,7 +1236,8 @@
       "file": "IntegrationEndpoints.cs",
       "coveredBy": [
         "ChangeRequestTargetReleaseGuardApiTests",
-        "OpenDigitalThreadTests"
+        "OpenDigitalThreadTests",
+        "WebhookDeliveryOperationsApiTests"
       ]
     },
     {
