@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   median, percentile, classifyRun, runDurationMs, jobGroupDurations, queueAndCancellation,
   flakeTrend, cacheTrend, rollingStats, detectRegressions, validateRunRecord, recordFormat, buildRollingReport, trackerBody, trackerCategoriesFromBody, decideTrackerAction, regressionDeterminacy, writeWouldRegressTracker,
-  fullGatesPerMerge, FULL_GATE_WINDOW_DAYS, MAX_RECORDS,
+  fullGatesPerMerge, scheduledProofStatus, FULL_GATE_WINDOW_DAYS, MAX_RECORDS,
 } from '../lib/rolling.mjs'
 
 function record(overrides = {}) {
@@ -57,7 +57,67 @@ test('classifyRun distinguishes comparable categories', () => {
   assert.equal(classifyRun(record({ classifications: { docsOnly: 0, backend: 1, client: 1, browser: 1, postgresql: 1, unavailable: 1 } })), 'mixed')
   assert.equal(classifyRun(record({ run: { ...record().run, event: 'push' } })), 'push-main')
   assert.equal(classifyRun(record({ run: { ...record().run, event: 'schedule' } })), 'scheduled')
-  assert.equal(classifyRun(record({ run: { ...record().run, event: 'workflow_dispatch' } })), 'manual')
+  assert.equal(classifyRun(record({ run: { ...record().run, event: 'workflow_dispatch' } })), 'dispatch-backend-only')
+  assert.equal(classifyRun(record({ run: { ...record().run, event: 'merge_group' } })), 'queue-backend-only')
+  assert.equal(classifyRun(record({ run: { ...record().run, event: 'merge_group', attempt: 2 } })), 'rerun-queue-backend-only')
+  assert.equal(classifyRun(record({ run: { ...record().run, event: 'push', attempt: 2 } })), 'rerun-push-main')
+})
+
+test('dispatch scopes, queue evidence and reruns are separate regression cohorts', () => {
+  const backend = record({ run: { ...record().run, event: 'workflow_dispatch' } })
+  const mixed = record({ run: backend.run, classifications: { backend: 1, client: 1, browser: 1, postgresql: 1 } })
+  const queue = record({ ...mixed, run: { ...mixed.run, event: 'merge_group' } })
+  const rerun = record({ ...mixed, run: { ...mixed.run, attempt: 2 } })
+  assert.deepEqual(rollingStats([backend, mixed, queue, rerun]).map((group) => group.category),
+    ['dispatch-backend-only', 'dispatch-mixed', 'queue-mixed', 'rerun-dispatch-mixed'])
+})
+
+test('new event/attempt cohorts survive tracker serialization and require their own recovery evidence', () => {
+  for (const category of ['dispatch-mixed', 'queue-mixed', 'rerun-dispatch-backend-only', 'rerun-push-main']) {
+    const body = trackerBody({ generatedAt: '2026-09-07T12:00:00Z',
+      regressions: [{ category, metric: 'criticalPathP95', current: 900000, previous: 600000, threshold: 690000, runs: 8 }] })
+    assert.deepEqual(trackerCategoriesFromBody(body), [category])
+    assert.equal(decideTrackerAction({ regressions: [], trackerExists: true, trackerCategories: [category],
+      determinacyByCategory: { mixed: { determinate: true } } }).action, 'none')
+  }
+})
+
+test('scheduled freshness exposes cancellations without artifacts and never invents successful proof', () => {
+  const success = { id: 1, event: 'schedule', head_branch: 'main', status: 'completed', conclusion: 'success',
+    created_at: '2026-08-10T03:00:00Z', updated_at: '2026-08-10T04:00:00Z' }
+  const cancelled = { ...success, id: 2, conclusion: 'cancelled', created_at: '2026-09-07T03:00:00Z', updated_at: '2026-09-07T04:00:00Z' }
+  const result = scheduledProofStatus([success, cancelled], '2026-09-07T04:00:00Z')
+  assert.equal(result.latest.runId, 2)
+  assert.equal(result.latest.conclusion, 'cancelled')
+  assert.equal(result.lastSuccess.runId, 1)
+  assert.equal(result.lastSuccessAgeMs, 28 * 86400000)
+  assert.equal(scheduledProofStatus([cancelled], '2026-09-07T04:00:00Z').lastSuccessAgeMs, null)
+  assert.equal(scheduledProofStatus([{ ...success, event: 'push' }], '2026-09-07T04:00:00Z').latest, null)
+  assert.equal(scheduledProofStatus([success], 'invalid').lastSuccessAgeMs, null)
+  assert.equal(scheduledProofStatus([success], '2026-08-09T04:00:00Z').lastSuccessAgeMs, null)
+  const report = buildRollingReport({ records: [], scheduledRuns: [success, cancelled], generatedAt: '2026-09-07T04:00:00Z' })
+  assert.match(report.markdown, /Latest scheduled main run: 2 \(completed, cancelled\)/)
+  assert.match(report.markdown, /28.0 days ago \(run 1\)/)
+})
+
+test('queue-era cadence includes dispatch, queue attempts and the exact post-merge push', () => {
+  const pr = { number: 932, head: { ref: 'feature/932' }, created_at: '2026-09-06T00:00:00Z',
+    merged_at: '2026-09-07T12:00:00Z', merge_commit_sha: 'a'.repeat(40) }
+  const run = { created_at: '2026-09-07T11:00:00Z', run_attempt: 1 }
+  const queueRef = `gh-readonly-queue/main/pr-932-${'b'.repeat(40)}`
+  const rows = [
+    { ...run, event: 'workflow_dispatch', head_branch: pr.head.ref, pull_requests: [] },
+    { ...run, event: 'merge_group', head_branch: queueRef, run_attempt: 2 },
+    { ...run, event: 'push', head_sha: pr.merge_commit_sha, created_at: '2026-09-07T12:01:00Z' },
+    { ...run, event: 'schedule', head_branch: 'main' },
+    { ...run, event: 'workflow_dispatch', head_branch: pr.head.ref, created_at: '2026-09-07T13:00:00Z' },
+    { ...run, event: 'workflow_dispatch', head_branch: pr.head.ref, pull_requests: [{ number: 999 }] },
+    { ...run, event: 'merge_group', head_branch: queueRef.replace('pr-932-', 'pr-9320-') },
+    { ...run, event: 'merge_group', head_branch: `${queueRef}-extra` },
+    { ...run, event: 'push', head_sha: 'c'.repeat(40) },
+  ]
+  assert.deepEqual(fullGatesPerMerge([pr], rows), [{ pr: 932, mergedAt: pr.merged_at,
+    runs: 3, attempts: 4, prRuns: 1, queueRuns: 1, postMergeRuns: 1 }])
 })
 
 test('runDurationMs and jobGroupDurations respect unavailable data', () => {
@@ -115,6 +175,17 @@ test('rollingStats groups like-for-like runs with median/p95', () => {
   assert.equal(backendOnly.criticalPath.p95, 70_000)
   const pushMain = stats.find((group) => group.category === 'push-main')
   assert.equal(pushMain.runs, 1)
+})
+
+test('rolling count totals retain passed results alongside TRX reconciliation fields', () => {
+  const stats = rollingStats([
+    record({ counts: { expected: 4, executed: 3, passed: 2, failed: 1, skipped: 1, flaky: 0 } }),
+    record({ run: { ...record().run, id: 2 }, counts: { expected: 2, executed: 2, passed: 2, failed: 0, skipped: 0, flaky: 0 } }),
+  ])
+  const group = stats.find((entry) => entry.category === 'backend-only')
+  assert.deepEqual(group.counts, { runs: 2, expected: 6, executed: 5, passed: 4, failed: 1, skipped: 1, flaky: 0 })
+  const report = buildRollingReport({ records: [record()] })
+  assert.match(report.markdown, /Expected \| Executed \| Passed \| Failed \| Skipped \| Flaky/)
 })
 
 test('detectRegressions requires sustained evidence and never fires on noise', () => {
@@ -208,7 +279,9 @@ test('the full-gate headline sums the current run/attempt fields and never emits
   // report; the distribution leads because the totals are not the actionable part.
   assert.match(report.markdown, /Full gates per merged PR \(2 merge\(s\) from the last 30 days, newest 200 kept\)/)
   assert.match(report.markdown, /median 10, p95 10, max 10 \(20 runs \/ 23 attempts in total\)/)
-  assert.match(report.markdown, /PR #572 \(merged 2026-08-14\): 10 full gate run\(s\) \/ 13 attempt\(s\) \(9 pre-merge, 1 post-merge\)/)
+  assert.match(report.markdown, /PR #572 \(merged 2026-08-14\): 10 full gate run\(s\) \/ 13 attempt\(s\) \(9 pre-queue, 0 queue, 1 post-merge\)/)
+  assert.match(report.markdown, /including failures and selected scopes/)
+  assert.match(report.markdown, /missing historical stage is not zero lifetime cost/)
 })
 
 test('the full-gate headline reports a distribution, not just a mean-shaped total', () => {

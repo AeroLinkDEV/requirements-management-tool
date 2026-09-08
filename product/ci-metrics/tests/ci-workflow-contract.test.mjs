@@ -23,6 +23,44 @@ import { fileURLToPath } from 'node:url'
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const workflowPath = join(repoRoot, '.github', 'workflows', 'ci.yml')
 
+test('all browser lanes retain actual reports and failure traces after retry success', () => {
+  for (const [job, results, report] of [
+    ['browser-pr', 'test-results', 'journey-durations-${{ matrix.shard }}.json'],
+    ['browser-production', 'test-results-production', 'journey-durations-production.json'],
+    ['browser-full', 'test-results', 'journey-durations-full-${{ matrix.shard }}.json'],
+  ]) {
+    const uploads = stepBlocks(jobBodies(workflowLines())[job])
+      .filter((block) => /uses: actions\/upload-artifact/.test(block.lines.join('\n')))
+    for (const path of [results, report]) {
+      const upload = uploads.find((block) => block.lines.some((line) => line.trim() === `product/client/${path}` || line.trim() === `path: product/client/${path}`))
+      assert.ok(upload, `${job} must upload ${path}`)
+      assert.match(upload.lines.join('\n'), /^        if: always\(\)$/m, `${job} must retain evidence on retry-pass and cancellation`)
+      assert.match(upload.lines.join('\n'), /retention-days: 7/)
+    }
+  }
+})
+
+test('scheduled proof uses bounded duration packing and cannot be cancelled by a main push', () => {
+  const workflow = workflowLines().join('\n')
+  const group = workflow.split('\n').find((line) => line.startsWith('  group: quality-'))
+  assert.ok(group.includes("github.event_name == 'schedule' && 'scheduled'"))
+  assert.ok(group.includes("github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && format('diagnostics-{0}', github.ref)"))
+  assert.ok(group.includes('inputs.pull_request_number || github.event.pull_request.number || github.ref'))
+  const full = jobBodies(workflowLines())['browser-full'].join('\n')
+  assert.match(full, /timeout-minutes: 30/)
+  assert.match(full, /shard: \[1, 2, 3\]/)
+  assert.match(full, /scripts\/plan-journey-shard\.mjs listed\.txt/)
+  assert.match(full, /\[ "\$actual" != "\$expected" \]/)
+  assert.doesNotMatch(full, /playwright test --shard/)
+})
+
+test('run metadata receives dispatch mode and PR identity inputs used by browser topology', () => {
+  const report = jobBodies(workflowLines())['metrics-report'].join('\n')
+  for (const name of ['FULL_DIAGNOSTICS', 'PULL_REQUEST_NUMBER', 'PULL_REQUEST_BASE_SHA', 'PULL_REQUEST_HEAD_SHA']) {
+    assert.match(report, new RegExp(`${name}: \\$\\{\\{\\s*inputs\\.`), `${name} must come from workflow_dispatch inputs`)
+  }
+})
+
 test('the actual aggregate shell rejects incomplete scheduled and manual browser proof', () => {
   const gate = jobBodies(workflowLines()).gate
   assert.match(gate.join('\n'), /needs: \[[^\n]*browser-full/)

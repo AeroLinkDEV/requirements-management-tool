@@ -43,21 +43,23 @@ export function percentile(values, p) {
 
 export function classifyRun(record) {
   const event = record.run?.event ?? 'unknown'
-  if (event === 'push') return 'push-main'
-  if (event === 'schedule') return 'scheduled'
-  if (event === 'workflow_dispatch') return 'manual'
+  const attempt = record.run?.attempt > 1 ? 'rerun-' : ''
+  if (event === 'push') return `${attempt}push-main`
+  if (event === 'schedule') return `${attempt}scheduled`
+  const role = event === 'workflow_dispatch' ? 'dispatch-' : event === 'merge_group' ? 'queue-' : ''
+  const category = (scope) => `${attempt}${role}${scope}`
 
   const classification = record.classifications ?? {}
-  if (classification.docsOnly > 0) return 'docs-only'
+  if (classification.docsOnly > 0) return category('docs-only')
 
   const selected = []
   if (classification.backend > 0) selected.push('backend')
   if (classification.client > 0) selected.push('client')
   if (classification.browser > 0) selected.push('browser')
   if (classification.postgresql > 0) selected.push('postgresql')
-  if (selected.length === 0) return 'unclassified'
-  if (selected.length === 1) return `${selected[0]}-only`
-  return 'mixed'
+  if (selected.length === 0) return category('unclassified')
+  if (selected.length === 1) return category(`${selected[0]}-only`)
+  return category('mixed')
 }
 
 export function runDurationMs(record) {
@@ -146,18 +148,25 @@ export function fullGatesPerMerge(mergedPrs, runs) {
     const created = Date.parse(pr.created_at)
     const merged = Date.parse(pr.merged_at)
     if (!Number.isFinite(created) || !Number.isFinite(merged)) continue
-    // Pre-merge gates are every pull_request quality-gate run on the PR's branch created between shortly
-    // before the PR and one day after the merge (reruns keep their original created_at, so they remain in
-    // the window). Post-merge gates are push runs on the exact merge commit.
-    const cutoff = merged + 24 * 60 * 60 * 1000
+    // Observational attribution, not merge authority. Dispatch runs often have
+    // no pull_requests association, so use branch + lifetime. Queue refs identify
+    // their primary PR only; do not pretend this enumerates all composed members.
+    // Reruns retain created_at. A later reuse of the branch is outside this PR.
     const prRuns = []
+    const queueRuns = []
     const postMergeRuns = []
     for (const run of Array.isArray(runs) ? runs : []) {
       if (typeof run.created_at !== 'string') continue
       const at = Date.parse(run.created_at)
       if (!Number.isFinite(at)) continue
-      if (run.event === 'pull_request' && run.head_branch === pr.head.ref && at >= created - 60 * 60 * 1000 && at <= cutoff) {
+      const inLifetime = at >= created - 60 * 60 * 1000 && at <= merged
+      const associated = Array.isArray(run.pull_requests) ? run.pull_requests : []
+      const associationMatches = associated.length === 0 || associated.some((entry) => entry.number === pr.number)
+      const queuePrimary = /^gh-readonly-queue\/main\/pr-([1-9][0-9]*)-[0-9a-f]{40}$/.exec(run.head_branch ?? '')
+      if (['pull_request', 'workflow_dispatch'].includes(run.event) && run.head_branch === pr.head.ref && inLifetime && associationMatches) {
         prRuns.push(run)
+      } else if (run.event === 'merge_group' && queuePrimary && Number(queuePrimary[1]) === pr.number && inLifetime) {
+        queueRuns.push(run)
       } else if (run.event === 'push' && run.head_sha === pr.merge_commit_sha) {
         postMergeRuns.push(run)
       }
@@ -166,20 +175,41 @@ export function fullGatesPerMerge(mergedPrs, runs) {
     result.push({
       pr: pr.number,
       mergedAt: pr.merged_at,
-      runs: prRuns.length + postMergeRuns.length,
-      attempts: attemptCount(prRuns) + attemptCount(postMergeRuns),
+      runs: prRuns.length + queueRuns.length + postMergeRuns.length,
+      attempts: attemptCount(prRuns) + attemptCount(queueRuns) + attemptCount(postMergeRuns),
       prRuns: prRuns.length,
+      queueRuns: queueRuns.length,
       postMergeRuns: postMergeRuns.length,
     })
   }
   return result.sort((a, b) => String(b.mergedAt).localeCompare(String(a.mergedAt))).slice(0, MAX_RECORDS)
 }
 
+// Read API metadata directly: cancelled scheduled runs may have no metrics
+// artifact, so deriving this from successfully downloaded records would hide them.
+export function scheduledProofStatus(runs, now) {
+  const scheduled = (Array.isArray(runs) ? runs : []).filter((run) => run.event === 'schedule' &&
+    run.head_branch === 'main' && Number.isSafeInteger(run.id) && Number.isFinite(Date.parse(run.created_at)))
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+  const latest = scheduled[0]
+  const successful = scheduled.filter((run) => run.status === 'completed' && run.conclusion === 'success' &&
+    Number.isFinite(Date.parse(run.updated_at))).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0]
+  const elapsed = successful ? Date.parse(now) - Date.parse(successful.updated_at) : NaN
+  return {
+    latest: latest ? { runId: latest.id, status: String(latest.status ?? 'unknown').slice(0, 40),
+      conclusion: String(latest.conclusion ?? 'pending').slice(0, 40) } : null,
+    lastSuccess: successful ? { runId: successful.id, completedAt: successful.updated_at } : null,
+    lastSuccessAgeMs: Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : null,
+    unavailableReason: !successful ? 'No successful scheduled main run is present in the fetched history.'
+      : !Number.isFinite(elapsed) || elapsed < 0 ? 'Scheduled completion age could not be established.' : null,
+  }
+}
+
 export function rollingStats(records) {
   const groups = new Map()
   for (const record of records) {
     const category = classifyRun(record)
-    const entry = groups.get(category) ?? { category, criticalPath: [], jobGroups: new Map(), counts: { runs: 0, expected: 0, executed: 0, failed: 0, skipped: 0, flaky: 0 } }
+    const entry = groups.get(category) ?? { category, criticalPath: [], jobGroups: new Map(), counts: { runs: 0, expected: 0, executed: 0, passed: 0, failed: 0, skipped: 0, flaky: 0 } }
     entry.counts.runs += 1
     const duration = runDurationMs(record)
     if (duration !== null) entry.criticalPath.push(duration)
@@ -189,7 +219,7 @@ export function rollingStats(records) {
       entry.jobGroups.set(group, list)
     }
     const counts = record.counts ?? {}
-    for (const key of ['expected', 'executed', 'failed', 'skipped', 'flaky']) {
+    for (const key of ['expected', 'executed', 'passed', 'failed', 'skipped', 'flaky']) {
       if (Number.isInteger(counts[key])) entry.counts[key] += counts[key]
     }
     groups.set(category, entry)
@@ -341,10 +371,11 @@ function escapeMarkdown(value) {
     .replace(/\r?\n/g, ' ')
 }
 
-export function buildRollingReport({ records, regressions = [], missing = [], fullGates = [], fullGateScope = null, determinacy = null, generatedAt = new Date().toISOString() }) {
+export function buildRollingReport({ records, regressions = [], missing = [], fullGates = [], fullGateScope = null, scheduledRuns = [], determinacy = null, generatedAt = new Date().toISOString() }) {
   const stats = rollingStats(records)
   const flakes = flakeTrend(records)
   const cache = cacheTrend(records)
+  const scheduledProof = scheduledProofStatus(scheduledRuns, generatedAt)
   const queueDelays = records.map((record) => record.apiTiming?.queueDelayMs).filter((value) => Number.isFinite(value))
   const cancelledConsumedTotal = records.reduce((sum, record) => sum + (record.apiTiming?.cancelledConsumedMs ?? 0), 0)
   const cancelledJobsTotal = records.reduce((sum, record) => sum + (record.apiTiming?.cancelledJobs ?? 0), 0)
@@ -355,6 +386,7 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
   lines.push('')
   lines.push(`- Generated: ${escapeMarkdown(generatedAt)}`)
   lines.push(`- Runs included: ${records.length}`)
+  lines.push(`- Latest scheduled main run: ${scheduledProof.latest ? `${scheduledProof.latest.runId} (${escapeMarkdown(scheduledProof.latest.status)}, ${escapeMarkdown(scheduledProof.latest.conclusion)})` : 'unavailable in fetched history'}. Last successful completion: ${scheduledProof.lastSuccessAgeMs === null ? 'age unavailable' : `${(scheduledProof.lastSuccessAgeMs / 86_400_000).toFixed(1)} days ago (run ${scheduledProof.lastSuccess.runId})`}.`)
   lines.push(`- Runs missing/unreadable: ${missing.length}`)
   lines.push(`- Flaky runs: ${flakes.totalFlakyRuns}`)
   lines.push(`- Queue delay median: ${median(queueDelays) === null ? 'unavailable' : `${Math.round(median(queueDelays) / 1000)}s`} (${queueDelays.length} measured)`)
@@ -386,14 +418,15 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
       `- Full gates per merged PR (${scope}): median ${middle}, p95 ${upper}, max ${worst} ` +
         `(${totalRuns} runs / ${totalAttempts} attempts in total)`,
     )
+    lines.push('- Cadence counts are observed Product workflow runs (including failures and selected scopes), not proof of a completed Full gate. Pre-queue attribution uses branch/lifetime; queue attribution uses the primary PR in its ref, not every composed member. Counts cover only the fetched run window; a missing historical stage is not zero lifetime cost.')
   }
   lines.push('')
   lines.push('## Comparable groups')
   lines.push('')
-  lines.push('| Category | Runs | Critical path median | Critical path p95 | Expected | Executed | Failed | Skipped | Flaky |')
-  lines.push('|---|---|---|---:|---:|---:|---:|---:|---:|')
+  lines.push('| Category | Runs | Critical path median | Critical path p95 | Expected | Executed | Passed | Failed | Skipped | Flaky |')
+  lines.push('|---|---|---|---:|---:|---:|---:|---:|---:|---:|')
   for (const group of stats) {
-    lines.push(`| ${escapeMarkdown(group.category)} | ${group.runs} | ${group.criticalPath.median === null ? '—' : `${Math.round(group.criticalPath.median / 1000)}s`} | ${group.criticalPath.p95 === null ? '—' : `${Math.round(group.criticalPath.p95 / 1000)}s`} | ${group.counts.expected} | ${group.counts.executed} | ${group.counts.failed} | ${group.counts.skipped} | ${group.counts.flaky} |`)
+    lines.push(`| ${escapeMarkdown(group.category)} | ${group.runs} | ${group.criticalPath.median === null ? '—' : `${Math.round(group.criticalPath.median / 1000)}s`} | ${group.criticalPath.p95 === null ? '—' : `${Math.round(group.criticalPath.p95 / 1000)}s`} | ${group.counts.expected} | ${group.counts.executed} | ${group.counts.passed} | ${group.counts.failed} | ${group.counts.skipped} | ${group.counts.flaky} |`)
   }
   lines.push('')
   if (regressions.length > 0) {
@@ -424,7 +457,7 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
     lines.push('## Full gates per merged PR')
     lines.push('')
     for (const entry of fullGates.slice(0, 20)) {
-      lines.push(`- PR #${escapeMarkdown(String(entry.pr))} (merged ${escapeMarkdown(String(entry.mergedAt).slice(0, 10))}): ${entry.runs} full gate run(s) / ${entry.attempts} attempt(s) (${entry.prRuns} pre-merge, ${entry.postMergeRuns} post-merge)`)
+      lines.push(`- PR #${escapeMarkdown(String(entry.pr))} (merged ${escapeMarkdown(String(entry.mergedAt).slice(0, 10))}): ${entry.runs} full gate run(s) / ${entry.attempts} attempt(s) (${entry.prRuns} pre-queue, ${entry.queueRuns ?? 0} queue, ${entry.postMergeRuns} post-merge)`)
     }
     lines.push('')
   }
@@ -465,6 +498,7 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
     regressions: regressions.slice(0, MAX_REGRESSIONS),
     missing: missing.slice(0, 50),
     fullGatesPerMerge: fullGates.slice(0, MAX_RECORDS),
+    scheduledProof,
     queueAndCancellation: {
       queueDelayMedianMs: median(queueDelays),
       queueDelaySamples: queueDelays.length,
@@ -484,6 +518,11 @@ const TRACKER_CATEGORIES = new Set([
   'backend-only', 'browser-only', 'client-only', 'docs-only', 'manual', 'mixed', 'postgresql-only',
   'push-main', 'scheduled', 'unclassified',
 ])
+for (const scope of ['backend-only', 'browser-only', 'client-only', 'docs-only', 'mixed', 'postgresql-only', 'unclassified']) {
+  TRACKER_CATEGORIES.add(`dispatch-${scope}`)
+  TRACKER_CATEGORIES.add(`queue-${scope}`)
+}
+for (const category of [...TRACKER_CATEGORIES]) TRACKER_CATEGORIES.add(`rerun-${category}`)
 const MAX_TRACKER_CATEGORIES = 20
 const MAX_TRACKER_CATEGORY_LENGTH = 100
 const LEGACY_TRACKER_INTRO = [

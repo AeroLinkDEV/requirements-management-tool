@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { parseTrx, parseDuration, classDurations, TrxParseError } from '../lib/trx.mjs'
 
 const sample = `<?xml version="1.0" encoding="utf-8"?>
@@ -35,6 +34,28 @@ test('parseTrx reads totals, per-test outcomes, and class mapping', () => {
   assert.equal(parsed.tests[1].outcome, 'Failed')
   assert.equal(parsed.tests[0].durationMs, 1250)
   assert.equal(parsed.tests[2].durationMs, 750)
+})
+
+// Reduced from Infrastructure TRX in Product run 34009335939: 46 explicit
+// NotExecuted rows, but <Counters notExecuted="0">. Keep both adapter shapes.
+for (const counter of [0, 1]) {
+  test(`explicit skipped results reconcile when notExecuted=${counter}`, () => {
+    const xml = sample.replace('</Results>', '<UnitTestResult testId="skip" testName="Requires_PostgreSQL" outcome="NotExecuted" /></Results>')
+      .replace('total="3"', 'total="4"').replace('notExecuted="0"', `notExecuted="${counter}"`)
+    const parsed = parseTrx(xml)
+    assert.deepEqual(parsed.totals, { total: 4, executed: 3, passed: 2, failed: 1, skipped: 1 })
+    assert.equal(parsed.tests.at(-1).outcome, 'NotExecuted')
+  })
+}
+
+test('missing rows, contradictory skips and unknown outcomes never become verified counts', () => {
+  for (const xml of [
+    sample.replace('total="3"', 'total="4"'),
+    sample.replace(/<UnitTestResult testId="c"[^>]*\/>/, ''),
+    sample.replace('notExecuted="0"', 'notExecuted="1"'),
+    sample.replace('outcome="Passed"', 'outcome="InProgress"'),
+    sample.replace('outcome="Passed"', 'outcome="NotExecuted"'),
+  ]) assert.throws(() => parseTrx(xml), TrxParseError)
 })
 
 test('parseDuration handles days and fractions', () => {

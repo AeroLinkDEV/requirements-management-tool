@@ -19,16 +19,24 @@ const enabled = (name) => process.env[name] === 'true'
 
 function readEventContext() {
   const eventPath = value('GITHUB_EVENT_PATH')
-  if (!eventPath || !existsSync(eventPath)) return { pr: null, baseSha: null, headSha: null }
+  const configuredPr = value('PULL_REQUEST_NUMBER')
+  const configuredBaseSha = value('PULL_REQUEST_BASE_SHA')
+  const configuredHeadSha = value('PULL_REQUEST_HEAD_SHA')
+  const fallback = {
+    pr: configuredPr && /^[1-9][0-9]*$/.test(configuredPr) ? Number(configuredPr) : null,
+    baseSha: configuredBaseSha && /^[0-9a-f]{40}$/.test(configuredBaseSha) ? configuredBaseSha : null,
+    headSha: configuredHeadSha && /^[0-9a-f]{40}$/.test(configuredHeadSha) ? configuredHeadSha : null,
+  }
+  if (!eventPath || !existsSync(eventPath)) return fallback
   try {
     const event = JSON.parse(readFileSync(eventPath, 'utf8'))
     return {
-      pr: event.pull_request?.number ?? null,
-      baseSha: event.pull_request?.base?.sha ?? null,
-      headSha: event.pull_request?.head?.sha ?? null,
+      pr: event.pull_request?.number ?? fallback.pr,
+      baseSha: event.pull_request?.base?.sha ?? fallback.baseSha,
+      headSha: event.pull_request?.head?.sha ?? fallback.headSha,
     }
   } catch {
-    return { pr: null, baseSha: null, headSha: null }
+    return fallback
   }
 }
 
@@ -49,6 +57,12 @@ if (!tree || !/^[0-9a-f]{40}$/.test(tree)) {
 
 const event = value('GITHUB_EVENT_NAME') ?? ''
 const ref = value('GITHUB_REF') ?? ''
+const pullRequestNumber = value('PULL_REQUEST_NUMBER') ?? ''
+// workflow_dispatch is used for both trusted PR readiness and manual diagnostics. The former follows
+// the pull-request topology; only the latter may select the scheduled full-browser proof, and only when
+// the dispatch explicitly requested it. An absent value preserves the workflow input's default for local
+// invocations of this helper.
+const fullDiagnostics = value('FULL_DIAGNOSTICS') !== 'false'
 const eventContext = readEventContext()
 const docsOnly = enabled('CLASS_DOCS_ONLY')
 const backend = enabled('CLASS_BACKEND')
@@ -58,9 +72,11 @@ const postgresql = enabled('CLASS_POSTGRESQL')
 
 requireClassification(['CLASS_DOCS_ONLY', 'CLASS_BACKEND', 'CLASS_CLIENT', 'CLASS_BROWSER', 'CLASS_POSTGRESQL'])
 
-const isPullRequestEvent = event === 'pull_request' || event === 'merge_group'
+const isPullRequestEvent = event === 'pull_request' || event === 'merge_group' ||
+  (event === 'workflow_dispatch' && pullRequestNumber !== '')
 const isPushEvent = event === 'push'
-const isScheduledEvent = event === 'schedule' || event === 'workflow_dispatch'
+const isScheduledEvent = event === 'schedule' ||
+  (event === 'workflow_dispatch' && pullRequestNumber === '' && fullDiagnostics)
 
 const selected = []
 const skipped = []
@@ -143,7 +159,7 @@ if (isPushEvent) {
 // path and never a "dependency group has no instances" contradiction.
 const selectedGroups = new Set(selected.map((job) => job.group))
 const gateNeeds = ['changes', 'metrics-tooling']
-for (const group of ['backend-api', 'backend-core-domain', 'backend-core-infrastructure', 'client', 'script-contracts', 'browser-pr', 'browser-production', 'postgresql-smoke']) {
+for (const group of ['backend-api', 'backend-core-domain', 'backend-core-infrastructure', 'client', 'script-contracts', 'browser-pr', 'browser-production', 'browser-full', 'postgresql-smoke']) {
   if (selectedGroups.has(group)) gateNeeds.push(group)
 }
 addSelected('gate', 'gate', gateNeeds)
