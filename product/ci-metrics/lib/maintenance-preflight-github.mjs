@@ -47,7 +47,7 @@ export async function collectMaintenancePreflight({ read, graphql, prNumber, run
   const entry = qpr.mergeQueueEntry
   const evidence = {
     repository, main,
-    pr: { number: pr.number, state: pr.state, draft: pr.draft, base: { ref: pr.base?.ref },
+    pr: { number: pr.number, state: pr.state, draft: pr.draft, labels: (pr.labels ?? []).map(label => typeof label === 'string' ? label : label.name).sort(), base: { ref: pr.base?.ref },
       head: { sha: pr.head?.sha, repo: { full_name: pr.head?.repo?.full_name } } },
     queue: entry ? { prNumber: qpr.number, prHeadSha: qpr.headRefOid, position: entry.position, state: entry.state,
       headSha: entry.headCommit?.oid, baseSha: entry.baseCommit?.oid } : null,
@@ -64,6 +64,7 @@ export async function collectMaintenancePreflight({ read, graphql, prNumber, run
   ])
   if (currentRun.runAttempt !== run.runAttempt || currentRun.status !== run.status || currentRun.headSha !== run.headSha ||
       currentMain.sha !== main.sha || currentPr.head?.sha !== pr.head?.sha || currentPr.state !== pr.state ||
+      currentPr.draft !== pr.draft || evidenceDigest(currentPr.labels ?? []) !== evidenceDigest(pr.labels ?? []) ||
       evidenceDigest(currentQueue) !== evidenceDigest(queueBody)) throw new Error('Evidence advanced during collection; collect a fresh packet.')
   const packet = { schemaVersion: 'aerolink-authority-maintenance-preflight/v1', preparer,
     assessment: evaluateMaintenancePreflight(evidence), evidence }
