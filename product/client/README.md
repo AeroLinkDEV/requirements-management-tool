@@ -38,8 +38,8 @@ npm.cmd run test:production
 - `test:fast:routes` compares the explicit Fast discovery with Full and writes `test-results/fast/routing.json`.
 - `test:fast:logic` runs the selected browser/API-free behavior checks.
 - `test:fast:rendered` runs the selected Vite/Chromium fixtures; install Chromium first. These checks reject the
-  `request` fixture and `page.request` and refuse browser API/external requests, and remain part of the complete
-  Full suite.
+  `request` fixture, `page.request`, and browser-context API methods and refuse browser API/external requests,
+  and remain part of the complete Full suite.
 - `test:focused` runs selected Playwright journeys against an isolated API and SQLite database.
 - `test:e2e:sharded` builds the API once and runs the complete browser matrix in three isolated shards.
 - `test:production` builds the client and exercises protected mutations and deep links against the API-served

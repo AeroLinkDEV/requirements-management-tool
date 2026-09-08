@@ -2,23 +2,26 @@ import { expect, test as base } from '@playwright/test'
 
 export { expect }
 
+const apiRequestContextError = 'A rendered fixture must not use an API request context.'
+
 export const logicTest = base.extend({
   browser: async ({ browserName: _browserName }, _provide) => { throw new Error('A logic test must not launch a browser.') },
   request: async ({ baseURL: _baseURL }, _provide) => { throw new Error('A logic test must not use an API request context.') },
 })
 
 export const renderedTest = base.extend({
-  request: async ({ baseURL: _baseURL }, _provide) => { throw new Error('A rendered fixture must not use an API request context.') },
+  request: async ({ baseURL: _baseURL }, _provide) => { throw new Error(apiRequestContextError) },
   // `page.request` is an APIRequestContext that bypasses browser routes and request events.
   page: async ({ page }, provide) => {
     Object.defineProperty(page, 'request', {
       configurable: true,
-      get: () => { throw new Error('A rendered fixture must not use an API request context.') },
+      get: () => { throw new Error(apiRequestContextError) },
     })
     await provide(page)
   },
   context: async ({ context, baseURL }, provide) => {
     expect(baseURL, 'rendered fixtures require an isolated client origin').toBeTruthy()
+    // Derived from the active Playwright config: Full uses its own client port and Fast may override 5188.
     const origin = new URL(baseURL!).origin
     const unexpected: string[] = []
     const allowed = (url: string) => {
@@ -32,6 +35,18 @@ export const renderedTest = base.extend({
       if (!allowed(request.url())) unexpected.push(request.url())
     })
     await context.route('**/*', route => allowed(route.request().url()) ? route.continue() : route.abort())
+    // Playwright exposes the same APIRequestContext through page.request and context.request. Replace it
+    // with a guard that permits only the internal dispose path and rejects every network method.
+    const rawRequest = context.request
+    Object.defineProperty(context, 'request', {
+      configurable: true,
+      get: () => new Proxy(rawRequest, {
+        get: (target, property) => {
+          if (property === 'dispose') return target.dispose.bind(target)
+          throw new Error(apiRequestContextError)
+        },
+      }),
+    })
     await provide(context)
     expect(unexpected, 'rendered fixture attempted API or external network access').toEqual([])
   },
