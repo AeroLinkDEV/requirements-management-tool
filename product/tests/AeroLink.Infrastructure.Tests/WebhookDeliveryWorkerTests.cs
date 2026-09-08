@@ -73,6 +73,100 @@ public sealed class WebhookDeliveryWorkerTests
     }
 
     [Fact]
+    public async Task Due_retry_work_across_projects_is_stable_and_batched_before_future_rows()
+    {
+        await using var fixture = await WorkerFixture.CreateAsync();
+        var now = DateTimeOffset.UtcNow;
+        var retryIds = new List<Guid>();
+        var otherProjectId = Guid.Empty;
+        var futureIds = new List<Guid>();
+        using (var scope = fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var otherProject = new ProjectRecord(fixture.Project.ProgramId, "Webhook worker second project", $"W-{Guid.NewGuid():N}");
+            var enabled = new WebhookSubscription(otherProject.Id, "Enabled retries", "https://retry.example/hook", "[\"quality.test\"]", "unused", "tester", now);
+            var future = new WebhookSubscription(otherProject.Id, "Future", "https://future.example/hook", "[\"quality.test\"]", "unused", "tester", now);
+            var localEnabled = new WebhookSubscription(fixture.Project.Id, "Enabled local retries", "https://local-retry.example/hook", "[\"quality.test\"]", "unused", "tester", now);
+            db.AddRange(otherProject, enabled, future, localEnabled);
+            otherProjectId = otherProject.Id;
+
+            var dueAt = now.AddMinutes(-1);
+            for (var i = 0; i < 3; i++)
+            {
+                var integrationEvent = new IntegrationEvent(fixture.Project.Id, "quality.test", "Test", Guid.NewGuid(), "{}", "tester", dueAt);
+                var delivery = new WebhookDelivery(fixture.Project.Id, integrationEvent.Id, localEnabled.Id, dueAt);
+                var seedToken = Guid.NewGuid();
+                delivery.BeginAttempt("seed-worker", seedToken, dueAt, TimeSpan.FromMinutes(2));
+                delivery.Fail(seedToken, 500, "seed retry", dueAt.AddSeconds(1));
+                db.AddRange(integrationEvent, delivery);
+                retryIds.Add(delivery.Id);
+            }
+
+            for (var i = 0; i < 25; i++)
+            {
+                var integrationEvent = new IntegrationEvent(otherProject.Id, "quality.test", "Test", Guid.NewGuid(), "{}", "tester", dueAt);
+                var delivery = new WebhookDelivery(otherProject.Id, integrationEvent.Id, enabled.Id, dueAt);
+                var seedToken = Guid.NewGuid();
+                delivery.BeginAttempt("seed-worker", seedToken, dueAt, TimeSpan.FromMinutes(2));
+                delivery.Fail(seedToken, 500, "seed retry", dueAt.AddSeconds(1));
+                db.AddRange(integrationEvent, delivery);
+                retryIds.Add(delivery.Id);
+            }
+
+            var futureAt = now.AddMinutes(30);
+            for (var i = 0; i < 55; i++)
+            {
+                var integrationEvent = new IntegrationEvent(otherProject.Id, "quality.test", "Test", Guid.NewGuid(), "{}", "tester", futureAt);
+                var delivery = new WebhookDelivery(otherProject.Id, integrationEvent.Id, future.Id, futureAt);
+                var seedToken = Guid.NewGuid();
+                delivery.BeginAttempt("seed-worker", seedToken, futureAt, TimeSpan.FromMinutes(2));
+                delivery.Fail(seedToken, 500, "seed future retry", futureAt.AddSeconds(1));
+                db.AddRange(integrationEvent, delivery);
+                futureIds.Add(delivery.Id);
+            }
+
+            await db.SaveChangesAsync();
+            await db.WebhookDeliveries.Where(x => retryIds.Contains(x.Id))
+                .ExecuteUpdateAsync(x => x.SetProperty(y => y.NextAttemptAt, dueAt));
+            await db.WebhookDeliveries.Where(x => futureIds.Contains(x.Id))
+                .ExecuteUpdateAsync(x => x.SetProperty(y => y.NextAttemptAt, futureAt));
+        }
+
+        using (var scope = fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var expectedFirstBatch = await db.WebhookDeliveries.AsNoTracking()
+                .Where(x => retryIds.Contains(x.Id)).OrderBy(x => x.Id)
+                .Take(WebhookDeliveryWorker.BatchSize).Select(x => x.Id).ToListAsync();
+            var worker = fixture.Worker();
+            await worker.DeliverBatchAsync(CancellationToken.None);
+
+            var firstBatch = await db.WebhookDeliveries.AsNoTracking()
+                .Where(x => retryIds.Contains(x.Id) && x.AttemptCount == 2).Select(x => new { x.Id, x.ProjectId }).ToListAsync();
+            Assert.Equal(WebhookDeliveryWorker.BatchSize, firstBatch.Count);
+            Assert.Equal(expectedFirstBatch.OrderBy(x => x), firstBatch.Select(x => x.Id).OrderBy(x => x));
+            Assert.All(await db.WebhookDeliveries.AsNoTracking().Where(x => futureIds.Contains(x.Id)).ToListAsync(), row =>
+            {
+                Assert.Equal(WebhookDeliveryState.RetryScheduled, row.State);
+                Assert.Equal(1, row.AttemptCount);
+            });
+
+            var firstIds = firstBatch.Select(x => x.Id).ToHashSet();
+            var secondCandidates = await db.WebhookDeliveries.AsNoTracking()
+                .Where(x => retryIds.Contains(x.Id) && x.AttemptCount == 1).ToListAsync();
+            Assert.Equal(8, secondCandidates.Count);
+            await worker.DeliverBatchAsync(CancellationToken.None);
+            var allRetries = await db.WebhookDeliveries.AsNoTracking().Where(x => retryIds.Contains(x.Id)).ToListAsync();
+            Assert.All(allRetries, row => Assert.Equal(2, row.AttemptCount));
+            var secondBatch = allRetries.Where(x => !firstIds.Contains(x.Id)).ToList();
+            Assert.Equal(8, secondBatch.Count);
+            var servicedProjects = firstBatch.Select(x => x.ProjectId).Concat(secondBatch.Select(x => x.ProjectId)).ToList();
+            Assert.Contains(fixture.Project.Id, servicedProjects);
+            Assert.Contains(otherProjectId, servicedProjects);
+        }
+    }
+
+    [Fact]
     public async Task Cancellation_releases_the_claim_with_a_cancelled_attempt_history_entry()
     {
         var handler = new BlockingWebhookHandler();

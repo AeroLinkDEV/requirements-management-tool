@@ -17,6 +17,66 @@ namespace AeroLink.Infrastructure.Tests;
 
 public sealed class WebhookDeliveryPostgresQualificationTests
 {
+    private const string PredecessorMigration = "20260905222930_AddChangeRequestTargetReleaseProjectBinding";
+
+    [DisposablePostgresFact]
+    public async Task PostgreSQL_predecessor_upgrade_recovers_legacy_deliveries_with_explicit_unknown_history()
+    {
+        var serverConnection = QualificationConnectionOrThrow();
+        var databaseName = $"aerolink_963_{Guid.NewGuid():N}";
+        var connection = await CreateDatabaseAsync(serverConnection, databaseName);
+        try
+        {
+            await using (var predecessor = new AeroLinkDbContext(Options(connection)))
+                await predecessor.Database.MigrateAsync(PredecessorMigration);
+
+            var seed = await SeedLegacyDeliveriesAsync(connection);
+            await using (var latest = new AeroLinkDbContext(Options(connection)))
+            {
+                await latest.Database.MigrateAsync();
+                var rows = await latest.WebhookDeliveries.AsNoTracking()
+                    .Where(x => x.Id == seed.RetryDeliveryId || x.Id == seed.DeadLetterDeliveryId)
+                    .ToListAsync();
+                Assert.Equal(2, rows.Count);
+
+                var retry = Assert.Single(rows, x => x.Id == seed.RetryDeliveryId);
+                Assert.Equal(WebhookDeliveryState.RetryScheduled, retry.State);
+                Assert.Equal(1, retry.AttemptCount);
+                Assert.Equal(502, retry.ResponseStatusCode);
+                Assert.Contains("legacy receiver diagnostic one", retry.LastError, StringComparison.Ordinal);
+                Assert.Equal(seed.ProjectId, retry.ProjectId);
+                Assert.Equal(seed.EventOneId, retry.IntegrationEventId);
+                Assert.Equal(seed.SubscriptionId, retry.SubscriptionId);
+                var retryHistory = Assert.Single(retry.AttemptHistory());
+                Assert.Equal("LegacyRecovered", retryHistory.Outcome);
+                Assert.Equal(1, retryHistory.Attempt);
+                Assert.Equal(502, retryHistory.ResponseStatusCode);
+                Assert.Equal("legacy receiver diagnostic one", retryHistory.Error);
+                Assert.Null(retryHistory.ClaimToken);
+                Assert.Null(retryHistory.Worker);
+                Assert.Null(retryHistory.StartedAt);
+
+                var deadLetter = Assert.Single(rows, x => x.Id == seed.DeadLetterDeliveryId);
+                Assert.Equal(WebhookDeliveryState.DeadLettered, deadLetter.State);
+                Assert.Equal(5, deadLetter.AttemptCount);
+                Assert.Equal(504, deadLetter.ResponseStatusCode);
+                Assert.Contains("legacy receiver diagnostic five", deadLetter.LastError, StringComparison.Ordinal);
+                var deadLetterHistory = Assert.Single(deadLetter.AttemptHistory());
+                Assert.Equal("LegacyRecovered", deadLetterHistory.Outcome);
+                Assert.Equal(5, deadLetterHistory.Attempt);
+                Assert.Equal(504, deadLetterHistory.ResponseStatusCode);
+                Assert.Equal("legacy receiver diagnostic five", deadLetterHistory.Error);
+                Assert.Null(deadLetterHistory.ClaimToken);
+                Assert.Null(deadLetterHistory.Worker);
+                Assert.Null(deadLetterHistory.StartedAt);
+            }
+        }
+        finally
+        {
+            await DropDatabaseAsync(serverConnection, databaseName);
+        }
+    }
+
     [DisposablePostgresFact]
     public async Task PostgreSQL_claims_only_enabled_due_rows_and_fences_concurrent_workers()
     {
@@ -124,6 +184,46 @@ public sealed class WebhookDeliveryPostgresQualificationTests
     private static DbContextOptions<AeroLinkDbContext> Options(string connection) =>
         new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options;
 
+    private static async Task<LegacySeed> SeedLegacyDeliveriesAsync(string connection)
+    {
+        var programId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var subscriptionId = Guid.NewGuid();
+        var eventOneId = Guid.NewGuid();
+        var eventFiveId = Guid.NewGuid();
+        var retryDeliveryId = Guid.NewGuid();
+        var deadLetterDeliveryId = Guid.NewGuid();
+        var aggregateOneId = Guid.NewGuid();
+        var aggregateFiveId = Guid.NewGuid();
+        await using var database = new NpgsqlConnection(connection);
+        await database.OpenAsync();
+        await using var command = database.CreateCommand();
+        command.CommandText = """
+            INSERT INTO programs ("Id", "Name", "Code") VALUES (@programId, 'Legacy webhook qualification', @programCode);
+            INSERT INTO projects ("Id", "ProgramId", "Name", "SoftwareProduct") VALUES (@projectId, @programId, 'Legacy webhook project', 'AeroLink');
+            INSERT INTO webhook_subscriptions ("Id", "ProjectId", "Name", "EndpointUrl", "EventTypesJson", "ProtectedSecret", "IsEnabled", "CreatedBy", "CreatedAt", "UpdatedAt")
+                VALUES (@subscriptionId, @projectId, 'Legacy webhook', 'https://legacy.example/hook', '["quality.test"]', 'legacy-protected-secret', TRUE, 'qualification', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+            INSERT INTO integration_events ("Id", "ProjectId", "EventType", "AggregateType", "AggregateId", "PayloadJson", "Actor", "IdempotencyKey", "OccurredAt", "State", "DispatchedAt", "LastError")
+                VALUES (@eventOneId, @projectId, 'quality.test', 'Test', @aggregateOneId, '{}', 'qualification', NULL, CURRENT_TIMESTAMP, 'Dispatched', CURRENT_TIMESTAMP, NULL),
+                       (@eventFiveId, @projectId, 'quality.test', 'Test', @aggregateFiveId, '{}', 'qualification', NULL, CURRENT_TIMESTAMP, 'Dispatched', CURRENT_TIMESTAMP, NULL);
+            INSERT INTO webhook_deliveries ("Id", "ProjectId", "IntegrationEventId", "SubscriptionId", "State", "AttemptCount", "NextAttemptAt", "ResponseStatusCode", "LastError", "CreatedAt", "UpdatedAt", "DeliveredAt")
+                VALUES (@retryDeliveryId, @projectId, @eventOneId, @subscriptionId, 'Delivering', 1, CURRENT_TIMESTAMP, 502, 'legacy receiver diagnostic one', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+                       (@deadLetterDeliveryId, @projectId, @eventFiveId, @subscriptionId, 'Delivering', 5, CURRENT_TIMESTAMP, 504, 'legacy receiver diagnostic five', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL);
+            """;
+        command.Parameters.AddWithValue("programId", programId);
+        command.Parameters.AddWithValue("programCode", $"L963{Guid.NewGuid():N}"[..30]);
+        command.Parameters.AddWithValue("projectId", projectId);
+        command.Parameters.AddWithValue("subscriptionId", subscriptionId);
+        command.Parameters.AddWithValue("eventOneId", eventOneId);
+        command.Parameters.AddWithValue("eventFiveId", eventFiveId);
+        command.Parameters.AddWithValue("aggregateOneId", aggregateOneId);
+        command.Parameters.AddWithValue("aggregateFiveId", aggregateFiveId);
+        command.Parameters.AddWithValue("retryDeliveryId", retryDeliveryId);
+        command.Parameters.AddWithValue("deadLetterDeliveryId", deadLetterDeliveryId);
+        await command.ExecuteNonQueryAsync();
+        return new(programId, projectId, subscriptionId, eventOneId, eventFiveId, retryDeliveryId, deadLetterDeliveryId);
+    }
+
     private static string QualificationConnectionOrThrow()
     {
         var connection = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
@@ -168,6 +268,9 @@ public sealed class WebhookDeliveryPostgresQualificationTests
                 Skip = "Webhook PostgreSQL qualification skipped: set AEROLINK_MIGRATIONS_CONNECTION to the dedicated disposable database.";
         }
     }
+
+    private sealed record LegacySeed(Guid ProgramId, Guid ProjectId, Guid SubscriptionId,
+        Guid EventOneId, Guid EventFiveId, Guid RetryDeliveryId, Guid DeadLetterDeliveryId);
 
     private sealed class LoopbackResolver : IWebhookDnsResolver
     {

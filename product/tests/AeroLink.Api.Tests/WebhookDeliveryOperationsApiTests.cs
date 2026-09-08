@@ -68,7 +68,7 @@ public sealed class WebhookDeliveryOperationsApiTests
         Assert.Null(expired.ClaimedBy);
         Assert.Null(expired.ClaimExpiresAt);
         Assert.NotEqual("[]", expired.AttemptHistoryJson);
-        Assert.NotEqual(expiredHistory, "[]");
+        Assert.NotEqual("[]", expiredHistory);
         Assert.Contains(expired.AttemptHistory(), attempt => attempt.Outcome == "Replayed");
 
         Assert.Equal(WebhookDeliveryState.Pending, deadLetter.State);
