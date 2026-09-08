@@ -211,6 +211,7 @@ public static class AeroLinkMaintenanceHost
         await services.GetRequiredService<ProjectLeadershipReconciliationAuthority>().EnsureCompletedAsync();
         await services.GetRequiredService<TestChangeRequestPrefixMigrationAuthority>().EnsureCompletedAsync();
         await services.GetRequiredService<SoftwareProcedureExecutionCutoverAuthority>().EnsureCompletedAsync();
+        await services.GetRequiredService<FrozenReviewTraceAdjacencyMigrationAuthority>().EnsureCompletedAsync();
 
         var after = await analyzer.AnalyzeAsync();
         foreach (var line in AeroLinkUpgradeAnalyzer.Render(after)) Console.WriteLine(line);
