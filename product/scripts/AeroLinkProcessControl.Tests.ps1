@@ -12,6 +12,7 @@ function Refuses([scriptblock]$Action, [string]$Message) {
 $child = $null
 $helper = $null
 $lease = $null
+$continuingChild = $null
 $savedCapability = $env:AEROLINK_TRANSITION_LEASE
 try {
     $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -63,14 +64,46 @@ try {
     $env:AEROLINK_TRANSITION_LEASE = $capability
     Exit-AeroLinkTransition $lease
     $lease = $null
-    # An interrupted owner leaves a file but no OS lease. It must never permanently block or replay state.
+    $lease = Enter-AeroLinkTransition -InstallationRoot $root -Policy Preserve
+    $continuationWitness = Join-Path $root 'witness.ps1'
+    @'
+param($Module, $Root)
+$ErrorActionPreference = 'Stop'
+Import-Module $Module
+$lease = Enter-AeroLinkTransition -InstallationRoot $Root
+try {
+    Set-Content -LiteralPath (Join-Path $Root 'child-ready') -Value 'ready'
+    for ($i=0; $i -lt 200 -and -not (Test-Path (Join-Path $Root 'child-release')); $i++) { Start-Sleep -Milliseconds 100 }
+} finally { Exit-AeroLinkTransition $lease }
+'@ | Set-Content -LiteralPath $continuationWitness -Encoding UTF8
+    $continuingChild = Start-Process -FilePath $powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$continuationWitness`" -Module `"$module`" -Root `"$root`"" -WindowStyle Hidden -PassThru
+    for ($i=0; $i -lt 100 -and -not (Test-Path (Join-Path $root 'child-ready')); $i++) { Start-Sleep -Milliseconds 100 }
+    Check (Test-Path (Join-Path $root 'child-ready')) 'The continuation witness must be held before parent interruption.'
+    Exit-AeroLinkTransition $lease
+    $lease = $null
+    $env:AEROLINK_TRANSITION_LEASE = $null
+    Refuses { Enter-AeroLinkTransition -InstallationRoot $root } 'A live child must exclude another coordinator after its parent releases the lease.'
+    Set-Content -LiteralPath (Join-Path $root 'child-release') -Value 'release'
+    $continuingChild.WaitForExit()
+    $lease = Enter-AeroLinkTransition -InstallationRoot $root -Policy Preserve
+    $intent = [pscustomobject]@{ SourceRoot=$root; PriorTunnel=$true; Stage='Quiesced'; Discharged=$false }
+    Save-AeroLinkProductionObligation -Obligation $intent
+    Exit-AeroLinkTransition $lease
+    $lease = Enter-AeroLinkTransition -InstallationRoot $root -Policy Preserve
+    Check ($lease.Pending -and $lease.Pending.PriorTunnel) 'Interrupted intent must survive without being treated as process ownership.'
+    $intent.Discharged = $true
+    Save-AeroLinkProductionObligation -Obligation $intent
+    Exit-AeroLinkTransition $lease
+    $lease = $null
+    # A discharged intent must never replay on a fresh acquisition.
     $env:AEROLINK_TRANSITION_LEASE = $capability
     $lease = Enter-AeroLinkTransition -InstallationRoot $root -Policy KeepReady
-    Check ($lease.Owner -and $lease.Policy -eq 'KeepReady') 'A stale released lease must acquire fresh ownership and policy.'
+    Check ($lease.Owner -and $lease.Policy -eq 'KeepReady' -and -not $lease.Pending) 'A stale released lease must acquire fresh ownership and policy.'
 }
 finally {
     Exit-AeroLinkTransition $lease
     $env:AEROLINK_TRANSITION_LEASE = $savedCapability
+    if ($continuingChild) { if (-not $continuingChild.HasExited) { $continuingChild.Kill(); $continuingChild.WaitForExit() }; $continuingChild.Dispose() }
     if ($child) { if (-not $child.HasExited) { $child.Kill(); $child.WaitForExit() }; $child.Dispose() }
     if ($helper) { if (-not $helper.Process.HasExited) { $helper.Process.Kill(); $helper.Process.WaitForExit() }; $helper.Process.Dispose() }
     $resolved = [IO.Path]::GetFullPath($root)

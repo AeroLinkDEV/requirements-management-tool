@@ -85,6 +85,10 @@ switch ($Action) {
     'Stop' {
         $config = Get-AeroLinkRemoteDemoConfig
         Stop-AeroLinkRemoteDemo -Config $config -IncludeLocalStack:$IncludeLocalStack
+        if ($env:AEROLINK_TRANSITION_JOURNAL -and (Test-Path -LiteralPath $env:AEROLINK_TRANSITION_JOURNAL)) {
+            # An explicit successful operator Stop supersedes an interrupted restoration intent.
+            Remove-Item -LiteralPath $env:AEROLINK_TRANSITION_JOURNAL -Force
+        }
         exit 0
     }
     'Continue' {

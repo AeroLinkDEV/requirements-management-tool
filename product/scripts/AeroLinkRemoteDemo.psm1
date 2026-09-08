@@ -950,6 +950,7 @@ function Start-AeroLinkRemoteDemo {
                 $obligation = New-AeroLinkProductionObligation -SourceRoot $Config.AeroLinkRoot -Config $Config -Policy KeepReady
                 $sourceAdvancedIrreversibly = $false
                 $priorTopology = [pscustomobject]@{ TunnelRunning = $obligation.PriorTunnel; RuntimeRunning = $obligation.PriorRuntime }
+                $obligation.Stage = 'Quiescing'
                 Save-AeroLinkProductionObligation -Obligation $obligation
                 $advanced = $null
                 try {
@@ -989,6 +990,7 @@ function Start-AeroLinkRemoteDemo {
                                 $sourceAdvancedIrreversibly = $true
                                 throw "The production source WAS advanced to $($advanced.HeadSha), but the updated code could not complete the start ($handoffFailure) and the prior service topology could not be recovered either: $($_.Exception.Message). The source is current; the service is not running."
                             }
+                            throw "The source advanced to $($advanced.HeadSha), but the initiating handoff failed ($handoffFailure). A fresh current-source retry restored the prior topology."
                         }
                         return [pscustomobject]@{
                             # PublicUrl is populated because the CLI prints it unconditionally; a handed-off
@@ -1013,6 +1015,11 @@ function Start-AeroLinkRemoteDemo {
                     $onDisk = Get-AeroLinkProductionSourcePosture -SourceRoot $Config.AeroLinkRoot
                     if (-not $onDisk.Canonical) {
                         throw "The production source transition failed after the tunnel was taken down ($failure), and the revision on disk is not canonical either: $($onDisk.Reason)"
+                    }
+                    if ($onDisk.Posture.HeadSha -ne $obligation.SourceBefore) {
+                        try { Invoke-AeroLinkRemoteDemoHandoff -Config $Config -Scheduled:$Scheduled -Run $run -Topology $priorTopology -HeadSha $onDisk.Posture.HeadSha | Out-Null }
+                        catch { throw "Transition failed ($failure). Current source is $($onDisk.Posture.HeadSha); fresh-source recovery failed: $($_.Exception.Message)" }
+                        throw "Transition failed ($failure). Current source is $($onDisk.Posture.HeadSha); fresh-source recovery restored the prior topology."
                     }
                     $advanced = [pscustomobject]@{
                         Action = 'TransitionFailed'; Canonical = $true; HeadSha = $onDisk.Posture.HeadSha
@@ -1144,6 +1151,11 @@ function Start-AeroLinkRemoteDemo {
         throw $decision.Message
     }
 
+    $originRuntime = Get-AeroLinkRemoteDemoLocalRuntimeIdentity -Config $Config -RuntimeProbe $LocalRuntimeProbe
+    if ($expectedSourceIdentity -and -not $LocalRuntimeProbe) {
+        $originProof = Test-AeroLinkRemoteDemoNotificationOriginProof -Config $Config
+        if (-not $originProof.Valid) { throw "The launch did not prove the notification origin before publication. $($originProof.Detail)" }
+    }
     Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'Starting the protected ngrok tunnel.'
     if ($null -eq $NgrokLauncher) { $NgrokLauncher = { param($C, $R) Start-AeroLinkRemoteDemoNgrok -Config $C -Run $R } }
     $launched = & $NgrokLauncher $Config $run
@@ -1182,6 +1194,11 @@ function Start-AeroLinkRemoteDemo {
         throw "The tunnel became protected but the notification-link origin could not be attributed to the local AeroLink process, so the just-started tunnel was stopped. $($runtime.Detail)"
     }
 
+    if (-not $originRuntime.Found -or $runtime.ProcessId -ne $originRuntime.ProcessId -or
+        ([DateTimeOffset]$runtime.StartedAt).UtcDateTime.Ticks -ne ([DateTimeOffset]$originRuntime.StartedAt).UtcDateTime.Ticks) {
+        if (-not $launched.HasExited) { $launched.Kill(); $launched.WaitForExit() }
+        throw 'The API changed after origin proof and before final publication; the created tunnel was stopped.'
+    }
     if ($expectedSourceIdentity) {
         $finalMatch = Test-AeroLinkRemoteDemoRuntimeMatchesSource -Config $Config -ExpectedSourceIdentity $expectedSourceIdentity -RuntimeIdentityProbe $RuntimeIdentityProbe
         $finalNgrok = Get-AeroLinkRemoteDemoNgrokProcess -Config $Config
@@ -1619,6 +1636,15 @@ function Get-AeroLinkServiceTopology {
 function Save-AeroLinkProductionObligation {
     param([Parameter(Mandatory)]$Obligation)
     $env:AEROLINK_PRODUCTION_OBLIGATION = $Obligation | ConvertTo-Json -Depth 12 -Compress
+    if ($env:AEROLINK_TRANSITION_JOURNAL) {
+        $path = $env:AEROLINK_TRANSITION_JOURNAL
+        $root = Split-Path -Parent (Split-Path -Parent $path)
+        $temporary = $path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+        try {
+            @{ InstallationRoot = $root; Obligation = $Obligation } | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath $temporary -Encoding UTF8
+            Move-Item -LiteralPath $temporary -Destination $path -Force
+        } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
+    }
 }
 
 function New-AeroLinkProductionObligation {
@@ -1661,6 +1687,19 @@ function New-AeroLinkProductionObligation {
             throw 'The running API does not prove the expected installation binding. Source/runtime replacement was refused.'
         }
     }
+    if ($env:AEROLINK_TRANSITION_JOURNAL -and (Test-Path -LiteralPath $env:AEROLINK_TRANSITION_JOURNAL)) {
+        $saved = (Get-Content -LiteralPath $env:AEROLINK_TRANSITION_JOURNAL -Raw | ConvertFrom-Json).Obligation
+        if (-not $saved.Discharged -and $saved.Stage -in @('Quiescing','Quiesced')) {
+            if ($saved.SourceRoot -ine $SourceRoot -or ($saved.PriorTunnel -and
+                (-not $Config -or $saved.PublicOrigin -ine $Config.PublicUrl))) { throw 'Interrupted transition source/public-origin binding contradicts current configuration.' }
+            $obligation.PriorTunnel = [bool]$saved.PriorTunnel
+            $obligation.PriorRuntime = [bool]$saved.PriorRuntime
+            $obligation.PublicOrigin = $saved.PublicOrigin
+            $obligation.Policy = $saved.Policy
+            $obligation.TeardownBegan = $true
+            $obligation.Stage = 'Quiesced'
+        }
+    }
     return $obligation
 }
 
@@ -1668,6 +1707,7 @@ function Stop-AeroLinkProductionTransition {
     param([Parameter(Mandatory)]$Obligation, $Config)
     try {
         $Obligation.Stage = 'Quiescing'
+        Save-AeroLinkProductionObligation -Obligation $Obligation
         if ($Config) { Assert-AeroLinkOwnedTunnelStopped -Config $Config -Obligation $Obligation | Out-Null }
         Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @((Join-Path $Obligation.SourceRoot 'product\src\AeroLink.Api')) -OnStopped {
             $Obligation.RuntimeWasRunning = $true
@@ -1953,6 +1993,7 @@ function Invoke-AeroLinkProductionSourceReconciliation {
     $obligation.PriorRuntime = [bool]$priorState.RuntimeRunning
     Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Before teardown: tunnel $(if ($priorState.TunnelRunning) { 'running' } else { 'not running' }), owned runtime $(if ($priorState.RuntimeRunning) { 'running' } else { 'not running' })."
 
+    $obligation.Stage = 'Quiescing'
     if (-not $ServiceStateProbe) { Save-AeroLinkProductionObligation -Obligation $obligation }
     $advance = $null
     try {
@@ -1978,22 +2019,29 @@ function Invoke-AeroLinkProductionSourceReconciliation {
         $failure = $_.Exception.Message
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The transition failed after teardown began: $failure. Restoring the prior topology."
         $restored = $null
+        $actualHead = $inspect.HeadSha
         try {
+            if (-not $Restarter) {
+                $onDisk = Get-AeroLinkProductionSourcePosture -SourceRoot $Config.AeroLinkRoot
+                if (-not $onDisk.Canonical) { throw "Current source is not canonical: $($onDisk.Reason)" }
+                $actualHead = $onDisk.Posture.HeadSha
+            }
             # The SAME discharge as the success path, driven by the same prior topology. Compensation used to
             # call Start-AeroLinkRemoteDemo unconditionally, so a runtime-only installation came back as
             # runtime plus a public tunnel, and an installation with nothing running could acquire a whole
             # demo from a failure branch. "Restore what was running, and only that" has to hold on the paths
             # nobody watches, or it does not hold.
             $restored = if ($Restarter) { & $Restarter $Config $null }
-            else { Restore-AeroLinkServiceTopology -Config $Config -Topology $priorState -KeepReady:(-not $PreserveServiceState) -Scheduled:$Scheduled -Run $run }
+            else { Invoke-AeroLinkRemoteDemoHandoff -Config $Config -Topology $priorState -PreserveServiceState:$PreserveServiceState -Scheduled:$Scheduled -Run $run -HeadSha $actualHead }
             $obligation.Discharged = $true
+            if (-not $ServiceStateProbe) { Save-AeroLinkProductionObligation -Obligation $obligation }
         }
         catch {
-            throw "The production source transition failed after teardown began ($failure), and the prior service topology could not be restored either: $($_.Exception.Message). The source was not advanced."
+            throw "The production source transition failed after teardown began ($failure), and current-source recovery could not be completed: $($_.Exception.Message). Last verified source: $actualHead; service/schema completion is not asserted."
         }
         return [pscustomobject]@{
-            Action = 'TransitionFailed'; Restarted = $true; HeadSha = $inspect.HeadSha
-            Detail = "The production source was not advanced because the transition failed after teardown began: $failure The prior service topology was restored. $($restored.Detail)"
+            Action = 'TransitionFailed'; Restarted = $true; HeadSha = $actualHead
+            Detail = "The transition failed after teardown began: $failure Actual source: $actualHead. The prior service topology was restored by verified source. $($restored.Detail)"
         }
     }
 
@@ -2017,12 +2065,14 @@ function Invoke-AeroLinkProductionSourceReconciliation {
             # handoff exists to prevent, reached through the failure path instead of the success path.
             try { Invoke-AeroLinkRemoteDemoHandoff -Config $Config -Scheduled:$Scheduled -Run $run -Topology $priorState -PreserveServiceState:$PreserveServiceState -HeadSha $advance.HeadSha }
             catch {
-                throw "The production source WAS advanced to $($advance.HeadSha), but the updated code could not complete the transition ($handoffFailure) and the prior service topology could not be recovered either: $($_.Exception.Message). The source is current; the service is not running."
+                throw "The production source WAS advanced to $($advance.HeadSha), but the updated code could not complete the transition ($handoffFailure) and the prior service topology could not be recovered either: $($_.Exception.Message). The source is current; final service/schema readiness is not asserted."
             }
+            throw "The source advanced to $($advance.HeadSha), but the initiating handoff failed ($handoffFailure). A fresh current-source retry restored the prior topology."
         }
     }
     else { Restore-AeroLinkServiceTopology -Config $Config -Topology $priorState -KeepReady:(-not $PreserveServiceState) -Scheduled:$Scheduled -Run $run }
     $obligation.Discharged = $true
+    if (-not $ServiceStateProbe) { Save-AeroLinkProductionObligation -Obligation $obligation }
 
     if ($advance.Action -ne 'Updated' -or -not $advance.Canonical) {
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'The advance was refused; production was restarted on the revision already on disk.'

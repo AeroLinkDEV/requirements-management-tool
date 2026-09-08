@@ -124,6 +124,7 @@ $lease = Enter-AeroLinkTransition -InstallationRoot $installation.InstallationRo
 $previousObligation = $env:AEROLINK_PRODUCTION_OBLIGATION
 $obligation = $null
 $demoConfig = $null
+$schemaState = 'not inspected by this invocation'
 try {
     $demoConfigPath = Get-AeroLinkRemoteDemoConfigPath
     if (Test-Path -LiteralPath $demoConfigPath -PathType Leaf) { $demoConfig = Get-AeroLinkRemoteDemoConfig -ConfigPath $demoConfigPath }
@@ -132,6 +133,22 @@ try {
         if ([string]$obligation.SourceRoot -ine $repositoryRoot) { throw 'Transition continuation source binding does not match.' }
     } else {
         $obligation = New-AeroLinkProductionObligation -SourceRoot $repositoryRoot -Config $demoConfig -Policy $lease.Policy
+        if ($lease.PSObject.Properties['Pending'] -and $lease.Pending) {
+            $pending = $lease.Pending
+            if ($pending.SourceRoot -ine $repositoryRoot -or ($pending.PriorTunnel -and
+                (-not $demoConfig -or $pending.PublicOrigin -ine $demoConfig.PublicUrl))) {
+                throw 'Interrupted transition source/public-origin binding contradicts this invocation.'
+            }
+            # Saved intent supplies policy only. New-AeroLinkProductionObligation above independently
+            # reproves every currently running process; the journal cannot authorize process adoption.
+            $obligation.PriorTunnel = [bool]$pending.PriorTunnel
+            $obligation.PriorRuntime = [bool]$pending.PriorRuntime
+            $obligation.PublicOrigin = $pending.PublicOrigin
+            $obligation.Policy = $pending.Policy
+            $obligation.TeardownBegan = $true
+            $obligation.Stage = 'Quiesced'
+            Write-Host 'Resuming an interrupted HOME transition after fresh source/process validation.' -ForegroundColor Yellow
+        }
         # Consume the prior-version launcher's checkout-bound marker only alongside exact-SHA bootstrap validation.
         if ($env:AEROLINK_BOOTSTRAP_REENTRY -and $env:AEROLINK_TUNNEL_OWED -eq $repositoryRoot) {
             if (-not $demoConfig) { throw 'Legacy continuation owes a tunnel but has no protected configuration.' }
@@ -177,6 +194,7 @@ try {
 if ($bootstrapResult.Action -eq 'Reentered') {
     if ($bootstrapResult.ExitCode -ne 0) { throw "Updated launcher failed with exit code $($bootstrapResult.ExitCode)." }
     $obligation.Discharged = $true
+    Save-AeroLinkProductionObligation -Obligation $obligation
     exit 0
 }
 
@@ -310,9 +328,10 @@ else {
     Write-Host '      Checking database upgrade posture...' -ForegroundColor Cyan
     $upgradePosture = Get-AeroLinkUpgradeAnalysis -ProductRoot $productRoot -DotnetPath $dotnet
     switch ($upgradePosture.Status) {
-        'current' { Write-Host '      Database is current; no upgrade is pending.' -ForegroundColor Green }
+        'current' { $schemaState = 'current for the verified source'; Write-Host '      Database is current; no upgrade is pending.' -ForegroundColor Green }
         'upgrade-required' {
             Write-Host "      Upgrade pending: $(@($upgradePosture.Analysis.pendingEfMigrations).Count) schema migration(s), $(@($upgradePosture.Analysis.pendingSemanticUpgrades).Count) semantic upgrade(s)." -ForegroundColor Yellow
+            $schemaState = 'upgrade attempted; final schema not yet proven'
             $upgrade = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -DotnetPath $dotnet
             if (-not $upgrade.Applied) {
                 Write-Host ''
@@ -320,6 +339,7 @@ else {
                 Write-Host $upgrade.Detail -ForegroundColor Red
                 throw 'AeroLink was not started because the canonical database could not be safely upgraded.'
             }
+            $schemaState = 'clone-validated upgrade applied for the verified source'
             Write-Host "      $($upgrade.Detail)" -ForegroundColor Green
         }
         'conflict' {
@@ -512,7 +532,8 @@ catch {
             $recovery = 'Prior safe topology restored by verified current source.'
         } catch { $recovery = "Compensation incomplete: $($_.Exception.Message)" }
     } elseif ($RecoveryAttempt) { $recovery = 'Bounded compensation failed; no older binary or database rollback was attempted.' }
-    $actualSha = (Get-AeroLinkSourceFingerprint -RepositoryRoot $repositoryRoot).Sha
+    $actualSha = 'unknown'
+    try { $actualSha = (Get-AeroLinkSourceFingerprint -RepositoryRoot $repositoryRoot).Sha } catch {}
     $runtimeState = 'unknown'; $tunnelState = 'unknown'
     try { $runtimeState = if ((Get-AeroLinkPortOwner -Port 5080).Found) { 'running (readiness not asserted)' } else { 'stopped' } } catch {}
     try {
@@ -521,7 +542,7 @@ catch {
             if (@($actualTunnels.Mismatched).Count -eq 0) { $tunnelState = if (@($actualTunnels.Owned).Count) { 'running (protection not asserted)' } else { 'stopped' } }
         }
     } catch {}
-    throw "HOME transition failed: $initiatingError Recovery: $recovery Actual source: $actualSha; API: $runtimeState; tunnel: $tunnelState."
+    throw "HOME transition failed: $initiatingError Recovery: $recovery Actual source: $actualSha; schema: $schemaState; API: $runtimeState; tunnel: $tunnelState."
 }
 finally {
     $env:AEROLINK_PRODUCTION_OBLIGATION = $previousObligation

@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 [CmdletBinding()]
-param([int]$ControllerWaitSeconds = 900)
+param([ValidateRange(1,1800)][int]$ControllerWaitSeconds = 900)
 
 $ErrorActionPreference = 'Stop'
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -37,6 +37,7 @@ if (Test-Path -LiteralPath (Get-AeroLinkRemoteDemoConfigPath)) { $demoConfig = G
 
 $disabledTasks = @()
 $lease = $null
+$deploymentTask = $null
 try {
     foreach ($name in @('AeroLinkRemoteDemoRecovery', 'AeroLinkProductionSourceReconcile')) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
@@ -45,7 +46,7 @@ try {
         $operatorName = [Security.Principal.WindowsIdentity]::GetCurrent().Name
         $taskAccount = New-Object Security.Principal.NTAccount($task.Principal.UserId)
         if ($taskAccount.Translate([Security.Principal.SecurityIdentifier]).Value -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or
-            $task.Principal.LogonType -ne 'S4U' -or $task.Actions.Count -ne 1 -or
+            $task.Principal.LogonType -ne 'S4U' -or $task.Principal.RunLevel -ne 'Limited' -or $task.Actions.Count -ne 1 -or
             ([string]$task.Actions[0].Arguments).IndexOf('"' + $actionPath + '"', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
             throw "Task $name does not match the existing supported HOME binding. Setup did not alter that task."
         }
@@ -86,9 +87,13 @@ try {
             $identity.instance.id -ne $instance.InstanceId -or $identity.instance.classification -ne $instance.Classification) {
             throw 'Legacy runtime mode/instance proof is incomplete. It was not adopted.'
         }
+        if ([string]$identity.sourceIdentity -notmatch '^[0-9a-fA-F]{40}$') { throw 'Legacy source identity is not a clean approved revision.' }
+        & git -C $setupRoot merge-base --is-ancestor $identity.sourceIdentity $posture.RemoteMainSha
+        if ($LASTEXITCODE -ne 0) { throw 'Legacy runtime source is not in approved main history. It was not adopted.' }
     }
     $ngrok = if ($demoConfig) { Get-AeroLinkRemoteDemoNgrokProcess -Config $demoConfig } else { $null }
     if ($ngrok -and @($ngrok.Mismatched).Count) { throw 'A legacy ngrok process contradicts the protected contract. It was not adopted.' }
+    if ($ngrok -and @($ngrok.Owned).Count -gt 1) { throw 'Multiple legacy ngrok processes are ambiguous. They were not adopted.' }
     # Finish all read-only ownership checks before granting access to either service.
     if ($api.Found) {
         Grant-AeroLinkCreatedProcessAccess -ProcessId $api.ProcessId -StartedAt $api.StartedAt `
@@ -103,13 +108,56 @@ try {
     # Complete first deployment while old scheduled controllers are still paused. Leaving this to a later
     # click would allow an old recovery task to create inaccessible children again before the fixed source
     # arrived. The old launcher's existing strict update/re-entry path reaches the newly merged controller.
-    $productionLauncher = Join-Path $configuration.SourceRoot 'product\scripts\Start-AeroLinkProduction.ps1'
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $productionLauncher -DoNotOpenBrowser
-    if ($LASTEXITCODE -ne 0) { throw "The first-deployment production transition failed (exit $LASTEXITCODE). The existing task enabled states will be restored." }
+    # Never launch the replacement API from this elevated token: a high-integrity process is not an
+    # ordinary operator's target even with an account DACL. Run the existing launcher through Limited S4U.
+    $deploymentId = [guid]::NewGuid().ToString('N')
+    $deploymentScript = Join-Path $leaseDirectory "home-deployment-$deploymentId.ps1"
+    $deploymentResult = Join-Path $leaseDirectory "home-deployment-$deploymentId.result"
+    $deploymentLog = Join-Path $leaseDirectory "home-deployment-$deploymentId.log"
+    @'
+param($Module, $Installation, $Source, $Result, $Log)
+$ErrorActionPreference = 'Stop'
+$lease = $null
+$code = 1
+try {
+    $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Deployment helper must run Limited, never elevated.' }
+    Import-Module $Module
+    $lease = Enter-AeroLinkTransition -InstallationRoot $Installation
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Source 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser *> $Log
+    $code = $LASTEXITCODE
+} catch { $_ | Out-String | Add-Content -LiteralPath $Log }
+finally {
+    if ($lease) { Exit-AeroLinkTransition $lease }
+    Set-Content -LiteralPath $Result -Value $code
+}
+exit $code
+'@ | Set-Content -LiteralPath $deploymentScript -Encoding UTF8
+    $deploymentTask = "AeroLinkHomeFirstDeployment_$deploymentId"
+    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Module "{1}" -Installation "{2}" -Source "{3}" -Result "{4}" -Log "{5}"' -f `
+        $deploymentScript, (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1'), $installation.InstallationRoot, $configuration.SourceRoot, $deploymentResult, $deploymentLog
+    $action = New-ScheduledTaskAction -Execute (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument $arguments
+    $taskPrincipal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType S4U -RunLevel Limited
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 60) -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName $deploymentTask -Action $action -Principal $taskPrincipal -Settings $settings | Out-Null
+    Exit-AeroLinkTransition -Lease $lease
+    $lease = $null
+    Start-ScheduledTask -TaskName $deploymentTask
+    $deadline = (Get-Date).AddMinutes(60)
+    while (-not (Test-Path -LiteralPath $deploymentResult)) {
+        if ((Get-Date) -ge $deadline) { throw "The Limited S4U deployment did not report completion. Inspect $deploymentLog; final readiness is not asserted." }
+        Start-Sleep -Seconds 5
+    }
+    $deploymentCode = [int](Get-Content -LiteralPath $deploymentResult -Raw)
+    if ($deploymentCode -ne 0) { throw "The Limited S4U first-deployment transition failed (exit $deploymentCode). Inspect $deploymentLog. Existing task enabled states will be restored." }
     Write-Host "HOME first-deployment setup completed from approved source $($posture.HeadSha)."
     Write-Host 'Subsequent START_AEROLINK_PRODUCTION.bat launches and updates run from ordinary Explorer or PowerShell.'
 }
 finally {
     Exit-AeroLinkTransition -Lease $lease
+    if ($deploymentTask) {
+        $task = Get-ScheduledTask -TaskName $deploymentTask -ErrorAction SilentlyContinue
+        if ($task -and $task.State -ne 'Running') { Unregister-ScheduledTask -TaskName $deploymentTask -Confirm:$false }
+    }
     foreach ($name in $disabledTasks) { Enable-ScheduledTask -TaskName $name | Out-Null }
 }

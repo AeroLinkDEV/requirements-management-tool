@@ -232,8 +232,11 @@ must match; extra URL/config/policy overrides are not treated as the configured 
 One installation lease coordinates production Start, remote-demo Start/Stop, and source reconciliation.
 The OS file handle remains held through a fresh child continuation. Only a descendant with the matching
 per-run capability and live owner creation identity can share it. Contending invocations fail promptly with a
-retry diagnosis. An exited coordinator releases the OS lease; leftover file contents do not replay an old
-obligation. Ordinary production/preserve-state and explicit remote Start/scheduled keep-ready remain separate
+retry diagnosis. Each child holds a separate OS witness so parent interruption cannot admit a competing
+transition while the child is still running. An interrupted quiescing transition retains its installation/source-bound
+restoration intent. The next launcher revalidates live ownership and current source before recovering; this intent
+is never process provenance. Completed intent is not replayed, and a successful explicit Stop supersedes it.
+Ordinary production/preserve-state and explicit remote Start/scheduled keep-ready remain separate
 policies. No durable disabled-tunnel preference is introduced.
 
 **First deployment of this contract requires the one elevated setup approved in DEC-121.** A pre-fix launcher
@@ -258,7 +261,9 @@ It temporarily disables the existing supported recovery triggers, waits boundedl
 finish, and restores the previous enabled states in `finally`. It grants access only after proving the legacy
 API/tunnel contracts and process starts. The only filesystem ACL change is operator Modify access on the
 installation's bootstrap coordination directory. It then runs the existing dedicated production launch/update
-path while legacy recovery triggers are still paused, allowing its strict fast-forward and fresh re-entry to
+path through a temporary Limited S4U task under the same account, while legacy recovery triggers are still paused.
+The replacement service is never created from the elevated setup token. The temporary task is removed on completion;
+its log and result remain in the bootstrap directory. This allows the strict fast-forward and fresh re-entry to
 reach the fixed controller. Existing database/evidence locations and the ordinary clone-validated upgrade
 boundary remain authoritative. Setup never runs an API from the temporary worktree.
 

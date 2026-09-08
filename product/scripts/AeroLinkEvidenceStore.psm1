@@ -1,5 +1,18 @@
 Set-StrictMode -Version Latest
 
+function Invoke-AeroLinkEvidenceSql {
+    param([string]$Psql, [string]$Database, [int]$Port, [string]$Sql, [string[]]$OutputArguments = @())
+    # Windows PowerShell's native stdin pipeline can prepend a BOM. Use an explicitly BOM-free SQL
+    # file so PostgreSQL receives the same query under PS 5.1 and PS 7, including quoted identifiers.
+    $path = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-evidence-query-' + [guid]::NewGuid().ToString('N') + '.sql')
+    try {
+        [IO.File]::WriteAllText($path, $Sql, (New-Object Text.UTF8Encoding($false)))
+        $result = & $Psql -h 127.0.0.1 -p $Port -U postgres -d $Database -v ON_ERROR_STOP=1 @OutputArguments -f $path
+        if ($LASTEXITCODE -ne 0) { throw "Could not query controlled storage in database '$Database'." }
+        return $result
+    } finally { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force } }
+}
+
 function Get-AeroLinkEvidenceRoot {
     param([Parameter(Mandatory)][string]$ProductRoot)
     if (-not [string]::IsNullOrWhiteSpace($env:Evidence__Root)) { return [IO.Path]::GetFullPath($env:Evidence__Root) }
@@ -24,13 +37,12 @@ function Get-AeroLinkEvidenceRoot {
 function Get-AeroLinkAttachmentInventory {
     param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
     $sql = 'COPY (SELECT "Id", "StorageKey", "Size", lower("Sha256") AS "Sha256", "ArtifactType", "ArtifactId", "RevisionId" FROM controlled_attachments ORDER BY "StorageKey", "Id") TO STDOUT WITH (FORMAT CSV, HEADER TRUE)'
-    $csv = $sql | & $Psql -h 127.0.0.1 -p $Port -U postgres -d $Database -v ON_ERROR_STOP=1 -f -
-    if ($LASTEXITCODE -ne 0) { throw "Could not read the controlled-attachment inventory from database '$Database'." }
+    $csv = Invoke-AeroLinkEvidenceSql -Psql $Psql -Database $Database -Port $Port -Sql $sql
     return @($csv | ConvertFrom-Csv)
 }
 
 function Test-AeroLinkAttachmentInventory {
-    param([Parameter(Mandatory)][object[]]$Inventory,[Parameter(Mandatory)][string]$EvidenceRoot)
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Inventory,[Parameter(Mandatory)][string]$EvidenceRoot)
     $root = [IO.Path]::GetFullPath($EvidenceRoot); $prefix = $root + [IO.Path]::DirectorySeparatorChar
     $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $verifiedBytes = [long]0
@@ -57,8 +69,7 @@ SELECT
  (SELECT count(*) FROM managed_document_revisions WHERE ("ReleaseCandidateDocxAttachmentId" IS NULL) <> ("ReleaseCandidatePdfAttachmentId" IS NULL)) AS partial_candidates,
  (SELECT count(*) FROM managed_document_revisions WHERE "State" = 'Released' AND (("ReleasedDocxAttachmentId" IS NULL) OR ("ReleasedPdfAttachmentId" IS NULL))) AS incomplete_releases;
 '@
-    $raw = $sql | & $Psql -h 127.0.0.1 -p $Port -U postgres -d $Database -v ON_ERROR_STOP=1 -tA -F ',' -f -
-    if ($LASTEXITCODE -ne 0) { throw "Could not evaluate managed-document storage health in database '$Database'." }
+    $raw = Invoke-AeroLinkEvidenceSql -Psql $Psql -Database $Database -Port $Port -Sql $sql -OutputArguments @('-tA', '-F', ',')
     $value = ([string]$raw).Trim()
     if ($value -notmatch '^\d+,\d+,\d+$') { throw "Could not evaluate managed-document storage health in database '$Database'." }
     $parts = $value.Split(','); if ([int]$parts[0] -ne 0 -or [int]$parts[1] -ne 0 -or [int]$parts[2] -ne 0) { throw "Managed-document storage is not backup/restore ready: pending=$($parts[0]), partialCandidates=$($parts[1]), incompleteReleases=$($parts[2])." }
