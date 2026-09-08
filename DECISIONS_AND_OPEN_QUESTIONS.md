@@ -2317,6 +2317,43 @@ successful when the reviewed merge candidate contains no trace of it.
 - **Authority:** The directed `trace()` projection and the view-supplied node set remain authoritative. Framing is a
   presentation operation over that set and must not discover siblings, invent edges, or alter controlled identity.
 
+### DEC-121 - Protected CI Maintenance Requires Exact Owner Approval and a Qualified Initial Installation
+
+- **Date:** 2026-09-08 UTC
+- **Status:** Accepted, with installation conditional on the qualification below.
+- **Owner authority:** The owner explicitly approved proceeding with the proposed authority-maintenance
+  installation in the Codex conversation. The scope and qualification record are maintained in
+  [issue #942](https://github.com/AeroLinkDEV/requirements-management-tool/issues/942). This records the owner's
+  instruction; it does not claim that an agent-authored GitHub comment is a native owner deployment approval.
+- **Durable decision:** Ordinary product merges retain DEC-119. A protected-main maintenance path may admit
+  changes to CI/planner/metrics only after complete native Product proof and attributable owner approval of
+  the exact PR head, composed commit/tree, protected difference, workflow/run/attempt, publishers and settings.
+  A request label is not approval. The runtime approval kernel cannot authorize its own replacement.
+- **Review boundary:** The separate main-only review environment has the owner as its sole required reviewer,
+  administrator bypass disabled and no App credential. Prevention of self-review is disabled because the owner
+  may initiate the run. This is attributable owner approval, not a claim of independent human review. Publication
+  uses the existing main-only App environment and fresh authenticated evidence; stale or changed proof refuses.
+- **One-time installation exception:** Only the initial reviewed installation in PR #960 may use a separately
+  qualified direct squash merge instead of DEC-119's ordinary queue/App authorization. Before production action,
+  rehearse the exact procedure in an isolated repository and require passing exact-candidate qualification,
+  authenticated sole-PR queue-composition evidence, current successful native Full proof and an unchanged base.
+  Independently prove that the frozen base plus reviewed head produces the recorded tested queue tree.
+- **Temporary authority:** Use a dedicated private App with Contents write, scoped to one explicitly selected
+  repository at a time and with no access to the existing Merge Authority App key. During the owner-coordinated
+  window, preserve the complete ruleset while adding an update freeze and only this App as a pull-request-only
+  bypass actor. Its bypass is not technically limited to one PR; owner custody and the single-merge procedure
+  must enforce that restriction. Use the synchronous merge endpoint with the exact reviewed head once.
+- **Restoration and refusal:** Missing proof, drift, non-successful qualification or an unexpected API response
+  aborts the procedure. Restore the exact baseline only if current settings match the expected temporary state;
+  never overwrite an unrelated policy change. Revoke temporary credentials and remove the temporary installation.
+  Verify the resulting tree, absence of standing bypass, unchanged publisher pins and post-merge acceptance.
+  An uncertain merge is not retried blindly. This exception does not permit fabricated success checks, copying
+  the existing App key, direct pushes, broader fallback permissions or force-pushing history.
+- **Limits:** GitHub's ruleset update has no conditional compare-and-swap, and its merge endpoint binds the head
+  but not the expected base/result tree. The maintenance window, pre-merge tree proof and post-operation checks
+  remain mandatory. Failure to satisfy these conditions means the installation stays blocked. The exception
+  expires after this installation; future kernel changes or rollback require a separately approved transition.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

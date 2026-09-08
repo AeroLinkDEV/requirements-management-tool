@@ -14,12 +14,48 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const workflowPath = join(repoRoot, '.github', 'workflows', 'ci.yml')
+
+test('the actual aggregate shell rejects incomplete scheduled and manual browser proof', () => {
+  const gate = jobBodies(workflowLines()).gate
+  assert.match(gate.join('\n'), /needs: \[[^\n]*browser-full/)
+  const step = stepBlocks(gate).find((block) => block.name === 'Summarise and enforce')
+  assert.ok(step, 'the aggregate must contain the enforcement step')
+  const runStart = step.lines.findIndex((line) => line === '        run: |')
+  assert.ok(runStart >= 0, 'the aggregate must execute a shell script')
+  const script = step.lines.slice(runStart + 1).filter((line) => line.startsWith('          ')).map((line) => line.slice(10)).join('\n')
+  const envNames = step.lines.slice(0, runStart).flatMap((line) => /^          ([A-Z_]+):/.exec(line)?.[1] ?? [])
+  const directory = mkdtempSync(join(tmpdir(), 'aerolink-942-gate-'))
+  const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash'
+  try {
+    for (const event of ['schedule', 'workflow_dispatch', 'pull_request', 'merge_group', 'push']) {
+      for (const result of ['success', 'failure', 'cancelled', 'skipped', '']) {
+        const env = {
+          ...process.env,
+          ...Object.fromEntries(envNames.map((name) => [name, ''])),
+          BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'success', BACKEND_CORE_INFRASTRUCTURE: 'success',
+          CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success',
+          POSTGRESQL: 'success', METRICS_TOOLING: 'success', DOCS_ONLY: 'false', LAUNCHERS_ONLY: 'false',
+          POST_MERGE_SKIP: 'false', EVENT_NAME: event, FULL_DIAGNOSTICS: 'true', BROWSER_FULL: result,
+          GITHUB_STEP_SUMMARY: join(directory, 'summary.md').replaceAll('\\', '/'),
+        }
+        const child = spawnSync(bash, ['-c', script], { encoding: 'utf8', env })
+        const required = event === 'schedule' || event === 'workflow_dispatch'
+        const shouldFail = ['failure', 'cancelled'].includes(result) || (required && result !== 'success')
+        assert.equal(child.status, shouldFail ? 1 : 0, `${event}/${result}: ${child.error ?? child.stderr}\n${child.stdout}`)
+      }
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
 
 function workflowLines() {
   return readFileSync(workflowPath, 'utf8').split(/\r?\n/)

@@ -1239,7 +1239,9 @@ jobs:
     # no information. validate and postgresql-smoke still run on every push as the safety net.
     if: (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && inputs.full_diagnostics == true)) && needs.changes.outputs.browser == 'true'
     runs-on: windows-latest
-    timeout-minutes: 20
+    # The diagnostic shard needs setup time plus its longest journey set; retain a bounded margin over the
+    # observed 20-minute ceiling so timeout cancellation cannot masquerade as a successful aggregate.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -1519,7 +1521,7 @@ jobs:
   gate:
     name: Full Product evidence aggregate
     if: always()
-    needs: [changes, backend-api, backend-core-domain, backend-core-infrastructure, client, script-contracts, browser-pr, browser-production, postgresql-smoke, metrics-tooling]
+    needs: [changes, backend-api, backend-core-domain, backend-core-infrastructure, client, script-contracts, browser-pr, browser-production, browser-full, postgresql-smoke, metrics-tooling]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -1543,6 +1545,8 @@ jobs:
           CONTRACTS: ${{ needs.script-contracts.result }}
           BROWSER: ${{ needs.browser-pr.result }}
           PRODUCTION: ${{ needs.browser-production.result }}
+          BROWSER_FULL: ${{ needs.browser-full.result }}
+          FULL_DIAGNOSTICS: ${{ inputs.full_diagnostics }}
           POSTGRESQL: ${{ needs.postgresql-smoke.result }}
           METRICS_TOOLING: ${{ needs.metrics-tooling.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
@@ -1591,6 +1595,7 @@ jobs:
             describe "Operator and recovery script contracts" "$CONTRACTS"
             describe "Browser journeys" "$BROWSER"
             describe "Browser journeys on the production build" "$PRODUCTION"
+            describe "Scheduled/manual full browser journeys" "$BROWSER_FULL"
             describe "PostgreSQL migrations and secure bootstrap" "$POSTGRESQL"
             describe "CI metrics tooling tests" "$METRICS_TOOLING"
             echo
@@ -1605,7 +1610,7 @@ jobs:
           # than relying on this job's own dependency behaviour, which treats a skipped dependency as a reason
           # to skip and would take this reporter down with it.
           failed=""
-          for pair in "backend-api:$BACKEND_API" "backend-core-domain:$BACKEND_CORE_DOMAIN" "backend-core-infrastructure:$BACKEND_CORE_INFRASTRUCTURE" "client:$CLIENT" "script-contracts:$CONTRACTS" "browser-pr:$BROWSER" "browser-production:$PRODUCTION" "postgresql-smoke:$POSTGRESQL"; do
+          for pair in "backend-api:$BACKEND_API" "backend-core-domain:$BACKEND_CORE_DOMAIN" "backend-core-infrastructure:$BACKEND_CORE_INFRASTRUCTURE" "client:$CLIENT" "script-contracts:$CONTRACTS" "browser-pr:$BROWSER" "browser-production:$PRODUCTION" "browser-full:$BROWSER_FULL" "postgresql-smoke:$POSTGRESQL"; do
             name="${pair%%:*}"
             result="${pair#*:}"
             case "$result" in
@@ -1615,6 +1620,13 @@ jobs:
           if [ -n "$failed" ]; then
             echo "::error::These gates did not pass:$failed"
             exit 1
+          fi
+
+          if [ "$EVENT_NAME" = "schedule" ] || { [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$FULL_DIAGNOSTICS" = "true" ]; }; then
+            if [ "$BROWSER_FULL" != "success" ]; then
+              echo "::error::Scheduled/manual full browser proof did not complete successfully."
+              exit 1
+            fi
           fi
 
           # The guard that used to live inside `validate`, moved here because the thing it protects against is
@@ -1685,6 +1697,9 @@ jobs:
               needs="$needs,browser-pr"
             fi
             if [ "${{ github.event_name }}" != "push" ]; then needs="$needs,browser-production"; fi
+            if [ "$effective_event" = "schedule" ] || { [ "$effective_event" = "workflow_dispatch" ] && [ "${{ inputs.full_diagnostics }}" = "true" ]; }; then
+              needs="$needs,browser-full"
+            fi
           fi
           if [ "${{ needs.changes.outputs.post_merge_skip }}" != "true" ] && [ "${{ needs.changes.outputs.postgresql }}" = "true" ]; then needs="$needs,postgresql-smoke"; fi
           echo "METRICS_NEEDS=$needs" >> "$GITHUB_ENV"

@@ -492,6 +492,18 @@ test('the expected job topology matches the current workflow', () => {
   const gateNeeds = needsLine.match(/\[([^\]]+)\]/)[1].split(',').map((entry) => entry.trim())
   for (const id of gateNeeds) {
     if (NON_AUTHORITATIVE_JOB_IDS.includes(id)) continue
+    if (id === 'browser-full') {
+      // Authoritative for schedule/manual diagnostics, deliberately absent from
+      // queue runs (whose four browser-pr shards remain required). Pin the whole
+      // job predicate before excluding it from this merge-group-only model.
+      const start = lines.findIndex((line) => line === '  browser-full:')
+      const end = lines.findIndex((line, index) => index > start && /^  [\w-]+:$/.test(line))
+      const body = lines.slice(start, end < 0 ? undefined : end)
+      assert.deepEqual(body.filter((line) => line.startsWith('    if:')), [
+        "    if: (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && inputs.full_diagnostics == true)) && needs.changes.outputs.browser == 'true'",
+      ])
+      continue
+    }
     const display = jobDisplayName(id)
     assert.ok(
       covered.has(display),

@@ -129,7 +129,9 @@ environment, retrieve the App key or alter repository settings. Existing output 
 
 ## Owner-reviewed maintenance binding
 
-The binding workflow contains an opt-in maintenance path. Its initial activation is a separate trust-root
+The binding workflow contains an opt-in maintenance path governed by
+[DEC-121](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-121---protected-ci-maintenance-requires-exact-owner-approval-and-a-qualified-initial-installation).
+Its initial activation is a separate trust-root
 transition: the path cannot authorize installation or replacement of its own approval kernel. Activation
 requires an explicitly reviewed procedure, exact candidate qualification, owner approval of live actions and
 restoration steps, and verification of both unchanged required publishers and the main-only secret boundary.
