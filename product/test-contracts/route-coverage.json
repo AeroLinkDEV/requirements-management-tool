@@ -363,6 +363,7 @@
         "ReopenBaselineConsequencesApiTests",
         "RequirementFilterExactnessApiTests",
         "RequirementProposalOptionsApiTests",
+        "RequirementRedlineApiTests",
         "RestartReviewApiTests",
         "ReviewCommentApiTests",
         "ReviewLinkOutlivedCycleTests",
@@ -389,7 +390,9 @@
         "TestProposalContentApiTests",
         "VerificationImpactApiTests",
         "VerificationProgramIsolationApiTests",
+        "VerificationReadEffectivityApiTests",
         "VerificationVocabularyApiTests",
+        "WebhookDeliveryOperationsApiTests",
         "WithdrawChangeRequestApiTests",
         "WorkflowAuthorityCutoverApiTests"
       ]
@@ -664,7 +667,8 @@
       "path": "/api/change-requests/{id:guid}/cancel-review",
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
-        "CancelReviewAuthorityTests"
+        "CancelReviewAuthorityTests",
+        "ReviewCommentApiTests"
       ]
     },
     {
@@ -709,6 +713,7 @@
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
         "ChangeRequestReviewRationaleApiTests",
+        "ReviewCommentApiTests",
         "ReviewLinkOutlivedCycleTests",
         "TestChangeRequestReviewWorkflowTests"
       ]
@@ -737,6 +742,7 @@
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
         "RestartReviewApiTests",
+        "ReviewCommentApiTests",
         "TestChangeRequestReviewWorkflowTests"
       ]
     },
@@ -1209,7 +1215,9 @@
       "method": "POST",
       "path": "/api/integrations/deliveries/{id:guid}/replay",
       "file": "IntegrationEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "WebhookDeliveryOperationsApiTests"
+      ]
     },
     {
       "method": "POST",
@@ -1231,7 +1239,8 @@
       "file": "IntegrationEndpoints.cs",
       "coveredBy": [
         "ChangeRequestTargetReleaseGuardApiTests",
-        "OpenDigitalThreadTests"
+        "OpenDigitalThreadTests",
+        "WebhookDeliveryOperationsApiTests"
       ]
     },
     {

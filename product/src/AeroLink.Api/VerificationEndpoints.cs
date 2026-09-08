@@ -551,7 +551,7 @@ public static class VerificationEndpoints
         /// verification decision that resolved to it, which is the record that actually connects the two. A
         /// revision written outside that path has no change request, and says so rather than guessing.
         app.MapGet("/api/test-{artifactRoute:regex(procedures|cases)}/{id:guid}/history", async (string artifactRoute, Guid id, Guid? revisionId, Guid? releaseId, HttpContext http,
-            AeroLinkDbContext db, CancellationToken ct) =>
+            AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var procedure = await db.TestProcedures.AsNoTracking()
                 .Where(x => x.Id == id)
@@ -568,13 +568,13 @@ public static class VerificationEndpoints
             Guid? effectiveRevisionId = null;
             if (releaseId is not null)
             {
-                var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, procedure.ProjectId, releaseId.Value, ct);
+                var effectivity = await VerificationReadEffectivity.ForReleaseAsync(db, procedure.ProjectId, releaseId.Value, ct, policyResolver);
                 if (effectivity is not null && effectivity.RevisionByProcedure.TryGetValue(id, out var carriedRevisionId))
                     effectiveRevisionId = carriedRevisionId;
                 // A request for one exact revision is a build-effectivity assertion and must match the
                 // manifest. Omitting revisionId is the broad historical view: legacy and draft procedures
                 // remain readable there even when no build ever carried them.
-                if (revisionId is not null && revisionId != effectiveRevisionId) return Results.NotFound();
+                if (revisionId is not null && (effectivity is null || !effectivity.RevisionIds.Contains(revisionId.Value))) return Results.NotFound();
             }
 
             var titles = await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db, revisionIds, ct);
@@ -685,7 +685,7 @@ public static class VerificationEndpoints
         // revision or a relationship belonging to another build is never substituted for what this build
         // actually carries.
         app.MapGet("/api/test-{artifactRoute:regex(procedures|cases)}/{id:guid}/trace", async (string artifactRoute, Guid id, Guid? releaseId, Guid? revisionId,
-            HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var procedure = await db.TestProcedures.AsNoTracking()
                 .Where(x => x.Id == id)
@@ -700,8 +700,8 @@ public static class VerificationEndpoints
             var isExactManifest = false;
             if (releaseId is not null)
             {
-                var effectivity = await TestProcedureEffectivity.ForReleaseAsync(
-                    db, procedure.ProjectId, releaseId.Value, ct);
+                var effectivity = await VerificationReadEffectivity.ForReleaseAsync(
+                    db, procedure.ProjectId, releaseId.Value, ct, policyResolver);
                 if (effectivity is null || !effectivity.RevisionByProcedure.TryGetValue(id, out var carriedRevisionId))
                     return Results.NotFound(new
                     {
@@ -710,13 +710,13 @@ public static class VerificationEndpoints
                     });
                 // A request for one exact revision is a build-effectivity assertion and must match the
                 // manifest, exactly as the history endpoint enforces.
-                if (revisionId is not null && revisionId != carriedRevisionId)
+                if (revisionId is not null && !effectivity.RevisionIds.Contains(revisionId.Value))
                     return Results.NotFound(new
                     {
                         error = $"The requested {ArtifactNoun(procedure.Level, procedure.ArtifactKind)} revision is not the revision the selected build carries.",
                         code = "cross_build_procedure_revision"
                     });
-                selectedRevisionId = carriedRevisionId;
+                selectedRevisionId ??= carriedRevisionId;
                 isExactManifest = effectivity.IsExactManifest;
                 effectiveBaselineId = effectivity.BaselineId;
                 // The requirement manifest is the other half of build effectivity: the same build's exact
@@ -945,7 +945,7 @@ public static class VerificationEndpoints
             Dictionary<Guid, Guid>? scopedRevisions = null;
             if(releaseId is not null)
             {
-                var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, projectId, releaseId.Value, ct);
+                var effectivity = await VerificationReadEffectivity.ForReleaseAsync(db, projectId, releaseId.Value, ct, policyResolver);
                 // `views` is part of this response's shape, so the empty answer carries it too. A reply that
                 // drops a field the caller reads is a reply that crashes the caller.
                 if(effectivity is null)return Results.Ok(new{page=currentPage,pageSize=size,totalCount=0,totalPages=0,views=Array.Empty<object>(),items=Array.Empty<object>()});

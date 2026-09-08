@@ -388,7 +388,7 @@ public static class BaselineEndpoints
         {
             var baseline = await baselines.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
-            var scr = await scrs.GetAsync(request.ChangeRequestId, ct); if (scr is null) return Results.NotFound();
+            var scr = await scrs.GetAsync(request.ChangeRequestId, ChangeRequestLoadShape.None, ct); if (scr is null) return Results.NotFound();
             try { baseline.Select(scr, http.UserAccount().UserName, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
@@ -461,7 +461,7 @@ public static class BaselineEndpoints
         {
             var baseline = await baselines.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
-            var scr = await scrs.GetAsync(changeRequestId, ct); if (scr is null) return Results.NotFound();
+            var scr = await scrs.GetAsync(changeRequestId, ChangeRequestLoadShape.None, ct); if (scr is null) return Results.NotFound();
             try { baseline.Remove(scr, http.UserAccount().UserName, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.NoContent(); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });

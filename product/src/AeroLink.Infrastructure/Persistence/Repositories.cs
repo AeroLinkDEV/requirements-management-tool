@@ -3,6 +3,8 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Contracts;
 using AeroLink.Domain.Programs;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using System.Data;
 
 namespace AeroLink.Infrastructure.Persistence;
 
@@ -58,17 +60,98 @@ public sealed class ChangeRequestRepository(AeroLinkDbContext db) : IChangeReque
     }
 
     public Task<SystemChangeRequest?> GetAsync(Guid id, CancellationToken cancellationToken) =>
-        db.SystemChangeRequests
-            .Include(x => x.RequirementChanges)
-            .Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
+        GetAsync(id, ChangeRequestLoadShape.Complete, cancellationToken);
+
+    public async Task<SystemChangeRequest?> GetAsync(Guid id, ChangeRequestLoadShape shape,
+        CancellationToken cancellationToken)
+    {
+        var normalized = Normalize(shape);
+        var query = db.SystemChangeRequests.AsQueryable();
+        if (normalized.HasFlag(ChangeRequestLoadShape.RequirementChanges))
+            query = query.Include(x => x.RequirementChanges);
+        if (normalized.HasFlag(ChangeRequestLoadShape.ReviewCycles))
+            query = query.Include(x => x.ReviewCycles);
+        if (normalized.HasFlag(ChangeRequestLoadShape.ReviewSteps))
+            query = query.Include(x => x.ReviewCycles).ThenInclude(x => x.Steps);
+        if (normalized.HasFlag(ChangeRequestLoadShape.ReviewComments))
+        {
             // Comments load with the cycle because closing one publishes whatever drafts are outstanding.
             // Left out, that loop would iterate an empty collection and silently discard them — the write
             // would succeed, nothing would error, and a reviewer's writing would simply never appear.
-            .Include(x => x.ReviewCycles).ThenInclude(x => x.Comments)
-            .Include(x => x.AuditEvents)
-            .Include(x => x.UpstreamLinks)
-            .Include(x => x.UpstreamHistory)
-            .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+            query = query.Include(x => x.ReviewCycles).ThenInclude(x => x.Comments);
+        }
+        if (normalized.HasFlag(ChangeRequestLoadShape.AuditEvents))
+            query = query.Include(x => x.AuditEvents);
+        if (normalized.HasFlag(ChangeRequestLoadShape.UpstreamLinks))
+            query = query.Include(x => x.UpstreamLinks);
+        if (normalized.HasFlag(ChangeRequestLoadShape.UpstreamHistory))
+            query = query.Include(x => x.UpstreamHistory);
+
+        var independentCollections = normalized is ChangeRequestLoadShape.None
+            ? 0
+            : Enum.GetValues<ChangeRequestLoadShape>()
+                .Where(flag => flag is ChangeRequestLoadShape.RequirementChanges
+                    or ChangeRequestLoadShape.ReviewCycles
+                    or ChangeRequestLoadShape.ReviewSteps
+                    or ChangeRequestLoadShape.ReviewComments
+                    or ChangeRequestLoadShape.AuditEvents
+                    or ChangeRequestLoadShape.UpstreamLinks
+                    or ChangeRequestLoadShape.UpstreamHistory)
+                .Count(flag => normalized.HasFlag(flag));
+        if (independentCollections < 2)
+            return await query.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        // Split queries avoid the cartesian multiplication of independent history collections. Every statement
+        // must still observe one snapshot: without a transaction PostgreSQL's default ReadCommitted isolation can
+        // observe a different state for each child query. If the caller already owns a transaction, split only when
+        // that transaction has a snapshot-preserving isolation level. A weaker caller transaction is deliberately
+        // kept as one statement so it cannot return a graph assembled from different committed states; its lifetime
+        // remains untouched in either case.
+        var currentTransaction = db.Database.CurrentTransaction;
+        if (currentTransaction is not null && !HasConsistentReadIsolation(currentTransaction))
+            return await query.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        var transaction = currentTransaction is null
+            ? await BeginConsistentReadAsync(cancellationToken)
+            : null;
+        try
+        {
+            var result = await query.AsSplitQuery().SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+            return result;
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
+        }
+    }
+
+    private async Task<IDbContextTransaction> BeginConsistentReadAsync(CancellationToken cancellationToken)
+    {
+        var isolation = db.Database.ProviderName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true
+            ? IsolationLevel.RepeatableRead
+            : IsolationLevel.Serializable;
+        return await db.Database.BeginTransactionAsync(isolation, cancellationToken);
+    }
+
+    private static bool HasConsistentReadIsolation(IDbContextTransaction transaction) =>
+        transaction.GetDbTransaction().IsolationLevel is IsolationLevel.RepeatableRead
+            or IsolationLevel.Serializable
+            or IsolationLevel.Snapshot;
+
+    private static ChangeRequestLoadShape Normalize(ChangeRequestLoadShape shape)
+    {
+        const ChangeRequestLoadShape all = ChangeRequestLoadShape.RequirementChanges
+            | ChangeRequestLoadShape.ReviewCycles | ChangeRequestLoadShape.ReviewSteps
+            | ChangeRequestLoadShape.ReviewComments | ChangeRequestLoadShape.AuditEvents
+            | ChangeRequestLoadShape.UpstreamLinks | ChangeRequestLoadShape.UpstreamHistory;
+        if ((shape & ~all) != 0)
+            throw new ArgumentOutOfRangeException(nameof(shape), shape, "Unknown change-request load-shape flags.");
+        if (shape.HasFlag(ChangeRequestLoadShape.ReviewSteps)
+            || shape.HasFlag(ChangeRequestLoadShape.ReviewComments))
+            shape |= ChangeRequestLoadShape.ReviewCycles;
+        return shape;
+    }
 
     public Task AddAsync(SystemChangeRequest scr, CancellationToken cancellationToken) =>
         db.SystemChangeRequests.AddAsync(scr, cancellationToken).AsTask();

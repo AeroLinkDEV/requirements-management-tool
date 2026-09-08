@@ -24,9 +24,6 @@ public static class WorkflowEndpoints
     /// <summary>One offered signer for one stage, carrying why they qualify so the picker can say so.</summary>
     private sealed record StageCandidate(string UserId, string Name, string Role, string Via);
 
-    /// <summary>The role label retained for compatibility, paired with the resolver's exact evidence row.</summary>
-    public readonly record struct AuthorityResolution(ProgramRole? Role, ProjectAuthorityDecision Decision);
-
     public static void MapWorkflowEndpoints(this WebApplication app)
     {
         app.MapGet("/api/review-workflows", async (Guid projectId, HttpContext http, AeroLinkDbContext db,
@@ -276,198 +273,13 @@ public static class WorkflowEndpoints
     }
 
     /// <summary>The active procedure for this kind of package, or null when the project records none.</summary>
-    public static async Task<ReviewWorkflow?> ActiveAsync(AeroLinkDbContext db, Guid projectId,
+    private static async Task<ReviewWorkflow?> ActiveAsync(AeroLinkDbContext db, Guid projectId,
         ReviewSubject subject, CancellationToken ct) =>
         await db.ReviewWorkflows.AsNoTracking().Include(x => x.Stages)
             .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.AppliesTo == subject
                                        && x.State == ReviewWorkflowState.Active, ct);
 
-    /// <summary>A change request names its subject by its type; a test change request by its discipline.</summary>
-    public static ReviewSubject SubjectOf(ChangeRequestType type, ILadderPolicy? ladderPolicy = null)
-        => (ladderPolicy ?? LegacyLadderPolicy.Instance).WorkflowSubject(type);
 
-    public static ReviewSubject SubjectOf(TestChangeReviewDiscipline discipline, ILadderPolicy? ladderPolicy = null)
-        => (ladderPolicy ?? LegacyLadderPolicy.Instance).WorkflowSubject(discipline);
-
-    public static ReviewSubject SubjectOf(VerificationArtifactKey key, ILadderPolicy? ladderPolicy = null)
-        => (ladderPolicy ?? LegacyLadderPolicy.Instance).WorkflowSubject(key);
-
-    public static async Task<ReviewWorkflowSpecification?> ActiveSpecificationAsync(AeroLinkDbContext db,
-        Guid projectId, ChangeRequestType type, CancellationToken ct, ILadderPolicy? ladderPolicy = null) =>
-        (await ActiveAsync(db, projectId, SubjectOf(type, ladderPolicy), ct))?.Specification();
-
-    public static async Task<ReviewWorkflowSpecification?> ActiveSpecificationAsync(AeroLinkDbContext db,
-        Guid projectId, TestChangeReviewDiscipline discipline, CancellationToken ct, ILadderPolicy? ladderPolicy = null) =>
-        (await ActiveAsync(db, projectId, SubjectOf(discipline, ladderPolicy), ct))?.Specification();
-
-    public static async Task<ReviewWorkflowSpecification?> ActiveSpecificationAsync(AeroLinkDbContext db,
-        Guid projectId, VerificationArtifactKey key, CancellationToken ct, ILadderPolicy? ladderPolicy = null) =>
-        (await ActiveAsync(db, projectId, SubjectOf(key, ladderPolicy), ct))?.Specification();
-
-    /// <summary>
-    /// Loads the exact workflow recorded on an in-flight cycle. Revisions govern future Draft submissions;
-    /// correction/restart operations inside an existing cycle must not silently switch to today's active
-    /// policy.
-    /// </summary>
-    public static async Task<ReviewWorkflowSpecification?> HistoricalSpecificationAsync(AeroLinkDbContext db,
-        Guid projectId, Guid? workflowId, CancellationToken ct)
-    {
-        if (workflowId is null) return null;
-        return (await db.ReviewWorkflows.AsNoTracking().Include(x => x.Stages)
-            .SingleOrDefaultAsync(x => x.Id == workflowId && x.ProjectId == projectId, ct))?.Specification();
-    }
-
-    /// <summary>
-    /// The strongest effective authority each user holds on the program owning this project.
-    ///
-    /// This must resolve the same leadership, standing-backup, delegation, account-state and administrator
-    /// rules as the signing gate. Reading raw membership rows here allowed a retired position role to become
-    /// an additional signer and could freeze an unrelated base role as the signature provenance.
-    /// </summary>
-    public static async Task<Dictionary<Guid, ProgramRole?>> AuthoritiesAsync(AeroLinkDbContext db,
-        Guid projectId, IReadOnlyList<Guid> userIds, CancellationToken ct)
-    {
-        var resolved = await AuthoritiesWithDecisionsAsync(db, projectId, userIds, ct);
-        return resolved.ToDictionary(x => x.Key, x => x.Value.Role);
-    }
-
-    /// <summary>Resolves the strongest effective authority and retains its source row for freezing.</summary>
-    public static async Task<Dictionary<Guid, AuthorityResolution>> AuthoritiesWithDecisionsAsync(
-        AeroLinkDbContext db, Guid projectId, IReadOnlyList<Guid> userIds, CancellationToken ct)
-    {
-        var programId = await db.Projects.Where(x => x.Id == projectId)
-            .Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
-        if (programId is null || userIds.Count == 0) return [];
-        var resolver = new ProjectAuthorityResolver(db);
-        var now = DateTimeOffset.UtcNow;
-        var memberships = await db.ProgramMemberships.AsNoTracking()
-            .Where(x => x.ProgramId == programId && x.EndedAt == null && userIds.Contains(x.UserId))
-            .Select(x => new { x.Id, x.UserId, x.Role }).ToListAsync(ct);
-        var result = new Dictionary<Guid, AuthorityResolution>();
-        foreach (var userId in userIds.Distinct())
-        {
-            foreach (var candidate in ParticipationAuthorities)
-            {
-                var decision = await resolver.ResolveAsync(userId, programId.Value,
-                    ProjectAuthorityRequirement.LegacyRoleDemand(candidate,
-                        allowProgramAdministratorSubstitution: true), now, ct);
-                if (!decision.Granted) continue;
-                ProgramRole? role = decision.Source == ProjectAuthoritySource.AdministratorSubstitution
-                    ? ProgramRole.Administrator
-                    : decision.Source == ProjectAuthoritySource.DirectBaseRole
-                        // The resolver chose the source row using the canonical accepted-role precedence.
-                        // Freeze the same role label beside it; re-scanning the user's roles here could select
-                        // a different role when one account has several accepted memberships.
-                        ? memberships.Where(m => m.UserId == userId && m.Id == decision.SourceId)
-                            .Select(m => (ProgramRole?)m.Role).FirstOrDefault()
-                        : candidate;
-                result[userId] = new AuthorityResolution(role, decision);
-                break;
-            }
-            if (!result.ContainsKey(userId))
-                result[userId] = new AuthorityResolution(null, ProjectAuthorityDecision.Denied);
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// The authority one user actually uses to sign one configured stage.
-    ///
-    /// A person can hold several Program roles, and the strongest one is not necessarily the one a stage
-    /// asks for: a TestLead who is also an Approver must still be able to sign the TestLead stage as a
-    /// TestLead, and a Configuration Manager who is also a Program Manager signs the Configuration Manager
-    /// stage as a Configuration Manager. Administrator remains a substitution authority for any stage.
-    /// The resolved authority is frozen on the approval step, so the signature stays explainable after
-    /// memberships change.
-    /// </summary>
-    public static async Task<ProgramRole?> StageAuthorityAsync(AeroLinkDbContext db, Guid projectId,
-        Guid userId, ProgramRole requiredRole, CancellationToken ct)
-    {
-        return (await StageAuthorityWithDecisionAsync(db, projectId, userId, requiredRole, ct)).Role;
-    }
-
-    /// <summary>Legacy-role stage resolution with the exact authority provenance beside its role label.</summary>
-    public static async Task<AuthorityResolution> StageAuthorityWithDecisionAsync(AeroLinkDbContext db,
-        Guid projectId, Guid userId, ProgramRole requiredRole, CancellationToken ct)
-    {
-        var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId)
-            .SingleOrDefaultAsync(ct);
-        if (programId is null) return new(null, ProjectAuthorityDecision.Denied);
-        var decision = await new ProjectAuthorityResolver(db).ResolveAsync(userId, programId.Value,
-            ProjectAuthorityRequirement.LegacyRoleDemand(requiredRole,
-                allowProgramAdministratorSubstitution: true), DateTimeOffset.UtcNow, ct);
-        if (!decision.Granted) return new(null, decision);
-        if (decision.Source == ProjectAuthoritySource.AdministratorSubstitution)
-            return new(ProgramRole.Administrator, decision);
-
-        // Preserve the actual base role on the frozen signature where a membership answered the demand.
-        // Leadership, standing-backup and delegation decisions instead record the exact configured demand:
-        // no raw retired position membership is consulted, and the picker and submission gate therefore
-        // cannot disagree about whether the person may occupy this stage.
-        if (decision.Source == ProjectAuthoritySource.DirectBaseRole)
-        {
-            // ResolveAsync selected this exact membership row. Use its role for the compatibility label so
-            // the frozen Authority and AuthoritySourceId cannot describe different memberships.
-            if (decision.SourceId is { } sourceId)
-            {
-                var sourceRole = await db.ProgramMemberships.AsNoTracking()
-                    .Where(x => x.Id == sourceId && x.ProgramId == programId && x.UserId == userId
-                        && x.EndedAt == null)
-                    .Select(x => (ProgramRole?)x.Role).SingleOrDefaultAsync(ct);
-                if (sourceRole is not null) return new(sourceRole, decision);
-            }
-        }
-        return new(requiredRole, decision);
-    }
-
-    /// <summary>
-    /// The stage-aware form: an explicit-authority stage resolves through its own recorded
-    /// <see cref="ReviewStageRequirement.RequiredAuthority"/> — the exact #816 requirement the candidate
-    /// picker offered — while a legacy stage keeps answering under the compatibility demand it was recorded
-    /// under. Freezing the required role itself (not the holder's strongest role) is what lets the domain's
-    /// exact-match stage validation and this resolution agree by construction.
-    /// </summary>
-    public static async Task<ProgramRole?> StageAuthorityAsync(AeroLinkDbContext db, Guid projectId,
-        Guid userId, ReviewStageRequirement stage, CancellationToken ct)
-    {
-        return (await StageAuthorityWithDecisionAsync(db, projectId, userId, stage, ct)).Role;
-    }
-
-    /// <summary>Stage-aware resolution that returns both compatibility role and frozen authority provenance.</summary>
-    public static async Task<AuthorityResolution> StageAuthorityWithDecisionAsync(AeroLinkDbContext db,
-        Guid projectId, Guid userId, ReviewStageRequirement stage, CancellationToken ct)
-    {
-        if (stage.AuthorityKind is null)
-            return await StageAuthorityWithDecisionAsync(db, projectId, userId, stage.RequiredRole, ct);
-        var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId)
-            .SingleOrDefaultAsync(ct);
-        if (programId is null) return new(null, ProjectAuthorityDecision.Denied);
-        var decision = await new ProjectAuthorityResolver(db).ResolveAsync(userId, programId.Value,
-            stage.RequiredAuthority, DateTimeOffset.UtcNow, ct);
-        if (!decision.Granted) return new(null, decision);
-        return new(decision.Source == ProjectAuthoritySource.AdministratorSubstitution
-            ? ProgramRole.Administrator : stage.RequiredRole, decision);
-    }
-
-    private static readonly ProgramRole[] ParticipationAuthorities =
-    [
-        ProgramRole.Administrator,
-        ProgramRole.ProgramManager,
-        ProgramRole.ConfigurationManager,
-        ProgramRole.ProjectEngineeringLead,
-        ProgramRole.EngineeringManager,
-        ProgramRole.SystemEngineeringLead,
-        ProgramRole.SoftwareEngineeringLead,
-        ProgramRole.SystemTestLead,
-        ProgramRole.SoftwareTestLead,
-        ProgramRole.Approver,
-        ProgramRole.TestLead,
-        ProgramRole.Reviewer,
-        ProgramRole.TestEngineer,
-        ProgramRole.Engineer,
-        ProgramRole.SoftwareQualityAnalyst,
-        ProgramRole.Airworthiness,
-    ];
 
     private static void ValidateSubject(ILadderPolicy policy, ReviewSubject subject)
     {

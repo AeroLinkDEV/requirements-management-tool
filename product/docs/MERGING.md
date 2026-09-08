@@ -35,6 +35,12 @@ eligible to enter the queue. If another commit is pushed, the trusted synchroniz
 `ready-for-full-ci`; the old Full result and App check belong to the old SHA and cannot authorize the new one.
 Finish the fix, then request readiness again.
 
+The readiness publisher checks the complete current queue before dispatch and again before publishing. It
+refuses a PR head that equals any current composed candidate, including another PR's candidate. Both paths
+use the same required App context, so a second PR must not provide readiness for an existing queue commit.
+An incomplete queue response also refuses. Historical queue membership alone does not permanently disqualify
+a reopened head; current membership and the normal in-progress invalidator provide the boundary.
+
 To disarm auto-merge:
 
 ```bash
@@ -101,6 +107,72 @@ private key exists only in the `merge-authority` environment, whose deployment p
 candidate code cannot mint that check. Changes to `.github/`, `product/test-planner/`, or
 `product/ci-metrics/` deliberately refuse automatic queue binding and require an explicitly reviewed
 authority-maintenance cutover.
+
+## Prepare a maintenance review packet
+
+The read-only preflight collects current GitHub PR, queue, run, native check publisher, complete protected
+Git trees, ruleset and credential-environment metadata. Run it from a reviewed checkout, with an output path
+outside `product/.local`:
+
+```text
+node product/ci-metrics/bin/prepare-authority-maintenance.mjs <pr-number> <product-run-id> <new-output.json>
+node --test product/ci-metrics/tests/maintenance-preflight.test.mjs
+```
+
+The output includes the clean preparer commit/tree and a digest of that identity, the evidence and all
+existing verifier refusals. The preparer's identity is checked again after collection. `REVIEW_REQUIRED` means
+only that the packet can be reviewed; it cannot authorize an App check or a merge. `REFUSE` retains the
+missing, failed, stale or mismatched evidence. A diagnostic run, an obsolete queue candidate or a PR-head
+green check cannot replace the current composed candidate. Truncated responses and changes observed during
+collection fail closed. The command does not execute candidate code, read candidate artifacts, approve an
+environment, retrieve the App key or alter repository settings. Existing output files cannot be overwritten.
+
+## Owner-reviewed maintenance binding
+
+The binding workflow contains an opt-in maintenance path governed by
+[DEC-121](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-121---protected-ci-maintenance-requires-exact-owner-approval-and-a-qualified-initial-installation).
+Its initial activation is a separate trust-root
+transition: the path cannot authorize installation or replacement of its own approval kernel. Activation
+requires an explicitly reviewed procedure, exact candidate qualification, owner approval of live actions and
+restoration steps, and verification of both unchanged required publishers and the main-only secret boundary.
+An unconfigured environment is a refusal. Adding this code alone does not activate an approval environment.
+
+After that activation, request maintenance with the `authority-maintenance-requested` PR label and ordinary
+Full readiness. The label requests review; it grants no authority. When the PR is first in the queue and its
+complete native Product proof succeeds, the protected-main binder compares the full protected Git trees.
+Only the ordinary verifier's protected-surface refusal may proceed to review. Missing/failed jobs, a changed
+approval kernel, a different publisher or an obsolete composition still refuse.
+
+The binder writes the exact PR head, composed commit/tree, protected diff, main/preparer identity and Product
+run/attempt into its run summary. It leaves the App check pending while the separate
+`merge-authority-maintenance` environment waits for the owner. This environment must have exactly one required
+reviewer, GitHub account `seanmccarthyns` (ID `295123958`), a branch-only `main` deployment policy and administrator
+bypass disabled. It receives no App secret. Prevention of self-review is explicitly disabled because the owner
+may also be the workflow initiator; this is a deliberate owner approval, not a claim of independent review.
+
+Read the linked exact candidate diff and native evidence before approving **Review deployments**. The approval
+comment must be exactly `APPROVE MAINTENANCE <digest>` using the summary's 64-character digest. An ordinary PR
+comment, label, different reviewer, absent approval, rejected approval or mixed/duplicate approval history is
+insufficient. Do not approve the environment on the owner's behalf without explicit authorization for that
+exact digest. The approval job executes no repository code and has no token permissions.
+
+The final publisher runs from the same protected-main workflow SHA in the existing `merge-authority`
+environment. It reads GitHub's authenticated approval history for this binding workflow and recollects live
+PR/queue, native run/jobs/check publisher, Git trees, ruleset and both environment policies. A changed digest
+refuses publication. Both the live Product attempt and binding workflow identity/status are checked once more
+immediately before publishing. These reads cannot make the GitHub read-and-publish boundary atomic. The normal
+in-progress invalidator and paired native check remain required throughout the wait.
+
+GitHub approval history does not carry an attempt identifier. Maintenance therefore refuses reruns of the
+binding workflow itself. If a run or candidate becomes stale, obtain a new Product completion and fresh binding
+workflow/owner review; do not reuse a prior approval. A Product partial rerun may retain successful native jobs
+through `filter=latest`, but its new attempt still needs a fresh digest and approval. The existing queue timeout
+continues to apply; approval does not extend it.
+
+Any change to the runtime maintenance/merge-authority modules or the protected binding/readiness workflows is
+outside this routine path. Use a separately reviewed trust-root transition; never remove a required check or
+publish a fabricated success to make a refused maintenance PR merge. Rollback also requires reviewed exact
+revert evidence; an earlier approval is not permission for a later revert.
 
 ## Related
 

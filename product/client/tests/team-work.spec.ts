@@ -495,6 +495,10 @@ test('Team Work stays readable without document overflow at the supported narrow
   await expect(page.getByRole('heading', { name: 'Team Work', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'People', exact: true })).toBeVisible()
   await expect(page.getByRole('textbox', { name: 'Search' })).toBeVisible()
+  // DOM visibility alone misses a full-height sticky navigation row covering the workspace.
+  // A real pointer click must reach the control after scrolling the narrow page.
+  await page.getByRole('textbox', { name: 'Search' }).click()
+  await expect(page.getByRole('textbox', { name: 'Search' })).toBeFocused()
   if (process.env.AEROLINK_TEAM_WORK_NARROW_SCREENSHOT)
     await page.screenshot({ path: process.env.AEROLINK_TEAM_WORK_NARROW_SCREENSHOT, fullPage: true })
 })

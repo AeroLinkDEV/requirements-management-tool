@@ -1,10 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Releases;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -131,11 +133,83 @@ public sealed class TestChangeRequestConsolidationTests
         var visibleItems = visible.EnumerateArray().ToList();
         Assert.Equal(2, visibleItems.Count);
         Assert.All(visibleItems, item => Assert.Equal(packageId, item.GetProperty("testChangeReviewId").GetGuid()));
+        await AssertPendingReadinessAsync(factory, client, fixture, expectedImpacts: 2, expectedReviews: 1);
 
         // The moved item can be resolved from the surviving package's authority.
         using var resolved = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.SecondItemId}/resolve",
             new { outcome = "NewProcedureRequired", rationale = "A procedure must be written for the second change." });
         Assert.True(resolved.IsSuccessStatusCode, await resolved.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Source_revision_supersession_keeps_the_actionable_queue_and_readiness_on_current_work()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "consolidation.engineer");
+        Guid successorReviewId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var source = await db.SystemChangeRequests.Include(x => x.RequirementChanges)
+                .SingleAsync(x => x.Id == fixture.FirstChangeId);
+            var now = DateTimeOffset.UtcNow;
+            var successor = source.StartNextRevision("author", now, targetReleaseIsReleased: false);
+            successor.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
+            successor.ApproveActiveStage("reviewer", now);
+            db.Add(successor);
+            await db.SaveChangesAsync();
+            await scope.ServiceProvider.GetRequiredService<VerificationImpactService>()
+                .RaiseForApprovedChangeRequestAsync(successor, now, default);
+            await db.SaveChangesAsync();
+            successorReviewId = (await db.TestChangeReviews.SingleAsync(x => x.ChangeRequestId == successor.Id)).Id;
+        }
+
+        var queue = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/releases/{fixture.ReleaseId}/verification-impact?outstandingOnly=true");
+        var items = queue.EnumerateArray().ToList();
+        Assert.Equal(2, items.Count);
+        Assert.DoesNotContain(items, x => x.GetProperty("id").GetGuid() == fixture.FirstItemId);
+        Assert.Contains(items, x => x.GetProperty("testChangeReviewId").GetGuid() == successorReviewId);
+        await AssertPendingReadinessAsync(factory, client, fixture, expectedImpacts: 2, expectedReviews: 2);
+
+        using var assertScope = factory.Services.CreateScope();
+        var assertDb = assertScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var historical = await assertDb.TestChangeReviews.SingleAsync(x => x.Id == fixture.FirstReviewId);
+        Assert.Equal(TestChangeReviewState.Superseded, historical.State);
+        Assert.Equal(successorReviewId, historical.SupersededByTestChangeRequestId);
+        Assert.Equal(VerificationImpactState.Superseded,
+            (await assertDb.VerificationImpactItems.SingleAsync(x => x.Id == fixture.FirstItemId)).State);
+    }
+
+    private static async Task AssertPendingReadinessAsync(AeroLinkApiFactory factory, HttpClient client,
+        Fixture fixture, int expectedImpacts, int expectedReviews)
+    {
+        Guid campaignId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var baseline = new CandidateBaseline("BL-00000957", 0, fixture.ProjectId, fixture.ReleaseId,
+                null, "Readiness regression", "cm", now);
+            var campaign = new ReleaseCampaign(fixture.ProjectId, fixture.ReleaseId, baseline.Id,
+                "Readiness regression", "program.manager", now);
+            db.AddRange(baseline, campaign);
+            await db.SaveChangesAsync();
+            campaignId = campaign.Id;
+        }
+        using var response = await client.GetAsync($"/api/release-campaigns/{campaignId}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var gates = body.GetProperty("readiness").GetProperty("gates").EnumerateArray().ToList();
+        foreach (var (code, total) in new[] { ("verification_impact", expectedImpacts), ("test_change_reviews", expectedReviews) })
+        {
+            var gate = Assert.Single(gates, x => x.GetProperty("code").GetString() == code);
+            Assert.Equal(total, gate.GetProperty("total").GetInt32());
+            Assert.Equal(0, gate.GetProperty("completed").GetInt32());
+            Assert.False(gate.GetProperty("complete").GetBoolean());
+        }
     }
 
     [Fact]

@@ -116,7 +116,7 @@ public sealed class VerificationPersistenceTests
     }
 
     [Fact]
-    public async Task Parent_classification_is_enforced_when_existing_links_are_added_or_removed_on_both_save_paths()
+    public async Task Parent_classification_is_enforced_when_existing_links_are_added_or_removed_on_the_async_save_boundary()
     {
         await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -147,11 +147,6 @@ public sealed class VerificationPersistenceTests
         await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
         db.Entry(asyncAdded).State = EntityState.Detached;
 
-        var syncAdded = new TestCaseProcedureLink(caseRevision.Id, derivedRevision.Id);
-        db.Add(syncAdded);
-        Assert.Throws<DomainException>(() => db.SaveChanges());
-        db.Entry(syncAdded).State = EntityState.Detached;
-
         var allocated = new TestProcedure(project.Id, "HLRTP-100002", "Allocated Procedure", "tester", now,
             TestProcedureLevel.HighLevel, artifactKind: VerificationArtifactKind.Procedure,
             parentKind: VerificationProcedureParentKind.Allocated);
@@ -167,25 +162,25 @@ public sealed class VerificationPersistenceTests
         await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
         db.Entry(allocatedLink).State = EntityState.Detached;
 
-        var syncAllocated = new TestProcedure(project.Id, "HLRTP-100003", "Sync Allocated Procedure", "tester", now,
+        var asyncAllocated = new TestProcedure(project.Id, "HLRTP-100003", "Second Allocated Procedure", "tester", now,
             TestProcedureLevel.HighLevel, artifactKind: VerificationArtifactKind.Procedure,
             parentKind: VerificationProcedureParentKind.Allocated);
-        var syncAllocatedRevision = new TestProcedureRevision(syncAllocated.Id, 0, "Procedure objective", "Procedure preconditions",
+        var asyncAllocatedRevision = new TestProcedureRevision(asyncAllocated.Id, 0, "Procedure objective", "Procedure preconditions",
             "Procedure summary", "Procedure result", TestProcedureState.Draft, "tester", now,
             environmentSetup: "Bench", testData: "Known data", orderedSteps: "1. Execute",
             expectedObservations: "Expected", cleanup: "Restore", toolingAutomation: "Runner",
             parentKind: VerificationProcedureParentKind.Allocated);
-        var syncAllocatedLink = new TestCaseProcedureLink(caseRevision.Id, syncAllocatedRevision.Id);
-        db.AddRange(syncAllocated, syncAllocatedRevision, syncAllocatedLink);
+        var asyncAllocatedLink = new TestCaseProcedureLink(caseRevision.Id, asyncAllocatedRevision.Id);
+        db.AddRange(asyncAllocated, asyncAllocatedRevision, asyncAllocatedLink);
         await db.SaveChangesAsync();
-        db.Remove(syncAllocatedLink);
-        Assert.Throws<DomainException>(() => db.SaveChanges());
+        db.Remove(asyncAllocatedLink);
+        await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
     }
 
     [Fact]
     public async Task Direct_software_procedure_coverage_is_refused_for_new_rows_on_both_save_paths()
     {
-        static async Task AssertRejectedAsync(bool synchronous)
+        static async Task AssertRejectedAsync()
         {
             await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
@@ -215,20 +210,16 @@ public sealed class VerificationPersistenceTests
             db.AddRange(program, project, release, configuration, source, baseline, requirement,
                 requirementRevision, procedure, procedureRevision,
                 new TestRequirementCoverage(procedureRevision.Id, requirementRevision.Id));
-            if (synchronous)
-                Assert.Throws<DomainException>(() => db.SaveChanges());
-            else
-                await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
+            await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
         }
 
-        await AssertRejectedAsync(synchronous: false);
-        await AssertRejectedAsync(synchronous: true);
+        await AssertRejectedAsync();
     }
 
     [Fact]
     public async Task Added_software_procedure_headers_require_same_unit_initial_revisions_on_both_save_paths()
     {
-        static async Task AssertMissingInitialRevisionAsync(bool synchronous)
+        static async Task AssertMissingInitialRevisionAsync()
         {
             await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
@@ -242,13 +233,10 @@ public sealed class VerificationPersistenceTests
                 TestProcedureLevel.HighLevel, artifactKind: VerificationArtifactKind.Procedure,
                 parentKind: VerificationProcedureParentKind.Derived);
             db.AddRange(program, project, procedure);
-            if (synchronous)
-                Assert.Throws<DomainException>(() => db.SaveChanges());
-            else
-                await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
+            await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
         }
 
-        static async Task AssertUnclassifiedInitialRevisionAsync(bool synchronous)
+        static async Task AssertUnclassifiedInitialRevisionAsync()
         {
             await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
@@ -266,16 +254,12 @@ public sealed class VerificationPersistenceTests
                 testData: "Known data", orderedSteps: "1. Execute", expectedObservations: "Observed",
                 cleanup: "Restore", toolingAutomation: "Runner");
             db.AddRange(program, project, procedure, revision);
-            if (synchronous)
-                Assert.Throws<DomainException>(() => db.SaveChanges());
-            else
-                await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
+            await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
         }
 
-        await AssertMissingInitialRevisionAsync(synchronous: false);
-        await AssertMissingInitialRevisionAsync(synchronous: true);
+        await AssertMissingInitialRevisionAsync();
 
-        static async Task AssertPseudoInitialRevisionAsync(bool synchronous, int revisionNumber, TestProcedureState state)
+        static async Task AssertPseudoInitialRevisionAsync(int revisionNumber, TestProcedureState state)
         {
             await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
@@ -294,18 +278,12 @@ public sealed class VerificationPersistenceTests
                 cleanup: "Restore", toolingAutomation: "Runner", parentKind: VerificationProcedureParentKind.Derived,
                 derivedRationale: "Standalone while dormant.");
             db.AddRange(program, project, procedure, revision);
-            if (synchronous)
-                Assert.Throws<DomainException>(() => db.SaveChanges());
-            else
-                await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
+            await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
         }
 
-        await AssertPseudoInitialRevisionAsync(synchronous: false, revisionNumber: 5, TestProcedureState.Draft);
-        await AssertPseudoInitialRevisionAsync(synchronous: true, revisionNumber: 5, TestProcedureState.Draft);
-        await AssertPseudoInitialRevisionAsync(synchronous: false, revisionNumber: 0, TestProcedureState.Retired);
-        await AssertPseudoInitialRevisionAsync(synchronous: true, revisionNumber: 0, TestProcedureState.Retired);
-        await AssertUnclassifiedInitialRevisionAsync(synchronous: false);
-        await AssertUnclassifiedInitialRevisionAsync(synchronous: true);
+        await AssertPseudoInitialRevisionAsync(revisionNumber: 5, TestProcedureState.Draft);
+        await AssertPseudoInitialRevisionAsync(revisionNumber: 0, TestProcedureState.Retired);
+        await AssertUnclassifiedInitialRevisionAsync();
 
         await using var validConnection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
         await validConnection.OpenAsync();

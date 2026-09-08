@@ -80,6 +80,10 @@ public sealed class IntegrationEventPublisher(AeroLinkDbContext db)
 
 public sealed class WebhookDeliveryWorker(IServiceScopeFactory scopeFactory, IConfiguration configuration, ILogger<WebhookDeliveryWorker> logger) : BackgroundService
 {
+    public static readonly TimeSpan ClaimLease = TimeSpan.FromMinutes(2);
+    public const int BatchSize = 20;
+    private readonly string _worker = $"{Environment.MachineName}/{Environment.ProcessId}";
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Max(1, configuration.GetValue<int?>("Integrations:DeliveryPollSeconds") ?? 3)));
@@ -101,32 +105,122 @@ public sealed class WebhookDeliveryWorker(IServiceScopeFactory scopeFactory, ICo
         var destinationPolicy = scope.ServiceProvider.GetRequiredService<WebhookDestinationPolicy>();
         var allowInsecure = configuration.GetValue<bool>("Integrations:AllowInsecureWebhookTargets");
         var allowPrivate = configuration.GetValue<bool>("Integrations:AllowPrivateWebhookTargets");
-        var now = DateTimeOffset.UtcNow;
-        var candidates = await db.WebhookDeliveries.Where(x => x.State == WebhookDeliveryState.Pending).Take(50).ToListAsync(ct);
-        candidates.AddRange(await db.WebhookDeliveries.Where(x => x.State == WebhookDeliveryState.RetryScheduled).Take(50).ToListAsync(ct));
-        var deliveries = candidates.Where(x=>x.NextAttemptAt<=now).OrderBy(x=>x.NextAttemptAt).Take(20).ToList();
-        foreach (var delivery in deliveries)
+
+        await RecoverExpiredAsync(db, ct);
+        for (var i = 0; i < BatchSize; i++)
         {
-            var integrationEvent = await db.IntegrationEvents.AsNoTracking().SingleAsync(x => x.Id == delivery.IntegrationEventId, ct);
-            var subscription = await db.WebhookSubscriptions.AsNoTracking().SingleAsync(x => x.Id == delivery.SubscriptionId, ct);
-            if (!subscription.IsEnabled) continue;
-            delivery.BeginAttempt(now); await db.SaveChangesAsync(ct);
+            ct.ThrowIfCancellationRequested();
+            var claim = await ClaimNextAsync(db, DateTimeOffset.UtcNow, ct);
+            if (claim is null) return;
+            var (deliveryId, claimToken, integrationEventId, subscriptionId) = claim.Value;
             try
             {
+                db.ChangeTracker.Clear();
+                var integrationEvent = await db.IntegrationEvents.AsNoTracking().SingleAsync(x => x.Id == integrationEventId, ct);
+                var subscription = await db.WebhookSubscriptions.AsNoTracking().SingleAsync(x => x.Id == subscriptionId, ct);
+                if (!subscription.IsEnabled)
+                {
+                    await ReleaseClaimAsync(db, deliveryId, claimToken, DateTimeOffset.UtcNow, "Subscription disabled before send.", ct);
+                    continue;
+                }
+
                 var approved = await destinationPolicy.ValidateAsync(new Uri(subscription.EndpointUrl), allowInsecure, allowPrivate, ct);
                 var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
                 var envelope = JsonSerializer.Serialize(new { id = integrationEvent.Id, type = integrationEvent.EventType, occurredAt = integrationEvent.OccurredAt, projectId = integrationEvent.ProjectId, aggregate = new { type = integrationEvent.AggregateType, id = integrationEvent.AggregateId }, data = JsonDocument.Parse(integrationEvent.PayloadJson).RootElement });
                 var secret = security.UnprotectWebhookSecret(subscription.ProtectedSecret);
                 var signature = Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes($"{timestamp}.{envelope}"))).ToLowerInvariant();
                 using var request = new HttpRequestMessage(HttpMethod.Post, subscription.EndpointUrl) { Content = new StringContent(envelope, Encoding.UTF8, "application/json") };
-                request.Headers.Add("X-AeroLink-Event", integrationEvent.EventType); request.Headers.Add("X-AeroLink-Delivery", delivery.Id.ToString()); request.Headers.Add("X-AeroLink-Timestamp", timestamp); request.Headers.Add("X-AeroLink-Signature", $"v1={signature}");
+                request.Headers.Add("X-AeroLink-Event", integrationEvent.EventType); request.Headers.Add("X-AeroLink-Delivery", deliveryId.ToString()); request.Headers.Add("X-AeroLink-Timestamp", timestamp); request.Headers.Add("X-AeroLink-Signature", $"v1={signature}");
                 request.Options.Set(WebhookConnectionTransport.ApprovedAddressesOption, approved.Addresses);
                 using var response = await clientFactory.CreateClient("AeroLinkWebhooks").SendAsync(request, ct);
-                if ((int)response.StatusCode is >= 200 and < 300) delivery.Complete((int)response.StatusCode, DateTimeOffset.UtcNow);
-                else delivery.Fail((int)response.StatusCode, $"Endpoint returned HTTP {(int)response.StatusCode}.", 5, DateTimeOffset.UtcNow);
+                var now = DateTimeOffset.UtcNow;
+                if ((int)response.StatusCode is >= 200 and < 300)
+                    await CompleteClaimAsync(db, deliveryId, claimToken, (int)response.StatusCode, now, ct);
+                else
+                    await FailClaimAsync(db, deliveryId, claimToken, (int)response.StatusCode, $"Endpoint returned HTTP {(int)response.StatusCode}.", now, ct);
             }
-            catch (Exception ex) { delivery.Fail(null, ex.Message, 5, DateTimeOffset.UtcNow); }
-            await db.SaveChangesAsync(ct);
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                await ReleaseClaimAsync(db, deliveryId, claimToken, DateTimeOffset.UtcNow, "Worker shut down before finishing; returned to the queue.", CancellationToken.None);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                await FailClaimAsync(db, deliveryId, claimToken, null, ex.Message, DateTimeOffset.UtcNow, ct);
+            }
         }
+    }
+
+    private async Task RecoverExpiredAsync(AeroLinkDbContext db, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var expiredQuery = db.Database.IsSqlite()
+            ? db.WebhookDeliveries.FromSqlInterpolated($"SELECT * FROM webhook_deliveries WHERE State = 'Delivering' AND ClaimExpiresAt IS NOT NULL AND julianday(ClaimExpiresAt) <= julianday({now}) ORDER BY julianday(ClaimExpiresAt), Id LIMIT {BatchSize}")
+            : db.WebhookDeliveries.Where(x => x.State == WebhookDeliveryState.Delivering && x.ClaimExpiresAt != null && x.ClaimExpiresAt <= now).OrderBy(x => x.ClaimExpiresAt).ThenBy(x => x.Id).Take(BatchSize);
+        var ids = await expiredQuery.AsNoTracking().Select(x => x.Id).ToListAsync(ct);
+        foreach (var id in ids)
+        {
+            db.ChangeTracker.Clear();
+            var delivery = await db.WebhookDeliveries.SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (delivery is null || !delivery.ClaimExpired(now)) continue;
+            var previousWorker = delivery.ClaimedBy;
+            try
+            {
+                delivery.RecoverExpired(now);
+                await db.SaveChangesAsync(ct);
+                logger.LogWarning("Recovered expired webhook delivery {DeliveryId} from {Worker}.", id, previousWorker);
+            }
+            catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); }
+        }
+    }
+
+    private async Task<(Guid DeliveryId, Guid ClaimToken, Guid IntegrationEventId, Guid SubscriptionId)?> ClaimNextAsync(AeroLinkDbContext db, DateTimeOffset now, CancellationToken ct)
+    {
+        var dueQuery = db.Database.IsSqlite()
+            ? db.WebhookDeliveries.FromSqlInterpolated($"SELECT d.* FROM webhook_deliveries AS d INNER JOIN webhook_subscriptions AS s ON s.Id = d.SubscriptionId WHERE d.State IN ('Pending', 'RetryScheduled') AND julianday(d.NextAttemptAt) <= julianday({now}) AND s.IsEnabled = 1 ORDER BY julianday(d.NextAttemptAt), d.Id LIMIT {BatchSize}")
+            : db.WebhookDeliveries.Where(x => (x.State == WebhookDeliveryState.Pending || x.State == WebhookDeliveryState.RetryScheduled) && x.NextAttemptAt <= now).Where(x => db.WebhookSubscriptions.Any(s => s.Id == x.SubscriptionId && s.IsEnabled)).OrderBy(x => x.NextAttemptAt).ThenBy(x => x.Id).Take(BatchSize);
+        var candidates = await dueQuery.AsNoTracking().Select(x => new { x.Id, x.IntegrationEventId, x.SubscriptionId }).ToListAsync(ct);
+        foreach (var candidate in candidates)
+        {
+            db.ChangeTracker.Clear();
+            var delivery = await db.WebhookDeliveries.SingleOrDefaultAsync(x => x.Id == candidate.Id, ct);
+            if (delivery is null || delivery.State is not (WebhookDeliveryState.Pending or WebhookDeliveryState.RetryScheduled) || delivery.NextAttemptAt > now)
+                continue;
+            var enabled = await db.WebhookSubscriptions.AsNoTracking().AnyAsync(x => x.Id == delivery.SubscriptionId && x.IsEnabled, ct);
+            if (!enabled) continue;
+            var claimToken = Guid.NewGuid();
+            try
+            {
+                delivery.BeginAttempt(_worker, claimToken, now, ClaimLease);
+                await db.SaveChangesAsync(ct);
+                return (delivery.Id, claimToken, delivery.IntegrationEventId, delivery.SubscriptionId);
+            }
+            catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); }
+        }
+        return null;
+    }
+
+    private static async Task CompleteClaimAsync(AeroLinkDbContext db, Guid id, Guid claimToken, int statusCode, DateTimeOffset now, CancellationToken ct)
+    {
+        db.ChangeTracker.Clear();
+        var delivery = await db.WebhookDeliveries.SingleOrDefaultAsync(x => x.Id == id, ct);
+        if (delivery is null || !delivery.Complete(claimToken, statusCode, now)) return;
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task FailClaimAsync(AeroLinkDbContext db, Guid id, Guid claimToken, int? statusCode, string error, DateTimeOffset now, CancellationToken ct)
+    {
+        db.ChangeTracker.Clear();
+        var delivery = await db.WebhookDeliveries.SingleOrDefaultAsync(x => x.Id == id, ct);
+        if (delivery is null || !delivery.Fail(claimToken, statusCode, error, now)) return;
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task ReleaseClaimAsync(AeroLinkDbContext db, Guid id, Guid claimToken, DateTimeOffset now, string reason, CancellationToken ct)
+    {
+        db.ChangeTracker.Clear();
+        var delivery = await db.WebhookDeliveries.SingleOrDefaultAsync(x => x.Id == id, ct);
+        if (delivery is null || !delivery.ReleaseForShutdown(claimToken, now, reason)) return;
+        await db.SaveChangesAsync(ct);
     }
 }

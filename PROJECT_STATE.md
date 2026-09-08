@@ -155,6 +155,8 @@ AeroLink supports governed System/HLR/LLR change requests and Test Change Reques
 
 The Digital Thread accepts a stable Change Request identity and presents the server-composed exact Change Request/provenance projection as a visual, layered node-and-edge map or equivalent accessible table for the same active investigation. Network, Inside and Artifact representations retain their own authoritative projection/context, exact identities, typed direct relationships and hop-qualified indirect context; changing representation does not change the subject. The CR inspector exposes the selected record's direct upstream/downstream relationships and labels additional connected records as hop-qualified context, and it can open the exact selected CR thread. Exact routeable identifiers use native links; unavailable targets remain explicitly non-openable. The existing baseline-exact requirement → verification → result/evidence → build path remains an explicitly named Baseline evidence report with server paging, exact revision/artifact links and relationship lifecycle controls where authorized; its PDF/DOCX exports are baseline-scoped. Proposed Introduce/Modify/Retire content remains visibly separate from materialized, effective-baseline, and evidence truth.
 
+Digital Thread reads select a bounded typed frontier or exact build membership before loading evidence. A derived, indexed frozen-review lookup preserves reverse historical reachability without scanning unrelated snapshot payloads; original snapshots and hashes remain authoritative. Oversized rooted traces fail explicitly, while build-network cuts retain the existing truncation signal. See [the read contract](product/docs/DIGITAL_THREAD_READS.md).
+
 For a non-root requirement change request, the controlled Draft also records either exact upstream change-request
 revision link(s) or an attributable no-upstream rationale before review. Same-build direct-parent linkage from the
 effective Project ladder is the normal path; an explicitly requested earlier-build link must target an exact signed
@@ -273,6 +275,16 @@ See [Security and Identity Model](docs/product-definition/SECURITY_AND_IDENTITY_
 ## Interchange and integrations
 
 AeroLink includes governed import/export/interchange foundations such as CSV/XLSX onboarding, ReqIF-related workflows, versioned API behavior, service identities, webhooks/integration foundations, and external-system linking. Interchange must preserve provenance and must not bypass controlled change/review merely because data arrived from another tool.
+
+The persistence write path is intentionally asynchronous and phase-ordered. `AeroLinkDbContext` retains the
+model and final EF write while state repair, complete integrity validation, and lifecycle/outbox preparation are
+cohesive internal save phases. The authoritative ordering, provider-read and transaction boundary, failure/tracked-
+state condition, retry contract, and bounded child-state lookup rule live in
+[product/docs/SAVE_BOUNDARY.md](product/docs/SAVE_BOUNDARY.md).
+
+Routine change-request reads choose an explicit child-graph load contract so detail and command paths do not
+materialize every controlled history collection; the provider-specific split-query and snapshot rules are
+authoritatively documented in [product/docs/CHANGE_REQUEST_LOADS.md](product/docs/CHANGE_REQUEST_LOADS.md).
 
 ## Operations and recovery
 

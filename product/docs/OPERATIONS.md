@@ -496,6 +496,20 @@ Relevant production settings are:
 
 Webhook requests include `X-AeroLink-Event`, `X-AeroLink-Delivery`, `X-AeroLink-Timestamp`, and `X-AeroLink-Signature`. Consumers must reject stale timestamps and verify the `v1=<hex>` HMAC-SHA256 over `<timestamp>.<raw request body>` before parsing the payload. Multi-instance deployments must use a shared, protected ASP.NET Core Data Protection key ring so encrypted webhook secrets and browser mutation tokens remain valid across instances.
 
+Webhook dispatch is at-least-once. Each attempt has a durable claim token and a two-minute lease; a worker crash,
+shutdown, or uncertain response returns the delivery to the retry path while preserving the
+stable `X-AeroLink-Delivery` and event IDs. A receiver may therefore see the same delivery more than once and must
+deduplicate on that delivery ID. A shutdown or disabled-before-send release records a cancelled physical attempt but
+does not consume the five failed-receiver-attempt budget. Disabled subscriptions retain their pending backlog and do not consume the active
+dispatch batch; enabling the subscription makes that backlog eligible again. Integration health reports expired claims
+as an attention condition, and the Integration Center places expired activity ahead of the recent activity list so an
+operator can inspect and replay it safely. Replaying an expired claim closes its prior attempt history before starting
+the same durable delivery again. Before upgrading to this claim protocol, stop or drain old dispatcher processes;
+old binaries do not understand claim tokens and must not run concurrently with the new dispatcher during the upgrade.
+The additive upgrade records pre-claim `Delivering` rows as an explicit `LegacyRecovered` history outcome with
+unknown owner/token/start time, while preserving their attempt count, response status, and prior error text. Rows at
+the five-attempt limit become dead-lettered during that repair.
+
 ### Webhook egress and redirect policy
 
 - Webhook endpoints must use HTTPS. `Integrations__AllowInsecureWebhookTargets=true` may permit plain HTTP only in isolated development. No other URI scheme is accepted, with or without the development overrides.

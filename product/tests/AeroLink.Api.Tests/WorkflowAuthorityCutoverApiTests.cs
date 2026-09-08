@@ -246,22 +246,23 @@ public sealed class WorkflowAuthorityCutoverApiTests : IClassFixture<SharedApiHo
         var gateDb = gateScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var specification = (await gateDb.ReviewWorkflows.AsNoTracking().Include(x => x.Stages)
             .SingleAsync(x => x.Id == workflowId)).Specification();
+        var authority = new WorkflowAuthorityService(gateDb);
 
         // The leadership primary and the standing backup answer the leadership stage; the base-only System
         // Engineer does not — the exact set the candidate picker offered.
-        Assert.Equal(ProgramRole.SystemEngineeringLead, await WorkflowEndpoints.StageAuthorityAsync(
-            gateDb, seeded.ProjectId, seeded.LeadId, specification.Stages[0], default));
-        Assert.Equal(ProgramRole.SystemEngineeringLead, await WorkflowEndpoints.StageAuthorityAsync(
-            gateDb, seeded.ProjectId, seeded.BackupId, specification.Stages[0], default));
-        Assert.Null(await WorkflowEndpoints.StageAuthorityAsync(
-            gateDb, seeded.ProjectId, seeded.BaseOnlyId, specification.Stages[0], default));
+        Assert.Equal(ProgramRole.SystemEngineeringLead, await authority.StageAuthorityAsync(
+            seeded.ProjectId, seeded.LeadId, specification.Stages[0], default));
+        Assert.Equal(ProgramRole.SystemEngineeringLead, await authority.StageAuthorityAsync(
+            seeded.ProjectId, seeded.BackupId, specification.Stages[0], default));
+        Assert.Null(await authority.StageAuthorityAsync(
+            seeded.ProjectId, seeded.BaseOnlyId, specification.Stages[0], default));
 
         // The base-role stage answers the job, and elevation alone does not answer it for somebody who
         // never held the job.
-        Assert.Equal(ProgramRole.ProjectEngineer, await WorkflowEndpoints.StageAuthorityAsync(
-            gateDb, seeded.ProjectId, seeded.BaseOnlyId, specification.Stages[1], default));
-        Assert.Null(await WorkflowEndpoints.StageAuthorityAsync(
-            gateDb, seeded.ProjectId, seeded.LeadId, specification.Stages[1], default));
+        Assert.Equal(ProgramRole.ProjectEngineer, await authority.StageAuthorityAsync(
+            seeded.ProjectId, seeded.BaseOnlyId, specification.Stages[1], default));
+        Assert.Null(await authority.StageAuthorityAsync(
+            seeded.ProjectId, seeded.LeadId, specification.Stages[1], default));
     }
 
     [Fact]

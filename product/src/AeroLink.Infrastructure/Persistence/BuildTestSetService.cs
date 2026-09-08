@@ -1,6 +1,8 @@
 using AeroLink.Domain.Verification;
 using AeroLink.Domain.Hierarchy;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace AeroLink.Infrastructure.Persistence;
 
@@ -25,8 +27,9 @@ public sealed class BuildTestSetService(AeroLinkDbContext db, ILadderPolicy? pol
     /// Returns the build's sets, creating and seeding any that do not exist yet.
     ///
     /// Safe to call repeatedly and from more than one request: a set that another caller created in the
-    /// meantime loses the unique index race, and the loser re-reads rather than failing, because two people
-    /// opening the same build at once is ordinary and neither should see an error for it.
+    /// meantime loses the exact ReleaseId/Discipline unique index race, and the loser re-reads only after
+    /// proving that the winner persisted every configured discipline. Other persistence failures remain
+    /// failures; a readiness read must not turn an incomplete write into an apparent success.
     /// </summary>
     public async Task<IReadOnlyList<BuildTestSet>> EnsureForReleaseAsync(Guid projectId, Guid releaseId, CancellationToken ct = default)
     {
@@ -47,6 +50,7 @@ public sealed class BuildTestSetService(AeroLinkDbContext db, ILadderPolicy? pol
         var now = DateTimeOffset.UtcNow;
         var carried = (await CarriedForwardAsync(releaseId, ct))
             .Where(x => configuredDisciplines.Contains(x.Discipline)).ToList();
+        var candidates = new List<BuildTestSet>(missing.Count);
         foreach (var discipline in missing)
         {
             var set = new BuildTestSet(projectId, releaseId, discipline, now);
@@ -54,16 +58,72 @@ public sealed class BuildTestSetService(AeroLinkDbContext db, ILadderPolicy? pol
                 set.Include(entry.DecidedBy, entry.ProcedureRevisionId, TestSelectionReason.ChangedRequirement,
                     $"Carried forward from {entry.SubjectDisplayNumber}, which required evidence before release.", now);
             db.BuildTestSets.Add(set);
+            candidates.Add(set);
         }
 
         try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateException)
+        catch (OperationCanceledException)
         {
-            // Another request created them between the read and the write. Theirs is as good as ours.
-            db.ChangeTracker.Clear();
+            // Do not leave our candidate graph armed for an accidental later save. The caller's unrelated
+            // tracked changes remain intact, and cancellation remains cancellation.
+            DetachCandidateGraph(candidates);
+            throw;
         }
-        return await db.BuildTestSets.Include(x => x.Entries)
-            .Where(x => x.ReleaseId == releaseId && configuredDisciplines.Contains(x.Discipline)).ToListAsync(ct);
+        catch (DbUpdateException ex)
+        {
+            // EF leaves failed Added graphs tracked. Detach only the graph this initializer owns; clearing the
+            // whole unit of work would discard an unrelated mutation made by the caller in the same request.
+            DetachCandidateGraph(candidates);
+            if (!IsExpectedSetUniquenessViolation(ex)) throw;
+
+            // A matching constraint error is only a concurrency loser if the database now contains every
+            // configured set. A fault injector, partial writer, or invalid reference can otherwise produce
+            // the same broad EF exception shape; preserve the original diagnostic in those cases.
+            var winner = await ReadConfiguredSetsAsync(releaseId, configuredDisciplines, ct);
+            if (winner.Select(x => x.Discipline).ToHashSet().SetEquals(configuredDisciplines))
+                return winner;
+            throw;
+        }
+        return await ReadConfiguredSetsAsync(releaseId, configuredDisciplines, ct);
+    }
+
+    private async Task<IReadOnlyList<BuildTestSet>> ReadConfiguredSetsAsync(Guid releaseId,
+        IReadOnlySet<TestChangeReviewDiscipline> configuredDisciplines, CancellationToken ct) =>
+        await db.BuildTestSets.Include(x => x.Entries)
+            .Where(x => x.ReleaseId == releaseId && configuredDisciplines.Contains(x.Discipline))
+            .ToListAsync(ct);
+
+    private void DetachCandidateGraph(IEnumerable<BuildTestSet> candidates)
+    {
+        var owned = candidates.SelectMany(set => set.Entries.Cast<object>().Append(set)).ToHashSet();
+        foreach (var entry in db.ChangeTracker.Entries()
+                     .Where(entry => owned.Contains(entry.Entity)).ToList())
+            entry.State = EntityState.Detached;
+    }
+
+    /// <summary>
+    /// The only recoverable write conflict is the named one-set-per-release/discipline unique index. Provider
+    /// error codes alone are too broad: PostgreSQL 23505 and SQLite 19 also cover unrelated uniqueness rules.
+    /// </summary>
+    private static bool IsExpectedSetUniquenessViolation(DbUpdateException exception)
+    {
+        for (var inner = exception.InnerException; inner is not null; inner = inner.InnerException)
+        {
+            if (inner is PostgresException { SqlState: "23505" } postgres
+                && string.Equals(postgres.ConstraintName,
+                    "IX_build_test_sets_ReleaseId_Discipline", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (inner is SqliteException { SqliteErrorCode: 19, SqliteExtendedErrorCode: 2067 } sqlite)
+            {
+                var message = sqlite.Message ?? string.Empty;
+                if (message.Contains("IX_build_test_sets_ReleaseId_Discipline", StringComparison.OrdinalIgnoreCase)
+                    || (message.Contains("build_test_sets.ReleaseId", StringComparison.OrdinalIgnoreCase)
+                        && message.Contains("build_test_sets.Discipline", StringComparison.OrdinalIgnoreCase)))
+                    return true;
+            }
+        }
+        return false;
     }
 
     private sealed record CarriedEntry(TestChangeReviewDiscipline Discipline, Guid ProcedureRevisionId,

@@ -102,10 +102,12 @@ public sealed class AeroLinkMaintenanceQualificationTests
             {
                 await new ProjectLeadershipMigrationAuthority(upgrade).EnsureCompletedAsync();
                 await new ProjectLeadershipReconciliationAuthority(upgrade).EnsureCompletedAsync();
+                await new FrozenReviewTraceAdjacencyMigrationAuthority(upgrade).EnsureCompletedAsync();
             }
             // The remaining authorities need a renderer and an evidence store to RUN; the analyzer only reads
             // the completion markers they write, so a database on which they already ran is modelled by those
-            // markers. That is exactly the read the analyzer performs against a real installation.
+            // markers. The frozen-review adjacency authority is intentionally exercised above because it has
+            // no external renderer or evidence-store dependency.
             await MarkCompletedAsync(connection,
                 SoftwareVerificationCaseMigrationAuthority.MigrationMarker,
                 TestChangeRequestPrefixMigrationAuthority.MigrationMarker,
@@ -155,6 +157,7 @@ public sealed class AeroLinkMaintenanceQualificationTests
             {
                 await new ProjectLeadershipMigrationAuthority(upgrade).EnsureCompletedAsync();
                 await new ProjectLeadershipReconciliationAuthority(upgrade).EnsureCompletedAsync();
+                await new FrozenReviewTraceAdjacencyMigrationAuthority(upgrade).EnsureCompletedAsync();
             }
             await MarkCompletedAsync(connection,
                 SoftwareVerificationCaseMigrationAuthority.MigrationMarker,
@@ -860,12 +863,12 @@ public sealed class AeroLinkMaintenanceQualificationTests
     }
 
     /// <summary>
-    /// The analyzer's authority list and the startup sequence in Program.cs must name the same authorities.
+    /// The analyzer's authority list and both supported startup sequences must name the same authorities.
     ///
-    /// They are two lists in two files, and the failure mode when they drift is silent under-reporting: an
+    /// The failure mode when these lists drift is silent under-reporting: an
     /// authority that startup runs but the analyzer does not know about is a pending upgrade the operator is
     /// never told is pending, and a conflict they meet as a stack trace instead. Source-derived rather than
-    /// hand-maintained, so adding one in Program.cs fails here rather than shipping.
+    /// hand-maintained, so adding one in either Program.cs or MaintenanceHost.cs fails here rather than shipping.
     /// </summary>
     [Fact]
     public void The_analyzer_knows_every_semantic_authority_startup_runs()
@@ -880,15 +883,20 @@ public sealed class AeroLinkMaintenanceQualificationTests
         }
         Assert.True(programPath is not null, "Program.cs was not found above the test assembly.");
 
-        var program = File.ReadAllText(programPath!);
-        // Every authority resolved in the startup scope, by the exact type name Program.cs asks for.
-        var startupAuthorities = System.Text.RegularExpressions.Regex
-            .Matches(program, @"GetRequiredService<(\w+(?:Migration|Reconciliation|Cutover)Authority)>")
-            .Select(x => x.Groups[1].Value)
-            .Distinct()
-            .OrderBy(x => x)
+        var maintenanceHostPath = Path.Combine(Path.GetDirectoryName(programPath!)!, "MaintenanceHost.cs");
+        Assert.True(File.Exists(maintenanceHostPath), "MaintenanceHost.cs was not found beside Program.cs.");
+
+        // Every authority resolved in each supported startup path, by the exact type name the source asks for.
+        var startupAuthoritiesBySource = new[] { programPath!, maintenanceHostPath }
+            .Select(path => System.Text.RegularExpressions.Regex
+                .Matches(File.ReadAllText(path), @"GetRequiredService<(\w+(?:Migration|Reconciliation|Cutover)Authority)>")
+                .Select(x => x.Groups[1].Value)
+                .Distinct()
+                .OrderBy(x => x)
+                .ToList())
             .ToList();
-        Assert.NotEmpty(startupAuthorities);
+        Assert.All(startupAuthoritiesBySource, authorities => Assert.NotEmpty(authorities));
+        Assert.Equal(startupAuthoritiesBySource[0], startupAuthoritiesBySource[1]);
 
         var analyzerAuthorities = AeroLinkUpgradeAnalyzer.SemanticAuthorities
             .Select(x => x.Marker switch
@@ -898,12 +906,13 @@ public sealed class AeroLinkMaintenanceQualificationTests
                 var m when m == ProjectLeadershipReconciliationAuthority.MigrationMarker => nameof(ProjectLeadershipReconciliationAuthority),
                 var m when m == TestChangeRequestPrefixMigrationAuthority.MigrationMarker => nameof(TestChangeRequestPrefixMigrationAuthority),
                 var m when m == SoftwareProcedureExecutionCutoverAuthority.MigrationMarker => nameof(SoftwareProcedureExecutionCutoverAuthority),
+                var m when m == FrozenReviewTraceAdjacencyMigrationAuthority.Marker => nameof(FrozenReviewTraceAdjacencyMigrationAuthority),
                 _ => x.Marker,
             })
             .OrderBy(x => x)
             .ToList();
 
-        Assert.Equal(startupAuthorities, analyzerAuthorities);
+        Assert.Equal(startupAuthoritiesBySource[0], analyzerAuthorities);
     }
 
     /// <summary>
