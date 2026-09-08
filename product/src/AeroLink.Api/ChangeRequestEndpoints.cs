@@ -1004,7 +1004,7 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/change-requests/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, IProjectLadderPolicyResolver policyResolver, ProjectVerificationVocabularyService verificationVocabulary, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/submit", async (Guid id, SubmitReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, ILadderPolicy ladderPolicy, IProjectLadderPolicyResolver policyResolver, ProjectVerificationVocabularyService verificationVocabulary, WorkflowAuthorityService workflowAuthority, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This change request changed after it was opened. Refresh it before submitting.", code = "stale_version" });
@@ -1040,7 +1040,7 @@ public static class ChangeRequestEndpoints
                 var known = await db.UserAccounts.AsNoTracking().Where(x => request.Approvers.Select(a => a.UserId.ToLower()).Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
                 if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every approver must be an active AeroLink user." });
                 var directory = known.ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
-                var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, scr.ProjectId, scr.Type, ct, ladderPolicy);
+                var workflow = await workflowAuthority.ActiveSpecificationAsync(scr.ProjectId, scr.Type, ct, ladderPolicy);
                 var programId = await db.Projects.AsNoTracking().Where(x => x.Id == scr.ProjectId)
                     .Select(x => x.ProgramId).SingleAsync(ct);
                 if (workflow is not null && request.Approvers.Count < workflow.Stages.Count)
@@ -1073,14 +1073,14 @@ public static class ChangeRequestEndpoints
                             {
                                 error = $"{account.DisplayName} does not hold Approver authority. With no review workflow configured, the reviewer must be an Approver."
                             });
-                        var resolved = await WorkflowEndpoints.StageAuthorityWithDecisionAsync(db, scr.ProjectId,
+                        var resolved = await workflowAuthority.StageAuthorityWithDecisionAsync(scr.ProjectId,
                             account.Id, ProgramRole.Approver, ct);
                         role = resolved.Role;
                         authorityDecision = resolved.Decision;
                     }
                     else if (index < workflow.Stages.Count)
                     {
-                        var resolved = await WorkflowEndpoints.StageAuthorityWithDecisionAsync(db, scr.ProjectId,
+                        var resolved = await workflowAuthority.StageAuthorityWithDecisionAsync(scr.ProjectId,
                             account.Id, workflow.Stages[index], ct);
                         role = resolved.Role;
                         authorityDecision = resolved.Decision;
@@ -1090,7 +1090,7 @@ public static class ChangeRequestEndpoints
                         // be active participants in this Program. A role is resolved from the server roster;
                         // the client cannot turn an unrelated account into an extra reviewer.
                     {
-                        var resolved = (await WorkflowEndpoints.AuthoritiesWithDecisionsAsync(db, scr.ProjectId,
+                        var resolved = (await workflowAuthority.AuthoritiesWithDecisionsAsync(scr.ProjectId,
                             [account.Id], ct)).GetValueOrDefault(account.Id);
                         role = resolved.Role;
                         authorityDecision = resolved.Decision;
@@ -1126,11 +1126,7 @@ public static class ChangeRequestEndpoints
         // Recovering from a misrouted review. Without this the only way out of a review sent to the wrong approver
         // was for that approver to act, which is exactly what cannot happen when they are the wrong person, on leave,
         // or no longer with the organization. The domain has always supported it; nothing exposed it.
-
-        // Recovering from a misrouted review. Without this the only way out of a review sent to the wrong approver
-        // was for that approver to act, which is exactly what cannot happen when they are the wrong person, on leave,
-        // or no longer with the organization. The domain has always supported it; nothing exposed it.
-        app.MapPost("/api/change-requests/{id:guid}/restart-review", async (Guid id, RestartReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/restart-review", async (Guid id, RestartReviewRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, WorkflowAuthorityService workflowAuthority, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "This change request changed after it was opened. Refresh it before restarting the review.", code = "stale_version" });
@@ -1146,7 +1142,7 @@ public static class ChangeRequestEndpoints
                 // A correction within an already active cycle is still governed by that cycle's frozen
                 // workflow. A Draft returned/cancelled and normally submitted above resolves the latest
                 // active version, but restart must not reinterpret the review that already began.
-                var workflow = await WorkflowEndpoints.HistoricalSpecificationAsync(db, scr.ProjectId,
+                var workflow = await workflowAuthority.HistoricalSpecificationAsync(scr.ProjectId,
                     scr.ActiveReviewCycle?.WorkflowId, ct);
                 var programId = await db.Projects.AsNoTracking().Where(x => x.Id == scr.ProjectId)
                     .Select(x => x.ProgramId).SingleAsync(ct);
@@ -1171,21 +1167,21 @@ public static class ChangeRequestEndpoints
                             {
                                 error = $"{account.DisplayName} does not hold Approver authority. With no review workflow configured, the reviewer must be an Approver."
                             });
-                        var resolved = await WorkflowEndpoints.StageAuthorityWithDecisionAsync(db, scr.ProjectId,
+                        var resolved = await workflowAuthority.StageAuthorityWithDecisionAsync(scr.ProjectId,
                             account.Id, ProgramRole.Approver, ct);
                         role = resolved.Role;
                         authorityDecision = resolved.Decision;
                     }
                     else if (index < workflow.Stages.Count)
                     {
-                        var resolved = await WorkflowEndpoints.StageAuthorityWithDecisionAsync(db, scr.ProjectId,
+                        var resolved = await workflowAuthority.StageAuthorityWithDecisionAsync(scr.ProjectId,
                             account.Id, workflow.Stages[index], ct);
                         role = resolved.Role;
                         authorityDecision = resolved.Decision;
                     }
                     else
                     {
-                        var resolved = (await WorkflowEndpoints.AuthoritiesWithDecisionsAsync(db, scr.ProjectId,
+                        var resolved = (await workflowAuthority.AuthoritiesWithDecisionsAsync(scr.ProjectId,
                             [account.Id], ct)).GetValueOrDefault(account.Id);
                         role = resolved.Role;
                         authorityDecision = resolved.Decision;

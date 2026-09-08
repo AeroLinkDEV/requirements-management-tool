@@ -488,8 +488,9 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
 
         using var signingScope = _host.Factory.Services.CreateScope();
         var signingDb = signingScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-        Assert.Equal(ProgramRole.Airworthiness, await WorkflowEndpoints.StageAuthorityAsync(
-            signingDb, seeded.ProjectId, delegateId, ProgramRole.Airworthiness, default));
+        var authority = new WorkflowAuthorityService(signingDb);
+        Assert.Equal(ProgramRole.Airworthiness, await authority.StageAuthorityAsync(
+            seeded.ProjectId, delegateId, ProgramRole.Airworthiness, default));
     }
 
     [Fact]
@@ -533,8 +534,9 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
 
         using var signingScope = _host.Factory.Services.CreateScope();
         var signingDb = signingScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-        Assert.Equal(ProgramRole.Administrator, await WorkflowEndpoints.StageAuthorityAsync(
-            signingDb, seeded.ProjectId, administratorId, ProgramRole.Airworthiness, default));
+        var authority = new WorkflowAuthorityService(signingDb);
+        Assert.Equal(ProgramRole.Administrator, await authority.StageAuthorityAsync(
+            seeded.ProjectId, administratorId, ProgramRole.Airworthiness, default));
     }
 
     private sealed record ConfigurationResponse(Guid ProjectId, bool CanManage, ArtifactRow[] Artifacts);
