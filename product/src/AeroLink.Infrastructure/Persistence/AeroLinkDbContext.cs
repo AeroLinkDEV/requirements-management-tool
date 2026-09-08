@@ -338,10 +338,15 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         // procedure documents, and bulk metadata remain scaffolding and are deliberately absent below.
         ChangeTracker.DetectChanges();
         var candidates = new List<(Guid ProjectId, string Kind, string Identity, string Actor)>();
+        // Candidate collection reads the already-detected graph without mutating it.
+        // DbSet.Local otherwise triggers another whole-graph DetectChanges for every
+        // proposed requirement/revision in a bulk import or fresh showcase seed.
+        var localRequests = SystemChangeRequests.Local.ToDictionary(x => x.Id);
+        var localRequirements = Requirements.Local.ToDictionary(x => x.Id);
 
         foreach (var entry in ChangeTracker.Entries<RequirementChange>().Where(x => x.State == EntityState.Added))
         {
-            var request = SystemChangeRequests.Local.SingleOrDefault(x => x.Id == entry.Entity.ChangeRequestId);
+            var request = localRequests.GetValueOrDefault(entry.Entity.ChangeRequestId);
             var projectId = request?.ProjectId ?? await SystemChangeRequests.AsNoTracking()
                 .Where(x => x.Id == entry.Entity.ChangeRequestId).Select(x => x.ProjectId).SingleOrDefaultAsync(ct);
             if (projectId == Guid.Empty) continue;
@@ -364,7 +369,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 LadderSealActor ?? "system.persistence"));
         foreach (var entry in ChangeTracker.Entries<RequirementRevision>().Where(x => x.State == EntityState.Added))
         {
-            var artifact = Requirements.Local.SingleOrDefault(x => x.Id == entry.Entity.ArtifactId);
+            var artifact = localRequirements.GetValueOrDefault(entry.Entity.ArtifactId);
             var baseNumber = artifact?.BaseNumber ?? await Requirements.AsNoTracking()
                 .Where(x => x.Id == entry.Entity.ArtifactId).Select(x => x.BaseNumber).SingleOrDefaultAsync(ct);
             var projectId = artifact?.ProjectId ?? await Requirements.AsNoTracking()
@@ -391,9 +396,15 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
 
         if (candidates.Count == 0) return;
         var authority = new ProjectLadderSealAuthority(this);
+        var sealedProjects = new HashSet<Guid>();
         foreach (var candidate in candidates.OrderBy(x => x.ProjectId).ThenBy(x => x.Kind, StringComparer.Ordinal)
                      .ThenBy(x => x.Identity, StringComparer.Ordinal))
         {
+            // Every candidate still needs a registered kind, stable identity and actor.
+            // The first candidate in the original deterministic order owns the seal;
+            // later candidates for that same project cannot create another seal/history.
+            ProjectLadderSealAuthority.ValidateContentReference(candidate.Kind, candidate.Identity, candidate.Actor);
+            if (!sealedProjects.Add(candidate.ProjectId)) continue;
             var result = await authority.SealAsync(candidate.ProjectId, candidate.Kind, candidate.Identity,
                 candidate.Actor, DateTimeOffset.UtcNow, ct);
             if (result.Kind == ProjectLadderSealResultKind.NotFound)

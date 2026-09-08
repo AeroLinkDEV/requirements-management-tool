@@ -237,7 +237,23 @@ public static class RequirementsEndpoints
             var revisions=await db.RequirementRevisions.AsNoTracking().Where(x=>x.ArtifactId==artifactId&&(x.Id==fromRevisionId||x.Id==toRevisionId)).ToListAsync(ct);if(revisions.Count!=2)return Results.BadRequest(new{error="Select two revisions of the same requirement."});var from=revisions.Single(x=>x.Id==fromRevisionId);var to=revisions.Single(x=>x.Id==toRevisionId);
             var profiles=await db.RequirementRevisionProfiles.AsNoTracking().Where(x=>x.RevisionId==fromRevisionId||x.RevisionId==toRevisionId).ToListAsync(ct);var fromProfile=profiles.SingleOrDefault(x=>x.RevisionId==fromRevisionId);var toProfile=profiles.SingleOrDefault(x=>x.RevisionId==toRevisionId);
             var files=await db.ControlledAttachments.AsNoTracking().Where(x=>x.ArtifactId==artifactId&&(x.RevisionId==fromRevisionId||x.RevisionId==toRevisionId)).ToListAsync(ct);var attachmentChanges=files.Select(x=>new{x.Id,x.LogicalId,x.Version,x.Label,x.OriginalFileName,x.Sha256,kind=x.RevisionId==toRevisionId?"added":"removed"}).ToList();
-            return Results.Ok(new{from=from.Revision,to=to.Revision,statement=EnterpriseRequirementsService.Diff(from.Statement,to.Statement),rationale=EnterpriseRequirementsService.Diff(from.Rationale,to.Rationale),richText=EnterpriseRequirementsService.Diff(fromProfile?.RichText??from.Statement,toProfile?.RichText??to.Statement),attributesChanged=(fromProfile?.AttributesJson??"{}")!=(toProfile?.AttributesJson??"{}"),fromAttributes=fromProfile?.AttributesJson??"{}",toAttributes=toProfile?.AttributesJson??"{}",verificationChanged=from.VerificationMethod!=to.VerificationMethod,fromVerification=from.VerificationMethod,toVerification=to.VerificationMethod,attachmentChanges});
+            var statement = EnterpriseRequirementsService.Diff(from.Statement, to.Statement, ct);
+            var rationale = EnterpriseRequirementsService.Diff(from.Rationale, to.Rationale, ct);
+            var richText = EnterpriseRequirementsService.Diff(fromProfile?.RichText ?? from.Statement, toProfile?.RichText ?? to.Statement, ct);
+            return Results.Ok(new
+            {
+                from = from.Revision, to = to.Revision, fromRevisionId = from.Id, toRevisionId = to.Id,
+                statement = statement.Spans, rationale = rationale.Spans, richText = richText.Spans,
+                comparison = new
+                {
+                    isComplete = statement.IsComplete && rationale.IsComplete && richText.IsComplete,
+                    statement = statement.Mode, rationale = rationale.Mode, richText = richText.Mode,
+                },
+                attributesChanged = (fromProfile?.AttributesJson ?? "{}") != (toProfile?.AttributesJson ?? "{}"),
+                fromAttributes = fromProfile?.AttributesJson ?? "{}", toAttributes = toProfile?.AttributesJson ?? "{}",
+                verificationChanged = from.VerificationMethod != to.VerificationMethod,
+                fromVerification = from.VerificationMethod, toVerification = to.VerificationMethod, attachmentChanges,
+            });
         });
 
         app.MapGet("/api/enterprise-requirements/{artifactId:guid}/impact",async(Guid artifactId,Guid? releaseId,HttpContext http,

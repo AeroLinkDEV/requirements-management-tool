@@ -47,12 +47,7 @@ public sealed class ProjectLadderSealAuthority(AeroLinkDbContext db)
     public async Task<ProjectLadderSealResult> SealAsync(Guid projectId, string contentKind,
         string contentIdentity, string actor, DateTimeOffset now, CancellationToken ct = default)
     {
-        if (!LadderBoundContentCatalog.IsKnown(contentKind))
-            throw new DomainException($"Unknown ladder-bound content kind '{contentKind}'. Register the qualifying route before sealing it.");
-        if (string.IsNullOrWhiteSpace(contentIdentity))
-            throw new DomainException("Ladder-bound content requires a stable identity before the ladder can be sealed.");
-        if (string.IsNullOrWhiteSpace(actor))
-            throw new DomainException("Ladder sealing requires an attributable actor.");
+        ValidateContentReference(contentKind, contentIdentity, actor);
 
         // A project creation transaction may persist its ladder and first content together. Prefer an Added local
         // graph (or an already fully loaded graph) so the same UoW can seal before its INSERT is issued; otherwise
@@ -94,6 +89,16 @@ public sealed class ProjectLadderSealAuthority(AeroLinkDbContext db)
             $"Sealed ladder with first {contentKind} '{contentIdentity}'.", canonical, hash,
             configuration.VerificationProfileSchemaVersion));
         return new(ProjectLadderSealResultKind.Sealed, configuration);
+    }
+
+    internal static void ValidateContentReference(string contentKind, string contentIdentity, string actor)
+    {
+        if (!LadderBoundContentCatalog.IsKnown(contentKind))
+            throw new DomainException($"Unknown ladder-bound content kind '{contentKind}'. Register the qualifying route before sealing it.");
+        if (string.IsNullOrWhiteSpace(contentIdentity))
+            throw new DomainException("Ladder-bound content requires a stable identity before the ladder can be sealed.");
+        if (string.IsNullOrWhiteSpace(actor))
+            throw new DomainException("Ladder sealing requires an attributable actor.");
     }
 
     public static string ConflictExplanation(ProjectLadderConfiguration configuration) =>

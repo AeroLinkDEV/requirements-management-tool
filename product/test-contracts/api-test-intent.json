@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 858,
-    "cases": 955,
-    "classes": 127,
-    "hostedTests": 820,
-    "hostedCases": 903,
+    "tests": 859,
+    "cases": 956,
+    "classes": 128,
+    "hostedTests": 821,
+    "hostedCases": 904,
     "nonHostedTests": 30,
     "nonHostedCases": 44,
     "unknownHostTests": 8,
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 91,
-      "cases": 95,
+      "tests": 92,
+      "cases": 96,
       "unknownCases": 0,
-      "classes": 53
+      "classes": 54
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -10659,6 +10659,24 @@
       "sourceLines": {
         "start": 17,
         "end": 92
+      }
+    },
+    {
+      "cls": "RequirementRedlineApiTests",
+      "test": "Redline_returns_complete_exact_revision_text_and_explicit_comparison_modes_without_writes",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 17,
+        "end": 77
       }
     },
     {
