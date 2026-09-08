@@ -130,6 +130,37 @@ try {
     $env:AEROLINK_TRANSITION_LEASE = $capability
     $lease = Enter-AeroLinkTransition -InstallationRoot $root -Policy KeepReady
     Check ($lease.Owner -and $lease.Policy -eq 'KeepReady' -and -not $lease.Pending) 'A stale released lease must acquire fresh ownership and policy.'
+
+    # Execute the real explicit Stop entry point with disposable service adapters. A failed
+    # native/ownership stop must not reach PostgreSQL, and the installation lease always exits.
+    $stopScripts = Join-Path $root 'stop-contract\product\scripts'
+    New-Item -ItemType Directory -Path $stopScripts -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Stop-AeroLink.ps1') -Destination $stopScripts
+    @'
+function Stop-AeroLinkOwnedListener($Port, $OwnershipFragments) {
+    if ($Port -eq 5080 -and -not $OwnershipFragments[0].EndsWith('src\AeroLink.Api')) { throw 'API ownership must use its exact directory.' }
+    Add-Content (Join-Path $PSScriptRoot 'events.txt') "stop-$Port"
+    if ($Port -eq 5080 -and (Test-Path (Join-Path $PSScriptRoot 'refuse'))) { throw 'Native/ownership stop refused.' }
+    [pscustomobject]@{ Detail = 'Disposable owned listener stopped.' }
+}
+'@ | Set-Content (Join-Path $stopScripts 'AeroLinkRuntimeIdentity.psm1')
+    'function Get-AeroLinkInstallationPaths($ProductRoot) { [pscustomobject]@{InstallationRoot=$ProductRoot} }' | Set-Content (Join-Path $stopScripts 'AeroLinkInstallation.psm1')
+    @'
+function Enter-AeroLinkTransition($InstallationRoot) { Add-Content (Join-Path $PSScriptRoot 'events.txt') 'enter'; [pscustomobject]@{Root=$InstallationRoot} }
+function Exit-AeroLinkTransition($Lease) { Add-Content (Join-Path $PSScriptRoot 'events.txt') 'exit' }
+'@ | Set-Content (Join-Path $stopScripts 'AeroLinkTransition.psm1')
+    'Add-Content (Join-Path $PSScriptRoot "events.txt") "postgres"' | Set-Content (Join-Path $stopScripts 'Stop-Postgres.ps1')
+    & $powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $stopScripts 'Stop-AeroLink.ps1')
+    Check ($LASTEXITCODE -eq 0 -and ((Get-Content (Join-Path $stopScripts 'events.txt')) -join ',') -eq 'enter,stop-5173,stop-5080,postgres,exit') 'Explicit Stop must coordinate and prove both listeners before stopping PostgreSQL.'
+    Clear-Content (Join-Path $stopScripts 'events.txt')
+    Set-Content (Join-Path $stopScripts 'refuse') 'refuse'
+    $stopPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $stopScripts 'Stop-AeroLink.ps1') *> (Join-Path $root 'stop-refusal.log')
+        $stopCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $stopPreference }
+    Check ($stopCode -ne 0 -and ((Get-Content (Join-Path $stopScripts 'events.txt')) -join ',') -eq 'enter,stop-5173,stop-5080,exit') 'Failed explicit Stop must release its lease and preserve PostgreSQL.'
 }
 finally {
     Exit-AeroLinkTransition $lease
