@@ -3,23 +3,39 @@ import { expect, test as base } from '@playwright/test'
 export { expect }
 
 const apiRequestContextError = 'A rendered fixture must not use an API request context.'
+const apiRequestContextDiagnostic = 'rendered fixture used a forbidden API request context'
+
+type RenderedFixtureState = {
+  apiRequestViolations: string[]
+}
 
 export const logicTest = base.extend({
   browser: async ({ browserName: _browserName }, _provide) => { throw new Error('A logic test must not launch a browser.') },
   request: async ({ baseURL: _baseURL }, _provide) => { throw new Error('A logic test must not use an API request context.') },
 })
 
-export const renderedTest = base.extend({
-  request: async ({ baseURL: _baseURL }, _provide) => { throw new Error(apiRequestContextError) },
+export const renderedTest = base.extend<RenderedFixtureState>({
+  apiRequestViolations: async (_fixtures, provide) => {
+    const violations: string[] = []
+    await provide(violations)
+    expect(violations, apiRequestContextDiagnostic).toEqual([])
+  },
+  request: async ({ baseURL: _baseURL, apiRequestViolations }, _provide) => {
+    apiRequestViolations.push('request fixture')
+    throw new Error(apiRequestContextError)
+  },
   // `page.request` is an APIRequestContext that bypasses browser routes and request events.
-  page: async ({ page }, provide) => {
+  page: async ({ page, apiRequestViolations }, provide) => {
     Object.defineProperty(page, 'request', {
       configurable: true,
-      get: () => { throw new Error(apiRequestContextError) },
+      get: () => {
+        apiRequestViolations.push('page.request')
+        throw new Error(apiRequestContextError)
+      },
     })
     await provide(page)
   },
-  context: async ({ context, baseURL }, provide) => {
+  context: async ({ context, baseURL, apiRequestViolations }, provide) => {
     expect(baseURL, 'rendered fixtures require an isolated client origin').toBeTruthy()
     // Derived from the active Playwright config: Full uses its own client port and Fast may override 5188.
     const origin = new URL(baseURL!).origin
@@ -43,6 +59,7 @@ export const renderedTest = base.extend({
       get: () => new Proxy(rawRequest, {
         get: (target, property) => {
           if (property === 'dispose') return target.dispose.bind(target)
+          apiRequestViolations.push(`context.request.${String(property)}`)
           throw new Error(apiRequestContextError)
         },
       }),

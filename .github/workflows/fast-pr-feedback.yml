@@ -112,6 +112,7 @@ jobs:
                 'npm run test:fast:routes' { npm run test:fast:routes }
                 'npm run test:fast:logic' { npm run test:fast:logic }
                 'npx playwright install chromium' { npx playwright install chromium }
+                'npm run test:fast:isolation' { npm run test:fast:isolation }
                 'npm run test:fast:rendered' { npm run test:fast:rendered }
                 default { throw "Unreviewed Fast client command: $command" }
               }

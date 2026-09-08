@@ -65,7 +65,8 @@ test('Fast backend manifest names only reviewed source-controlled smoke classes'
 test('Fast client adds explicit isolated behavior checks and Full retains heavyweight evidence', () => {
   assert.deepEqual(manifest.client.commands, [
     'npm ci', 'npm run lint', 'npm run typecheck', 'npm run test:fast:routes',
-    'npm run test:fast:logic', 'npx playwright install chromium', 'npm run test:fast:rendered',
+    'npm run test:fast:logic', 'npx playwright install chromium', 'npm run test:fast:isolation',
+    'npm run test:fast:rendered',
   ])
   assert.equal(manifest.client.workingDirectory, 'product/client')
   assert.doesNotMatch(JSON.stringify(manifest.client), /test:smoke|test:production/i)

@@ -10,7 +10,8 @@ This phase measures a bounded Fast pull-request lane without changing merge auth
 - The Infrastructure smoke is deliberately limited to reviewed persistence/concurrency/migration-model sentinels that use temp/in-memory SQLite or a non-connecting model comparison.
 - The hosted API smoke is `SharedHostIsolationTests`, which uses a disposable shared SQLite host with unique logical data and fresh clients.
 - Client Fast runs `npm ci`, lint, type-check, route/identity parity, the explicit logic tier, Chromium installation,
-  and the explicit rendered-fixture tier selected by `product/client/fast-client-tests.json`.
+  a subprocess isolation meta-test, and the explicit rendered-fixture tier selected by
+  `product/client/fast-client-tests.json`.
 - The rendered fixtures use Vite and Chromium without an API or showcase seed. Integrated browser journeys,
   PostgreSQL, complete API/Infrastructure, and operator/recovery evidence remain Full-only during phase 1.
 - Every selected identity remains in Full. The routing check rejects missing, duplicate or substituted Fast

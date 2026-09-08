@@ -51,11 +51,13 @@ records and refuses browser API/external requests, including swallowed failures.
 discovers and executes all of these tests.
 
 From `product/client`, run `npm run test:fast:routes`, `npm run test:fast:logic`, then
-`npx playwright install chromium` and `npm run test:fast:rendered`. The routing check compares actual
-Playwright discovery by file and title, rejects missing/duplicate/substituted identities, and records
-every remaining file as Full-only. Newly added files therefore retain integrated Full coverage until
-their dependencies and assertions are reviewed for early execution. Mixed integrated/fixture files must
-not be added to the isolated manifest merely because they mock one response.
+`npx playwright install chromium`, `npm run test:fast:isolation`, and `npm run test:fast:rendered`. The
+isolation command runs a deliberately offending child test outside ordinary discovery and requires a
+nonzero exit even when the child swallows the API-context error; its control child must pass. The routing
+check compares actual Playwright discovery by file and title, rejects missing/duplicate/substituted
+identities, and records every remaining file as Full-only. Newly added files therefore retain integrated
+Full coverage until their dependencies and assertions are reviewed for early execution. Mixed
+integrated/fixture files must not be added to the isolated manifest merely because they mock one response.
 
 Fast retains its routing report, JSON results and available traces under a per-run artifact, including
 failed runs. This addition is intended to expose defects earlier; it does not establish a reduction in

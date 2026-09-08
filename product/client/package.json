@@ -13,6 +13,7 @@
     "test:fast": "npm run lint && npm run typecheck",
     "test:fast:routes": "node scripts/check-fast-client-routing.mjs",
     "test:fast:logic": "playwright test --config=playwright.logic.config.ts",
+    "test:fast:isolation": "node --test scripts/fast-client-isolation.test.mjs",
     "test:fast:rendered": "playwright test --config=playwright.rendered.config.ts",
     "test:focused": "playwright test",
     "test:smoke:core": "playwright test tests/application-smoke.spec.ts",

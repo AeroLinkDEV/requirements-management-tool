@@ -28,6 +28,7 @@ npm.cmd run test:fast
 npm.cmd run test:fast:routes
 npm.cmd run test:fast:logic
 npx playwright install chromium
+npm.cmd run test:fast:isolation
 npm.cmd run test:fast:rendered
 npm.cmd run test:focused -- tests\upward-allocation.spec.ts
 npm.cmd run test:e2e:sharded
@@ -37,6 +38,8 @@ npm.cmd run test:production
 - `test:fast` runs lint and TypeScript checks.
 - `test:fast:routes` compares the explicit Fast discovery with Full and writes `test-results/fast/routing.json`.
 - `test:fast:logic` runs the selected browser/API-free behavior checks.
+- `test:fast:isolation` runs a subprocess negative proof: a child test that swallows denied API-context access
+  must still fail at fixture teardown, while its ordinary control passes.
 - `test:fast:rendered` runs the selected Vite/Chromium fixtures; install Chromium first. These checks reject the
   `request` fixture, `page.request`, and browser-context API methods and refuse browser API/external requests,
   and remain part of the complete Full suite.

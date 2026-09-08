@@ -5,7 +5,6 @@
     "digital-thread-canvas-geometry.spec.ts"
   ],
   "rendered": [
-    "artifact-thread-rendered.spec.ts",
-    "fast-client-isolation.spec.ts"
+    "artifact-thread-rendered.spec.ts"
   ]
 }
