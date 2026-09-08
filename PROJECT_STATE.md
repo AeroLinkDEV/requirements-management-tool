@@ -280,6 +280,10 @@ cohesive internal save phases. The authoritative ordering, provider-read and tra
 state condition, retry contract, and bounded child-state lookup rule live in
 [product/docs/SAVE_BOUNDARY.md](product/docs/SAVE_BOUNDARY.md).
 
+Routine change-request reads choose an explicit child-graph load contract so detail and command paths do not
+materialize every controlled history collection; the provider-specific split-query and snapshot rules are
+authoritatively documented in [product/docs/CHANGE_REQUEST_LOADS.md](product/docs/CHANGE_REQUEST_LOADS.md).
+
 ## Operations and recovery
 
 The repository provides stable Windows root launchers for development, production-style local operation, shared/remote demo modes, backup, restore validation, diagnostics, and related operator actions.

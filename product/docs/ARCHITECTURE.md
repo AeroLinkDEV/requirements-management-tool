@@ -73,6 +73,10 @@ commit-in-build proof remain later integration depth. AeroLink never clones a re
 
 Repository interfaces are defined in the domain project and implemented in infrastructure. Provider choice is configuration-driven. PostgreSQL uses versioned EF migrations at application startup; SQLite remains isolated to tests and disposable local scenarios.
 
+The change-request child graph is selected explicitly by caller through the load contract documented in
+[CHANGE_REQUEST_LOADS.md](CHANGE_REQUEST_LOADS.md). This keeps read and command paths from purchasing all
+controlled history by default while preserving a consistent snapshot for split collection loads.
+
 `AeroLinkDbContext` exposes asynchronous persistence as its single supported write boundary. `SaveChangesAsync`
 performs the provider reads and controlled preparation needed for aggregate child-state repair, versioning,
 integrity checks, lifecycle events, and notification outbox rows before one EF write. The synchronous EF
