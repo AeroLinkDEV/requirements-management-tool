@@ -35,7 +35,10 @@ test('the actual aggregate shell rejects incomplete scheduled and manual browser
   const directory = mkdtempSync(join(tmpdir(), 'aerolink-942-gate-'))
   const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash'
   try {
-    for (const event of ['schedule', 'workflow_dispatch', 'pull_request', 'merge_group', 'push']) {
+    for (const [event, fullDiagnostics] of [
+      ['schedule', 'true'], ['workflow_dispatch', 'true'], ['workflow_dispatch', 'false'],
+      ['pull_request', 'true'], ['pull_request', 'false'], ['merge_group', 'true'], ['push', 'true'],
+    ]) {
       for (const result of ['success', 'failure', 'cancelled', 'skipped', '']) {
         const env = {
           ...process.env,
@@ -43,13 +46,13 @@ test('the actual aggregate shell rejects incomplete scheduled and manual browser
           BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'success', BACKEND_CORE_INFRASTRUCTURE: 'success',
           CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success',
           POSTGRESQL: 'success', METRICS_TOOLING: 'success', DOCS_ONLY: 'false', LAUNCHERS_ONLY: 'false',
-          POST_MERGE_SKIP: 'false', EVENT_NAME: event, FULL_DIAGNOSTICS: 'true', BROWSER_FULL: result,
+          POST_MERGE_SKIP: 'false', EVENT_NAME: event, FULL_DIAGNOSTICS: fullDiagnostics, BROWSER_FULL: result,
           GITHUB_STEP_SUMMARY: join(directory, 'summary.md').replaceAll('\\', '/'),
         }
         const child = spawnSync(bash, ['-c', script], { encoding: 'utf8', env })
-        const required = event === 'schedule' || event === 'workflow_dispatch'
+        const required = event === 'schedule' || (event === 'workflow_dispatch' && fullDiagnostics === 'true')
         const shouldFail = ['failure', 'cancelled'].includes(result) || (required && result !== 'success')
-        assert.equal(child.status, shouldFail ? 1 : 0, `${event}/${result}: ${child.error ?? child.stderr}\n${child.stdout}`)
+        assert.equal(child.status, shouldFail ? 1 : 0, `${event}/${fullDiagnostics}/${result}: ${child.error ?? child.stderr}\n${child.stdout}`)
       }
     }
   } finally {
