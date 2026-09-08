@@ -1,13 +1,13 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 865,
-    "cases": 962,
-    "classes": 129,
+    "tests": 867,
+    "cases": 964,
+    "classes": 130,
     "hostedTests": 827,
     "hostedCases": 910,
-    "nonHostedTests": 30,
-    "nonHostedCases": 44,
+    "nonHostedTests": 32,
+    "nonHostedCases": 46,
     "unknownHostTests": 8,
     "unknownHostCases": 8,
     "hostedCandidateTests": 16,
@@ -29,10 +29,10 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 166,
-      "cases": 180,
+      "tests": 167,
+      "cases": 181,
       "unknownCases": 0,
-      "classes": 59
+      "classes": 60
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -45,10 +45,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 35,
-      "cases": 35,
+      "tests": 36,
+      "cases": 36,
       "unknownCases": 0,
-      "classes": 12
+      "classes": 13
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -426,8 +426,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 495,
-        "end": 538
+        "start": 496,
+        "end": 540
       }
     },
     {
@@ -445,7 +445,7 @@
       ],
       "sourceLines": {
         "start": 451,
-        "end": 493
+        "end": 494
       }
     },
     {
@@ -13234,6 +13234,34 @@
       }
     },
     {
+      "cls": "TestChangeReviewWorkflowServiceBoundaryTests",
+      "test": "Submit_and_approve_persist_the_frozen_workflow_contract_without_an_api_host",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 42,
+        "end": 166
+      }
+    },
+    {
+      "cls": "TestChangeReviewWorkflowServiceBoundaryTests",
+      "test": "Submit_boundary_returns_the_structured_case_refusal_without_starting_a_cycle",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 17,
+        "end": 40
+      }
+    },
+    {
       "cls": "TestExecutionEffectivityApiTests",
       "test": "A_cross_project_release_header_is_refused",
       "kind": "Fact",
@@ -14986,8 +15014,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 322,
-        "end": 377
+        "start": 323,
+        "end": 378
       }
     },
     {
@@ -15076,8 +15104,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 267,
-        "end": 281
+        "start": 268,
+        "end": 282
       }
     },
     {
@@ -15094,8 +15122,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 283,
-        "end": 320
+        "start": 284,
+        "end": 321
       }
     },
     {
@@ -15130,7 +15158,7 @@
       ],
       "sourceLines": {
         "start": 228,
-        "end": 265
+        "end": 266
       }
     }
   ]

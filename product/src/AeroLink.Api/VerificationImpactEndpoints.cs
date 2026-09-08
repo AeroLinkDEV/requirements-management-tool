@@ -2430,7 +2430,8 @@ public static class VerificationImpactEndpoints
         });
 
         app.MapPost("/api/test-change-reviews/{id:guid}/submit", async (Guid id, SubmitTestChangeReviewRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver,
+            TestChangeReviewWorkflowService workflowService, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).Include(x => x.ReviewCycles)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
@@ -2448,126 +2449,17 @@ public static class VerificationImpactEndpoints
                 });
             try
             {
-                // Historical blank packages remain readable; compatibility is not a submission bypass.
-                // Every new review cycle requires the complete case its reviewer is being asked to approve.
-                var missingCaseFields = review.MissingCaseFields();
-                if (review.Outcome == TestChangeReviewOutcome.ChangeRequired && missingCaseFields.Count > 0)
-                    return Results.BadRequest(new
-                    {
-                        error = $"Complete the test change request case before sending it for review. Missing: {string.Join(", ", missingCaseFields)}.",
-                        code = "test_change_request_case_incomplete",
-                        fields = missingCaseFields
-                    });
-                if (review.Outcome == TestChangeReviewOutcome.ChangeRequired && review.ProcedureChanges.Count == 0)
-                    return Results.BadRequest(new
-                    {
-                        error = $"{review.DisplayNumber} concluded that {TestChangeRequestSourceEligibility.ArtifactNoun(review.ArtifactKey)} work is required but names none. " +
-                            $"Add the {TestChangeRequestSourceEligibility.ArtifactNoun(review.ArtifactKey)} decisions it carries before sending it for review."
-                    });
-                await TestChangeReviewRequirementScope.ValidateProcedureChangesForSubmissionAsync(
-                    db, review, ladderPolicy, ct);
-                await TestChangeReviewRequirementScope.ValidateRetargetPlansForSubmissionAsync(db, review, ct, ladderPolicy);
-                var allResolved = await db.VerificationImpactItems
-                    .Where(x => x.TestChangeReviewId == id)
-                    .AllAsync(x => x.State == VerificationImpactState.Resolved, ct);
-                // The project's recorded procedure for this discipline decides the stages. Where none is
-                // recorded the chosen approver stands alone, exactly as before — a rule nobody has written
-                // down must not become a rule that blocks work.
-                var workflow = await WorkflowEndpoints.ActiveSpecificationAsync(db, review.ProjectId, review.ArtifactKey, ct, ladderPolicy);
-                List<ApproverSelection> selections;
-                if (workflow is null)
-                {
-                    if (string.IsNullOrWhiteSpace(request.ApproverId))
-                        return Results.BadRequest(new { error = "Select an independent test change request approver." });
-                    var approver = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x =>
-                        x.UserName == request.ApproverId.Trim().ToLowerInvariant() && x.State == AccountState.Active, ct);
-                    if (approver is null)
-                        return Results.BadRequest(new { error = "Select an active AeroLink test change request approver." });
-                    var programId = await db.Projects.AsNoTracking().Where(x => x.Id == review.ProjectId)
-                        .Select(x => x.ProgramId).SingleAsync(ct);
-                    if (!await identity.HasRoleAsync(approver.Id, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct))
-                        return Results.BadRequest(new { error = $"{approver.DisplayName} does not hold Approver authority for this Program." });
-                    var resolved = await WorkflowEndpoints.StageAuthorityWithDecisionAsync(db, review.ProjectId,
-                        approver.Id, ProgramRole.Approver, ct);
-                    selections = [new ApproverSelection(approver.UserName, approver.DisplayName,
-                        resolved.Role, resolved.Decision.Granted ? resolved.Decision.Source : ProjectAuthoritySource.None,
-                        resolved.Decision.SourceId)];
-                }
-                else
-                {
-                    var requested = request.Approvers ?? [];
-                    if (requested.Count < workflow.Stages.Count)
-                        return Results.BadRequest(new
-                        {
-                            error = $"{workflow.Name} v{workflow.Version} requires {workflow.Stages.Count} approver{(workflow.Stages.Count == 1 ? "" : "s")} minimum (at least {workflow.Stages.Count}), one for each stage: " +
-                                string.Join(", ", workflow.Stages.Select(x => x.Name)) + "."
-                        });
-                    var ids = requested.Select(x => x.UserId.Trim().ToLowerInvariant()).ToList();
-                    var accounts = await db.UserAccounts.AsNoTracking()
-                        .Where(x => ids.Contains(x.UserName) && x.State == AccountState.Active)
-                        .Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
-                    if (accounts.Count != ids.Count)
-                        return Results.BadRequest(new { error = "Every stage approver must be an active AeroLink user." });
-                    var directory = accounts.ToDictionary(x => x.UserName, StringComparer.OrdinalIgnoreCase);
-                    var programId = await db.Projects.AsNoTracking().Where(x => x.Id == review.ProjectId)
-                        .Select(x => x.ProgramId).SingleAsync(ct);
-                    selections = new List<ApproverSelection>();
-                    for (var index = 0; index < requested.Count; index++)
-                    {
-                        var chosen = requested[index];
-                        var account = directory[chosen.UserId.Trim().ToLowerInvariant()];
-                        var resolution = index < workflow.Stages.Count
-                            ? await WorkflowEndpoints.StageAuthorityWithDecisionAsync(db, review.ProjectId, account.Id,
-                                workflow.Stages[index], ct)
-                            : (await WorkflowEndpoints.AuthoritiesWithDecisionsAsync(db, review.ProjectId,
-                                [account.Id], ct)).GetValueOrDefault(account.Id);
-                        var role = resolution.Role;
-                        if (role is null)
-                            return Results.BadRequest(new { error = $"{account.DisplayName} does not hold authority to sign this review." });
-                        selections.Add(new ApproverSelection(account.UserName, account.DisplayName, role,
-                            resolution.Decision.Source, resolution.Decision.SourceId));
-                    }
-                }
-                var now = DateTimeOffset.UtcNow;
-                var problemReportIds = await db.ProblemReportLinks.AsNoTracking()
-                    .Where(x => x.ArtifactType == "TestChangeRequest" && x.ArtifactId == review.Id)
-                    .Select(x => x.ProblemReportId).ToListAsync(ct);
-                var impactItems = await db.VerificationImpactItems.AsNoTracking()
-                    .Where(x => x.TestChangeReviewId == review.Id).ToListAsync(ct);
-                var impactDecisions = impactItems.Select(x => new VerificationImpactSnapshot(
-                    x.Id, x.ChangeRequestId, x.Trigger, x.RequirementChangeId, x.RequirementRevisionId,
-                    x.ProcedureId, x.SubjectDisplayNumber, x.Outcome, x.ProcedureChangeAction,
-                    x.ResolutionRationale, x.ResolvedProcedureId, x.ResolvedProcedureRevisionId,
-                    x.RetargetedRequirementRevisionId, x.PreReleaseEvidenceRequired)).ToList();
-                // Same rule as a change request: whoever submits first takes the procedure, and the second is
-                // told which test change request has it rather than discovering it at approval.
-                var contendedProcedures = review.ProcedureChanges
-                    .Where(x => x.Kind is TestProcedureChangeKind.Modify or TestProcedureChangeKind.Retire)
-                    .Select(x => x.BaseNumber).Distinct().ToList();
-                var blockingProcedures = (await ArtifactClaims.ProcedureContendersAsync(db, review.ProjectId,
-                    contendedProcedures, review.Id, ct)).Where(x => x.Holds).ToList();
-                if (blockingProcedures.Count > 0)
-                    return Results.BadRequest(new
-                    {
-                        error = ArtifactClaims.Refusal(blockingProcedures,
-                            TestChangeRequestSourceEligibility.ArtifactPlural(review.ArtifactKey)),
-                        code = "procedure_claimed"
-                    });
-
-                var cycle = review.SubmitForReview(http.UserAccount().UserName, selections, allResolved, now,
-                    workflow?.Mode ?? ReviewMode.Sequential, workflow, problemReportIds, impactDecisions);
-                foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
-                    db.UserNotifications.Add(ReviewNotificationFactory.ForTestChangeRequest(review.ProjectId,
-                        step.ApproverId, step.StageKind, review.DisplayNumber, http.UserAccount().DisplayName,
-                        $"test-change-request:{review.Id}", review.Id, now));
-                await db.SaveChangesAsync(ct);
+                var result = await workflowService.SubmitAsync(review,
+                    new SubmitTestChangeReviewCommand(request.ApproverId,
+                        (request.Approvers ?? []).Select(x => new TestChangeReviewApproverChoice(x.UserId)).ToList()),
+                    http.UserAccount(), ladderPolicy, ct);
                 return Results.Ok(new
                 {
-                    review.Id,
-                    state = review.State.ToString(),
-                    cycleId = cycle.Id,
-                    sequence = cycle.Sequence,
-                    stageCount = cycle.Steps.Count
+                    id = result.ReviewId,
+                    state = result.State.ToString(),
+                    cycleId = result.CycleId,
+                    sequence = result.Sequence,
+                    stageCount = result.StageCount
                 });
             }
             catch (DbUpdateConcurrencyException)
@@ -2581,12 +2473,20 @@ public static class VerificationImpactEndpoints
                     code = "stale_version"
                 });
             }
+            catch (TestChangeReviewWorkflowException ex)
+            {
+                if (ex.Fields is not null)
+                    return Results.BadRequest(new { error = ex.Message, code = ex.Code, fields = ex.Fields });
+                return ex.Code is null
+                    ? Results.BadRequest(new { error = ex.Message })
+                    : Results.BadRequest(new { error = ex.Message, code = ex.Code });
+            }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
         app.MapPost("/api/test-change-reviews/{id:guid}/approve", async (Guid id, ApproveTestChangeReviewRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity,
-            VerificationImpactService verificationImpact, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, TestChangeReviewWorkflowService workflowService,
+            CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.Include(x => x.ReviewCycles).ThenInclude(x => x.Steps)
                 .SingleOrDefaultAsync(x => x.Id == id, ct);
@@ -2601,75 +2501,24 @@ public static class VerificationImpactEndpoints
                 return Results.BadRequest(new { error = "An explicit electronic signature meaning is required.", code = "signature_meaning_required" });
 
             var actor = http.UserAccount();
-            var cycle = review.ActiveReviewCycle;
-            if (cycle is null)
-                return Results.BadRequest(new { error = "This test change request has no active review." });
-            var activeStep = cycle.Steps.SingleOrDefault(x => x.State == ApprovalStepState.Active
-                && string.Equals(x.ApproverId, actor.UserName, StringComparison.OrdinalIgnoreCase));
-            if (activeStep is null)
-                return Results.BadRequest(new { error = "Only the active approver can approve this review stage." });
-            var programId = await db.Projects.AsNoTracking().Where(x => x.Id == review.ProjectId)
-                .Select(x => x.ProgramId).SingleAsync(ct);
-            // Configured workflows freeze the authority selected for each stage. Requiring a generic Approver
-            // here would invalidate legitimate TestLead and ConfigurationManager stages. The no-workflow
-            // fallback has no such governed stage, so its signer must still hold current Approver authority,
-            // including administrator substitution and active delegation.
-            if (cycle.WorkflowId is null
-                && !await identity.HasRoleAsync(actor, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct))
-                return Results.Forbid();
-            // Credential knowledge is reconfirmed only after every other authorization/input gate and
-            // immediately before the controlled mutation. A refusal therefore cannot advance a step, create a
-            // signature, or activate/notify the next stage.
-            if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password ?? "", ct))
-                return Results.Json(new
-                {
-                    error = "Electronic signature confirmation failed.",
-                    code = "electronic_signature_confirmation_failed"
-                }, statusCode: StatusCodes.Status401Unauthorized);
             try
             {
-                await using var transaction = await db.Database.BeginTransactionAsync(ct);
-                var now = DateTimeOffset.UtcNow;
-                var snapshotHash = cycle.SnapshotHash;
-                var activeBefore = cycle.Steps.Where(x => x.State == ApprovalStepState.Active)
-                    .Select(x => x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                review.ApproveActiveStage(actor.UserName, request.Rationale, now);
-                var activated = review.ActiveReviewCycle?.Steps
-                    .Where(x => x.State == ApprovalStepState.Active && !activeBefore.Contains(x.ApproverId))
-                    .ToList() ?? [];
-                foreach (var step in activated)
-                    db.UserNotifications.Add(ReviewNotificationFactory.ForTestChangeRequest(review.ProjectId,
-                        step.ApproverId, step.StageKind, review.DisplayNumber, http.UserAccount().DisplayName,
-                        $"test-change-request:{review.Id}", review.Id, now, priorStageComplete: true));
-                // activeStep was captured before the aggregate mutation above. Signature provenance must
-                // describe the frozen obligation that was actually exercised, not the current workflow.
-                db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId,
-                    "TestChangeRequest", review.Id, review.DisplayNumber, activeStep.StageKind.ToString(),
-                    request.Meaning.Trim(), snapshotHash,
-                    http.Connection.RemoteIpAddress?.ToString() ?? "local", now,
-                    authority: activeStep.Authority, reviewStepId: activeStep.Id,
-                    reviewCycle: cycle.Sequence, reviewStepPosition: activeStep.Position,
-                    rationale: request.Rationale.Trim(),
-                    authoritySource: activeStep.AuthoritySource?.ToString() ?? "",
-                    workflowId: cycle.WorkflowId, workflowVersion: cycle.WorkflowVersion,
-                    authoritySourceId: activeStep.AuthoritySourceId));
-                await db.SaveChangesAsync(ct);
-                // The exact Case origin must already be Approved when PostgreSQL validates the polymorphic
-                // origin. Keep both saves in one transaction so approval and assessment raising are still one
-                // atomic controlled act, while the direct database guard observes the truthful source state.
-                if (review.State == TestChangeReviewState.Approved
-                    && review.ArtifactKind == VerificationArtifactKind.Case)
-                {
-                    await verificationImpact.RaiseForApprovedCaseReviewAsync(review, now, ct);
-                    await db.SaveChangesAsync(ct);
-                }
-                await transaction.CommitAsync(ct);
-                return Results.Ok(new
-                {
-                    review.Id,
-                    state = review.State.ToString(),
-                    cycleState = review.ActiveReviewCycle?.State.ToString()
-                });
+                var result = await workflowService.ApproveAsync(review,
+                    new ApproveTestChangeReviewCommand(request.Rationale, request.Password, request.Meaning),
+                    actor, http.Connection.RemoteIpAddress?.ToString() ?? "local", ct);
+                return Results.Ok(new { id = result.ReviewId, state = result.State.ToString(), cycleState = result.CycleState?.ToString() });
+            }
+            catch (ElectronicSignatureConfirmationException)
+            {
+                return Results.Json(new { error = "Electronic signature confirmation failed.", code = "electronic_signature_confirmation_failed" },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+            catch (TestChangeReviewWorkflowForbiddenException) { return Results.Forbid(); }
+            catch (TestChangeReviewWorkflowException ex)
+            {
+                return ex.Code is null
+                    ? Results.BadRequest(new { error = ex.Message })
+                    : Results.BadRequest(new { error = ex.Message, code = ex.Code });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });

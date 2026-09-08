@@ -42,6 +42,15 @@ has linked evidence, then one with a result, then the controlled number as a sta
 evidence reference remains useful context but does not make the evidence stage complete. The general
 relationship explorer remains available; the compact path is an assurance projection, not a new trace store.
 
+Critical review mutations use an application service boundary between HTTP and the aggregates. TCR submit and
+approve orchestration lives in `TestChangeReviewWorkflowService`: endpoint modules bind requests and perform
+resource-entry checks, while the service resolves the active or frozen workflow, freezes authority provenance
+and impact snapshots, transitions the aggregate, creates notifications and signatures, and owns the approval
+transaction. `WorkflowAuthorityService` is the shared resolver for TCR and change-request paths; it is not
+hosted by an endpoint module, so those paths cannot depend on one another for authority decisions. Aggregate
+methods remain responsible for lifecycle invariants, and the service preserves the approval two-save ordering
+needed before downstream Case assessment work is written.
+
 Software-build identity is canonical: a release version such as `1.6` is represented by `SW-01.60`. The
 historical `CandidateBaseline` and executable `SoftwareBuild` persistence records are implementation facets of
 that one software build, not separate product concepts presented to the user.

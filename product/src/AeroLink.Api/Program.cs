@@ -57,6 +57,8 @@ builder.Services.AddExceptionHandler<ConcurrencyExceptionHandler>();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddAeroLinkInfrastructure(builder.Configuration);
 builder.Services.AddScoped<TeamWorkProjectionService>();
+builder.Services.AddScoped<WorkflowAuthorityService>();
+builder.Services.AddScoped<TestChangeReviewWorkflowService>();
 builder.Services.AddSingleton<ILadderPolicy, LegacyLadderPolicy>();
 if (restoreValidationReadOnly)
 {
