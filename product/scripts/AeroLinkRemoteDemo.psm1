@@ -3,6 +3,7 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1')
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1')
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkProductionSource.psm1')
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1')
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessControl.psm1')
 <#
     AeroLink protected remote-demo operator mode.
 
@@ -172,6 +173,7 @@ function Get-AeroLinkRemoteDemoNgrokProcess {
     )
 
     $enumerated = $true
+    $liveEnumeration = ($null -eq $ProcessInfos)
     if ($null -eq $ProcessInfos) {
         # Injected process lists stay deterministic for the contract suite; only LIVE enumeration can fail.
         try { $ProcessInfos = @(Get-CimInstance Win32_Process -Filter "Name='ngrok.exe'" -ErrorAction Stop) }
@@ -188,11 +190,14 @@ function Get-AeroLinkRemoteDemoNgrokProcess {
         if ($process.ExecutablePath) { $executable = [IO.Path]::GetFullPath($process.ExecutablePath) }
         $command = [string]$process.CommandLine
         $exeMatches = $executable -eq $expectedExe
-        $contractMatches = $command.IndexOf($Config.PublicUrl, [StringComparison]::OrdinalIgnoreCase) -ge 0 `
-            -and $command.IndexOf($Config.Upstream, [StringComparison]::OrdinalIgnoreCase) -ge 0 `
-            -and $command.IndexOf('--traffic-policy-file', [StringComparison]::OrdinalIgnoreCase) -ge 0 `
-            -and $command.IndexOf($Config.TrafficPolicyPath, [StringComparison]::OrdinalIgnoreCase) -ge 0
+        $contractMatches = Test-AeroLinkNgrokLaunchContract -Config $Config -CommandLine $command
         if ($exeMatches -and $contractMatches) {
+            if ($liveEnumeration) {
+                # Exact OS start identity is retained for the stop boundary. If it cannot be read, this
+                # process is unknown even when an earlier command-line read happened to succeed.
+                try { $process | Add-Member -NotePropertyName StartedAt -NotePropertyValue (Get-AeroLinkProcessStartIdentity -ProcessId $process.ProcessId) -Force }
+                catch { $mismatched += $process; continue }
+            }
             $owned += $process
         }
         else {
@@ -200,6 +205,20 @@ function Get-AeroLinkRemoteDemoNgrokProcess {
         }
     }
     return [pscustomobject]@{ Owned = @($owned); Mismatched = @($mismatched); Enumerated = $enumerated }
+}
+
+function Test-AeroLinkNgrokLaunchContract {
+    param([Parameter(Mandatory)]$Config, [AllowEmptyString()][string]$CommandLine)
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $false }
+    $arguments = @([AeroLink.ProcessAccess]::Arguments($CommandLine))
+    $expected = @(Get-AeroLinkRemoteDemoNgrokArguments -Config $Config)
+    # Only our supported invocation is attributable. A duplicated URL, alternate config or extra policy
+    # override must not satisfy a substring check while executing a different contract.
+    if ($arguments.Count -ne $expected.Count + 1) { return $false }
+    for ($index = 0; $index -lt $expected.Count; $index++) {
+        if (-not [string]::Equals($arguments[$index + 1], $expected[$index], [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
 }
 
 function Test-AeroLinkRemoteDemoPublicProtection {
@@ -361,6 +380,32 @@ function Test-AeroLinkRemoteDemoNotificationOriginProof {
     }
 }
 
+function Set-AeroLinkRemoteDemoNotificationOriginProof {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$ExpectedProcess)
+    $runtime = Get-AeroLinkRemoteDemoLocalRuntimeIdentity -Config $Config
+    if (-not $runtime.Found -or $runtime.ProcessId -ne $ExpectedProcess.ProcessId -or
+        ([DateTimeOffset]$runtime.StartedAt).UtcDateTime.Ticks -ne ([DateTimeOffset]$ExpectedProcess.StartedAt).UtcDateTime.Ticks) {
+        throw 'The newly launched API no longer owns the listener; notification origin was not attributed.'
+    }
+    if (-not (Test-Path -LiteralPath $Config.StatePath)) { New-Item -ItemType Directory -Path $Config.StatePath -Force | Out-Null }
+    $statePath = Join-Path $Config.StatePath 'remote-demo-state.json'
+    $state = @{}
+    if (Test-Path -LiteralPath $statePath) {
+        try { (Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $state[$_.Name] = $_.Value } }
+        catch { $state = @{} }
+    }
+    $state.NotificationBaseUrl = $Config.PublicUrl
+    $state.LocalApiPid = $runtime.ProcessId
+    $state.LocalApiStartedAt = $runtime.StartedAt
+    $temporary = $statePath + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+    try {
+        $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temporary -Encoding UTF8
+        Move-Item -LiteralPath $temporary -Destination $statePath -Force
+    }
+    finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
+}
+
 function Get-AeroLinkRemoteDemoStartDecision {
     <#
       .SYNOPSIS Deterministic idempotence/fail-closed decision for remote-demo start.
@@ -510,6 +555,7 @@ function Start-AeroLinkRemoteDemoPostgresHelper {
     $helper = [pscustomobject]@{
         Id = $process.Id
         Process = $process
+        NativeHandle = $process.Handle
         HasExited = $false
         ExitCode = $null
         StdOutPath = $stdout
@@ -518,7 +564,7 @@ function Start-AeroLinkRemoteDemoPostgresHelper {
     $helper | Add-Member -MemberType ScriptMethod -Name Refresh -Value {
         $this.Process.Refresh()
         $this.HasExited = $this.Process.HasExited
-        if ($this.Process.HasExited -and $null -eq $this.ExitCode) { $this.ExitCode = $this.Process.ExitCode }
+        if ($this.Process.HasExited -and $null -eq $this.ExitCode) { $this.ExitCode = [AeroLink.ProcessAccess]::ExitCode($this.NativeHandle) }
     }
     return $helper
 }
@@ -529,13 +575,13 @@ function Stop-AeroLinkRemoteDemoOwnedProcess {
       .DESCRIPTION Refuses anything whose process name is not a PowerShell helper.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][int]$ProcessId)
-    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
-    if ($null -eq $process) { return }
-    if ($process.ProcessName -ne 'powershell' -and $process.ProcessName -ne 'pwsh') {
-        throw "Refusing to stop PID ${ProcessId}: it is $($process.ProcessName), not an owned PowerShell helper."
-    }
-    Stop-Process -Id $ProcessId -Force
+    param([Parameter(Mandatory)][int]$ProcessId, [Parameter(Mandatory)][Diagnostics.Process]$ExpectedProcess)
+    if ($ExpectedProcess.Id -ne $ProcessId) { throw 'The helper handle does not match the requested process.' }
+    if ($ExpectedProcess.HasExited) { return }
+    # Use the creator's retained process handle, never a fresh name/PID lookup that can target a reused PID.
+    $ExpectedProcess.Kill()
+    $ExpectedProcess.WaitForExit()
+
 }
 
 function Start-AeroLinkRemoteDemoPostgres {
@@ -561,7 +607,7 @@ function Start-AeroLinkRemoteDemoPostgres {
     )
     if ($null -eq $ReadyTest) { $ReadyTest = { param($C, $R) Test-AeroLinkRemoteDemoPostgresReady -Config $C } }
     if ($null -eq $HelperLauncher) { $HelperLauncher = { param($C, $R) Start-AeroLinkRemoteDemoPostgresHelper -Config $C -Run $R } }
-    if ($null -eq $HelperStopper) { $HelperStopper = { param($C, $R, $ProcessId) Stop-AeroLinkRemoteDemoOwnedProcess -ProcessId $ProcessId } }
+    if ($null -eq $HelperStopper) { $HelperStopper = { param($C, $R, $ProcessId, $Helper) Stop-AeroLinkRemoteDemoOwnedProcess -ProcessId $ProcessId -ExpectedProcess $Helper.Process } }
 
     $ready = & $ReadyTest $Config $Run
     if ($ready.Ready) {
@@ -589,14 +635,14 @@ function Start-AeroLinkRemoteDemoPostgres {
         Start-Sleep -Seconds $GraceSeconds
         if (-not $helper.HasExited) {
             Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Terminating owned PostgreSQL helper PID $($helper.Id) because PostgreSQL is independently query-ready."
-            & $HelperStopper $Config $Run $helper.Id
+            & $HelperStopper $Config $Run $helper.Id $helper
         }
         return [pscustomobject]@{ Healthy = $true; HelperUsed = $true; ProcessId = $helper.Id; Step = 'postgres-recovery'; Detail = $ready.Detail; LogPath = (Join-Path $Config.LogsPath 'remote-demo.log') }
     }
 
     if (-not $helper.HasExited) {
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "PostgreSQL helper PID $($helper.Id) exceeded $RecoveryTimeoutSeconds seconds; terminating the owned helper."
-        & $HelperStopper $Config $Run $helper.Id
+        & $HelperStopper $Config $Run $helper.Id $helper
     }
     $detail = if ($helperExited) {
         "PostgreSQL helper exited with code $($helper.ExitCode) but the database never became query-ready within $RecoveryTimeoutSeconds seconds. Step: postgres-recovery. Helper PID: $($helper.Id). Logs: $($helper.StdOutPath), $($helper.StdErrPath), $(Join-Path $Config.LogsPath 'remote-demo.log')"
@@ -633,6 +679,7 @@ function Start-AeroLinkRemoteDemoProductionHelper {
     $helper = [pscustomobject]@{
         Id = $process.Id
         Process = $process
+        NativeHandle = $process.Handle
         HasExited = $false
         ExitCode = $null
         StdOutPath = $stdout
@@ -641,7 +688,7 @@ function Start-AeroLinkRemoteDemoProductionHelper {
     $helper | Add-Member -MemberType ScriptMethod -Name Refresh -Value {
         $this.Process.Refresh()
         $this.HasExited = $this.Process.HasExited
-        if ($this.Process.HasExited -and $null -eq $this.ExitCode) { $this.ExitCode = $this.Process.ExitCode }
+        if ($this.Process.HasExited -and $null -eq $this.ExitCode) { $this.ExitCode = [AeroLink.ProcessAccess]::ExitCode($this.NativeHandle) }
     }
     return $helper
 }
@@ -701,14 +748,15 @@ function Invoke-AeroLinkProductionLauncher {
         # How long to keep polling readiness AFTER the launcher child has exited. A launcher that has already
         # exited will not open a port; the only reason to wait at all is that a process it started may still
         # be finishing its own startup, and that is seconds, not minutes.
-        [int]$PostExitGraceSeconds = 20
+        [int]$PostExitGraceSeconds = 20,
+        [switch]$ForceLaunch
     )
     if ($null -eq $LocalReadyTest) { $LocalReadyTest = { param($C) Test-AeroLinkRemoteDemoLocalReady -Config $C } }
     if ($null -eq $HelperLauncher) { $HelperLauncher = { param($C, $R) Start-AeroLinkRemoteDemoProductionHelper -Config $C -Run $R } }
-    if ($null -eq $HelperStopper) { $HelperStopper = { param($C, $R, $ProcessId) Stop-AeroLinkRemoteDemoOwnedProcess -ProcessId $ProcessId } }
+    if ($null -eq $HelperStopper) { $HelperStopper = { param($C, $R, $ProcessId, $Helper) Stop-AeroLinkRemoteDemoOwnedProcess -ProcessId $ProcessId -ExpectedProcess $Helper.Process } }
 
     $local = & $LocalReadyTest $Config
-    if ($local.Ready) {
+    if ($local.Ready -and -not $ForceLaunch) {
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Local AeroLink already ready; launcher helper not needed."
         return [pscustomobject]@{ Healthy = $true; HelperUsed = $false; ProcessId = $null; Step = 'production-launcher'; Detail = $local.Detail; LogPath = (Join-Path $Config.LogsPath 'remote-demo.log') }
     }
@@ -733,21 +781,17 @@ function Invoke-AeroLinkProductionLauncher {
             if ($exitDeadline -lt $deadline) { $deadline = $exitDeadline }
         }
         $local = & $LocalReadyTest $Config
-    } while (-not $local.Ready -and (Get-Date) -lt $deadline)
+        if ($helperExited -and $helper.ExitCode -ne 0) { break }
+    } while ((-not $helperExited -or -not $local.Ready) -and (Get-Date) -lt $deadline)
 
-    if ($local.Ready) {
+    if ($local.Ready -and $helperExited -and $helper.ExitCode -eq 0) {
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Local AeroLink became ready: $($local.Detail)"
-        Start-Sleep -Seconds $GraceSeconds
-        if (-not $helper.HasExited) {
-            Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Terminating owned production-launcher helper PID $($helper.Id) because AeroLink is independently ready."
-            & $HelperStopper $Config $Run $helper.Id
-        }
         return [pscustomobject]@{ Healthy = $true; HelperUsed = $true; ProcessId = $helper.Id; Step = 'production-launcher'; Detail = $local.Detail; LogPath = (Join-Path $Config.LogsPath 'remote-demo.log') }
     }
 
     if (-not $helper.HasExited) {
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Production launcher helper PID $($helper.Id) exceeded $TimeoutSeconds seconds; terminating the owned helper."
-        & $HelperStopper $Config $Run $helper.Id
+        & $HelperStopper $Config $Run $helper.Id $helper
     }
     $detail = if ($helperExited) {
         # The reason the child gave, not just the fact that it stopped. A refusal is printed by the launcher
@@ -779,8 +823,17 @@ function Start-AeroLinkRemoteDemoNgrok {
     $argumentLine = ((Get-AeroLinkRemoteDemoNgrokArguments -Config $Config) | ForEach-Object {
         if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
     }) -join ' '
-    return Start-Process -FilePath $Config.NgrokExecutable -ArgumentList $argumentLine -WindowStyle Hidden `
+    $process = Start-Process -FilePath $Config.NgrokExecutable -ArgumentList $argumentLine -WindowStyle Hidden `
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+    try {
+        Grant-AeroLinkCreatedProcessAccess -ProcessId $process.Id -StartedAt $process.StartTime.ToUniversalTime() `
+            -ExpectedExecutable $Config.NgrokExecutable -ExpectedArguments (Get-AeroLinkRemoteDemoNgrokArguments -Config $Config)
+    }
+    catch {
+        if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+        throw
+    }
+    return $process
 }
 
 function Test-AeroLinkRemoteDemoRuntimeMatchesSource {
@@ -798,7 +851,15 @@ function Test-AeroLinkRemoteDemoRuntimeMatchesSource {
         [Parameter(Mandatory)][string]$ExpectedSourceIdentity,
         [scriptblock]$RuntimeIdentityProbe
     )
-    $identity = if ($RuntimeIdentityProbe) { & $RuntimeIdentityProbe $Config } else { Get-AeroLinkRuntimeIdentity -BaseUri $Config.LocalApiBaseUri }
+    if (-not $RuntimeIdentityProbe) {
+        $instance = Get-AeroLinkInstanceConfig -ProductRoot (Join-Path $Config.AeroLinkRoot 'product') -Mode HomeCanonical
+        $disposition = Resolve-AeroLinkRuntimeDisposition -Port ([uri]$Config.LocalApiBaseUri).Port -BaseUri $Config.LocalApiBaseUri `
+            -ExpectedMode 'HOME-PRODUCTION' -ExpectedSourceIdentity $ExpectedSourceIdentity `
+            -ExpectedInstanceId $instance.InstanceId -ExpectedClassification $instance.Classification `
+            -OwnershipFragments @((Join-Path $Config.AeroLinkRoot 'product\src\AeroLink.Api'))
+        return [pscustomobject]@{ Matches = ($disposition.Disposition -eq 'Reuse'); Detail = $disposition.Detail }
+    }
+    $identity = & $RuntimeIdentityProbe $Config
     if ($null -eq $identity) {
         return [pscustomobject]@{ Matches = $false; Detail = 'The local AeroLink publishes no runtime identity, so it cannot be proven to be the verified production source. It will be restarted rather than exposed.' }
     }
@@ -856,6 +917,11 @@ function Start-AeroLinkRemoteDemo {
     # checkout, reconciled to current approved origin/main by strict fast-forward and revalidated — never
     # whichever branch the development checkout happens to be on, and never repaired into shape.
     $expectedSourceIdentity = $null
+    $sourceFailure = $null
+    if ($SkipSourceReconciliation -and -not $PSBoundParameters.ContainsKey('LocalReadyTest')) {
+        $expectedSourceIdentity = (Get-AeroLinkSourceFingerprint -RepositoryRoot $Config.AeroLinkRoot).Identity
+        if (-not $expectedSourceIdentity) { throw 'The continuation source identity cannot be established.' }
+    }
     if (-not $SkipSourceReconciliation) {
         $reconcile = if ($SourceReconciler) { & $SourceReconciler $Config } else {
             Assert-AeroLinkDedicatedProductionSource -SourceRoot $Config.AeroLinkRoot | Out-Null
@@ -881,11 +947,10 @@ function Start-AeroLinkRemoteDemo {
                 # after that call returned meant precisely that throw bypassed compensation: public endpoint
                 # down, source unchanged, nothing restored. The obligation, not the call's position, decides
                 # whether anything is owed.
-                $obligation = New-AeroLinkTransitionObligation
+                $obligation = New-AeroLinkProductionObligation -SourceRoot $Config.AeroLinkRoot -Config $Config -Policy KeepReady
                 $sourceAdvancedIrreversibly = $false
-                $priorTopology = Get-AeroLinkServiceTopology -Config $Config
-                $obligation.PriorTunnel = [bool]$priorTopology.TunnelRunning
-                $obligation.PriorRuntime = [bool]$priorTopology.RuntimeRunning
+                $priorTopology = [pscustomobject]@{ TunnelRunning = $obligation.PriorTunnel; RuntimeRunning = $obligation.PriorRuntime }
+                Save-AeroLinkProductionObligation -Obligation $obligation
                 $advanced = $null
                 try {
                     Assert-AeroLinkOwnedTunnelStopped -Config $Config -Run $run -Obligation $obligation | Out-Null
@@ -894,7 +959,9 @@ function Start-AeroLinkRemoteDemo {
                     # must not be left executing deleted files. Each stop is recorded as it succeeds, and
                     # PostgreSQL is left alone: it does not execute out of the source working tree.
                     Stop-AeroLinkSourceExecutingProcesses -Config $Config -Obligation $obligation -Run $run | Out-Null
+                    Save-AeroLinkProductionObligation -Obligation $obligation
                     $advanced = Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -AdvanceToSha $inspect.TargetSha
+                    if ($advanced.Action -eq 'Updated' -and $advanced.Canonical) { $sourceAdvancedIrreversibly = $true }
                     if ($advanced.Action -eq 'Updated' -and $advanced.Canonical -and $env:AEROLINK_REMOTE_DEMO_HANDOFF -ne "$($Config.AeroLinkRoot)|$($advanced.HeadSha)") {
                         # The source generation changed, and this module is the old one. Everything after this
                         # point - readiness, identity, the tunnel, the 401 proof - must run from the updated
@@ -933,6 +1000,7 @@ function Start-AeroLinkRemoteDemo {
                     }
                 }
                 catch {
+                    Save-AeroLinkProductionObligation -Obligation $obligation
                     # Past the point of no return: the source HAS advanced, so this module is the wrong
                     # generation to recover with and the compensation below would both lie about what
                     # happened and resume in pre-advance code. Propagate.
@@ -975,6 +1043,7 @@ function Start-AeroLinkRemoteDemo {
             Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: $($reconcile.Reason)"
             throw "AEROLINK REMOTE DEMO NOT READY: $($reconcile.Reason)"
         }
+        if ($reconcile.Action -in @('TransitionFailed', 'AdvanceRefused')) { $sourceFailure = $reconcile.Reason }
         $expectedSourceIdentity = [string]$reconcile.HeadSha
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production source: $($reconcile.Action) - $($reconcile.Reason)"
     }
@@ -1003,7 +1072,7 @@ function Start-AeroLinkRemoteDemo {
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "PostgreSQL ready: $($postgres.Detail)"
         $launcher = Invoke-AeroLinkProductionLauncher -Config $Config -Run $run `
             -LocalReadyTest $LocalReadyTest -HelperLauncher $ProductionHelperLauncher -HelperStopper $ProductionHelperStopper `
-            -TimeoutSeconds $ProductionTimeoutSeconds
+            -TimeoutSeconds $ProductionTimeoutSeconds -ForceLaunch
         if (-not $launcher.Healthy) {
             Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: $($launcher.Detail)"
             throw "AEROLINK REMOTE DEMO NOT READY: $($launcher.Detail)"
@@ -1038,6 +1107,7 @@ function Start-AeroLinkRemoteDemo {
     }
 
     $processes = Get-AeroLinkRemoteDemoNgrokProcess -Config $Config
+    if (@($processes.Owned).Count -gt 1) { throw 'Multiple owned ngrok processes are ambiguous; no READY state was asserted.' }
     if (@($processes.Mismatched).Count -gt 0) {
         $mismatchPids = (@($processes.Mismatched) | ForEach-Object { $_.ProcessId }) -join ', '
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: unexpected ngrok process(es) PID $mismatchPids."
@@ -1059,6 +1129,7 @@ function Start-AeroLinkRemoteDemo {
             throw "The tunnel is protected, but reachable notification links are not attributable to the current AeroLink process. $($originProof.Detail) Stop the owned local stack, then start the remote demo again."
         }
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message 'Remote demo already ready; no new processes started.'
+        if ($sourceFailure) { throw "The source transition failed ($sourceFailure). The protected prior topology is ready again." }
         return [pscustomobject]@{ Ready = $true; PublicUrl = $Config.PublicUrl; Detail = "$($decision.Message) $($originProof.Detail)" }
     }
     if ($local.Ready -and $decision.Decision -eq 'CanStart' -and -not $startedLocalForThisRun) {
@@ -1092,23 +1163,33 @@ function Start-AeroLinkRemoteDemo {
     } while ((Get-Date) -lt $ngrokDeadline)
 
     if (-not $probeResult.Protected) {
-        Stop-Process -Id $launched.Id -Force -ErrorAction SilentlyContinue
+        if (-not $launched.HasExited) { $launched.Kill(); $launched.WaitForExit() }
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: just-started tunnel not protected (expected 401, got $($probeResult.StatusCode)); torn down."
         throw "The just-started tunnel was not protected (expected 401, got $($probeResult.StatusCode)). It was torn down; nothing was left exposed."
     }
 
     $localAfter = & $LocalReadyTest $Config
     if (-not $localAfter.Ready) {
-        Stop-Process -Id $launched.Id -Force -ErrorAction SilentlyContinue
+        if (-not $launched.HasExited) { $launched.Kill(); $launched.WaitForExit() }
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: local AeroLink readiness lost after tunnel start."
         throw "The tunnel became protected but local AeroLink readiness was lost, so the just-started tunnel was stopped. $($localAfter.Detail)"
     }
 
     $runtime = Get-AeroLinkRemoteDemoLocalRuntimeIdentity -Config $Config -RuntimeProbe $LocalRuntimeProbe
     if (-not $runtime.Found) {
-        Stop-Process -Id $launched.Id -Force -ErrorAction SilentlyContinue
+        if (-not $launched.HasExited) { $launched.Kill(); $launched.WaitForExit() }
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO NOT READY: $($runtime.Detail)"
         throw "The tunnel became protected but the notification-link origin could not be attributed to the local AeroLink process, so the just-started tunnel was stopped. $($runtime.Detail)"
+    }
+
+    if ($expectedSourceIdentity) {
+        $finalMatch = Test-AeroLinkRemoteDemoRuntimeMatchesSource -Config $Config -ExpectedSourceIdentity $expectedSourceIdentity -RuntimeIdentityProbe $RuntimeIdentityProbe
+        $finalNgrok = Get-AeroLinkRemoteDemoNgrokProcess -Config $Config
+        if (-not $finalMatch.Matches -or @($finalNgrok.Mismatched).Count -or @($finalNgrok.Owned).Count -ne 1 -or
+            $finalNgrok.Owned[0].ProcessId -ne $launched.Id) {
+            if (-not $launched.HasExited) { $launched.Kill(); $launched.WaitForExit() }
+            throw 'The final runtime/tunnel ownership proof changed after publication; the created tunnel was stopped.'
+        }
     }
 
     $state = [pscustomobject]@{
@@ -1125,6 +1206,7 @@ function Start-AeroLinkRemoteDemo {
     if (-not (Test-Path -LiteralPath $Config.StatePath)) { New-Item -ItemType Directory -Path $Config.StatePath -Force | Out-Null }
     $state | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $Config.StatePath 'remote-demo-state.json') -Encoding UTF8
 
+    if ($sourceFailure) { throw "The source transition failed ($sourceFailure). The protected prior topology is ready again." }
     Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "AEROLINK REMOTE DEMO READY; protected tunnel PID $($launched.Id); $($probeResult.Detail)"
     return [pscustomobject]@{ Ready = $true; PublicUrl = $Config.PublicUrl; Detail = $probeResult.Detail }
 }
@@ -1156,8 +1238,9 @@ function Stop-AeroLinkRemoteDemo {
     }
     foreach ($process in @($processes.Owned)) {
         Write-Host "Stopping the AeroLink-owned ngrok tunnel (PID $($process.ProcessId))."
-        Stop-Process -Id $process.ProcessId -Force
-        if ($Obligation) { $Obligation.TunnelWasRunning = $true; $Obligation.TeardownBegan = $true }
+        Stop-AeroLinkProvenProcess -Process $process -OnStopped {
+            if ($Obligation) { $Obligation.TunnelWasRunning = $true; $Obligation.TeardownBegan = $true }
+        }
     }
     if (@($processes.Owned).Count -eq 0) {
         Write-Host 'No AeroLink-owned ngrok tunnel is running.'
@@ -1466,6 +1549,15 @@ function New-AeroLinkTransitionObligation {
         PriorTunnel       = $false
         PriorRuntime      = $false
         Discharged        = $false
+        SourceRoot        = $null
+        SourceBefore      = $null
+        Policy            = 'Preserve'
+        PublicOrigin      = $null
+        Stage             = 'Captured'
+        RuntimeIdentity   = $null
+        LocalReady        = $false
+        PublicProtected   = $false
+        OriginValid       = $false
     }
 }
 
@@ -1513,11 +1605,77 @@ function Get-AeroLinkServiceTopology {
     # else is not ours to count as our topology, and is not ours to stop either.
     $ownedRuntime = $owner.Found -and
         (Test-AeroLinkProcessOwnership -CommandLine $owner.CommandLine -ExecutablePath $owner.ExecutablePath -OwnershipFragments @($apiProjectDirectory))
+    if ($owner.Found -and -not $ownedRuntime) { throw 'The local listener belongs to another source or application. Nothing was stopped.' }
+    $tunnels = Get-AeroLinkRemoteDemoNgrokProcess -Config $Config
+    if (@($tunnels.Mismatched).Count -gt 0) { throw 'Ngrok ownership is unknown or contradicts the configured launch contract. Nothing was stopped.' }
+    if (@($tunnels.Owned).Count -gt 1) { throw 'Multiple owned ngrok tunnels are ambiguous. Nothing was stopped.' }
     return [pscustomobject]@{
-        TunnelRunning  = (@((Get-AeroLinkRemoteDemoNgrokProcess -Config $Config).Owned).Count -gt 0)
+        TunnelRunning  = (@($tunnels.Owned).Count -eq 1)
         RuntimeRunning = [bool]$ownedRuntime
         RuntimeDetail  = $owner.Detail
     }
+}
+
+function Save-AeroLinkProductionObligation {
+    param([Parameter(Mandatory)]$Obligation)
+    $env:AEROLINK_PRODUCTION_OBLIGATION = $Obligation | ConvertTo-Json -Depth 12 -Compress
+}
+
+function New-AeroLinkProductionObligation {
+    param([Parameter(Mandatory)][string]$SourceRoot, $Config, [string]$Policy = 'Preserve')
+    $obligation = New-AeroLinkTransitionObligation
+    $obligation.SourceRoot = $SourceRoot
+    $obligation.SourceBefore = (Get-AeroLinkSourceFingerprint -RepositoryRoot $SourceRoot).Sha
+    $obligation.Policy = $Policy
+    if ($Config) {
+        $topology = Get-AeroLinkServiceTopology -Config $Config
+        $obligation.PriorTunnel = $topology.TunnelRunning
+        $obligation.PriorRuntime = $topology.RuntimeRunning
+        $obligation.RuntimeIdentity = Get-AeroLinkRuntimeIdentity -BaseUri $Config.LocalApiBaseUri
+        $obligation.LocalReady = (Test-AeroLinkRemoteDemoLocalReady -Config $Config).Ready
+        if ($topology.TunnelRunning) {
+            $obligation.PublicProtected = (Test-AeroLinkRemoteDemoPublicProtection -Config $Config).Protected
+            $obligation.OriginValid = (Test-AeroLinkRemoteDemoNotificationOriginProof -Config $Config).Valid
+            if (-not $obligation.PublicProtected -or -not $obligation.OriginValid) {
+                throw "An owned tunnel is running but its safe restoration contract is incomplete (public 401=$($obligation.PublicProtected), notification origin=$($obligation.OriginValid), local ready=$($obligation.LocalReady)). Source/runtime replacement was refused; the running topology was not treated as OFF."
+            }
+            $obligation.PublicOrigin = $Config.PublicUrl
+        }
+    }
+    else {
+        if (@(Get-CimInstance Win32_Process -Filter "Name='ngrok.exe'" -ErrorAction Stop).Count) {
+            throw 'Ngrok is running but there is no usable AeroLink tunnel contract. Source/runtime replacement was refused.'
+        }
+        $owner = Get-AeroLinkPortOwner -Port 5080
+        if ($owner.Found -and ($owner.Ambiguous -or -not $owner.Attributable -or
+            -not (Test-AeroLinkProcessOwnership -CommandLine $owner.CommandLine -ExecutablePath $owner.ExecutablePath -OwnershipFragments @((Join-Path $SourceRoot 'product\src\AeroLink.Api'))))) {
+            throw 'Local listener ownership cannot be established; no transition was started.'
+        }
+        $obligation.PriorRuntime = $owner.Found
+    }
+    if ($obligation.PriorRuntime) {
+        $identity = Get-AeroLinkRuntimeIdentity -BaseUri 'http://127.0.0.1:5080'
+        $expected = Get-AeroLinkInstanceConfig -ProductRoot (Join-Path $SourceRoot 'product') -Mode HomeCanonical
+        if ($identity -and (-not $identity.PSObject.Properties['instance'] -or
+            $identity.instance.id -ne $expected.InstanceId -or $identity.instance.classification -ne $expected.Classification)) {
+            throw 'The running API does not prove the expected installation binding. Source/runtime replacement was refused.'
+        }
+    }
+    return $obligation
+}
+
+function Stop-AeroLinkProductionTransition {
+    param([Parameter(Mandatory)]$Obligation, $Config)
+    try {
+        $Obligation.Stage = 'Quiescing'
+        if ($Config) { Assert-AeroLinkOwnedTunnelStopped -Config $Config -Obligation $Obligation | Out-Null }
+        Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @((Join-Path $Obligation.SourceRoot 'product\src\AeroLink.Api')) -OnStopped {
+            $Obligation.RuntimeWasRunning = $true
+            $Obligation.TeardownBegan = $true
+        } | Out-Null
+        $Obligation.Stage = 'Quiesced'
+    }
+    finally { Save-AeroLinkProductionObligation -Obligation $Obligation }
 }
 
 function Restore-AeroLinkServiceTopology {
@@ -1581,7 +1739,9 @@ function Stop-AeroLinkSourceExecutingProcesses {
     $clientRoot = Join-Path $Config.AeroLinkRoot 'product\client'
     $stoppedAnything = $false
 
-    $api = Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiProjectDirectory)
+    $api = Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiProjectDirectory) -OnStopped {
+        if ($Obligation) { $Obligation.RuntimeWasRunning = $true; $Obligation.TeardownBegan = $true }
+    }
     if ($api.Stopped) {
         $stoppedAnything = $true
         # Recorded HERE, not after the last stop below: a later failure must not erase the fact that this one
@@ -1784,11 +1944,16 @@ function Invoke-AeroLinkProductionSourceReconciliation {
     # source advance is about a running process, and an owned API that is up but unhealthy is precisely the
     # one that must not be left executing replaced files. Recording topology from a readiness probe meant
     # such a process was stopped while the record said nothing had been running.
-    $priorState = if ($ServiceStateProbe) { & $ServiceStateProbe $Config } else { Get-AeroLinkServiceTopology -Config $Config }
+    $priorState = if ($ServiceStateProbe) { & $ServiceStateProbe $Config } else {
+        $policy = if ($PreserveServiceState) { 'Preserve' } else { 'KeepReady' }
+        $obligation = New-AeroLinkProductionObligation -SourceRoot $Config.AeroLinkRoot -Config $Config -Policy $policy
+        [pscustomobject]@{ TunnelRunning = $obligation.PriorTunnel; RuntimeRunning = $obligation.PriorRuntime }
+    }
     $obligation.PriorTunnel = [bool]$priorState.TunnelRunning
     $obligation.PriorRuntime = [bool]$priorState.RuntimeRunning
     Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Before teardown: tunnel $(if ($priorState.TunnelRunning) { 'running' } else { 'not running' }), owned runtime $(if ($priorState.RuntimeRunning) { 'running' } else { 'not running' })."
 
+    if (-not $ServiceStateProbe) { Save-AeroLinkProductionObligation -Obligation $obligation }
     $advance = $null
     try {
         if ($TunnelStopper) { & $TunnelStopper $Config | Out-Null; $obligation.TeardownBegan = $true }
@@ -1799,12 +1964,14 @@ function Invoke-AeroLinkProductionSourceReconciliation {
         if ($RuntimeStopper) { & $RuntimeStopper $Config $inspect | Out-Null; $obligation.TeardownBegan = $true }
         else { Stop-AeroLinkSourceExecutingProcesses -Config $Config -Obligation $obligation -Run $run | Out-Null }
 
+        if (-not $ServiceStateProbe) { Save-AeroLinkProductionObligation -Obligation $obligation }
         $advance = if ($SourceAdvancer) { & $SourceAdvancer $Config $inspect } else {
             Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -AdvanceToSha $inspect.TargetSha
         }
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production-source advance: $($advance.Action) - $($advance.Reason)"
     }
     catch {
+        if (-not $ServiceStateProbe) { Save-AeroLinkProductionObligation -Obligation $obligation }
         # Nothing was taken down, so nothing is owed - the tunnel refused to stop, or a mismatched ngrok made
         # the stop refuse. Fail closed and leave the machine exactly as it was.
         if (-not $obligation.TeardownBegan) { throw }
@@ -2084,3 +2251,5 @@ Export-ModuleMember -Function `
     Remove-AeroLinkRemoteDemoTask, `
     Get-AeroLinkRemoteDemoTaskStatus, `
     Get-AeroLinkRemoteDemoStatus
+
+Export-ModuleMember -Function Save-AeroLinkProductionObligation, New-AeroLinkProductionObligation, Stop-AeroLinkProductionTransition, Set-AeroLinkRemoteDemoNotificationOriginProof

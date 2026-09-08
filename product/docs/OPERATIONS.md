@@ -210,6 +210,63 @@ reboot can never block a fresh start; live ownership, port, runtime identity and
 If the production launcher exits with a terminal refusal, recovery reports that refusal within seconds and
 quotes the reason the launcher gave. It no longer waits out the readiness timeout for a port that cannot open.
 
+### HOME process control and first deployment
+
+Ordinary production Start preserves the current tunnel state. An exact ready API is reused without a client
+build or PostgreSQL startup. Reuse requires the dedicated source, launcher mode, installation classification
+and instance ID. If source or runtime replacement is needed, the controller captures its obligation, stops
+the owned tunnel before the API, and keeps that obligation through source re-entry, upgrade, build and startup.
+The replacement API receives an owed public notification origin before it starts. Its new listener PID and
+start identity own the origin proof before tunnel restoration; public 401 and readiness are checked again.
+An incomplete owed restoration exits unsuccessfully even when a safe local API remains available.
+
+API and ngrok ownership uses live Windows executable/command-line and process-creation evidence, not a saved
+PID or a health response alone. Supported creators add query/read/terminate/synchronize access for the
+operator's account SID to each new service process, retaining the existing ACL. This makes the same process
+accessible from the account's S4U and ordinary interactive logons without granting Everyone access or changing
+the caller's token. API startup uses the built apphost directly so access is established before readiness,
+including for a process whose database readiness fails. Termination pins a native process handle and verifies
+the expected executable and exact start time, rejecting stale PIDs. Ngrok's full supported argument sequence
+must match; extra URL/config/policy overrides are not treated as the configured tunnel.
+
+One installation lease coordinates production Start, remote-demo Start/Stop, and source reconciliation.
+The OS file handle remains held through a fresh child continuation. Only a descendant with the matching
+per-run capability and live owner creation identity can share it. Contending invocations fail promptly with a
+retry diagnosis. An exited coordinator releases the OS lease; leftover file contents do not replay an old
+obligation. Ordinary production/preserve-state and explicit remote Start/scheduled keep-ready remain separate
+policies. No durable disabled-tunnel preference is introduced.
+
+**First deployment of this contract requires the one elevated setup approved in DEC-121.** A pre-fix launcher
+can refuse before it fetches the fix, so first obtain the merged setup code without moving the development
+checkout. In the canonical repository, fetch and create a temporary source-only worktree:
+
+```powershell
+git fetch origin
+$setupSource = Join-Path $env:TEMP ('aerolink-home-setup-' + [guid]::NewGuid().ToString('N'))
+git worktree add --detach $setupSource origin/main
+```
+
+From an elevated **Windows PowerShell under the same operator account**, run the script at that exact
+`$setupSource` path:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<setupSource>\product\scripts\Initialize-AeroLinkHomeProcessControl.ps1"
+```
+
+Setup verifies clean fetched main of the same repository, the dedicated source/data binding and HOME instance.
+It temporarily disables the existing supported recovery triggers, waits boundedly for an old controller to
+finish, and restores the previous enabled states in `finally`. It grants access only after proving the legacy
+API/tunnel contracts and process starts. The only filesystem ACL change is operator Modify access on the
+installation's bootstrap coordination directory. It then runs the existing dedicated production launch/update
+path while legacy recovery triggers are still paused, allowing its strict fast-forward and fresh re-entry to
+reach the fixed controller. Existing database/evidence locations and the ordinary clone-validated upgrade
+boundary remain authoritative. Setup never runs an API from the temporary worktree.
+
+After setup, run the stable production BAT from ordinary Explorer/PowerShell and verify unchanged PIDs on
+reuse, or the new runtime/origin and protected tunnel after a required transition. A one-time setup pass is
+not evidence that the S4U/non-admin or final HOME acceptance matrix has passed; retain those results separately
+on the delivery issue. Foreign/unprovable processes or unresolved configuration remain explicit refusals.
+
 ### Database upgrade posture, before the web server
 
 Both launchers ask what this build would do to this database **before** building a client or starting an API:

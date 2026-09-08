@@ -69,6 +69,27 @@ try {
     $reuse = Get-Disposition -PortOwnerProbe (New-Owner) -RuntimeProbe (New-Identity $currentSha 'HOME-PRODUCTION')
     Assert-True ($reuse.Disposition -eq 'Reuse') 'A matching, ready, owned process in the requested mode may be reused.'
 
+    # Exact source/mode can belong to a different installation. A requested binding is mandatory for reuse,
+    # and a contradiction must not become permission to terminate that other installation.
+    foreach ($bindingCase in @(
+        @{ Id = 'home-instance'; Classification = 'HomeCanonical'; Expected = 'Reuse' },
+        @{ Id = 'other-instance'; Classification = 'HomeCanonical'; Expected = 'Refuse' },
+        @{ Id = 'home-instance'; Classification = 'WorkLaptopLocal'; Expected = 'Refuse' },
+        @{ Id = ''; Classification = 'HomeCanonical'; Expected = 'Refuse' }
+    )) {
+        $boundIdentity = [pscustomobject]@{
+            sourceIdentity = $currentSha; mode = 'HOME-PRODUCTION'
+            instance = [pscustomobject]@{ id = $bindingCase.Id; classification = $bindingCase.Classification }
+        }
+        $boundProbe = { param($BaseUri) $boundIdentity }.GetNewClosure()
+        $boundDisposition = Resolve-AeroLinkRuntimeDisposition -Port 5080 -BaseUri 'http://127.0.0.1:5080' `
+            -ExpectedMode 'HOME-PRODUCTION' -ExpectedSourceIdentity $currentSha -OwnershipFragments $ownership `
+            -ExpectedInstanceId 'home-instance' -ExpectedClassification 'HomeCanonical' `
+            -PortOwnerProbe (New-Owner) -RuntimeProbe $boundProbe -ReadyProbe $alwaysReady
+        Assert-True ($boundDisposition.Disposition -eq $bindingCase.Expected) `
+            "Installation binding $($bindingCase.Id)/$($bindingCase.Classification) must produce $($bindingCase.Expected)."
+    }
+
     # --- Healthy but older source: STALE. This is the #816 defect. ---
     $stale = Get-Disposition -PortOwnerProbe (New-Owner) -RuntimeProbe (New-Identity $olderSha 'HOME-PRODUCTION')
     Assert-True ($stale.Disposition -eq 'RestartStale') 'A healthy AeroLink from another revision must be restarted, not reused.'
@@ -128,8 +149,10 @@ try {
     $null = Get-Disposition -PortOwnerProbe $testPortOwner -RuntimeProbe (New-Identity $currentSha 'HOME-PRODUCTION')
 
     # --- Ownership matching is by command line and executable, and is not fooled by a similar name ---
-    Assert-True (Test-AeroLinkProcessOwnership -CommandLine "dotnet run --project `"$($ownership[0])\AeroLink.Api.csproj`"" -ExecutablePath 'dotnet.exe' -OwnershipFragments $ownership) `
-        'This checkout''s AeroLink API command line is recognized.'
+    Assert-True (Test-AeroLinkProcessOwnership -CommandLine "dotnet `"$($ownership[0])\bin\Release\net10.0\AeroLink.Api.dll`"" -ExecutablePath 'dotnet.exe' -OwnershipFragments $ownership) `
+        'This checkout''s exact API DLL invocation is recognized.'
+    Assert-True (-not (Test-AeroLinkProcessOwnership -CommandLine "foreign.exe --description `"$($ownership[0])`"" -ExecutablePath 'foreign.exe' -OwnershipFragments $ownership)) `
+        'Quoting the API directory cannot confer ownership on a foreign executable.'
     Assert-True (-not (Test-AeroLinkProcessOwnership -CommandLine 'node aerolink-api-mock.js' -ExecutablePath 'node.exe' -OwnershipFragments $ownership)) `
         'A process merely mentioning AeroLink in a different form is not owned.'
 
@@ -251,6 +274,9 @@ finally {
         if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
+
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'AeroLinkProcessControl.Tests.ps1')
+Assert-True ($LASTEXITCODE -eq 0) 'Managed process freshness and cross-process transition lease contracts must pass.'
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }

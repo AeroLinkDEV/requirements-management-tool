@@ -232,12 +232,24 @@ Assert-True ($null -eq (Get-AeroLinkProductionLauncherRefusal -StandardOutputPat
 
 # --- 10. A genuine slow start still gets its bounded readiness window ---
 $slowHelper = New-FakeHelper -Stuck $true
+$slowHelper | Add-Member -NotePropertyName PollCount -NotePropertyValue 0
+$slowHelper | Add-Member -MemberType ScriptMethod -Name Refresh -Force -Value {
+    $this.PollCount++
+    if ($this.PollCount -ge 4) { $this.HasExited = $true; $this.ExitCode = 0 }
+}
 $readyAfter = 0
 $slowReady = { param($C) $script:readyAfter++; if ($script:readyAfter -lt 3) { [pscustomobject]@{ Ready = $false; Detail = 'starting' } } else { [pscustomobject]@{ Ready = $true; Detail = 'ready' } } }
 $slow = Invoke-AeroLinkProductionLauncher -Config $config -Run (New-TestRun) `
     -LocalReadyTest $slowReady -HelperLauncher { param($C, $R) $slowHelper } -HelperStopper $stopper `
     -TimeoutSeconds 60 -PollIntervalSeconds 1 -GraceSeconds 0
 Assert-True ($slow.Healthy) 'Scenario 10: a slow but genuine startup must still be allowed its bounded readiness window.'
+Assert-True ($slowHelper.PollCount -ge 4) 'Local readiness must not terminate a controller still completing its obligation.'
+
+$readyButFailed = Invoke-AeroLinkProductionLauncher -Config $config -Run (New-TestRun) `
+    -LocalReadyTest { [pscustomobject]@{ Ready = $true; Detail = 'API ready, restoration failed' } } `
+    -HelperLauncher { $exitedHelper } -HelperStopper $stopper -ForceLaunch `
+    -TimeoutSeconds 5 -PollIntervalSeconds 1 -PostExitGraceSeconds 0
+Assert-True (-not $readyButFailed.Healthy) 'A non-zero production controller exit remains failure even when the local API is ready.'
 
 # --- 11. A stale remote-demo state file must not false-block a fresh start ---
 #
@@ -577,5 +589,7 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'AeroLinkProductionTransition.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Production transition controller contracts failed.' }
 Write-Host 'Remote-demo recovery regression passed.' -ForegroundColor Green
 exit 0

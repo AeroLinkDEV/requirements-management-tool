@@ -2317,6 +2317,21 @@ successful when the reviewed merge candidate contains no trace of it.
 - **Authority:** The directed `trace()` projection and the view-supplied node set remain authoritative. Framing is a
   presentation operation over that set and must not discover siblings, invent edges, or alter controlled identity.
 
+### DEC-121 - One-Time HOME Process-Control Deployment Setup
+
+- **Date:** 2026-09-08
+- **Status:** Accepted
+- **Decision:** The first deployment of #924 may require one explicitly elevated setup invocation to adopt
+  strongly attributed legacy HOME processes and establish access across the S4U/interactive logon boundary.
+  Subsequent ordinary production launches and updates remain non-admin and preserve the initiating service
+  policy. The setup uses approved main, the existing dedicated source, and the existing canonical installation.
+- **Authority:** The owner answered **"Yes approved !"** to the explicit question authorizing a one-time
+  elevated setup after merge, with subsequent launches and updates remaining non-admin. The approval is
+  recorded on [issue #924](https://github.com/AeroLinkDEV/requirements-management-tool/issues/924#issuecomment-5585911172).
+- **Boundary:** This is a first-deployment allowance, not permission to run unmerged code against HOME data,
+  weaken ownership checks, reset/reseed the database, bypass the source gate, or require elevation for normal
+  use. Actual S4U and final HOME acceptance remain required.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

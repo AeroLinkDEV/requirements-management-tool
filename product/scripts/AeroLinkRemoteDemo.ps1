@@ -54,6 +54,16 @@ catch {
     }
 }
 
+$transitionLease = $null
+if ($Action -in @('Start', 'Stop', 'Continue', 'Reconcile')) {
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1')
+    $activeConfig = Get-AeroLinkRemoteDemoConfig
+    $activeInstallation = Get-AeroLinkInstallationPaths -ProductRoot (Join-Path $activeConfig.AeroLinkRoot 'product')
+    $policy = if ($Action -eq 'Start' -or $Action -eq 'Reconcile') { 'KeepReady' } else { 'Preserve' }
+    $transitionLease = Enter-AeroLinkTransition -InstallationRoot $activeInstallation.InstallationRoot -Policy $policy
+}
+try {
 switch ($Action) {
     'Start' {
         $config = Get-AeroLinkRemoteDemoConfig
@@ -107,6 +117,7 @@ switch ($Action) {
             $result = Invoke-AeroLinkProductionSourceReconciliation -Config $config -Scheduled:$Scheduled
             Write-Host "AEROLINK PRODUCTION SOURCE $($result.Action.ToUpperInvariant())"
             Write-Host $result.Detail
+            if ($result.Action -notin @('Updated', 'AlreadyCurrent', 'CachedCanonical')) { exit 1 }
             exit 0
         }
         catch {
@@ -157,3 +168,5 @@ switch ($Action) {
         }
     }
 }
+
+} finally { if ($transitionLease) { Exit-AeroLinkTransition -Lease $transitionLease } }
