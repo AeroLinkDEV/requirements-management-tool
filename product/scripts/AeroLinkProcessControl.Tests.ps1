@@ -74,6 +74,19 @@ exit 0
     } finally {
         if ($survivor) { if (-not $survivor.HasExited) { $survivor.Kill(); $survivor.WaitForExit() }; $survivor.Dispose() }
     }
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkBootstrap.psm1') -Force
+    $reentrySurvivor = $null
+    try {
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        $reentryCode = Invoke-AeroLinkBootstrapReentry -CurrentScriptPath (Join-Path $helperScripts 'Start-AeroLinkProduction.ps1') -ExpectedSha 'disposable-reentry-source'
+        $reentrySurvivor = Get-Process -Id ([int](Get-Content (Join-Path $helperScripts 'survivor.pid')))
+        Check ($reentryCode -eq 0 -and $timer.Elapsed.TotalSeconds -lt 15 -and -not $reentrySurvivor.HasExited) 'Source re-entry must finish while its replacement service remains alive.'
+        Set-Content -LiteralPath (Join-Path $helperScripts 'Start-AeroLinkProduction.ps1') -Value 'exit 7'
+        $reentryCode = Invoke-AeroLinkBootstrapReentry -CurrentScriptPath (Join-Path $helperScripts 'Start-AeroLinkProduction.ps1') -ExpectedSha 'disposable-reentry-source'
+        Check ($reentryCode -eq 7) 'Source re-entry must retain a failed launcher exit code.'
+    } finally {
+        if ($reentrySurvivor) { if (-not $reentrySurvivor.HasExited) { $reentrySurvivor.Kill(); $reentrySurvivor.WaitForExit() }; $reentrySurvivor.Dispose() }
+    }
 
     $lease = Enter-AeroLinkTransition -InstallationRoot $root -Policy Preserve
     $module = Join-Path $PSScriptRoot 'AeroLinkTransition.psm1'
