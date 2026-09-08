@@ -209,7 +209,7 @@ export function rollingStats(records) {
   const groups = new Map()
   for (const record of records) {
     const category = classifyRun(record)
-    const entry = groups.get(category) ?? { category, criticalPath: [], jobGroups: new Map(), counts: { runs: 0, expected: 0, executed: 0, failed: 0, skipped: 0, flaky: 0 } }
+    const entry = groups.get(category) ?? { category, criticalPath: [], jobGroups: new Map(), counts: { runs: 0, expected: 0, executed: 0, passed: 0, failed: 0, skipped: 0, flaky: 0 } }
     entry.counts.runs += 1
     const duration = runDurationMs(record)
     if (duration !== null) entry.criticalPath.push(duration)
@@ -219,7 +219,7 @@ export function rollingStats(records) {
       entry.jobGroups.set(group, list)
     }
     const counts = record.counts ?? {}
-    for (const key of ['expected', 'executed', 'failed', 'skipped', 'flaky']) {
+    for (const key of ['expected', 'executed', 'passed', 'failed', 'skipped', 'flaky']) {
       if (Number.isInteger(counts[key])) entry.counts[key] += counts[key]
     }
     groups.set(category, entry)
@@ -423,10 +423,10 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
   lines.push('')
   lines.push('## Comparable groups')
   lines.push('')
-  lines.push('| Category | Runs | Critical path median | Critical path p95 | Expected | Executed | Failed | Skipped | Flaky |')
-  lines.push('|---|---|---|---:|---:|---:|---:|---:|---:|')
+  lines.push('| Category | Runs | Critical path median | Critical path p95 | Expected | Executed | Passed | Failed | Skipped | Flaky |')
+  lines.push('|---|---|---|---:|---:|---:|---:|---:|---:|---:|')
   for (const group of stats) {
-    lines.push(`| ${escapeMarkdown(group.category)} | ${group.runs} | ${group.criticalPath.median === null ? '—' : `${Math.round(group.criticalPath.median / 1000)}s`} | ${group.criticalPath.p95 === null ? '—' : `${Math.round(group.criticalPath.p95 / 1000)}s`} | ${group.counts.expected} | ${group.counts.executed} | ${group.counts.failed} | ${group.counts.skipped} | ${group.counts.flaky} |`)
+    lines.push(`| ${escapeMarkdown(group.category)} | ${group.runs} | ${group.criticalPath.median === null ? '—' : `${Math.round(group.criticalPath.median / 1000)}s`} | ${group.criticalPath.p95 === null ? '—' : `${Math.round(group.criticalPath.p95 / 1000)}s`} | ${group.counts.expected} | ${group.counts.executed} | ${group.counts.passed} | ${group.counts.failed} | ${group.counts.skipped} | ${group.counts.flaky} |`)
   }
   lines.push('')
   if (regressions.length > 0) {

@@ -158,6 +158,7 @@ test('the real manifest writer agrees with consumer eligibility, including the o
       { record: { ...good, counts: {} }, eligible: false },
       { record: { ...good, missing: [{ job: 'backend-api-1', reason: 'No fragment' }] }, eligible: false },
       { record: { ...good, missingTotal: 1 }, eligible: false },
+      { record: { ...good, missing: [], missingTotal: undefined }, eligible: false },
       { record: { ...good, missing: undefined }, eligible: false },
       { record: { ...good, jobs: [{ instance: 'gate', result: 'failure' }] }, eligible: false },
     ]
@@ -174,6 +175,14 @@ test('the real manifest writer agrees with consumer eligibility, including the o
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
+})
+
+test('manifest eligibility rejects an invalid or nonzero shared missing total', () => {
+  const base = manifest()
+  assert.equal(deriveEligibility(base).eligible, true)
+  assert.equal(deriveEligibility({ ...base, gates: { ...base.gates, missingTotal: 1 } }).eligible, false)
+  assert.equal(deriveEligibility({ ...base, gates: { ...base.gates, missingTotal: null } }).eligible, false)
+  assert.ok(validateManifest({ ...base, gates: { ...base.gates, missingTotal: -1 } }).some((error) => /missingTotal/.test(error)))
 })
 
 const DAY_MS = 24 * 60 * 60 * 1000

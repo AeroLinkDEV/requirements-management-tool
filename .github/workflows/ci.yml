@@ -1832,6 +1832,10 @@ jobs:
           CLASS_CLIENT: ${{ needs.changes.outputs.client }}
           CLASS_BROWSER: ${{ needs.changes.outputs.browser }}
           CLASS_POSTGRESQL: ${{ needs.changes.outputs.postgresql }}
+          FULL_DIAGNOSTICS: ${{ inputs.full_diagnostics }}
+          PULL_REQUEST_NUMBER: ${{ inputs.pull_request_number }}
+          PULL_REQUEST_BASE_SHA: ${{ inputs.pull_request_base_sha }}
+          PULL_REQUEST_HEAD_SHA: ${{ inputs.pull_request_head_sha }}
           METRICS_RUN_META_PATH: ${{ runner.temp }}/metrics/run-meta.json
         run: |
           tree="$(git rev-parse HEAD^{tree})"

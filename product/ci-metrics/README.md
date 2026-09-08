@@ -129,7 +129,7 @@ default-branch code and never executes PR content.
 - separates event roles and changed-area scopes (for example, `dispatch-backend-only`, `dispatch-mixed`,
   `queue-mixed`, `push-main`, `scheduled`), with a `rerun-` prefix for later attempts, and computes
   median/p95 for the critical path and each job group, plus
-  count, flake-title, and cache trends;
+  expected/executed/passed/failed/skipped/flaky count, flake-title, and cache trends;
 - detects sustained regressions only with enough comparable evidence (window and minimum-run guards;
   noise never fires);
 - publishes `rolling-metrics.json` + `rolling-metrics.md` as a 30-day artifact.
@@ -167,6 +167,8 @@ merged run record: repository, workflow and revision, run id/attempt, PR/base/he
 checked-out commit and tree, event, classifier outputs, per-job gate results, verified totals, and
 `canAuthorizePostMergeSkip` (true only when the gate and every selected product job passed with zero
 missing, zero failed tests and coherent verified totals, using the consumer's same eligibility function).
+The manifest carries both the bounded missing-entry list and its authoritative `missingTotal`; an absent,
+invalid, or nonzero total remains ineligible even when the bounded list is empty.
 The manifest is labelled `shadow` because same-workflow code is PR-controlled on pull_request
 runs, and it is uploaded only when the aggregate job succeeds (30-day retention).
 

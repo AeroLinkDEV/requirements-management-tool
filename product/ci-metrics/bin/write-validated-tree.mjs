@@ -66,6 +66,9 @@ function main() {
       selected: selected.map((job) => ({ instance: job.instance, result: job.result })),
       skipped: Array.isArray(record.skipped) ? record.skipped.map((job) => ({ instance: job.instance, reason: bounded(job.reason, 300) })) : [],
       missing: Array.isArray(record.missing) ? record.missing.map((entry) => ({ job: bounded(entry.job, 120), reason: bounded(entry.reason, 300) })) : null,
+      // Keep the bounded list and its authoritative total together. The shared consumer predicate uses
+      // this value so a truncated/nonexistent list cannot accidentally look like complete evidence.
+      missingTotal: Number.isInteger(record.missingTotal) && record.missingTotal >= 0 ? record.missingTotal : null,
       gatePassed,
       allSelectedPassed,
     },
@@ -82,7 +85,7 @@ function main() {
   }
   // Use the same gate/count predicate as the trusted consumer. The producer's
   // claim is advisory, but it must not advertise contradictory evidence.
-  manifest.canAuthorizePostMergeSkip = record.missingTotal === 0 && deriveEligibility(manifest).eligible
+  manifest.canAuthorizePostMergeSkip = deriveEligibility(manifest).eligible
 
   mkdirSync(dirname(outputPath), { recursive: true })
   writeFileSync(outputPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')

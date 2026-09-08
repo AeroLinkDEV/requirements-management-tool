@@ -54,6 +54,13 @@ test('scheduled proof uses bounded duration packing and cannot be cancelled by a
   assert.doesNotMatch(full, /playwright test --shard/)
 })
 
+test('run metadata receives dispatch mode and PR identity inputs used by browser topology', () => {
+  const report = jobBodies(workflowLines())['metrics-report'].join('\n')
+  for (const name of ['FULL_DIAGNOSTICS', 'PULL_REQUEST_NUMBER', 'PULL_REQUEST_BASE_SHA', 'PULL_REQUEST_HEAD_SHA']) {
+    assert.match(report, new RegExp(`${name}: \\$\\{\\{\\s*inputs\\.`), `${name} must come from workflow_dispatch inputs`)
+  }
+})
+
 test('the actual aggregate shell rejects incomplete scheduled and manual browser proof', () => {
   const gate = jobBodies(workflowLines()).gate
   assert.match(gate.join('\n'), /needs: \[[^\n]*browser-full/)

@@ -177,6 +177,10 @@ export function validateManifest(manifest) {
     errors.push('Manifest has no gates evidence.')
   } else {
     if (typeof gates.gatePassed !== 'boolean' || typeof gates.allSelectedPassed !== 'boolean') errors.push('Gate result flags must be boolean.')
+    if (gates.missingTotal !== undefined &&
+      (!Number.isInteger(gates.missingTotal) || gates.missingTotal < 0)) {
+      errors.push('gates.missingTotal must be a non-negative integer when present.')
+    }
   }
   const json = JSON.stringify(manifest)
   if (Buffer.byteLength(json, 'utf8') > 256 * 1024) errors.push('Manifest exceeds the bounded size.')
@@ -196,6 +200,9 @@ export function deriveEligibility(manifest) {
       reasons.push('A selected gate did not succeed.')
     }
     if (!Array.isArray(gates.missing) || gates.missing.length > 0) reasons.push('Missing gate evidence is present or unavailable.')
+    if (gates.missingTotal !== undefined && (!Number.isInteger(gates.missingTotal) || gates.missingTotal !== 0)) {
+      reasons.push('Missing gate evidence total is present or unavailable.')
+    }
   }
   const totals = manifest?.verifiedTotals ?? {}
   for (const key of ['expected', 'executed', 'passed', 'failed', 'skipped']) {

@@ -177,6 +177,17 @@ test('rollingStats groups like-for-like runs with median/p95', () => {
   assert.equal(pushMain.runs, 1)
 })
 
+test('rolling count totals retain passed results alongside TRX reconciliation fields', () => {
+  const stats = rollingStats([
+    record({ counts: { expected: 4, executed: 3, passed: 2, failed: 1, skipped: 1, flaky: 0 } }),
+    record({ run: { ...record().run, id: 2 }, counts: { expected: 2, executed: 2, passed: 2, failed: 0, skipped: 0, flaky: 0 } }),
+  ])
+  const group = stats.find((entry) => entry.category === 'backend-only')
+  assert.deepEqual(group.counts, { runs: 2, expected: 6, executed: 5, passed: 4, failed: 1, skipped: 1, flaky: 0 })
+  const report = buildRollingReport({ records: [record()] })
+  assert.match(report.markdown, /Expected \| Executed \| Passed \| Failed \| Skipped \| Flaky/)
+})
+
 test('detectRegressions requires sustained evidence and never fires on noise', () => {
   assert.deepEqual(detectRegressions([record()], {}), [])
   const fast = Array.from({ length: 6 }, (_, i) => record({ criticalPath: { job: 'gate', durationMs: 30_000, unavailableReason: null }, run: { ...record().run, id: i + 1 } }))
