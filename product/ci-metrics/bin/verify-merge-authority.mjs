@@ -1,6 +1,9 @@
 // Trusted default-branch verifier and App-bound check publisher for merge-queue candidates (#549).
 
-import { readFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
+import { collectMaintenanceReview } from '../lib/maintenance-approval-github.mjs'
+import { maintenanceReviewSummary } from '../lib/maintenance-approval.mjs'
+import { trustedMaintenanceContext } from '../lib/maintenance-runtime.mjs'
 import { evaluateMergeGroupCandidate, TRUSTED_SURFACE_PREFIXES } from '../lib/merge-authority.mjs'
 import {
   compareTrustedSurfaces,
@@ -131,6 +134,24 @@ async function main() {
       `to status=${currentRun.status ?? 'unknown'} attempt=${currentRun.runAttempt ?? 'unknown'}`,
     )
     return
+  }
+
+  // Protected changes remain refused by the ordinary evaluator. Only a complete, opt-in maintenance
+  // packet can start a separate owner review; the App check stays pending and no PASS is published here.
+  if (decision.decision === 'REFUSE' && decision.reasons.length > 0 &&
+      decision.reasons.every(reason => reason.startsWith('trusted-surface-modified:'))) {
+    try {
+      const context = trustedMaintenanceContext(event)
+      const review = await collectMaintenanceReview({ ...context, read: evidenceRequest,
+        graphql: query => evidenceRequest('/graphql', { method: 'POST', body: { query } }) })
+      appendFileSync(requiredEnv('GITHUB_STEP_SUMMARY'), maintenanceReviewSummary(review))
+      appendFileSync(requiredEnv('GITHUB_OUTPUT'), `maintenance-digest=${review.digest}\n`)
+      console.log('[merge-authority] PENDING: exact owner environment approval is required')
+      return
+    } catch {
+      // Missing configuration, request, evidence or current identity is a refusal, never an exception.
+      decision.reasons.push('maintenance-review-not-prepared: opt-in, configuration or current evidence failed verification')
+    }
   }
 
   await publishMergeAuthorityCheck({
