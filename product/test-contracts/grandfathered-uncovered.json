@@ -41,7 +41,6 @@
     "POST /api/integrations/checkpoints/{}/replay",
     "POST /api/integrations/connectors",
     "POST /api/integrations/connectors/{}/checkpoints",
-    "POST /api/integrations/deliveries/{}/replay",
     "POST /api/integrations/mappings",
     "POST /api/integrations/service-identities/{}/revoke",
     "POST /api/integrations/webhooks",

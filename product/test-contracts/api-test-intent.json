@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 860,
-    "cases": 957,
-    "classes": 128,
-    "hostedTests": 822,
-    "hostedCases": 905,
+    "tests": 865,
+    "cases": 962,
+    "classes": 129,
+    "hostedTests": 827,
+    "hostedCases": 910,
     "nonHostedTests": 30,
     "nonHostedCases": 44,
     "unknownHostTests": 8,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 539,
-      "cases": 604,
+      "tests": 543,
+      "cases": 608,
       "unknownCases": 0,
-      "classes": 104
+      "classes": 105
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 92,
-      "cases": 96,
+      "tests": 93,
+      "cases": 97,
       "unknownCases": 0,
-      "classes": 54
+      "classes": 55
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -14740,6 +14740,93 @@
       "sourceLines": {
         "start": 307,
         "end": 385
+      }
+    },
+    {
+      "cls": "WebhookDeliveryOperationsApiTests",
+      "test": "Expired_and_dead_letter_replay_preserve_delivery_event_subscription_and_attempt_history",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 36,
+        "end": 82
+      }
+    },
+    {
+      "cls": "WebhookDeliveryOperationsApiTests",
+      "test": "Overview_counts_and_surfaces_expired_work_beyond_recent_activity_without_cross_project_rows",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 16,
+        "end": 34
+      }
+    },
+    {
+      "cls": "WebhookDeliveryOperationsApiTests",
+      "test": "Replay_rejects_a_live_claim_and_leaves_current_owner_and_history_unchanged",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 84,
+        "end": 114
+      }
+    },
+    {
+      "cls": "WebhookDeliveryOperationsApiTests",
+      "test": "Scoped_service_health_reports_expired_and_live_claims_without_foreign_project_data",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 141,
+        "end": 171
+      }
+    },
+    {
+      "cls": "WebhookDeliveryOperationsApiTests",
+      "test": "Unauthenticated_and_foreign_project_operators_cannot_replay_a_delivery",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 116,
+        "end": 139
       }
     },
     {

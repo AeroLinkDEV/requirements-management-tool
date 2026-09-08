@@ -1880,7 +1880,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
         modelBuilder.Entity<WebhookDelivery>(b =>
         {
-            b.ToTable("webhook_deliveries"); b.HasKey(x=>x.Id); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.LastError).HasMaxLength(2000); b.HasIndex(x=>new{x.State,x.NextAttemptAt}); b.HasIndex(x=>new{x.ProjectId,x.CreatedAt}); b.HasIndex(x=>new{x.IntegrationEventId,x.SubscriptionId}).IsUnique(); b.HasOne<IntegrationEvent>().WithMany().HasForeignKey(x=>x.IntegrationEventId).OnDelete(DeleteBehavior.Restrict); b.HasOne<WebhookSubscription>().WithMany().HasForeignKey(x=>x.SubscriptionId).OnDelete(DeleteBehavior.Restrict);
+            b.ToTable("webhook_deliveries"); b.HasKey(x=>x.Id); b.Property(x=>x.State).HasConversion<string>().HasMaxLength(30); b.Property(x=>x.LastError).HasMaxLength(2000); b.Property(x=>x.ClaimedBy).HasMaxLength(150); b.Property(x=>x.AttemptHistoryJson).IsRequired(); b.Property(x=>x.Version).IsConcurrencyToken(); b.HasIndex(x=>new{x.State,x.NextAttemptAt}); b.HasIndex(x=>new{x.State,x.ClaimExpiresAt}); b.HasIndex(x=>new{x.ProjectId,x.CreatedAt}); b.HasIndex(x=>new{x.IntegrationEventId,x.SubscriptionId}).IsUnique(); b.HasOne<IntegrationEvent>().WithMany().HasForeignKey(x=>x.IntegrationEventId).OnDelete(DeleteBehavior.Restrict); b.HasOne<WebhookSubscription>().WithMany().HasForeignKey(x=>x.SubscriptionId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ReqIfExchangeJob>(b =>
         {
