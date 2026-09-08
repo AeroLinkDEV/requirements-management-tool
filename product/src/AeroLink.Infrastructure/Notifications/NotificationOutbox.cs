@@ -95,8 +95,20 @@ public sealed class NotificationOutbox(AeroLinkDbContext db)
                 .Select(x => x.Recipient).ToListAsync(ct))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // SaveChangesAsync(false) and an uncertain save failure intentionally leave the same user
+        // notification and its delivery in the change tracker for a caller retry. Do not append a second
+        // delivery every time the authoritative save pipeline is re-entered. The database transaction still
+        // owns atomicity; this set only prevents duplicate pending inserts for the same tracked unit of work.
+        var trackedEmailDeliveries = db.ChangeTracker.Entries<NotificationDelivery>()
+            .Where(x => x.State is EntityState.Added or EntityState.Modified
+                        && x.Entity.Channel == NotificationChannel.Email)
+            .Select(x => x.Entity.NotificationId)
+            .ToHashSet();
+
         foreach (var notification in notifications)
         {
+            if (!trackedEmailDeliveries.Add(notification.Id))
+                continue;
             addresses.TryGetValue(notification.Recipient, out var account);
             var delivery = new NotificationDelivery(notification.Id, NotificationChannel.Email,
                 notification.Recipient, account?.Email ?? "", now);
