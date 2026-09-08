@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   compareTrustedSurfaces,
+  compareTrustedSurfacePaths,
   createGitHubRequest,
   fetchDefaultBranch,
   fetchLatestRunJobs,
@@ -182,6 +183,50 @@ test('truncated or missing Git trees fail closed', async () => {
       baseSha: sha('c'),
     }),
     /missing or ambiguous/,
+  )
+})
+
+test('maintenance mint comparison returns exact protected file paths from complete root trees', async () => {
+  const candidateRoot = sha('1')
+  const baseRoot = sha('2')
+  const unchanged = { path: '.github/workflows/ci.yml', type: 'blob', mode: '100644', sha: sha('3') }
+  const candidate = { truncated: false, sha: candidateRoot, tree: [
+    { path: '.github', type: 'tree', mode: '040000', sha: sha('4') },
+    { path: 'product', type: 'tree', mode: '040000', sha: sha('5') },
+    { path: 'product/test-planner', type: 'tree', mode: '040000', sha: sha('a') },
+    { path: 'product/ci-metrics', type: 'tree', mode: '040000', sha: sha('b') },
+    unchanged,
+    { path: 'product/ci-metrics/lib/maintenance-evidence-reader.mjs', type: 'blob', mode: '100644', sha: sha('6') },
+  ] }
+  const base = { truncated: false, sha: baseRoot, tree: [
+    { path: '.github', type: 'tree', mode: '040000', sha: sha('4') },
+    { path: 'product', type: 'tree', mode: '040000', sha: sha('5') },
+    { path: 'product/test-planner', type: 'tree', mode: '040000', sha: sha('a') },
+    { path: 'product/ci-metrics', type: 'tree', mode: '040000', sha: sha('b') },
+    unchanged,
+    { path: 'product/ci-metrics/lib/maintenance-evidence-reader.mjs', type: 'blob', mode: '100644', sha: sha('9') },
+  ] }
+  const request = async path => {
+    if (path.endsWith(`/git/commits/${sha('b')}`)) return { tree: { sha: candidateRoot } }
+    if (path.endsWith(`/git/commits/${sha('c')}`)) return { tree: { sha: baseRoot } }
+    if (path.endsWith(candidateRoot + '?recursive=1')) return candidate
+    if (path.endsWith(baseRoot + '?recursive=1')) return base
+    throw new Error('unexpected exact tree request ' + path)
+  }
+  const paths = await compareTrustedSurfacePaths({ request, repository: REPOSITORY, candidateSha: sha('b'), baseSha: sha('c') })
+  assert.ok(paths.includes('product/ci-metrics/lib/maintenance-evidence-reader.mjs'))
+  assert.ok(paths.every(path => typeof path === 'string' && path.startsWith('product/ci-metrics/')))
+})
+
+test('maintenance mint comparison refuses a recursive tree response for the wrong root SHA', async () => {
+  const request = async path => {
+    if (path.endsWith(`/git/commits/${sha('b')}`)) return { tree: { sha: sha('1') } }
+    if (path.endsWith(`/git/commits/${sha('c')}`)) return { tree: { sha: sha('2') } }
+    return { truncated: false, sha: sha('d'), tree: [] }
+  }
+  await assert.rejects(
+    compareTrustedSurfacePaths({ request, repository: REPOSITORY, candidateSha: sha('b'), baseSha: sha('c') }),
+    /response identity/,
   )
 })
 

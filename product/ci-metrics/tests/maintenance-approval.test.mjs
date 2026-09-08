@@ -197,6 +197,20 @@ test('complete API handoff reads this binding run approval, then recollects curr
   assert.ok(calls.lastIndexOf(`${root}/actions/runs/42`) > 0)
 })
 
+test('initial review and final publisher recollection use the same privileged ruleset source', async () => {
+  const { input, values } = githubFixture()
+  let privilegedReads = 0
+  const rulesetReader = async () => {
+    privilegedReads += 1
+    return { ruleset: structuredClone(values.get(`${root}/rulesets/22306102`)) }
+  }
+  const review = await collectMaintenanceReview({ ...input, rulesetReader })
+  values.set(`${root}/actions/runs/50/approvals`, approval(review))
+  const result = await verifyApprovedMaintenance({ ...input, rulesetReader, expectedDigest: review.digest })
+  assert.equal(result.decision, 'PASS')
+  assert.equal(privilegedReads, 2)
+})
+
 test('cancellation of the binding during collection refuses the prepared handoff', async () => {
   const { input } = githubFixture()
   const read = input.read

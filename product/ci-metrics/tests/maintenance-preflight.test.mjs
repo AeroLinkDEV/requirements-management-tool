@@ -77,6 +77,8 @@ for (const [name, mutate, reason] of [
   ['tag with main name', e => { e.branchPolicies.branch_policies[0].type = 'tag' }, 'app-secret-environment-not-main-only'],
   ['kernel removal', e => { e.changes[0].path = '.github/workflows/request-full-ci.yml'; e.changes[0].after = null }, 'separate-trust-root-bootstrap-required'],
   ['kernel helper substitution', e => { e.changes[0].path = 'product/ci-metrics/lib/maintenance-preflight.mjs' }, 'separate-trust-root-bootstrap-required'],
+  ['privileged reader substitution', e => { e.changes[0].path = 'product/ci-metrics/lib/maintenance-evidence-reader.mjs' }, 'separate-trust-root-bootstrap-required'],
+  ['maintenance detector substitution', e => { e.changes[0].path = 'product/ci-metrics/bin/detect-maintenance-candidate.mjs' }, 'separate-trust-root-bootstrap-required'],
 ]) {
   test(`refuses ${name} without discarding ordinary verifier refusals`, () => {
     const evidence = fixture()

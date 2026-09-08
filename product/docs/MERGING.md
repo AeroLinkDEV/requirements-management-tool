@@ -174,6 +174,43 @@ outside this routine path. Use a separately reviewed trust-root transition; neve
 publish a fabricated success to make a refused maintenance PR merge. Rollback also requires reviewed exact
 revert evidence; an earlier approval is not permission for a later revert.
 
+## Permanent maintenance evidence reader (#982 preparation)
+
+Routine owner-reviewed maintenance uses a separate repository-scoped evidence App. Its installation is selected
+to this repository only and its GitHub permission is **Administration: write** with the implicit Metadata read
+permission; it receives no Checks or Contents permission. GitHub requires that Administration capability for a
+ruleset read that includes the authoritative `bypass_actors` field. The capability is therefore physically
+privileged even though the checked-in client exposes only one operation: an authenticated GET of the exact
+`/repos/AeroLinkDEV/requirements-management-tool/rulesets/22306102` path. The protected action configuration pins
+the App slug/client ID, expected App and installation IDs, owner, repository, and requested Administration-only
+permission; an owner/JWT setup audit verifies the selected installation and exact permission grant. The
+installation-token client then verifies the exact one-repository scope through the supported
+`/installation/repositories?per_page=100` endpoint before that ruleset read. An installation token cannot call the
+JWT-only installation-detail endpoint, so the client does not pretend to prove its own App ID or permission grant.
+It rejects every other method, path, query, body or redirect.
+
+The evidence App is separate from the existing Merge Authority App and its names are deliberate:
+`MAINTENANCE_EVIDENCE_APP_CLIENT_ID`, `MAINTENANCE_EVIDENCE_APP_ID`,
+`MAINTENANCE_EVIDENCE_INSTALLATION_ID`, `MAINTENANCE_EVIDENCE_APP_SLUG`, and
+`MAINTENANCE_EVIDENCE_APP_PRIVATE_KEY`. The private key belongs
+only in the existing main-only `merge-authority` environment. Every other GitHub read remains on the ordinary
+read-only workflow token, and publishing the `Trusted merge-queue binding` check remains on the existing Merge
+Authority token. The owner-review job has no token permissions or secret access.
+
+The binding workflow first uses protected-main code to establish an exact completed queue candidate: the
+ordinary verifier must refuse only the opted-in protected-surface change, the PR must carry the maintenance
+request label, and no kernel path may change. Only that trusted step output can mint the evidence token. Ordinary
+polling and ordinary merge-group candidates never mint it. After the owner review wait, the publisher repeats the
+same current-candidate detector before minting a fresh evidence token. Missing configuration, unverified installation
+identity/scope, an omitted or nonempty ruleset bypass list, or any changed native evidence remains a refusal.
+The privileged response stays in process and is never written to a step summary, output, artifact, or check
+message.
+
+Creating/configuring the App, placing its key and immutable IDs in the main-only environment, and any one-time
+trust-root bootstrap are separate operator actions. This implementation does not create an App, read a key,
+change settings, install an App, or authorize its own rollout. The new reader and detector are kernel paths and
+cannot self-authorize through the routine maintenance path.
+
 ## Related
 
 - [Feedback time](BROWSER_AND_BACKEND_FEEDBACK_TIME.md) — **read before changing CI.** Where a pull request's

@@ -2,6 +2,7 @@
 
 import { appendFileSync, readFileSync } from 'node:fs'
 import { collectMaintenanceReview } from '../lib/maintenance-approval-github.mjs'
+import { createMaintenanceRulesetReader } from '../lib/maintenance-evidence-reader.mjs'
 import { maintenanceReviewSummary } from '../lib/maintenance-approval.mjs'
 import { trustedMaintenanceContext } from '../lib/maintenance-runtime.mjs'
 import { evaluateMergeGroupCandidate, TRUSTED_SURFACE_PREFIXES } from '../lib/merge-authority.mjs'
@@ -142,7 +143,18 @@ async function main() {
       decision.reasons.every(reason => reason.startsWith('trusted-surface-modified:'))) {
     try {
       const context = trustedMaintenanceContext(event)
-      const review = await collectMaintenanceReview({ ...context, read: evidenceRequest,
+      const evidenceAppId = Number(requiredEnv('MAINTENANCE_EVIDENCE_APP_ID'))
+      const evidenceInstallationId = Number(requiredEnv('MAINTENANCE_EVIDENCE_INSTALLATION_ID'))
+      const rulesetReader = createMaintenanceRulesetReader({
+        token: requiredEnv('MAINTENANCE_EVIDENCE_TOKEN'),
+        expectedAppId: evidenceAppId,
+        expectedInstallationId: evidenceInstallationId,
+        expectedAppSlug: requiredEnv('MAINTENANCE_EVIDENCE_APP_SLUG'),
+        actionAppSlug: requiredEnv('MAINTENANCE_EVIDENCE_ACTION_APP_SLUG'),
+        actionInstallationId: Number(requiredEnv('MAINTENANCE_EVIDENCE_ACTION_INSTALLATION_ID')),
+        apiUrl: env('GITHUB_API_URL') || 'https://api.github.com',
+      })
+      const review = await collectMaintenanceReview({ ...context, read: evidenceRequest, rulesetReader,
         graphql: query => evidenceRequest('/graphql', { method: 'POST', body: { query } }) })
       appendFileSync(requiredEnv('GITHUB_STEP_SUMMARY'), maintenanceReviewSummary(review))
       appendFileSync(requiredEnv('GITHUB_OUTPUT'), `maintenance-digest=${review.digest}\n`)

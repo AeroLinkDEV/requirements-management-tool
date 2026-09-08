@@ -2368,6 +2368,32 @@ successful when the reviewed merge candidate contains no trace of it.
   weaken ownership checks, reset/reseed the database, bypass the source gate, or require elevation for normal
   use. Actual S4U and final HOME acceptance remain required.
 
+### DEC-123 - Permanent Repository-Scoped Maintenance Evidence Access
+
+- **Date:** 2026-09-08
+- **Status:** Accepted
+- **Decision:** Use a dedicated permanent GitHub App installed only on
+  `AeroLinkDEV/requirements-management-tool` to observe complete repository protection evidence for
+  maintenance approval. Keep its credential in the main-only `merge-authority` environment, separate
+  from the existing check-publisher App credential. Ordinary evidence reads continue to use the
+  read-only workflow token; the dedicated token is minted only for eligible maintenance verification.
+- **Authority:** The owner requested full-time access instead of repeated temporary App setup and
+  answered **"yes go"** to the dedicated repository-scoped App recommendation. Implementation and
+  qualification are tracked in [issue #982](https://github.com/AeroLinkDEV/requirements-management-tool/issues/982).
+- **Permission boundary:** GitHub requires repository Administration write permission to disclose
+  the complete ruleset bypass list; Administration read can return a successful but redacted response.
+  This is a real write-capable credential, not a GitHub-enforced read-only credential. Reviewed
+  protected-main code confines its use to fixed GitHub API GET operations for the selected repository
+  and ruleset, verifies the minted identity and repository scope through supported mechanisms, and
+  fails closed on missing or unexpected protection evidence. Candidate code must never receive the key
+  or token. Tokens remain short-lived and are revoked after use; secrets must not enter logs or artifacts.
+- **Approval boundary:** Permanent credential availability grants no standing merge bypass and does
+  not replace exact-change owner approval, native candidate qualification, or required checks. The
+  maintenance owner-review environment remains secret-free. Existing authorization-kernel installation
+  restrictions remain in force: this decision does not extend DEC-121's expired installation exception
+  or authorize a new ruleset change, force merge, or self-installation. Initial activation requires
+  independently reviewed implementation, qualification, and a separately authorized installation path.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.
