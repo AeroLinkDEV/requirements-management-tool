@@ -266,7 +266,9 @@ finish, and restores the previous enabled states in `finally`. It grants access 
 API/tunnel contracts and process starts. The only filesystem ACL change is operator Modify access on the
 installation's bootstrap coordination directory. It then runs the existing dedicated production launch/update
 path through a temporary Limited S4U task under the same account, while legacy recovery triggers are still paused.
-The replacement service is never created from the elevated setup token. The temporary task is removed on completion;
+The replacement service is never created from the interactive setup token. Windows may give a LeastPrivilege
+S4U task for an administrator account a high-integrity batch token; the access grant and native query/stop
+were qualified from ordinary PowerShell against that actual boundary. The temporary task is removed on completion;
 its log and result remain in the bootstrap directory. Before that handoff, the approved setup generation
 captures restoration intent, quiesces proven legacy services and uses the existing strict source authority to
 fast-forward the dedicated checkout. This is necessary because a legacy launcher still relies on hidden CIM

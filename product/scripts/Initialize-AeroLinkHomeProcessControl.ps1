@@ -118,8 +118,9 @@ try {
         $advance = Update-AeroLinkProductionSource -SourceRoot $configuration.SourceRoot -AdvanceToSha $inspect.TargetSha
         if (-not $advance.Canonical -or $advance.Action -ne 'Updated') { throw "First-deployment source advance refused after quiescence: $($advance.Reason). Restoration intent is retained; rerun approved setup." }
     }
-    # Never launch the replacement API from this elevated token: a high-integrity process is not an
-    # ordinary operator's target even with an account DACL. Run the existing launcher through Limited S4U.
+    # Use the supported scheduled context, not this interactive setup token. LeastPrivilege S4U may still
+    # have an administrator/high-integrity batch token on Windows; native account access was qualified
+    # across that actual boundary. RunLevel is not proof of token filtering.
     $deploymentId = [guid]::NewGuid().ToString('N')
     $deploymentScript = Join-Path $leaseDirectory "home-deployment-$deploymentId.ps1"
     $deploymentResult = Join-Path $leaseDirectory "home-deployment-$deploymentId.result"
@@ -132,7 +133,7 @@ $lease = $null
 $code = 1
 try {
     $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Deployment helper must run Limited, never elevated.' }
+    if (-not $principal.IsInRole([Security.Principal.SecurityIdentifier]'S-1-5-3')) { throw 'Deployment helper requires the scheduled batch logon context.' }
     Import-Module $Module
     $lease = Enter-AeroLinkTransition -InstallationRoot $Installation
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Source 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser *> $Log
