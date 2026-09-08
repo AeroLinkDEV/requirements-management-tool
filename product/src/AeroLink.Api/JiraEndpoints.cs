@@ -75,7 +75,7 @@ public static class JiraEndpoints
         app.MapPost("/api/change-requests/{id:guid}/jira", async (Guid id, HttpContext http, IChangeRequestRepository repository,
             AeroLinkDbContext db, JiraConnectorService connector, CancellationToken ct) =>
         {
-            var scr = await repository.GetAsync(id, ct);
+            var scr = await repository.GetAsync(id, ChangeRequestLoadShape.RequirementChanges, ct);
             if (scr is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
             try

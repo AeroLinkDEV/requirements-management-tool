@@ -69,6 +69,70 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
     }
 
     [Fact]
+    public async Task Cancelling_a_review_publishes_outstanding_drafts_as_unrecorded()
+    {
+        var fixture = await SeedAsync(host.Factory);
+        using var reviewer = host.CreateClient();
+        await LoginAsync(reviewer, fixture.FirstReviewer);
+        await PostCommentAsync(reviewer, fixture.ChangeRequestId, "The review must stop before this is reworked.");
+
+        using var cancelled = await reviewer.PostAsJsonAsync(
+            $"/api/change-requests/{fixture.ChangeRequestId}/cancel-review",
+            new { reason = "The package needs rework before review continues." });
+        Assert.True(cancelled.StatusCode == HttpStatusCode.OK, await cancelled.Content.ReadAsStringAsync());
+
+        using var author = host.CreateClient();
+        await LoginAsync(author, fixture.Author);
+        var comment = Assert.Single(await CommentsFor(author, fixture.ChangeRequestId));
+        Assert.Equal("Published", comment.GetProperty("state").GetString());
+        Assert.False(comment.GetProperty("decisionRecorded").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Requesting_changes_publishes_the_active_reviewer_draft()
+    {
+        var fixture = await SeedAsync(host.Factory);
+        using var reviewer = host.CreateClient();
+        await LoginAsync(reviewer, fixture.FirstReviewer);
+        await PostCommentAsync(reviewer, fixture.ChangeRequestId, "This wording needs another pass.");
+
+        using var returned = await reviewer.PostAsJsonAsync(
+            $"/api/change-requests/{fixture.ChangeRequestId}/request-changes",
+            new { reason = "Please revise the controlled wording." });
+        Assert.True(returned.StatusCode == HttpStatusCode.OK, await returned.Content.ReadAsStringAsync());
+
+        using var author = host.CreateClient();
+        await LoginAsync(author, fixture.Author);
+        var comment = Assert.Single(await CommentsFor(author, fixture.ChangeRequestId));
+        Assert.Equal("Published", comment.GetProperty("state").GetString());
+        Assert.True(comment.GetProperty("decisionRecorded").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Restarting_a_review_publishes_the_cancelled_cycle_drafts()
+    {
+        var fixture = await SeedAsync(host.Factory);
+        using var reviewer = host.CreateClient();
+        await LoginAsync(reviewer, fixture.FirstReviewer);
+        await PostCommentAsync(reviewer, fixture.ChangeRequestId, "This cycle was assigned to the wrong route.");
+
+        using var author = host.CreateClient();
+        await LoginAsync(author, fixture.Author);
+        using var restarted = await author.PostAsJsonAsync(
+            $"/api/change-requests/{fixture.ChangeRequestId}/restart-review",
+            new
+            {
+                reason = "Restarting with the corrected reviewer assignment.",
+                approvers = new[] { new { userId = fixture.SecondReviewer } },
+            });
+        Assert.True(restarted.StatusCode == HttpStatusCode.OK, await restarted.Content.ReadAsStringAsync());
+
+        var comment = Assert.Single(await CommentsFor(author, fixture.ChangeRequestId));
+        Assert.Equal("Published", comment.GetProperty("state").GetString());
+        Assert.False(comment.GetProperty("decisionRecorded").GetBoolean());
+    }
+
+    [Fact]
     public async Task A_reviewer_who_has_not_decided_is_shown_less_than_the_author_is()
     {
         var fixture = await SeedAsync(host.Factory, ReviewMode.Parallel);

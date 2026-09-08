@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 867,
-    "cases": 964,
+    "tests": 870,
+    "cases": 967,
     "classes": 130,
-    "hostedTests": 827,
-    "hostedCases": 910,
+    "hostedTests": 830,
+    "hostedCases": 913,
     "nonHostedTests": 32,
     "nonHostedCases": 46,
     "unknownHostTests": 8,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 543,
-      "cases": 608,
+      "tests": 546,
+      "cases": 611,
       "unknownCases": 0,
       "classes": 105
     },
@@ -10780,8 +10780,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 170,
-        "end": 181
+        "start": 234,
+        "end": 245
       }
     },
     {
@@ -10814,8 +10814,25 @@
         "factory-services"
       ],
       "sourceLines": {
+        "start": 135,
+        "end": 161
+      }
+    },
+    {
+      "cls": "ReviewCommentApiTests",
+      "test": "Cancelling_a_review_publishes_outstanding_drafts_as_unrecorded",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
         "start": 71,
-        "end": 97
+        "end": 89
       }
     },
     {
@@ -10848,8 +10865,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 131,
-        "end": 158
+        "start": 195,
+        "end": 222
       }
     },
     {
@@ -10865,8 +10882,42 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 99,
-        "end": 129
+        "start": 163,
+        "end": 193
+      }
+    },
+    {
+      "cls": "ReviewCommentApiTests",
+      "test": "Requesting_changes_publishes_the_active_reviewer_draft",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 91,
+        "end": 109
+      }
+    },
+    {
+      "cls": "ReviewCommentApiTests",
+      "test": "Restarting_a_review_publishes_the_cancelled_cycle_drafts",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 111,
+        "end": 133
       }
     },
     {
