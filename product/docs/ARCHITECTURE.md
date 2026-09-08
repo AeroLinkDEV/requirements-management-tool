@@ -4,6 +4,8 @@
 
 AeroLink begins as a modular monolith: one deployable ASP.NET Core backend with explicit domain, infrastructure, and API boundaries, plus a React web client. This keeps controlled workflows transactional and understandable while leaving clean seams for later modules.
 
+The ordered persistence phases and transaction/failure semantics are documented in [SAVE_BOUNDARY.md](SAVE_BOUNDARY.md).
+
 ## Technology decisions
 
 - React and TypeScript for the browser client

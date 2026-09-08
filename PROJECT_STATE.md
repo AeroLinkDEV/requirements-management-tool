@@ -274,6 +274,12 @@ See [Security and Identity Model](docs/product-definition/SECURITY_AND_IDENTITY_
 
 AeroLink includes governed import/export/interchange foundations such as CSV/XLSX onboarding, ReqIF-related workflows, versioned API behavior, service identities, webhooks/integration foundations, and external-system linking. Interchange must preserve provenance and must not bypass controlled change/review merely because data arrived from another tool.
 
+The persistence write path is intentionally asynchronous and phase-ordered. `AeroLinkDbContext` retains the
+model and final EF write while state repair, complete integrity validation, and lifecycle/outbox preparation are
+cohesive internal save phases. The authoritative ordering, provider-read and transaction boundary, failure/tracked-
+state condition, retry contract, and bounded child-state lookup rule live in
+[product/docs/SAVE_BOUNDARY.md](product/docs/SAVE_BOUNDARY.md).
+
 ## Operations and recovery
 
 The repository provides stable Windows root launchers for development, production-style local operation, shared/remote demo modes, backup, restore validation, diagnostics, and related operator actions.
