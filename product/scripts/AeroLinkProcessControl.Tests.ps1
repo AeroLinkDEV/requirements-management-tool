@@ -47,7 +47,7 @@ try {
     }
     Check ($helper.HasExited -and $helper.ExitCode -eq 7) 'A real redirected Windows PowerShell helper must retain its non-zero exit code.'
     $setup = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Initialize-AeroLinkHomeProcessControl.ps1') -Raw
-    $invocation = [regex]::Match($setup, '(?s)    \$savedPreference = \$ErrorActionPreference.*?finally \{ \$ErrorActionPreference = \$savedPreference \}')
+    $invocation = [regex]::Match($setup, '(?s)    \$launcherPath = Join-Path \$Source.*?finally \{ \$launcher.Dispose\(\) \}')
     if (-not $invocation.Success) { throw 'First-deployment native invocation was not found.' }
     foreach ($expectedCode in @(0, 7)) {
         Set-Content -LiteralPath (Join-Path $helperScripts 'Start-AeroLinkProduction.ps1') -Value ('[Console]::Error.WriteLine("native notice"); exit ' + $expectedCode) -Encoding UTF8
@@ -57,7 +57,22 @@ try {
         . ([scriptblock]::Create($invocation.Value))
         Check ($code -eq $expectedCode) 'First-deployment stderr must preserve both successful and failed native exit codes.'
         Check ($ErrorActionPreference -eq 'Stop') 'First-deployment invocation must restore terminating error handling.'
-        Check ((Get-Content -LiteralPath $Log -Raw) -match 'native notice') 'Native stderr must remain in the deployment log.'
+        Check ((Get-Content -LiteralPath "$Log.stderr" -Raw) -match 'native notice') 'Native stderr must remain in the deployment log.'
+    }
+    $survivor = $null
+    try {
+        @'
+$child = Start-Process powershell.exe -ArgumentList '-NoProfile -Command "Start-Sleep -Seconds 30"' -WindowStyle Hidden -PassThru
+$child.Id | Set-Content (Join-Path $PSScriptRoot 'survivor.pid')
+exit 0
+'@ | Set-Content -LiteralPath (Join-Path $helperScripts 'Start-AeroLinkProduction.ps1') -Encoding UTF8
+        $Log = Join-Path $root 'deployment-survivor.log'
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        . ([scriptblock]::Create($invocation.Value))
+        $survivor = Get-Process -Id ([int](Get-Content (Join-Path $helperScripts 'survivor.pid')))
+        Check ($code -eq 0 -and $timer.Elapsed.TotalSeconds -lt 15 -and -not $survivor.HasExited) 'Setup must complete when its launcher exits while the launched service remains alive.'
+    } finally {
+        if ($survivor) { if (-not $survivor.HasExited) { $survivor.Kill(); $survivor.WaitForExit() }; $survivor.Dispose() }
     }
 
     $lease = Enter-AeroLinkTransition -InstallationRoot $root -Policy Preserve

@@ -135,15 +135,19 @@ try {
     $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $principal.IsInRole([Security.Principal.SecurityIdentifier]'S-1-5-3')) { throw 'Deployment helper requires the scheduled batch logon context.' }
     Import-Module $Module
+    Import-Module (Join-Path (Split-Path $Module) 'AeroLinkProcessControl.psm1')
     $lease = Enter-AeroLinkTransition -InstallationRoot $Installation
-    # Windows PowerShell turns redirected native stderr into ErrorRecords. A notice on
-    # stderr is not a failed deployment; the child controller's exit code is authority.
-    $savedPreference = $ErrorActionPreference
+    # Wait on the launcher process, not a native pipeline whose streams can remain
+    # inherited by the API. Separate stderr is diagnostic; the pinned exit code is authority.
+    $launcherPath = Join-Path $Source 'product\scripts\Start-AeroLinkProduction.ps1'
+    $launcherArguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -DoNotOpenBrowser' -f $launcherPath
+    $launcher = Start-Process -FilePath (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+        -ArgumentList $launcherArguments -WindowStyle Hidden -PassThru -RedirectStandardOutput $Log -RedirectStandardError "$Log.stderr"
     try {
-        $ErrorActionPreference = 'Continue'
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Source 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser *> $Log
-        $code = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $savedPreference }
+        $launcherHandle = $launcher.Handle
+        while (-not $launcher.HasExited) { Start-Sleep -Milliseconds 250; $launcher.Refresh() }
+        $code = [AeroLink.ProcessAccess]::ExitCode($launcherHandle)
+    } finally { $launcher.Dispose() }
 } catch { $_ | Out-String | Add-Content -LiteralPath $Log }
 finally {
     if ($lease) { Exit-AeroLinkTransition $lease }
@@ -167,7 +171,7 @@ exit $code
         Start-Sleep -Seconds 5
     }
     $deploymentCode = [int](Get-Content -LiteralPath $deploymentResult -Raw)
-    if ($deploymentCode -ne 0) { throw "The Limited S4U first-deployment transition failed (exit $deploymentCode). Inspect $deploymentLog. Existing task enabled states will be restored." }
+    if ($deploymentCode -ne 0) { throw "The Limited S4U first-deployment transition failed (exit $deploymentCode). Inspect $deploymentLog and $deploymentLog.stderr. Existing task enabled states will be restored." }
     Write-Host "HOME first-deployment setup completed from approved source $($posture.HeadSha)."
     Write-Host 'Subsequent START_AEROLINK_PRODUCTION.bat launches and updates run from ordinary Explorer or PowerShell.'
 }
