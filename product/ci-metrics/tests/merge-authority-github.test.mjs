@@ -16,6 +16,40 @@ const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const REPOSITORY = 'AeroLinkDEV/requirements-management-tool'
 const sha = (character) => character.repeat(40)
 
+test('PR readiness refuses cross-PR current queue aliases through the actual protected helper', async () => {
+  const requester = readFileSync(join(repoRoot, '.github/workflows/request-full-ci.yml'), 'utf8')
+  const embedded = requester.match(/<<'NODE_READINESS_TARGET'\r?\n([\s\S]*?)^          NODE_READINESS_TARGET$/m)
+  assert.ok(embedded, 'the guard must be defined by the protected workflow')
+  const source = embedded[1].replace(/^          /gm, '')
+  const queue = candidates => ({ data: { repository: { mergeQueue: { entries: {
+    nodes: candidates.map(oid => ({ headCommit: { oid } })), pageInfo: { hasNextPage: false },
+  } } } } })
+  const cases = [
+    { name: 'ordinary distinct PR', queue: queue([sha('b')]), pass: true },
+    { name: 'empty queue or reopened historical head', queue: queue([]), pass: true },
+    { name: 'another PRs current queue candidate', queue: queue([sha('b'), sha('a')]), pass: false },
+    { name: 'missing queue', queue: {}, pass: false },
+    { name: 'GraphQL error', queue: { ...queue([]), errors: [{ message: 'denied' }] }, pass: false },
+    { name: 'unresolved candidate', queue: queue([null]), pass: false },
+  ]
+  const paged = queue([])
+  paged.data.repository.mergeQueue.entries.pageInfo.hasNextPage = true
+  cases.push({ name: 'incomplete queue page', queue: paged, pass: false })
+  const { verifyReadinessTarget } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+  for (const item of cases) {
+    if (item.pass) assert.doesNotThrow(() => verifyReadinessTarget(sha('a'), item.queue), item.name)
+    else assert.throws(() => verifyReadinessTarget(sha('a'), item.queue), undefined, item.name)
+  }
+  // The two calls model a PR that was distinct at dispatch but aliases a queue entry after the Full wait.
+  assert.doesNotThrow(() => verifyReadinessTarget(sha('a'), queue([])))
+  assert.throws(() => verifyReadinessTarget(sha('a'), queue([sha('a')])))
+  const calls = [...requester.matchAll(/node "\$RUNNER_TEMP\/verify-readiness-target.mjs"/g)].map(match => match.index)
+  assert.equal(calls.length, 2)
+  assert.ok(calls[0] < requester.indexOf('match="$(find_product_run)"'), 'refuse before paying for Full CI')
+  assert.ok(calls[1] > requester.indexOf('- name: Publish trusted pull-request readiness'))
+  assert.ok(calls[1] < requester.indexOf('"$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/check-runs"'))
+})
+
 test('workflow run metadata is mapped directly from the exact run endpoint', async () => {
   const calls = []
   const run = await fetchWorkflowRun({

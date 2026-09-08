@@ -243,7 +243,7 @@ is never process provenance. Completed intent is not replayed, and a successful 
 Ordinary production/preserve-state and explicit remote Start/scheduled keep-ready remain separate
 policies. No durable disabled-tunnel preference is introduced.
 
-**First deployment of this contract requires the one elevated setup approved in DEC-121.** A pre-fix launcher
+**First deployment of this contract requires the one elevated setup approved in DEC-122.** A pre-fix launcher
 can refuse before it fetches the fix, so first obtain the merged setup code without moving the development
 checkout. In the canonical repository, fetch and create a temporary source-only worktree:
 

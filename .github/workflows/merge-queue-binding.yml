@@ -17,6 +17,8 @@ on:
 permissions:
   actions: read
   contents: read
+  checks: read
+  pull-requests: read
 
 # An in-progress rerun must preempt a stale completed handler, while a completed event must wait for (not
 # cancel) its invalidator. Separate queue candidates have separate run ids and never block one another.
@@ -30,11 +32,16 @@ jobs:
     if: github.event.workflow_run.event == 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      maintenance-digest: ${{ steps.bind.outputs.maintenance-digest }}
     environment:
       name: merge-authority
     steps:
       - name: Check out the protected default branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -48,6 +55,7 @@ jobs:
           permission-checks: write
           permission-contents: read
       - name: Invalidate prior authority or bind the completed merge-group run
+        id: bind
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -55,3 +63,50 @@ jobs:
           GITHUB_EVENT_PATH: ${{ github.event_path }}
           MERGE_AUTHORITY_TOKEN: ${{ steps.authority-token.outputs.token }}
         run: node product/ci-metrics/bin/verify-merge-authority.mjs
+
+  review-maintenance:
+    name: Owner approval of exact maintenance digest
+    needs: bind
+    if: needs.bind.outputs.maintenance-digest != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    environment:
+      name: merge-authority-maintenance
+      url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Continue after owner environment review
+        run: echo 'Owner review completed; the publisher will authenticate its exact digest and revalidate live evidence.'
+
+  publish-maintenance:
+    name: Revalidate and publish approved maintenance
+    needs: [bind, review-maintenance]
+    if: needs.bind.outputs.maintenance-digest != '' && needs.review-maintenance.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: merge-authority
+    steps:
+      - name: Check out the protected workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Mint the repository-scoped Merge Authority token
+        id: authority-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.MERGE_AUTHORITY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MERGE_AUTHORITY_APP_PRIVATE_KEY }}
+          permission-checks: write
+          permission-contents: read
+      - name: Authenticate approval and recollect current candidate proof
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MERGE_AUTHORITY_TOKEN: ${{ steps.authority-token.outputs.token }}
+          MAINTENANCE_REVIEW_DIGEST: ${{ needs.bind.outputs.maintenance-digest }}
+        run: node product/ci-metrics/bin/publish-approved-maintenance.mjs
