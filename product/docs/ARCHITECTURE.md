@@ -4,6 +4,8 @@
 
 AeroLink begins as a modular monolith: one deployable ASP.NET Core backend with explicit domain, infrastructure, and API boundaries, plus a React web client. This keeps controlled workflows transactional and understandable while leaving clean seams for later modules.
 
+The ordered persistence phases and transaction/failure semantics are documented in [SAVE_BOUNDARY.md](SAVE_BOUNDARY.md).
+
 ## Technology decisions
 
 - React and TypeScript for the browser client
@@ -64,8 +66,7 @@ Repository interfaces are defined in the domain project and implemented in infra
 
 `AeroLinkDbContext` exposes asynchronous persistence as its single supported write boundary. `SaveChangesAsync`
 performs the provider reads and controlled preparation needed for aggregate child-state repair, versioning,
-integrity checks, lifecycle events, and notification outbox rows before one EF write. The ordered phase contract
-and transaction/failure semantics are documented in [SAVE_BOUNDARY.md](SAVE_BOUNDARY.md). The synchronous EF
+integrity checks, lifecycle events, and notification outbox rows before one EF write. The synchronous EF
 overloads fail before tracker or provider mutation and are marked as compile-time errors for direct
 `AeroLinkDbContext` callers; callers typed as `DbContext` receive the same runtime guard. Code that requests
 `SaveChangesAsync(false)` owns the usual EF deferred `AcceptAllChanges` decision and must accept the tracked
