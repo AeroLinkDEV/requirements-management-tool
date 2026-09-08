@@ -163,4 +163,3 @@ internal static class TraceTestProvider
     internal static DbContextOptionsBuilder<AeroLinkDbContext> ConfigureProvider(this DbContextOptionsBuilder<AeroLinkDbContext> options, DbConnection connection)
         => connection is NpgsqlConnection ? options.UseNpgsql(connection) : options.UseSqlite(connection);
 }
-
