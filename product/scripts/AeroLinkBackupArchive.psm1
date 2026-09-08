@@ -1,6 +1,17 @@
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 
+function ConvertTo-AeroLinkArchiveIoPath {
+    param([Parameter(Mandatory)][string]$Path)
+    # Keep authority/relative-path checks on normal paths. Only filesystem calls use
+    # the extended Windows spelling, which .NET Framework/PowerShell 5.1 need even
+    # when an existing evidence filename fits before extraction adds staging folders.
+    $full = [IO.Path]::GetFullPath($Path)
+    if ([IO.Path]::DirectorySeparatorChar -ne '\' -or $full.StartsWith('\\?\')) { return $full }
+    if ($full.StartsWith('\\')) { return '\\?\UNC\' + $full.Substring(2) }
+    return '\\?\' + $full
+}
+
 function Add-AeroLinkCompressionAssemblies {
     Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
     Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
@@ -8,7 +19,7 @@ function Add-AeroLinkCompressionAssemblies {
 
 function Get-AeroLinkBackupFileInventory {
     param([Parameter(Mandatory)][string]$StagingRoot)
-    $root = [IO.Path]::GetFullPath($StagingRoot).TrimEnd('\', '/')
+    $root = (ConvertTo-AeroLinkArchiveIoPath $StagingRoot).TrimEnd('\', '/')
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw "The backup staging root is missing: $root" }
     $prefixLength = $root.Length + 1
     return @(Get-ChildItem -LiteralPath $root -File -Recurse | ForEach-Object {
@@ -26,7 +37,7 @@ function Compress-AeroLinkBackupArchive {
         [Parameter(Mandatory)][string]$DestinationArchive
     )
     Add-AeroLinkCompressionAssemblies
-    $sourceRoot = [IO.Path]::GetFullPath($SourceDirectory).TrimEnd('\', '/')
+    $sourceRoot = (ConvertTo-AeroLinkArchiveIoPath $SourceDirectory).TrimEnd('\', '/')
     if (-not (Test-Path -LiteralPath $sourceRoot -PathType Container)) { throw "The backup staging root is missing: $sourceRoot" }
     $destination = [IO.Path]::GetFullPath($DestinationArchive)
     $destinationParent = Split-Path -Parent $destination
@@ -78,18 +89,21 @@ function Expand-AeroLinkBackupArchive {
             $target = [IO.Path]::GetFullPath((Join-Path $destinationRoot ($entryPath.Replace('/', [IO.Path]::DirectorySeparatorChar))))
             if (-not $target.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Unsafe archive path: $entryPath" }
             if ($entryPath.EndsWith('/') -or $entryPath.EndsWith('\')) {
-                if (-not (Test-Path -LiteralPath $target -PathType Container)) { New-Item -ItemType Directory -Path $target -Force | Out-Null }
+                $ioTarget = ConvertTo-AeroLinkArchiveIoPath $target
+                if (-not (Test-Path -LiteralPath $ioTarget -PathType Container)) { New-Item -ItemType Directory -Path $ioTarget -Force | Out-Null }
                 continue
             }
             $parent = Split-Path -Parent $target
-            if (-not (Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-            [IO.Compression.ZipFileExtensions]::ExtractToFile($zipEntry, $target, $true)
+            $ioParent = ConvertTo-AeroLinkArchiveIoPath $parent
+            if (-not (Test-Path -LiteralPath $ioParent -PathType Container)) { New-Item -ItemType Directory -Path $ioParent -Force | Out-Null }
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($zipEntry, (ConvertTo-AeroLinkArchiveIoPath $target), $true)
         }
     }
     finally { $zip.Dispose() }
 }
 
 Export-ModuleMember -Function @(
+    'ConvertTo-AeroLinkArchiveIoPath',
     'Get-AeroLinkBackupFileInventory',
     'Compress-AeroLinkBackupArchive',
     'Expand-AeroLinkBackupArchive'

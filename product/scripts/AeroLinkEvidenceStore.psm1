@@ -1,4 +1,5 @@
 Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1')
 
 function Invoke-AeroLinkEvidenceSql {
     param([string]$Psql, [string]$Database, [int]$Port, [string]$Sql, [string[]]$OutputArguments = @())
@@ -51,12 +52,14 @@ function Test-AeroLinkAttachmentInventory {
         if ([string]::IsNullOrWhiteSpace($key) -or [IO.Path]::IsPathRooted($key) -or $key -split '[\\/]' -contains '..') { throw "Unsafe attachment storage key: $($entry.StorageKey)" }
         $path = [IO.Path]::GetFullPath((Join-Path $root $key))
         if (-not $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Attachment storage key escapes the evidence root: $($entry.StorageKey)" }
+        $path = ConvertTo-AeroLinkArchiveIoPath $path
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Referenced evidence object is missing: $($entry.StorageKey) (attachment $($entry.Id))" }
         $size = (Get-Item -LiteralPath $path).Length; if ($size -ne [long]$entry.Size) { throw "Referenced evidence size mismatch: $($entry.StorageKey); expected $($entry.Size), found $size" }
         $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant(); if ($hash -ne ([string]$entry.Sha256).ToLowerInvariant()) { throw "Referenced evidence hash mismatch: $($entry.StorageKey); expected $($entry.Sha256), found $hash" }
         [void]$seen.Add([string]$entry.StorageKey); $verifiedBytes += $size
     }
-    $allObjects = if (Test-Path -LiteralPath $root) { @(Get-ChildItem -LiteralPath $root -File -Recurse | ForEach-Object { $_.FullName.Substring($root.Length).TrimStart([char[]]@('\','/')).Replace('\','/') }) } else { @() }
+    $ioRoot = ConvertTo-AeroLinkArchiveIoPath $root
+    $allObjects = if (Test-Path -LiteralPath $ioRoot) { @(Get-ChildItem -LiteralPath $ioRoot -File -Recurse | ForEach-Object { $_.FullName.Substring($ioRoot.Length).TrimStart([char[]]@('\','/')).Replace('\','/') }) } else { @() }
     $unreferenced = @($allObjects | Where-Object { -not $seen.Contains($_) })
     return [pscustomobject]@{ ReferencedObjects=$seen.Count; ReferencedAttachments=$Inventory.Count; VerifiedBytes=$verifiedBytes; UnreferencedObjects=$unreferenced }
 }
