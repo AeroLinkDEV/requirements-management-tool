@@ -213,39 +213,24 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ManagedDocumentEvent> ManagedDocumentEvents => Set<ManagedDocumentEvent>();
     public DbSet<DocumentConnectorGrant> DocumentConnectorGrants => Set<DocumentConnectorGrant>();
 
-    public override int SaveChanges(bool acceptAllChangesOnSuccess)
-    {
-        PendingLadderSeals.Clear();
-        try
-        {
-            foreach (var entry in ChangeTracker.Entries<TestChangeReview>()
-                         .Where(x => x.State is EntityState.Added or EntityState.Modified))
-                entry.Entity.ValidateOriginForPersistence();
-            PrepareLadderSealsAsync(CancellationToken.None).GetAwaiter().GetResult();
-            ValidateVerificationIntegrityAsync(CancellationToken.None).GetAwaiter().GetResult();
-            var result = base.SaveChanges(acceptAllChangesOnSuccess);
-            PendingLadderSeals.Clear();
-            return result;
-        }
-        catch (DbUpdateConcurrencyException ex) when (TryFindPendingSealConflict(ex, out var pending))
-        {
-            PendingLadderSeals.Clear();
-            throw SealConflict(pending, ex);
-        }
-        catch (DbUpdateException ex) when (TryFindPendingSealConflict(ex, out var pendingDbUpdate))
-        {
-            PendingLadderSeals.Clear();
-            throw SealConflict(pendingDbUpdate, ex);
-        }
-        catch
-        {
-            PendingLadderSeals.Clear();
-            throw;
-        }
-    }
+    private const string AsyncSaveChangesOnlyMessage =
+        "AeroLinkDbContext supports asynchronous persistence only. Use SaveChangesAsync(...) so controlled validation, versioning, lifecycle events, and notifications run through the authoritative save pipeline.";
 
+    /// <summary>
+    /// Synchronous persistence is deliberately unsupported. The controlled save boundary performs provider
+    /// reads and asynchronous preparation before EF writes, so a synchronous twin cannot safely provide the
+    /// same version, lifecycle-event, and notification semantics. Keep this guard first: it must not mutate
+    /// the change tracker or touch the provider before directing callers to SaveChangesAsync.
+    /// </summary>
+#pragma warning disable CS0809 // The compile-time error is intentional on this specialized override; DbContext itself cannot carry the contract.
+    [Obsolete("Use SaveChangesAsync(...); synchronous persistence is unsupported for AeroLinkDbContext.", error: true)]
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+        => throw new InvalidOperationException(AsyncSaveChangesOnlyMessage);
+
+    [Obsolete("Use SaveChangesAsync(...); synchronous persistence is unsupported for AeroLinkDbContext.", error: true)]
     public override int SaveChanges()
-        => SaveChanges(acceptAllChangesOnSuccess: true);
+        => throw new InvalidOperationException(AsyncSaveChangesOnlyMessage);
+#pragma warning restore CS0809
 
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess,
         CancellationToken cancellationToken = default)

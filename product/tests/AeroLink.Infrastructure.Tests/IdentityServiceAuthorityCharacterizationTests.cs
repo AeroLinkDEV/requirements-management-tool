@@ -15,7 +15,7 @@ namespace AeroLink.Infrastructure.Tests;
 /// hold them to the same contract for the mechanisms the Project Leadership work will move: satisfying
 /// memberships, standing backups, exact-role delegations and ended memberships.
 /// </summary>
-public sealed class IdentityServiceAuthorityCharacterizationTests : IDisposable
+public sealed class IdentityServiceAuthorityCharacterizationTests : IAsyncLifetime
 {
     private const string Password = "StrongPass!2026";
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"aerolink-authchar-{Guid.NewGuid():N}.db");
@@ -23,34 +23,37 @@ public sealed class IdentityServiceAuthorityCharacterizationTests : IDisposable
     private readonly IdentityService _identity;
     private readonly DateTimeOffset _now = DateTimeOffset.UtcNow;
 
-    private readonly ProgramRecord _program;
-    private readonly UserAccount _systemEngineer;
-    private readonly UserAccount _lead;
-    private readonly UserAccount _backup;
-    private readonly UserAccount _outsider;
+    private ProgramRecord _program = null!;
+    private UserAccount _systemEngineer = null!;
+    private UserAccount _lead = null!;
+    private UserAccount _backup = null!;
+    private UserAccount _outsider = null!;
 
     public IdentityServiceAuthorityCharacterizationTests()
     {
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={_path};Pooling=False").Options;
         _db = new AeroLinkDbContext(options);
         _db.Database.OpenConnection();
-        _db.Database.EnsureCreated();
         _identity = new IdentityService(_db);
+    }
 
+    public async Task InitializeAsync()
+    {
+        await _db.Database.EnsureCreatedAsync();
         _program = new ProgramRecord("Authority Characterization", $"AC{Guid.NewGuid():N}"[..12]);
         _systemEngineer = NewAccount("char.system.engineer");
         _lead = NewAccount("char.system.lead");
         _backup = NewAccount("char.backup");
         _outsider = NewAccount("char.outsider");
         _db.AddRange(_program, _systemEngineer, _lead, _backup, _outsider);
-        _db.SaveChanges();
+        await _db.SaveChangesAsync();
         // The backup deliberately holds only the discipline membership: the strongest form of the backup
         // rule, where the backup carries a lead's authority with no lead membership of their own.
         _db.AddRange(
             new ProgramMembership(_systemEngineer.Id, _program.Id, ProgramRole.SystemEngineer, "admin", _now),
             new ProgramMembership(_lead.Id, _program.Id, ProgramRole.SystemEngineeringLead, "admin", _now),
             new ProgramMembership(_backup.Id, _program.Id, ProgramRole.SystemEngineer, "admin", _now));
-        _db.SaveChanges();
+        await _db.SaveChangesAsync();
     }
 
     private static UserAccount NewAccount(string name) =>
@@ -158,10 +161,11 @@ public sealed class IdentityServiceAuthorityCharacterizationTests : IDisposable
         Assert.Null(await _identity.ResolveAsync(token, _now, default));
     }
 
-    public void Dispose()
+    public Task DisposeAsync()
     {
         _db.Database.CloseConnection();
         _db.Dispose();
         try { File.Delete(_path); } catch { /* temp cleanup best effort */ }
+        return Task.CompletedTask;
     }
 }

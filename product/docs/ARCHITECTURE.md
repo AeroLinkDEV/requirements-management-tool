@@ -62,6 +62,14 @@ commit-in-build proof remain later integration depth. AeroLink never clones a re
 
 Repository interfaces are defined in the domain project and implemented in infrastructure. Provider choice is configuration-driven. PostgreSQL uses versioned EF migrations at application startup; SQLite remains isolated to tests and disposable local scenarios.
 
+`AeroLinkDbContext` exposes asynchronous persistence as its single supported write boundary. `SaveChangesAsync`
+performs the provider reads and controlled preparation needed for aggregate child-state repair, versioning,
+integrity checks, lifecycle events, and notification outbox rows before one EF write. The synchronous EF
+overloads fail before tracker or provider mutation and are marked as compile-time errors for direct
+`AeroLinkDbContext` callers; callers typed as `DbContext` receive the same runtime guard. Code that requests
+`SaveChangesAsync(false)` owns the usual EF deferred `AcceptAllChanges` decision and must accept the tracked
+states before beginning another logical unit of work.
+
 Fresh installations contain no assumed program. The onboarding transaction creates the Program, its first Project/software product, and its initial release together. FMS records are optional demo data controlled by configuration and are disabled by default.
 
 Enterprise authoring extends the existing requirement aggregate instead of replacing it. Stable artifacts and immutable requirement revisions remain authoritative; revision profiles add schema-bound rich content and classifications, specification nodes add reusable document placement, and comments/views/jobs preserve collaboration and high-volume operations as separate attributable records. Existing Projects are synchronized idempotently so the new workspace can be introduced without rewriting approved history.

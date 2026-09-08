@@ -13,12 +13,12 @@ namespace AeroLink.Infrastructure.Tests;
 /// resolver existed the two were one call and one answer, so every gate that named a position accepted
 /// anybody granted the role.
 /// </summary>
-public sealed class ProjectAuthorityResolverTests : IDisposable
+public sealed class ProjectAuthorityResolverTests : IAsyncLifetime
 {
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"aerolink-authority-{Guid.NewGuid():N}.db");
     private readonly AeroLinkDbContext _db;
     private readonly ProjectAuthorityResolver _resolver;
-    private readonly ProgramRecord _program;
+    private ProgramRecord _program = null!;
     private readonly DateTimeOffset _now = DateTimeOffset.UtcNow;
 
     public ProjectAuthorityResolverTests()
@@ -27,36 +27,40 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
             .UseSqlite($"Data Source={_path};Pooling=False").Options;
         _db = new AeroLinkDbContext(options);
         _db.Database.OpenConnection();
-        _db.Database.EnsureCreated();
-        _program = new ProgramRecord("Authority Resolver", $"AR{Guid.NewGuid():N}"[..12]);
-        _db.Add(_program);
-        _db.SaveChanges();
         _resolver = new ProjectAuthorityResolver(_db);
     }
 
-    private UserAccount Person(string name, params ProgramRole[] roles)
+    public async Task InitializeAsync()
+    {
+        await _db.Database.EnsureCreatedAsync();
+        _program = new ProgramRecord("Authority Resolver", $"AR{Guid.NewGuid():N}"[..12]);
+        _db.Add(_program);
+        await _db.SaveChangesAsync();
+    }
+
+    private async Task<UserAccount> PersonAsync(string name, params ProgramRole[] roles)
     {
         var account = new UserAccount($"res.{name}.{Guid.NewGuid():N}"[..40], name, $"{name}@example.test",
             IdentityService.HashPassword("StrongPass!2026"), _now);
         _db.Add(account);
         foreach (var role in roles)
             _db.ProgramMemberships.Add(new ProgramMembership(account.Id, _program.Id, role, "test", _now));
-        _db.SaveChanges();
+        await _db.SaveChangesAsync();
         return account;
     }
 
-    private void Assign(UserAccount account, ProjectLeadershipPosition position)
+    private async Task AssignAsync(UserAccount account, ProjectLeadershipPosition position)
     {
         _db.ProjectLeadershipAssignments.Add(
             new ProjectLeadershipAssignment(_program.Id, position, account.Id, "test", _now));
-        _db.SaveChanges();
+        await _db.SaveChangesAsync();
     }
 
-    private void BackUp(UserAccount account, ProjectLeadershipPosition position)
+    private async Task BackUpAsync(UserAccount account, ProjectLeadershipPosition position)
     {
         _db.ProjectLeadershipBackups.Add(
             new ProjectLeadershipBackup(_program.Id, position, account.Id, "test", _now));
-        _db.SaveChanges();
+        await _db.SaveChangesAsync();
     }
 
     private Task<ProjectAuthorityDecision> ResolveAsync(UserAccount account, ProjectLeadershipPosition position) =>
@@ -76,7 +80,7 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     public async Task The_base_role_alone_does_not_grant_the_identically_named_position(
         ProgramRole role, ProjectLeadershipPosition position)
     {
-        var person = Person("base", role);
+        var person = await PersonAsync("base", role);
         var decision = await ResolveAsync(person, position);
         Assert.False(decision.Granted);
         Assert.Equal(ProjectAuthoritySource.None, decision.Source);
@@ -89,9 +93,9 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [InlineData(ProgramRole.ConfigurationManager)]
     public async Task Several_people_may_hold_a_base_eligibility_role(ProgramRole role)
     {
-        var first = Person("first", role);
-        var second = Person("second", role);
-        var third = Person("third", role);
+        var first = await PersonAsync("first", role);
+        var second = await PersonAsync("second", role);
+        var third = await PersonAsync("third", role);
 
         foreach (var person in new[] { first, second, third })
             Assert.True(await _resolver.IsSatisfiedAsync(
@@ -104,7 +108,7 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     public async Task An_engineering_base_eligibility_role_still_answers_an_ordinary_engineer_question(
         ProgramRole role)
     {
-        var person = Person("engineering-base", role);
+        var person = await PersonAsync("engineering-base", role);
 
         Assert.True(await _resolver.IsSatisfiedAsync(person.Id, _program.Id,
             ProjectAuthorityRequirement.BaseRole(ProgramRole.Engineer), _now));
@@ -113,9 +117,9 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task The_engineer_holder_projection_keeps_engineering_base_roles_and_excludes_retired_rows()
     {
-        var projectEngineer = Person("project-engineer", ProgramRole.ProjectEngineer);
-        var engineeringManager = Person("engineering-manager", ProgramRole.EngineeringManager);
-        var retiredLead = Person("retired-lead", ProgramRole.SystemEngineeringLead);
+        var projectEngineer = await PersonAsync("project-engineer", ProgramRole.ProjectEngineer);
+        var engineeringManager = await PersonAsync("engineering-manager", ProgramRole.EngineeringManager);
+        var retiredLead = await PersonAsync("retired-lead", ProgramRole.SystemEngineeringLead);
 
         var holders = await _resolver.ResolveHoldersAsync(_program.Id, ProgramRole.Engineer, _now);
 
@@ -129,7 +133,7 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task A_raw_retired_position_membership_does_not_answer_the_positions_demands()
     {
-        var person = Person("legacy-position", ProgramRole.SystemEngineeringLead);
+        var person = await PersonAsync("legacy-position", ProgramRole.SystemEngineeringLead);
 
         Assert.False(await _resolver.IsSatisfiedAsync(person.Id, _program.Id,
             ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.SystemEngineeringLead), _now));
@@ -146,8 +150,8 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task The_primary_holds_the_position_and_the_provenance_says_so()
     {
-        var person = Person("primary", ProgramRole.SystemEngineer);
-        Assign(person, ProjectLeadershipPosition.SystemEngineeringLead);
+        var person = await PersonAsync("primary", ProgramRole.SystemEngineer);
+        await AssignAsync(person, ProjectLeadershipPosition.SystemEngineeringLead);
 
         var decision = await ResolveAsync(person, ProjectLeadershipPosition.SystemEngineeringLead);
         Assert.True(decision.Granted);
@@ -159,8 +163,8 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task A_standing_backup_carries_the_same_authority_as_the_primary()
     {
-        var backup = Person("backup", ProgramRole.SystemEngineer);
-        BackUp(backup, ProjectLeadershipPosition.SystemEngineeringLead);
+        var backup = await PersonAsync("backup", ProgramRole.SystemEngineer);
+        await BackUpAsync(backup, ProjectLeadershipPosition.SystemEngineeringLead);
 
         var decision = await ResolveAsync(backup, ProjectLeadershipPosition.SystemEngineeringLead);
         Assert.True(decision.Granted);
@@ -170,8 +174,8 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task Removing_the_backup_removes_the_authority_immediately()
     {
-        var backup = Person("backup", ProgramRole.SystemEngineer);
-        BackUp(backup, ProjectLeadershipPosition.SystemEngineeringLead);
+        var backup = await PersonAsync("backup", ProgramRole.SystemEngineer);
+        await BackUpAsync(backup, ProjectLeadershipPosition.SystemEngineeringLead);
         Assert.True((await ResolveAsync(backup, ProjectLeadershipPosition.SystemEngineeringLead)).Granted);
 
         var row = await _db.ProjectLeadershipBackups.SingleAsync(x => x.BackupUserId == backup.Id);
@@ -184,8 +188,8 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task Losing_the_base_eligibility_removes_the_leadership_authority_immediately()
     {
-        var person = Person("primary", ProgramRole.SystemEngineer);
-        Assign(person, ProjectLeadershipPosition.SystemEngineeringLead);
+        var person = await PersonAsync("primary", ProgramRole.SystemEngineer);
+        await AssignAsync(person, ProjectLeadershipPosition.SystemEngineeringLead);
         Assert.True((await ResolveAsync(person, ProjectLeadershipPosition.SystemEngineeringLead)).Granted);
 
         var membership = await _db.ProgramMemberships.SingleAsync(
@@ -199,8 +203,8 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task An_inactive_account_holds_no_authority()
     {
-        var person = Person("primary", ProgramRole.SystemEngineer);
-        Assign(person, ProjectLeadershipPosition.SystemEngineeringLead);
+        var person = await PersonAsync("primary", ProgramRole.SystemEngineer);
+        await AssignAsync(person, ProjectLeadershipPosition.SystemEngineeringLead);
         person.Disable(_now);
         await _db.SaveChangesAsync();
 
@@ -212,8 +216,8 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task An_ended_program_membership_removes_the_authority()
     {
-        var person = Person("primary", ProgramRole.SystemEngineer);
-        Assign(person, ProjectLeadershipPosition.SystemEngineeringLead);
+        var person = await PersonAsync("primary", ProgramRole.SystemEngineer);
+        await AssignAsync(person, ProjectLeadershipPosition.SystemEngineeringLead);
 
         foreach (var membership in await _db.ProgramMemberships.Where(x => x.UserId == person.Id).ToListAsync())
             membership.End("test", _now.AddMinutes(1));
@@ -236,9 +240,9 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task Eligibility_for_one_position_cannot_rescue_another_whose_eligibility_lapsed()
     {
-        var person = Person("dual", ProgramRole.SystemEngineer, ProgramRole.ConfigurationManager);
-        Assign(person, ProjectLeadershipPosition.SystemEngineeringLead);
-        Assign(person, ProjectLeadershipPosition.ConfigurationManager);
+        var person = await PersonAsync("dual", ProgramRole.SystemEngineer, ProgramRole.ConfigurationManager);
+        await AssignAsync(person, ProjectLeadershipPosition.SystemEngineeringLead);
+        await AssignAsync(person, ProjectLeadershipPosition.ConfigurationManager);
 
         Assert.True(await _resolver.IsSatisfiedAsync(
             person.Id, _program.Id, ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.Reviewer), _now));
@@ -266,9 +270,9 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task A_replacement_can_be_made_eligible_while_the_incumbent_still_holds_the_post()
     {
-        var incumbent = Person("incumbent", ProgramRole.ProgramManager);
-        Assign(incumbent, ProjectLeadershipPosition.ProgramManager);
-        var successor = Person("successor", ProgramRole.ProgramManager);
+        var incumbent = await PersonAsync("incumbent", ProgramRole.ProgramManager);
+        await AssignAsync(incumbent, ProjectLeadershipPosition.ProgramManager);
+        var successor = await PersonAsync("successor", ProgramRole.ProgramManager);
 
         Assert.True((await ResolveAsync(incumbent, ProjectLeadershipPosition.ProgramManager)).Granted);
         Assert.False((await ResolveAsync(successor, ProjectLeadershipPosition.ProgramManager)).Granted);
@@ -276,7 +280,7 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
         var assignment = await _db.ProjectLeadershipAssignments.SingleAsync(
             x => x.HolderUserId == incumbent.Id && x.EndedAt == null);
         assignment.End("test", _now.AddMinutes(1));
-        Assign(successor, ProjectLeadershipPosition.ProgramManager);
+        await AssignAsync(successor, ProjectLeadershipPosition.ProgramManager);
 
         Assert.False((await ResolveAsync(incumbent, ProjectLeadershipPosition.ProgramManager)).Granted);
         Assert.True((await ResolveAsync(successor, ProjectLeadershipPosition.ProgramManager)).Granted);
@@ -291,12 +295,12 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task The_holder_projection_agrees_with_the_per_person_decision()
     {
-        var primary = Person("primary", ProgramRole.SystemEngineer);
-        var backup = Person("backup", ProgramRole.SystemEngineer);
-        var eligibleOnly = Person("eligible", ProgramRole.SystemEngineer);
-        var unrelated = Person("unrelated", ProgramRole.SoftwareQualityAnalyst);
-        Assign(primary, ProjectLeadershipPosition.SystemEngineeringLead);
-        BackUp(backup, ProjectLeadershipPosition.SystemEngineeringLead);
+        var primary = await PersonAsync("primary", ProgramRole.SystemEngineer);
+        var backup = await PersonAsync("backup", ProgramRole.SystemEngineer);
+        var eligibleOnly = await PersonAsync("eligible", ProgramRole.SystemEngineer);
+        var unrelated = await PersonAsync("unrelated", ProgramRole.SoftwareQualityAnalyst);
+        await AssignAsync(primary, ProjectLeadershipPosition.SystemEngineeringLead);
+        await BackUpAsync(backup, ProjectLeadershipPosition.SystemEngineeringLead);
 
         var holders = await _resolver.ResolveHoldersAsync(_program.Id, ProgramRole.SystemEngineeringLead, _now);
         var holderIds = holders.Select(x => x.UserId).ToHashSet();
@@ -334,8 +338,8 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task A_standalone_exact_role_delegate_is_projected_when_the_per_person_gate_accepts_them()
     {
-        var delegator = Person("delegator", ProgramRole.Approver);
-        var delegatee = Person("standalone-delegate");
+        var delegator = await PersonAsync("delegator", ProgramRole.Approver);
+        var delegatee = await PersonAsync("standalone-delegate");
         _db.RoleDelegations.Add(new RoleDelegation(_program.Id, delegator.Id, delegatee.Id,
             ProgramRole.Approver, _now.AddMinutes(-1), _now.AddHours(1), "Exact cover.", "test", _now));
         await _db.SaveChangesAsync();
@@ -352,7 +356,7 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task Program_administrator_substitution_is_explicit_and_projection_matches_the_gate()
     {
-        var administrator = Person("program-admin", ProgramRole.Administrator);
+        var administrator = await PersonAsync("program-admin", ProgramRole.Administrator);
         var ordinary = ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.Airworthiness);
         var workflow = ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.Airworthiness,
             allowProgramAdministratorSubstitution: true);
@@ -378,13 +382,13 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task The_typed_base_role_requirement_answers_genuine_members_and_exact_delegations_only()
     {
-        var member = Person("base-member", ProgramRole.SystemEngineer);
-        var elevated = Person("elevated", ProgramRole.SystemEngineer);
-        Assign(elevated, ProjectLeadershipPosition.SystemEngineeringLead);
-        var delegatee = Person("delegatee");
+        var member = await PersonAsync("base-member", ProgramRole.SystemEngineer);
+        var elevated = await PersonAsync("elevated", ProgramRole.SystemEngineer);
+        await AssignAsync(elevated, ProjectLeadershipPosition.SystemEngineeringLead);
+        var delegatee = await PersonAsync("delegatee");
         _db.RoleDelegations.Add(new RoleDelegation(_program.Id, member.Id, delegatee.Id,
             ProgramRole.SystemEngineer, _now.AddMinutes(-1), _now.AddHours(1), "Exact cover.", "test", _now));
-        var ended = Person("ended", ProgramRole.SystemEngineer);
+        var ended = await PersonAsync("ended", ProgramRole.SystemEngineer);
         _db.ProgramMemberships.Single(x => x.UserId == ended.Id).End("test", _now.AddMinutes(1));
         await _db.SaveChangesAsync();
 
@@ -403,11 +407,11 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task The_typed_leadership_requirement_answers_primary_and_backup_and_fails_closed()
     {
-        var primary = Person("primary", ProgramRole.SystemEngineer);
-        var backup = Person("backup", ProgramRole.SystemEngineer);
-        var baseOnly = Person("base-only", ProgramRole.SystemEngineer);
-        Assign(primary, ProjectLeadershipPosition.SystemEngineeringLead);
-        BackUp(backup, ProjectLeadershipPosition.SystemEngineeringLead);
+        var primary = await PersonAsync("primary", ProgramRole.SystemEngineer);
+        var backup = await PersonAsync("backup", ProgramRole.SystemEngineer);
+        var baseOnly = await PersonAsync("base-only", ProgramRole.SystemEngineer);
+        await AssignAsync(primary, ProjectLeadershipPosition.SystemEngineeringLead);
+        await BackUpAsync(backup, ProjectLeadershipPosition.SystemEngineeringLead);
 
         var requirement = ProjectAuthorityRequirement.Leadership(ProjectLeadershipPosition.SystemEngineeringLead);
         var holders = await _resolver.ResolveHoldersAsync(_program.Id, requirement, _now);
@@ -435,10 +439,10 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task A_persisted_legacy_demand_through_the_typed_overload_behaves_exactly_as_recorded()
     {
-        var lead = Person("lead", ProgramRole.SystemEngineer);
-        Assign(lead, ProjectLeadershipPosition.SystemEngineeringLead);
-        var rawRetired = Person("raw-retired", ProgramRole.SystemEngineeringLead);
-        var systemEngineer = Person("plain-engineer", ProgramRole.SystemEngineer);
+        var lead = await PersonAsync("lead", ProgramRole.SystemEngineer);
+        await AssignAsync(lead, ProjectLeadershipPosition.SystemEngineeringLead);
+        var rawRetired = await PersonAsync("raw-retired", ProgramRole.SystemEngineeringLead);
+        var systemEngineer = await PersonAsync("plain-engineer", ProgramRole.SystemEngineer);
 
         var legacyLead = ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.SystemEngineeringLead,
             allowProgramAdministratorSubstitution: true);
@@ -460,7 +464,7 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     {
         // Engineer accepts several memberships. The authority label and source row must identify the same
         // role; choosing the smallest GUID would make those two facts disagree nondeterministically.
-        var person = Person("multi-role", ProgramRole.ProjectEngineer, ProgramRole.SystemEngineer);
+        var person = await PersonAsync("multi-role", ProgramRole.ProjectEngineer, ProgramRole.SystemEngineer);
         var memberships = await _db.ProgramMemberships.Where(x => x.UserId == person.Id).ToListAsync();
         var expected = memberships.Single(x => x.Role == ProgramRole.SystemEngineer);
 
@@ -480,8 +484,8 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
         // Legacy Engineer demands resolve direct base membership before the leadership compatibility bridge.
         // Candidate projection must retain that same source, or the picker can freeze a different authority
         // from the one the per-person signing gate would report.
-        var person = Person("multi-authority", ProgramRole.SystemEngineer);
-        Assign(person, ProjectLeadershipPosition.SystemEngineeringLead);
+        var person = await PersonAsync("multi-authority", ProgramRole.SystemEngineer);
+        await AssignAsync(person, ProjectLeadershipPosition.SystemEngineeringLead);
         var membership = await _db.ProgramMemberships.SingleAsync(x => x.UserId == person.Id);
         var requirement = ProjectAuthorityRequirement.LegacyRoleDemand(ProgramRole.Engineer);
 
@@ -497,12 +501,12 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
     [Fact]
     public async Task Every_live_source_exposes_its_exact_row_id_and_global_admin_is_null()
     {
-        var primary = Person("source-primary", ProgramRole.SystemEngineer);
-        Assign(primary, ProjectLeadershipPosition.SystemEngineeringLead);
-        var backup = Person("source-backup", ProgramRole.SystemEngineer);
-        BackUp(backup, ProjectLeadershipPosition.SystemEngineeringLead);
-        var delegator = Person("source-delegator", ProgramRole.Approver);
-        var delegatee = Person("source-delegatee");
+        var primary = await PersonAsync("source-primary", ProgramRole.SystemEngineer);
+        await AssignAsync(primary, ProjectLeadershipPosition.SystemEngineeringLead);
+        var backup = await PersonAsync("source-backup", ProgramRole.SystemEngineer);
+        await BackUpAsync(backup, ProjectLeadershipPosition.SystemEngineeringLead);
+        var delegator = await PersonAsync("source-delegator", ProgramRole.Approver);
+        var delegatee = await PersonAsync("source-delegatee");
         var delegation = new RoleDelegation(_program.Id, delegator.Id, delegatee.Id, ProgramRole.Approver,
             _now.AddMinutes(-1), _now.AddHours(1), "Temporary cover", "test", _now);
         _db.RoleDelegations.Add(delegation);
@@ -526,10 +530,11 @@ public sealed class ProjectAuthorityResolverTests : IDisposable
         Assert.Null(administratorDecision.SourceId);
     }
 
-    public void Dispose()
+    public Task DisposeAsync()
     {
         _db.Database.CloseConnection();
         _db.Dispose();
         try { File.Delete(_path); } catch { /* temp cleanup best effort */ }
+        return Task.CompletedTask;
     }
 }

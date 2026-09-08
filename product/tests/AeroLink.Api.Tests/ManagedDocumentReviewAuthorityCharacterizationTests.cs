@@ -17,13 +17,13 @@ namespace AeroLink.Api.Tests;
 /// neither), and the precedence direct membership → program-administrator membership → active delegation
 /// → standing backup (which additionally requires a current membership to mean anything).
 /// </summary>
-public sealed class ManagedDocumentReviewAuthorityCharacterizationTests : IDisposable
+public sealed class ManagedDocumentReviewAuthorityCharacterizationTests : IAsyncLifetime
 {
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"aerolink-mdauth-{Guid.NewGuid():N}.db");
     private readonly AeroLinkDbContext _db;
     private readonly DateTimeOffset _now = DateTimeOffset.UtcNow;
 
-    private readonly ProgramRecord _program;
+    private ProgramRecord _program = null!;
     private readonly Dictionary<string, UserAccount> _accounts = new();
 
     public ManagedDocumentReviewAuthorityCharacterizationTests()
@@ -31,10 +31,14 @@ public sealed class ManagedDocumentReviewAuthorityCharacterizationTests : IDispo
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={_path};Pooling=False").Options;
         _db = new AeroLinkDbContext(options);
         _db.Database.OpenConnection();
-        _db.Database.EnsureCreated();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _db.Database.EnsureCreatedAsync();
         _program = new ProgramRecord("Document Authority Characterization", $"DA{Guid.NewGuid():N}"[..12]);
         _db.Add(_program);
-        _db.SaveChanges();
+        await _db.SaveChangesAsync();
     }
 
     private UserAccount AddAccount(string key, params ProgramRole[] roles)
@@ -345,10 +349,11 @@ public sealed class ManagedDocumentReviewAuthorityCharacterizationTests : IDispo
             _db, _program.Id, _accounts["backup.replacement.position"], _now, default));
     }
 
-    public void Dispose()
+    public Task DisposeAsync()
     {
         _db.Database.CloseConnection();
         _db.Dispose();
         try { File.Delete(_path); } catch { /* temp cleanup best effort */ }
+        return Task.CompletedTask;
     }
 }
