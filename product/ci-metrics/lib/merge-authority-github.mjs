@@ -5,6 +5,7 @@
 // contract testable without credentials or live GitHub state.
 
 import { TRUSTED_SURFACE_PREFIXES } from './merge-authority.mjs'
+import { compareProtectedTrees } from './maintenance-preflight.mjs'
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/
 
@@ -151,6 +152,22 @@ export async function compareTrustedSurfaces({ request, repository, candidateSha
     if (candidateTree !== baseTree) changedPaths.push(prefix)
   }
   return changedPaths
+}
+
+/** Return exact protected paths for the mint decision; broad subtree names are insufficient for kernel safety. */
+export async function compareTrustedSurfacePaths({ request, repository, candidateSha, baseSha }) {
+  requireSha(candidateSha, 'Candidate SHA')
+  requireSha(baseSha, 'Default-branch SHA')
+  const candidateRoot = await commitTreeSha({ request, repository, ref: candidateSha })
+  const baseRoot = await commitTreeSha({ request, repository, ref: baseSha })
+  const [candidateTree, baseTree] = await Promise.all([
+    request(`/repos/${repository}/git/trees/${candidateRoot}?recursive=1`),
+    request(`/repos/${repository}/git/trees/${baseRoot}?recursive=1`),
+  ])
+  if (candidateTree?.sha !== candidateRoot || baseTree?.sha !== baseRoot) {
+    throw new Error('Complete protected tree response identity did not match the requested commit tree.')
+  }
+  return compareProtectedTrees(baseTree, candidateTree).map(change => change.path)
 }
 
 export async function fetchDefaultBranch({ request, repository }) {

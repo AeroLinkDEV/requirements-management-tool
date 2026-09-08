@@ -2,17 +2,19 @@ import { collectMaintenancePreflight } from './maintenance-preflight-github.mjs'
 import { evidenceDigest, MAINTENANCE_REPOSITORY as repository } from './maintenance-preflight.mjs'
 import { createMaintenanceReview, evaluateMaintenanceApproval, MAINTENANCE_REVIEW_ENVIRONMENT } from './maintenance-approval.mjs'
 import { fetchWorkflowRun } from './merge-authority-github.mjs'
+import { routeMaintenanceRead } from './maintenance-evidence-reader.mjs'
 
-export async function collectMaintenanceReview({ read, graphql, preparer, prNumber, runId, bindingRunId, bindingRunAttempt, expectedProduct }) {
+export async function collectMaintenanceReview({ read, graphql, rulesetReader, preparer, prNumber, runId, bindingRunId, bindingRunAttempt, expectedProduct }) {
+  const maintenanceRead = rulesetReader ? routeMaintenanceRead({ read, rulesetReader }) : read
   if (!Number.isSafeInteger(bindingRunId) || bindingRunId < 1 || bindingRunAttempt !== 1) {
     throw new Error('A first-attempt binding workflow is required for fresh owner approval.')
   }
   const root = `/repos/${repository}`
   const [packet, bindingRun, environment, branchPolicies] = await Promise.all([
-    collectMaintenancePreflight({ read, graphql, preparer, prNumber, runId }),
+    collectMaintenancePreflight({ read: maintenanceRead, graphql, preparer, prNumber, runId }),
     read(`${root}/actions/runs/${bindingRunId}`),
-    read(`${root}/environments/${MAINTENANCE_REVIEW_ENVIRONMENT}`),
-    read(`${root}/environments/${MAINTENANCE_REVIEW_ENVIRONMENT}/deployment-branch-policies`),
+    maintenanceRead(`${root}/environments/${MAINTENANCE_REVIEW_ENVIRONMENT}`),
+    maintenanceRead(`${root}/environments/${MAINTENANCE_REVIEW_ENVIRONMENT}/deployment-branch-policies`),
   ])
   if (bindingRun.id !== bindingRunId || bindingRun.run_attempt !== bindingRunAttempt || bindingRun.status !== 'in_progress') {
     throw new Error('Binding run advanced or is not active.')

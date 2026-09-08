@@ -46,6 +46,25 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      - name: Detect exact maintenance candidate
+        id: detect-maintenance
+        if: github.event.action == 'completed' && github.event.workflow_run.event == 'merge_group'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: node product/ci-metrics/bin/detect-maintenance-candidate.mjs
+      - name: Mint the repository-scoped maintenance evidence token
+        id: maintenance-evidence-token
+        if: steps.detect-maintenance.outputs.maintenance-needed == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.MAINTENANCE_EVIDENCE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MAINTENANCE_EVIDENCE_APP_PRIVATE_KEY }}
+          owner: AeroLinkDEV
+          repositories: requirements-management-tool
+          permission-administration: write
+          permission-metadata: read
       - name: Mint the repository-scoped Merge Authority token
         id: authority-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -62,6 +81,12 @@ jobs:
           GITHUB_API_URL: ${{ github.api_url }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
           MERGE_AUTHORITY_TOKEN: ${{ steps.authority-token.outputs.token }}
+          MAINTENANCE_EVIDENCE_TOKEN: ${{ steps.maintenance-evidence-token.outputs.token }}
+          MAINTENANCE_EVIDENCE_APP_ID: ${{ vars.MAINTENANCE_EVIDENCE_APP_ID }}
+          MAINTENANCE_EVIDENCE_INSTALLATION_ID: ${{ vars.MAINTENANCE_EVIDENCE_INSTALLATION_ID }}
+          MAINTENANCE_EVIDENCE_APP_SLUG: ${{ vars.MAINTENANCE_EVIDENCE_APP_SLUG }}
+          MAINTENANCE_EVIDENCE_ACTION_INSTALLATION_ID: ${{ steps.maintenance-evidence-token.outputs.installation-id }}
+          MAINTENANCE_EVIDENCE_ACTION_APP_SLUG: ${{ steps.maintenance-evidence-token.outputs.app-slug }}
         run: node product/ci-metrics/bin/verify-merge-authority.mjs
 
   review-maintenance:
@@ -96,6 +121,16 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      - name: Mint the repository-scoped maintenance evidence token
+        id: maintenance-evidence-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.MAINTENANCE_EVIDENCE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MAINTENANCE_EVIDENCE_APP_PRIVATE_KEY }}
+          owner: AeroLinkDEV
+          repositories: requirements-management-tool
+          permission-administration: write
+          permission-metadata: read
       - name: Mint the repository-scoped Merge Authority token
         id: authority-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -108,5 +143,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           MERGE_AUTHORITY_TOKEN: ${{ steps.authority-token.outputs.token }}
+          MAINTENANCE_EVIDENCE_TOKEN: ${{ steps.maintenance-evidence-token.outputs.token }}
+          MAINTENANCE_EVIDENCE_APP_ID: ${{ vars.MAINTENANCE_EVIDENCE_APP_ID }}
+          MAINTENANCE_EVIDENCE_INSTALLATION_ID: ${{ vars.MAINTENANCE_EVIDENCE_INSTALLATION_ID }}
+          MAINTENANCE_EVIDENCE_APP_SLUG: ${{ vars.MAINTENANCE_EVIDENCE_APP_SLUG }}
+          MAINTENANCE_EVIDENCE_ACTION_INSTALLATION_ID: ${{ steps.maintenance-evidence-token.outputs.installation-id }}
+          MAINTENANCE_EVIDENCE_ACTION_APP_SLUG: ${{ steps.maintenance-evidence-token.outputs.app-slug }}
           MAINTENANCE_REVIEW_DIGEST: ${{ needs.bind.outputs.maintenance-digest }}
         run: node product/ci-metrics/bin/publish-approved-maintenance.mjs
