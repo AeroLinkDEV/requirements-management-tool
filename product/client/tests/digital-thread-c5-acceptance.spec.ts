@@ -143,6 +143,40 @@ test("artifact full story retains both verification branches and excludes the si
   await testInfo.attach("artifact-branching-story", { body: await page.screenshot(), contentType: "image/png" })
 })
 
+test("artifact cards reflow after delayed web fonts settle", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 900 })
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  let delayedFontRequests = 0
+  await page.route(url => /\.(?:woff2?|ttf|otf)(?:\?|$)/i.test(url.pathname), async route => {
+    delayedFontRequests += 1
+    const response = await route.fetch()
+    await new Promise(resolve => setTimeout(resolve, 750))
+    await route.fulfill({ response })
+  })
+  await page.goto("/tests/fixtures/digital-thread-c5.html?view=artifact&density=comfortable")
+  await expect(page.locator(".dtCanvas")).toBeVisible()
+  await expect(page.locator(".dtCanvasScene")).toHaveAttribute("data-tier", /[012]/)
+  await page.evaluate(async () => { await document.fonts.ready })
+  expect(delayedFontRequests).toBeGreaterThan(0)
+
+  const overlap = await page.locator(".dtCanvas").evaluate(canvas => {
+    const cards = [...canvas.querySelectorAll<HTMLElement>('[data-node-id]')]
+      .filter(card => !card.classList.contains("is-offscreen"))
+    const focal = cards.find(card => card.textContent?.includes("HLR-925.01"))
+    const sibling = cards.find(card => card.textContent?.includes("HLR-926.01"))
+    if (!focal || !sibling) throw new Error("The two HLR cards were not rendered")
+    const focalRect = focal.getBoundingClientRect()
+    const siblingRect = sibling.getBoundingClientRect()
+    return {
+      verticalOverlap: Math.min(focalRect.bottom, siblingRect.bottom) - Math.max(focalRect.top, siblingRect.top),
+      focalHeight: focalRect.height,
+      siblingTop: siblingRect.top,
+      focalBottom: focalRect.bottom,
+    }
+  })
+  expect(overlap.verticalOverlap).toBeLessThanOrEqual(1)
+})
+
 test("clearing and reselecting the arrival focal uses selection framing instead of replaying landing", async ({ page }) => {
   await open(page, "network", 1280)
   const scale = page.getByLabel("Current canvas scale")
