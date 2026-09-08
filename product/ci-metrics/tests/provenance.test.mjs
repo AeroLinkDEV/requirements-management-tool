@@ -25,7 +25,7 @@ function manifest(overrides = {}) {
     checkedOut: { commitSha: 'c'.repeat(40), treeSha: 'd'.repeat(40), ref: 'refs/pull/1/merge' },
     event: 'pull_request',
     classifications: {},
-    gates: { selected: [{ instance: 'gate', result: 'success' }], skipped: [], missing: [], gatePassed: true, allSelectedPassed: true },
+    gates: { selected: [{ instance: 'gate', result: 'success' }], skipped: [], missing: [], missingTotal: 0, gatePassed: true, allSelectedPassed: true },
     verifiedTotals: { expected: 100, executed: 100, passed: 100, failed: 0, skipped: 0, flaky: 0 },
     validatedAt: '2026-08-14T00:00:00Z',
     canAuthorizePostMergeSkip: true,
@@ -183,6 +183,22 @@ test('manifest eligibility rejects an invalid or nonzero shared missing total', 
   assert.equal(deriveEligibility({ ...base, gates: { ...base.gates, missingTotal: 1 } }).eligible, false)
   assert.equal(deriveEligibility({ ...base, gates: { ...base.gates, missingTotal: null } }).eligible, false)
   assert.ok(validateManifest({ ...base, gates: { ...base.gates, missingTotal: -1 } }).some((error) => /missingTotal/.test(error)))
+})
+
+test('enforcement requires an explicit zero missing total despite an authorization claim', () => {
+  const complete = manifest()
+  const enforce = (candidate) => applyProvenanceMode(decide({
+    pushTreeSha: 'd'.repeat(40), mergedPr: { number: 1 }, manifests: [candidate],
+  }), 'enforce')
+  assert.equal(enforce(complete).canSkip, true)
+  for (const missingTotal of [undefined, null, -1, 0.5, '0', 1]) {
+    // Serialize as the real artifact consumer does: undefined becomes an absent property.
+    const incomplete = JSON.parse(JSON.stringify({ ...complete, gates: { ...complete.gates, missingTotal } }))
+    assert.equal(incomplete.canAuthorizePostMergeSkip, true)
+    assert.equal(deriveEligibility(incomplete).eligible, false)
+    assert.equal(enforce(incomplete).canSkip, false)
+    if (missingTotal !== 1) assert.ok(validateManifest(incomplete).some((error) => /missingTotal/.test(error)))
+  }
 })
 
 const DAY_MS = 24 * 60 * 60 * 1000
