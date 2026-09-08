@@ -36,6 +36,37 @@ namespace AeroLink {
         [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateProcess(IntPtr handle, uint exitCode);
         [DllImport("kernel32.dll", SetLastError=true)] static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
         [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetExitCodeProcess(IntPtr handle, out uint code);
+        [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr handle, int informationClass, IntPtr information, int length, out int returnLength);
+        [StructLayout(LayoutKind.Sequential)] struct UnicodeString { public ushort Length; public ushort MaximumLength; public IntPtr Buffer; }
+        public sealed class Snapshot {
+            public int ProcessId;
+            public string StartedAt;
+            public string ExecutablePath;
+            public string CommandLine;
+        }
+        public static Snapshot Read(int id) {
+            IntPtr handle = OpenProcess(0x1000u, false, id);
+            if (handle == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+            IntPtr buffer = IntPtr.Zero;
+            try {
+                long created, exited, kernel, user;
+                if (!GetProcessTimes(handle, out created, out exited, out kernel, out user)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                StringBuilder image = new StringBuilder(32768);
+                int imageLength = image.Capacity;
+                if (!QueryFullProcessImageName(handle, 0, image, ref imageLength)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                int needed;
+                NtQueryInformationProcess(handle, 60, IntPtr.Zero, 0, out needed);
+                if (needed < Marshal.SizeOf(typeof(UnicodeString)) || needed > 1048576) throw new InvalidOperationException("Native command-line query did not provide a bounded result.");
+                buffer = Marshal.AllocHGlobal(needed);
+                int status = NtQueryInformationProcess(handle, 60, buffer, needed, out needed);
+                if (status != 0) throw new InvalidOperationException("Native command-line query failed with NTSTATUS " + status.ToString("X8") + ".");
+                UnicodeString command = (UnicodeString)Marshal.PtrToStructure(buffer, typeof(UnicodeString));
+                if (command.Length == 0 || command.Length % 2 != 0 || command.Buffer.ToInt64() < buffer.ToInt64() ||
+                    command.Buffer.ToInt64() + command.Length > buffer.ToInt64() + needed) throw new InvalidOperationException("Native command-line result is invalid.");
+                return new Snapshot { ProcessId = id, StartedAt = DateTime.FromFileTimeUtc(created).ToString("o"),
+                    ExecutablePath = image.ToString(), CommandLine = Marshal.PtrToStringUni(command.Buffer, command.Length / 2) };
+            } finally { if (buffer != IntPtr.Zero) Marshal.FreeHGlobal(buffer); CloseHandle(handle); }
+        }
         [DllImport("advapi32.dll")] static extern uint GetSecurityInfo(IntPtr handle, int type, uint information,
             out IntPtr owner, out IntPtr group, out IntPtr dacl, out IntPtr sacl, out IntPtr descriptor);
         [DllImport("advapi32.dll", CharSet=CharSet.Unicode)] static extern uint SetEntriesInAclW(uint count,
@@ -65,7 +96,7 @@ namespace AeroLink {
                 sid = Marshal.AllocHGlobal(bytes.Length);
                 Marshal.Copy(bytes, 0, sid, bytes.Length);
                 ExplicitAccess entry = new ExplicitAccess {
-                    Permissions = 0x00101411u, Mode = 1, Inheritance = 0,
+                    Permissions = 0x00101001u, Mode = 1, Inheritance = 0,
                     Trustee = new Trustee { TrusteeForm = 0, TrusteeType = 1, Name = sid }
                 };
                 result = SetEntriesInAclW(1, ref entry, oldAcl, out acl);
@@ -156,6 +187,11 @@ function Get-AeroLinkProcessStartIdentity {
     finally { $process.Dispose() }
 }
 
+function Get-AeroLinkNativeProcessIdentity {
+    param([Parameter(Mandatory)][int]$ProcessId)
+    return [AeroLink.ProcessAccess]::Read($ProcessId)
+}
+
 function Stop-AeroLinkProvenProcess {
     [CmdletBinding()]
     param(
@@ -172,4 +208,4 @@ function Stop-AeroLinkProvenProcess {
     if (-not $exited) { throw 'Termination was requested for the owned process, but its exit was not proven within ten seconds.' }
 }
 
-Export-ModuleMember -Function Grant-AeroLinkCreatedProcessAccess, Get-AeroLinkProcessStartIdentity, Stop-AeroLinkProvenProcess
+Export-ModuleMember -Function Grant-AeroLinkCreatedProcessAccess, Get-AeroLinkProcessStartIdentity, Get-AeroLinkNativeProcessIdentity, Stop-AeroLinkProvenProcess

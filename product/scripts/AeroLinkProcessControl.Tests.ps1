@@ -19,6 +19,9 @@ try {
     $child = Start-Process -FilePath $powershell -ArgumentList '-NoProfile -NonInteractive -Command "Start-Sleep -Seconds 60"' -WindowStyle Hidden -PassThru
     $started = $child.StartTime.ToUniversalTime()
     Grant-AeroLinkCreatedProcessAccess -ProcessId $child.Id -StartedAt $started -ExpectedExecutable $powershell -ExpectedArguments @('Start-Sleep', '60')
+    $native = Get-AeroLinkNativeProcessIdentity -ProcessId $child.Id
+    Check ($native.ExecutablePath -ieq $powershell -and $native.CommandLine -match 'Start-Sleep' -and
+        ([DateTimeOffset]$native.StartedAt).UtcDateTime.Ticks -eq $started.Ticks) 'Native query must bind executable, launch contract and exact creation through one process handle.'
     Refuses { Grant-AeroLinkCreatedProcessAccess -ProcessId $child.Id -StartedAt $started.AddSeconds(-1) -ExpectedExecutable $powershell -ExpectedArguments @('Start-Sleep') } 'Stale start identity must not grant access.'
     Refuses { Grant-AeroLinkCreatedProcessAccess -ProcessId $child.Id -StartedAt $started -ExpectedExecutable 'C:\foreign.exe' -ExpectedArguments @('Start-Sleep') } 'Contradictory executable must not grant access.'
     $forged = [pscustomobject]@{ ProcessId = $child.Id; StartedAt = $started.AddSeconds(-1).ToString('o'); ExecutablePath = $powershell }

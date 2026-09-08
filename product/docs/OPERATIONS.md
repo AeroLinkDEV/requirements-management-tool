@@ -221,10 +221,14 @@ start identity own the origin proof before tunnel restoration; public 401 and re
 An incomplete owed restoration exits unsuccessfully even when a safe local API remains available.
 
 API and ngrok ownership uses live Windows executable/command-line and process-creation evidence, not a saved
-PID or a health response alone. Supported creators add query/read/terminate/synchronize access for the
+PID or a health response alone. Supported creators add limited-query/terminate/synchronize access for the
 operator's account SID to each new service process, retaining the existing ACL. This makes the same process
 accessible from the account's S4U and ordinary interactive logons without granting Everyone access or changing
-the caller's token. API startup uses the built apphost directly so access is established before readiness,
+the caller's token. CIM may still hide fields across those logons after the grant. In that case a native
+query reads the executable, full command line and creation time through one limited-query process handle,
+then checks the creation time against the enumerated process. Failure remains unknown, never absent;
+the grant does not provide process-memory write, full-access or token rights.
+API startup uses the built apphost directly so access is established before readiness,
 including for a process whose database readiness fails. Termination pins a native process handle and verifies
 the expected executable and exact start time, rejecting stale PIDs. Ngrok's full supported argument sequence
 must match; extra URL/config/policy overrides are not treated as the configured tunnel.
@@ -263,7 +267,10 @@ API/tunnel contracts and process starts. The only filesystem ACL change is opera
 installation's bootstrap coordination directory. It then runs the existing dedicated production launch/update
 path through a temporary Limited S4U task under the same account, while legacy recovery triggers are still paused.
 The replacement service is never created from the elevated setup token. The temporary task is removed on completion;
-its log and result remain in the bootstrap directory. This allows the strict fast-forward and fresh re-entry to
+its log and result remain in the bootstrap directory. Before that handoff, the approved setup generation
+captures restoration intent, quiesces proven legacy services and uses the existing strict source authority to
+fast-forward the dedicated checkout. This is necessary because a legacy launcher still relies on hidden CIM
+fields even after access is granted. No source gate is bypassed. The new Limited launcher consumes the intent to
 reach the fixed controller. Existing database/evidence locations and the ordinary clone-validated upgrade
 boundary remain authoritative. Setup never runs an API from the temporary worktree.
 

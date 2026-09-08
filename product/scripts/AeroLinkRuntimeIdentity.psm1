@@ -279,6 +279,15 @@ function Get-AeroLinkPortOwner {
     # belong to another user. Both still fail closed - nothing is stopped on a guess - but the operator is
     # told which of the two it is, instead of being sent to close an application that may not exist.
     $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($owners[0])" -ErrorAction SilentlyContinue
+    if ($process -and (-not $process.ExecutablePath -or -not $process.CommandLine)) {
+        try {
+            $native = Get-AeroLinkNativeProcessIdentity -ProcessId $owners[0]
+            if (-not $process.CreationDate -or
+                ([DateTimeOffset]$process.CreationDate).UtcDateTime.ToString('yyyyMMddHHmmssffffff') -ne
+                ([DateTimeOffset]$native.StartedAt).UtcDateTime.ToString('yyyyMMddHHmmssffffff')) { throw 'Process identity changed during enumeration.' }
+            $process = [pscustomobject]@{ ExecutablePath=$native.ExecutablePath; CommandLine=$native.CommandLine; CreationDate=$process.CreationDate }
+        } catch { }
+    }
     $attributable = [bool]($process -and $process.ExecutablePath -and $process.CommandLine)
     $startedAt = $null
     if ($attributable) {

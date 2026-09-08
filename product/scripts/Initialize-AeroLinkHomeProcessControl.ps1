@@ -105,9 +105,19 @@ try {
                 -ExpectedExecutable $demoConfig.NgrokExecutable -ExpectedArguments (Get-AeroLinkRemoteDemoNgrokArguments -Config $demoConfig)
         }
     }
-    # Complete first deployment while old scheduled controllers are still paused. Leaving this to a later
-    # click would allow an old recovery task to create inaccessible children again before the fixed source
-    # arrived. The old launcher's existing strict update/re-entry path reaches the newly merged controller.
+    # A legacy launcher still relies on CIM, which can hide fields even after the account grant. It cannot
+    # safely perform the first transition. This clean approved setup generation uses the same strict source
+    # authority and owned-process controller, then hands the resulting intent to the new Limited launcher.
+    $firstDeploymentIntent = New-AeroLinkProductionObligation -SourceRoot $configuration.SourceRoot -Config $demoConfig -Policy Preserve
+    Save-AeroLinkProductionObligation -Obligation $firstDeploymentIntent
+    $inspect = Update-AeroLinkProductionSource -SourceRoot $configuration.SourceRoot -InspectOnly
+    if (-not $inspect.Canonical) { throw "First-deployment source inspection refused: $($inspect.Reason)" }
+    if ($inspect.Action -eq 'UpdateAvailable') {
+        if ($inspect.TargetSha -ne $posture.RemoteMainSha) { throw 'Approved main moved during setup. Nothing was stopped; obtain setup from the new approved revision.' }
+        Stop-AeroLinkProductionTransition -Obligation $firstDeploymentIntent -Config $demoConfig
+        $advance = Update-AeroLinkProductionSource -SourceRoot $configuration.SourceRoot -AdvanceToSha $inspect.TargetSha
+        if (-not $advance.Canonical -or $advance.Action -ne 'Updated') { throw "First-deployment source advance refused after quiescence: $($advance.Reason). Restoration intent is retained; rerun approved setup." }
+    }
     # Never launch the replacement API from this elevated token: a high-integrity process is not an
     # ordinary operator's target even with an account DACL. Run the existing launcher through Limited S4U.
     $deploymentId = [guid]::NewGuid().ToString('N')

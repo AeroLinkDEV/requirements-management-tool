@@ -186,6 +186,15 @@ function Get-AeroLinkRemoteDemoNgrokProcess {
     $mismatched = @()
     $expectedExe = [IO.Path]::GetFullPath($Config.NgrokExecutable)
     foreach ($process in $ProcessInfos) {
+        if ($liveEnumeration -and (-not $process.ExecutablePath -or -not $process.CommandLine)) {
+            try {
+                $native = Get-AeroLinkNativeProcessIdentity -ProcessId $process.ProcessId
+                if (-not $process.CreationDate -or
+                    ([DateTimeOffset]$process.CreationDate).UtcDateTime.ToString('yyyyMMddHHmmssffffff') -ne
+                    ([DateTimeOffset]$native.StartedAt).UtcDateTime.ToString('yyyyMMddHHmmssffffff')) { throw 'Process identity changed during enumeration.' }
+                $process = [pscustomobject]@{ ProcessId=$native.ProcessId; ExecutablePath=$native.ExecutablePath; CommandLine=$native.CommandLine; CreationDate=$process.CreationDate }
+            } catch { $mismatched += $process; continue }
+        }
         $executable = ''
         if ($process.ExecutablePath) { $executable = [IO.Path]::GetFullPath($process.ExecutablePath) }
         $command = [string]$process.CommandLine
