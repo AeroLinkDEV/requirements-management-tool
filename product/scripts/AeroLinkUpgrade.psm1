@@ -1,4 +1,5 @@
 #Requires -Version 5.1
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1')
 <#
     The launcher's side of the database upgrade contract.
 
@@ -441,7 +442,7 @@ function Remove-AeroLinkUpgradeValidationDatabase {
     if ($LASTEXITCODE -ne 0) { throw "Could not remove the disposable validation database '$Database'." }
     $validationEvidence = Join-Path (Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot).RestoreValidation $Database
     if (Test-Path -LiteralPath $validationEvidence -PathType Container) {
-        Remove-Item -LiteralPath $validationEvidence -Recurse -Force
+        Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $validationEvidence) -Recurse -Force
     }
 }
 
@@ -464,7 +465,7 @@ function Remove-AeroLinkSnapshotStagingDatabase {
     & (Join-Path $paths.PostgresBin 'dropdb.exe') -h 127.0.0.1 -p $PostgresPort -U postgres --if-exists $Database
     if ($LASTEXITCODE -ne 0) { throw "Could not remove the disposable snapshot-staging database '$Database'." }
     $stagingEvidence = Join-Path $paths.RestoreValidation $Database
-    if (Test-Path -LiteralPath $stagingEvidence -PathType Container) { Remove-Item -LiteralPath $stagingEvidence -Recurse -Force }
+    if (Test-Path -LiteralPath $stagingEvidence -PathType Container) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $stagingEvidence) -Recurse -Force }
 }
 
 Export-ModuleMember -Function @(
