@@ -222,6 +222,33 @@ this phase.
   The critical-path values are re-measured automatically by the rolling collector; the checked-in journey
   durations continue to be refreshed from `journey-durations-*` artifacts.
 
+### API packing shadow (942)
+
+`lib/api-packing-shadow.mjs` and `bin/report-api-packing-shadow.mjs` compare the current API class-count
+partition with a deterministic candidate that uses validated class-duration observations plus test count.
+The command is offline and advisory:
+
+```powershell
+node product/ci-metrics/bin/report-api-packing-shadow.mjs discovery.json api-packing-observations.json out 3
+```
+
+`discovery.json` must be a fresh `dotnet test product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj
+--list-tests` inventory (`aerolink-api-discovery/v1`) with its commit/tree identity. The live inventory is
+the coverage authority; a static class list cannot replace it. Optional collection entries must explicitly
+set `preserveTogether: true`; every class in one such collection stays on one shard. The current and
+candidate plans both report exact test union, duplicate, split-class and per-shard filter evidence, leaving
+the existing TRX self-check as the execution guard.
+
+`api-packing-observations.json` (`aerolink-api-packing-observations/v1`) must link every class weight to
+validated successful `merge_group` Product quality-gate runs, including each run's commit SHA, tree SHA,
+discovery digest, and cohort. Missing, stale, malformed or mixed-cohort evidence falls back to the current
+count plan; a bounded top-50 class sample leaves unweighted tail classes on count-based placement and is
+still ineligible for adoption. Fewer than eight matched runs can produce a visible candidate for investigation
+but cannot make it adoption-eligible. Class duration sums are rank signals only and are not additive wall-clock forecasts;
+the report never changes the CI selector, shard count, required checks or merge authority, and never claims a
+speedup. No candidate should be wired into `.github/workflows/ci.yml` until an independently reviewed
+measurement establishes the current F3/F4/F5 gate and the existing count/TRX/union guards remain intact.
+
 ## Security and trust
 
 - Fragments contain no environment values, cookies, headers, passwords, connection strings, request/response
@@ -302,7 +329,7 @@ independently selected producer, so push/schedule reports are complete).
 Run the full suite exactly as CI does:
 
 ```powershell
-node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs product/ci-metrics/tests/merge-authority.test.mjs product/ci-metrics/tests/merge-authority-github.test.mjs
+node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs product/ci-metrics/tests/api-packing-shadow.test.mjs product/ci-metrics/tests/merge-authority.test.mjs product/ci-metrics/tests/merge-authority-github.test.mjs
 ```
 
 The command's reported test count is the authoritative current total; historical run artifacts retain
@@ -318,6 +345,10 @@ consistency and GitHub-tree cross-checking, tested-tree manifest validation and 
 selection, contradictory raw gate evidence, identity binding for repository/workflow/run/attempt/PR/
 head/base/ref/checkout-tree), credential guards, timing validation, bounded output, Markdown escaping, critical-path
 computation, the minimal ZIP reader, and the static workflow contract.
+
+The API-packing-shadow subset additionally covers exact current/candidate coverage and filters, preserved
+class and explicitly declared collection groups, deterministic assignment, malformed/stale/missing/mixed
+evidence fallback, the eight-run adoption threshold, and the offline report's no-speedup limits.
 
 The API-telemetry subset (9 tests) additionally covers non-overlapping construction/host/disposal math,
 parameterized-theory ambiguity, unmatched fixture/helper factories, connection-open separation, schema
