@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 859,
-    "cases": 956,
+    "tests": 860,
+    "cases": 957,
     "classes": 128,
-    "hostedTests": 821,
-    "hostedCases": 904,
+    "hostedTests": 822,
+    "hostedCases": 905,
     "nonHostedTests": 30,
     "nonHostedCases": 44,
     "unknownHostTests": 8,
@@ -29,8 +29,8 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 165,
-      "cases": 179,
+      "tests": 166,
+      "cases": 180,
       "unknownCases": 0,
       "classes": 59
     },
@@ -12001,8 +12001,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 418,
-        "end": 446
+        "start": 492,
+        "end": 520
       }
     },
     {
@@ -12019,8 +12019,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 187,
-        "end": 236
+        "start": 261,
+        "end": 310
       }
     },
     {
@@ -12037,8 +12037,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 513,
-        "end": 578
+        "start": 587,
+        "end": 652
       }
     },
     {
@@ -12055,8 +12055,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 90,
-        "end": 139
+        "start": 92,
+        "end": 142
       }
     },
     {
@@ -12073,8 +12073,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 141,
-        "end": 185
+        "start": 215,
+        "end": 259
       }
     },
     {
@@ -12091,8 +12091,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 238,
-        "end": 365
+        "start": 312,
+        "end": 439
+      }
+    },
+    {
+      "cls": "TestChangeRequestConsolidationTests",
+      "test": "Source_revision_supersession_keeps_the_actionable_queue_and_readiness_on_current_work",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 144,
+        "end": 184
       }
     },
     {
@@ -12109,8 +12127,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 367,
-        "end": 416
+        "start": 441,
+        "end": 490
       }
     },
     {
@@ -12127,8 +12145,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 448,
-        "end": 511
+        "start": 522,
+        "end": 585
       }
     },
     {

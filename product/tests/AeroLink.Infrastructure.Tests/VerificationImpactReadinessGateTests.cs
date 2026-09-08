@@ -316,6 +316,93 @@ public sealed class VerificationImpactReadinessGateTests
         finally { File.Delete(seed.Path); }
     }
 
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, true)]
+    public async Task Superseded_history_is_not_a_current_verification_obligation(bool resolved, bool approved, bool deferred)
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            Guid historicalReviewId, historicalItemId;
+            string historicalSnapshotHash;
+            await using (var arrange = new AeroLinkDbContext(seed.Options))
+            {
+                var historicalItem = AddIntroduced(arrange, seed, "SYSR-OLD.00", "Analysis");
+                var historicalReview = arrange.TestChangeReviews.Local.Single();
+                historicalItem.AssignToEngineer("lead", "engineer", Now);
+                historicalItem.Resolve("engineer", VerificationImpactOutcome.NoTestRequired, "Original analysis decision.", Now);
+                historicalReview.RecordNoTestChangeRequired("engineer", "Original analysis accepted.", Now);
+                historicalReview.Submit("engineer", "lead", true, Now);
+                historicalReview.ApproveActiveStage("lead", "Original decision approved.", Now);
+                historicalSnapshotHash = Assert.Single(historicalReview.ReviewCycles).SnapshotHash;
+                var successor = new SystemChangeRequest("SRCR-00010", 1, seed.ProjectId, seed.ReleaseId,
+                    "Updated routing", "P", "A", "S", "author", Now);
+                var currentReview = new TestChangeReview(seed.ProjectId, seed.ReleaseId, successor.Id,
+                    TestChangeReviewDiscipline.System, successor.DisplayNumber, Now);
+                var currentItem = VerificationImpactItem.ForIntroducedRequirement(seed.ProjectId, seed.ReleaseId,
+                    successor.Id, currentReview.Id, Guid.NewGuid(), "SYSR-CURRENT.00", "Analysis", Now);
+                historicalReview.Supersede(currentReview.Id, "Source revision superseded.", Now);
+                historicalItem.Supersede(Now);
+                if (resolved)
+                {
+                    currentItem.AssignToEngineer("lead", "engineer", Now);
+                    currentItem.Resolve("engineer", VerificationImpactOutcome.NoTestRequired, "Verified by analysis.", Now);
+                }
+                if (approved)
+                {
+                    currentReview.RecordNoTestChangeRequired("engineer", "Analysis satisfies the current requirement.", Now);
+                    currentReview.Submit("engineer", "lead", true, Now);
+                    currentReview.ApproveActiveStage("lead", "Analysis decision accepted.", Now);
+                }
+                if (deferred) currentReview.Defer("Current work awaits a future decision.", Now);
+                arrange.AddRange(successor, currentReview, currentItem);
+                await arrange.SaveChangesAsync();
+                historicalReviewId = historicalReview.Id;
+                historicalItemId = historicalItem.Id;
+            }
+
+            await using var read = new AeroLinkDbContext(seed.Options);
+            var readiness = await new ReleaseReadinessService(read).CalculateAsync(seed.CampaignId, default);
+            var impact = Assert.Single(readiness.Gates, x => x.Code == "verification_impact");
+            Assert.Equal(1, impact.Total);
+            Assert.Equal(resolved ? 1 : 0, impact.Completed);
+            Assert.Equal(resolved, impact.Complete);
+            Assert.DoesNotContain("SYSR-OLD", impact.Detail);
+            if (!resolved) Assert.Contains("SYSR-CURRENT.00", impact.Detail);
+            var review = Assert.Single(readiness.Gates, x => x.Code == "test_change_reviews");
+            Assert.Equal(1, review.Total);
+            Assert.Equal(approved ? 1 : 0, review.Completed);
+            Assert.Equal(approved, review.Complete);
+            var historical = await read.TestChangeReviews.Include(x => x.ReviewCycles).SingleAsync(x => x.Id == historicalReviewId);
+            Assert.Equal(TestChangeReviewState.Superseded, historical.State);
+            Assert.Equal(historicalSnapshotHash, Assert.Single(historical.ReviewCycles).SnapshotHash);
+            Assert.Equal("lead", historical.ApprovedBy);
+            var historicalImpact = await read.VerificationImpactItems.SingleAsync(x => x.Id == historicalItemId);
+            Assert.Equal(VerificationImpactState.Superseded, historicalImpact.State);
+            Assert.Equal(VerificationImpactOutcome.NoTestRequired, historicalImpact.Outcome);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
+    public async Task Missing_current_reviews_do_not_satisfy_a_configured_verification_discipline()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            await using var db = new AeroLinkDbContext(seed.Options);
+            var readiness = await new ReleaseReadinessService(db).CalculateAsync(seed.CampaignId, default);
+            var gate = Assert.Single(readiness.Gates, x => x.Code == "test_change_reviews");
+            Assert.False(gate.Complete);
+            Assert.Equal(0, gate.Total);
+            Assert.Contains("No controlled test change requests", gate.Detail);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
     [Fact]
     public async Task Freezing_a_baseline_is_not_held_back_by_an_undecided_item()
     {
