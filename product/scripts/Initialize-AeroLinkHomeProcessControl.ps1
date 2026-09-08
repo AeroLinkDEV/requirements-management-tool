@@ -125,8 +125,9 @@ try {
     $deploymentResult = Join-Path $leaseDirectory "home-deployment-$deploymentId.result"
     $deploymentLog = Join-Path $leaseDirectory "home-deployment-$deploymentId.log"
     @'
-param($Module, $Installation, $Source, $Result, $Log)
+param($Module, $Installation, $Source, $Result, $Log, $ConfigurationProfile)
 $ErrorActionPreference = 'Stop'
+$env:LOCALAPPDATA = $ConfigurationProfile
 $lease = $null
 $code = 1
 try {
@@ -144,8 +145,8 @@ finally {
 exit $code
 '@ | Set-Content -LiteralPath $deploymentScript -Encoding UTF8
     $deploymentTask = "AeroLinkHomeFirstDeployment_$deploymentId"
-    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Module "{1}" -Installation "{2}" -Source "{3}" -Result "{4}" -Log "{5}"' -f `
-        $deploymentScript, (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1'), $installation.InstallationRoot, $configuration.SourceRoot, $deploymentResult, $deploymentLog
+    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Module "{1}" -Installation "{2}" -Source "{3}" -Result "{4}" -Log "{5}" -ConfigurationProfile "{6}"' -f `
+        $deploymentScript, (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1'), $installation.InstallationRoot, $configuration.SourceRoot, $deploymentResult, $deploymentLog, $env:LOCALAPPDATA
     $action = New-ScheduledTaskAction -Execute (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument $arguments
     $taskPrincipal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType S4U -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 60) -MultipleInstances IgnoreNew
