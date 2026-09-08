@@ -331,6 +331,8 @@ public static partial class ChangeRequestTraceProjection
         // exact evidence it froze, so retain it as historical provenance without reanimating a live edge.
         foreach (var cycle in frozenCycles.Where(x => byCr.ContainsKey(x.ChangeRequestId)
                      && x.SnapshotContractVersion >= 3))
+        {
+            ct.ThrowIfCancellationRequested();
             foreach (var frozen in ParseFrozenTrace(cycle.SnapshotJson))
             {
                 var reopening = frozen.AssessmentId is Guid assessmentId
@@ -360,6 +362,7 @@ public static partial class ChangeRequestTraceProjection
                         PreviousState: reopening?.PreviousState.ToString(),
                         PreviousOutcome: reopening?.PreviousOutcome.ToString()));
             }
+        }
 
         var nodes = new Dictionary<(string Kind, Guid Id), ChangeRequestTraceNode>();
         foreach (var id in byCr.Keys.OrderBy(x => x))
@@ -600,7 +603,10 @@ public static partial class ChangeRequestTraceProjection
         var typedEdges = edgeBuilders.Where(x => nodes.ContainsKey((x.FromKind, x.FromId))
                 && nodes.ContainsKey((x.ToKind, x.ToId))).ToList();
         foreach (var edge in typedEdges)
+        {
+            ct.ThrowIfCancellationRequested();
             Connect((edge.FromKind, edge.FromId), (edge.ToKind, edge.ToId));
+        }
         var visited = new HashSet<(string Kind, Guid Id)>();
         if (isNetwork)
         {
@@ -619,6 +625,7 @@ public static partial class ChangeRequestTraceProjection
             var pending = new Stack<(string Kind, Guid Id)>([(rootKind, rootId)]);
             while (pending.Count > 0)
             {
+                ct.ThrowIfCancellationRequested();
                 var current = pending.Pop();
                 if (!visited.Add(current) || !graph.TryGetValue(current, out var next)) continue;
                 foreach (var node in next.OrderByDescending(x => x.Kind).ThenByDescending(x => x.Id)) pending.Push(node);
@@ -639,6 +646,7 @@ public static partial class ChangeRequestTraceProjection
                     group.Any(x => x.IsSuspect)))
             .OrderBy(x => x.FromKind).ThenBy(x => x.FromId).ThenBy(x => x.ToKind).ThenBy(x => x.ToId)
             .ThenBy(x => x.Relation).ToList();
+        ct.ThrowIfCancellationRequested();
         return new(projectId, rootKind == "ChangeRequest" ? rootCr : Guid.Empty,
             nodes.Where(x => visited.Contains(x.Key)).Select(x => x.Value)
                 .OrderBy(x => x.Kind).ThenBy(x => x.DisplayNumber).ThenBy(x => x.Id).ToList(), edges, state,

@@ -90,6 +90,11 @@ public sealed class FrozenReviewTraceAdjacencyPostgresQualificationTests
 
                 var completion = Assert.Single(await verify.GovernedMigrationCompletions.AsNoTracking()
                     .Where(x => x.Marker == FrozenReviewTraceAdjacencyMigrationAuthority.Marker).ToListAsync());
+                var audit = Assert.Single(await verify.SecurityAuditEvents.AsNoTracking()
+                    .Where(x => x.EventType == FrozenReviewTraceAdjacencyMigrationAuthority.Marker + ".Completed"
+                        && x.Target == FrozenReviewTraceAdjacencyMigrationAuthority.AuditTarget).ToListAsync());
+                Assert.Equal("Success", audit.Outcome);
+                Assert.Equal(completion.TotalsJson, audit.Detail);
                 using var totals = JsonDocument.Parse(completion.TotalsJson);
                 Assert.Equal(101, totals.RootElement.GetProperty("CyclesExamined").GetInt32());
                 Assert.Equal(101, totals.RootElement.GetProperty("AdjacencyRowsInserted").GetInt32());

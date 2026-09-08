@@ -8,6 +8,7 @@ namespace AeroLink.Infrastructure.Persistence;
 public sealed class FrozenReviewTraceAdjacencyMigrationAuthority(AeroLinkDbContext db)
 {
     public const string Marker = "FrozenReviewTraceAdjacency.v1";
+    public const string AuditTarget = "frozen-review-trace-adjacency";
     public async Task EnsureCompletedAsync(CancellationToken ct = default)
     {
         await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
@@ -47,6 +48,8 @@ public sealed class FrozenReviewTraceAdjacencyMigrationAuthority(AeroLinkDbConte
             var completion = new GovernedMigrationCompletion(Marker, "platform-migration", DateTimeOffset.UtcNow,
                 JsonSerializer.Serialize(new { CyclesExamined = offset, AdjacencyRowsInserted = inserted }));
             db.Add(completion);
+            db.SecurityAuditEvents.Add(new SecurityAuditEvent(Marker + ".Completed", "platform-migration",
+                AuditTarget, "Success", completion.TotalsJson, "local", completion.CompletedAt));
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         });

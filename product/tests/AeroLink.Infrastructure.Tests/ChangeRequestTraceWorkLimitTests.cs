@@ -4,6 +4,8 @@ using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using System.Data.Common;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -72,6 +74,28 @@ public sealed class ChangeRequestTraceWorkLimitTests
     }
 
     [Fact]
+    public async Task Rooted_trace_cancellation_mid_frontier_read_leaves_the_context_usable()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var root = fixture.CreateChangeRequest("SRCR-10280");
+        var child = fixture.CreateChangeRequest("SRCR-10281");
+        child.AddUpstreamLink("author", root.Id, root.DisplayNumber, fixture.Release.Id,
+            fixture.Release.Version, "mid-frontier cancellation test", fixture.Now);
+        fixture.Db.AddRange(root, child);
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+
+        using var cancellation = new CancellationTokenSource();
+        fixture.Interceptor.Arm(cancellation);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ChangeRequestTraceProjection.ForChangeRequestAsync(
+            fixture.Db, fixture.Project.Id, child.Id, LegacyLadderPolicy.Instance, cancellation.Token));
+        Assert.Equal(3, fixture.Interceptor.CancellationReaderNumber);
+
+        fixture.Interceptor.Disarm();
+        Assert.Equal(2, await fixture.Db.SystemChangeRequests.CountAsync());
+    }
+
+    [Fact]
     public async Task Build_network_cap_is_deterministic_and_declares_truncation()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -97,19 +121,21 @@ public sealed class ChangeRequestTraceWorkLimitTests
     {
         private readonly SqliteConnection _connection;
         private Fixture(SqliteConnection connection, AeroLinkDbContext db, ProjectRecord project,
-            SoftwareRelease release, DateTimeOffset now)
-        { _connection = connection; Db = db; Project = project; Release = release; Now = now; }
+            SoftwareRelease release, DateTimeOffset now, MidFrontierCancellationInterceptor interceptor)
+        { _connection = connection; Db = db; Project = project; Release = release; Now = now; Interceptor = interceptor; }
         public AeroLinkDbContext Db { get; }
         public ProjectRecord Project { get; }
         public SoftwareRelease Release { get; }
         public DateTimeOffset Now { get; }
+        public MidFrontierCancellationInterceptor Interceptor { get; }
 
         public static async Task<Fixture> CreateAsync()
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
+            var interceptor = new MidFrontierCancellationInterceptor();
             var db = new AeroLinkDbContext(new DbContextOptionsBuilder<AeroLinkDbContext>()
-                .UseSqlite(connection).Options);
+                .UseSqlite(connection).AddInterceptors(interceptor).Options);
             await db.Database.EnsureCreatedAsync();
             var now = new DateTimeOffset(2026, 9, 8, 12, 0, 0, TimeSpan.Zero);
             var program = new ProgramRecord("Trace limits", "TLM");
@@ -117,7 +143,7 @@ public sealed class ChangeRequestTraceWorkLimitTests
             var release = new SoftwareRelease(project.Id, "1.0", false);
             db.AddRange(program, project, release);
             await db.SaveChangesAsync();
-            return new(connection, db, project, release, now);
+            return new(connection, db, project, release, now, interceptor);
         }
 
         public SystemChangeRequest CreateChangeRequest(string number) =>
@@ -125,5 +151,42 @@ public sealed class ChangeRequestTraceWorkLimitTests
 
         public async ValueTask DisposeAsync()
         { await Db.DisposeAsync(); await _connection.DisposeAsync(); }
+    }
+
+    private sealed class MidFrontierCancellationInterceptor : DbCommandInterceptor
+    {
+        private CancellationTokenSource? _source;
+        private int _readerCount;
+        private int _cancellationReaderNumber;
+        public int CancellationReaderNumber => Volatile.Read(ref _cancellationReaderNumber);
+
+        public void Arm(CancellationTokenSource source)
+        {
+            _source = source;
+            Interlocked.Exchange(ref _readerCount, 0);
+            Interlocked.Exchange(ref _cancellationReaderNumber, 0);
+        }
+
+        public void Disarm()
+        {
+            _source = null;
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            var source = _source;
+            if (source is not null)
+            {
+                var readerNumber = Interlocked.Increment(ref _readerCount);
+                if (readerNumber == 3)
+                {
+                    Interlocked.Exchange(ref _cancellationReaderNumber, readerNumber);
+                    source.Cancel();
+                }
+            }
+            return new ValueTask<InterceptionResult<DbDataReader>>(result);
+        }
     }
 }

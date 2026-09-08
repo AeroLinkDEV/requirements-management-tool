@@ -102,10 +102,12 @@ public sealed class AeroLinkMaintenanceQualificationTests
             {
                 await new ProjectLeadershipMigrationAuthority(upgrade).EnsureCompletedAsync();
                 await new ProjectLeadershipReconciliationAuthority(upgrade).EnsureCompletedAsync();
+                await new FrozenReviewTraceAdjacencyMigrationAuthority(upgrade).EnsureCompletedAsync();
             }
             // The remaining authorities need a renderer and an evidence store to RUN; the analyzer only reads
             // the completion markers they write, so a database on which they already ran is modelled by those
-            // markers. That is exactly the read the analyzer performs against a real installation.
+            // markers. The frozen-review adjacency authority is intentionally exercised above because it has
+            // no external renderer or evidence-store dependency.
             await MarkCompletedAsync(connection,
                 SoftwareVerificationCaseMigrationAuthority.MigrationMarker,
                 TestChangeRequestPrefixMigrationAuthority.MigrationMarker,
@@ -155,6 +157,7 @@ public sealed class AeroLinkMaintenanceQualificationTests
             {
                 await new ProjectLeadershipMigrationAuthority(upgrade).EnsureCompletedAsync();
                 await new ProjectLeadershipReconciliationAuthority(upgrade).EnsureCompletedAsync();
+                await new FrozenReviewTraceAdjacencyMigrationAuthority(upgrade).EnsureCompletedAsync();
             }
             await MarkCompletedAsync(connection,
                 SoftwareVerificationCaseMigrationAuthority.MigrationMarker,
@@ -898,6 +901,7 @@ public sealed class AeroLinkMaintenanceQualificationTests
                 var m when m == ProjectLeadershipReconciliationAuthority.MigrationMarker => nameof(ProjectLeadershipReconciliationAuthority),
                 var m when m == TestChangeRequestPrefixMigrationAuthority.MigrationMarker => nameof(TestChangeRequestPrefixMigrationAuthority),
                 var m when m == SoftwareProcedureExecutionCutoverAuthority.MigrationMarker => nameof(SoftwareProcedureExecutionCutoverAuthority),
+                var m when m == FrozenReviewTraceAdjacencyMigrationAuthority.Marker => nameof(FrozenReviewTraceAdjacencyMigrationAuthority),
                 _ => x.Marker,
             })
             .OrderBy(x => x)
