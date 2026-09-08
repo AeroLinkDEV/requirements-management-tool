@@ -159,7 +159,7 @@ test("artifact cards reflow after delayed web fonts settle", async ({ page }) =>
   await page.evaluate(async () => { await document.fonts.ready })
   expect(delayedFontRequests).toBeGreaterThan(0)
 
-  const overlap = await page.locator(".dtCanvas").evaluate(canvas => {
+  const overlap = () => page.locator(".dtCanvas").evaluate(canvas => {
     const cards = [...canvas.querySelectorAll<HTMLElement>('[data-node-id]')]
       .filter(card => !card.classList.contains("is-offscreen"))
     const focal = cards.find(card => card.textContent?.includes("HLR-925.01"))
@@ -167,14 +167,11 @@ test("artifact cards reflow after delayed web fonts settle", async ({ page }) =>
     if (!focal || !sibling) throw new Error("The two HLR cards were not rendered")
     const focalRect = focal.getBoundingClientRect()
     const siblingRect = sibling.getBoundingClientRect()
-    return {
-      verticalOverlap: Math.min(focalRect.bottom, siblingRect.bottom) - Math.max(focalRect.top, siblingRect.top),
-      focalHeight: focalRect.height,
-      siblingTop: siblingRect.top,
-      focalBottom: focalRect.bottom,
-    }
+    return Math.min(focalRect.bottom, siblingRect.bottom) - Math.max(focalRect.top, siblingRect.top)
   })
-  expect(overlap.verticalOverlap).toBeLessThanOrEqual(1)
+  // The canvas repaints on the next animation frame after the font event. Keep this bounded below the suite's
+  // existing 15-second acceptance budget while allowing that scheduled geometry pass to settle.
+  await expect.poll(overlap, { timeout: 3_000 }).toBeLessThanOrEqual(1)
 })
 
 test("clearing and reselecting the arrival focal uses selection framing instead of replaying landing", async ({ page }) => {
