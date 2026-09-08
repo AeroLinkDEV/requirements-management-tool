@@ -36,6 +36,7 @@ public sealed class AeroLinkUpgradeAnalyzer(
         (ProjectLeadershipReconciliationAuthority.MigrationMarker, "project-leadership"),
         (TestChangeRequestPrefixMigrationAuthority.MigrationMarker, "test-change-request-identities"),
         (SoftwareProcedureExecutionCutoverAuthority.MigrationMarker, "software-procedure-execution-cutover"),
+        (FrozenReviewTraceAdjacencyMigrationAuthority.Marker, FrozenReviewTraceAdjacencyMigrationAuthority.AuditTarget),
     ];
 
     /// <summary>

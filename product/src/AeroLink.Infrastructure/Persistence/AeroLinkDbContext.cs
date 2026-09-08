@@ -837,6 +837,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasIndex(x => x.AssessmentId);
             b.HasOne<DownstreamChangeAssessment>().WithMany().HasForeignKey(x => x.AssessmentId).OnDelete(DeleteBehavior.Cascade);
         });
+        modelBuilder.Entity<FrozenReviewTraceLink>(FrozenReviewTraceLink.Configure);
         modelBuilder.Entity<ReviewCycle>(b =>
         {
             b.ToTable("review_cycles"); b.HasKey(x => x.Id);
@@ -2024,6 +2025,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             await new SaveBoundaryStateRepair(this).ApplyAsync(cancellationToken);
             await new SaveBoundaryIntegrityValidator(this).ValidateAsync(cancellationToken);
             await new SaveBoundaryLifecycleAppender(this).AppendAsync(cancellationToken);
+
+            await FrozenReviewTraceLink.PrepareAsync(this, cancellationToken);
 
             var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
             PendingLadderSeals.Clear();

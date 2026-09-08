@@ -103,6 +103,9 @@ Files are streamed to protected local content-addressed storage, SHA-256 hashed,
 
 ## Open Digital Thread boundary
 
+The [bounded Digital Thread read contract](DIGITAL_THREAD_READS.md) describes typed frontier selection, explicit work limits, and the derived frozen-review adjacency lookup. Original snapshots remain the historical provenance authority.
+
+
 AeroLink 2.0 introduces a separate machine-access boundary under `/api/v1`. Machine identities belong to exactly one Project, receive explicit scopes, and authenticate with one-time API keys whose secrets are never persisted. The first public resources expose cursor-paginated, ETag-bearing requirement reads and idempotent external-event ingestion without exposing internal tables or browser-session behavior.
 
 Integration events and webhook deliveries are durable, separate records. Event creation and delivery creation share the application transaction; a hosted dispatcher claims due work with a conditional, expiring token, signs JSON envelopes with HMAC-SHA256, applies exponential retry, and retains bounded per-attempt outcomes for operator replay. Delivery is at-least-once: the stable event and delivery IDs are the receiver deduplication keys when a receiver accepts a request before local completion is recorded. Enabled-subscription and due-time filtering happens before the bounded dispatch batch, so disabled or future work cannot starve eligible work. Webhook signing secrets are protected through ASP.NET Core Data Protection and outbound targets fail closed against insecure or private destinations unless a development-only override is configured.

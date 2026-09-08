@@ -551,9 +551,18 @@ public static class VerificationImpactEndpoints
             if (review is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, review.ProjectId, ct)) return Results.Forbid();
             var policy = await policyResolver.ResolveAsync(review.ProjectId, ct);
-            var projection = await ChangeRequestTraceProjection.ForTestChangeReviewAsync(db, review.ProjectId,
-                id, policy, ct);
-            return projection is null ? Results.NotFound() : Results.Ok(projection);
+            try
+            {
+                var projection = await ChangeRequestTraceProjection.ForTestChangeReviewAsync(db, review.ProjectId,
+                    id, policy, ct);
+                return projection is null ? Results.NotFound() : Results.Ok(projection);
+            }
+            catch (TraceWorkLimitException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
+                    title: "Trace work limit exceeded", detail: ex.Message,
+                    extensions: new Dictionary<string, object?> { ["code"] = "trace_work_limit" });
+            }
         });
 
         // What a controlled Test Change Request proposes, for the Digital Thread inside-a-change view.

@@ -5,6 +5,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -219,6 +220,47 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
             Assert.Contains(edge.GetProperty("fromId").GetString(), ids);
             Assert.Contains(edge.GetProperty("toId").GetString(), ids);
         });
+    }
+
+    [Fact]
+    public async Task Oversized_rooted_traces_return_an_explicit_work_limit_after_project_authorization()
+    {
+        var fixture = await SeedAsync(_host.Factory);
+        Guid reviewId;
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var previous = fixture.ParentId;
+            for (var index = 0; index < 66; index++)
+            {
+                var child = new SystemChangeRequest($"SRCR-{91000 + index}", 0, fixture.ProjectId,
+                    fixture.CurrentReleaseId, "Deep trace", "Problem", "Analysis", "Solution", fixture.Member, now);
+                db.Add(child);
+                db.Add(new ChangeRequestUpstreamLink(child.Id, previous, "Historical exact predecessor",
+                    fixture.CurrentReleaseId, "2.1", "Recorded dependency", fixture.Member, now));
+                previous = child.Id;
+            }
+            var review = new TestChangeReview(fixture.ProjectId, fixture.CurrentReleaseId, fixture.ParentId,
+                TestChangeReviewDiscipline.System, "SRCR-90001.00", now, baseNumber: "SYSTPCR-91000", revision: 0);
+            db.Add(review);
+            reviewId = review.Id;
+            await db.SaveChangesAsync();
+        }
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+        foreach (var route in new[] { $"/api/change-requests/{fixture.ParentId}/trace", $"/api/test-change-reviews/{reviewId}/trace" })
+        {
+            using var response = await client.GetAsync(route);
+            Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+            var problem = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+            Assert.Equal("trace_work_limit", problem.GetProperty("code").GetString());
+        }
+        using var outsider = _host.CreateClient();
+        await SignInAsync(outsider, fixture.Outsider);
+        using var forbidden = await outsider.GetAsync($"/api/change-requests/{fixture.ParentId}/trace");
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.True((await NetworkAsync(client, fixture, 1)).GetProperty("truncated").GetBoolean());
     }
 
     [Fact]

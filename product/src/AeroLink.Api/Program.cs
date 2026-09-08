@@ -116,6 +116,9 @@ await using (var scope = app.Services.CreateAsyncScope())
             throw new InvalidOperationException("The read-only restore-validation database is unavailable.");
         if ((await db.Database.GetPendingMigrationsAsync()).Any())
             throw new InvalidOperationException("The restored database schema does not match this AeroLink validation build.");
+        if (db.Database.IsNpgsql() && !await db.GovernedMigrationCompletions.AsNoTracking()
+                .AnyAsync(x => x.Marker == FrozenReviewTraceAdjacencyMigrationAuthority.Marker))
+            throw new InvalidOperationException("The restored database has not completed the frozen review trace lookup upgrade.");
     }
     else if (db.Database.IsNpgsql()) await db.Database.MigrateAsync();
     else await db.Database.EnsureCreatedAsync();
@@ -132,6 +135,7 @@ await using (var scope = app.Services.CreateAsyncScope())
         // effective-executable resolver does the governed authority activate the software Procedure tier.
         // It is internal, idempotent, and refuses (with no partial state) if typed v2 readiness is missing.
         await scope.ServiceProvider.GetRequiredService<SoftwareProcedureExecutionCutoverAuthority>().EnsureCompletedAsync();
+        await scope.ServiceProvider.GetRequiredService<FrozenReviewTraceAdjacencyMigrationAuthority>().EnsureCompletedAsync();
     }
     // FMS closure scenarios are controlled records, so the first demo-data start must have the seeded
     // SQA directory available before their frozen closure package is written. Keep the post-Program pass
