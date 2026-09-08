@@ -93,6 +93,25 @@ function normalizeTests(tests) {
 }
 
 /**
+ * Parse the bounded API-test lines emitted by `dotnet test --list-tests`.  This helper only parses text
+ * supplied by its caller; it does not execute VSTest or authenticate the resulting inventory.
+ */
+export function parseVstestList(text) {
+  if (typeof text !== 'string' || text.length === 0) throw new Error('VSTest list output must be non-empty text.')
+  const tests = []
+  for (const line of text.split(/\r?\n/)) {
+    // Keep the same prefix boundary as the CI grep. normalizeApiDiscovery then rejects any captured
+    // line that cannot derive an AeroLink.* class, instead of silently dropping a CI-selected line.
+    if (!line.startsWith('    AeroLink')) continue
+    const name = line.slice(4)
+    if (name.length > MAX_TEST_NAME || /[\r\n]/.test(name)) throw new Error('VSTest list contains an invalid test name.')
+    tests.push(name)
+  }
+  if (tests.length === 0) throw new Error('VSTest list contained no AeroLink API tests.')
+  return tests
+}
+
+/**
  * Normalize a live `dotnet test --list-tests` inventory.  The inventory is the coverage authority for
  * both plans; no static class inventory can stand in for it because test classes can be added by source.
  */
@@ -182,7 +201,7 @@ function coverageForPlan(plan, discovery) {
   }
 }
 
-function materializePlan({ discovery, shardCount, assignments, weights = null, algorithm }) {
+function materializePlan({ discovery, shardCount, assignments, weights = null, algorithm, grouping }) {
   const shards = Array.from({ length: shardCount }, (_, index) => emptyShard(index + 1))
   for (const entry of discovery.classes) {
     const shardNumber = assignments.get(entry.className)
@@ -209,7 +228,7 @@ function materializePlan({ discovery, shardCount, assignments, weights = null, a
       shard.compositeLoad = Math.round(shard.compositeLoad * 100) / 100
     }
   }
-  const plan = { algorithm, shardCount, shards }
+  const plan = { algorithm, shardCount, grouping, shards }
   plan.coverage = coverageForPlan(plan, discovery)
   if (!plan.coverage.complete) throw new Error(`${algorithm} produced an incomplete or overlapping test plan.`)
   return plan
@@ -243,18 +262,30 @@ export function buildCurrentCountPlan(discovery, shardCount = DEFAULT_API_SHARD_
   const count = normalizeShardCount(shardCount)
   const loads = Array.from({ length: count }, () => 0)
   const assignments = new Map()
-  const units = packingUnits(normalized).sort((a, b) => b.testCount - a.testCount || compareStrings(a.unitName, b.unitName))
-  for (const unit of units) {
+  // This intentionally mirrors the individual-class greedy packer in ci.yml. Collection metadata is
+  // not part of the current execution selector and must never silently change the baseline plan.
+  const classes = [...normalized.classes].sort((a, b) => b.testCount - a.testCount || compareStrings(a.className, b.className))
+  for (const entry of classes) {
     let best = 0
     for (let index = 1; index < count; index += 1) if (loads[index] < loads[best]) best = index
-    loads[best] += unit.testCount
-    for (const className of unit.classNames) assignments.set(className, best + 1)
+    loads[best] += entry.testCount
+    assignments.set(entry.className, best + 1)
   }
-  return materializePlan({ discovery: normalized, shardCount: count, assignments, algorithm: 'current-count-greedy' })
+  return materializePlan({
+    discovery: normalized,
+    shardCount: count,
+    assignments,
+    algorithm: 'current-count-greedy',
+    grouping: {
+      mode: 'individual-class',
+      collectionConstraintsApplied: false,
+      collectionsIgnoredByCurrentCi: normalized.collections.map((collection) => collection.name),
+    },
+  })
 }
 
 function invalidEvidence(reason) {
-  return { valid: false, reasons: [reason], sourceRuns: [], weights: new Map(), missingWeightClasses: [], completeWeightCoverage: false, cohort: null, matchedRunCount: 0, adoptionEligible: false }
+  return { structurallyCompatible: false, reasons: [reason], sourceRuns: [], weights: new Map(), missingWeightClasses: [], completeWeightCoverage: false, cohort: null, matchedRunCount: 0, minimumEvidenceCountMet: false, adoptionEligible: false }
 }
 
 /**
@@ -269,7 +300,7 @@ export function evaluateApiPackingObservations({ discovery, observations, minSou
     const value = requireObject(observations, 'observations')
     if (value.schemaVersion !== API_OBSERVATIONS_SCHEMA_VERSION) return fallback(`observations.schemaVersion must be ${API_OBSERVATIONS_SCHEMA_VERSION}.`)
     if (value.repository !== API_REPOSITORY) return fallback(`observations.repository must be ${API_REPOSITORY}.`)
-    if (value.provenance !== 'validated-queue-telemetry') return fallback('observations.provenance is not validated-queue-telemetry.')
+    if (value.provenance !== 'offline-shadow-claim') return fallback('observations.provenance must explicitly be offline-shadow-claim.')
     const cohort = requireNonEmptyString(value.cohort, 'observations.cohort', MAX_COHORT)
     if (!Array.isArray(value.sourceRuns) || value.sourceRuns.length === 0 || value.sourceRuns.length > 100) return fallback('observations.sourceRuns must contain 1..100 source runs.')
     const sourceRuns = []
@@ -287,8 +318,8 @@ export function evaluateApiPackingObservations({ discovery, observations, minSou
       const treeSha = requireSha(run.treeSha, `source run ${runId}.treeSha`)
       const discoveryDigest = requireSha(run.discoveryDigest, `source run ${runId}.discoveryDigest`, 64)
       if (discoveryDigest !== normalized.digest) return fallback(`source run ${runId} has stale discovery ${discoveryDigest}; current discovery is ${normalized.digest}.`)
-      if (run.validatedTree !== true) return fallback(`source run ${runId} lacks validated-tree provenance.`)
-      sourceRuns.push({ runId, event: run.event, workflow: run.workflow, conclusion: run.conclusion, cohort, commitSha, treeSha, discoveryDigest, validatedTree: true })
+      if (run.validatedTree !== true) return fallback(`source run ${runId} lacks the required validatedTree claim.`)
+      sourceRuns.push({ runId, event: run.event, workflow: run.workflow, conclusion: run.conclusion, cohort, commitSha, treeSha, discoveryDigest, treeEvidence: 'unverified-offline-claim' })
     }
     if (!Array.isArray(value.weights) || value.weights.length === 0) return fallback('observations.weights is missing.')
     const expectedClasses = new Set(normalized.classes.map((entry) => entry.className))
@@ -328,9 +359,11 @@ export function evaluateApiPackingObservations({ discovery, observations, minSou
     }
     const reasons = []
     if (!completeWeightCoverage) reasons.push(`${missingWeightClasses.length} classes have no duration weight; those classes use count-based placement.`)
-    if (sourceRuns.length < minSourceRuns) reasons.push(`Only ${sourceRuns.length} matched source runs; ${minSourceRuns} are required for adoption evidence.`)
-    const adoptionEligible = completeWeightCoverage && sourceRuns.length >= minSourceRuns
-    return { valid: true, reasons, sourceRuns, weights, missingWeightClasses, completeWeightCoverage, cohort, matchedRunCount: sourceRuns.length, durationPerCaseScale, adoptionEligible }
+    const minimumEvidenceCountMet = sourceRuns.length >= minSourceRuns
+    if (!minimumEvidenceCountMet) reasons.push(`Only ${sourceRuns.length} matched source runs; ${minSourceRuns} are required for the minimum evidence count.`)
+    // Offline JSON cannot authenticate GitHub run identity, tree provenance, discovery freshness, or cohort
+    // comparability. The candidate remains a hypothetical calculation and is never adoption-eligible here.
+    return { structurallyCompatible: true, reasons, sourceRuns, weights, missingWeightClasses, completeWeightCoverage, cohort, matchedRunCount: sourceRuns.length, durationPerCaseScale, minimumEvidenceCountMet, adoptionEligible: false }
   } catch (error) {
     return fallback(error instanceof Error ? error.message : 'Observation evidence is malformed.')
   }
@@ -355,11 +388,46 @@ function buildCompositePlan(discovery, shardCount, evidence) {
     loads[best].cases += unit.testCount
     for (const className of unit.classNames) assignments.set(className, best + 1)
   }
-  return materializePlan({ discovery, shardCount, assignments, weights: evidence.weights, algorithm: 'composite-duration-and-case-shadow' })
+  return materializePlan({
+    discovery,
+    shardCount,
+    assignments,
+    weights: evidence.weights,
+    algorithm: 'composite-duration-and-case-shadow',
+    grouping: {
+      mode: discovery.collections.length > 0 ? 'hypothetical-collection-aware' : 'individual-class',
+      collectionConstraintsApplied: discovery.collections.length > 0,
+      collectionGroupsUnverified: discovery.collections.length > 0,
+      collections: discovery.collections.map((collection) => collection.name),
+    },
+  })
 }
 
 function maxOf(shards, field) {
   return Math.max(...shards.map((shard) => shard[field]))
+}
+
+function classAssignments(plan) {
+  const assignments = new Map()
+  for (const shard of plan.shards) for (const className of shard.classes) assignments.set(className, shard.shard)
+  return assignments
+}
+
+function collectionGroupingChanges(discovery, currentPlan, proposedPlan) {
+  const current = classAssignments(currentPlan)
+  const proposed = classAssignments(proposedPlan)
+  return discovery.collections.map((collection) => {
+    const currentShards = [...new Set(collection.classNames.map((className) => current.get(className)))].sort((a, b) => a - b)
+    const proposedShards = [...new Set(collection.classNames.map((className) => proposed.get(className)))].sort((a, b) => a - b)
+    return {
+      name: collection.name,
+      classNames: collection.classNames,
+      currentShards,
+      proposedShards,
+      changed: currentShards.length !== proposedShards.length || currentShards.some((shard, index) => shard !== proposedShards[index]),
+      source: 'caller-supplied-hypothetical',
+    }
+  })
 }
 
 /** Build a complete, advisory-only comparison of current and candidate packing. */
@@ -367,12 +435,14 @@ export function buildApiPackingShadowReport({ discovery, observations, shardCoun
   const normalized = normalizeApiDiscovery(discovery)
   const countPlan = buildCurrentCountPlan(normalized, shardCount)
   const evidence = evaluateApiPackingObservations({ discovery: normalized, observations, minSourceRuns })
-  const proposedPlan = evidence.valid ? buildCompositePlan(normalized, shardCount, evidence) : countPlan
-  const fallbackUsed = !evidence.valid
+  const proposedPlan = evidence.structurallyCompatible ? buildCompositePlan(normalized, shardCount, evidence) : countPlan
+  const fallbackUsed = !evidence.structurallyCompatible
   return {
     schemaVersion: API_PACKING_SHADOW_SCHEMA_VERSION,
     repository: API_REPOSITORY,
     discovery: {
+      authenticity: 'unverified-offline-claim',
+      freshDiscoveryClaim: false,
       source: normalized.source,
       project: normalized.project,
       commitSha: normalized.commitSha,
@@ -387,21 +457,25 @@ export function buildApiPackingShadowReport({ discovery, observations, shardCoun
     noSpeedupClaim: true,
     measurementLimits: [
       'Class duration sums are rank signals only; they are not additive wall-clock predictions.',
-      'Live dotnet --list-tests discovery remains the coverage authority.',
+      'This offline report does not execute dotnet --list-tests; supplied discovery is an unverified claim.',
+      'Caller-supplied run, tree, cohort and validatedTree fields are unverified claims, not authenticated GitHub evidence.',
+      'Caller-supplied collection groups are hypothetical and unverified; grouped adoption is unsupported.',
       'A candidate plan does not alter CI execution, required checks, merge authority, or shard count.',
-      'Adoption requires complete validated provenance and at least the configured matched source-run cohort.',
+      'Adoption eligibility is permanently false for this offline prototype; a future trusted collector must be separate work.',
     ],
     evidence: {
-      valid: evidence.valid,
+      structurallyCompatible: evidence.structurallyCompatible,
+      authenticity: 'unverified-offline-claims',
       fallbackUsed,
       reasons: evidence.reasons,
       cohort: evidence.cohort,
       matchedRunCount: evidence.matchedRunCount,
+      minimumEvidenceCountMet: evidence.minimumEvidenceCountMet,
       completeWeightCoverage: evidence.completeWeightCoverage,
       missingWeightClasses: evidence.missingWeightClasses,
-      sourceRuns: evidence.sourceRuns.map((run) => ({ runId: run.runId, commitSha: run.commitSha, treeSha: run.treeSha, discoveryDigest: run.discoveryDigest, cohort: run.cohort, event: run.event, workflow: run.workflow, conclusion: run.conclusion, validatedTree: run.validatedTree })),
+      sourceRuns: evidence.sourceRuns.map((run) => ({ runId: run.runId, commitSha: run.commitSha, treeSha: run.treeSha, discoveryDigest: run.discoveryDigest, cohort: run.cohort, event: run.event, workflow: run.workflow, conclusion: run.conclusion, treeEvidence: run.treeEvidence })),
       durationPerCaseScaleMs: evidence.durationPerCaseScale ?? null,
-      adoptionEligible: evidence.adoptionEligible,
+      adoptionEligible: false,
     },
     currentPlan: countPlan,
     proposedPlan,
@@ -410,8 +484,9 @@ export function buildApiPackingShadowReport({ discovery, observations, shardCoun
       proposedMaxCaseCount: maxOf(proposedPlan.shards, 'caseCount'),
       currentCaseCounts: countPlan.shards.map((shard) => shard.caseCount),
       proposedCaseCounts: proposedPlan.shards.map((shard) => shard.caseCount),
-      proposedDurationLoadsMs: evidence.valid ? proposedPlan.shards.map((shard) => shard.durationLoadMs) : null,
-      proposedCompositeLoads: evidence.valid ? proposedPlan.shards.map((shard) => shard.compositeLoad) : null,
+      proposedDurationLoadsMs: evidence.structurallyCompatible ? proposedPlan.shards.map((shard) => shard.durationLoadMs) : null,
+      proposedCompositeLoads: evidence.structurallyCompatible ? proposedPlan.shards.map((shard) => shard.compositeLoad) : null,
+      collectionGrouping: collectionGroupingChanges(normalized, countPlan, proposedPlan),
     },
     recommendation: fallbackUsed ? 'retain-current-count-plan-until-evidence-is-repaired' : 'candidate-is-shadow-only-and-requires-independent-adoption-review',
   }
@@ -424,7 +499,7 @@ function markdownCell(value) {
 function renderPlan(lines, title, plan) {
   lines.push(`## ${title}`)
   lines.push('')
-  lines.push(`Algorithm: \`${plan.algorithm}\`; exact coverage: ${plan.coverage.complete ? 'complete' : 'INVALID'}.`)
+  lines.push(`Algorithm: \`${plan.algorithm}\`; grouping: \`${plan.grouping.mode}\`; exact coverage: ${plan.coverage.complete ? 'complete' : 'INVALID'}.`)
   lines.push('')
   lines.push('| Shard | Cases | Classes | Duration load (ms) | Composite load | Filter |')
   lines.push('|---:|---:|---:|---:|---:|---|')
@@ -435,7 +510,7 @@ function renderPlan(lines, title, plan) {
 }
 
 export function renderApiPackingShadowMarkdown(report) {
-  const lines = ['# API packing shadow report', '', `- Mode: **${report.mode}**; execution selector changed: **${report.executionSelectorChanged}**`, `- Discovery: ${report.discovery.testCount} tests across ${report.discovery.classCount} classes; commit \`${report.discovery.commitSha}\`; tree \`${report.discovery.treeSha}\`; digest \`${report.discovery.digest}\``, `- Evidence: ${report.evidence.valid ? 'validated' : 'fallback to current count plan'}; cohort: ${report.evidence.cohort ?? '—'}; matched source runs: ${report.evidence.matchedRunCount}`, `- Adoption eligible: **${report.evidence.adoptionEligible}**; speedup claim: **none**`, '']
+  const lines = ['# API packing shadow report', '', `- Mode: **${report.mode}**; execution selector changed: **${report.executionSelectorChanged}**`, `- Discovery: ${report.discovery.testCount} tests across ${report.discovery.classCount} classes; commit \`${report.discovery.commitSha}\`; tree \`${report.discovery.treeSha}\`; digest \`${report.discovery.digest}\``, `- Discovery authenticity: **${report.discovery.authenticity}**; fresh discovery executed: **${report.discovery.freshDiscoveryClaim}**`, `- Evidence: ${report.evidence.structurallyCompatible ? 'structurally compatible offline claims' : 'fallback to current count plan'}; authenticity: **${report.evidence.authenticity}**; cohort claim: ${report.evidence.cohort ?? '—'}; source-run claims: ${report.evidence.matchedRunCount}`, `- Minimum evidence count met: **${report.evidence.minimumEvidenceCountMet}**; adoption eligible: **false**; speedup claim: **none**`, '']
   if (report.evidence.reasons.length > 0) {
     lines.push('## Evidence disposition')
     lines.push('')
@@ -444,6 +519,18 @@ export function renderApiPackingShadowMarkdown(report) {
   }
   renderPlan(lines, 'Current count plan', report.currentPlan)
   renderPlan(lines, 'Proposed composite shadow plan', report.proposedPlan)
+  lines.push('## Collection grouping effects')
+  lines.push('')
+  lines.push('Collection groups are caller-supplied hypothetical claims. They affect the proposed shadow plan only and are not complete or adoption evidence.')
+  lines.push('')
+  if (report.comparison.collectionGrouping.length === 0) {
+    lines.push('No collection grouping claims were supplied.')
+  } else {
+    lines.push('| Collection claim | Current shards | Proposed shards | Changed |')
+    lines.push('|---|---:|---:|---|')
+    for (const entry of report.comparison.collectionGrouping) lines.push(`| ${markdownCell(entry.name)} | ${entry.currentShards.join(', ')} | ${entry.proposedShards.join(', ')} | ${entry.changed} |`)
+  }
+  lines.push('')
   lines.push('## Coverage and limits')
   lines.push('')
   lines.push(`Both plans must cover exactly ${report.discovery.testCount} discovered tests with no duplicate or split class. Current: ${report.currentPlan.coverage.complete}; proposed: ${report.proposedPlan.coverage.complete}.`)

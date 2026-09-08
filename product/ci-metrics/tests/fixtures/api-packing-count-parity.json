@@ -1,0 +1,25 @@
+{
+  "vstestList": "api-vstest-list.txt",
+  "shardCount": 3,
+  "collections": [
+    {
+      "name": "Issue870Postgres",
+      "classNames": ["AeroLink.Api.Tests.ProblemReportPostgresQualificationTests"],
+      "preserveTogether": true
+    },
+    {
+      "name": "ShowcaseApiCollection",
+      "classNames": [
+        "AeroLink.Api.Tests.ConfigurationPublicationApiTests",
+        "AeroLink.Api.Tests.ShowcaseUpgradeApiTests"
+      ],
+      "preserveTogether": true
+    }
+  ],
+  "expectedClassShards": {
+    "AeroLink.Api.Tests.ConfigurationPublicationApiTests": 1,
+    "AeroLink.Api.Tests.ParameterizedApiTests": 1,
+    "AeroLink.Api.Tests.ProblemReportPostgresQualificationTests": 2,
+    "AeroLink.Api.Tests.ShowcaseUpgradeApiTests": 3
+  }
+}
