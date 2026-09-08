@@ -29,6 +29,8 @@ function discover(config) {
   assert.ok(entries.length > 0, `empty ${config} discovery is not proof`)
   return entries
 }
+// Fast tiers intentionally use their own project labels, so the cross-tier identity is file + describe/title.
+// A second Full project or any parameter collision produces a duplicate key and fails the uniqueness check.
 const key = entry => JSON.stringify([entry.file, entry.title])
 const full = discover('playwright.config.ts')
 const expected = new Map(full.map(entry => [key(entry), entry]))

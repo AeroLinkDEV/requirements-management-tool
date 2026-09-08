@@ -46,8 +46,9 @@ timing and regression data; re-measure the new cadence rather than assuming savi
 The advisory Fast client job runs the explicit logic and rendered-fixture files in
 `product/client/fast-client-tests.json` after static checks. Logic uses no browser or server;
 rendered fixtures use one Chromium worker and Vite, with no API or showcase setup. Neither tier retries.
-The fixture boundary rejects API request fixtures and records and refuses browser API/external requests,
-including swallowed failures. The Full workflow still discovers and executes all of these tests.
+The fixture boundary rejects its `request` fixture and `page.request`, and records and refuses browser
+API/external requests, including swallowed failures. The Full workflow still discovers and executes all of
+these tests.
 
 From `product/client`, run `npm run test:fast:routes`, `npm run test:fast:logic`, then
 `npx playwright install chromium` and `npm run test:fast:rendered`. The routing check compares actual

@@ -9,6 +9,14 @@ export const logicTest = base.extend({
 
 export const renderedTest = base.extend({
   request: async ({ baseURL: _baseURL }, _provide) => { throw new Error('A rendered fixture must not use an API request context.') },
+  // `page.request` is an APIRequestContext that bypasses browser routes and request events.
+  page: async ({ page }, provide) => {
+    Object.defineProperty(page, 'request', {
+      configurable: true,
+      get: () => { throw new Error('A rendered fixture must not use an API request context.') },
+    })
+    await provide(page)
+  },
   context: async ({ context, baseURL }, provide) => {
     expect(baseURL, 'rendered fixtures require an isolated client origin').toBeTruthy()
     const origin = new URL(baseURL!).origin
