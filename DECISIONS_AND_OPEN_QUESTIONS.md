@@ -2394,6 +2394,34 @@ successful when the reviewed merge candidate contains no trace of it.
   or authorize a new ruleset change, force merge, or self-installation. Initial activation requires
   independently reviewed implementation, qualification, and a separately authorized installation path.
 
+### DEC-124 - Standing Owner Delegation for CI Maintenance Approvals
+
+- **Date:** 2026-09-09 UTC
+- **Status:** Accepted
+- **Authority:** The owner stated **"I formally grant you approval for all future CI changes!"** in
+  the Codex conversation after discussing the repeated per-candidate approval prompts. The instruction
+  is transcribed in [issue #942](https://github.com/AeroLinkDEV/requirements-management-tool/issues/942#issuecomment-5593954915).
+  That agent-authored record is evidence of the delegation, not an independently posted owner review.
+- **Decision:** Codex may submit exact CI-maintenance environment approvals on the owner's behalf
+  under this standing authorization, without requesting a new conversational confirmation for each
+  digest. The delegation remains effective until the owner revokes or narrows it.
+- **Qualification:** Before each approval, retain the required code review and complete native proof
+  for the current composed candidate. Inspect the hosted packet, verify its exact digest and current
+  PR/head/base/tree/run/attempt identities, then submit `APPROVE MAINTENANCE <digest>` through the
+  existing owner-authenticated environment review. Record that Codex acted under delegated authority;
+  do not represent the action as an independent human review of that candidate.
+- **Preserved controls:** The protected publisher still authenticates each approval and recollects
+  live evidence. Stale or failed proof, missing permissions, changed publishers and kernel-path refusals
+  remain refusals. Required checks, independent review, credential isolation and the no-force-merge
+  boundary remain in force. Kernel changes still need a separately reviewed, qualified transition;
+  this delegation does not renew expired one-time bypass exceptions or let a kernel authorize itself.
+- **Supersedes:** The operational requirement in `product/docs/MERGING.md` for renewed conversational
+  confirmation before Codex submits each otherwise-qualified routine maintenance approval. DEC-121's
+  initial-installation and expired-exception boundaries, and DEC-123's credential and exact-candidate
+  constraints, remain intact. Exact per-candidate GitHub approvals and technical verification remain
+  required. This decision changes delegated operator authorization, not workflow code, GitHub reviewer
+  identity, environment policy or the ordinary product merge path.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

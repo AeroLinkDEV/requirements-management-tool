@@ -153,8 +153,12 @@ may also be the workflow initiator; this is a deliberate owner approval, not a c
 Read the linked exact candidate diff and native evidence before approving **Review deployments**. The approval
 comment must be exactly `APPROVE MAINTENANCE <digest>` using the summary's 64-character digest. An ordinary PR
 comment, label, different reviewer, absent approval, rejected approval or mixed/duplicate approval history is
-insufficient. Do not approve the environment on the owner's behalf without explicit authorization for that
-exact digest. The approval job executes no repository code and has no token permissions.
+insufficient. Under the owner's standing delegation in
+[DEC-124](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-124---standing-owner-delegation-for-ci-maintenance-approvals),
+Codex may submit each exact approval on the owner's behalf after the required review and native qualification,
+without asking the owner to confirm each digest again. Verify the current hosted packet and record the delegated
+action; do not describe it as an independent human review. The delegation remains effective until revoked or
+narrowed by the owner. The approval job executes no repository code and has no token permissions.
 
 The final publisher runs from the same protected-main workflow SHA in the existing `merge-authority`
 environment. It reads GitHub's authenticated approval history for this binding workflow and recollects live
@@ -165,14 +169,16 @@ in-progress invalidator and paired native check remain required throughout the w
 
 GitHub approval history does not carry an attempt identifier. Maintenance therefore refuses reruns of the
 binding workflow itself. If a run or candidate becomes stale, obtain a new Product completion and fresh binding
-workflow/owner review; do not reuse a prior approval. A Product partial rerun may retain successful native jobs
-through `filter=latest`, but its new attempt still needs a fresh digest and approval. The existing queue timeout
+workflow/review; do not reuse a prior GitHub approval. A Product partial rerun may retain successful native jobs
+through `filter=latest`, but its new attempt still needs a fresh digest and GitHub approval, which Codex may submit
+under the standing delegation after renewed qualification. The existing queue timeout
 continues to apply; approval does not extend it.
 
 Any change to the runtime maintenance/merge-authority modules or the protected binding/readiness workflows is
 outside this routine path. Use a separately reviewed trust-root transition; never remove a required check or
 publish a fabricated success to make a refused maintenance PR merge. Rollback also requires reviewed exact
-revert evidence; an earlier approval is not permission for a later revert.
+revert evidence; an earlier candidate's GitHub approval cannot be reused for a later revert. Standing delegation
+does not waive technical refusals, required checks or the separately reviewed transition for kernel changes.
 
 ## Permanent maintenance evidence reader (#982 preparation)
 
