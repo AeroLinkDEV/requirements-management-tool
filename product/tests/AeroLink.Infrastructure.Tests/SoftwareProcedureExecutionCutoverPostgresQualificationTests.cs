@@ -109,10 +109,11 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
                 Task.Run(() => CatchAsync(() =>
                     new SoftwareProcedureExecutionCutoverAuthority(second, legacy, typed)
                         .EnsureCompletedAsync())));
-            // The returned record is the immutable completion summary, not per-invocation work. A caller
-            // either loses the project-level optimistic race and returns the all-zero no-work result, or it
-            // performs/reuses the one committed cutover and receives the same completed totals. Both callers
-            // may therefore report ProceduresGenerated=1 while the database contains exactly one Procedure.
+            // The returned record is the immutable completion summary, not per-invocation work. CatchAsync
+            // normalizes the documented ladder optimistic-version collision to the all-zero no-work result;
+            // otherwise a caller performs/reuses the one committed cutover and receives the completed totals.
+            // Both callers may therefore report ProceduresGenerated=1 while the database contains exactly one
+            // Procedure.
             var completedOutcome = new SoftwareProcedureCutoverResult(1, 1, 1, 1, 1, 0);
             var noWorkOutcome = new SoftwareProcedureCutoverResult(0, 0, 0, 0, 0, 0);
             Assert.Contains(completedOutcome, parallel);
