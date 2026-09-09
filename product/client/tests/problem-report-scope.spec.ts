@@ -152,3 +152,68 @@ test('Problem Reports remain workable and explicitly target-filtered from every 
   await expect(page.getByRole('heading', { name: unassignedTitle })).toBeVisible({ timeout: 30_000 })
   await expect(page.locator('.prIdentity').getByText('Not assigned', { exact: true })).toBeVisible()
 })
+
+test('an explicit target-build action refresh keeps its own history entry', async ({ page, request }) => {
+  test.setTimeout(240_000)
+  await apiLogin(request)
+  const showcase = await showcaseSeed(request)
+  const stamp = Date.now()
+  const changedTitle = `Explicit target change ${stamp}`
+  const activeAnchorTitle = `Active target anchor ${stamp}`
+
+  const changed = await request.post(`${apiBase}/api/problem-reports`, {
+    data: {
+      category: 'CodeFunctional', projectId: showcase.projectId,
+      releaseId: showcase.activeReleaseId,
+      title: changedTitle,
+      problem: 'This report will be explicitly moved to another target while the queue is filtered.',
+    },
+  })
+  expect(changed.ok(), await changed.text()).toBeTruthy()
+  const changedId = (await changed.json()).id as string
+  const activeAnchor = await request.post(`${apiBase}/api/problem-reports`, {
+    data: {
+      category: 'CodeFunctional', projectId: showcase.projectId,
+      releaseId: showcase.activeReleaseId,
+      title: activeAnchorTitle,
+      problem: 'A second active-target row keeps the explicit-action fallback deterministic.',
+    },
+  })
+  expect(activeAnchor.ok(), await activeAnchor.text()).toBeTruthy()
+  const activeAnchorId = (await activeAnchor.json()).id as string
+
+  await login(page)
+  await page.getByRole('link', { name: 'Problem Reports' }).click()
+  await expect(page.getByRole('heading', { name: 'Problem Report queue' })).toBeVisible({ timeout: 30_000 })
+  await page.getByPlaceholder('Number, title, description, root cause').fill(String(stamp))
+  await page.waitForResponse(response =>
+    response.url().includes('/api/problem-reports?') &&
+    new URL(response.url()).searchParams.get('search') === String(stamp))
+
+  const targetBuild = () => page.getByLabel('Target build').first()
+  const [activeList, activeDashboard] = await Promise.all([
+    page.waitForResponse(response => response.url().includes('/api/problem-reports?') &&
+      new URL(response.url()).searchParams.get('targetReleaseId') === showcase.activeReleaseId),
+    page.waitForResponse(response => response.url().includes('/api/problem-reports/dashboard?') &&
+      new URL(response.url()).searchParams.get('targetReleaseId') === showcase.activeReleaseId),
+    targetBuild().selectOption(showcase.activeReleaseId),
+  ])
+  expect(activeList.ok(), await activeList.text()).toBeTruthy()
+  expect(activeDashboard.ok(), await activeDashboard.text()).toBeTruthy()
+  await page.locator('.prList').getByText(changedTitle).click()
+  await expect(page).toHaveURL(new RegExp(`${changedId}.*targetBuild=${showcase.activeReleaseId}`))
+
+  const releasedOption = await targetBuild().locator('option').filter({ hasText: 'released' }).getAttribute('value')
+  expect(releasedOption).toBeTruthy()
+  const fallbackDetail = page.waitForResponse(response => {
+    const url = new URL(response.url())
+    return url.pathname.endsWith(`/api/problem-reports/${activeAnchorId}`)
+  })
+  const historyBefore = await page.evaluate(() => history.length)
+  await page.locator('.prAdmin summary').click()
+  await page.locator('.prAdmin select').selectOption(releasedOption!)
+  const fallbackResponse = await fallbackDetail
+  expect(fallbackResponse.ok(), await fallbackResponse.text()).toBeTruthy()
+  await expect(page).toHaveURL(new RegExp(`${activeAnchorId}.*targetBuild=${showcase.activeReleaseId}`))
+  expect(await page.evaluate(() => history.length)).toBe(historyBefore + 1)
+})
