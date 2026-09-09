@@ -45,6 +45,7 @@ function MetadataIcon({ kind }: { kind: "owner" | "created" | "phase" }) {
 export default function SoftwareBuildsLanding({
   user,
   releases,
+  projectName,
   onOpenBuild,
   onProjectOverview,
   onImportedBaselines,
@@ -54,6 +55,7 @@ export default function SoftwareBuildsLanding({
 }: {
   user: AuthUser;
   releases: SelectableRelease[];
+  projectName: string;
   onOpenBuild: (release: SelectableRelease) => void;
   onProjectOverview: () => void;
   onImportedBaselines: () => void;
@@ -70,7 +72,7 @@ export default function SoftwareBuildsLanding({
         <nav className="buildBreadcrumb" aria-label="Breadcrumb">
           <button type="button" onClick={onProjectOverview}>Projects</button>
           <span aria-hidden="true">/</span>
-          <strong>FMS Product Development</strong>
+          <strong>{projectName}</strong>
         </nav>
         <header className="buildsLandingHeading">
           <div>
@@ -103,7 +105,7 @@ export default function SoftwareBuildsLanding({
         <section className="buildProjectSummary" aria-labelledby="build-project-name">
           <span className="buildProjectIcon"><ProjectIcon name="fms"/></span>
           <div className="buildProjectContent">
-            <h2 id="build-project-name">FMS Product Development</h2>
+            <h2 id="build-project-name">{projectName}</h2>
             <p>Requirements traceability, verification, and release planning.</p>
             <dl>
               <div><MetadataIcon kind="owner"/><span><dt>Project owner</dt><dd>Jane Doe</dd></span></div>

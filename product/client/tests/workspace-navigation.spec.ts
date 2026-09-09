@@ -1,0 +1,108 @@
+import { expect, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { resolveWorkspaceContext } from "../src/workspaceContext";
+import { parseRoute, projectAreaPath, projectSlugOf, routePath } from "../src/routing";
+
+const fms = { program: { id: "fms-program", name: "FMS Program", code: "FMS" }, projects: [{
+  project: { id: "fms-project", name: "FMS Product Development", softwareProduct: "FMS" },
+  releases: [{ id: "fms-old", version: "1.5", isReleased: true }, { id: "fms-current", version: "1.6", isReleased: false }],
+}] };
+const other = { program: { id: "other-program", name: "Other Program", code: "OTHER" }, projects: [{
+  project: { id: "other-project", name: "DOORS Import Practice", softwareProduct: "Practice" },
+  releases: [{ id: "other-build", version: "1.6", isReleased: false }],
+}] };
+const workspaces = [other, fms];
+const fmsPath = projectAreaPath(projectSlugOf("FMS Product Development"), "builds");
+const context = { programId: "fms-program", projectId: "fms-project", releaseId: "fms-current" };
+
+async function mockShell(page: Page, load: () => Promise<unknown> = async () => workspaces) {
+  await page.route("**/api/**", async route => {
+    const path = new URL(route.request().url()).pathname;
+    const json = path === "/api/auth/me"
+      ? { id: "author", userName: "author", displayName: "Author", isAdministrator: false, mustChangePassword: false, programs: [] }
+      : path === "/api/workspaces" ? await load()
+        : path.endsWith("/configuration") ? { effectiveSteps: [{ catalogueEntry: "System", capabilities: 15 }] }
+          : path === "/api/dashboard" ? { system: {}, software: {}, verification: { system: {}, hlr: {}, llr: {} } }
+            : [];
+    await route.fulfill({ json });
+  });
+}
+
+test("delayed hydration retains a real project-card selection and exact build scope", async ({ page }) => {
+  let deliver: (value: unknown) => void = () => { throw new Error("Workspace request has not started"); };
+  const pending = new Promise(resolve => { deliver = resolve; });
+  await mockShell(page, () => pending);
+  await page.goto("/projects");
+  await page.getByRole("link", { name: "Open FMS Product Development", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Opening workspace" })).toBeVisible();
+  deliver(workspaces);
+  const build = page.getByRole("button", { name: /Open Build 1.6/i });
+  await expect(build).toBeEnabled();
+  await build.click();
+  await expect(page).toHaveURL(new RegExp("/programs/fms-program/projects/fms-project/releases/fms-current/"));
+  await expect(page.getByRole("complementary")).toContainText("FMS Product Development");
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(fmsPath + "$"));
+  await expect(build).toBeEnabled();
+  await page.goForward();
+  await expect(page.getByRole("heading", { name: "FMS 1.6", exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("complementary")).toContainText("FMS Product Development");
+});
+
+test("missing exact build never substitutes the current build", async ({ page }) => {
+  await mockShell(page);
+  await page.goto(routePath({ ...context, releaseId: "removed" }, "dashboard"));
+  await expect(page.getByRole("heading", { name: "Workspace unavailable", exact: true })).toBeVisible();
+  await expect(page.locator(".contextBar")).toHaveCount(0);
+});
+
+test("workspace failures have a truthful retry state", async ({ page }) => {
+  await mockShell(page);
+  await page.route("**/api/workspaces", route => route.fulfill({ status: 403, json: { error: "Denied" } }));
+  await page.goto(fmsPath);
+  await expect(page.getByRole("heading", { name: "Workspace access unavailable" })).toBeVisible();
+  await page.unroute("**/api/workspaces");
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(page.getByRole("button", { name: /Open Build 1.6/i })).toBeEnabled();
+});
+
+test("late dashboard completion cannot overwrite a newer build", async ({ page }) => {
+  await mockShell(page);
+  let deliver = () => {};
+  const pending = new Promise<void>(resolve => { deliver = resolve; });
+  let started = () => {};
+  const requested = new Promise<void>(resolve => { started = resolve; });
+  await page.route("**/api/dashboard?**", async route => {
+    const old = new URL(route.request().url()).searchParams.get("releaseId") === "fms-old";
+    if (old) { started(); await pending; }
+    const summary = { total: old ? 99 : 17, draft: 0, inReview: 0, approved: 0, deferred: 0 };
+    await route.fulfill({ json: { system: summary, software: summary, verification: {
+      system: { totalChangeRequests: 0 }, hlr: { totalChangeRequests: 0 }, llr: { totalChangeRequests: 0 },
+    } } });
+  });
+  await page.goto(fmsPath);
+  await page.getByRole("button", { name: /Open build 1.5/i }).click();
+  await requested;
+  await page.getByRole("button", { name: "← Back to Software Builds" }).click();
+  await page.getByRole("button", { name: /Open build 1.6/i }).click();
+  const total = page.locator(".dashboardAreaCard.system .dashboardTotal strong");
+  // The request's completion, rather than a sleep, establishes that the stale response was delivered.
+  const completed = page.waitForResponse(response => response.url().includes("/api/dashboard?") && response.url().includes("fms-old"));
+  deliver();
+  await completed;
+  await expect(page.getByRole("heading", { name: "FMS 1.6", exact: true })).toBeVisible();
+  await expect(total).toHaveText("17");
+});
+
+test("route resolution preserves exact history and rejects absent program, project and build", () => {
+  const route = parseRoute(routePath({ ...context, releaseId: "fms-old" }, "requirements", "system", "requirement") + "&requirementRevisionId=revision");
+  const resolved = resolveWorkspaceContext(workspaces, route);
+  expect(resolved.release?.id).toBe("fms-old");
+  expect(route.requirementRevisionId).toBe("revision");
+  for (const missing of [{ programId: "removed" }, { projectId: "other-project" }, { releaseId: "other-build" }]) {
+    expect(resolveWorkspaceContext(workspaces, { ...route, ...missing })).toEqual({ active: undefined, project: undefined, release: undefined, unavailable: true });
+  }
+  expect(resolveWorkspaceContext(workspaces, parseRoute(fmsPath)).project?.project.id).toBe("fms-project");
+});
+
