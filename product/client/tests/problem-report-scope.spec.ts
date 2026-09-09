@@ -287,3 +287,129 @@ test('Back restores the exact historical Problem Report snapshot after another r
   await expect(page.getByText('HISTORICAL RECORD')).toBeVisible({ timeout: 30_000 })
   await expect(page.getByRole('heading', { name: historicalTitle })).toBeVisible()
 })
+
+test('a failed route restoration cannot leave the previous Problem Report actionable', async ({ page, request }) => {
+  test.setTimeout(240_000)
+  await apiLogin(request)
+  const showcase = await showcaseSeed(request)
+  const stamp = Date.now()
+  const firstTitle = `Restore failure first ${stamp}`
+  const secondTitle = `Restore failure second ${stamp}`
+
+  const first = await request.post(`${apiBase}/api/problem-reports`, {
+    data: {
+      category: 'CodeFunctional', projectId: showcase.projectId,
+      releaseId: showcase.activeReleaseId,
+      title: firstTitle,
+      problem: 'This report is restored after another report is already displayed.',
+    },
+  })
+  expect(first.ok(), await first.text()).toBeTruthy()
+  const firstId = (await first.json()).id as string
+  const second = await request.post(`${apiBase}/api/problem-reports`, {
+    data: {
+      category: 'CodeFunctional', projectId: showcase.projectId,
+      releaseId: showcase.activeReleaseId,
+      title: secondTitle,
+      problem: 'This report remains displayed while the failed route restoration begins.',
+    },
+  })
+  expect(second.ok(), await second.text()).toBeTruthy()
+
+  await login(page)
+  await page.getByRole('link', { name: 'Problem Reports' }).click()
+  await expect(page.getByRole('heading', { name: 'Problem Report queue' })).toBeVisible({ timeout: 30_000 })
+  await page.getByPlaceholder('Number, title, description, root cause').fill(String(stamp))
+  await page.waitForResponse(response =>
+    response.url().includes('/api/problem-reports?') &&
+    new URL(response.url()).searchParams.get('search') === String(stamp))
+  await page.locator('.prList').getByText(secondTitle).click()
+  await expect(page.getByRole('heading', { name: secondTitle })).toBeVisible()
+
+  const failFirst = (url: URL) => url.pathname === `/api/problem-reports/${firstId}`
+  await page.route(failFirst, async route => { await route.abort('failed') })
+  const firstUrl = new URL(page.url())
+  firstUrl.pathname = `${firstUrl.pathname.replace(/\/[^/]+$/, '')}/${firstId}`
+  await page.evaluate(url => {
+    history.pushState({}, '', url)
+    dispatchEvent(new PopStateEvent('popstate'))
+  }, `${firstUrl.pathname}${firstUrl.search}`)
+
+  await expect(page).toHaveURL(new RegExp(firstId))
+  await expect(page.locator('.workspaceError')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: secondTitle })).toHaveCount(0)
+  await expect(page.locator('.prFlow')).toHaveCount(0)
+
+  await page.unroute(failFirst)
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: secondTitle })).toBeVisible()
+  await page.goForward()
+  await expect(page).toHaveURL(new RegExp(firstId))
+  await expect(page.getByRole('heading', { name: firstTitle })).toBeVisible({ timeout: 30_000 })
+})
+
+test('an implicit zero-row target clear replaces its history entry', async ({ page, request }) => {
+  test.setTimeout(240_000)
+  await apiLogin(request)
+  const showcase = await showcaseSeed(request)
+  const stamp = Date.now()
+  const title = `Zero-row clear report ${stamp}`
+
+  const created = await request.post(`${apiBase}/api/problem-reports`, {
+    data: {
+      category: 'CodeFunctional', projectId: showcase.projectId,
+      releaseId: showcase.activeReleaseId,
+      title,
+      problem: 'This report is selected before the queue filters to an empty target.',
+    },
+  })
+  expect(created.ok(), await created.text()).toBeTruthy()
+  const reportId = (await created.json()).id as string
+
+  await login(page)
+  await page.getByRole('link', { name: 'Problem Reports' }).click()
+  await expect(page.getByRole('heading', { name: 'Problem Report queue' })).toBeVisible({ timeout: 30_000 })
+  await page.getByPlaceholder('Number, title, description, root cause').fill(String(stamp))
+  await page.waitForResponse(response =>
+    response.url().includes('/api/problem-reports?') &&
+    new URL(response.url()).searchParams.get('search') === String(stamp))
+
+  const targetBuild = () => page.locator('.prFilters').getByLabel('Target build')
+  const activeOption = showcase.activeReleaseId
+  const releasedOption = await targetBuild().locator('option').filter({ hasText: 'released' }).getAttribute('value')
+  expect(releasedOption).toBeTruthy()
+  const [activeList, activeDashboard] = await Promise.all([
+    page.waitForResponse(response => response.url().includes('/api/problem-reports?') &&
+      new URL(response.url()).searchParams.get('targetReleaseId') === activeOption),
+    page.waitForResponse(response => response.url().includes('/api/problem-reports/dashboard?') &&
+      new URL(response.url()).searchParams.get('targetReleaseId') === activeOption),
+    targetBuild().selectOption(activeOption),
+  ])
+  expect(activeList.ok(), await activeList.text()).toBeTruthy()
+  expect(activeDashboard.ok(), await activeDashboard.text()).toBeTruthy()
+  await page.locator('.prList').getByText(title).click()
+  await expect(page).toHaveURL(new RegExp(`${reportId}.*targetBuild=${activeOption}`))
+
+  const emptyList = (url: URL) => url.pathname === '/api/problem-reports' &&
+    url.searchParams.get('targetReleaseId') === releasedOption
+  const emptyDashboard = (url: URL) => url.pathname === '/api/problem-reports/dashboard' &&
+    url.searchParams.get('targetReleaseId') === releasedOption
+  await page.route(emptyList, route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ items: [], page: 1, pageSize: 10, totalCount: 0, totalPages: 0 }),
+  }))
+  await page.route(emptyDashboard, route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ summary: { total: 0, active: 0, closureAwaitingApproval: 0, closed: 0, releaseBlockers: 0, waivedBlockers: 0 } }),
+  }))
+
+  await targetBuild().selectOption(releasedOption!)
+  await expect(page).toHaveURL(new RegExp(`targetBuild=${releasedOption}`))
+  await expect(page).not.toHaveURL(new RegExp(reportId))
+  await page.goBack()
+  await expect(targetBuild()).toHaveValue(activeOption)
+  await expect(page.getByRole('heading', { name: title })).toBeVisible({ timeout: 30_000 })
+  await page.goForward()
+  await expect(targetBuild()).toHaveValue(releasedOption!)
+  await expect(page.locator('.prList').getByText(title)).toHaveCount(0)
+})

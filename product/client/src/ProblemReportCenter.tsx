@@ -381,6 +381,7 @@ export default function ProblemReportCenter({
   // The record the pane is actually committed to — the last detail that was allowed to apply. A failed open
   // hands the intent back to this, so pane, address and intent can never disagree about which record is shown.
   const appliedIdRef = useRef<string | undefined>(undefined);
+  const appliedSnapshotRef = useRef<string | undefined>(undefined);
   const openSequence = useRef(0);
   // The routed report ID is the component's initial intent. A popstate can change it without changing
   // targetFilter, so track it explicitly and rehydrate the pane when the address names another record.
@@ -540,6 +541,7 @@ export default function ProblemReportCenter({
         setSelected(detail);
         selectedIdRef.current = detail.id;
         appliedIdRef.current = detail.id;
+        appliedSnapshotRef.current = detail.snapshotId;
         setOwner({ userId: detail.responsibleEngineerId, name: detail.responsibleEngineerId });
         // The record being read belongs in the address, or a refresh lands on whatever happens to be first.
         //
@@ -568,8 +570,9 @@ export default function ProblemReportCenter({
         setSelected(undefined);
         selectedIdRef.current = undefined;
         appliedIdRef.current = undefined;
+        appliedSnapshotRef.current = undefined;
         if ((requested && !historicalRequested) || hadRecord)
-          onSelected(undefined, targetFilter, undefined, replaceRoute);
+          onSelected(undefined, targetFilter, undefined, replaceRoute || selectId === undefined);
       }
     } catch (reason) {
       // A failure is the reader's problem only while the record it was loading is still the reader's
@@ -597,6 +600,17 @@ export default function ProblemReportCenter({
     selectedIdRef.current = initialReportId;
     routeRestorationRef.current = true;
     routeSnapshotRef.current = initialSnapshotId;
+    // A different routed record is not yet committed. Clear the previous pane and applied identity before
+    // the request starts, so a failed restoration can never leave the old record actionable under the new URL.
+    if (
+      appliedIdRef.current !== initialReportId ||
+      appliedSnapshotRef.current !== initialSnapshotId
+    ) {
+      setSelected(undefined);
+      appliedIdRef.current = undefined;
+      appliedSnapshotRef.current = undefined;
+      setOwner({ userId: "", name: "" });
+    }
   }, [initialReportId, initialSnapshotId]);
   useEffect(() => {
     const replaceRoute = routeRestorationRef.current;
@@ -675,6 +689,7 @@ export default function ProblemReportCenter({
       setSelected(detail);
       selectedIdRef.current = detail.id;
       appliedIdRef.current = detail.id;
+      appliedSnapshotRef.current = detail.snapshotId;
       setOwner({ userId: detail.responsibleEngineerId, name: detail.responsibleEngineerId });
       setTab("record");
       onSelected(id, targetFilter, snapshotId);
