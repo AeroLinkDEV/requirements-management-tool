@@ -68,7 +68,11 @@ public static class BaselineEndpoints
                     .Where(other => other.ProjectId == projectId && other.BaseNumber == x.BaseNumber)
                     .Max(other => other.Revision));
             var total = await source.CountAsync(ct);
-            var ordered = db.Database.IsSqlite() ? source.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision) : source.OrderByDescending(x => x.UpdatedAt).ThenBy(x => x.BaseNumber).ThenByDescending(x => x.Revision);
+            // Prefix, numeric width, then digits gives controlled-number order without integer overflow.
+            // Apply it before paging, identically on PostgreSQL and SQLite; activity never moves a row.
+            var ordered = source.OrderBy(x => x.BaseNumber.Contains("-") ? x.BaseNumber.Substring(0, x.BaseNumber.IndexOf("-")) : x.BaseNumber)
+                .ThenBy(x => x.BaseNumber.Length).ThenBy(x => x.BaseNumber)
+                .ThenByDescending(x => x.Revision).ThenBy(x => x.Id);
             var items = await ordered
                 .Skip((page - 1) * pageSize).Take(pageSize).Select(x => new { x.Id, displayNumber = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision,
                     x.BaseNumber, x.Revision, x.Title, state = x.State.ToString(), deferredFromState = x.DeferredFromState == null ? null : x.DeferredFromState.ToString(),
@@ -190,11 +194,9 @@ public static class BaselineEndpoints
                 }
             }
             var total = await source.CountAsync(ct);
-            // SQLite can neither order nor aggregate a DateTimeOffset, so the newest-first ordering the
-            // requirements register uses is available only on PostgreSQL. Same compromise, same reason.
-            var ordered = db.Database.IsSqlite()
-                ? source.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision)
-                : source.OrderByDescending(x => x.UpdatedAt).ThenBy(x => x.BaseNumber).ThenByDescending(x => x.Revision);
+            var ordered = source.OrderBy(x => x.BaseNumber.Contains("-") ? x.BaseNumber.Substring(0, x.BaseNumber.IndexOf("-")) : x.BaseNumber)
+                .ThenBy(x => x.BaseNumber.Length).ThenBy(x => x.BaseNumber)
+                .ThenByDescending(x => x.Revision).ThenBy(x => x.Id);
             var items = await ordered.Skip((page - 1) * pageSize).Take(pageSize)
                 .Select(x => new
                 {

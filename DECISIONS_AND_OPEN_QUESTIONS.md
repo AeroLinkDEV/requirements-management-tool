@@ -2422,6 +2422,16 @@ successful when the reviewed merge candidate contains no trace of it.
   required. This decision changes delegated operator authorization, not workflow code, GitHub reviewer
   identity, environment policy or the ordinary product merge path.
 
+### DEC-125 - Exact Approved Upstream CRs and the Scoped FMS Historical Correction
+
+- **Date:** 2026-09-09
+- **Status:** Accepted
+- **Authority:** The owner clarified the September 9 review and authorized implementation of [issue #1006](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1006).
+- **Decision:** New upstream CR links require an exact currently Approved or SelectedForBaseline revision at the configured direct-parent level. Approved predecessor-build revisions remain eligible when applicable to the selected build, with an explicit cross-build rationale. A newer Draft does not replace an approved exact revision.
+- **Deferred:** Applicable Deferred CRs remain visible in the selector. Choosing one changes no selection and opens a popup identifying the CR and instructing the author to reassign it to the current build before linking. Reassignment does not bypass approval eligibility. The server independently refuses the deferred link.
+- **FMS exception:** The owner requested removal of Customer/Interface demonstration artifacts across all FMS builds and history, superseding #889's acceptance of retained Interface history. The audited population is eight owned synthetic Interface CR aggregates and no Customer/Interface requirements. An explicit operator correction may remove that exact dependency manifest after a verified backup and disposable-copy qualification. It must fail closed on unexpected ownership, released material, external files or dependencies; prove unrelated rows and trigger settings unchanged; and preserve a recovery receipt outside the application data.
+- **Preserved boundary:** This is not a normal controlled-record deletion workflow or permission to reset FMS, other projects, signatures or manifests for convenience. Invalid active upstream links receive attributable correction; earlier review snapshots keep their original contents and hashes. Unowned author work is left truthfully incomplete when maintenance has no authoritative replacement answer.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

@@ -161,7 +161,7 @@ The Digital Thread accepts a stable Change Request identity and presents the ser
 Digital Thread reads select a bounded typed frontier or exact build membership before loading evidence. A derived, indexed frozen-review lookup preserves reverse historical reachability without scanning unrelated snapshot payloads; original snapshots and hashes remain authoritative. Oversized rooted traces fail explicitly, while build-network cuts retain the existing truncation signal. See [the read contract](product/docs/DIGITAL_THREAD_READS.md).
 
 For a non-root requirement change request, the controlled Draft also records either exact upstream change-request
-revision link(s) or an attributable no-upstream rationale before review. Same-build direct-parent linkage from the
+revision link(s) or an attributable no-upstream rationale before review, using one picker during creation and editing. New links require an exact currently Approved or SelectedForBaseline revision. Deferred candidates remain visible but selection opens reassignment guidance and creates no link. Same-build direct-parent linkage from the
 effective Project ladder is the normal path; an explicitly requested earlier-build link must target an exact signed
 predecessor-build revision and retain its cross-build rationale. Assessment-derived upstream evidence remains owned
 by its build-scoped downstream assessment, while the review snapshot freezes the exact assessment/link identity that
@@ -237,8 +237,7 @@ The FMS Product Development dataset remains the principal deterministic live dem
 - Named deterministic scenarios provide representative lifecycle, later-revision, trace-branching, assessment,
   verification/evidence, Problem Report, review/approval, leadership, avatar, and distributed-work
   coverage. Interface change-control scenarios are deliberately not seeded: the FMS ladder configures
-  `[System, HighLevel, LowLevel]`, and an older seed's Interface scenarios are closed out — withdrawn under
-  their own identity, never deleted — by the explicit showcase upgrade (#889). Fresh showcase creation is
+  `[System, HighLevel, LowLevel]`. The owner-directed #1006 operator correction removes the audited older synthetic Interface aggregates and their history after verified backup and disposable-copy qualification (DEC-125), superseding #889's earlier retained-history acceptance. Other projects and normal controlled history retain their deletion protections. Named upstream examples use the approved exact source of their baseline parent; invalid older links receive recorded correction without rewriting frozen reviews. Fresh showcase creation is
   rollback-atomic; upgrading an existing synthetic showcase is an explicit administrator action that
   requires positive target and backup confirmation and never runs during ordinary startup.
 

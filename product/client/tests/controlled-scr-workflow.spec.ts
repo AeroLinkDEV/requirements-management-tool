@@ -59,7 +59,7 @@ test('author creates, edits, submits, and sequentially approves a change request
   // A new requirement must be given a place in the document before it can be sent for review.
   await page.getByLabel('Section for proposal 1').selectOption({ index: 1 })
   await page.locator('.derivedControl button').click()
-  await page.getByLabel('Rationale').fill('Architecture-derived behavior for this isolated software workspace.')
+  await page.getByLabel('Rationale', { exact: true }).fill('Architecture-derived behavior for this isolated software workspace.')
   await page.getByRole('button', { name: 'Save HLRCR Draft' }).click()
 
   await expect(page.getByRole('heading', { name: 'Introduce controlled browser workflow' })).toBeVisible()

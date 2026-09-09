@@ -1,3 +1,4 @@
+import UpstreamChangeRequestPicker, { useUpstreamCandidates } from "./UpstreamChangeRequestPicker";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { artifactAcronym, changeRequestAllocation, changeRequestState, stateLabel } from './presentation'
 import type { FormEvent } from "react";
@@ -118,22 +119,6 @@ type UpstreamHistory = {
   rationale: string;
   actor: string;
   occurredAt: string;
-};
-type UpstreamCandidate = {
-  id: string;
-  displayNumber: string;
-  title: string;
-  build: string;
-  earlierBuild: boolean;
-  assessmentDerived: boolean;
-};
-type DerivedUpstreamEdge = {
-  upstreamChangeRequestId: string;
-  upstreamDisplayNumber: string;
-  upstreamBuildId: string;
-  upstreamBuildVersion: string;
-  assessmentId: string;
-  assessmentLinkId: string;
 };
 type Audit = {
   eventType: string;
@@ -515,12 +500,10 @@ export default function ChangeRequestWorkspace({
   });
   const [requirements, setRequirements] = useState<DraftRequirement[]>([]);
   const [problemReportIds, setProblemReportIds] = useState<string[]>([]);
-  const [upstreamCandidates, setUpstreamCandidates] = useState<UpstreamCandidate[]>([]);
-  const [derivedUpstreamEdges, setDerivedUpstreamEdges] = useState<DerivedUpstreamEdge[]>([]);
-  const [upstreamAnswerComplete, setUpstreamAnswerComplete] = useState(false);
-  const [upstreamSearch, setUpstreamSearch] = useState("");
-  const [upstreamCandidatesTop, setUpstreamCandidatesTop] = useState(false);
-  const [includeEarlierBuilds, setIncludeEarlierBuilds] = useState(false);
+  const upstreamPicker = useUpstreamCandidates(scr ? `${api}/api/change-requests/${scr.id}/upstream-candidates?version=${scr.version}` : undefined);
+  const upstreamCandidatesTop = upstreamPicker.data?.isTopOfLadder ?? false;
+  const upstreamAnswerComplete = upstreamPicker.data?.upstreamAnswerComplete ?? false;
+  const derivedUpstreamEdges = upstreamPicker.data?.derivedEdges ?? [];
   const [approvers, setApprovers] = useState<Approver[]>([]);
   // Null means the applicable workflow has not been resolved yet (or its lookup failed): the picker stays
   // unfiltered and the server remains authoritative. True means no workflow is configured, so only users
@@ -601,22 +584,7 @@ export default function ChangeRequestWorkspace({
     (proposal as HTMLElement).focus({ preventScroll: true });
   }, [initialRequirementProposalId, scr]);
 
-  useEffect(() => {
-    if (!scr) return;
-    const controller = new AbortController();
-    const query = upstreamSearch.trim() ? `&search=${encodeURIComponent(upstreamSearch.trim())}` : "";
-    fetch(`${api}/api/change-requests/${scr.id}/upstream-candidates?limit=25&includeEarlierBuilds=${includeEarlierBuilds}${query}`, { signal: controller.signal })
-      .then(async (response) => response.ok ? response.json() as Promise<{ isTopOfLadder: boolean; upstreamAnswerComplete?: boolean; candidates: UpstreamCandidate[]; derivedEdges?: DerivedUpstreamEdge[] }> : undefined)
-      .then((value) => {
-        if (!value) return;
-        setUpstreamCandidatesTop(value.isTopOfLadder);
-        setUpstreamAnswerComplete(value.upstreamAnswerComplete ?? false);
-        setDerivedUpstreamEdges(value.derivedEdges ?? []);
-        if (mode === "edit") setUpstreamCandidates(value.candidates ?? []);
-      })
-      .catch(() => { /* The server remains authoritative at check-in when candidate search is unavailable. */ });
-    return () => controller.abort();
-  }, [api, includeEarlierBuilds, mode, scr, upstreamSearch]);
+
 
   useEffect(() => {
     if (!scr) return;
@@ -703,7 +671,12 @@ export default function ChangeRequestWorkspace({
         problemRich: recovered.problemRich || fromPlainText(recovered.problem),
         analysisRich: recovered.analysisRich || fromPlainText(recovered.analysis),
         solutionRich: recovered.solutionRich || fromPlainText(recovered.solution),
-        upstreamLinks: recovered.upstreamLinks ?? [],
+        upstreamLinks: (recovered.upstreamLinks ?? []).map(link => {
+          // Older server snapshots used CLR casing inside this otherwise camel-case document.
+          const legacy = link as UpstreamDraftLink & { UpstreamChangeRequestId?: string; Rationale?: string };
+          return { upstreamChangeRequestId: link.upstreamChangeRequestId ?? legacy.UpstreamChangeRequestId ?? "",
+            rationale: link.rationale ?? legacy.Rationale ?? "" };
+        }),
         noUpstreamRationale: recovered.noUpstreamRationale ?? null,
         upstreamAnswerAffirmed: recovered.upstreamAnswerAffirmed ?? false,
       };
@@ -1153,7 +1126,6 @@ export default function ChangeRequestWorkspace({
     && (latest?.steps ?? []).some((step) => step.approverId.toLowerCase() === user.userName.toLowerCase());
   const targetRelease = releases.find((item) => item.id === scr.targetReleaseId);
   const inheritedAnswer = inheritedTraceAnswer(scr.inheritedUpstream?.inheritedUpstreamContextJson);
-  const upstreamById = new Map((scr.upstream ?? []).map((link) => [link.upstreamChangeRequestId, link]));
   // Signed for, whichever of the two stored states it sits in. See StartNextRevision in the domain for why
   // both count, and why a released target build takes the action away again.
   const isSignedFor = scr.state === "Approved" || scr.state === "SelectedForBaseline";
@@ -1183,7 +1155,7 @@ export default function ChangeRequestWorkspace({
     value.trim(),
   );
   const proposalsComplete = requirements.length > 0 && requirements.every(proposalComplete);
-  const localTraceAnswerComplete = upstreamAnswerComplete || upstreamCandidatesTop || derivedUpstreamEdges.length > 0
+  const localTraceAnswerComplete = mode !== "edit" ? upstreamAnswerComplete : upstreamAnswerComplete || upstreamCandidatesTop || derivedUpstreamEdges.length > 0
     || (draft.upstreamLinks ?? []).length > 0 || Boolean(draft.noUpstreamRationale?.trim())
     || draft.upstreamAnswerAffirmed === true;
   const reviewReady = caseComplete && proposalsComplete && requirements.length > 0 && localTraceAnswerComplete;
@@ -1302,14 +1274,7 @@ export default function ChangeRequestWorkspace({
             <ProblemReportPicker api={api} projectId={scr.projectId} scope="target-build" releaseId={scr.targetReleaseId}
               selected={problemReportIds} onChange={setProblemReportIds}
               legend={`PRs driving this ${artifactAcronym(scr.displayNumber, "changeRequest")} (optional)`} />
-            <section className="upstreamAnswerEditor" aria-labelledby="upstream-answer-title">
-              <div className="workspaceTitle">
-                <div>
-                  <span className="stageKicker">TRACE ANSWER</span>
-                  <h3 id="upstream-answer-title">Upstream change requests</h3>
-                  <p>Choose exact direct-parent change requests, or explain why none applies. The server revalidates every choice at check-in.</p>
-                </div>
-              </div>
+            <section className="upstreamAuthoring">
               {scr.inheritedUpstream && !draft.upstreamAnswerAffirmed && (
                 <div className="inheritedTraceAnswer">
                   <b>Inherited from the predecessor revision</b>
@@ -1324,51 +1289,11 @@ export default function ChangeRequestWorkspace({
                   </button>
                 </div>
               )}
-              {!upstreamCandidatesTop && (
-                <>
-                  <label><input type="checkbox" checked={includeEarlierBuilds} onChange={(event) => setIncludeEarlierBuilds(event.target.checked)} /> Include earlier builds (only signed, exact upstream revisions are eligible)</label>
-                  <label>
-                    Find a direct parent
-                    <input value={upstreamSearch} onChange={(event) => setUpstreamSearch(event.target.value)} placeholder="Search number or title" />
-                  </label>
-                  <div className="upstreamCandidateList">
-                    {upstreamCandidates.filter((candidate) => !draft.upstreamLinks?.some((link) => link.upstreamChangeRequestId === candidate.id))
-                      .filter((candidate) => !candidate.assessmentDerived).map((candidate) => (
-                        <button type="button" key={candidate.id}
-                          onClick={() => {
-                            if (draft.noUpstreamRationale && !window.confirm("Replace the authored no-upstream answer with a named upstream link?")) return;
-                            setDraft((value) => ({ ...value, noUpstreamRationale: null,
-                              upstreamLinks: [...(value.upstreamLinks ?? []), { upstreamChangeRequestId: candidate.id, rationale: "" }] }));
-                          }}>
-                          {candidate.displayNumber} · {candidate.title} (current build {targetRelease?.version ?? scr.targetReleaseId} → upstream build {candidate.build}{candidate.earlierBuild ? ", earlier build" : ""})
-                        </button>
-                      ))}
-                  </div>
-                </>
-              )}
-              {derivedUpstreamEdges.length > 0 && <div className="snapshotNote"><b>Assessment-derived upstream edges (read-only)</b>{derivedUpstreamEdges.map((edge) => <p key={edge.assessmentLinkId}>{edge.upstreamDisplayNumber} · current build {targetRelease?.version ?? scr.targetReleaseId} → upstream build {edge.upstreamBuildVersion || edge.upstreamBuildId} · assessment {edge.assessmentId} · link {edge.assessmentLinkId}</p>)}</div>}
-              {(draft.upstreamLinks ?? []).map((link) => {
-                const candidate = upstreamCandidates.find((value) => value.id === link.upstreamChangeRequestId);
-                const stored = upstreamById.get(link.upstreamChangeRequestId);
-                const displayNumber = candidate?.displayNumber ?? stored?.upstreamDisplayNumber ?? link.upstreamChangeRequestId;
-                const upstreamBuild = candidate?.build ?? stored?.upstreamBuildVersion ?? "unknown";
-                return <div className="upstreamDraftRow" key={link.upstreamChangeRequestId}>
-                  <b>{displayNumber}<small>current build {targetRelease?.version ?? scr.targetReleaseId} → upstream build {upstreamBuild}</small></b>
-                  <input aria-label={`Rationale for ${displayNumber}`} value={link.rationale}
-                    onChange={(event) => setDraft((value) => ({ ...value, upstreamLinks: (value.upstreamLinks ?? []).map((item) => item.upstreamChangeRequestId === link.upstreamChangeRequestId ? { ...item, rationale: event.target.value } : item) }))}
-                    placeholder="Why is this exact change request upstream?" />
-                  <button type="button" onClick={() => setDraft((value) => ({ ...value, upstreamLinks: (value.upstreamLinks ?? []).filter((item) => item.upstreamChangeRequestId !== link.upstreamChangeRequestId) }))}>Remove</button>
-                </div>;
-              })}
-              {!upstreamCandidatesTop && derivedUpstreamEdges.length === 0 && (draft.upstreamLinks ?? []).length === 0 && (
-                <label>
-                  No upstream change-request rationale
-                  <textarea value={draft.noUpstreamRationale ?? ""}
-                    onChange={(event) => setDraft((value) => ({ ...value, noUpstreamRationale: event.target.value || null }))}
-                    placeholder="Explain why no direct upstream change request applies." />
-                </label>
-              )}
-              {upstreamCandidatesTop && <p className="muted">This level is at the top of the configured ladder; its upstream answer is derived.</p>}
+              <UpstreamChangeRequestPicker candidates={upstreamPicker} links={draft.upstreamLinks ?? []}
+                onChange={links => setDraft(value => ({ ...value, upstreamLinks: links }))}
+                noUpstreamRationale={draft.noUpstreamRationale ?? null}
+                onNoUpstreamRationale={value => setDraft(current => ({ ...current, noUpstreamRationale: value }))}
+                currentBuild={targetRelease?.version ?? scr.targetReleaseId} stored={scr.upstream ?? []} />
             </section>
           </section>
 

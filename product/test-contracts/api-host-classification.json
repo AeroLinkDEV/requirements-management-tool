@@ -1,22 +1,22 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 130,
-    "tests": 871,
-    "knownCases": 968,
+    "classes": 131,
+    "tests": 873,
+    "knownCases": 970,
     "unknownCaseTests": 0
   },
   "summary": {
     "converted": {
       "classes": 30,
-      "tests": 250,
-      "knownCases": 275,
+      "tests": 251,
+      "knownCases": 276,
       "unknownCaseTests": 0
     },
     "fresh-host": {
-      "classes": 47,
-      "tests": 299,
-      "knownCases": 331,
+      "classes": 48,
+      "tests": 300,
+      "knownCases": 332,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -207,6 +207,18 @@
       ]
     },
     {
+      "cls": "ChangeRequestUpstreamTraceApiTests",
+      "tests": 6,
+      "knownCases": 6,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
+        "auth-policy",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "CoverageStateFilterApiTests",
       "tests": 6,
       "knownCases": 6,
@@ -253,18 +265,6 @@
       "reason": "Already sharing a host through the #563 pilot.",
       "intents": [
         "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ChangeRequestUpstreamTraceApiTests",
-      "tests": 5,
-      "knownCases": 5,
-      "unknownCaseTests": 0,
-      "classification": "converted",
-      "reason": "Already sharing a host through the #563 pilot.",
-      "intents": [
-        "auth-policy",
         "http-boundary"
       ]
     },
@@ -830,6 +830,17 @@
       "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
       "intents": [
         "auth-policy"
+      ]
+    },
+    {
+      "cls": "ChangeRequestNumberOrderingTests",
+      "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Host use is unknown for one or more invocations; isolate it until method-level evidence is completed.",
+      "intents": [
+        "in-process-logic"
       ]
     },
     {

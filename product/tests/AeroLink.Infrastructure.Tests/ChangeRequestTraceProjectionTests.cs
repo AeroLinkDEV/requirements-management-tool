@@ -18,6 +18,59 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class ChangeRequestTraceProjectionTests
 {
     [Fact]
+    public async Task Approved_parent_with_changed_captured_build_remains_historical_and_requires_correction()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var earlier = new SoftwareRelease(fixture.Project.Id, "0.9", false);
+        var source = new SystemChangeRequest("SRCR-10061", 0, fixture.Project.Id, fixture.Release.Id,
+            "Reassigned parent", "P", "A", "S", "author", fixture.Now);
+        var child = new SystemChangeRequest("HLRCR-10061", 0, fixture.Project.Id, fixture.Release.Id,
+            "Child", "P", "A", "S", "author", fixture.Now,
+            ChangeRequestType.Software, softwareLevel: RequirementLevel.HighLevel);
+        child.AddUpstreamLink("author", source.Id, source.DisplayNumber, earlier.Id, "0.9",
+            "Previously captured build", fixture.Now);
+        fixture.Db.AddRange(earlier, source, child);
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE system_change_requests SET State = {ChangeRequestState.Approved.ToString()} WHERE Id = {source.Id}");
+        fixture.Db.ChangeTracker.Clear();
+
+        var result = await ChangeRequestTraceProjection.ForChangeRequestAsync(fixture.Db, fixture.Project.Id,
+            child.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
+        Assert.NotNull(result);
+        Assert.Equal("UpstreamGap", result.State!.Upstream);
+        Assert.Equal("ActionRequired", result.State.Overall);
+        var provenance = Assert.Single(Assert.Single(result.Edges).Provenance);
+        Assert.False(provenance.IsLive);
+        Assert.Equal(earlier.Id, provenance.UpstreamBuildId);
+        Assert.Equal(1, await fixture.Db.ChangeRequestUpstreamLinks.CountAsync());
+    }
+
+    [Fact]
+    public async Task Retained_off_ladder_history_is_explicit_and_does_not_break_mixed_projection()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var system = new SystemChangeRequest("SRCR-10060", 0, fixture.Project.Id, fixture.Release.Id,
+            "Current root", "P", "A", "S", "author", fixture.Now);
+        var historical = new SystemChangeRequest("ICDCR-10060", 0, fixture.Project.Id, fixture.Release.Id,
+            "Historical Interface", "P", "A", "S", "author", fixture.Now, ChangeRequestType.Interface);
+        fixture.Db.AddRange(system, historical);
+        await fixture.Db.SaveChangesAsync();
+        var policy = new ResolvedProjectLadderPolicy(new ResolvedProjectLadder(fixture.Project.Id,
+            ProjectLadderConfigurationClassification.LegacyDefault, ProjectLadderConfigurationState.Active,
+            [new(RequirementLevel.System, 1, LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities)], []));
+        var states = await ChangeRequestTraceProjection.StatesAsync(fixture.Db, fixture.Project.Id,
+            [system.Id, historical.Id], policy, CancellationToken.None);
+        Assert.True(states[system.Id].IsTopOfLadder);
+        Assert.False(states[historical.Id].IsTopOfLadder);
+        Assert.Equal("OffLadder", states[historical.Id].Overall);
+        var trace = await ChangeRequestTraceProjection.ForChangeRequestAsync(fixture.Db, fixture.Project.Id,
+            historical.Id, policy, CancellationToken.None);
+        Assert.NotNull(trace);
+        Assert.Equal("OffLadder", trace.State!.Overall);
+    }
+
+    [Fact]
     public async Task Composes_exact_tcr_origin_and_additional_sources_without_unrelated_nodes()
     {
         await using var fixture = await Fixture.CreateAsync();

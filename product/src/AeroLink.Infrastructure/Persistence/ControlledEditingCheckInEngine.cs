@@ -442,6 +442,14 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
         return normalized;
     }
 
+    // Creation and checkout/check-in share the same project, approval, ladder, build and cycle checks.
+    public Task ApplyInitialUpstreamAnswerAsync(SystemChangeRequest item,
+        List<ChangeRequestUpstreamDraft>? links, string? noUpstreamRationale, string actor,
+        DateTimeOffset now, ILadderPolicy policy, CancellationToken ct) =>
+        ApplyUpstreamDraftAsync(item, new(null, null, null, null, null,
+            UpstreamLinks: links ?? [], NoUpstreamRationale: noUpstreamRationale),
+            actor, false, now, policy, ct);
+
     private async Task ApplyUpstreamDraftAsync(SystemChangeRequest item, SystemChangeRequestDraft draft,
         string actor, bool administratorAuthority, DateTimeOffset now, ILadderPolicy policy, CancellationToken ct)
     {
@@ -493,8 +501,8 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
             if (sourceLevel is null || !parentLevels.Contains(sourceLevel.Value))
                 throw new DomainException("The controlled Draft contains an upstream change request outside the effective direct-parent ladder.");
             var crossBuild = source.TargetReleaseId != item.TargetReleaseId;
-            if (!crossBuild && source.State == ChangeRequestState.Withdrawn)
-                throw new DomainException("A withdrawn change request cannot be an upstream dependency.");
+            if (!ChangeRequestUpstreamEligibility.IsApproved(source.State))
+                throw new DomainException(ChangeRequestUpstreamEligibility.RefusalFor(source));
             if (crossBuild && (!earlier.Contains(source.TargetReleaseId)
                 || source.State is not (ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline)
                 || string.IsNullOrWhiteSpace(requestedLink.Rationale)))
@@ -569,8 +577,8 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
                 || !string.Equals(sourceRelease.Version, link.UpstreamBuildVersion, StringComparison.Ordinal))
                 throw new DomainException("The inherited answer carries a stale upstream build identity.");
             var crossBuild = source.TargetReleaseId != item.TargetReleaseId;
-            if (!crossBuild && source.State == ChangeRequestState.Withdrawn)
-                throw new DomainException("A withdrawn change request cannot be an upstream dependency.");
+            if (!ChangeRequestUpstreamEligibility.IsApproved(source.State))
+                throw new DomainException(ChangeRequestUpstreamEligibility.RefusalFor(source));
             if (crossBuild && (!earlier.Contains(source.TargetReleaseId)
                 || source.State is not (ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline)
                 || string.IsNullOrWhiteSpace(link.Rationale)))
@@ -639,9 +647,8 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
     private sealed record SystemChangeRequestDraft(string? Title, string? Problem, string? Analysis,
         string? Solution, List<SystemChangeRequestRequirementDraft>? RequirementChanges,
         string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null,
-        List<Guid>? ProblemReportIds = null, List<SystemChangeRequestUpstreamDraft>? UpstreamLinks = null,
+        List<Guid>? ProblemReportIds = null, List<ChangeRequestUpstreamDraft>? UpstreamLinks = null,
         string? NoUpstreamRationale = null, bool? UpstreamAnswerAffirmed = null);
-    private sealed record SystemChangeRequestUpstreamDraft(Guid UpstreamChangeRequestId, string? Rationale = null);
     private sealed record State(SystemChangeRequest Request, List<Guid> ProblemReportIds);
     private sealed record SystemChangeRequestRequirementDraft(string? BaseNumber, int Revision,
         string? Level, string? Kind, string? Statement, string? Rationale, string? VerificationMethod,

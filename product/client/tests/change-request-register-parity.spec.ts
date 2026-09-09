@@ -116,9 +116,9 @@ test('requirements register preserves deep-link history, native links, and autho
         { id: grandchildId, kind: 'ChangeRequest', projectId, buildId: releaseId, displayNumber: 'SRCR-GRANDCHILD.00', title: 'Indirect grandchild must stay out of inspector', state: 'Draft', revision: 0 },
       ],
       edges: [
-        { fromId: rootId, fromKind: 'ChangeRequest', toId: parentId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: parentId, rationale: 'Controlled parent rationale.' }] },
+        { fromId: parentId, fromKind: 'ChangeRequest', toId: rootId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: parentId, rationale: 'Controlled parent rationale.' }] },
         { fromId: rootId, fromKind: 'ChangeRequest', toId: tcrId, toKind: 'TestChangeRequest', relation: 'CoveredByTestChangeRequest', provenance: [{ kind: 'AssessmentDerived', sourceId: tcrId, status: 'Change required.' }] },
-        { fromId: rootId, fromKind: 'ChangeRequest', toId: secondParentId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: secondParentId, rationale: 'Second direct parent rationale.' }] },
+        { fromId: secondParentId, fromKind: 'ChangeRequest', toId: rootId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: secondParentId, rationale: 'Second direct parent rationale.' }] },
         { fromId: rootId, fromKind: 'ChangeRequest', toId: secondTcrId, toKind: 'TestChangeRequest', relation: 'CoveredByTestChangeRequest', provenance: [{ kind: 'AssessmentDerived', sourceId: secondTcrId, status: 'No change required.' }] },
         { fromId: parentId, fromKind: 'ChangeRequest', toId: grandchildId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: grandchildId }] },
       ],

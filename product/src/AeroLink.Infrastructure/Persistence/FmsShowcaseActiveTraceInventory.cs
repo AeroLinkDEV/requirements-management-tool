@@ -58,8 +58,9 @@ public sealed partial class FmsShowcaseSeeder
         {
             var parallel = await db.SystemChangeRequests.AsNoTracking().Include(x => x.ReviewCycles)
                 .ThenInclude(x => x.Steps).SingleOrDefaultAsync(x => x.Id == parallelId, ct);
-            var cycle = parallel?.ReviewCycles.Count == 1 ? parallel.ReviewCycles.Single() : null;
+            var cycle = parallel?.ReviewCycles.SingleOrDefault(x => x.State == ReviewCycleState.Active);
             var notices = await db.UserNotifications.AsNoTracking().Where(x => x.ArtifactId == parallelId).ToListAsync(ct);
+            if (cycle is not null) notices = notices.Where(x => x.CreatedAt >= cycle.StartedAt).ToList();
             if (parallel?.State != ChangeRequestState.InReview || cycle is null
                 || cycle.State != ReviewCycleState.Active || cycle.Mode != ReviewMode.Parallel
                 || cycle.SnapshotContractVersion != SystemChangeRequest.CurrentSnapshotContractVersion
@@ -72,6 +73,15 @@ public sealed partial class FmsShowcaseSeeder
         var positiveIds = positive.Values.ToHashSet();
         var links = await db.ChangeRequestUpstreamLinks.AsNoTracking().Where(x => positiveIds.Contains(x.ChangeRequestId)).ToListAsync(ct);
         var proposalIdentities = await ValidateActiveTraceProposalsAsync(programId, projectId, requests, positive, problems, ct);
+        var parentRevisionIds = proposalIdentities.Values.Where(x => x.UpstreamRevisionId != null).Select(x => x.UpstreamRevisionId!.Value).Distinct().ToList();
+        var approvedParents = await (from revision in db.RequirementRevisions.AsNoTracking()
+            join source in db.SystemChangeRequests.AsNoTracking() on revision.SourceChangeRequestId equals source.Id
+            where parentRevisionIds.Contains(revision.Id) && source.ProjectId == projectId
+                && (source.State == ChangeRequestState.Approved || source.State == ChangeRequestState.SelectedForBaseline)
+            select new { revision.Id, SourceId = source.Id }).ToDictionaryAsync(x => x.Id, x => x.SourceId, ct);
+        bool HasExactApprovedParent(Guid child) => proposalIdentities.TryGetValue(child, out var identity)
+            && identity.UpstreamRevisionId is { } revisionId && approvedParents.TryGetValue(revisionId, out var sourceId)
+            && links.Any(x => x.ChangeRequestId == child && x.UpstreamChangeRequestId == sourceId);
         for (var index = 1; index <= ActiveTraceScenarioChains; index++)
         {
             var prefix = $"{ActiveTraceScenarioPrefix}{index:D2}/";
@@ -81,9 +91,9 @@ public sealed partial class FmsShowcaseSeeder
             { problems.Add($"Missing System/HLR/LLR ownership map for scenario {index:D2}."); continue; }
             if (links.Any(x => x.ChangeRequestId == system)
                 || links.Count(x => x.ChangeRequestId == high) != 1
-                || !links.Any(x => x.ChangeRequestId == high && x.UpstreamChangeRequestId == system)
+                || !HasExactApprovedParent(high)
                 || links.Count(x => x.ChangeRequestId == low) != 1
-                || !links.Any(x => x.ChangeRequestId == low && x.UpstreamChangeRequestId == high))
+                || !HasExactApprovedParent(low))
                 problems.Add($"The exact System/HLR/LLR links of scenario {index:D2} have drifted.");
             if (!proposalIdentities.TryGetValue(system, out var systemProposal)
                 || !proposalIdentities.TryGetValue(high, out var highProposal)

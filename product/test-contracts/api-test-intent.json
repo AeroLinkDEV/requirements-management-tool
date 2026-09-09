@@ -1,19 +1,19 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 871,
-    "cases": 968,
-    "classes": 130,
-    "hostedTests": 831,
-    "hostedCases": 914,
+    "tests": 873,
+    "cases": 970,
+    "classes": 131,
+    "hostedTests": 832,
+    "hostedCases": 915,
     "nonHostedTests": 32,
     "nonHostedCases": 46,
-    "unknownHostTests": 8,
-    "unknownHostCases": 8,
+    "unknownHostTests": 9,
+    "unknownHostCases": 9,
     "hostedCandidateTests": 16,
     "hostedCandidateCases": 16,
-    "unknownCandidateTests": 4,
-    "unknownCandidateCases": 4,
+    "unknownCandidateTests": 5,
+    "unknownCandidateCases": 5,
     "unknownCaseTests": 0,
     "criterion7": "unresolved"
   },
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 546,
-      "cases": 611,
+      "tests": 547,
+      "cases": 612,
       "unknownCases": 0,
       "classes": 105
     },
@@ -45,10 +45,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 36,
-      "cases": 36,
+      "tests": 37,
+      "cases": 37,
       "unknownCases": 0,
-      "classes": 13
+      "classes": 14
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -3202,6 +3202,20 @@
       }
     },
     {
+      "cls": "ChangeRequestNumberOrderingTests",
+      "test": "Sqlite_orders_both_registers_numerically_before_paging",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 16,
+        "end": 17
+      }
+    },
+    {
       "cls": "ChangeRequestRenameApiTests",
       "test": "A_created_change_request_is_numbered_for_the_level_it_may_change",
       "kind": "Theory",
@@ -3479,8 +3493,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 130,
-        "end": 246
+        "start": 174,
+        "end": 283
       }
     },
     {
@@ -3497,8 +3511,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 429,
-        "end": 459
+        "start": 466,
+        "end": 496
       }
     },
     {
@@ -3515,8 +3529,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 363,
-        "end": 402
+        "start": 400,
+        "end": 439
+      }
+    },
+    {
+      "cls": "ChangeRequestUpstreamTraceApiTests",
+      "test": "Deferred_sources_are_visible_but_cannot_be_linked_during_creation_or_check_in",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 20,
+        "end": 62
       }
     },
     {
@@ -3533,8 +3565,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 248,
-        "end": 361
+        "start": 285,
+        "end": 398
       }
     },
     {
@@ -3551,8 +3583,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 404,
-        "end": 427
+        "start": 441,
+        "end": 464
       }
     },
     {
