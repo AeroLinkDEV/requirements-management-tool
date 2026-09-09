@@ -1691,6 +1691,15 @@ jobs:
             exit 1
           fi
 
+          # A scoped runner that executes unexpectedly must not bypass its whole-solution owner merely because
+          # the classifier says docs-only or trusted post-merge skip. A successful API or Infrastructure job
+          # therefore implies a successful Domain owner in every mode; legitimate all-skipped modes remain
+          # allowed because neither scoped runner has produced success.
+          if { [ "$BACKEND_API" = "success" ] || [ "$BACKEND_CORE_INFRASTRUCTURE" = "success" ]; } && [ "$BACKEND_CORE_DOMAIN" != "success" ]; then
+            echo "::error::A scoped backend job passed without a successful whole-solution Domain owner."
+            exit 1
+          fi
+
           # A scoped backend job is only safe when the required Windows whole-solution owner ran too. The
           # dependencies above intentionally allow skipped jobs so docs-only and trusted post-merge
           # provenance can report; this selected-backend guard closes the ordinary PR/push/dispatch/schedule

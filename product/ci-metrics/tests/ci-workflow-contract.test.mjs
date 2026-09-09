@@ -168,8 +168,26 @@ test('the actual aggregate shell rejects a selected backend without its whole-so
       assert.equal(child.status, 1, `${label} must reject a selected backend with skipped Domain: ${child.error ?? child.stderr}\n${child.stdout}`)
     }
 
+    for (const [label, event, fullDiagnostics, changes, results] of [
+      ['unexpected API in client-only mode', 'pull_request', 'false', { BACKEND: 'false', DOCS_ONLY: 'false', POST_MERGE_SKIP: 'false' }, { BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'skipped', BACKEND_CORE_INFRASTRUCTURE: 'skipped' }],
+      ['unexpected API in docs-only mode', 'pull_request', 'false', { BACKEND: 'false', DOCS_ONLY: 'true', POST_MERGE_SKIP: 'false' }, { BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'skipped', BACKEND_CORE_INFRASTRUCTURE: 'skipped' }],
+      ['unexpected Infrastructure during trusted skip', 'push', 'false', { BACKEND: 'true', DOCS_ONLY: 'false', POST_MERGE_SKIP: 'true' }, { BACKEND_API: 'skipped', BACKEND_CORE_DOMAIN: 'skipped', BACKEND_CORE_INFRASTRUCTURE: 'success' }],
+    ]) {
+      const env = {
+        ...process.env,
+        ...Object.fromEntries(envNames.map((name) => [name, ''])),
+        ...results,
+        CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success', BROWSER_FULL: 'success',
+        POSTGRESQL: 'success', METRICS_TOOLING: 'success', LAUNCHERS_ONLY: 'false', EVENT_NAME: event,
+        FULL_DIAGNOSTICS: fullDiagnostics, GITHUB_STEP_SUMMARY: join(directory, `${label.replaceAll(/[^a-z0-9]+/gi, '-')}.md`).replaceAll('\\', '/'),
+        ...changes,
+      }
+      const child = spawnSync(bash, ['-c', script], { encoding: 'utf8', env })
+      assert.equal(child.status, 1, `${label} must reject a successful scoped job without Domain: ${child.error ?? child.stderr}\n${child.stdout}`)
+    }
+
     for (const [label, event, fullDiagnostics, changes] of [
-      ['docs-only', 'pull_request', 'false', { BACKEND: 'true', DOCS_ONLY: 'true', POST_MERGE_SKIP: 'false' }],
+      ['docs-only', 'pull_request', 'false', { BACKEND: 'false', DOCS_ONLY: 'true', POST_MERGE_SKIP: 'false' }],
       ['trusted post-merge skip', 'push', 'false', { BACKEND: 'true', DOCS_ONLY: 'false', POST_MERGE_SKIP: 'true' }],
       ['client-only', 'pull_request', 'false', { BACKEND: 'false', DOCS_ONLY: 'false', POST_MERGE_SKIP: 'false' }],
     ]) {
