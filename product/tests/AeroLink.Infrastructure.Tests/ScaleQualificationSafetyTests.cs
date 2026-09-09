@@ -1,5 +1,6 @@
 using AeroLink.Scale;
 using Npgsql;
+using System.Text.Json;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -55,6 +56,84 @@ public sealed class ScaleQualificationSafetyTests
             ScaleQualificationSafety.WriteImmutableManifest(path, manifest);
             Assert.Throws<InvalidOperationException>(() => ScaleQualificationSafety.WriteImmutableManifest(path, manifest));
             Assert.Contains("preflight-only", File.ReadAllText(path));
+            Assert.Single(Directory.GetFiles(root));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void Repository_identity_and_canonical_store_ignore_foreign_caller_cwd()
+    {
+        var original = Directory.GetCurrentDirectory();
+        var foreign = Path.Combine(Path.GetTempPath(), "aerolink-cq14-foreign", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(foreign);
+        try
+        {
+            Directory.SetCurrentDirectory(foreign);
+            var repository = ScaleQualificationSafety.RepositoryRoot();
+            Assert.True(Directory.Exists(Path.Combine(repository, "product")));
+            Assert.Equal(Path.GetFullPath(Path.Combine(repository, "product", ".local")),
+                ScaleQualificationSafety.PersistentProductStorePath());
+            Assert.Throws<InvalidOperationException>(() =>
+                ScaleQualificationSafety.RequireEvidenceRoot(ScaleQualificationSafety.CanonicalPersistentProductStorePath()));
+            Assert.Matches("^[0-9a-f]{40}$", ScaleQualificationSafety.RequireSourceCommit());
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(original);
+            Directory.Delete(foreign, true);
+        }
+    }
+
+    [Fact]
+    public void Manifest_path_rejects_physical_junction_escape()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "aerolink-cq14-junction", Guid.NewGuid().ToString("N"));
+        var outside = Path.Combine(Path.GetTempPath(), "aerolink-cq14-outside", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(outside);
+        var junction = Path.Combine(root, "child");
+        try
+        {
+            try { Directory.CreateSymbolicLink(junction, outside); }
+            catch (UnauthorizedAccessException) { return; }
+            catch (PlatformNotSupportedException) { return; }
+            catch (IOException) { return; }
+            Assert.Throws<InvalidOperationException>(() =>
+                ScaleQualificationSafety.RequireManifestPath(Path.Combine(junction, "escape.json"), root));
+        }
+        finally
+        {
+            if (Directory.Exists(junction)) Directory.Delete(junction);
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+            if (Directory.Exists(outside)) Directory.Delete(outside, true);
+        }
+    }
+
+    [Fact]
+    public void Prepared_manifest_requires_dataset_preparation_status_and_preserves_no_query_secret()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "aerolink-cq14-prepared", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var identity = Identity();
+        var manifest = ScaleQualificationSafety.CreateManifest("dataset-prepared", "workspace", new string('a', 40), identity,
+            "disposable-postgresql", "Host=127.0.0.1;Port=55495;Database=aerolink_995_qualify", root, true, true);
+        var path = Path.Combine(root, "workspace.json");
+        try
+        {
+            ScaleQualificationSafety.WriteImmutableManifest(path, manifest);
+            Assert.Equal("dataset-prepared", ScaleQualificationSafety.ReadPreparedManifest(path).Status);
+
+            var wrong = Path.Combine(root, "wrong.json");
+            File.WriteAllText(wrong, JsonSerializer.Serialize(manifest with { Status = "preflight-only" }));
+            Assert.Throws<InvalidOperationException>(() => ScaleQualificationSafety.ReadPreparedManifest(wrong));
+
+            var error = Assert.Throws<InvalidOperationException>(() =>
+                ScaleQualificationSafety.RejectApiOption(true, "https://127.0.0.1:5175/?token=supersecret"));
+            Assert.DoesNotContain("supersecret", error.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

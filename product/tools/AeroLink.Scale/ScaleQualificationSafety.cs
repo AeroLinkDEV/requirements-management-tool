@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -7,8 +9,8 @@ namespace AeroLink.Scale;
 
 /// <summary>
 /// The exact controlled scope and stable dataset identity used by one qualification run.
-/// The IDs are intentionally caller supplied for an existing dataset; the harness never discovers a
-/// replacement project or release when one is missing.
+/// The IDs are read from an immutable prepared manifest for an existing dataset; the harness never
+/// discovers a replacement project or release when one is missing.
 /// </summary>
 public sealed record ScaleQualificationScope(
     Guid ProgramId,
@@ -66,6 +68,53 @@ public static class ScaleQualificationSafety
     public const string ManifestSchema = "aerolink.scale-qualification.v1";
     public const string ProtectedPort = "54329";
 
+    public static string RepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            var product = Path.Combine(current.FullName, "product");
+            var git = Path.Combine(current.FullName, ".git");
+            if (Directory.Exists(product) && (Directory.Exists(git) || File.Exists(git)))
+                return current.FullName;
+            current = current.Parent;
+        }
+        throw new InvalidOperationException("The scale tool could not locate its executing repository.");
+    }
+
+    public static string GitCommonRoot()
+    {
+        var commonDirectory = RunGit("rev-parse", "--git-common-dir");
+        var fullCommonDirectory = Path.IsPathRooted(commonDirectory)
+            ? commonDirectory
+            : Path.GetFullPath(Path.Combine(RepositoryRoot(), commonDirectory));
+        return new DirectoryInfo(fullCommonDirectory).Parent?.FullName
+            ?? throw new InvalidOperationException("The scale tool could not locate its Git common root.");
+    }
+
+    public static string BuiltSourceCommit()
+    {
+        var value = typeof(ScaleQualificationSafety).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .SingleOrDefault(x => x.Key == "ScaleSourceCommit")?.Value?.Trim();
+        if (!IsSha(value))
+            throw new InvalidOperationException("The scale tool binary has no verifiable source commit.");
+        return value!;
+    }
+
+    public static string RequireSourceCommit(string? expected = null)
+    {
+        var built = BuiltSourceCommit();
+        var current = RunGit("rev-parse", "HEAD");
+        if (!built.Equals(current, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The scale tool binary was not built from the executing repository revision.");
+        if (!string.IsNullOrWhiteSpace(expected) && !built.Equals(expected.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The requested commit does not match the scale tool build identity.");
+        return built;
+    }
+
+    public static bool IsSourceDirty() => !string.IsNullOrWhiteSpace(RunGit("status", "--porcelain"));
+
     public static string RequireSafeConnection(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -113,6 +162,18 @@ public static class ScaleQualificationSafety
             throw new InvalidOperationException($"{operation} requires separate write opt-in (--allow-write-load).");
     }
 
+    public static void RequireQualificationOptIn(bool qualificationEnabled, string operation)
+    {
+        if (!qualificationEnabled)
+            throw new InvalidOperationException($"{operation} requires explicit qualification opt-in (--qualification-enabled).");
+    }
+
+    public static void RejectApiOption(bool supplied, string? value)
+    {
+        if (supplied)
+            throw new InvalidOperationException("CQ-14 A0 does not accept an HTTP API target until API-to-database binding is supported.");
+    }
+
     public static void RequireDatasetWriteOptIn(bool qualificationEnabled, bool datasetWriteOptIn)
     {
         if (!qualificationEnabled)
@@ -131,10 +192,13 @@ public static class ScaleQualificationSafety
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         { throw new InvalidOperationException("Qualification evidence root is not a valid path."); }
 
-        var persistentStore = ResolveExistingPath(PersistentProductStorePath());
         var resolvedEvidenceRoot = ResolveExistingPath(full);
-        if (IsUnder(resolvedEvidenceRoot, persistentStore) || IsUnder(persistentStore, resolvedEvidenceRoot))
-            throw new InvalidOperationException("Qualification evidence must be outside the persistent product/.local store.");
+        foreach (var store in ProtectedProductStorePaths())
+        {
+            var persistentStore = ResolveExistingPath(store);
+            if (IsUnder(resolvedEvidenceRoot, persistentStore) || IsUnder(persistentStore, resolvedEvidenceRoot))
+                throw new InvalidOperationException("Qualification evidence must be outside the persistent product/.local store.");
+        }
 
         return full;
     }
@@ -190,13 +254,23 @@ public static class ScaleQualificationSafety
 
     public static string ComputeDatasetHash(ScaleDatasetIdentity identity)
     {
-        var canonical = string.Join('|',
-            identity.ProgramId.ToString("D"), identity.ProgramCode.Trim().ToUpperInvariant(), identity.ProgramName.Trim(),
-            identity.ProjectId.ToString("D"), identity.ProjectName.Trim(), identity.SoftwareProduct.Trim(),
-            identity.ReleaseId.ToString("D"), identity.ReleaseVersion.Trim(),
-            identity.BaselineId.ToString("D"), identity.BaselineNumber.Trim(),
-            identity.RequirementCount.ToString(System.Globalization.CultureInfo.InvariantCulture), identity.DatasetSeed.Trim(),
-            identity.RequirementContentHash.Trim().ToLowerInvariant(), identity.BaselineRequirementsHash.Trim().ToLowerInvariant());
+        var canonical = JsonSerializer.Serialize(new
+        {
+            programId = identity.ProgramId,
+            programCode = identity.ProgramCode.Trim().ToUpperInvariant(),
+            programName = identity.ProgramName.Trim(),
+            projectId = identity.ProjectId,
+            projectName = identity.ProjectName.Trim(),
+            softwareProduct = identity.SoftwareProduct.Trim(),
+            releaseId = identity.ReleaseId,
+            releaseVersion = identity.ReleaseVersion.Trim(),
+            baselineId = identity.BaselineId,
+            baselineNumber = identity.BaselineNumber.Trim(),
+            requirementCount = identity.RequirementCount,
+            datasetSeed = identity.DatasetSeed.Trim(),
+            requirementContentHash = identity.RequirementContentHash.Trim().ToLowerInvariant(),
+            baselineRequirementsHash = identity.BaselineRequirementsHash.Trim().ToLowerInvariant(),
+        });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
@@ -241,17 +315,29 @@ public static class ScaleQualificationSafety
     {
         var full = Path.GetFullPath(path);
         var evidenceRoot = RequireEvidenceRoot(Path.GetDirectoryName(full));
+        _ = RequireManifestPath(full, evidenceRoot);
         Directory.CreateDirectory(evidenceRoot);
         var options = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
         var bytes = JsonSerializer.SerializeToUtf8Bytes(manifest, options);
+        var temporary = Path.Combine(evidenceRoot, $".{Path.GetFileName(full)}.{Guid.NewGuid():N}.tmp");
         try
         {
-            using var stream = new FileStream(full, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
-            stream.Write(bytes);
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.Read,
+                4096, FileOptions.WriteThrough))
+            {
+                stream.Write(bytes);
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temporary, full, overwrite: false);
         }
         catch (IOException)
         {
             throw new InvalidOperationException("The qualification manifest already exists or cannot be created immutably.");
+        }
+        finally
+        {
+            try { if (File.Exists(temporary)) File.Delete(temporary); }
+            catch (IOException) { }
         }
         return full;
     }
@@ -262,11 +348,53 @@ public static class ScaleQualificationSafety
             throw new InvalidOperationException("Qualification requires an explicit manifest path (--manifest).");
         var full = Path.GetFullPath(path.Trim());
         var root = RequireEvidenceRoot(evidenceRoot);
-        if (!IsUnder(full, root))
+        var resolvedRoot = ResolveExistingPath(root);
+        var resolvedTarget = ResolveExistingPath(full);
+        if (!IsUnder(resolvedTarget, resolvedRoot))
             throw new InvalidOperationException("The qualification manifest must be stored under the separate evidence root.");
         if (File.Exists(full))
             throw new InvalidOperationException("The qualification manifest already exists; immutable evidence cannot be overwritten.");
         return full;
+    }
+
+    public static string RequireExistingManifestPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new InvalidOperationException("Qualification requires an explicit prepared manifest path (--prepared-manifest).");
+        var full = Path.GetFullPath(path.Trim());
+        var directory = Path.GetDirectoryName(full)
+            ?? throw new InvalidOperationException("The prepared qualification manifest path has no directory.");
+        var root = RequireEvidenceRoot(directory);
+        var resolvedRoot = ResolveExistingPath(root);
+        var resolvedTarget = ResolveExistingPath(full);
+        if (!IsUnder(resolvedTarget, resolvedRoot) || !File.Exists(full))
+            throw new InvalidOperationException("The prepared qualification manifest must be an existing file under a safe evidence root.");
+        return full;
+    }
+
+    public static ScaleQualificationManifest ReadPreparedManifest(string? path)
+    {
+        var full = RequireExistingManifestPath(path);
+        ScaleQualificationManifest? manifest;
+        try
+        {
+            manifest = JsonSerializer.Deserialize<ScaleQualificationManifest>(File.ReadAllText(full),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch (JsonException)
+        {
+            throw new InvalidOperationException("The prepared qualification manifest is not valid JSON.");
+        }
+        if (manifest is null || manifest.Schema != ManifestSchema || manifest.Status != "dataset-prepared")
+            throw new InvalidOperationException("The prepared qualification manifest has an unsupported schema or status.");
+        _ = RequireScope(manifest.ProgramId.ToString("D"), manifest.ProjectId.ToString("D"),
+            manifest.ReleaseId.ToString("D"), manifest.BaselineId.ToString("D"), manifest.DatasetSeed, manifest.DatasetHash);
+        if (!IsSha(manifest.Commit))
+            throw new InvalidOperationException("The prepared qualification manifest has no verifiable source commit.");
+        var declaredRoot = RequireEvidenceRoot(manifest.EvidenceRoot);
+        if (!ResolveExistingPath(declaredRoot).Equals(ResolveExistingPath(Path.GetDirectoryName(full)!), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The prepared qualification manifest evidence root does not match its containing directory.");
+        return manifest;
     }
 
     public static bool IsDedicatedDatabase(string? database) =>
@@ -277,14 +405,16 @@ public static class ScaleQualificationSafety
 
     public static string PersistentProductStorePath()
     {
-        var current = new DirectoryInfo(Directory.GetCurrentDirectory());
-        while (current is not null)
-        {
-            var candidate = Path.Combine(current.FullName, "product", ".local");
-            if (Directory.Exists(Path.Combine(current.FullName, "product"))) return Path.GetFullPath(candidate);
-            current = current.Parent;
-        }
-        return Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "product", ".local"));
+        return Path.Combine(RepositoryRoot(), "product", ".local");
+    }
+
+    public static string CanonicalPersistentProductStorePath() =>
+        Path.Combine(GitCommonRoot(), "product", ".local");
+
+    private static IEnumerable<string> ProtectedProductStorePaths()
+    {
+        yield return PersistentProductStorePath();
+        yield return CanonicalPersistentProductStorePath();
     }
 
     private static bool IsUnder(string path, string root)
@@ -308,6 +438,12 @@ public static class ScaleQualificationSafety
                 var candidate = new DirectoryInfo(Path.Combine(current.FullName, segments[i]));
                 if (!candidate.Exists)
                 {
+                    var file = new FileInfo(candidate.FullName);
+                    if (file.Exists)
+                    {
+                        var resolvedFile = file.ResolveLinkTarget(returnFinalTarget: true);
+                        return resolvedFile?.FullName ?? file.FullName;
+                    }
                     for (var remaining = i; remaining < segments.Length; remaining++)
                         current = new DirectoryInfo(Path.Combine(current.FullName, segments[remaining]));
                     return current.FullName;
@@ -326,6 +462,31 @@ public static class ScaleQualificationSafety
             throw new InvalidOperationException("Qualification evidence path could not be resolved safely.", ex);
         }
     }
+
+    private static string RunGit(params string[] arguments)
+    {
+        var repository = RepositoryRoot();
+        var process = new ProcessStartInfo("git")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        process.ArgumentList.Add("-C");
+        process.ArgumentList.Add(repository);
+        foreach (var argument in arguments) process.ArgumentList.Add(argument);
+        using var child = Process.Start(process)
+            ?? throw new InvalidOperationException("The scale tool could not inspect its executing repository.");
+        var output = child.StandardOutput.ReadToEnd().Trim();
+        child.WaitForExit();
+        if (child.ExitCode != 0)
+            throw new InvalidOperationException("The scale tool could not inspect its executing repository.");
+        return output;
+    }
+
+    private static bool IsSha(string? value) =>
+        value is { Length: 40 } && value.All(Uri.IsHexDigit);
 
     private static Guid ParseRequiredGuid(string? value, string label) =>
         Guid.TryParse(value, out var parsed) && parsed != Guid.Empty

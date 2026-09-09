@@ -32,27 +32,24 @@ SRCRs carry a numeric optimistic-concurrency version. Every changed SRCR advance
 
 The separate `workspace` command generates materialized Requirement artifacts, immutable revisions, baseline membership, Program schemas, structured System/HLR/LLR specifications, revision profiles, and specification placements. Its `small` profile is the Wave 1 qualification dataset with 10,000 requirements; `smoke` produces 1,000 and `medium` produces 50,000. This database is intentionally separate from the 1,250-requirement FMS showcase.
 
-Example:
+Workspace preparation is the supported A0 write path:
 
 ```powershell
-$env:AEROLINK_SCALE_CONNECTION='Host=127.0.0.1;Port=55495;Database=aerolink_scale;Username=postgres'
-& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- generate --profile medium --reset --dataset-seed 4754 --qualification-enabled --allow-dataset-write
+$env:AEROLINK_SCALE_CONNECTION='Host=127.0.0.1;Port=55495;Database=aerolink_995_qualify;Username=postgres'
+& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- workspace --profile medium --dataset-seed 4754 --qualification-enabled --allow-dataset-write --evidence-root C:\Temp\aerolink-scale-evidence --manifest C:\Temp\aerolink-scale-evidence\workspace.json
 ```
 
-Enterprise Requirements Workspace qualification:
+The prepared manifest is the sole scope input to the direct database preflight:
 
 ```powershell
-& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- workspace --profile medium --reset --dataset-seed 4754 --qualification-enabled --allow-dataset-write --evidence-root C:\Temp\aerolink-scale-evidence --manifest C:\Temp\aerolink-scale-evidence\workspace.json
-# Read programId/projectId/releaseId/baselineId/datasetHash from workspace.json, then pass those exact values:
-& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- benchmark --program-id <programId> --project-id <projectId> --release-id <releaseId> --baseline-id <baselineId> --dataset-seed 4754 --dataset-hash <datasetHash>
-& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- load --program-id <programId> --project-id <projectId> --release-id <releaseId> --baseline-id <baselineId> --dataset-seed 4754 --dataset-hash <datasetHash> --users 150 --iterations 8
+& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- preflight --qualification-enabled --prepared-manifest C:\Temp\aerolink-scale-evidence\workspace.json --evidence-root C:\Temp\aerolink-scale-evidence --manifest C:\Temp\aerolink-scale-evidence\preflight.json
 ```
 
-Scale writes require an explicit `--qualification-enabled` and a separate `--allow-dataset-write` opt-in. Existing-dataset reads require exact Program, Project, release, baseline, and dataset manifest values; they never choose the first available Project. The tool refuses the persistent PostgreSQL port `54329`, ordinary databases, evidence roots overlapping `product/.local`, and an existing manifest path. `session-load` remains deferred until a supported proof binds the HTTP API to the exact qualified database; no HTTP workload or account provisioning is claimed by this foundation slice.
+Scale writes require an explicit `--qualification-enabled` and a separate `--allow-dataset-write` opt-in. Existing-dataset preflight reads the immutable prepared manifest, then verifies the exact Program, Project, release, baseline, seed, and computed dataset content against PostgreSQL. The tool refuses the persistent PostgreSQL port `54329`, ordinary databases, evidence roots overlapping either linked-worktree or canonical `product/.local`, and an existing manifest path. `generate`, `benchmark`, `load`, and `session-load` remain deferred in A0; no HTTP workload or account provisioning is claimed by this foundation slice.
 
 ## First medium-scale result
 
-Run on July 12, 2026 using local PostgreSQL 18.4:
+Historical measurements from July 12, 2026 using local PostgreSQL 18.4:
 
 - 10,000 SRCRs
 - 50,000 proposed requirement changes
@@ -76,7 +73,7 @@ These are local engineering observations, not production guarantees. They exclud
 
 ## First 10,000-requirement workspace result
 
-Run on July 12, 2026 using local PostgreSQL 18.4 and deterministic seed 4754:
+Historical measurements from July 12, 2026 using local PostgreSQL 18.4 and deterministic seed 4754:
 
 - 10,000 stable Requirement artifacts and immutable active revisions
 - 1,500 System requirements, 3,500 HLRs, and 5,000 LLRs
@@ -108,7 +105,7 @@ Run on July 12, 2026 using local PostgreSQL 18.4 and deterministic seed 4754:
 - 401.8 operations/second; 16 ms p50, 1,265 ms p95, and 2,461 ms p99
 - the 150-client p95 passed the 2,000 ms engineering gate
 
-The load command mixes paging, verification aggregation, specification-tree queries, and identifier search using separate pooled database contexts. It demonstrates persistence/query concurrency on this workstation; it is not yet a claim of 150 simultaneous rendered browser sessions or a production service-level guarantee.
+The historical load command mixed paging, verification aggregation, specification-tree queries, and identifier search using separate pooled database contexts. It demonstrates persistence/query concurrency on this workstation; it is not yet a claim of 150 simultaneous rendered browser sessions or a production service-level guarantee.
 
 ## Next scale gates
 
@@ -156,7 +153,7 @@ worklist means the same thing whether it arrives as a query string or a stored r
 
 ### Budgets at 50,000 requirements
 
-Measured by `dotnet run --project product/tools/AeroLink.Scale -- benchmark` against the workspace dataset.
+Historical filter measurements used `dotnet run --project product/tools/AeroLink.Scale -- benchmark` against the workspace dataset.
 Each measure reports a cold first run alongside the warm p95, because a warm number alone hides what the first
 reader of the day waits for.
 
