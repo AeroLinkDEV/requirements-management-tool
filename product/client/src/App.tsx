@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { ComponentType, FormEvent } from "react";
 import { useWorkspaceRoute } from "./useWorkspaceRoute";
-import { resolveWorkspaceContext } from "./workspaceContext";
+import { decodeWorkspaces, resolveWorkspaceContext } from "./workspaceContext";
 import type { Workspace } from "./workspaceContext";
 import { useLatestRequest } from "./useLatestRequest";
 import CommandPalette from "./CommandPalette";
@@ -352,8 +352,7 @@ function App() {
     try {
       const response = await fetch(API + "/api/workspaces");
       if (!response.ok) throw new Error("Workspace access is unavailable.");
-      const next = await response.json() as Workspace[];
-      if (!Array.isArray(next)) throw new Error("Workspace response is invalid.");
+      const next = decodeWorkspaces(await response.json());
       if (!current()) return;
       setWorkspaces(next);
       setWorkspaceStatus("ready");
