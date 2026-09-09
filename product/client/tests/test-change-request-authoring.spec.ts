@@ -124,6 +124,9 @@ test('an engineer raises a System test change request with its case from the Cha
   // The package opens onto its workspace so the engineer can start its procedure decisions.
   const workspace = page.getByRole('dialog', { name: /procedure decisions/ })
   await expect(workspace).toBeVisible({ timeout: 30_000 })
+  await expect(page).toHaveURL(/authoring=[^&]+/)
+  await page.reload()
+  await expect(workspace).toBeVisible({ timeout: 30_000 })
   await expect(workspace.getByText('Engineering case')).toBeVisible()
   await expect(workspace.getByText('Verify the TCR authoring behavior as one package', { exact: true })).toBeVisible()
   await expect(workspace.getByText('Raise one SYSTPCR and write the procedure it needs.', { exact: true })).toBeVisible()
@@ -137,6 +140,9 @@ test('an engineer raises a System test change request with its case from the Cha
   await expect(workspace.getByText('Verify the TCR authoring behavior as one package (corrected)', { exact: true })).toBeVisible({ timeout: 30_000 })
 
   await workspace.getByRole('button', { name: 'Close test change request' }).click()
+  await expect(page).not.toHaveURL(/authoring=/)
+  await page.reload()
+  await expect(workspace).toHaveCount(0)
   await expect(page.locator('.downstreamAssessment').filter({ hasText: /SYSTPCR-/ }).first())
     .toContainText(/SYSTPCR-\d{6}\.\d{2}/, { timeout: 30_000 })
 })

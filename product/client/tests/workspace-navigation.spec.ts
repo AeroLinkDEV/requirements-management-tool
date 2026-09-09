@@ -145,3 +145,11 @@ test("route resolution preserves exact history and rejects absent program, proje
   expect(resolveWorkspaceContext(workspaces, { ...route, view: "managedDocuments", releaseId: "removed" }).unavailable).toBe(false);
 });
 
+test("new package authoring selection survives route parsing for each verification scope", () => {
+  for (const kind of ["Procedure", "HighLevel", "LowLevelProcedure"]) {
+    const discipline = kind === "Procedure" ? "systemTest" : "softwareTest";
+    const route = parseRoute(routePath(context, "testChangeRequests", discipline, "saved-package", kind));
+    expect(route).toMatchObject({ ...context, view: "testChangeRequests", discipline, artifactId: "saved-package" });
+  }
+});
+

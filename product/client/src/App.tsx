@@ -982,6 +982,11 @@ function App() {
          user={user}
          ladder={ladder}
          initialReviewId={selectedArtifactId}
+         onAuthoringClosed={() => {
+           const destination = new URL(location.href);
+           destination.searchParams.delete("authoring");
+           writeHistory("replaceState", destination);
+         }}
          initialRegisterSelectionId={testChangeRequestSelectionId || undefined}
          onBack={() => navigate("dashboard")}
          onOpenRequirementRevision={openRequirementRevision}

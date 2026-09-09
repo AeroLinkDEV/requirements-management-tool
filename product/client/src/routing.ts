@@ -197,11 +197,11 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   // The register, which is a page of its own here as it is on the requirements side. Declared after the
   // `/new` routes above so raising one is not read as a package whose id happens to be "new".
   if (path === "system-verification/change-requests")
-    return { ...base, view: "testChangeRequests", discipline: "systemTest", testChangeRequestSelectionId: query.get("selection") || undefined };
+    return { ...base, view: "testChangeRequests", discipline: "systemTest", testChangeRequestSelectionId: query.get("selection") || undefined, artifactId: query.get("authoring") || undefined };
   if (path === "software-verification/hlr/change-requests")
-    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query), testChangeRequestSelectionId: query.get("selection") || undefined };
+    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query), testChangeRequestSelectionId: query.get("selection") || undefined, artifactId: query.get("authoring") || undefined };
   if (path === "software-verification/llr/change-requests")
-    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query), testChangeRequestSelectionId: query.get("selection") || undefined };
+    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query), testChangeRequestSelectionId: query.get("selection") || undefined, artifactId: query.get("authoring") || undefined };
   if (tail[0] === "system-verification" && tail[1] === "change-requests" && tail[2])
     return { ...base, view: "testChangeRequest", discipline: "systemTest", artifactKind: query.get("kind")?.toLowerCase() === "procedure" ? "Procedure" : undefined, artifactId: decoded(tail[2]), testChangeRequestProposalId: query.get("proposalId") || undefined };
   if (tail[0] === "software-verification" && tail[1] === "hlr" && tail[2] === "change-requests" && tail[3])
@@ -353,6 +353,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
       const query = new URLSearchParams();
       if (artifactKind?.toLowerCase().includes("procedure")) query.set("kind", "Procedure");
       if (selectionId) query.set("selection", selectionId);
+      if (artifactId) query.set("authoring", artifactId);
       return `${path}${query.size ? `?${query}` : ""}`;
     }
     case "testChangeRequest": {
