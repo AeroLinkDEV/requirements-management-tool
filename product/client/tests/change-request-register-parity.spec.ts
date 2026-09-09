@@ -2,6 +2,16 @@ import { expect, test, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { login } from './auth'
 
+let routeHandlerFinished = true
+
+test.afterEach(async ({ page }) => {
+  // A test may finish as soon as its assertion passes while a page.route handler is still fetching
+  // or parsing a response. Wait for those handlers before Playwright closes the context, otherwise
+  // the next test inherits "Test ended" or "Response has been disposed" from this test's work.
+  await page.unrouteAll({ behavior: 'wait' })
+  expect(routeHandlerFinished).toBe(true)
+})
+
 const pngSize = (path: string) => {
   const bytes = readFileSync(path)
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
@@ -405,4 +415,28 @@ test('register authorship names the person, keeps the role secondary, and preser
 
   // The initials chip that made the row read "SR · Systems Requirements Author" is gone entirely.
   await expect(page.locator('.personMeta > i')).toHaveCount(0)
+})
+
+test('in-flight route handlers settle before browser teardown', async ({ page }) => {
+  routeHandlerFinished = false
+  let handlerStarted = false
+  let releaseHandler!: () => void
+  const handlerReleased = new Promise<void>(resolve => {
+    releaseHandler = resolve
+  })
+  await page.route('**/route-handler-teardown-probe', async route => {
+    handlerStarted = true
+    await handlerReleased
+    const response = await route.fetch()
+    await route.fulfill({ response })
+    routeHandlerFinished = true
+  })
+  await page.goto('/')
+  await page.evaluate(() => {
+    void fetch('/route-handler-teardown-probe')
+  })
+  await expect.poll(() => handlerStarted).toBe(true)
+  // The test body deliberately ends before this releases. The afterEach cleanup must wait for
+  // route.fetch and route.fulfill to finish instead of letting context teardown interrupt them.
+  setTimeout(releaseHandler, 250)
 })

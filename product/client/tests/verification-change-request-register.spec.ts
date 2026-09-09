@@ -1,6 +1,12 @@
 import { expect, test, type Locator } from '@playwright/test'
 import { login } from './auth'
 
+test.afterEach(async ({ page }) => {
+  // Wait for in-flight page.route fetches and response parsing before context teardown. Otherwise
+  // one test's route work can be reported against the next test as "Test ended" or "Response has been disposed".
+  await page.unrouteAll({ behavior: 'wait' })
+})
+
 const documentBox = async (locator: Locator) => locator.evaluate(element => {
   const rect = element.getBoundingClientRect()
   return { x: rect.left + window.scrollX, y: rect.top + window.scrollY, width: rect.width, height: rect.height }
