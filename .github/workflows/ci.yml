@@ -269,10 +269,9 @@ jobs:
   # ~3 for the other two assemblies combined, so it gets a runner to itself and everything else finishes
   # underneath it. See BROWSER_AND_BACKEND_FEEDBACK_TIME.md for the measurements.
   #
-  # Both backend jobs build the whole solution rather than only the projects under test. `dotnet test` builds
-  # just the dependency graph it needs, which silently stops proving that the tools and product projects
-  # outside that graph still compile — a green suite over code that no longer builds. The duplicated build is
-  # the price of keeping "everything compiles" true in a world where the assemblies run apart.
+  # Each scoped backend runner restores and builds the exact test project under test, including its complete
+  # project-reference graph, before discovery and execution use --no-build. The required Domain job below
+  # remains the Windows whole-solution owner, so projects and tools outside these graphs are still compiled.
   # Sharded across two runners because this one `dotnet test` is 89% of the critical path: 1328 of the job's
   # 1487 seconds, against 103 for the build and 49 for setup. Splitting `validate` did not touch it, and this
   # is the only remaining change with the arithmetic to matter.
@@ -322,10 +321,10 @@ jobs:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('product/**/*.csproj', 'product/**/*.props', 'product/**/*.targets') }}
           restore-keys: nuget-${{ runner.os }}-
-      - name: Restore and build the solution
+      - name: Restore and build this test project and its dependencies
         run: |
-          dotnet restore product/AeroLink.slnx
-          dotnet build product/AeroLink.slnx --configuration Release --no-restore
+          dotnet restore product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj
+          dotnet build product/tests/AeroLink.Api.Tests/AeroLink.Api.Tests.csproj --configuration Release --no-restore
       - name: Mark setup complete
         continue-on-error: true
         run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
@@ -654,10 +653,10 @@ jobs:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('product/**/*.csproj', 'product/**/*.props', 'product/**/*.targets') }}
           restore-keys: nuget-${{ runner.os }}-
-      - name: Restore and build the solution
+      - name: Restore and build this test project and its dependencies
         run: |
-          dotnet restore product/AeroLink.slnx
-          dotnet build product/AeroLink.slnx --configuration Release --no-restore
+          dotnet restore product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj
+          dotnet build product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj --configuration Release --no-restore
       - name: Mark setup complete
         continue-on-error: true
         run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
@@ -1601,6 +1600,7 @@ jobs:
           BACKEND_API: ${{ needs.backend-api.result }}
           BACKEND_CORE_DOMAIN: ${{ needs.backend-core-domain.result }}
           BACKEND_CORE_INFRASTRUCTURE: ${{ needs.backend-core-infrastructure.result }}
+          BACKEND: ${{ needs.changes.outputs.backend }}
           CLIENT: ${{ needs.client.result }}
           CONTRACTS: ${{ needs.script-contracts.result }}
           BROWSER: ${{ needs.browser-pr.result }}
@@ -1689,6 +1689,23 @@ jobs:
           if [ "$POST_MERGE_SKIP" != "true" ] && [ "$DOCS_ONLY" != "true" ] && [ "$CONTRACTS" != "success" ]; then
             echo "::error::A non-documentation run must execute the operator and recovery script contracts."
             exit 1
+          fi
+
+          # A scoped backend job is only safe when the required Windows whole-solution owner ran too. The
+          # dependencies above intentionally allow skipped jobs so docs-only and trusted post-merge
+          # provenance can report; this selected-backend guard closes the ordinary PR/push/dispatch/schedule
+          # hole where API or Infrastructure could pass while Domain was silently skipped.
+          if [ "$BACKEND" = "true" ] && [ "$POST_MERGE_SKIP" != "true" ] && [ "$DOCS_ONLY" != "true" ]; then
+            missing=""
+            for pair in "backend-api:$BACKEND_API" "backend-core-domain:$BACKEND_CORE_DOMAIN" "backend-core-infrastructure:$BACKEND_CORE_INFRASTRUCTURE"; do
+              name="${pair%%:*}"
+              result="${pair#*:}"
+              [ "$result" = "success" ] || missing="$missing $name"
+            done
+            if [ -n "$missing" ]; then
+              echo "::error::A selected backend run must execute the complete backend owner set. These did not pass:$missing"
+              exit 1
+            fi
           fi
 
           if [ "$EVENT_NAME" = "schedule" ] || { [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$FULL_DIAGNOSTICS" = "true" ]; }; then
