@@ -10,6 +10,22 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <ScaleRepositoryRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\..'))</ScaleRepositoryRoot>
   </PropertyGroup>
+
+  <Target Name="CaptureScaleSourceCommit" BeforeTargets="GetAssemblyAttributes">
+    <Exec Command="git -C &quot;$(ScaleRepositoryRoot)&quot; rev-parse HEAD" ConsoleToMsBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="ScaleSourceCommit" />
+    </Exec>
+    <PropertyGroup>
+      <ScaleSourceCommit>$([System.String]::Copy('$(ScaleSourceCommit)').Trim())</ScaleSourceCommit>
+    </PropertyGroup>
+    <ItemGroup>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>ScaleSourceCommit</_Parameter1>
+        <_Parameter2>$(ScaleSourceCommit)</_Parameter2>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
 
 </Project>
