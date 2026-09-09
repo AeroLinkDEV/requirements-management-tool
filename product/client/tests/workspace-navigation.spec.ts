@@ -97,6 +97,25 @@ test("workspace failures have a truthful retry state", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Open Build 1.6/i })).toBeEnabled();
 });
 
+test("malformed build data cannot display or request a fabricated workspace and retry retains intent", async ({ page }) => {
+  await mockShell(page);
+  const dashboardRequests: string[] = [];
+  page.on("request", request => { if (request.url().includes("/api/dashboard?")) dashboardRequests.push(request.url()); });
+  await page.route("**/api/workspaces", route => route.fulfill({ json: [{ ...fms, projects: [{
+    project: fms.projects[0].project, releases: [{ version: "1.6", isReleased: "false" }],
+  }] }] }));
+  const target = routePath(context, "dashboard");
+  await page.goto(target);
+  await expect(page.getByRole("heading", { name: "Workspace access unavailable" })).toBeVisible();
+  await expect(page.locator(".contextBar")).toHaveCount(0);
+  expect(dashboardRequests).toEqual([]);
+  await expect(page).toHaveURL(new RegExp("fms-current/command-center$"));
+  await page.unroute("**/api/workspaces");
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "FMS 1.6", exact: true })).toBeVisible();
+  expect(dashboardRequests.every(url => url.includes("projectId=fms-project") && url.includes("releaseId=fms-current"))).toBe(true);
+});
+
 test("late dashboard completion cannot overwrite a newer build", async ({ page }) => {
   await mockShell(page);
   let deliver = () => {};
@@ -152,4 +171,3 @@ test("new package authoring selection survives route parsing for each verificati
     expect(route).toMatchObject({ ...context, view: "testChangeRequests", discipline, artifactId: "saved-package" });
   }
 });
-
