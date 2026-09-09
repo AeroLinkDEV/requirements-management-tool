@@ -1,10 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
@@ -13,22 +12,6 @@ const wrapper = readFileSync(wrapperPath, 'utf8')
 const backupContractPath = join(repoRoot, 'product/scripts/AeroLinkBackupVerification.Tests.ps1')
 const backupContract = readFileSync(backupContractPath, 'utf8')
 const backupVerifier = readFileSync(join(repoRoot, 'product/scripts/Verify-AeroLinkBackup.ps1'), 'utf8')
-const scriptContractNames = [
-  'AeroLinkEvidenceStore.Tests.ps1',
-  'AeroLinkBackupVerification.Tests.ps1',
-  'AeroLinkRestoreContract.Tests.ps1',
-  'AeroLinkMigrationPosture.Tests.ps1',
-  'AeroLinkRemoteDemo.Tests.ps1',
-  'AeroLinkRemoteDemoRecovery.Tests.ps1',
-  'AeroLinkBootstrap.Tests.ps1',
-  'AeroLinkInstallation.Tests.ps1',
-  'AeroLinkProductionSource.Tests.ps1',
-  'AeroLinkRuntimeIdentity.Tests.ps1',
-  'AeroLinkUpgrade.Tests.ps1',
-  'Get-AeroLinkTestPlan.Tests.ps1',
-  'Test-RepositoryLayout.ps1',
-  'Test-RepositoryLayout.Tests.ps1',
-]
 const ownedProcessProject = join(repoRoot, 'product/test-planner/tools/OwnedProcess/OwnedProcess.csproj')
 const ownedProcessSource = readFileSync(join(repoRoot, 'product/test-planner/tools/OwnedProcess/Program.cs'), 'utf8')
 
@@ -441,36 +424,70 @@ if (@(Get-BoundedListenerConnections -Port $port).Count -ne 1) { throw 'listener
   }
 })
 
-function snapshotTree(root) {
-  if (!existsSync(root)) return ['<absent>']
-  const entries = []
-  const visit = (current) => {
-    for (const entry of readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      const absolute = join(current, entry.name)
-      const name = relative(root, absolute)
-      if (entry.isDirectory()) {
-        entries.push(`${name}/`)
-        visit(absolute)
-      } else {
-        const stat = lstatSync(absolute)
-        const digest = entry.isFile() ? createHash('sha256').update(readFileSync(absolute)).digest('hex') : 'non-file'
-        entries.push(`${name}|${stat.size}|${stat.mtimeMs}|${digest}`)
-      }
-    }
-  }
-  visit(root)
-  return entries
-}
-
-test('script-contract family uses disposable verification storage and preserves product/.local', () => {
+test('the native Windows operator owner retains the complete family and evidence fingerprint', () => {
   assert.match(backupVerifier, /VerificationRoot/)
   assert.match(backupContract, /-VerificationRoot \$verificationRoot/)
-  const evidenceRoot = join(repoRoot, 'product/.local')
-  const before = snapshotTree(evidenceRoot)
-  for (const name of scriptContractNames) {
-    execFileSync('pwsh', ['-NoProfile', '-File', join(repoRoot, 'product/scripts', name)], { cwd: repoRoot, stdio: 'ignore' })
+  const workflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
+  const nativeStart = workflow.indexOf('\n  script-contracts:')
+  const browserStart = workflow.indexOf('\n  browser-pr:', nativeStart)
+  assert.ok(nativeStart >= 0 && browserStart > nativeStart, 'the native operator owner must remain identifiable')
+  const job = workflow.slice(nativeStart, browserStart)
+  assert.match(job, /runs-on: windows-latest/)
+  assert.match(job, /name: Validate native operator environment/)
+  assert.match(job, /Get-Command node\.exe/)
+  assert.match(job, /Get-Command powershell\.exe/)
+
+  // Derive this inventory from the live workflow so a newly added native contract is not silently omitted from
+  // the planner proof. The schedule preview is a distinct non-mutating check and is included separately below.
+  const nativeScripts = [...job.matchAll(/& \.\/product\/scripts\/([^\s]+\.ps1)/g)].map(match => match[1])
+  assert.ok(nativeScripts.length >= 14, 'the native owner must execute the complete current operator family')
+  for (const name of [
+    'AeroLinkEvidenceStore.Tests.ps1', 'AeroLinkBackupVerification.Tests.ps1', 'AeroLinkRestoreContract.Tests.ps1',
+    'AeroLinkMigrationPosture.Tests.ps1', 'AeroLinkRemoteDemo.Tests.ps1', 'AeroLinkRemoteDemoRecovery.Tests.ps1',
+    'AeroLinkLauncherContract.Tests.ps1', 'AeroLinkBootstrap.Tests.ps1', 'AeroLinkInstallation.Tests.ps1',
+    'AeroLinkProductionSource.Tests.ps1', 'AeroLinkRuntimeIdentity.Tests.ps1', 'AeroLinkUpgrade.Tests.ps1',
+    'Get-AeroLinkTestPlan.Tests.ps1', 'AeroLinkTestDiagnostics.Tests.ps1',
+    'Test-RepositoryLayout.ps1', 'Test-RepositoryLayout.Tests.ps1',
+  ]) assert.ok(nativeScripts.includes(name), `${name} must execute in the native Windows owner`)
+  assert.match(job, /Configure-AeroLinkBackupSchedule\.ps1/)
+
+  // Smtp4dev is intentionally a local-Full-only proof today; it has no native CI invocation. Keep it in the
+  // local suite while making sure the native owner remains exactly the CI family above.
+  const localSuite = wrapper.slice(wrapper.indexOf('function Invoke-ScriptContractSuite'), wrapper.indexOf('function Get-SafeFailureMessage'))
+  assert.match(localSuite, /AeroLinkSmtp4dev\.Tests\.ps1/)
+  assert.match(localSuite, /AeroLinkTestDiagnostics\.Tests\.ps1/)
+  assert.doesNotMatch(job, /AeroLinkSmtp4dev\.Tests\.ps1/)
+
+  const capture = job.indexOf('evidence-fingerprint.mjs capture')
+  const firstNativeScript = job.indexOf('& ./product/scripts/')
+  const verify = job.indexOf('evidence-fingerprint.mjs verify')
+  assert.ok(capture > 0 && capture < firstNativeScript, 'capture must precede native operator execution')
+  assert.ok(verify > job.lastIndexOf('& ./product/scripts/'), 'verification must follow every native operator contract')
+  assert.match(job, /id: capture_operator_evidence/)
+  assert.match(job, /EXPECTED_SNAPSHOT_SHA256: \$\{\{ steps\.capture_operator_evidence\.outputs\.sha256 \}\}/)
+  assert.match(job, /verify .*\$env:EXPECTED_SNAPSHOT_SHA256/)
+  assert.match(job, /name: Verify operator evidence preservation\s+if: always\(\)\s+shell: powershell/)
+  assert.doesNotMatch(job.slice(job.indexOf('- name: Verify operator evidence preservation'), verify), /continue-on-error/)
+
+  // Every native test command must propagate a nonzero child exit. Telemetry and cleanup remain allowed to be
+  // best-effort after the required family, but the operator proofs themselves cannot be made optional.
+  for (const step of nativeScripts.filter(name => name.endsWith('.Tests.ps1') || name === 'Test-RepositoryLayout.ps1')) {
+    const at = job.indexOf(`& ./product/scripts/${step}`)
+    const next = job.indexOf('\n      - name:', at)
+    const body = job.slice(at, next < 0 ? job.length : next)
+    const invocationEnd = body.indexOf('\n', body.indexOf(`& ./product/scripts/${step}`))
+    const following = body.slice(invocationEnd < 0 ? body.length : invocationEnd).trimStart()
+    assert.match(following, /^if \(\$LASTEXITCODE -ne 0\)/, `${step} must propagate native failure immediately after invocation`)
   }
-  assert.deepEqual(snapshotTree(evidenceRoot), before)
+
+  const gateStart = workflow.indexOf('\n  gate:')
+  const metricsStart = workflow.indexOf('\n  metrics-tooling:', gateStart)
+  assert.ok(gateStart >= 0 && metricsStart > gateStart, 'the aggregate owner must remain identifiable')
+  const gate = workflow.slice(gateStart, metricsStart)
+  assert.match(gate, /CONTRACTS: \$\{\{ needs\.script-contracts\.result \}\}/)
+  assert.match(gate, /POST_MERGE_SKIP.*!= "true".*DOCS_ONLY.*!= "true".*CONTRACTS.*!= "success"/s,
+    'a non-docs run cannot pass when the mandatory operator owner is skipped')
+  assert.match(gate, /A non-documentation run must execute the operator and recovery script contracts/)
 })
 
 test('wrapper failure and cleanup contracts are redacted and fail closed', () => {
