@@ -2415,10 +2415,12 @@ successful when the reviewed merge candidate contains no trace of it.
   remain refusals. Required checks, independent review, credential isolation and the no-force-merge
   boundary remain in force. Kernel changes still need a separately reviewed, qualified transition;
   this delegation does not renew expired one-time bypass exceptions or let a kernel authorize itself.
-- **Supersedes:** Only the requirement in DEC-121 and DEC-123 to obtain a fresh conversational owner
-  authorization for each CI-maintenance digest. Exact per-candidate GitHub approvals and technical
-  verification remain required. This decision changes delegated operator authorization, not workflow
-  code, GitHub reviewer identity, environment policy or the ordinary product merge path.
+- **Supersedes:** The operational requirement in `product/docs/MERGING.md` for renewed conversational
+  confirmation before Codex submits each otherwise-qualified routine maintenance approval. DEC-121's
+  initial-installation and expired-exception boundaries, and DEC-123's credential and exact-candidate
+  constraints, remain intact. Exact per-candidate GitHub approvals and technical verification remain
+  required. This decision changes delegated operator authorization, not workflow code, GitHub reviewer
+  identity, environment policy or the ordinary product merge path.
 
 ## Working Assumptions
 
