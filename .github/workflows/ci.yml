@@ -811,6 +811,7 @@ jobs:
           & $powershell.Source -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
           if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell is not executable on the native runner.' }
       - name: Capture operator evidence boundary
+        id: capture_operator_evidence
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -929,9 +930,11 @@ jobs:
       - name: Verify operator evidence preservation
         if: always()
         shell: powershell
+        env:
+          EXPECTED_SNAPSHOT_SHA256: ${{ steps.capture_operator_evidence.outputs.sha256 }}
         run: |
           $ErrorActionPreference = 'Stop'
-          node ./product/test-planner/tools/evidence-fingerprint.mjs verify "$env:RUNNER_TEMP/operator-evidence-${{ github.run_id }}-${{ github.run_attempt }}.json"
+          node ./product/test-planner/tools/evidence-fingerprint.mjs verify "$env:RUNNER_TEMP/operator-evidence-${{ github.run_id }}-${{ github.run_attempt }}.json" "$env:EXPECTED_SNAPSHOT_SHA256"
           if ($LASTEXITCODE -ne 0) { throw 'Operator contracts changed persistent evidence or preservation could not be proven.' }
       - name: Mark test complete
         if: always()

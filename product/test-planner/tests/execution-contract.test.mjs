@@ -462,6 +462,9 @@ test('the native Windows operator owner retains the complete family and evidence
   const verify = job.indexOf('evidence-fingerprint.mjs verify')
   assert.ok(capture > 0 && capture < firstNativeScript, 'capture must precede native operator execution')
   assert.ok(verify > job.lastIndexOf('& ./product/scripts/'), 'verification must follow every native operator contract')
+  assert.match(job, /id: capture_operator_evidence/)
+  assert.match(job, /EXPECTED_SNAPSHOT_SHA256: \$\{\{ steps\.capture_operator_evidence\.outputs\.sha256 \}\}/)
+  assert.match(job, /verify .*\$env:EXPECTED_SNAPSHOT_SHA256/)
   assert.match(job, /name: Verify operator evidence preservation\s+if: always\(\)\s+shell: powershell/)
   assert.doesNotMatch(job.slice(job.indexOf('- name: Verify operator evidence preservation'), verify), /continue-on-error/)
 

@@ -98,6 +98,59 @@ test('the actual aggregate shell rejects incomplete scheduled and manual browser
   }
 })
 
+test('the actual aggregate shell requires the native operator owner except documented skips', () => {
+  const jobs = jobBodies(workflowLines())
+  const gate = jobs.gate
+  const step = stepBlocks(gate).find((block) => block.name === 'Summarise and enforce')
+  assert.ok(step, 'the aggregate must contain the enforcement step')
+  const runStart = step.lines.findIndex((line) => line === '        run: |')
+  assert.ok(runStart >= 0, 'the aggregate must execute a shell script')
+  const script = step.lines.slice(runStart + 1).filter((line) => line.startsWith('          ')).map((line) => line.slice(10)).join('\n')
+  const envNames = step.lines.slice(0, runStart).flatMap((line) => /^          ([A-Z_]+):/.exec(line)?.[1] ?? [])
+  const directory = mkdtempSync(join(tmpdir(), 'aerolink-951-operator-gate-'))
+  const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash'
+  const base = {
+    ...process.env,
+    ...Object.fromEntries(envNames.map((name) => [name, ''])),
+    BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'success', BACKEND_CORE_INFRASTRUCTURE: 'success',
+    CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success', BROWSER_FULL: 'success',
+    POSTGRESQL: 'success', METRICS_TOOLING: 'success', DOCS_ONLY: 'false', LAUNCHERS_ONLY: 'false',
+    POST_MERGE_SKIP: 'false', EVENT_NAME: 'pull_request', FULL_DIAGNOSTICS: 'false',
+    GITHUB_STEP_SUMMARY: join(directory, 'summary.md').replaceAll('\\', '/'),
+  }
+  const invoke = (overrides) => spawnSync(bash, ['-c', script], {
+    encoding: 'utf8', env: { ...base, ...overrides },
+  })
+  try {
+    for (const status of ['failure', 'cancelled', 'skipped', '']) {
+      const child = invoke({ CONTRACTS: status })
+      assert.equal(child.status, 1, `non-documentation operator owner status ${JSON.stringify(status)} must fail: ${child.error ?? child.stderr}\n${child.stdout}`)
+    }
+    assert.equal(invoke({ CONTRACTS: 'success' }).status, 0, 'a successful operator owner must satisfy the aggregate')
+    assert.equal(invoke({ DOCS_ONLY: 'true', CONTRACTS: 'skipped' }).status, 0, 'documentation-only runs may skip the operator owner')
+    assert.equal(invoke({ POST_MERGE_SKIP: 'true', CONTRACTS: 'skipped' }).status, 0, 'the modeled post-merge skip may omit the operator owner')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('native operator proof steps cannot be optional or failure-isolated', () => {
+  const jobs = jobBodies(workflowLines())
+  const blocks = stepBlocks(jobs['script-contracts'])
+  const powershell = blocks.filter((block) => /^(?:        )shell:\s*powershell\s*$/m.test(block.lines.join('\n')))
+  assert.ok(powershell.length >= 15, `expected the native operator job to retain its complete proof family, found ${powershell.length}`)
+  for (const block of powershell) {
+    const text = block.lines.join('\n')
+    assert.doesNotMatch(text, /^        continue-on-error:\s*true\s*$/m, `${block.name} must fail the native job on error`)
+    if (block.name !== 'Verify operator evidence preservation') {
+      assert.doesNotMatch(text, /^        if:/m, `${block.name} must always run when the operator owner is selected`)
+    }
+  }
+  const aggregate = jobs.gate.join('\n')
+  assert.match(aggregate, /CONTRACTS:/, 'the aggregate must consume the native operator owner result')
+  assert.match(aggregate, /CONTRACTS[^\n]*!=\s*"success"/, 'the aggregate must reject a missing or unsuccessful native operator owner')
+})
+
 function workflowLines() {
   return readFileSync(workflowPath, 'utf8').split(/\r?\n/)
 }
