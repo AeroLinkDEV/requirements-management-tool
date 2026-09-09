@@ -65,6 +65,88 @@ const fixture = {
   ],
 }
 
+type FixturePerson = (typeof fixture.people)[number]
+type FixtureItem = (typeof fixture.items)[number]
+type FixtureLane = FixtureItem["lane"]
+
+const emptyLaneCounts = { work: 0, review: 0, sign: 0, approved: 0 }
+const rankingReleaseA = '00000000-0000-0000-0000-0000000000d1'
+const rankingReleaseB = '00000000-0000-0000-0000-0000000000d2'
+
+function rankingPerson(userName: string, displayName: string, userId: string): FixturePerson {
+  return {
+    userId, userName, displayName, isCurrentProjectMember: true, accountState: 'active',
+    baseRoles: [], disciplineAffinities: [], holds: 0, byLane: { ...emptyLaneCounts },
+  } as FixturePerson
+}
+
+function rankingItem(index: number, holder: string, releaseId: string, releaseVersion: string,
+  lane: FixtureLane, title: string): FixtureItem {
+  const id = `00000000-0000-0000-0002-${String(index).padStart(12, '0')}`
+  return {
+    id, family: 'problemReport', layer: null, artifactType: 'PR', category: null, prefix: null,
+    number: `PR${String(index).padStart(5, '0')}.00`, title, lane, nativeState: 'Open', nativeOutcome: null,
+    currentHolderIds: [holder], holderBasis: 'responsibleEngineer', activeStageObligations: [],
+    raisedById: null, raisedByKind: null,
+    release: { id: releaseId, version: releaseVersion, isReleased: false }, deferred: false,
+    allocation: null, deferredFromState: null, updatedAt: '2026-08-30T00:00:00Z',
+    openUrl: `/open/problem-report/${id}`,
+  } as FixtureItem
+}
+
+function rankingFixture() {
+  const people = [
+    rankingPerson('busy.36', 'Busy Thirty Six', '00000000-0000-0000-0000-000000000101'),
+    rankingPerson('busy.19', 'Busy Nineteen', '00000000-0000-0000-0000-000000000102'),
+    rankingPerson('busy.16', 'Busy Sixteen', '00000000-0000-0000-0000-000000000103'),
+    rankingPerson('busy.1', 'Busy One', '00000000-0000-0000-0000-000000000104'),
+    rankingPerson('zero.favorite', 'Zero Favorite', '00000000-0000-0000-0000-000000000105'),
+    ...Array.from({ length: 200 }, (_, index) => rankingPerson(
+      `zero.${String(index).padStart(3, '0')}`,
+      `Zero Person ${String(index).padStart(3, '0')}`,
+      `00000000-0000-0000-0001-${String(index + 1).padStart(12, '0')}`,
+    )),
+  ]
+  const items: FixtureItem[] = []
+  let itemIndex = 1
+  const add = (holder: string, releaseId: string, releaseVersion: string,
+    counts: Partial<Record<FixtureLane, number>>) => {
+    for (const [lane, count] of Object.entries(counts) as [FixtureLane, number][]) {
+      for (let index = 0; index < count; index++) {
+        items.push(rankingItem(itemIndex++, holder, releaseId, releaseVersion, lane,
+          `${holder} ${lane} ${index + 1}`))
+      }
+    }
+  }
+
+  add('busy.36', rankingReleaseA, '1.6', { work: 18, review: 6, sign: 4, approved: 2 })
+  add('busy.36', rankingReleaseB, '1.5', { work: 2, review: 2, sign: 1, approved: 1 })
+  add('busy.19', rankingReleaseA, '1.6', { work: 6, review: 2, sign: 1, approved: 1 })
+  add('busy.19', rankingReleaseB, '1.5', { work: 4, review: 3, sign: 1, approved: 1 })
+  add('busy.16', rankingReleaseA, '1.6', { work: 8, review: 4, sign: 2, approved: 2 })
+  add('busy.1', rankingReleaseA, '1.6', { work: 1 })
+
+  const counts = new Map<string, { holds: number; byLane: typeof emptyLaneCounts }>()
+  for (const item of items) {
+    for (const holder of item.currentHolderIds) {
+      const current = counts.get(holder) ?? { holds: 0, byLane: { ...emptyLaneCounts } }
+      current.holds++
+      current.byLane[item.lane]++
+      counts.set(holder, current)
+    }
+  }
+  return {
+    generatedAt: '2026-08-30T00:00:00Z',
+    totals: { items: items.length, returned: items.length, unheld: 0 },
+    people: people.map(person => ({
+      ...person,
+      holds: counts.get(person.userName)?.holds ?? 0,
+      byLane: counts.get(person.userName)?.byLane ?? { ...emptyLaneCounts },
+    })),
+    items,
+  }
+}
+
 async function openTeamWork(page: Parameters<typeof login>[0], body: unknown = fixture) {
   const calls: string[] = []
   await page.route('**/api/team-work*', async route => {
@@ -75,6 +157,10 @@ async function openTeamWork(page: Parameters<typeof login>[0], body: unknown = f
   await page.getByRole('link', { name: 'Team Work', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Team Work', exact: true })).toBeVisible()
   return calls
+}
+
+async function peopleNames(page: Parameters<typeof login>[0]) {
+  return page.locator('.teamWorkPeopleStrip .teamWorkPerson strong').allTextContents()
 }
 
 test('Team Work is a project-wide four-lane board with API-owned card truth and canonical links', async ({ page }) => {
@@ -381,6 +467,8 @@ test('Team Work replaces person selection, preserves shared-holder cards, and cl
   await expect(parallelCard).toBeVisible()
   await expect(parallelCard).toContainText('API Alice')
   await expect(parallelCard).toContainText('API Bob')
+  await expect(page.getByRole('button', { name: 'HLR (1)', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'HLRCR (1)', exact: true })).toBeVisible()
   await expect(page.getByRole('dialog')).toHaveCount(0)
 
   await page.locator('.teamWorkPerson').filter({ hasText: 'API Bob' }).click()
@@ -694,7 +782,7 @@ test('Team Work drawer traps focus, restores its trigger, preserves query state,
   await expect(page).toHaveURL(/mode=keep/)
 })
 
-test('Team Work scopes deterministic modern-discipline affinity by viewer, project, and user id', async ({ page }) => {
+test('Team Work scopes workload-first affinity by viewer, project, and user id', async ({ page }) => {
   let body: unknown = fixture
   await page.route('**/api/team-work*', async route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) }))
@@ -732,7 +820,8 @@ test('Team Work scopes deterministic modern-discipline affinity by viewer, proje
   await page.getByRole('link', { name: 'Team Work', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Team Work', exact: true })).toBeVisible()
   const names = await page.locator('.teamWorkPeopleStrip .teamWorkPerson strong').allTextContents()
-  expect(names.slice(0, 3)).toEqual([`${me.displayName} (you)`, 'API Dana', 'API Alice'])
+  expect(names.slice(0, 3)).toEqual(['API Dana', 'API Alice', 'API Bob'])
+  expect(names.at(-1)).toBe(`${me.displayName} (you)`)
   await page.locator('.teamWorkPerson').filter({ hasText: 'API Alice' }).click()
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('aerolink-teamwork-affinity') || '{}'))
   expect(stored.viewers[me.id][projectId][fixture.people[0].userId]).toBe(3)
@@ -764,6 +853,228 @@ test('Team Work retains a newly selected affinity when its scoped map is already
   const scoped = stored.viewers[me.id][projectId]
   expect(Object.keys(scoped)).toHaveLength(64)
   expect(scoped[fixture.people[1].userId]).toBe(1)
+})
+
+test('Team Work ranks current workloads before zero-work members and keeps build counts scoped', async ({ page }) => {
+  await openTeamWork(page, rankingFixture())
+  let names = await peopleNames(page)
+  expect(names.slice(0, 4)).toEqual(['Busy Thirty Six', 'Busy Nineteen', 'Busy Sixteen', 'Busy One'])
+  expect(names.indexOf('Zero Person 000')).toBeGreaterThan(names.indexOf('Busy One'))
+  await expect(page.locator('.teamWorkPerson').filter({ hasText: 'Busy Thirty Six' })).toContainText('36 holds')
+  if (process.env.AEROLINK_TEAM_WORK_INITIAL_RANKING_SCREENSHOT)
+    await page.screenshot({ path: process.env.AEROLINK_TEAM_WORK_INITIAL_RANKING_SCREENSHOT, fullPage: true })
+
+  await page.getByRole('button', { name: 'Build 1.6', exact: true }).click()
+  await expect(page.getByText('Showing Build 1.6', { exact: true })).toBeVisible()
+  names = await peopleNames(page)
+  expect(names.slice(0, 4)).toEqual(['Busy Thirty Six', 'Busy Sixteen', 'Busy Nineteen', 'Busy One'])
+  await expect(page.locator('.teamWorkPerson').filter({ hasText: 'Busy Thirty Six' })).toContainText('30 holds')
+  await expect(page.locator('.teamWorkPerson').filter({ hasText: 'Busy Thirty Six' }).locator('.teamWorkLoadShape'))
+    .toHaveAttribute('aria-label', '30 holds: 18 in work, 6 in review, 4 awaiting signature, 2 approved')
+  const totals = page.locator('.teamWorkTotals')
+  await expect(totals.getByText('Unique items').locator('..')).toContainText('57')
+  await expect(totals.getByText('People holding work').locator('..')).toContainText('4')
+  await expect(totals.getByText('No current holder').locator('..')).toContainText('0')
+  if (process.env.AEROLINK_TEAM_WORK_BUILD_16_SCREENSHOT)
+    await page.screenshot({ path: process.env.AEROLINK_TEAM_WORK_BUILD_16_SCREENSHOT, fullPage: true })
+  if (process.env.AEROLINK_TEAM_WORK_RANKING_NARROW_SCREENSHOT) {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.screenshot({ path: process.env.AEROLINK_TEAM_WORK_RANKING_NARROW_SCREENSHOT, fullPage: true })
+  }
+})
+
+test('Team Work caps selection frequency below substantially busier workloads', async ({ page }) => {
+  const body = rankingFixture()
+  await page.route('**/api/team-work*', async route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) }))
+  await login(page)
+  const identityResponse = await page.request.get(`${apiBase}/api/auth/me`)
+  expect(identityResponse.ok(), await identityResponse.text()).toBeTruthy()
+  const me = await identityResponse.json() as { id: string }
+  const projectId = locationProjectId(page.url())
+  const busy16 = body.people.find(person => person.userName === 'busy.16')!
+  const busy1 = body.people.find(person => person.userName === 'busy.1')!
+  const zeroFavorite = body.people.find(person => person.userName === 'zero.favorite')!
+  await page.evaluate(({ viewerId, project, busy16Id, busy1Id, zeroId }) => {
+    localStorage.setItem('aerolink-teamwork-affinity', JSON.stringify({
+      version: 1,
+      viewers: { [viewerId]: { [project]: { [busy16Id]: 10, [busy1Id]: 999, [zeroId]: 999 } } },
+    }))
+  }, {
+    viewerId: me.id,
+    project: projectId,
+    busy16Id: busy16.userId,
+    busy1Id: busy1.userId,
+    zeroId: zeroFavorite.userId,
+  })
+
+  await page.getByRole('link', { name: 'Team Work', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Team Work', exact: true })).toBeVisible()
+  const names = await peopleNames(page)
+  expect(names.slice(0, 4)).toEqual(['Busy Thirty Six', 'Busy Sixteen', 'Busy Nineteen', 'Busy One'])
+  expect(names.indexOf('Zero Favorite')).toBeGreaterThan(names.indexOf('Busy One'))
+  if (process.env.AEROLINK_TEAM_WORK_FREQUENCY_SCREENSHOT)
+    await page.screenshot({ path: process.env.AEROLINK_TEAM_WORK_FREQUENCY_SCREENSHOT, fullPage: true })
+})
+
+test('Team Work keeps holders of matching records visible with scoped counts', async ({ page }) => {
+  const holder = rankingPerson(
+    'record.holder', 'Record Holder', '00000000-0000-0000-0000-000000000111',
+  )
+  const zero = rankingPerson(
+    'zero.search', 'Zero Search', '00000000-0000-0000-0000-000000000112',
+  )
+  const item = rankingItem(1, 'record.holder', rankingReleaseA, '1.6', 'work', 'Unique Record 998')
+  await openTeamWork(page, {
+    generatedAt: '2026-08-30T00:00:00Z',
+    totals: { items: 1, returned: 1, unheld: 0 },
+    people: [
+      { ...holder, holds: 1, byLane: { ...emptyLaneCounts, work: 1 } },
+      zero,
+    ],
+    items: [item],
+  })
+
+  const search = page.getByRole('textbox', { name: 'Search' })
+  await search.fill('  unique   record 998 ')
+  await expect(page.locator('.teamWorkPerson').filter({ hasText: 'Record Holder' })).toContainText('1 hold')
+  await expect(page.locator('.teamWorkPerson').filter({ hasText: 'Zero Search' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: /Unique Record 998/ })).toBeVisible()
+  await page.locator('.teamWorkPerson').filter({ hasText: 'Record Holder' }).click()
+  await search.fill('no matching records')
+  await expect(page.locator('.teamWorkPerson').filter({ hasText: 'Record Holder' })).toBeVisible()
+  await expect(page.getByText('No matching work for Record Holder with these filters.')).toBeVisible()
+  await search.fill('')
+  await expect(page.locator('.teamWorkPerson').filter({ hasText: 'Zero Search' })).toBeVisible()
+})
+
+test('Team Work resolves drawer workload visuals in roster scope', async ({ page }) => {
+  await openTeamWork(page, rankingFixture())
+  await page.getByRole('button', { name: 'Build 1.6', exact: true }).click()
+  await page.locator('.teamWorkPersonDetails[aria-label="View details for Busy Thirty Six"]').click()
+  let drawer = page.getByRole('dialog', { name: 'Busy Thirty Six' })
+  await expect(drawer.locator('.teamWorkDrawerStats').getByText('Currently holds').locator('..')).toContainText('30')
+  await expect(drawer.locator('.teamWorkDrawerStats').getByText('In work').locator('..')).toContainText('18')
+  await expect(drawer.locator('.teamWorkDrawerLoadBar'))
+    .toHaveAttribute('aria-label', '18 in work, 6 in review, 4 awaiting signature, 2 approved')
+
+  await drawer.getByRole('button', { name: 'Close current holder' }).click()
+  await page.getByRole('button', { name: 'Build 1.5', exact: true }).click()
+  await page.locator('.teamWorkPersonDetails[aria-label="View details for Busy Thirty Six"]').click()
+  drawer = page.getByRole('dialog', { name: 'Busy Thirty Six' })
+  await expect(drawer.locator('.teamWorkDrawerStats').getByText('Currently holds').locator('..')).toContainText('6')
+  await expect(drawer.locator('.teamWorkDrawerStats').getByText('In work').locator('..')).toContainText('2')
+  await expect(drawer.locator('.teamWorkDrawerLoadBar'))
+    .toHaveAttribute('aria-label', '2 in work, 2 in review, 1 awaiting signature, 1 approved')
+})
+
+test('Team Work preserves focus and scroll when selection crosses a boost threshold', async ({ page }) => {
+  const body = rankingFixture()
+  await page.route('**/api/team-work*', async route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) }))
+  await login(page)
+  const identityResponse = await page.request.get(`${apiBase}/api/auth/me`)
+  expect(identityResponse.ok(), await identityResponse.text()).toBeTruthy()
+  const me = await identityResponse.json() as { id: string }
+  const projectId = locationProjectId(page.url())
+  const busy16 = body.people.find(person => person.userName === 'busy.16')!
+  await page.evaluate(({ viewerId, project, personId }) => {
+    localStorage.setItem('aerolink-teamwork-affinity', JSON.stringify({
+      version: 1,
+      viewers: { [viewerId]: { [project]: { [personId]: 9 } } },
+    }))
+  }, { viewerId: me.id, project: projectId, personId: busy16.userId })
+
+  await page.getByRole('link', { name: 'Team Work', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Team Work', exact: true })).toBeVisible()
+  let names = await peopleNames(page)
+  expect(names.slice(0, 4)).toEqual(['Busy Thirty Six', 'Busy Nineteen', 'Busy Sixteen', 'Busy One'])
+
+  const strip = page.locator('.teamWorkPeopleStrip')
+  const control = page.locator('.teamWorkPerson').filter({ hasText: 'Busy Sixteen' })
+  await strip.evaluate(element => { element.scrollLeft = 120 })
+  const before = await strip.evaluate(element => element.scrollLeft)
+  await control.click()
+  await expect(control).toBeFocused()
+  await expect(control).toBeInViewport()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  names = await peopleNames(page)
+  expect(names.slice(0, 4)).toEqual(['Busy Thirty Six', 'Busy Sixteen', 'Busy Nineteen', 'Busy One'])
+  const after = await strip.evaluate(element => element.scrollLeft)
+  expect(after).toBeGreaterThanOrEqual(before - 5)
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('aerolink-teamwork-affinity') || '{}'))
+  expect(stored.viewers[me.id][projectId][busy16.userId]).toBe(10)
+})
+
+test('Team Work counts holder-heading selections but not Details', async ({ page }) => {
+  await page.route('**/api/team-work*', async route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(fixture) }))
+  await login(page)
+  const identityResponse = await page.request.get(`${apiBase}/api/auth/me`)
+  expect(identityResponse.ok(), await identityResponse.text()).toBeTruthy()
+  const me = await identityResponse.json() as { id: string }
+  const projectId = locationProjectId(page.url())
+  const aliceId = fixture.people[0].userId
+
+  await page.getByRole('link', { name: 'Team Work', exact: true }).click()
+  await page.getByRole('button', { name: 'Current holder', exact: true }).click()
+  const group = page.locator('.teamWorkHolderGroup').filter({ hasText: 'API Alice' }).first()
+  await group.locator('.teamWorkHolderHeading').click()
+  let stored = await page.evaluate(() => JSON.parse(localStorage.getItem('aerolink-teamwork-affinity') || '{}'))
+  expect(stored.viewers[me.id][projectId][aliceId]).toBe(1)
+
+  await group.locator('.teamWorkPersonDetails[aria-label="View details for API Alice"]').click()
+  stored = await page.evaluate(() => JSON.parse(localStorage.getItem('aerolink-teamwork-affinity') || '{}'))
+  expect(stored.viewers[me.id][projectId][aliceId]).toBe(1)
+  await page.getByRole('dialog').getByRole('button', { name: 'Close current holder' }).click()
+  await group.locator('.teamWorkHolderHeading').click()
+  stored = await page.evaluate(() => JSON.parse(localStorage.getItem('aerolink-teamwork-affinity') || '{}'))
+  expect(stored.viewers[me.id][projectId][aliceId]).toBe(2)
+})
+
+test('Team Work keeps affinity bound to account identity after a display-name change', async ({ page }) => {
+  const body = {
+    ...fixture,
+    people: fixture.people.map(person => person.userName === 'alice'
+      ? { ...person, displayName: 'Renamed API Alice' }
+      : person),
+  }
+  await page.route('**/api/team-work*', async route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) }))
+  await login(page)
+  const identityResponse = await page.request.get(`${apiBase}/api/auth/me`)
+  expect(identityResponse.ok(), await identityResponse.text()).toBeTruthy()
+  const me = await identityResponse.json() as { id: string }
+  const projectId = locationProjectId(page.url())
+  await page.evaluate(({ viewerId, project, aliceId }) => {
+    localStorage.setItem('aerolink-teamwork-affinity', JSON.stringify({
+      version: 1,
+      viewers: { [viewerId]: { [project]: { [aliceId]: 4 } } },
+    }))
+  }, { viewerId: me.id, project: projectId, aliceId: fixture.people[0].userId })
+
+  await page.getByRole('link', { name: 'Team Work', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Team Work', exact: true })).toBeVisible()
+  const names = await peopleNames(page)
+  expect(names[0]).toBe('Renamed API Alice')
+})
+
+test('Team Work falls back to workload ordering when affinity storage is unavailable', async ({ page }) => {
+  await page.addInitScript(() => {
+    const getItem = Storage.prototype.getItem
+    const setItem = Storage.prototype.setItem
+    Storage.prototype.getItem = function (key: string) {
+      if (key === 'aerolink-teamwork-affinity') throw new Error('storage unavailable')
+      return getItem.call(this, key)
+    }
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === 'aerolink-teamwork-affinity') throw new Error('storage unavailable')
+      return setItem.call(this, key, value)
+    }
+  })
+  await openTeamWork(page, rankingFixture())
+  const names = await peopleNames(page)
+  expect(names.slice(0, 4)).toEqual(['Busy Thirty Six', 'Busy Nineteen', 'Busy Sixteen', 'Busy One'])
 })
 
 test('Team Work rejects retired role vocabulary and fabricated stage provenance', async ({ page }) => {

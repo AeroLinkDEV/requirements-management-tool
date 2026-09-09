@@ -3,6 +3,8 @@
 .teamWorkEyebrow { color: var(--teal-700); font-size: 12px; font-weight: 800; letter-spacing: .12em; }
 .teamWorkPageHeader h1 { margin: 5px 0 4px; font-size: clamp(26px, 3vw, 38px); line-height: 1.05; }
 .teamWorkPageHeader p { margin: 0; color: var(--ink-500); font-size: 14px; }
+.teamWorkTotalsGroup { display: grid; gap: 6px; justify-items: end; }
+.teamWorkScopeLabel { color: var(--ink-500); font-size: 12px; text-align: right; }
 .teamWorkTotals { display: flex; gap: 10px; margin: 0; }
 .teamWorkTotals div { min-width: 82px; padding: 10px 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); text-align: right; }
 .teamWorkTotals dt { color: var(--ink-500); font-size: 12px; }
@@ -57,7 +59,7 @@
 .teamWorkLoadingCard.short { height: 90px; }
 @keyframes team-work-shimmer { to { background-position: -150% 0; } }
 @media (max-width: 1100px) { .teamWorkBoard { grid-template-columns: repeat(4, minmax(228px, 1fr)); overflow-x: auto; } .teamWorkBoardViewportHint { display: flex; align-items: center; gap: 6px; margin: 0 0 6px 2px; color: var(--ink-500); font-size: 12px; } }
-@media (max-width: 650px) { .teamWorkPage { padding: 18px 16px 28px; } .teamWorkPageHeader { align-items: start; flex-direction: column; } .teamWorkTotals { width: 100%; } .teamWorkTotals div { flex: 1; text-align: left; } }
+@media (max-width: 650px) { .teamWorkPage { padding: 18px 16px 28px; } .teamWorkPageHeader { align-items: start; flex-direction: column; } .teamWorkTotalsGroup { width: 100%; justify-items: stretch; } .teamWorkScopeLabel { text-align: left; } .teamWorkTotals { width: 100%; } .teamWorkTotals div { flex: 1; text-align: left; } }
 
 .teamWorkPeople { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .teamWorkPeopleHeader { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 7px; }

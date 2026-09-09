@@ -182,9 +182,12 @@ project-wide four-lane lifecycle board, people strip, search/build filters, laye
 filters, current-holder grouping, and canonical record links. Selecting a person replaces the current person filter
 and keeps the board visible; current-holder detail is available only through a separate explicit action. Reusable
 person avatars use repository-owned synthetic portraits where available and retain an initials fallback. People
-ordering and the local affinity nudge use only modern base project roles; Project Leadership remains separate
-metadata and Review/Approval remain frozen workflow-stage meanings. Holder identity is 0..N, including parallel
-obligations, and no write, assignment, due-date, or age-in-state behavior is implied.
+ordering is workload-first within the current build/layer/artifact-type/search scope, with a bounded local
+selection-frequency boost and stable account-identity tie-breaking; zero-work members remain accessible after
+people holding work. Person workload counts follow that roster scope, while board totals follow the displayed
+person-filtered scope. Project Leadership remains separate metadata and Review/Approval remain frozen
+workflow-stage meanings. Holder identity is 0..N, including parallel obligations, and no write, assignment,
+due-date, or age-in-state behavior is implied.
 
 ## Problem Reports
 
