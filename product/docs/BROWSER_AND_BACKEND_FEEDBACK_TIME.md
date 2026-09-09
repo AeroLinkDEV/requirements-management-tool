@@ -41,6 +41,25 @@ different concurrency groups; development feedback cannot cancel final Full evid
 collector remains the source for post-switch full-gates-per-merge, cancellation waste, queue/final-push-to-merge
 timing and regression data; re-measure the new cadence rather than assuming savings.
 
+## One native owner for operator execution
+
+The required Windows `script-contracts` job owns the operator and recovery script family. The planner
+suite checks that this owner still executes the complete family unconditionally; it no longer launches
+the same family a second time from the Domain job. The native PowerShell steps and their assertions
+remain intact, including backup preview, launcher, process ownership, recovery and fault cases.
+
+The operator job captures the original `product/.local` fingerprint before execution and verifies it
+in an `always()` step afterwards. Missing evidence, a changed path/content/mtime, a foreign snapshot,
+or failure to capture/verify is a job failure. The capture refuses to overwrite its baseline or write
+the snapshot into the store being protected. The layout contracts also execute inside this boundary,
+while the always-running classifier retains its documentation/layout check.
+
+This removes duplicate execution while retaining native Windows qualification. The local Full planner
+still runs its operator family under the existing evidence and process-ownership boundary; its
+Smtp4dev contract remains local-Full-only, while launcher/bootstrap and layout proofs remain owned by
+the native Windows job. Measure hosted job and critical-path results before attributing any merge-time
+saving to this change.
+
 ## API-independent client feedback
 
 The advisory Fast client job runs the explicit logic and rendered-fixture files in

@@ -773,9 +773,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-  # The operator scripts are PowerShell and reference no compiled output, so this job needs neither .NET nor
-  # Node — a checkout is the whole environment. It stayed on the critical path for years only because it
-  # happened to live in the same job as the things that do need a toolchain.
+  # The native Windows operator job owns this family once. Node records metrics and
+  # fingerprints evidence; the planner job must not repeat the same script executions.
   #
   # Gated on the change not being documentation-only rather than on `backend`, which preserves exactly when
   # these ran before: a client-only change still proves the backup, evidence, restore, migration-posture and
@@ -801,6 +800,22 @@ jobs:
           printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "${{ runner.temp }}/ci-metrics/timing-script-contracts.json"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate native operator environment
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $node = Get-Command node.exe -ErrorAction Stop
+          $powershell = Get-Command powershell.exe -ErrorAction Stop
+          & $node.Source --version
+          if ($LASTEXITCODE -ne 0) { throw 'Node.js is not executable on the native Windows runner.' }
+          & $powershell.Source -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell is not executable on the native runner.' }
+      - name: Capture operator evidence boundary
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node ./product/test-planner/tools/evidence-fingerprint.mjs capture "$env:RUNNER_TEMP/operator-evidence-${{ github.run_id }}-${{ github.run_attempt }}.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Operator evidence capture failed.' }
       - name: Mark setup complete
         continue-on-error: true
         run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
@@ -903,6 +918,21 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./product/scripts/AeroLinkTestDiagnostics.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Durable test-diagnostics contract failed.' }
+      - name: Validate layout within the operator evidence boundary
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/Test-RepositoryLayout.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Operator repository layout guard failed.' }
+          & ./product/scripts/Test-RepositoryLayout.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Operator repository layout regression contract failed.' }
+      - name: Verify operator evidence preservation
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node ./product/test-planner/tools/evidence-fingerprint.mjs verify "$env:RUNNER_TEMP/operator-evidence-${{ github.run_id }}-${{ github.run_attempt }}.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Operator contracts changed persistent evidence or preservation could not be proven.' }
       - name: Mark test complete
         if: always()
         continue-on-error: true
@@ -1646,6 +1676,15 @@ jobs:
           done
           if [ -n "$failed" ]; then
             echo "::error::These gates did not pass:$failed"
+            exit 1
+          fi
+
+          # Operator contracts are mandatory for every non-documentation product run. A conditional owner that
+          # silently skipped cannot satisfy the aggregate merely because no other job failed. Trusted post-merge
+          # provenance deliberately skips the redundant product retest, and docs-only runs retain their layout
+          # proof in `changes`; those are the only states where this family is allowed not to run.
+          if [ "$POST_MERGE_SKIP" != "true" ] && [ "$DOCS_ONLY" != "true" ] && [ "$CONTRACTS" != "success" ]; then
+            echo "::error::A non-documentation run must execute the operator and recovery script contracts."
             exit 1
           fi
 
