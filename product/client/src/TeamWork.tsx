@@ -131,6 +131,26 @@ const canonicalOpenKindByFamily: Record<TeamWorkFamily, string> = {
   verification: "test-change-request", problemReport: "problem-report", assessment: "downstream-assessment",
 };
 const affinityStorageKey = "aerolink-teamwork-affinity";
+type TeamWorkLaneCounts = TeamWorkPerson["byLane"];
+type ScopedTeamWorkPerson = TeamWorkPerson & { selectionCount: number };
+type ScopedWorkload = { holds: number; byLane: TeamWorkLaneCounts };
+
+const emptyLaneCounts = (): TeamWorkLaneCounts => ({ work: 0, review: 0, sign: 0, approved: 0 });
+const normalizeSearchText = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
+const stablePersonKey = (person: TeamWorkPerson) => (person.userId ?? person.userName).toLowerCase();
+// Personalization may bridge at most three holdings. Workload remains the primary ordering fact.
+const selectionBoost = (count: number) => count >= 10 ? 3 : count >= 4 ? 2 : count >= 1 ? 1 : 0;
+
+function compareScopedPeople(a: ScopedTeamWorkPerson, b: ScopedTeamWorkPerson) {
+  const workOrder = Number(b.holds > 0) - Number(a.holds > 0);
+  if (workOrder) return workOrder;
+  const scoreOrder = (b.holds + selectionBoost(b.selectionCount))
+    - (a.holds + selectionBoost(a.selectionCount));
+  if (scoreOrder) return scoreOrder;
+  if (b.selectionCount !== a.selectionCount) return b.selectionCount - a.selectionCount;
+  if (b.holds !== a.holds) return b.holds - a.holds;
+  return stablePersonKey(a).localeCompare(stablePersonKey(b), undefined, { sensitivity: "base" });
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
@@ -498,25 +518,32 @@ function TeamWorkCard({ item, people }: { item: TeamWorkItem; people: Map<string
   );
 }
 
-function PersonStrip({ people, selected, search, viewer, onSelect, onDetails }: {
+function PersonStrip({ people, selected, search, scopeLabel, viewer, onSelect, onDetails }: {
   people: TeamWorkPerson[];
   selected: string | null;
   search: string;
+  scopeLabel: string;
   viewer: AuthUser;
   onSelect: (person: TeamWorkPerson, trigger: HTMLElement) => void;
   onDetails?: (person: TeamWorkPerson, trigger: HTMLElement) => void;
 }) {
   const strip = useRef<HTMLDivElement>(null);
-  const visible = people.filter(person =>
-    !search || `${person.displayName} ${person.userName} ${person.baseRoles.map(role => roleLabels[role]).join(" ")}`
-      .toLowerCase().includes(search.toLowerCase()));
+  const query = normalizeSearchText(search);
+  const visible = people.filter(person => {
+    if (!query) return true;
+    if (person.holds > 0 || selected === person.userName.toLowerCase()) return true;
+    const peopleFacts = normalizeSearchText(
+      `${person.displayName} ${person.userName} ${person.baseRoles.map(role => roleLabels[role]).join(" ")}`,
+    );
+    return peopleFacts.includes(query);
+  });
 
   return (
     <section className="teamWorkPeople" aria-labelledby="team-work-people-title">
       <div className="teamWorkPeopleHeader">
         <div>
           <h2 id="team-work-people-title">People</h2>
-          <p>Every current project member, including people holding no work</p>
+          <p>{scopeLabel}</p>
         </div>
         <div className="teamWorkPeopleControls">
           <button type="button" aria-label="Previous people" onClick={() => strip.current?.scrollBy({ left: -280, behavior: "smooth" })}>
@@ -554,7 +581,10 @@ function PersonStrip({ people, selected, search, viewer, onSelect, onDetails }: 
                     {person.holds} hold{person.holds === 1 ? "" : "s"}
                   </small>
                 </span>
-                <span className="teamWorkLoadShape" aria-label={`${person.holds} holds`}>
+                <span
+                  className="teamWorkLoadShape"
+                  aria-label={`${person.holds} holds: ${person.byLane.work} in work, ${person.byLane.review} in review, ${person.byLane.sign} awaiting signature, ${person.byLane.approved} approved`}
+                >
                   <i style={{ height: `${Math.min(100, person.byLane.work * 18)}%` }} />
                   <i style={{ height: `${Math.min(100, person.byLane.review * 18)}%` }} />
                   <i style={{ height: `${Math.min(100, person.byLane.sign * 18)}%` }} />
@@ -582,10 +612,11 @@ function PersonStrip({ people, selected, search, viewer, onSelect, onDetails }: 
   );
 }
 
-function TeamWorkDrawer({ person, items, people, onClose }: {
+function TeamWorkDrawer({ person, items, people, emptyMessage, onClose }: {
   person: TeamWorkPerson;
   items: TeamWorkItem[];
   people: Map<string, TeamWorkPerson>;
+  emptyMessage: string;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDivElement>(null);
@@ -599,9 +630,9 @@ function TeamWorkDrawer({ person, items, people, onClose }: {
       .map(item => item.id),
   );
   const stats = {
-    holds: personItems.length,
+    holds: person.holds,
     signature: approvals.size,
-    work: personItems.filter(item => item.lane === "work").length,
+    work: person.byLane.work,
     shared: personItems.filter(item => item.currentHolderIds.length > 1).length,
   };
 
@@ -695,17 +726,18 @@ function TeamWorkDrawer({ person, items, people, onClose }: {
               </section>
             );
           })}
-          {!personItems.length && <p>Nothing currently requires {person.displayName}.</p>}
+          {!personItems.length && <p>{emptyMessage}</p>}
         </div>
       </aside>
     </div>
   );
 }
 
-function TeamWorkBoard({ items, group, people, selectedPerson, onHolder, onDetails }: {
+function TeamWorkBoard({ items, group, people, personRank, selectedPerson, onHolder, onDetails }: {
   items: TeamWorkItem[];
   group: "lifecycle" | "holder";
   people: Map<string, TeamWorkPerson>;
+  personRank: Map<string, number>;
   selectedPerson: string | null;
   onHolder: (person: TeamWorkPerson, trigger?: HTMLElement) => void;
   onDetails?: (person: TeamWorkPerson, trigger?: HTMLElement) => void;
@@ -766,6 +798,9 @@ function TeamWorkBoard({ items, group, people, selectedPerson, onHolder, onDetai
   const ordered = [...groups.entries()].sort(([a], [b]) => {
     if (a === "__none__") return 1;
     if (b === "__none__") return -1;
+    const rankDifference = (personRank.get(a) ?? Number.MAX_SAFE_INTEGER)
+      - (personRank.get(b) ?? Number.MAX_SAFE_INTEGER);
+    if (rankDifference) return rankDifference;
     return displayNameFor(a, people).localeCompare(displayNameFor(b, people), undefined, { sensitivity: "base" });
   });
 
@@ -831,7 +866,7 @@ export default function TeamWork({ api, projectId, user }: {
   const [artifactType, setArtifactType] = useState<string>("all");
   const [group, setGroup] = useState<"lifecycle" | "holder">("lifecycle");
   const [selectedPerson, setSelectedPerson] = useState<string | null>(null);
-  const [drawerHolder, setDrawerHolder] = useState<TeamWorkPerson | null>(null);
+  const [drawerPersonKey, setDrawerPersonKey] = useState<string | null>(null);
   const [affinityStore, setAffinityStore] = useState(readAffinityStore);
   const lastTrigger = useRef<HTMLElement | null>(null);
 
@@ -879,44 +914,6 @@ export default function TeamWork({ api, projectId, user }: {
     }
     return map;
   }, [people]);
-  const memberPeople = useMemo(() => {
-    const project = affinityStore.viewers[user.id]?.[projectId] ?? {};
-    const viewer = people.find(person => personMatches(person, user.userName) || personMatches(person, user.id));
-    const viewerAffinities = new Set(viewer?.disciplineAffinities ?? []);
-    const hasAffinity = (person: TeamWorkPerson) => viewerAffinities.size > 0
-      && person.disciplineAffinities.some(item => viewerAffinities.has(item));
-    const topUsage = people
-      .filter(person => person.isCurrentProjectMember && hasAffinity(person) && person.userId)
-      .map(person => ({
-        person,
-        count: Number.isInteger(project[person.userId!.toLowerCase()])
-          && project[person.userId!.toLowerCase()] > 0
-          ? project[person.userId!.toLowerCase()]
-          : 0,
-      }))
-      .filter(entry => entry.count > 0)
-      .sort((a, b) => (b.count - a.count)
-        || a.person.userName.localeCompare(b.person.userName, undefined, { sensitivity: "base" }))
-      .slice(0, 3);
-    const usageRank = (person: TeamWorkPerson) => topUsage.findIndex(entry =>
-      entry.person.userId?.toLowerCase() === person.userId?.toLowerCase());
-
-    return people.filter(person => person.isCurrentProjectMember).sort((a, b) => {
-      const self = (person: TeamWorkPerson) =>
-        personMatches(person, user.userName) || personMatches(person, user.id) ? 0 : 1;
-      const affinity = (person: TeamWorkPerson) => hasAffinity(person) ? 0 : 1;
-      const rank = (person: TeamWorkPerson) => {
-        const value = usageRank(person);
-        return value < 0 || !hasAffinity(person) ? 3 : value;
-      };
-      return self(a) - self(b)
-        || affinity(a) - affinity(b)
-        || rank(a) - rank(b)
-        || `${a.displayName}\u0000${a.userName}`.localeCompare(
-          `${b.displayName}\u0000${b.userName}`, undefined, { sensitivity: "base" });
-    });
-  }, [affinityStore, people, projectId, user.id, user.userName]);
-
   const buildOptions = useMemo(() => {
     if (!response) return [];
     return [...new Map(
@@ -924,7 +921,7 @@ export default function TeamWork({ api, projectId, user }: {
     ).values()].sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }));
   }, [response]);
   const searchMatch = useCallback((item: TeamWorkItem) => {
-    const query = search.trim().toLowerCase();
+    const query = normalizeSearchText(search);
     const holderFacts = item.currentHolderIds
       .map(id => `${id} ${displayNameFor(id, peopleByIdentity)}`).join(" ");
     const raisedByFacts = item.raisedById
@@ -933,13 +930,13 @@ export default function TeamWork({ api, projectId, user }: {
     const searchableFacts = `${item.title} ${item.number ?? ""} ${item.prefix ?? ""} ${item.category ?? ""}
       ${item.nativeState} ${item.nativeOutcome ?? ""} ${raisedByFacts} ${item.raisedByKind ?? ""}
       ${item.release?.version ?? ""} ${holderFacts}`;
-    return !query || searchableFacts.toLowerCase().includes(query);
+    return !query || normalizeSearchText(searchableFacts).includes(query);
   }, [peopleByIdentity, search]);
-  const filterItems = useCallback((includeArtifactType: boolean, includeLayer = true) => (response?.items ?? []).filter(item => {
+  const filterItems = useCallback((includeArtifactType: boolean, includeLayer = true, includePerson = true) => (response?.items ?? []).filter(item => {
     const matchesBuild = build === "all"
       || build === "deferred" && item.deferred
       || build !== "deferred" && item.release?.id === build;
-    const matchesPerson = !selectedPerson
+    const matchesPerson = !includePerson || !selectedPerson
       || item.currentHolderIds.some(id => id.toLowerCase() === selectedPerson);
     const matchesLayer = !includeLayer || layer === "all" || layerFor(item)?.toLowerCase() === layer.toLowerCase();
     const matchesArtifactType = !includeArtifactType || artifactType === "all"
@@ -948,7 +945,8 @@ export default function TeamWork({ api, projectId, user }: {
   }), [artifactType, build, layer, response, searchMatch, selectedPerson]);
   const facetItems = useMemo(() => filterItems(false), [filterItems]);
   const layerFacetItems = useMemo(() => filterItems(false, false), [filterItems]);
-  const filteredItems = useMemo(() => filterItems(true), [filterItems]);
+  const rosterItems = useMemo(() => filterItems(true, true, false), [filterItems]);
+  const filteredItems = useMemo(() => filterItems(true, true, true), [filterItems]);
   const layerOptions = useMemo<TeamWorkLayerFacet[]>(() => {
     if (response?.layers?.length) return response.layers;
     const observed = new Map<string, number>();
@@ -973,31 +971,67 @@ export default function TeamWork({ api, projectId, user }: {
     }
     return [...observed.entries()].map(([id, count]) => ({ id, label: id === "ProblemReport" ? "Problem Report" : id, count }));
   }, [facetItems, layer, layerOptions, response]);
+  const scopedWorkloads = useMemo(() => {
+    const workloads = new Map<string, ScopedWorkload>();
+    for (const item of rosterItems) {
+      const seen = new Set<string>();
+      for (const holder of item.currentHolderIds) {
+        const key = holder.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const current = workloads.get(key) ?? { holds: 0, byLane: emptyLaneCounts() };
+        current.holds++;
+        current.byLane[item.lane]++;
+        workloads.set(key, current);
+      }
+    }
+    return workloads;
+  }, [rosterItems]);
+  const scopedPeople = useMemo<ScopedTeamWorkPerson[]>(() => {
+    const projectAffinity = affinityStore.viewers[user.id]?.[projectId] ?? {};
+    return people.map(person => {
+      const workload = scopedWorkloads.get(person.userName.toLowerCase())
+        ?? { holds: 0, byLane: emptyLaneCounts() };
+      const rawCount = person.userId ? projectAffinity[person.userId.toLowerCase()] : undefined;
+      const selectionCount = typeof rawCount === "number"
+        && Number.isInteger(rawCount) && rawCount > 0 ? rawCount : 0;
+      return { ...person, holds: workload.holds, byLane: workload.byLane, selectionCount };
+    }).sort(compareScopedPeople);
+  }, [affinityStore, people, projectId, scopedWorkloads, user.id]);
+  const memberPeople = useMemo(
+    () => scopedPeople.filter(person => person.isCurrentProjectMember),
+    [scopedPeople],
+  );
+  const personRank = useMemo(
+    () => new Map(scopedPeople.map((person, index) => [person.userName.toLowerCase(), index])),
+    [scopedPeople],
+  );
 
   const closeDrawer = useCallback(() => {
-    if (!drawerHolder) return;
-    setDrawerHolder(null);
+    if (!drawerPersonKey) return;
+    setDrawerPersonKey(null);
     const url = new URL(window.location.href);
     if (url.searchParams.has("holder")) {
       history.pushState({}, "", urlWithoutHolder(url));
     }
     window.setTimeout(() => lastTrigger.current?.focus(), 0);
-  }, [drawerHolder]);
-  const selectPerson = useCallback((person: TeamWorkPerson, trigger?: HTMLElement, recordAffinity = true) => {
+  }, [drawerPersonKey]);
+  const selectPerson = useCallback((person: TeamWorkPerson, trigger?: HTMLElement) => {
     setSelectedPerson(person.userName.toLowerCase());
     lastTrigger.current = trigger ?? null;
-    if (recordAffinity) {
-      writeAffinity(user.id, projectId, person);
-      setAffinityStore(readAffinityStore());
-    }
+    writeAffinity(user.id, projectId, person);
+    setAffinityStore(readAffinityStore());
     const url = new URL(window.location.href);
     if (url.searchParams.get("person")?.toLowerCase() !== person.userName.toLowerCase()) {
       url.searchParams.set("person", person.userName);
       history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
     }
+    window.requestAnimationFrame(() => {
+      lastTrigger.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
   }, [projectId, user.id]);
   const showDetails = useCallback((person: TeamWorkPerson, trigger?: HTMLElement) => {
-    setDrawerHolder(person);
+    setDrawerPersonKey(person.userName.toLowerCase());
     lastTrigger.current = trigger ?? null;
     const url = new URL(window.location.href);
     if (url.searchParams.get("holder")?.toLowerCase() !== person.userName.toLowerCase()) {
@@ -1016,7 +1050,7 @@ export default function TeamWork({ api, projectId, user }: {
       setSelectedPerson(selected?.userName.toLowerCase() ?? null);
       const holder = new URL(window.location.href).searchParams.get("holder");
       if (!holder) {
-        setDrawerHolder(null);
+        setDrawerPersonKey(null);
         return;
       }
       const person = people.find(candidate => candidate.userName.toLowerCase() === holder.toLowerCase());
@@ -1026,26 +1060,26 @@ export default function TeamWork({ api, projectId, user }: {
           url.searchParams.delete("holder");
           history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
         }
-        setDrawerHolder(null);
+        setDrawerPersonKey(null);
         return;
       }
-      setDrawerHolder(person);
+      setDrawerPersonKey(person.userName.toLowerCase());
     };
     syncUrl();
     window.addEventListener("popstate", syncUrl);
     return () => window.removeEventListener("popstate", syncUrl);
   }, [response, people]);
   useEffect(() => {
-    if (!drawerHolder || people.some(person =>
-      person.userName.toLowerCase() === drawerHolder.userName.toLowerCase())) return;
-    setDrawerHolder(null);
+    if (!drawerPersonKey || people.some(person =>
+      person.userName.toLowerCase() === drawerPersonKey)) return;
+    setDrawerPersonKey(null);
     setSelectedPerson(null);
     const url = new URL(window.location.href);
     if (url.searchParams.has("holder")) {
       url.searchParams.delete("holder");
       history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
     }
-  }, [drawerHolder, people]);
+  }, [drawerPersonKey, people]);
 
   const clearFilters = () => {
     setSearch("");
@@ -1053,7 +1087,7 @@ export default function TeamWork({ api, projectId, user }: {
     setLayer("all");
     setArtifactType("all");
     setSelectedPerson(null);
-    if (drawerHolder) closeDrawer();
+    if (drawerPersonKey) closeDrawer();
     const url = new URL(window.location.href);
     url.searchParams.delete("person");
     history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
@@ -1095,14 +1129,45 @@ export default function TeamWork({ api, projectId, user }: {
 
   const projectEmpty = response.items.length === 0;
   const selected = selectedPerson
-    ? people.find(person => person.userName.toLowerCase() === selectedPerson)
+    ? scopedPeople.find(person => person.userName.toLowerCase() === selectedPerson)
+    : undefined;
+  const drawerPerson = drawerPersonKey
+    ? scopedPeople.find(person => person.userName.toLowerCase() === drawerPersonKey)
     : undefined;
   const noFilteredItems = filteredItems.length === 0;
+  const boardHolderIds = new Set(
+    filteredItems.flatMap(item => item.currentHolderIds.map(id => id.toLowerCase())),
+  );
+  const boardTotals = {
+    items: filteredItems.length,
+    people: boardHolderIds.size,
+    unheld: filteredItems.filter(item => item.currentHolderIds.length === 0).length,
+  };
   const selectedBuild = build === "deferred"
     ? "Deferred"
     : build === "all"
       ? ""
       : `Build ${buildOptions.find(option => option.id === build)?.version ?? build}`;
+  const rosterScopeParts = [
+    selectedBuild,
+    layer !== "all" ? layerLabel(layer) : "",
+    artifactType !== "all"
+      ? artifactTypeOptions.find(option => option.id === artifactType)?.label ?? artifactType
+      : "",
+    search.trim() ? `Search “${search.trim()}”` : "",
+  ].filter(Boolean);
+  const hasNarrowingFilters = rosterScopeParts.length > 0;
+  const rosterScopeLabel = hasNarrowingFilters
+    ? `Showing ${rosterScopeParts.join(" · ")}`
+    : "Showing all project work";
+  const boardScopeLabel = selected
+    ? hasNarrowingFilters
+      ? `Showing ${selected.displayName} · ${rosterScopeParts.join(" · ")}`
+      : `Showing work held by ${selected.displayName}`
+    : rosterScopeLabel;
+  const peopleScopeLabel = hasNarrowingFilters
+    ? `${rosterScopeLabel} · counts before person selection`
+    : "Every current member · counts follow filters, before person selection";
   const filterDescription = `${layer !== "all" ? layerLabel(layer) : artifactType !== "all" ? artifactTypeOptions.find(option => option.id === artifactType)?.label ?? artifactType : "Controlled work"}${selectedBuild ? ` on ${selectedBuild}` : ""}`;
 
   return (
@@ -1113,16 +1178,20 @@ export default function TeamWork({ api, projectId, user }: {
           <h1>Team Work</h1>
           <p>Project scope · every build</p>
         </div>
-        <dl className="teamWorkTotals">
-          <div><dt>Unique items</dt><dd>{response.totals.items}</dd></div>
-          <div><dt>People holding work</dt><dd>{people.filter(person => person.holds > 0).length}</dd></div>
-          <div><dt>No current holder</dt><dd>{response.totals.unheld}</dd></div>
-        </dl>
+        <div className="teamWorkTotalsGroup">
+          <p className="teamWorkScopeLabel">{boardScopeLabel}</p>
+          <dl className="teamWorkTotals">
+            <div><dt>Unique items</dt><dd>{boardTotals.items}</dd></div>
+            <div><dt>People holding work</dt><dd>{boardTotals.people}</dd></div>
+            <div><dt>No current holder</dt><dd>{boardTotals.unheld}</dd></div>
+          </dl>
+        </div>
       </header>
       <PersonStrip
         people={memberPeople}
         selected={selectedPerson}
         search={search}
+        scopeLabel={peopleScopeLabel}
         viewer={user}
         onSelect={selectPerson}
         onDetails={showDetails}
@@ -1200,7 +1269,11 @@ export default function TeamWork({ api, projectId, user }: {
           </section>
           {selected && selected.holds === 0 ? (
             <section className="teamWorkMessage">
-              <strong>Nothing currently requires {selected.displayName}.</strong>
+              <strong>
+                {hasNarrowingFilters
+                  ? `No matching work for ${selected.displayName} with these filters.`
+                  : `Nothing currently requires ${selected.displayName}.`}
+              </strong>
             </section>
           ) : noFilteredItems ? (
             <section className="teamWorkMessage teamWorkFilteredEmpty">
@@ -1218,18 +1291,22 @@ export default function TeamWork({ api, projectId, user }: {
               items={filteredItems}
               group={group}
               people={peopleByIdentity}
+              personRank={personRank}
               selectedPerson={selectedPerson}
-              onHolder={(person, trigger) => selectPerson(person, trigger, false)}
+              onHolder={selectPerson}
               onDetails={showDetails}
             />
           )}
         </>
       )}
-      {drawerHolder && createPortal(
+      {drawerPerson && createPortal(
         <TeamWorkDrawer
-          person={drawerHolder}
-          items={response.items}
+          person={drawerPerson}
+          items={rosterItems}
           people={peopleByIdentity}
+          emptyMessage={hasNarrowingFilters
+            ? `No matching work for ${drawerPerson.displayName} with these filters.`
+            : `Nothing currently requires ${drawerPerson.displayName}.`}
           onClose={closeDrawer}
         />,
         document.body,
