@@ -364,6 +364,11 @@ function App() {
   const projectId = project?.project.id ?? "";
   const context:RouteContext|undefined=active&&project&&release?{programId:active.program.id,projectId:project.project.id,releaseId:release.id}:undefined;
   useEffect(() => {
+    if (route.view === "managedDocuments" && route.releaseId && active && project) {
+      writeHistory("replaceState", routePath({ programId: active.program.id, projectId: project.project.id, releaseId: "" }, "managedDocuments", "system", route.artifactId));
+    }
+  }, [route, active, project, writeHistory]);
+  useEffect(() => {
     let current = true;
     setLadder(null); setLadderError("");
     if (!projectId) return () => { current = false; };
@@ -450,7 +455,7 @@ function App() {
     return <div className="appBoot"><div className="bootMark">▲</div><div><p>AEROLINK CONTROLLED WORKSPACE</p><h1>Establishing your secure session</h1><span>Confirming identity, authority, and active program context…</span><i><b/></i></div></div>;
   if (user === null) return <LoginPage api={API} onLogin={setUser} />;
   if (user.mustChangePassword) return <RequiredPasswordChange api={API} onComplete={()=>setUser(null)} />;
-  if (connected && !workspaces.length)
+  if (workspaceStatus === "ready" && !workspaces.length)
     return (
       <div className="onboarding">
         <div className="onboardBrand">
@@ -650,6 +655,8 @@ function App() {
     invalidateDashboard();
     setWorkspaces([]);
     setWorkspaceStatus("loading");
+    setConnected(false);
+    writeHistory("replaceState", "/projects");
     setUser(null);
   };
   const buildsPath=projectAreaPath(projectSlugOf(project?.project.name??""),"builds");

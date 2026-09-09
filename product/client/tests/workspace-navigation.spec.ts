@@ -57,6 +57,29 @@ test("missing exact build never substitutes the current build", async ({ page })
   await expect(page.locator(".contextBar")).toHaveCount(0);
 });
 
+test("project switches and browser history resolve the named project's own requests", async ({ page }) => {
+  await mockShell(page);
+  await page.goto(fmsPath);
+  await page.getByRole("button", { name: "Projects", exact: true }).click();
+  const imported = page.waitForRequest(request => request.url().includes("/api/baseline-imports?projectId=other-project"));
+  await page.getByRole("link", { name: "Open DOORS Import Practice", exact: true }).click();
+  await imported;
+  await page.getByRole("button", { name: "← Software Builds", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "DOORS Import Practice", exact: true })).toBeVisible();
+  await page.goBack();
+  await page.goBack();
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "FMS Product Development", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Open build 1.6/i })).toBeEnabled();
+});
+
+test("legacy project-wide document links discard obsolete build context", async ({ page }) => {
+  await mockShell(page);
+  await page.goto("/programs/fms-program/projects/fms-project/releases/removed/documentation-center");
+  await expect(page).toHaveURL(/\/programs\/fms-program\/projects\/fms-project\/documentation-center$/);
+  await expect(page.getByRole("heading", { name: "Workspace unavailable", exact: true })).toHaveCount(0);
+});
+
 test("workspace failures have a truthful retry state", async ({ page }) => {
   await mockShell(page);
   await page.route("**/api/workspaces", route => route.fulfill({ status: 403, json: { error: "Denied" } }));
@@ -104,5 +127,6 @@ test("route resolution preserves exact history and rejects absent program, proje
     expect(resolveWorkspaceContext(workspaces, { ...route, ...missing })).toEqual({ active: undefined, project: undefined, release: undefined, unavailable: true });
   }
   expect(resolveWorkspaceContext(workspaces, parseRoute(fmsPath)).project?.project.id).toBe("fms-project");
+  expect(resolveWorkspaceContext(workspaces, { ...route, view: "managedDocuments", releaseId: "removed" }).unavailable).toBe(false);
 });
 

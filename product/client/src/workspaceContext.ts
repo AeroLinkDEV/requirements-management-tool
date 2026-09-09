@@ -22,10 +22,12 @@ export function resolveWorkspaceContext(workspaces: Workspace[], route: AppRoute
     : route.projectSlug
       ? active?.projects.find(item => projectSlugOf(item.project.name) === route.projectSlug)
       : active?.projects[0];
-  const release = route.releaseId
+  // Legacy Documentation Center URLs carry a build, but this surface is project-wide.
+  const requiresBuild = route.view !== "managedDocuments";
+  const release = route.releaseId && requiresBuild
     ? project?.releases.find(item => item.id === route.releaseId)
     : [...(project?.releases ?? [])].reverse().find(item => !item.isReleased) ?? project?.releases.at(-1);
   const unavailable = !!((route.programId && !active) || ((route.projectId || route.projectSlug) && !project)
-    || (route.releaseId && !release));
+    || (requiresBuild && route.releaseId && !release));
   return unavailable ? { active: undefined, project: undefined, release: undefined, unavailable } : { active, project, release, unavailable };
 }
