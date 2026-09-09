@@ -12,7 +12,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Net.Http
-Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessEnvironment.psm1') -Force
+if (-not (Get-Module -Name AeroLinkProcessEnvironment)) {
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessEnvironment.psm1')
+}
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 # The CALLER names the executable, because only the caller knows which one it just built.
 #

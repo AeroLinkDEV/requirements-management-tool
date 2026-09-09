@@ -2,7 +2,9 @@
 param([string]$PostgresBin)
 
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessEnvironment.psm1') -Force
+if (-not (Get-Module -Name AeroLinkProcessEnvironment)) {
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessEnvironment.psm1')
+}
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
 if (-not $PostgresBin) { $PostgresBin = Join-Path $productRoot '.local\postgresql\pgsql\bin' }

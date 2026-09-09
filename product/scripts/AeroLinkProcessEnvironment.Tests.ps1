@@ -2,7 +2,9 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessEnvironment.psm1') -Force
+if (-not (Get-Module -Name AeroLinkProcessEnvironment)) {
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessEnvironment.psm1')
+}
 $download = Join-Path $PSScriptRoot 'Test-AeroLinkRestoredDownloads.ps1'
 $probeName = 'AEROLINK_981_ROUNDTRIP_PROBE'
 $settingsNames = @(
