@@ -216,4 +216,8 @@ test('an explicit target-build action refresh keeps its own history entry', asyn
   expect(fallbackResponse.ok(), await fallbackResponse.text()).toBeTruthy()
   await expect(page).toHaveURL(new RegExp(`${activeAnchorId}.*targetBuild=${showcase.activeReleaseId}`))
   expect(await page.evaluate(() => history.length)).toBe(historyBefore + 1)
+  await page.goBack()
+  await expect(page).toHaveURL(new RegExp(`${activeAnchorId}.*targetBuild=${showcase.activeReleaseId}`))
+  await expect(page.getByRole('heading', { name: activeAnchorTitle })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: changedTitle })).toHaveCount(0)
 })

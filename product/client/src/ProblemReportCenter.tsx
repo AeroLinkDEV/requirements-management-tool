@@ -382,6 +382,10 @@ export default function ProblemReportCenter({
   // hands the intent back to this, so pane, address and intent can never disagree about which record is shown.
   const appliedIdRef = useRef<string | undefined>(undefined);
   const openSequence = useRef(0);
+  // The routed report ID is the component's initial intent. A popstate can change it without changing
+  // targetFilter, so track it explicitly and rehydrate the pane when the address names another record.
+  const routedReportIdRef = useRef<string | undefined>(initialReportId);
+  const routeRestorationRef = useRef(false);
   // What the queue was actually asked for, as opposed to what is being typed. The dropdowns commit on
   // Apply filters; the search box commits itself a moment after typing stops.
   const [appliedSearch, setAppliedSearch] = useState("");
@@ -435,7 +439,7 @@ export default function ProblemReportCenter({
     selected?.state === "Closed" ||
     terminalDispositions.includes(selected?.state ?? "");
 
-  const refresh = async (selectId?: string, requestedPage = page) => {
+  const refresh = async (selectId?: string, requestedPage = page, replaceRoute = false) => {
     // Everything this refresh will serve is fixed here, before any request goes out: the record it asks
     // for and the selection intent it observed. If the reader opens another record while the refresh is
     // in flight, the refresh's responses belong to an older decision and must not take the pane.
@@ -515,6 +519,7 @@ export default function ProblemReportCenter({
           : selectedIdRef.current !== undefined && selectedIdRef.current !== detail.id);
       if (superseded) detail = undefined;
       const id = detail?.id;
+      const routeAlreadyCorrect = id === initialReportId;
       if (detail) {
         // The address must follow the committed record whenever it changes — including when a refresh
         // commits a record the reader claimed while an earlier open for it is still in flight — so the
@@ -534,6 +539,7 @@ export default function ProblemReportCenter({
         // picked it by luck. Project-scoped, the queue holds every report in the Project and that luck is gone:
         // a refresh after creating a report jumped to the lowest-numbered record in the database.
         if (
+          !routeAlreadyCorrect &&
           !detail.historicalReadOnly &&
           (selectId || addressStale || (requested && requested !== id))
         )
@@ -542,13 +548,19 @@ export default function ProblemReportCenter({
           // the same filter and the fallback record. Explicit opens and create/action refreshes still push,
           // even when an action causes the changed record to fall out of the current filter and another row
           // becomes the fallback.
-          onSelected(id, targetFilter, undefined, fallback && selectId === undefined);
+          onSelected(
+            id,
+            targetFilter,
+            undefined,
+            replaceRoute || (fallback && selectId === undefined),
+          );
       } else if (selectedIdRef.current === intentAtStart) {
         const hadRecord = appliedIdRef.current !== undefined;
         setSelected(undefined);
         selectedIdRef.current = undefined;
         appliedIdRef.current = undefined;
-        if ((requested && !historicalRequested) || hadRecord) onSelected(undefined, targetFilter);
+        if ((requested && !historicalRequested) || hadRecord)
+          onSelected(undefined, targetFilter, undefined, replaceRoute);
       }
     } catch (reason) {
       // A failure is the reader's problem only while the record it was loading is still the reader's
@@ -565,8 +577,26 @@ export default function ProblemReportCenter({
   };
   // oxlint-disable-next-line react-hooks/exhaustive-deps -- filters are applied deliberately with Apply filters.
   useEffect(() => {
-    void refresh(undefined, page);
-  }, [api, projectId, releaseId, page, appliedSearch, appliedFilters, targetFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!initialReportId || routedReportIdRef.current === initialReportId) return;
+    routedReportIdRef.current = initialReportId;
+    selectedIdRef.current = initialReportId;
+    routeRestorationRef.current = true;
+  }, [initialReportId]);
+  useEffect(() => {
+    const replaceRoute = routeRestorationRef.current;
+    routeRestorationRef.current = false;
+    void refresh(undefined, page, replaceRoute);
+  }, [
+    api,
+    projectId,
+    releaseId,
+    page,
+    appliedSearch,
+    appliedFilters,
+    targetFilter,
+    initialReportId,
+    initialSnapshotId,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
   /**
    * The search box asks the queue itself, a moment after typing stops.
    *
