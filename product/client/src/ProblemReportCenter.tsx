@@ -186,7 +186,7 @@ type Props = {
   user: AuthUser;
   initialReportId?: string;
   initialSnapshotId?: string;
-  onSelected: (id?: string, targetBuild?: string, snapshotId?: string) => void;
+  onSelected: (id?: string, targetBuild?: string, snapshotId?: string, replace?: boolean) => void;
   onBack: () => void;
   onOpenVerification: (target?: {
     discipline: "system" | "software";
@@ -381,7 +381,14 @@ export default function ProblemReportCenter({
   // The record the pane is actually committed to — the last detail that was allowed to apply. A failed open
   // hands the intent back to this, so pane, address and intent can never disagree about which record is shown.
   const appliedIdRef = useRef<string | undefined>(undefined);
+  const appliedSnapshotRef = useRef<string | undefined>(undefined);
   const openSequence = useRef(0);
+  // The routed report ID is the component's initial intent. A popstate can change it without changing
+  // targetFilter, so track it explicitly and rehydrate the pane when the address names another record.
+  const routedReportIdRef = useRef<string | undefined>(initialReportId);
+  const routedSnapshotIdRef = useRef<string | undefined>(initialSnapshotId);
+  const routeRestorationRef = useRef(false);
+  const routeSnapshotRef = useRef<string | undefined>(undefined);
   // What the queue was actually asked for, as opposed to what is being typed. The dropdowns commit on
   // Apply filters; the search box commits itself a moment after typing stops.
   const [appliedSearch, setAppliedSearch] = useState("");
@@ -435,14 +442,21 @@ export default function ProblemReportCenter({
     selected?.state === "Closed" ||
     terminalDispositions.includes(selected?.state ?? "");
 
-  const refresh = async (selectId?: string, requestedPage = page) => {
+  const refresh = async (
+    selectId?: string,
+    requestedPage = page,
+    replaceRoute = false,
+    restoredSnapshot?: string,
+  ) => {
     // Everything this refresh will serve is fixed here, before any request goes out: the record it asks
     // for and the selection intent it observed. If the reader opens another record while the refresh is
     // in flight, the refresh's responses belong to an older decision and must not take the pane.
     const intentAtStart = selectedIdRef.current;
     const requested = selectId ?? intentAtStart ?? initialReportId;
     const historicalRequested = Boolean(
-      initialSnapshotId && requested === initialReportId && appliedIdRef.current === undefined,
+      initialSnapshotId &&
+      requested === initialReportId &&
+      (appliedIdRef.current === undefined || restoredSnapshot === initialSnapshotId),
     );
     const sequence = ++refreshSequence.current;
     try {
@@ -515,6 +529,7 @@ export default function ProblemReportCenter({
           : selectedIdRef.current !== undefined && selectedIdRef.current !== detail.id);
       if (superseded) detail = undefined;
       const id = detail?.id;
+      const routeAlreadyCorrect = id === initialReportId;
       if (detail) {
         // The address must follow the committed record whenever it changes — including when a refresh
         // commits a record the reader claimed while an earlier open for it is still in flight — so the
@@ -526,6 +541,7 @@ export default function ProblemReportCenter({
         setSelected(detail);
         selectedIdRef.current = detail.id;
         appliedIdRef.current = detail.id;
+        appliedSnapshotRef.current = detail.snapshotId;
         setOwner({ userId: detail.responsibleEngineerId, name: detail.responsibleEngineerId });
         // The record being read belongs in the address, or a refresh lands on whatever happens to be first.
         //
@@ -534,16 +550,29 @@ export default function ProblemReportCenter({
         // picked it by luck. Project-scoped, the queue holds every report in the Project and that luck is gone:
         // a refresh after creating a report jumped to the lowest-numbered record in the database.
         if (
+          !routeAlreadyCorrect &&
           !detail.historicalReadOnly &&
           (selectId || addressStale || (requested && requested !== id))
         )
-          onSelected(id, targetFilter);
+          // An implicit queue fallback is not a reader navigation. Replace the current filter entry so one
+          // Back returns to the previous target, rather than stepping onto a duplicate entry that carries
+          // the same filter and the fallback record. Explicit opens and create/action refreshes still push,
+          // even when an action causes the changed record to fall out of the current filter and another row
+          // becomes the fallback.
+          onSelected(
+            id,
+            targetFilter,
+            undefined,
+            replaceRoute || (fallback && selectId === undefined),
+          );
       } else if (selectedIdRef.current === intentAtStart) {
         const hadRecord = appliedIdRef.current !== undefined;
         setSelected(undefined);
         selectedIdRef.current = undefined;
         appliedIdRef.current = undefined;
-        if ((requested && !historicalRequested) || hadRecord) onSelected(undefined, targetFilter);
+        appliedSnapshotRef.current = undefined;
+        if ((requested && !historicalRequested) || hadRecord)
+          onSelected(undefined, targetFilter, undefined, replaceRoute || selectId === undefined);
       }
     } catch (reason) {
       // A failure is the reader's problem only while the record it was loading is still the reader's
@@ -560,8 +589,46 @@ export default function ProblemReportCenter({
   };
   // oxlint-disable-next-line react-hooks/exhaustive-deps -- filters are applied deliberately with Apply filters.
   useEffect(() => {
-    void refresh(undefined, page);
-  }, [api, projectId, releaseId, page, appliedSearch, appliedFilters, targetFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (
+      !initialReportId ||
+      (routedReportIdRef.current === initialReportId &&
+        routedSnapshotIdRef.current === initialSnapshotId)
+    )
+      return;
+    routedReportIdRef.current = initialReportId;
+    routedSnapshotIdRef.current = initialSnapshotId;
+    selectedIdRef.current = initialReportId;
+    routeRestorationRef.current = true;
+    routeSnapshotRef.current = initialSnapshotId;
+    // A different routed record is not yet committed. Clear the previous pane and applied identity before
+    // the request starts, so a failed restoration can never leave the old record actionable under the new URL.
+    if (
+      appliedIdRef.current !== initialReportId ||
+      appliedSnapshotRef.current !== initialSnapshotId
+    ) {
+      setSelected(undefined);
+      appliedIdRef.current = undefined;
+      appliedSnapshotRef.current = undefined;
+      setOwner({ userId: "", name: "" });
+    }
+  }, [initialReportId, initialSnapshotId]);
+  useEffect(() => {
+    const replaceRoute = routeRestorationRef.current;
+    const restoredSnapshot = routeSnapshotRef.current;
+    routeRestorationRef.current = false;
+    routeSnapshotRef.current = undefined;
+    void refresh(undefined, page, replaceRoute, restoredSnapshot);
+  }, [
+    api,
+    projectId,
+    releaseId,
+    page,
+    appliedSearch,
+    appliedFilters,
+    targetFilter,
+    initialReportId,
+    initialSnapshotId,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
   /**
    * The search box asks the queue itself, a moment after typing stops.
    *
@@ -622,6 +689,7 @@ export default function ProblemReportCenter({
       setSelected(detail);
       selectedIdRef.current = detail.id;
       appliedIdRef.current = detail.id;
+      appliedSnapshotRef.current = detail.snapshotId;
       setOwner({ userId: detail.responsibleEngineerId, name: detail.responsibleEngineerId });
       setTab("record");
       onSelected(id, targetFilter, snapshotId);
