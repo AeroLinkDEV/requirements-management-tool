@@ -583,6 +583,21 @@ test('Team Work stays readable without document overflow at the supported narrow
   await expect(page.getByRole('heading', { name: 'Team Work', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'People', exact: true })).toBeVisible()
   await expect(page.getByRole('textbox', { name: 'Search' })).toBeVisible()
+  const strip = page.locator('.teamWorkPeopleStrip')
+  const firstPerson = page.locator('.teamWorkPerson').filter({ hasText: 'API Alice' })
+  await expect(firstPerson.locator('strong')).toHaveText('API Alice')
+  await expect(firstPerson).toContainText('1 hold')
+  const personBounds = await firstPerson.boundingBox()
+  expect(personBounds).not.toBeNull()
+  expect(personBounds!.width).toBeGreaterThanOrEqual(190)
+  expect(await strip.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+  await firstPerson.click()
+  await expect(firstPerson).toHaveAttribute('aria-pressed', 'true')
+  const details = page.locator('.teamWorkPersonDetails[aria-label="View details for API Alice"]')
+  await expect(details).toBeVisible()
+  await details.click()
+  await expect(page.getByRole('dialog', { name: 'API Alice' })).toBeVisible()
+  await page.getByRole('dialog').getByRole('button', { name: 'Close current holder' }).click()
   // DOM visibility alone misses a full-height sticky navigation row covering the workspace.
   // A real pointer click must reach the control after scrolling the narrow page.
   await page.getByRole('textbox', { name: 'Search' }).click()
@@ -881,6 +896,30 @@ test('Team Work ranks current workloads before zero-work members and keeps build
     await page.setViewportSize({ width: 390, height: 844 })
     await page.screenshot({ path: process.env.AEROLINK_TEAM_WORK_RANKING_NARROW_SCREENSHOT, fullPage: true })
   }
+})
+
+test('Team Work labels person-filtered board totals separately from roster workloads', async ({ page }) => {
+  await openTeamWork(page, rankingFixture())
+  const totals = page.locator('.teamWorkTotals')
+
+  await page.locator('.teamWorkPerson').filter({ hasText: 'Busy Thirty Six' }).click()
+  await expect(page.locator('.teamWorkScopeLabel')).toHaveText('Showing work held by Busy Thirty Six')
+  await expect(totals.getByText('Unique items').locator('..')).toContainText('36')
+  await expect(totals.getByText('People holding work').locator('..')).toContainText('1')
+  await expect(totals.getByText('No current holder').locator('..')).toContainText('0')
+  await expect(page.locator('.teamWorkPerson').filter({ hasText: 'Busy Nineteen' })).toContainText('19 holds')
+
+  await page.getByRole('button', { name: 'Build 1.6', exact: true }).click()
+  await expect(page.locator('.teamWorkScopeLabel')).toHaveText('Showing Busy Thirty Six · Build 1.6')
+  await expect(totals.getByText('Unique items').locator('..')).toContainText('30')
+  await expect(totals.getByText('People holding work').locator('..')).toContainText('1')
+  await expect(totals.getByText('No current holder').locator('..')).toContainText('0')
+  await expect(page.locator('.teamWorkPerson').filter({ hasText: 'Busy Nineteen' })).toContainText('10 holds')
+
+  await page.getByRole('button', { name: 'Clear person', exact: true }).click()
+  await expect(page.locator('.teamWorkScopeLabel')).toHaveText('Showing Build 1.6')
+  await expect(totals.getByText('Unique items').locator('..')).toContainText('57')
+  await expect(totals.getByText('People holding work').locator('..')).toContainText('4')
 })
 
 test('Team Work caps selection frequency below substantially busier workloads', async ({ page }) => {

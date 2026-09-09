@@ -1148,7 +1148,7 @@ export default function TeamWork({ api, projectId, user }: {
     : build === "all"
       ? ""
       : `Build ${buildOptions.find(option => option.id === build)?.version ?? build}`;
-  const activeScopeParts = [
+  const rosterScopeParts = [
     selectedBuild,
     layer !== "all" ? layerLabel(layer) : "",
     artifactType !== "all"
@@ -1156,10 +1156,17 @@ export default function TeamWork({ api, projectId, user }: {
       : "",
     search.trim() ? `Search “${search.trim()}”` : "",
   ].filter(Boolean);
-  const hasNarrowingFilters = activeScopeParts.length > 0;
-  const scopeLabel = hasNarrowingFilters ? `Showing ${activeScopeParts.join(" · ")}` : "Showing all project work";
+  const hasNarrowingFilters = rosterScopeParts.length > 0;
+  const rosterScopeLabel = hasNarrowingFilters
+    ? `Showing ${rosterScopeParts.join(" · ")}`
+    : "Showing all project work";
+  const boardScopeLabel = selected
+    ? hasNarrowingFilters
+      ? `Showing ${selected.displayName} · ${rosterScopeParts.join(" · ")}`
+      : `Showing work held by ${selected.displayName}`
+    : rosterScopeLabel;
   const peopleScopeLabel = hasNarrowingFilters
-    ? `${scopeLabel} · counts before person selection`
+    ? `${rosterScopeLabel} · counts before person selection`
     : "Every current member · counts follow filters, before person selection";
   const filterDescription = `${layer !== "all" ? layerLabel(layer) : artifactType !== "all" ? artifactTypeOptions.find(option => option.id === artifactType)?.label ?? artifactType : "Controlled work"}${selectedBuild ? ` on ${selectedBuild}` : ""}`;
 
@@ -1172,7 +1179,7 @@ export default function TeamWork({ api, projectId, user }: {
           <p>Project scope · every build</p>
         </div>
         <div className="teamWorkTotalsGroup">
-          <p className="teamWorkScopeLabel">{scopeLabel}</p>
+          <p className="teamWorkScopeLabel">{boardScopeLabel}</p>
           <dl className="teamWorkTotals">
             <div><dt>Unique items</dt><dd>{boardTotals.items}</dd></div>
             <div><dt>People holding work</dt><dd>{boardTotals.people}</dd></div>

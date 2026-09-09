@@ -67,7 +67,7 @@
 .teamWorkPeopleHeader p { margin: 4px 0 0; color: var(--ink-500); font-size: 12px; }
 .teamWorkPeopleControls { display: flex; gap: 5px; }
 .teamWorkPeopleControls button, .teamWorkDrawer header button { min-width: 34px; min-height: 34px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink-700); font-size: 22px; line-height: 1; cursor: pointer; }
-.teamWorkPeopleStrip { display: grid; grid-auto-flow: column; grid-auto-columns: calc((100% - 50px) / 6); gap: 10px; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; padding: 1px 1px 3px; }
+.teamWorkPeopleStrip { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, calc((100% - 50px) / 6)); gap: 10px; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; padding: 1px 1px 3px; }
 .teamWorkPeopleStrip > div { min-width: 0; }
 .teamWorkPeopleStrip > div[role="listitem"] { position: relative; display: block; width: 100%; }
 .teamWorkPerson { position: relative; display: flex; width: 100%; min-width: 0; min-height: 74px; align-items: flex-start; gap: 7px; padding: 7px 7px 25px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--ink-900); text-align: left; cursor: pointer; scroll-snap-align: start; }
@@ -132,4 +132,4 @@
 .teamWorkDrawerRow span { font-size: 13px; }
 .teamWorkDrawerRow small { grid-column: 2; color: var(--ink-500); font-size: 12px; }
 @media (max-width: 650px) { .teamWorkDrawer { padding: 20px 16px; } .teamWorkDrawerStats { grid-template-columns: repeat(2, 1fr); } .teamWorkDrawerRow { grid-template-columns: 1fr; } .teamWorkDrawerRow small { grid-column: 1; } }
-@media (min-width: 1500px) { .teamWorkPeopleStrip { grid-auto-columns: calc((100% - 70px) / 8); } }
+@media (min-width: 1500px) { .teamWorkPeopleStrip { grid-auto-columns: minmax(200px, calc((100% - 70px) / 8)); } }
