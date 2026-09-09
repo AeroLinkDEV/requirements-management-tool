@@ -671,7 +671,12 @@ export default function ChangeRequestWorkspace({
         problemRich: recovered.problemRich || fromPlainText(recovered.problem),
         analysisRich: recovered.analysisRich || fromPlainText(recovered.analysis),
         solutionRich: recovered.solutionRich || fromPlainText(recovered.solution),
-        upstreamLinks: recovered.upstreamLinks ?? [],
+        upstreamLinks: (recovered.upstreamLinks ?? []).map(link => {
+          // Older server snapshots used CLR casing inside this otherwise camel-case document.
+          const legacy = link as UpstreamDraftLink & { UpstreamChangeRequestId?: string; Rationale?: string };
+          return { upstreamChangeRequestId: link.upstreamChangeRequestId ?? legacy.UpstreamChangeRequestId ?? "",
+            rationale: link.rationale ?? legacy.Rationale ?? "" };
+        }),
         noUpstreamRationale: recovered.noUpstreamRationale ?? null,
         upstreamAnswerAffirmed: recovered.upstreamAnswerAffirmed ?? false,
       };
@@ -1150,7 +1155,7 @@ export default function ChangeRequestWorkspace({
     value.trim(),
   );
   const proposalsComplete = requirements.length > 0 && requirements.every(proposalComplete);
-  const localTraceAnswerComplete = upstreamAnswerComplete || upstreamCandidatesTop || derivedUpstreamEdges.length > 0
+  const localTraceAnswerComplete = mode !== "edit" ? upstreamAnswerComplete : upstreamAnswerComplete || upstreamCandidatesTop || derivedUpstreamEdges.length > 0
     || (draft.upstreamLinks ?? []).length > 0 || Boolean(draft.noUpstreamRationale?.trim())
     || draft.upstreamAnswerAffirmed === true;
   const reviewReady = caseComplete && proposalsComplete && requirements.length > 0 && localTraceAnswerComplete;

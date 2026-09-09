@@ -244,6 +244,8 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
 
         var rationaleCheckout = await CheckoutAsync(client, fixture.ChildId);
         var persistedLink = Assert.Single(rationaleCheckout.Draft["upstreamLinks"]!.AsArray())!.AsObject();
+        Assert.Equal(fixture.EarlierSourceId, persistedLink["upstreamChangeRequestId"]!.GetValue<Guid>());
+        Assert.NotNull(persistedLink["rationale"]);
         persistedLink["rationale"] =
             "The signed 1.6 system decision remains controlling after the 1.7 rationale review.";
         var rationaleSessionVersion = await AutosaveAsync(client, rationaleCheckout.SessionId,
