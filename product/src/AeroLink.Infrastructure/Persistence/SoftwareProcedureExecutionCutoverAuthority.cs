@@ -15,6 +15,14 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
 
+/// <summary>
+/// The immutable totals for the single governed cutover completion. Every caller receives this same
+/// committed summary when the marker exists or when a concurrent caller observes the persisted project
+/// work before claiming the marker. The counters are not per-invocation work performed. An all-zero
+/// summary represents a non-applicable host, no eligible or recovered work, or the qualification
+/// harness's normalization of the documented ladder optimistic-version collision; the authority itself
+/// surfaces that collision as an <see cref="InvalidOperationException"/>.
+/// </summary>
 public sealed record SoftwareProcedureCutoverResult(int ProjectsUpgraded, int ProceduresGenerated,
     int ExecutionsRebound, int TestSetEntriesRebound, int BaselineSelectionsRebound, int ImpactItemsRebound);
 
