@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "aerolink-fast-ci/v1",
+  "id": "aerolink-fast-ci/v2",
   "authoritative": false,
   "targetMs": 240000,
   "safety": {
@@ -29,7 +29,12 @@
     "commands": [
       "npm ci",
       "npm run lint",
-      "npm run typecheck"
+      "npm run typecheck",
+      "npm run test:fast:routes",
+      "npm run test:fast:logic",
+      "npx playwright install chromium",
+      "npm run test:fast:isolation",
+      "npm run test:fast:rendered"
     ]
   },
   "fullOnlyEvidence": [
@@ -41,9 +46,10 @@
     "operator and recovery contract family"
   ],
   "notes": [
-    "Phase 1 is measurement-only and additive: the existing Full Product quality gate still runs unchanged on every pull request.",
+    "Fast is advisory and additive: dispatched Full and the composed merge-queue candidate retain every browser identity and the complete required gate.",
     "The selected Infrastructure tests use unique temp/in-memory SQLite, except MigrationRegistrationTests which builds the Npgsql model against an invalid host without opening a connection.",
     "SharedHostIsolationTests uses one disposable SharedApiHost/SQLite database with unique logical data and fresh clients to cover hosted startup, authentication/session isolation, persistence, and project authorization.",
-    "Browser smoke is intentionally not in v1 because the current hosted Windows smoke path alone can consume most of the four-minute budget; it remains fully covered by the unchanged Full gate while Fast timing is established."
+    "The explicit client manifest adds API-independent logic and rendered fixtures. Runtime discovery proves their identity parity with Full; every unknown file stays Full-only. Integrated browser smoke and its showcase seed remain in Full.",
+    "Rendered fixtures use Vite and Chromium only, reject API/external requests, and keep one worker with no retry. Individual assertions remain unchanged. Hosted latency and first-pass behavior must be measured before expanding this subset."
   ]
 }
