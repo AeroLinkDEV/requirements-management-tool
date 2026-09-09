@@ -19,7 +19,12 @@ export function useWorkspaceRoute() {
     setRoute(current => JSON.stringify(current) === JSON.stringify(next) ? current : next);
   }, [isCurrent]);
   useEffect(() => {
-    const restore = () => setRoute(readRoute());
+    // Local worklist paging is owned by its workspace. Do not replace an unchanged shell
+    // route while that workspace's own popstate handler is restoring the list.
+    const restore = () => {
+      const next = readRoute();
+      setRoute(current => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+    };
     addEventListener("popstate", restore);
     return () => removeEventListener("popstate", restore);
   }, []);
