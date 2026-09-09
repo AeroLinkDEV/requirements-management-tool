@@ -40,6 +40,9 @@ See [Scope and Boundaries](docs/product-definition/SCOPE_AND_BOUNDARIES.md) and 
 ## Current technology and repository shape
 
 - React + TypeScript client.
+- A typed current route owns workspace and exact-artifact selection. Workspace hydration resolves that
+  destination against authorized server workspaces; missing explicit projects/builds are unavailable rather
+  than substituted. Shared request-generation guards reject stale shell and Requirements Explorer reads.
 - ASP.NET Core / .NET application and API.
 - Entity Framework Core persistence.
 - PostgreSQL for real local/on-premises operation.

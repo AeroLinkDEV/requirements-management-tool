@@ -159,7 +159,7 @@ test('Build 1.6 keeps editing capability, scopes search, and labels predecessor 
     await page.screenshot({ path: process.env.AEROLINK_BUILD_16_SCREENSHOT, fullPage: true })
 })
 
-test('an authenticated invalid build deep link stays authenticated and shows not found', async ({ page }) => {
+test('an authenticated invalid build deep link stays authenticated without substituting another build', async ({ page }) => {
   await login(page)
   const validUrl = new URL(page.url())
   const parts = validUrl.pathname.split('/')
@@ -168,9 +168,13 @@ test('an authenticated invalid build deep link stays authenticated and shows not
 
   await page.goto(parts.join('/'))
 
-  await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Workspace unavailable', exact: true })).toBeVisible()
   await expect(page.getByLabel('Username')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Return to Command Center' })).toBeVisible()
+  expect(new URL(page.url()).pathname).toBe(parts.join('/'))
+  await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Back to Projects', exact: true }).click()
+  await expect(page).toHaveURL(/\/projects$/)
+  await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible()
 })
 
 test('the build lineage stacks without horizontal scrolling on mobile', async ({ page }) => {

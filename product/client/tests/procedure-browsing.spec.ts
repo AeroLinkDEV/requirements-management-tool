@@ -52,11 +52,6 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
     `${apiBase}/api/test-cases?projectId=${projectId}&scope=HighLevelSoftware&state=Approved&pageSize=1`)).json()).totalCount;
   await expect(page.locator(".pager")).toContainText(`of ${approvedTotal.toLocaleString()}`, { timeout: 30_000 });
 
-  // A filtered worklist survives being reloaded, which is what makes it worth sharing.
-  await page.reload({ waitUntil: "load" });
-  await expect(page.getByLabel("Case state")).toHaveValue("Approved", { timeout: 30_000 });
-  await expect(page.locator(".pager")).toContainText(`of ${approvedTotal.toLocaleString()}`, { timeout: 30_000 });
-
   // Paging is reachable, moves the list, and is in the address.
   const firstNumber = await rows.first().locator("b").first().textContent();
   await page.getByRole("button", { name: /Next/ }).click();
@@ -69,6 +64,11 @@ test("the procedure workspace pages, filters and deep-links instead of rendering
   await expect(page).not.toHaveURL(/artifactPage=2/, { timeout: 30_000 });
   await expect(page.getByLabel("Case state")).toHaveValue("Approved", { timeout: 30_000 });
   await expect(rows.first().locator("b").first()).toHaveText(firstNumber ?? "", { timeout: 30_000 });
+
+  // A filtered worklist survives being reloaded, which is what makes it worth sharing.
+  await page.reload({ waitUntil: "load" });
+  await expect(page.getByLabel("Case state")).toHaveValue("Approved", { timeout: 30_000 });
+  await expect(page.locator(".pager")).toContainText(`of ${approvedTotal.toLocaleString()}`, { timeout: 30_000 });
 
   // A search matching nothing says so, and says something different from having no procedures at all.
   await page.getByLabel("Find a case").fill("no-case-has-this-number");
