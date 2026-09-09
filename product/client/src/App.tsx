@@ -302,7 +302,7 @@ function App() {
      [ladder, setLadder] = useState<ProjectLadderProjection|null>(null),
      [ladderError, setLadderError] = useState(""),
      [ladderAttempt, setLadderAttempt] = useState(0),
-    [connected, setConnected] = useState(false),
+    [dashboardError, setDashboardError] = useState(""),
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
 
@@ -352,12 +352,10 @@ function App() {
       if (!current()) return;
       setWorkspaces(next);
       setWorkspaceStatus("ready");
-      setConnected(true);
     } catch {
       if (!current()) return;
       setWorkspaceStatus("error");
       setWorkspaces([]);
-      setConnected(false);
     }
   }, [beginWorkspaces]);
   const { active, project, release, unavailable } = resolveWorkspaceContext(workspaces, route);
@@ -403,6 +401,7 @@ function App() {
   const loadData = useCallback(async () => {
     if (!project) return;
     const current = beginDashboard();
+    setDashboardError("");
     setDashboardLoading(true);
     try {
       const response = await fetch(
@@ -412,7 +411,7 @@ function App() {
       const next = await response.json();
       if (current()) setMetrics(next);
     } catch {
-      if (current()) setConnected(false);
+      if (current()) setDashboardError("Build work summary could not be loaded.");
     } finally {
       if (current()) setDashboardLoading(false);
     }
@@ -655,7 +654,6 @@ function App() {
     invalidateDashboard();
     setWorkspaces([]);
     setWorkspaceStatus("loading");
-    setConnected(false);
     writeHistory("replaceState", "/projects");
     setUser(null);
   };
@@ -1299,7 +1297,7 @@ function App() {
           <button onClick={() => navigate("release")}>Lifecycle Decision Room →</button>
         </section>
         <section className="dashboardTriptych" aria-busy={dashboardLoading} aria-label="Build work summary">
-          {dashboardLoading?<>{Array.from({length:3},(_,index)=><div className="dashboardSkeleton dashboardAreaCard" key={index}><span className="skeletonLine medium"/><i className="skeletonMetric"/><span className="skeletonLine"/></div>)}</>:<>
+          {dashboardError?<div role="alert"><p>{dashboardError}</p><button onClick={()=>void loadData()}>Retry build summary</button></div>:dashboardLoading?<>{Array.from({length:3},(_,index)=><div className="dashboardSkeleton dashboardAreaCard" key={index}><span className="skeletonLine medium"/><i className="skeletonMetric"/><span className="skeletonLine"/></div>)}</>:<>
             {changeCard("System change control","system",metrics.system)}
             {changeCard("Software change control","software",metrics.software)}
             <section className="dashboardAreaCard verification">

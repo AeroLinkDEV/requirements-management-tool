@@ -118,6 +118,14 @@ test("late dashboard completion cannot overwrite a newer build", async ({ page }
   await expect(total).toHaveText("17");
 });
 
+test("a failed build read does not display another build's summary", async ({ page }) => {
+  await mockShell(page);
+  await page.route("**/api/dashboard?**", route => route.fulfill({ status: 503, json: { error: "Unavailable" } }));
+  await page.goto(routePath(context, "dashboard"));
+  await expect(page.getByRole("alert")).toContainText("Build work summary could not be loaded.");
+  await expect(page.locator(".dashboardTotal")).toHaveCount(0);
+});
+
 test("route resolution preserves exact history and rejects absent program, project and build", () => {
   const route = parseRoute(routePath({ ...context, releaseId: "fms-old" }, "requirements", "system", "requirement") + "&requirementRevisionId=revision");
   const resolved = resolveWorkspaceContext(workspaces, route);
