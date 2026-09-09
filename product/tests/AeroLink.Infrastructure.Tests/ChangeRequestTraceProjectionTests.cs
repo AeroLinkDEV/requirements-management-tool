@@ -38,7 +38,8 @@ public sealed class ChangeRequestTraceProjectionTests
         var result = await ChangeRequestTraceProjection.ForChangeRequestAsync(fixture.Db, fixture.Project.Id,
             child.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
         Assert.NotNull(result);
-        Assert.Equal("UpstreamGap", result.State!.Overall);
+        Assert.Equal("UpstreamGap", result.State!.Upstream);
+        Assert.Equal("ActionRequired", result.State.Overall);
         var provenance = Assert.Single(Assert.Single(result.Edges).Provenance);
         Assert.False(provenance.IsLive);
         Assert.Equal(earlier.Id, provenance.UpstreamBuildId);

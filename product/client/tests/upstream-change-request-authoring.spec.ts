@@ -56,4 +56,20 @@ test('initial upstream authoring blocks Deferred with a popup and persists multi
   expect(detail.ok(), await detail.text()).toBeTruthy()
   const body = await detail.json() as { upstream: { upstreamChangeRequestId: string }[] }
   expect(body.upstream.map(link => link.upstreamChangeRequestId).sort()).toEqual([earlier!.id, current!.id].sort())
+  await page.getByRole('button', { name: 'Check out & edit', exact: true }).click()
+  const editPicker = page.getByLabel('Upstream change requests', { exact: true })
+  await expect(editPicker.locator('.upstreamDraftRow')).toHaveCount(2)
+  for (const candidate of [earlier!, current!]) {
+    await expect(editPicker.getByLabel(`Rationale for ${candidate.displayNumber}`, { exact: true }))
+      .toHaveValue('This exact approved decision remains applicable to the selected build.')
+  }
+  await editPicker.getByLabel('Find a direct parent').fill(deferred!.displayNumber.split('.')[0])
+  const editDialogPromise = page.waitForEvent('dialog')
+  const editClick = editPicker.getByRole('button', { name: new RegExp(deferred!.displayNumber.replace('.', '\\.')) }).click()
+  const editDialog = await editDialogPromise
+  expect(editDialog.message()).toContain('Reassign this CR to the current build')
+  await editDialog.accept()
+  await editClick
+  await expect(editPicker.locator('.upstreamDraftRow')).toHaveCount(2)
+  await page.getByRole('button', { name: 'Discard checkout', exact: true }).click()
 })
