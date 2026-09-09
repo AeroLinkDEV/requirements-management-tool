@@ -111,7 +111,25 @@ test('Problem Reports remain workable and explicitly target-filtered from every 
 
   const releasedOption = await targetBuild().locator('option').filter({ hasText: 'released' }).getAttribute('value')
   expect(releasedOption).toBeTruthy()
+  const releasedAnchorTitle = `Released target anchor ${stamp}`
+  const releasedAnchor = await request.post(`${apiBase}/api/problem-reports`, {
+    data: {
+      category: 'CodeFunctional', projectId: showcase.projectId,
+      releaseId: releasedOption,
+      title: releasedAnchorTitle,
+      problem: 'A released-build row exists so the queue has a deterministic fallback selection.',
+    },
+  })
+  expect(releasedAnchor.ok(), await releasedAnchor.text()).toBeTruthy()
+  const fallbackDetail = page.waitForResponse(response => {
+    const url = new URL(response.url())
+    return /\/api\/problem-reports\/[0-9a-f-]{36}$/i.test(url.pathname)
+      && !url.pathname.endsWith(targetedId)
+  })
   await selectTargetBuild(releasedOption!)
+  const fallbackResponse = await fallbackDetail
+  expect(fallbackResponse.ok(), await fallbackResponse.text()).toBeTruthy()
+  await expect(page).not.toHaveURL(new RegExp(targetedId))
   await expect(page.locator('.prList').getByText(title)).toHaveCount(0)
 
   // Target filter state is addressable and follows browser history rather than silently following workspace.

@@ -186,7 +186,7 @@ type Props = {
   user: AuthUser;
   initialReportId?: string;
   initialSnapshotId?: string;
-  onSelected: (id?: string, targetBuild?: string, snapshotId?: string) => void;
+  onSelected: (id?: string, targetBuild?: string, snapshotId?: string, replace?: boolean) => void;
   onBack: () => void;
   onOpenVerification: (target?: {
     discipline: "system" | "software";
@@ -537,7 +537,10 @@ export default function ProblemReportCenter({
           !detail.historicalReadOnly &&
           (selectId || addressStale || (requested && requested !== id))
         )
-          onSelected(id, targetFilter);
+          // An automatic fallback is not a reader navigation. Replace the current filter entry so one Back
+          // returns to the previous target, rather than stepping onto a duplicate entry that carries the
+          // same filter and the fallback record. Explicit opens and create/action refreshes still push.
+          onSelected(id, targetFilter, undefined, fallback);
       } else if (selectedIdRef.current === intentAtStart) {
         const hadRecord = appliedIdRef.current !== undefined;
         setSelected(undefined);
