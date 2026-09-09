@@ -4,6 +4,10 @@ using System.Text.Json;
 
 namespace AeroLink.Infrastructure.Tests;
 
+[CollectionDefinition("ScaleQualificationSafety", DisableParallelization = true)]
+public sealed class ScaleQualificationSafetyCollection { }
+
+[Collection("ScaleQualificationSafety")]
 public sealed class ScaleQualificationSafetyTests
 {
     [Fact]
