@@ -15,6 +15,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
 
+/// <summary>
+/// The immutable totals for the single governed cutover completion. Every caller receives this same
+/// committed summary when the marker exists or when a concurrent caller observes the persisted project
+/// work before claiming the marker. The all-zero result is returned only when an invocation loses the
+/// project-level optimistic race before it completes any work; the counters are not per-invocation work
+/// performed.
+/// </summary>
 public sealed record SoftwareProcedureCutoverResult(int ProjectsUpgraded, int ProceduresGenerated,
     int ExecutionsRebound, int TestSetEntriesRebound, int BaselineSelectionsRebound, int ImpactItemsRebound);
 
