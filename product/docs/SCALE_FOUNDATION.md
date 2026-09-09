@@ -35,20 +35,20 @@ The separate `workspace` command generates materialized Requirement artifacts, i
 Example:
 
 ```powershell
-$env:AEROLINK_SCALE_CONNECTION='Host=127.0.0.1;Port=54329;Database=aerolink_scale;Username=postgres'
-& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- generate --profile medium --reset
-& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- benchmark
+$env:AEROLINK_SCALE_CONNECTION='Host=127.0.0.1;Port=55495;Database=aerolink_scale;Username=postgres'
+& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- generate --profile medium --reset --dataset-seed 4754 --qualification-enabled --allow-dataset-write
 ```
 
 Enterprise Requirements Workspace qualification:
 
 ```powershell
-& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- workspace --profile medium --reset
-& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- benchmark
-& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- load --users 150 --iterations 8
+& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- workspace --profile medium --reset --dataset-seed 4754 --qualification-enabled --allow-dataset-write --evidence-root C:\Temp\aerolink-scale-evidence --manifest C:\Temp\aerolink-scale-evidence\workspace.json
+# Read programId/projectId/releaseId/baselineId/datasetHash from workspace.json, then pass those exact values:
+& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- benchmark --program-id <programId> --project-id <projectId> --release-id <releaseId> --baseline-id <baselineId> --dataset-seed 4754 --dataset-hash <datasetHash>
+& "$HOME\.dotnet\dotnet.exe" run --project product\tools\AeroLink.Scale -- load --program-id <programId> --project-id <projectId> --release-id <releaseId> --baseline-id <baselineId> --dataset-seed 4754 --dataset-hash <datasetHash> --users 150 --iterations 8
 ```
 
-The `--reset` safeguard works only when the connection string names an `aerolink_scale` database.
+Scale writes require an explicit `--qualification-enabled` and a separate `--allow-dataset-write` opt-in. Existing-dataset reads require exact Program, Project, release, baseline, and dataset manifest values; they never choose the first available Project. The tool refuses the persistent PostgreSQL port `54329`, ordinary databases, evidence roots overlapping `product/.local`, and an existing manifest path. `session-load` remains deferred until a supported proof binds the HTTP API to the exact qualified database; no HTTP workload or account provisioning is claimed by this foundation slice.
 
 ## First medium-scale result
 

@@ -26,6 +26,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AeroLink.Domain\AeroLink.Domain.csproj" />
     <ProjectReference Include="..\..\src\AeroLink.Infrastructure\AeroLink.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\tools\AeroLink.Scale\AeroLink.Scale.csproj" />
   </ItemGroup>
 
 </Project>
