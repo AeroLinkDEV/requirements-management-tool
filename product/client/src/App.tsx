@@ -338,6 +338,11 @@ function App() {
       .then(async (r) => setUser(r.ok ? await r.json() : null))
       .catch(() => setUser(null));
   }, []);
+  useEffect(() => {
+    if (user && !user.mustChangePassword && location.pathname === "/") {
+      writeHistory("replaceState", "/projects");
+    }
+  }, [user, writeHistory]);
   const [workspaceStatus, setWorkspaceStatus] = useState<"loading" | "ready" | "error">("loading");
   const { begin: beginWorkspaces, invalidate: invalidateWorkspaces } = useLatestRequest();
   const { begin: beginDashboard, invalidate: invalidateDashboard } = useLatestRequest();

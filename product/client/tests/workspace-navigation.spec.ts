@@ -28,6 +28,13 @@ async function mockShell(page: Page, load: () => Promise<unknown> = async () => 
   });
 }
 
+test("an authenticated root destination canonicalizes to the Projects portal", async ({ page }) => {
+  await mockShell(page);
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/projects$/);
+});
+
 test("delayed hydration retains a real project-card selection and exact build scope", async ({ page }) => {
   let deliver: (value: unknown) => void = () => { throw new Error("Workspace request has not started"); };
   const pending = new Promise(resolve => { deliver = resolve; });
