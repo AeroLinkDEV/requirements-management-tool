@@ -315,7 +315,7 @@ public sealed class SystemChangeRequestControlledEditingAdapter(AeroLinkDbContex
             // Keep the editable fields aligned with SystemChangeRequestDraft. The surrounding provenance
             // fields remain read-only context; the check-in path must be able to round-trip autosave JSON.
             upstreamLinks = item.UpstreamLinks.OrderBy(x => x.UpstreamChangeRequestId).Select(x => new {
-                upstreamChangeRequestId = x.UpstreamChangeRequestId, rationale = x.Rationale }),
+                x.UpstreamChangeRequestId, x.Rationale }),
             noUpstreamRationale = item.NoUpstreamRationale,
             noUpstreamStatedBy = item.NoUpstreamStatedBy,
             noUpstreamStatedAt = item.NoUpstreamStatedAt,
