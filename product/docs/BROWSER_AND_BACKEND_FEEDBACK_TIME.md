@@ -184,10 +184,15 @@ the other two assemblies combined, so it gets a runner to itself and everything 
 
 Two details that are easy to get wrong, and were deliberately handled:
 
-- **Both backend jobs still build the whole solution.** `dotnet test <project>` builds only that project's
-  dependency graph, which would quietly stop proving that the tools and product projects outside it still
-  compile. The duplicated build is the price of keeping "everything compiles" true once the assemblies run
-  apart.
+- **The scoped backend jobs build their own complete project graphs.** Each API shard restores and builds
+  `AeroLink.Api.Tests.csproj`, and the Infrastructure job restores and builds
+  `AeroLink.Infrastructure.Tests.csproj`, including transitive project references, before discovery and
+  execution use `--no-build`. They do not consume binaries from another runner or use `--no-dependencies`.
+- **Whole-solution coverage remains separately owned.** The required Domain job restores and builds the
+  complete solution on Windows, including tools and projects outside the two test graphs. The PostgreSQL
+  qualification keeps its independent whole-solution Linux restore/build. A selected backend job requires
+  the Domain owner to complete; fewer projects compiled on a scoped runner is not evidence of a shorter
+  Full gate by itself.
 - **Naming assemblies individually introduces a new failure mode**: a test project that no job runs. It would
   still build, so nothing would fail — the suite would simply become invisible. `backend-core` carries a guard
   that enumerates `product/tests/*` and fails on any project not claimed by a job.

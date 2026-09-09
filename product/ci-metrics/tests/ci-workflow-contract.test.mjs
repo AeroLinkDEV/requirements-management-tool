@@ -82,7 +82,7 @@ test('the actual aggregate shell rejects incomplete scheduled and manual browser
           ...process.env,
           ...Object.fromEntries(envNames.map((name) => [name, ''])),
           BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'success', BACKEND_CORE_INFRASTRUCTURE: 'success',
-          CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success',
+          BACKEND: 'false', CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success',
           POSTGRESQL: 'success', METRICS_TOOLING: 'success', DOCS_ONLY: 'false', LAUNCHERS_ONLY: 'false',
           POST_MERGE_SKIP: 'false', EVENT_NAME: event, FULL_DIAGNOSTICS: fullDiagnostics, BROWSER_FULL: result,
           GITHUB_STEP_SUMMARY: join(directory, 'summary.md').replaceAll('\\', '/'),
@@ -129,6 +129,80 @@ test('the actual aggregate shell requires the native operator owner except docum
     assert.equal(invoke({ CONTRACTS: 'success' }).status, 0, 'a successful operator owner must satisfy the aggregate')
     assert.equal(invoke({ DOCS_ONLY: 'true', CONTRACTS: 'skipped' }).status, 0, 'documentation-only runs may skip the operator owner')
     assert.equal(invoke({ POST_MERGE_SKIP: 'true', CONTRACTS: 'skipped' }).status, 0, 'the modeled post-merge skip may omit the operator owner')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('the actual aggregate shell rejects a selected backend without its whole-solution owner', () => {
+  const gate = jobBodies(workflowLines()).gate
+  const step = stepBlocks(gate).find((block) => block.name === 'Summarise and enforce')
+  assert.ok(step, 'the aggregate must contain the enforcement step')
+  const runStart = step.lines.findIndex((line) => line === '        run: |')
+  assert.ok(runStart >= 0, 'the aggregate must execute a shell script')
+  const script = step.lines.slice(runStart + 1).filter((line) => line.startsWith('          ')).map((line) => line.slice(10)).join('\n')
+  const envNames = step.lines.slice(0, runStart).flatMap((line) => /^          ([A-Z_]+):/.exec(line)?.[1] ?? [])
+  const directory = mkdtempSync(join(tmpdir(), 'aerolink-953-gate-'))
+  const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash'
+  try {
+    const modes = [
+      ['ordinary PR', 'pull_request', 'false'],
+      ['ready-for-full-ci effective PR', 'pull_request', 'false'],
+      ['merge queue', 'merge_group', 'false'],
+      ['main push', 'push', 'false'],
+      ['scheduled qualification', 'schedule', 'true'],
+      ['manual diagnostics', 'workflow_dispatch', 'true'],
+      ['manual ready-for-full-ci', 'pull_request', 'false'],
+    ]
+    for (const [label, event, fullDiagnostics] of modes) {
+      const env = {
+        ...process.env,
+        ...Object.fromEntries(envNames.map((name) => [name, ''])),
+        BACKEND: 'true', BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'skipped', BACKEND_CORE_INFRASTRUCTURE: 'success',
+        CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success', BROWSER_FULL: 'success',
+        POSTGRESQL: 'success', METRICS_TOOLING: 'success', DOCS_ONLY: 'false', LAUNCHERS_ONLY: 'false',
+        POST_MERGE_SKIP: 'false', EVENT_NAME: event, FULL_DIAGNOSTICS: fullDiagnostics,
+        GITHUB_STEP_SUMMARY: join(directory, `${label.replaceAll(/[^a-z0-9]+/gi, '-')}.md`).replaceAll('\\', '/'),
+      }
+      const child = spawnSync(bash, ['-c', script], { encoding: 'utf8', env })
+      assert.equal(child.status, 1, `${label} must reject a selected backend with skipped Domain: ${child.error ?? child.stderr}\n${child.stdout}`)
+    }
+
+    for (const [label, event, fullDiagnostics, changes, results] of [
+      ['unexpected API in client-only mode', 'pull_request', 'false', { BACKEND: 'false', DOCS_ONLY: 'false', POST_MERGE_SKIP: 'false' }, { BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'skipped', BACKEND_CORE_INFRASTRUCTURE: 'skipped' }],
+      ['unexpected API in docs-only mode', 'pull_request', 'false', { BACKEND: 'false', DOCS_ONLY: 'true', POST_MERGE_SKIP: 'false' }, { BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'skipped', BACKEND_CORE_INFRASTRUCTURE: 'skipped' }],
+      ['unexpected Infrastructure during trusted skip', 'push', 'false', { BACKEND: 'true', DOCS_ONLY: 'false', POST_MERGE_SKIP: 'true' }, { BACKEND_API: 'skipped', BACKEND_CORE_DOMAIN: 'skipped', BACKEND_CORE_INFRASTRUCTURE: 'success' }],
+    ]) {
+      const env = {
+        ...process.env,
+        ...Object.fromEntries(envNames.map((name) => [name, ''])),
+        ...results,
+        CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success', BROWSER_FULL: 'success',
+        POSTGRESQL: 'success', METRICS_TOOLING: 'success', LAUNCHERS_ONLY: 'false', EVENT_NAME: event,
+        FULL_DIAGNOSTICS: fullDiagnostics, GITHUB_STEP_SUMMARY: join(directory, `${label.replaceAll(/[^a-z0-9]+/gi, '-')}.md`).replaceAll('\\', '/'),
+        ...changes,
+      }
+      const child = spawnSync(bash, ['-c', script], { encoding: 'utf8', env })
+      assert.equal(child.status, 1, `${label} must reject a successful scoped job without Domain: ${child.error ?? child.stderr}\n${child.stdout}`)
+    }
+
+    for (const [label, event, fullDiagnostics, changes] of [
+      ['docs-only', 'pull_request', 'false', { BACKEND: 'false', DOCS_ONLY: 'true', POST_MERGE_SKIP: 'false' }],
+      ['trusted post-merge skip', 'push', 'false', { BACKEND: 'true', DOCS_ONLY: 'false', POST_MERGE_SKIP: 'true' }],
+      ['client-only', 'pull_request', 'false', { BACKEND: 'false', DOCS_ONLY: 'false', POST_MERGE_SKIP: 'false' }],
+    ]) {
+      const env = {
+        ...process.env,
+        ...Object.fromEntries(envNames.map((name) => [name, ''])),
+        BACKEND_API: 'skipped', BACKEND_CORE_DOMAIN: 'skipped', BACKEND_CORE_INFRASTRUCTURE: 'skipped',
+        CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success', BROWSER_FULL: 'success',
+        POSTGRESQL: 'success', METRICS_TOOLING: 'success', LAUNCHERS_ONLY: 'false', EVENT_NAME: event,
+        FULL_DIAGNOSTICS: fullDiagnostics, GITHUB_STEP_SUMMARY: join(directory, `${label}.md`).replaceAll('\\', '/'),
+        ...changes,
+      }
+      const child = spawnSync(bash, ['-c', script], { encoding: 'utf8', env })
+      assert.equal(child.status, 0, `${label} should preserve its intentional skip: ${child.error ?? child.stderr}\n${child.stdout}`)
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
