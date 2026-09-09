@@ -147,6 +147,65 @@ function rankingFixture() {
   }
 }
 
+function filterScrollFixture() {
+  const people = [
+    rankingPerson('busy.system', 'Busy System', '00000000-0000-0000-0000-000000000201'),
+    rankingPerson('busy.interface', 'Busy Interface', '00000000-0000-0000-0000-000000000202'),
+    ...Array.from({ length: 40 }, (_, index) => rankingPerson(
+      `zero.${String(index).padStart(3, '0')}`,
+      `Zero Person ${String(index).padStart(3, '0')}`,
+      `00000000-0000-0000-0003-${String(index + 1).padStart(12, '0')}`,
+    )),
+  ]
+  const item = (index: number, holder: string, layer: 'System' | 'Interface',
+    artifactType: 'SRCR' | 'ICDCR'): FixtureItem => {
+    const id = `00000000-0000-0000-0004-${String(index).padStart(12, '0')}`
+    return {
+      id, family: layer === 'System' ? 'system' : 'interface', layer, artifactType,
+      category: layer, prefix: artifactType, number: `${artifactType}-${String(index).padStart(5, '0')}.00`,
+      title: `${artifactType} filter-scroll item ${index}`, lane: 'work', nativeState: 'Draft',
+      nativeOutcome: null, currentHolderIds: [holder], holderBasis: 'responsibleEngineer',
+      raisedById: null, raisedByKind: null,
+      release: { id: rankingReleaseA, version: '1.6', isReleased: false }, deferred: false,
+      allocation: null, deferredFromState: null, activeStageObligations: [],
+      updatedAt: '2026-08-30T00:00:00Z', openUrl: `/open/change-request/${id}`,
+    } as FixtureItem
+  }
+  const items = [
+    item(1, 'busy.system', 'System', 'SRCR'),
+    item(2, 'busy.system', 'System', 'SRCR'),
+    item(3, 'busy.interface', 'Interface', 'ICDCR'),
+    item(4, 'busy.interface', 'Interface', 'ICDCR'),
+  ]
+  const counts = new Map<string, { holds: number; byLane: typeof emptyLaneCounts }>()
+  for (const workItem of items) {
+    for (const holder of workItem.currentHolderIds) {
+      const current = counts.get(holder) ?? { holds: 0, byLane: { ...emptyLaneCounts } }
+      current.holds++
+      current.byLane[workItem.lane]++
+      counts.set(holder, current)
+    }
+  }
+  return {
+    generatedAt: '2026-08-30T00:00:00Z',
+    totals: { items: items.length, returned: items.length, unheld: 0 },
+    layers: [
+      { id: 'System', label: 'System', count: 2, artifactTypes: [{ id: 'SRCR', label: 'SRCR', count: 2 }] },
+      { id: 'Interface', label: 'Interface', count: 2, artifactTypes: [{ id: 'ICDCR', label: 'ICDCR', count: 2 }] },
+    ],
+    artifactTypes: [
+      { id: 'ICDCR', label: 'ICDCR', count: 2 },
+      { id: 'SRCR', label: 'SRCR', count: 2 },
+    ],
+    people: people.map(person => ({
+      ...person,
+      holds: counts.get(person.userName)?.holds ?? 0,
+      byLane: counts.get(person.userName)?.byLane ?? { ...emptyLaneCounts },
+    })),
+    items,
+  }
+}
+
 async function openTeamWork(page: Parameters<typeof login>[0], body: unknown = fixture) {
   const calls: string[] = []
   await page.route('**/api/team-work*', async route => {
@@ -1043,6 +1102,38 @@ test('Team Work preserves focus and scroll when selection crosses a boost thresh
   expect(after).toBeGreaterThanOrEqual(before - 5)
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('aerolink-teamwork-affinity') || '{}'))
   expect(stored.viewers[me.id][projectId][busy16.userId]).toBe(10)
+})
+
+test('Team Work keeps busy holders in the visible strip when filters reorder the roster', async ({ page }) => {
+  await openTeamWork(page, filterScrollFixture())
+  const strip = page.locator('.teamWorkPeopleStrip')
+  await strip.evaluate(element => { element.scrollLeft = 0 })
+  await expect(page.getByRole('button', { name: 'Build 1.6', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Build 1.6', exact: true }).click()
+  await expect(page.locator('.teamWorkScopeLabel')).toHaveText('Showing Build 1.6')
+  await page.getByRole('group', { name: 'Layer' })
+    .getByRole('button', { name: 'Interface (2)', exact: true }).click()
+  await expect(page.locator('.teamWorkScopeLabel')).toContainText('Interface')
+  await expect.poll(async () => strip.evaluate(element => element.scrollLeft)).toBeLessThanOrEqual(5)
+  const visible = await strip.evaluate(element => {
+    const stripRect = element.getBoundingClientRect()
+    return [...element.querySelectorAll('.teamWorkPerson')].map(card => {
+      const rect = card.getBoundingClientRect()
+      const text = (card.textContent ?? '').replace(/\s+/g, ' ').trim()
+      return {
+        name: card.querySelector('strong')?.textContent?.replace(/\s*\(you\)$/, '').trim() ?? '',
+        holds: Number(text.match(/(\d+) holds?/)?.[1] ?? -1),
+        intersects: rect.right > stripRect.left + 1
+          && rect.left < stripRect.right - 1
+          && rect.bottom > stripRect.top + 1
+          && rect.top < stripRect.bottom - 1,
+      }
+    }).filter(person => person.intersects)
+  })
+  expect(visible[0]?.name).toBe('Busy Interface')
+  expect(visible[0]?.holds).toBe(2)
+  if (process.env.AEROLINK_TEAM_WORK_FILTER_SCROLL_SCREENSHOT)
+    await page.screenshot({ path: process.env.AEROLINK_TEAM_WORK_FILTER_SCROLL_SCREENSHOT, fullPage: true })
 })
 
 test('Team Work counts holder-heading selections but not Details', async ({ page }) => {
