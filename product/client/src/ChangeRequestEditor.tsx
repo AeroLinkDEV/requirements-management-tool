@@ -1,3 +1,4 @@
+import UpstreamChangeRequestPicker, { useUpstreamCandidates, type UpstreamDraftLink } from "./UpstreamChangeRequestPicker";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { AuthUser } from "./IdentityCenter";
@@ -53,6 +54,8 @@ type SavedDraft = {
   analysisRich?: string;
   solutionRich?: string;
   problemReportIds?: string[];
+  upstreamLinks?: UpstreamDraftLink[];
+  noUpstreamRationale?: string | null;
 };
 type ValidationError = { kind: "title" | "proposal"; message: string };
 
@@ -164,6 +167,9 @@ export default function ChangeRequestEditor({
   // could not be turned into a Modify or a Retire either. The author chooses the first change.
   const [changes, setChanges] = useState<ControlledRequirementDraft[]>([]);
   const [problemReportIds, setProblemReportIds] = useState<string[]>([]);
+  const [upstreamLinks, setUpstreamLinks] = useState<UpstreamDraftLink[]>([]);
+  const [noUpstreamRationale, setNoUpstreamRationale] = useState<string | null>(null);
+  const upstreamPicker = useUpstreamCandidates(`${api}/api/authoring/upstream-change-requests?projectId=${projectId}&releaseId=${releaseId}&type=${scope}${scope === "Software" ? `&softwareLevel=${defaultLevel}` : ""}`);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [validationError, setValidationError] = useState<ValidationError>();
@@ -172,8 +178,9 @@ export default function ChangeRequestEditor({
   // would consume an identifier for something nobody submitted.
   const draft = useLocalDraft<SavedDraft>(
     storageKey,
-    { title, problem, analysis, solution, changes, problemRich, analysisRich, solutionRich, problemReportIds },
-    { isEmpty: (value) => !value.title.trim() && !value.problem.trim() && !value.analysis.trim() && !value.solution.trim() },
+    { title, problem, analysis, solution, changes, problemRich, analysisRich, solutionRich, problemReportIds, upstreamLinks, noUpstreamRationale },
+    { isEmpty: (value) => !value.title.trim() && !value.problem.trim() && !value.analysis.trim() && !value.solution.trim()
+      && !value.upstreamLinks?.length && !value.noUpstreamRationale?.trim() },
   );
 
   const applyDraft = () => {
@@ -186,6 +193,8 @@ export default function ChangeRequestEditor({
     setSolutionRich(saved.solutionRich || fromPlainText(saved.solution || ""));
     if (saved.changes?.length) setChanges(saved.changes.map((item) => normalizeProposal(item, defaultLevel)));
     setProblemReportIds(saved.problemReportIds ?? []);
+    setUpstreamLinks(saved.upstreamLinks ?? []);
+    setNoUpstreamRationale(saved.noUpstreamRationale ?? null);
   };
 
   useEffect(() => {
@@ -384,6 +393,8 @@ export default function ChangeRequestEditor({
           analysisRich,
           solutionRich,
           problemReportIds,
+          upstreamLinks,
+          noUpstreamRationale,
           type: scope,
           softwareLevel: scope === "Software" ? softwareLevel : null,
           // An unset section is sent as null, not as "". A Guid? will not bind an empty string, and the failure
@@ -510,6 +521,8 @@ export default function ChangeRequestEditor({
           <ProblemReportPicker api={api} projectId={projectId} scope="target-build" releaseId={releaseId}
             selected={problemReportIds} onChange={setProblemReportIds}
             legend={`PRs driving this ${abbreviation} (optional)`} />
+          <UpstreamChangeRequestPicker candidates={upstreamPicker} links={upstreamLinks} onChange={setUpstreamLinks}
+            noUpstreamRationale={noUpstreamRationale} onNoUpstreamRationale={setNoUpstreamRationale} currentBuild={releaseVersion} />
         </section>
 
         <section className="editorCard authoringStage" id="requirement-changes">

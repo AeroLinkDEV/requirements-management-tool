@@ -18,6 +18,30 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class ChangeRequestTraceProjectionTests
 {
     [Fact]
+    public async Task Retained_off_ladder_history_is_explicit_and_does_not_break_mixed_projection()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var system = new SystemChangeRequest("SRCR-10060", 0, fixture.Project.Id, fixture.Release.Id,
+            "Current root", "P", "A", "S", "author", fixture.Now);
+        var historical = new SystemChangeRequest("ICDCR-10060", 0, fixture.Project.Id, fixture.Release.Id,
+            "Historical Interface", "P", "A", "S", "author", fixture.Now, ChangeRequestType.Interface);
+        fixture.Db.AddRange(system, historical);
+        await fixture.Db.SaveChangesAsync();
+        var policy = new ResolvedProjectLadderPolicy(new ResolvedProjectLadder(fixture.Project.Id,
+            ProjectLadderConfigurationClassification.LegacyDefault, ProjectLadderConfigurationState.Active,
+            [new(RequirementLevel.System, 1, LegacyLadderPolicy.Instance.Definition(RequirementLevel.System).Capabilities)], []));
+        var states = await ChangeRequestTraceProjection.StatesAsync(fixture.Db, fixture.Project.Id,
+            [system.Id, historical.Id], policy, CancellationToken.None);
+        Assert.True(states[system.Id].IsTopOfLadder);
+        Assert.False(states[historical.Id].IsTopOfLadder);
+        Assert.Equal("OffLadder", states[historical.Id].Overall);
+        var trace = await ChangeRequestTraceProjection.ForChangeRequestAsync(fixture.Db, fixture.Project.Id,
+            historical.Id, policy, CancellationToken.None);
+        Assert.NotNull(trace);
+        Assert.Equal("OffLadder", trace.State!.Overall);
+    }
+
+    [Fact]
     public async Task Composes_exact_tcr_origin_and_additional_sources_without_unrelated_nodes()
     {
         await using var fixture = await Fixture.CreateAsync();

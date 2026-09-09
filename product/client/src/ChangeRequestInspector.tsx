@@ -187,12 +187,10 @@ export default function ChangeRequestInspector({
 
   const changes = detail.requirementChanges ?? detail.artifactChanges ?? detail.procedureChanges ?? []
   const rootId = trace?.rootArtifactId || trace?.rootChangeRequestId || id
-  const isUpstream = (edge: TraceEdge) => edge.relation === 'Upstream'
-    ? edge.fromId === rootId
-    : edge.toId === rootId
-  const isDownstream = (edge: TraceEdge) => edge.relation === 'Upstream'
-    ? edge.toId === rootId
-    : edge.fromId === rootId
+  // All projected edges use story direction (upstream source → downstream consumer).
+  // "Upstream" names the stored relation, not a reversal of the emitted endpoints.
+  const isUpstream = (edge: TraceEdge) => edge.toId === rootId
+  const isDownstream = (edge: TraceEdge) => edge.fromId === rootId
   const upstream = trace?.edges.filter(isUpstream) ?? []
   const downstream = trace?.edges.filter(isDownstream) ?? []
   const nodeById = new Map((trace?.nodes ?? []).map(node => [node.id, node]))

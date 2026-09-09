@@ -319,10 +319,15 @@ public static partial class ChangeRequestTraceProjection
             if (!edge.Provenance.Contains(provenance)) edge.Provenance.Add(provenance);
         }
         foreach (var link in authored)
+        {
+            var eligible = byCr.TryGetValue(link.UpstreamChangeRequestId, out var parent)
+                && ChangeRequestUpstreamEligibility.IsApproved(parent.State);
             AddPair(link.ChangeRequestId, link.UpstreamChangeRequestId,
                 new("AuthorStated", link.Id, Rationale: link.Rationale, ActorId: link.ActorId,
                     StatedAt: link.StatedAt, UpstreamBuildId: link.UpstreamBuildId,
-                    UpstreamBuildVersion: link.UpstreamBuildVersion));
+                    UpstreamBuildVersion: link.UpstreamBuildVersion, IsLive: eligible,
+                    Status: eligible ? null : "Upstream revision is not currently approved; corrective authoring is required."));
+        }
         foreach (var link in assessments)
             AddPair(link.ChildId, link.SourceChangeRequestId,
                 new("AssessmentDerived", link.Id, link.Id, link.LinkId,
@@ -658,9 +663,10 @@ public static partial class ChangeRequestTraceProjection
         CancellationToken ct, TraceReadBudget? budget = null)
     {
         var ids = rows.Select(x => x.Id).ToHashSet();
-        var links = await db.ChangeRequestUpstreamLinks.AsNoTracking()
-            .Where(x => ids.Contains(x.ChangeRequestId))
-            .Select(x => new { x.ChangeRequestId, x.UpstreamChangeRequestId })
+        var links = await (from link in db.ChangeRequestUpstreamLinks.AsNoTracking()
+            join source in db.SystemChangeRequests.AsNoTracking() on link.UpstreamChangeRequestId equals source.Id
+            where ids.Contains(link.ChangeRequestId)
+            select new { link.ChangeRequestId, link.UpstreamChangeRequestId, source.State })
             .ReadTraceAsync(budget, ct);
         // Read the assessment decision independently from its optional child links. An assessment can be
         // Pending, NoChangeRequired, or ChangeRequired before a downstream CR exists; an inner join would
@@ -718,6 +724,12 @@ public static partial class ChangeRequestTraceProjection
         foreach (var row in rows)
         {
             var level = ChangeRequestLevel(row);
+            if (level is null || !policy.OrderedLevels.Contains(level.Value))
+            {
+                result[row.Id] = new("NotApplicable", "NotApplicable", "OffLadder", false,
+                    ["Historical change request level is not configured in the current Project ladder."]);
+                continue;
+            }
             var top = level is not null && policy.ParentLevels(level.Value).Count == 0;
             var rowLinks = links.Where(x => x.ChangeRequestId == row.Id).ToList();
             var derivedAnswer = assessmentLinks.Any(x => x.ChildId == row.Id
@@ -726,13 +738,22 @@ public static partial class ChangeRequestTraceProjection
                 && targetIdentityById.TryGetValue(x.ChildId, out var child)
                 && IsCurrentAssessmentEdge(assessment.ProjectId, assessment.State, assessment.ReleaseId, assessment.TargetLevel,
                     source, child, policy));
-            var authoredAnswer = rowLinks.Count > 0 || !string.IsNullOrWhiteSpace(row.NoUpstreamRationale)
+            var invalidAuthoredAnswer = rowLinks.Any(x => !ChangeRequestUpstreamEligibility.IsApproved(x.State));
+            var invalidDerivedAnswer = assessmentLinks.Any(x => x.ChildId == row.Id
+                && assessmentById.TryGetValue(x.Id, out var assessment)
+                && sourceById.TryGetValue(assessment.SourceChangeRequestId, out var source)
+                && !ChangeRequestUpstreamEligibility.IsApproved(source.State)
+                && IsApplicableAssessmentPair(assessment.ProjectId, assessment.State, assessment.ReleaseId,
+                    assessment.TargetLevel, source, Identity(row), policy));
+            var authoredAnswer = rowLinks.Count > 0 && !invalidAuthoredAnswer || !string.IsNullOrWhiteSpace(row.NoUpstreamRationale)
                 || row.InheritedUpstreamContextJson is not null && row.UpstreamAnswerAffirmed;
             var frozenAnswer = frozenAnswers.GetValueOrDefault(row.Id);
             var historicalFrozenAnswer = row.State != ChangeRequestState.Draft && frozenAnswer;
-            var upstream = top ? "Root" : authoredAnswer || derivedAnswer || historicalFrozenAnswer ? "Answered"
+            var upstream = top ? "Root" : invalidAuthoredAnswer || invalidDerivedAnswer ? "UpstreamGap" : authoredAnswer || derivedAnswer || historicalFrozenAnswer ? "Answered"
                 : row.State == ChangeRequestState.Draft ? "IncompleteAuthoring" : "UpstreamGap";
             var warnings = new List<string>();
+            if (invalidAuthoredAnswer || invalidDerivedAnswer)
+                warnings.Add("An upstream revision is not currently approved; correct the active answer. Frozen reviews remain historical evidence.");
             if (!top && !authoredAnswer && !derivedAnswer && !historicalFrozenAnswer)
                 warnings.Add(row.State == ChangeRequestState.Draft
                     ? "No upstream answer is authored yet; complete it before review."
@@ -797,6 +818,11 @@ public static partial class ChangeRequestTraceProjection
     private static bool IsCurrentAssessmentEdge(Guid projectId, DownstreamAssessmentState assessmentState,
         Guid assessmentReleaseId,
         RequirementLevel assessmentTargetLevel, CrIdentity source, CrIdentity child, ILadderPolicy policy)
+        => ChangeRequestUpstreamEligibility.IsApproved(source.State)
+            && IsApplicableAssessmentPair(projectId, assessmentState, assessmentReleaseId, assessmentTargetLevel, source, child, policy);
+
+    private static bool IsApplicableAssessmentPair(Guid projectId, DownstreamAssessmentState assessmentState,
+        Guid assessmentReleaseId, RequirementLevel assessmentTargetLevel, CrIdentity source, CrIdentity child, ILadderPolicy policy)
     {
         if (assessmentState == DownstreamAssessmentState.Superseded
             || source.ProjectId != projectId || child.ProjectId != projectId)
@@ -804,6 +830,7 @@ public static partial class ChangeRequestTraceProjection
         var sourceLevel = ChangeRequestLevel(source.Type, source.SoftwareLevel);
         var childLevel = ChangeRequestLevel(child.Type, child.SoftwareLevel);
         return sourceLevel is not null && childLevel is not null
+            && policy.OrderedLevels.Contains(childLevel.Value)
             && assessmentReleaseId == child.TargetReleaseId
             && source.TargetReleaseId == child.TargetReleaseId
             && assessmentTargetLevel == childLevel

@@ -669,6 +669,20 @@ After reviewing the exact keep/delete list, apply it with `-Apply`. The command 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\Prune-LocalShowcasePrograms.ps1 -Apply
 ```
 
+### September 9 FMS historical correction
+
+DEC-125 and issue #1006 authorize one explicit exception for the audited, owned synthetic Interface aggregates across FMS history. `Repair-FmsDemoHistory.ps1` previews their exact dependency manifest by default. It refuses unexpected ownership, Customer/Interface requirements, released material or attachment dependencies; these require a newly reviewed manifest. The command does not reset the database or remove other Programs.
+
+Supply the exact installation PostgreSQL binaries, the runtime evidence root and a receipt directory outside application data:
+
+```powershell
+& product/scripts/Repair-FmsDemoHistory.ps1 -PostgresBin '<installation PostgreSQL bin>' -EvidenceRoot '<runtime evidence root>' -ReceiptDirectory '<operator recovery directory>'
+```
+
+First qualify `-Apply` on a disposable restored copy using `-Database` and `-PostgresPort` for that copy and its isolated `-EvidenceRoot`. Verify its complete application upgrade and controlled reads. For the qualified HOME correction, stop the supported HOME host, then run the same command with `-Apply` against the exact installation. It creates and verifies a fresh full backup, refuses a manifest changed since preview, holds database locks during the narrowly scoped trigger exception, and proves all unrelated rows and original trigger modes unchanged before commit. Retain the preview, applied manifest, recovery archive and JSON receipt. Any refusal or proof failure rolls the transaction back. There is no backup bypass.
+
+The normal explicit showcase upgrade separately replaces invalid active upstream links in owned scenarios with the approved exact source of the baseline parent. A review interrupted by that correction keeps its prior snapshot and receives a new review cycle. Maintenance removes unapproved links from other active FMS author work without inventing an answer; those Drafts are visibly incomplete until authored. This correction never approves a revision automatically.
+
 ## Backup and verification
 
 Run `BACKUP_AEROLINK.bat`. The output under `product/.local/backups` contains a PostgreSQL custom-format dump, the exact runtime-configured evidence root, runtime configuration, a database-derived attachment inventory, `manifest.json`, and a ZIP SHA-256 sidecar. `Evidence__Root` has environment precedence, then the active appsettings environment, then appsettings, then the LocalAppData default. Backup fails before publication if a referenced object is missing or does not match its size/SHA-256, if attachment metadata changes during capture, or if a pending/repair-required storage operation or partial candidate/released set exists. Retention defaults to 30 days.

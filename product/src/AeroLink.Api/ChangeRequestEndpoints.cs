@@ -248,69 +248,31 @@ public static class ChangeRequestEndpoints
         });
 
         app.MapGet("/api/change-requests/{id:guid}/upstream-candidates", async (Guid id, string? search,
-            bool? includeEarlierBuilds, int? limit, HttpContext http, IChangeRequestRepository repository,
+            bool? includeEarlierBuilds, int? page, int? limit, HttpContext http, IChangeRequestRepository repository,
             AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ChangeRequestLoadShape.UpstreamLinks, ct); if (scr is null) return Results.NotFound();
             if (!await http.HasProjectAccessAsync(db, scr.ProjectId, ct)) return Results.Forbid();
             var policy = await policyResolver.ResolveAsync(scr.ProjectId, ct);
-            var childLevel = ChangeRequestLevel(scr, policy);
-            var parentLevels = policy.ParentLevels(childLevel);
-            var derivedPairs = await DerivedEdgesAsync(db, scr, childLevel, ct);
-            var derivedReleaseIds = derivedPairs.Select(x => x.BuildId).Distinct().ToArray();
-            var derivedBuilds = await db.Releases.AsNoTracking().Where(x => derivedReleaseIds.Contains(x.Id))
-                .ToDictionaryAsync(x => x.Id, x => x.Version, ct);
-            var derivedEdges = derivedPairs.Select(x => new
-            {
-                upstreamChangeRequestId = x.UpstreamChangeRequestId,
-                upstreamDisplayNumber = x.UpstreamDisplayNumber,
-                upstreamBuildId = x.BuildId,
-                upstreamBuildVersion = derivedBuilds.GetValueOrDefault(x.BuildId, ""),
-                assessmentId = x.AssessmentId,
-                assessmentLinkId = x.AssessmentLinkId,
-            }).ToArray();
-            var upstreamAnswerComplete = parentLevels.Count == 0 || derivedEdges.Length > 0
-                || scr.UpstreamLinks.Count > 0 || !string.IsNullOrWhiteSpace(scr.NoUpstreamRationale)
-                || (scr.InheritedUpstreamContextJson is not null && scr.UpstreamAnswerAffirmed);
-            if (parentLevels.Count == 0)
-                return Results.Ok(new { isTopOfLadder = true, upstreamAnswerComplete, candidates = Array.Empty<object>(), derivedEdges });
-            var earlier = await EarlierReleaseIdsAsync(db, scr.ProjectId, scr.TargetReleaseId, ct);
-            var releases = new[] { scr.TargetReleaseId }
-                .Concat(includeEarlierBuilds == true ? earlier : [])
-                .Distinct().ToHashSet();
-            var candidateQuery = db.SystemChangeRequests.AsNoTracking()
-                .Where(x => x.ProjectId == scr.ProjectId && x.Id != scr.Id && releases.Contains(x.TargetReleaseId)
-                    && x.State != ChangeRequestState.Withdrawn
-                    && (x.TargetReleaseId == scr.TargetReleaseId
-                        || x.State == ChangeRequestState.Approved
-                        || x.State == ChangeRequestState.SelectedForBaseline)
-                    && ((x.Type == ChangeRequestType.System && parentLevels.Contains(RequirementLevel.System))
-                        || (x.Type == ChangeRequestType.Interface && parentLevels.Contains(RequirementLevel.Interface))
-                        || (x.Type == ChangeRequestType.Software && x.SoftwareLevel != null && parentLevels.Contains(x.SoftwareLevel.Value))));
-            if (!string.IsNullOrWhiteSpace(search))
-            {
-                var term = search.Trim().ToLowerInvariant();
-                candidateQuery = candidateQuery.Where(x => EF.Functions.Like(x.BaseNumber.ToLower(), $"%{term}%")
-                    || EF.Functions.Like(x.Title.ToLower(), $"%{term}%"));
-            }
-            var candidates = await candidateQuery.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision)
-                .Take(Math.Clamp(limit ?? 25, 1, 100)).ToListAsync(ct);
-            var releaseRows = await db.Releases.AsNoTracking().Where(x => releases.Contains(x.Id))
-                .ToDictionaryAsync(x => x.Id, x => x.Version, ct);
-            return Results.Ok(new
-            {
-                isTopOfLadder = false,
-                upstreamAnswerComplete,
-                includeEarlierBuilds = includeEarlierBuilds == true,
-                derivedEdges,
-                candidates = candidates.Select(x => new
-                {
-                    x.Id, x.DisplayNumber, x.Title, state = x.State.ToString(), x.TargetReleaseId,
-                    build = releaseRows.GetValueOrDefault(x.TargetReleaseId, ""),
-                    earlierBuild = x.TargetReleaseId != scr.TargetReleaseId,
-                    assessmentDerived = derivedPairs.Any(p => p.UpstreamChangeRequestId == x.Id),
-                })
-            });
+            return await UpstreamCandidatesAsync(db, policy, scr.ProjectId, scr.TargetReleaseId,
+                ChangeRequestLevel(scr, policy), scr, search, includeEarlierBuilds == true, page, limit, ct);
+        });
+
+        app.MapGet("/api/authoring/upstream-change-requests", async (Guid projectId, Guid releaseId,
+            ChangeRequestType type, RequirementLevel? softwareLevel, string? search, bool? includeEarlierBuilds,
+            int? page, int? limit, HttpContext http, AeroLinkDbContext db,
+            IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+        {
+            if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+            var policy = await policyResolver.ResolveAsync(projectId, ct);
+            if (!policy.IsChangeRequestScopeValid(type, softwareLevel))
+                return Results.BadRequest(new { error = "Choose a configured change-request level." });
+            var failure = (await new ChangeRequestTargetReleaseGuard(db).ValidateAsync(projectId, releaseId, ct)).ToFailureResult();
+            if (failure is not null) return failure;
+            var level = type == ChangeRequestType.System ? RequirementLevel.System
+                : type == ChangeRequestType.Interface ? RequirementLevel.Interface : softwareLevel!.Value;
+            return await UpstreamCandidatesAsync(db, policy, projectId, releaseId, level,
+                null, search, includeEarlierBuilds == true, page, limit, ct);
         });
 
         // A software change request is numbered per level, so the preview needs to know which workspace is
@@ -635,7 +597,8 @@ public static class ChangeRequestEndpoints
                 source = source.Where(x => EF.Functions.ILike(x.BaseNumber, $"%{term}%") || EF.Functions.ILike(x.Statement, $"%{term}%"));
             }
             var totalCount = await source.CountAsync(ct);
-            var items = await source.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision)
+            var items = await source.OrderBy(x => x.BaseNumber.Contains("-") ? x.BaseNumber.Substring(0, x.BaseNumber.IndexOf("-")) : x.BaseNumber)
+                .ThenBy(x => x.BaseNumber.Length).ThenBy(x => x.BaseNumber).ThenByDescending(x => x.Revision).ThenBy(x => x.Id)
                 .Skip((page - 1) * pageSize).Take(pageSize)
                 .Select(x => new { x.Id, displayNumber = x.BaseNumber + "." + x.Revision, level = x.Level.ToString(), kind = x.Kind.ToString(), x.Statement, x.VerificationMethod, x.ChangeRequestId })
                 .ToListAsync(ct);
@@ -768,6 +731,9 @@ public static class ChangeRequestEndpoints
                         change.TargetSectionId, proposedUpstreamRevisionIdsJson: JsonSerializer.Serialize(change.UpstreamRevisionIds ?? []),
                         ladderPolicy: ladderPolicy);
                 }
+                await new SystemChangeRequestControlledEditingAdapter(db, ladderPolicy)
+                    .ApplyInitialUpstreamAnswerAsync(scr, request.UpstreamLinks, request.NoUpstreamRationale,
+                        actor, now, ladderPolicy, ct);
                 await repository.AddAsync(scr, ct);
                 await problemReports.LinkChangeRequestAsync(scr.Id, scr.DisplayNumber, request.ProblemReportIds, actor, now, ct);
                 await repository.SaveAsync(ct);
@@ -816,7 +782,8 @@ public static class ChangeRequestEndpoints
             if (softwareLevel is not null) source = source.Where(x => x.SoftwareLevel == softwareLevel);
 
             var items = await source
-                .OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision)
+                .OrderBy(x => x.BaseNumber.Contains("-") ? x.BaseNumber.Substring(0, x.BaseNumber.IndexOf("-")) : x.BaseNumber)
+                .ThenBy(x => x.BaseNumber.Length).ThenBy(x => x.BaseNumber).ThenByDescending(x => x.Revision).ThenBy(x => x.Id)
                 .Select(x => new
                 {
                     x.Id, x.BaseNumber, x.Revision,
@@ -1529,6 +1496,79 @@ public static class ChangeRequestEndpoints
         return "Every proposed upstream allocation must be a current configured parent revision from this Project and build.";
     }
 
+    private static async Task<IResult> UpstreamCandidatesAsync(AeroLinkDbContext db, ILadderPolicy policy,
+        Guid projectId, Guid releaseId, RequirementLevel childLevel, SystemChangeRequest? scr,
+        string? search, bool includeEarlierBuilds, int? page, int? limit, CancellationToken ct)
+    {
+        if (!policy.OrderedLevels.Contains(childLevel))
+            return Results.BadRequest(new { error = "This historical level is not configured for upstream authoring." });
+            var parentLevels = policy.ParentLevels(childLevel);
+            var derivedPairs = scr is null ? Array.Empty<DerivedChangeRequestUpstreamEvidence>() : await DerivedEdgesAsync(db, scr, childLevel, ct);
+            var derivedReleaseIds = derivedPairs.Select(x => x.BuildId).Distinct().ToArray();
+            var derivedBuilds = await db.Releases.AsNoTracking().Where(x => derivedReleaseIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => x.Version, ct);
+            var derivedEdges = derivedPairs.Select(x => new
+            {
+                upstreamChangeRequestId = x.UpstreamChangeRequestId,
+                upstreamDisplayNumber = x.UpstreamDisplayNumber,
+                upstreamBuildId = x.BuildId,
+                upstreamBuildVersion = derivedBuilds.GetValueOrDefault(x.BuildId, ""),
+                assessmentId = x.AssessmentId,
+                assessmentLinkId = x.AssessmentLinkId,
+            }).ToArray();
+            var upstreamAnswerComplete = parentLevels.Count == 0 || derivedEdges.Length > 0
+                || (scr?.UpstreamLinks.Count ?? 0) > 0 || !string.IsNullOrWhiteSpace(scr?.NoUpstreamRationale)
+                || (scr?.InheritedUpstreamContextJson is not null && scr.UpstreamAnswerAffirmed);
+            if (scr is not null && upstreamAnswerComplete
+                && await UpstreamChangeRequestRefusalAsync(db, scr, policy, new(parentLevels.Count == 0, derivedPairs), ct) is not null)
+                upstreamAnswerComplete = false;
+            if (parentLevels.Count == 0)
+                return Results.Ok(new { isTopOfLadder = true, upstreamAnswerComplete, candidates = Array.Empty<object>(), derivedEdges });
+            var earlier = await EarlierReleaseIdsAsync(db, projectId, releaseId, ct);
+            var releases = new[] { releaseId }
+                .Concat(includeEarlierBuilds == true ? earlier : [])
+                .Distinct().ToHashSet();
+            var excludedId = scr?.Id ?? Guid.Empty;
+            var candidateQuery = db.SystemChangeRequests.AsNoTracking()
+                .Where(ChangeRequestUpstreamEligibility.VisibleSources)
+                .Where(x => x.ProjectId == projectId && x.Id != excludedId && releases.Contains(x.TargetReleaseId)
+                    && ((x.Type == ChangeRequestType.System && parentLevels.Contains(RequirementLevel.System))
+                        || (x.Type == ChangeRequestType.Interface && parentLevels.Contains(RequirementLevel.Interface))
+                        || (x.Type == ChangeRequestType.Software && x.SoftwareLevel != null && parentLevels.Contains(x.SoftwareLevel.Value))));
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = search.Trim().ToLowerInvariant();
+                candidateQuery = candidateQuery.Where(x => EF.Functions.Like(x.BaseNumber.ToLower(), $"%{term}%")
+                    || EF.Functions.Like(x.Title.ToLower(), $"%{term}%"));
+            }
+            var totalCount = await candidateQuery.CountAsync(ct);
+            var currentPage = Math.Max(1, page ?? 1);
+            var pageSize = Math.Clamp(limit ?? 25, 1, 100);
+            var candidates = await candidateQuery.OrderBy(x => x.BaseNumber.Contains("-") ? x.BaseNumber.Substring(0, x.BaseNumber.IndexOf("-")) : x.BaseNumber)
+                .ThenBy(x => x.BaseNumber.Length).ThenBy(x => x.BaseNumber).ThenByDescending(x => x.Revision).ThenBy(x => x.Id)
+                .Skip((currentPage - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+            var releaseRows = await db.Releases.AsNoTracking().Where(x => releases.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => x.Version, ct);
+            return Results.Ok(new
+            {
+                isTopOfLadder = false,
+                page = currentPage, pageSize, totalCount, totalPages = (int)Math.Ceiling(totalCount / (double)pageSize),
+                upstreamAnswerComplete,
+                includeEarlierBuilds = includeEarlierBuilds == true,
+                derivedEdges,
+                candidates = candidates.Select(x => new
+                {
+                    x.Id, x.DisplayNumber, x.Title, state = x.State.ToString(), x.TargetReleaseId,
+                    selectable = ChangeRequestUpstreamEligibility.IsApproved(x.State),
+                    selectionRefusal = ChangeRequestUpstreamEligibility.IsApproved(x.State)
+                        ? null : ChangeRequestUpstreamEligibility.RefusalFor(x),
+                    build = releaseRows.GetValueOrDefault(x.TargetReleaseId, ""),
+                    earlierBuild = x.TargetReleaseId != releaseId,
+                    assessmentDerived = derivedPairs.Any(p => p.UpstreamChangeRequestId == x.Id),
+                })
+            });
+    }
+
     private static RequirementLevel ChangeRequestLevel(SystemChangeRequest scr, ILadderPolicy policy) =>
         scr.Type switch
         {
@@ -1594,8 +1634,8 @@ public static class ChangeRequestEndpoints
             };
             if (sourceLevel is null || !parentLevels.Contains(sourceLevel.Value))
                 return "An assessment-derived upstream edge no longer matches the effective direct-parent ladder.";
-            if (source.State == ChangeRequestState.Withdrawn)
-                return "A withdrawn change request cannot satisfy an assessment-derived upstream dependency.";
+            if (!ChangeRequestUpstreamEligibility.IsApproved(source.State))
+                return ChangeRequestUpstreamEligibility.RefusalFor(source);
             if (!string.Equals(source.DisplayNumber, derivedEvidence.UpstreamDisplayNumber, StringComparison.Ordinal))
                 return "An assessment-derived upstream edge carries stale exact change-request identity.";
         }
@@ -1621,8 +1661,8 @@ public static class ChangeRequestEndpoints
             if (derivedIds.Contains(source.Id))
                 return "An authored upstream link duplicates an assessment-derived upstream edge.";
             var crossBuild = source.TargetReleaseId != child.TargetReleaseId;
-            if (!crossBuild && source.State == ChangeRequestState.Withdrawn)
-                return "A withdrawn change request cannot be an upstream dependency.";
+            if (!ChangeRequestUpstreamEligibility.IsApproved(source.State))
+                return ChangeRequestUpstreamEligibility.RefusalFor(source);
             if (crossBuild && (!earlier.Contains(source.TargetReleaseId)
                 || source.State is not (ChangeRequestState.Approved or ChangeRequestState.SelectedForBaseline)
                 || string.IsNullOrWhiteSpace(link.Rationale)))

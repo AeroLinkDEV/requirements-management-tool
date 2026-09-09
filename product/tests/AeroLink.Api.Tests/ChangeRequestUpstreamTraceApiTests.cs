@@ -17,6 +17,50 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
     private readonly SharedApiHost _host;
     public ChangeRequestUpstreamTraceApiTests(SharedApiHost host) => _host = host;
 
+    [Fact]
+    public async Task Deferred_sources_are_visible_but_cannot_be_linked_during_creation_or_check_in()
+    {
+        var fixture = await SeedAsync(_host.Factory, withDerivedEdge: false);
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var source = db.SystemChangeRequests.Single(x => x.Id == fixture.CurrentSourceId);
+            source.Defer(fixture.Author, "Shelve until assigned to the required build.", DateTimeOffset.UtcNow);
+            db.Add(new SystemChangeRequest("SRCR-78609", 0, fixture.ProjectId, fixture.CurrentReleaseId,
+                "Never approved", "P", "A", "S", fixture.Author, DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Author);
+        foreach (var endpoint in new[] {
+            $"/api/change-requests/{fixture.ChildId}/upstream-candidates",
+            $"/api/authoring/upstream-change-requests?projectId={fixture.ProjectId}&releaseId={fixture.CurrentReleaseId}&type=Software&softwareLevel=HighLevel" })
+        {
+            var result = await client.GetFromJsonAsync<JsonElement>(endpoint);
+            var candidate = Assert.Single(result.GetProperty("candidates").EnumerateArray());
+            Assert.Equal(fixture.CurrentSourceId, candidate.GetProperty("id").GetGuid());
+            Assert.Equal("Deferred", candidate.GetProperty("state").GetString());
+            Assert.False(candidate.GetProperty("selectable").GetBoolean());
+            Assert.Contains("current build", candidate.GetProperty("selectionRefusal").GetString());
+        }
+        var checkout = await CheckoutAsync(client, fixture.ChildId);
+        checkout.Draft["upstreamLinks"] = new JsonArray(new JsonObject {
+            ["upstreamChangeRequestId"] = fixture.CurrentSourceId, ["rationale"] = "Cannot bypass deferral." });
+        checkout.Draft["noUpstreamRationale"] = null;
+        var version = await AutosaveAsync(client, checkout.SessionId, checkout.Version, checkout.Draft);
+        using var refused = await client.PostAsJsonAsync($"/api/controlled-editing/sessions/{checkout.SessionId}/check-in", new { expectedVersion = version });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("Reassign", await refused.Content.ReadAsStringAsync());
+        using var create = await client.PostAsJsonAsync("/api/change-request-drafts", new {
+            projectId = fixture.ProjectId, targetReleaseId = fixture.CurrentReleaseId, title = "Deferred is blocked",
+            problem = "P", analysis = "A", solution = "S", type = "Software", softwareLevel = "HighLevel",
+            requirementChanges = Array.Empty<object>(),
+            upstreamLinks = new[] { new { upstreamChangeRequestId = fixture.CurrentSourceId, rationale = "Cannot bypass deferral." } }
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, create.StatusCode);
+        Assert.Contains("Reassign", await create.Content.ReadAsStringAsync());
+    }
+
     private sealed record Fixture(Guid ProjectId, Guid EarlierReleaseId, Guid CurrentReleaseId,
         Guid EarlierSourceId, Guid CurrentSourceId, Guid FutureSourceId, Guid ForeignSourceId, Guid ChildId,
         Guid? AssessmentId, Guid? AssessmentLinkId, string Author, string Approver, string Outsider);
@@ -144,23 +188,12 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
             db.Add(parent);
             await db.SaveChangesAsync();
             parentId = parent.Id;
-        }
-
-        var parentCheckout = await CheckoutAsync(client, fixture.ChildId);
-        parentCheckout.Draft["upstreamLinks"] = new JsonArray(new JsonObject
-        {
-            ["upstreamChangeRequestId"] = parentId,
-            ["rationale"] = "The same-build Draft parent controls this downstream work.",
-        });
-        parentCheckout.Draft["noUpstreamRationale"] = null;
-        var parentSessionVersion = await AutosaveAsync(client, parentCheckout.SessionId,
-            parentCheckout.Version, parentCheckout.Draft);
-        using (var parentCheckIn = await client.PostAsJsonAsync(
-                   $"/api/controlled-editing/sessions/{parentCheckout.SessionId}/check-in",
-                   new { expectedVersion = parentSessionVersion }))
-        {
-            var body = await parentCheckIn.Content.ReadAsStringAsync();
-            Assert.True(parentCheckIn.StatusCode == HttpStatusCode.OK, body);
+            // Legacy persisted Draft links still protect their parent from deletion, even though
+            // new authoring now refuses them. The later check-in replaces this invalid answer.
+            var legacyChild = db.SystemChangeRequests.Single(x => x.Id == fixture.ChildId);
+            legacyChild.AddUpstreamLink(fixture.Author, parent.Id, parent.DisplayNumber,
+                fixture.CurrentReleaseId, "1.7", "Legacy invalid Draft source", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
         }
 
         using (var deleteParent = await client.DeleteAsync($"/api/change-requests/{parentId}"))
