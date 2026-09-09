@@ -73,58 +73,67 @@ function Invoke-RoundTrip {
     Assert-ProcessState $probeName $State $(if ($Fail) { 'Failure restoration' } else { 'Success restoration' })
 }
 
-$emptyStateSupported = $false
-Set-ProcessState $probeName 'Empty'
-$emptyValue = [Environment]::GetEnvironmentVariable($probeName, 'Process')
-if ($null -ne $emptyValue -and $emptyValue -eq '') { $emptyStateSupported = $true }
-Remove-ProcessVariable $probeName
-
-foreach ($fail in @($false, $true)) {
-    Invoke-RoundTrip 'Absent' $fail
-    Invoke-RoundTrip 'Populated' $fail
-    if ($emptyStateSupported) { Invoke-RoundTrip 'Empty' $fail }
-}
-
-# Exercise the real validator's finally path with an executable that exits immediately. The expected
-# readiness failure must still restore every process setting it temporarily overrides in this process.
-foreach ($name in $settingsNames) { Remove-ProcessVariable $name }
-Set-ProcessState 'ConnectionStrings__AeroLink' 'Populated'
-Set-ProcessState 'RestoreValidation__Token' 'Populated'
-if ($emptyStateSupported) { Set-ProcessState 'Evidence__Root' 'Empty' }
-else { Set-ProcessState 'Evidence__Root' 'Populated' }
-$original = Get-AeroLinkProcessEnvironmentSnapshot -Name $settingsNames
-$listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
-$listener.Start()
-try { $apiPort = ([Net.IPEndPoint]$listener.LocalEndpoint).Port } finally { $listener.Stop() }
-$root = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-981-' + [Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $root -Force | Out-Null
+# This script is also invoked in-process by AeroLinkRestoreContract.Tests.ps1. Preserve the caller's
+# actual environment, not the synthetic states this test intentionally installs.
+$callerSnapshot = Get-AeroLinkProcessEnvironmentSnapshot -Name @($settingsNames + $probeName)
 try {
-    $expectedFailure = $false
+    $emptyStateSupported = $false
+    Set-ProcessState $probeName 'Empty'
+    $emptyValue = [Environment]::GetEnvironmentVariable($probeName, 'Process')
+    if ($null -ne $emptyValue -and $emptyValue -eq '') { $emptyStateSupported = $true }
+    Remove-ProcessVariable $probeName
+
+    foreach ($fail in @($false, $true)) {
+        Invoke-RoundTrip 'Absent' $fail
+        Invoke-RoundTrip 'Populated' $fail
+        if ($emptyStateSupported) { Invoke-RoundTrip 'Empty' $fail }
+    }
+
+    # Exercise the real validator's finally path with an executable that exits immediately. The expected
+    # readiness failure must still restore every process setting it temporarily overrides in this process.
+    foreach ($name in $settingsNames) { Remove-ProcessVariable $name }
+    Set-ProcessState 'ConnectionStrings__AeroLink' 'Populated'
+    Set-ProcessState 'RestoreValidation__Token' 'Populated'
+    if ($emptyStateSupported) { Set-ProcessState 'Evidence__Root' 'Empty' }
+    else { Set-ProcessState 'Evidence__Root' 'Populated' }
+    $original = Get-AeroLinkProcessEnvironmentSnapshot -Name $settingsNames
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    try { $apiPort = ([Net.IPEndPoint]$listener.LocalEndpoint).Port } finally { $listener.Stop() }
+    $root = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-981-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $root -Force | Out-Null
     try {
-        & $download -Database 'aerolink_981_validation' -EvidenceRoot $root -AttachmentInventory @() `
-            -PostgresPort 59999 -ApiPort $apiPort -LogRoot $root `
-            -ApiExecutable (Join-Path $env:WINDIR 'System32\where.exe')
+        $expectedFailure = $false
+        try {
+            & $download -Database 'aerolink_981_validation' -EvidenceRoot $root -AttachmentInventory @() `
+                -PostgresPort 59999 -ApiPort $apiPort -LogRoot $root `
+                -ApiExecutable (Join-Path $env:WINDIR 'System32\where.exe')
+        }
+        catch {
+            if ($_.Exception.Message -notlike '*did not become ready*') { throw }
+            $expectedFailure = $true
+        }
+        Assert-True $expectedFailure 'The immediate-exit API executable did not produce the expected readiness failure.'
+        foreach ($name in $settingsNames) {
+            $before = $original[$name]
+            $state = if (-not $before.Present) { 'Absent' } elseif ($before.Value -eq '') { 'Empty' } else { 'Populated' }
+            Assert-ProcessState $name $state 'Validator failure restoration'
+        }
     }
-    catch {
-        if ($_.Exception.Message -notlike '*did not become ready*') { throw }
-        $expectedFailure = $true
+    finally {
+        Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $original
+        if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
     }
-    Assert-True $expectedFailure 'The immediate-exit API executable did not produce the expected readiness failure.'
-    foreach ($name in $settingsNames) {
-        $before = $original[$name]
-        $state = if (-not $before.Present) { 'Absent' } elseif ($before.Value -eq '') { 'Empty' } else { 'Populated' }
-        Assert-ProcessState $name $state 'Validator failure restoration'
+
+    [pscustomobject]@{
+        Passed = $true
+        Engine = $PSVersionTable.PSVersion.ToString()
+        EmptyStateSupported = $emptyStateSupported
+        ValidatorFailureRestoredAllSettings = $true
+        CallerEnvironmentRestored = $true
     }
 }
 finally {
-    Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $original
-    if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
-}
-
-[pscustomobject]@{
-    Passed = $true
-    Engine = $PSVersionTable.PSVersion.ToString()
-    EmptyStateSupported = $emptyStateSupported
-    ValidatorFailureRestoredAllSettings = $true
+    Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $callerSnapshot
 }
 $global:LASTEXITCODE = 0
