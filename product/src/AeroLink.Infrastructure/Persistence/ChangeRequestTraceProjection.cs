@@ -321,12 +321,13 @@ public static partial class ChangeRequestTraceProjection
         foreach (var link in authored)
         {
             var eligible = byCr.TryGetValue(link.UpstreamChangeRequestId, out var parent)
-                && ChangeRequestUpstreamEligibility.IsApproved(parent.State);
+                && byCr.TryGetValue(link.ChangeRequestId, out var child)
+                && IsCurrentAuthoredPair(Identity(child), Identity(parent), link.UpstreamBuildId, policy);
             AddPair(link.ChangeRequestId, link.UpstreamChangeRequestId,
                 new("AuthorStated", link.Id, Rationale: link.Rationale, ActorId: link.ActorId,
                     StatedAt: link.StatedAt, UpstreamBuildId: link.UpstreamBuildId,
                     UpstreamBuildVersion: link.UpstreamBuildVersion, IsLive: eligible,
-                    Status: eligible ? null : "Upstream revision is not currently approved; corrective authoring is required."));
+                    Status: eligible ? null : "Upstream revision is not eligible for this exact parent/build relationship; corrective authoring is required."));
         }
         foreach (var link in assessments)
             AddPair(link.ChildId, link.SourceChangeRequestId,
@@ -666,7 +667,8 @@ public static partial class ChangeRequestTraceProjection
         var links = await (from link in db.ChangeRequestUpstreamLinks.AsNoTracking()
             join source in db.SystemChangeRequests.AsNoTracking() on link.UpstreamChangeRequestId equals source.Id
             where ids.Contains(link.ChangeRequestId)
-            select new { link.ChangeRequestId, link.UpstreamChangeRequestId, source.State })
+            select new { link.ChangeRequestId, link.UpstreamChangeRequestId, link.UpstreamBuildId,
+                Source = new CrIdentity(source.ProjectId, source.TargetReleaseId, source.Type, source.SoftwareLevel, source.State) })
             .ReadTraceAsync(budget, ct);
         // Read the assessment decision independently from its optional child links. An assessment can be
         // Pending, NoChangeRequired, or ChangeRequired before a downstream CR exists; an inner join would
@@ -738,7 +740,7 @@ public static partial class ChangeRequestTraceProjection
                 && targetIdentityById.TryGetValue(x.ChildId, out var child)
                 && IsCurrentAssessmentEdge(assessment.ProjectId, assessment.State, assessment.ReleaseId, assessment.TargetLevel,
                     source, child, policy));
-            var invalidAuthoredAnswer = rowLinks.Any(x => !ChangeRequestUpstreamEligibility.IsApproved(x.State));
+            var invalidAuthoredAnswer = rowLinks.Any(x => !IsCurrentAuthoredPair(Identity(row), x.Source, x.UpstreamBuildId, policy));
             var invalidDerivedAnswer = assessmentLinks.Any(x => x.ChildId == row.Id
                 && assessmentById.TryGetValue(x.Id, out var assessment)
                 && sourceById.TryGetValue(assessment.SourceChangeRequestId, out var source)
@@ -753,7 +755,7 @@ public static partial class ChangeRequestTraceProjection
                 : row.State == ChangeRequestState.Draft ? "IncompleteAuthoring" : "UpstreamGap";
             var warnings = new List<string>();
             if (invalidAuthoredAnswer || invalidDerivedAnswer)
-                warnings.Add("An upstream revision is not currently approved; correct the active answer. Frozen reviews remain historical evidence.");
+                warnings.Add("An upstream revision is not eligible for this exact parent/build relationship; correct the active answer. Frozen reviews remain historical evidence.");
             if (!top && !authoredAnswer && !derivedAnswer && !historicalFrozenAnswer)
                 warnings.Add(row.State == ChangeRequestState.Draft
                     ? "No upstream answer is authored yet; complete it before review."
@@ -814,6 +816,15 @@ public static partial class ChangeRequestTraceProjection
 
     private static CrIdentity Identity(CrRow row) =>
         new(row.ProjectId, row.TargetReleaseId, row.Type, row.SoftwareLevel, row.State);
+
+    private static bool IsCurrentAuthoredPair(CrIdentity child, CrIdentity source, Guid capturedBuildId, ILadderPolicy policy)
+    {
+        var childLevel = ChangeRequestLevel(child.Type, child.SoftwareLevel);
+        var parentLevel = ChangeRequestLevel(source.Type, source.SoftwareLevel);
+        return ChangeRequestUpstreamEligibility.IsApproved(source.State) && child.ProjectId == source.ProjectId
+            && capturedBuildId == source.TargetReleaseId && childLevel is { } level && parentLevel is { } parent
+            && policy.OrderedLevels.Contains(level) && policy.ParentLevels(level).Contains(parent);
+    }
 
     private static bool IsCurrentAssessmentEdge(Guid projectId, DownstreamAssessmentState assessmentState,
         Guid assessmentReleaseId,
