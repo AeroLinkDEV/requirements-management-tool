@@ -1609,7 +1609,11 @@ function Get-AeroLinkServiceTopology {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Config,
-        [int]$Port = 5080
+        [int]$Port = 5080,
+        # Contract callers may provide the already-enumerated process fixture used by
+        # Get-AeroLinkRemoteDemoNgrokProcess. Omitting it preserves the live ownership
+        # probe used by production callers.
+        [object[]]$ProcessInfos
     )
     $apiProjectDirectory = Join-Path $Config.AeroLinkRoot 'product\src\AeroLink.Api'
     $owner = Get-AeroLinkPortOwner -Port $Port
@@ -1632,7 +1636,12 @@ function Get-AeroLinkServiceTopology {
     $ownedRuntime = $owner.Found -and
         (Test-AeroLinkProcessOwnership -CommandLine $owner.CommandLine -ExecutablePath $owner.ExecutablePath -OwnershipFragments @($apiProjectDirectory))
     if ($owner.Found -and -not $ownedRuntime) { throw 'The local listener belongs to another source or application. Nothing was stopped.' }
-    $tunnels = Get-AeroLinkRemoteDemoNgrokProcess -Config $Config
+    $tunnels = if ($PSBoundParameters.ContainsKey('ProcessInfos')) {
+        Get-AeroLinkRemoteDemoNgrokProcess -Config $Config -ProcessInfos $ProcessInfos
+    }
+    else {
+        Get-AeroLinkRemoteDemoNgrokProcess -Config $Config
+    }
     if (@($tunnels.Mismatched).Count -gt 0) { throw 'Ngrok ownership is unknown or contradicts the configured launch contract. Nothing was stopped.' }
     if (@($tunnels.Owned).Count -gt 1) { throw 'Multiple owned ngrok tunnels are ambiguous. Nothing was stopped.' }
     return [pscustomobject]@{

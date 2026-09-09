@@ -336,11 +336,39 @@ Assert-True (($script:order -join ',') -eq 'inspect') 'Scenario 14: preserve-sta
 # the restart takes. Inspect (fetch only), stop, advance, start.
 $script:order = @()
 $available = { param($C) $script:order += 'inspect'; [pscustomobject]@{ Action = 'UpdateAvailable'; Canonical = $true; HeadSha = 'aaaaaaaa'; TargetSha = 'bbbbbbbb'; Reason = 'origin/main moved' } }
-$advanced = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $available -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
+$script:topologyProbeCalls = 0
+$topologyPresent = {
+    param($C)
+    $script:topologyProbeCalls++
+    [pscustomobject]@{ TunnelRunning = $true; RuntimeRunning = $true }
+}
+$advanced = Invoke-AeroLinkProductionSourceReconciliation -Config $config -ServiceStateProbe $topologyPresent -SourceInspector $available -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart
 Assert-True ($advanced.Restarted) 'Scenario 14: a real main advance must restart production into the new source.'
 Assert-True ($advanced.HeadSha -eq 'bbbbbbbb') 'Scenario 14: the new running revision must be reported.'
 Assert-True (($script:order -join ',') -eq 'inspect,stop-tunnel,stop,advance,restart') `
     'Scenario 14: the runtime must be stopped BEFORE the working tree it is executing out of is advanced.'
+Assert-True ($script:topologyProbeCalls -eq 1) 'Scenario 14: the injected present-topology fixture must replace live topology acquisition.'
+
+# The same seam must represent an installation with nothing running. Preserve-state must then leave it down,
+# while the source transition still follows the same stop/advance ordering.
+$script:order = @()
+$script:topologyProbeCalls = 0
+$topologyAbsent = {
+    param($C)
+    $script:topologyProbeCalls++
+    [pscustomobject]@{ TunnelRunning = $false; RuntimeRunning = $false }
+}
+$previousHandoff = $env:AEROLINK_REMOTE_DEMO_HANDOFF
+try {
+    # Keep the continuation guard out of this fixture so the preserve-state discharge is exercised directly.
+    $env:AEROLINK_REMOTE_DEMO_HANDOFF = $config.AeroLinkRoot
+    $absent = Invoke-AeroLinkProductionSourceReconciliation -Config $config -PreserveServiceState -ServiceStateProbe $topologyAbsent -SourceInspector $available -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk
+}
+finally { $env:AEROLINK_REMOTE_DEMO_HANDOFF = $previousHandoff }
+Assert-True ($absent.Action -eq 'Updated') 'Scenario 14: an absent-topology fixture must still permit the source transition.'
+Assert-True (($script:order -join ',') -eq 'inspect,stop-tunnel,stop,advance') `
+    'Scenario 14: preserve-state with no running services must not invoke a restart.'
+Assert-True ($script:topologyProbeCalls -eq 1) 'Scenario 14: the injected absent-topology fixture must replace live topology acquisition.'
 
 # A refusal at inspection never reaches the runtime at all: nothing is stopped for an update that is not
 # going to happen.
@@ -354,7 +382,7 @@ Assert-True (($script:order -join ',') -eq 'inspect') 'Scenario 14: a refused in
 # whatever is on disk rather than be left off because the update did not happen.
 $script:order = @()
 $advanceRefused = { param($C, $I) $script:order += 'advance'; [pscustomobject]@{ Action = 'Refused'; Canonical = $false; HeadSha = 'aaaaaaaa'; TargetSha = 'cccccccc'; Reason = 'origin/main moved between inspection and advance.' } }
-$recovered = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $available -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceRefused -Restarter $restart
+$recovered = Invoke-AeroLinkProductionSourceReconciliation -Config $config -ServiceStateProbe $topologyPresent -SourceInspector $available -TunnelStopper $stopTunnel -RuntimeStopper $stop -SourceAdvancer $advanceRefused -Restarter $restart
 Assert-True (($script:order -join ',') -eq 'inspect,stop-tunnel,stop,advance,restart') 'Scenario 14: a refused advance must still restart what was stopped.'
 Assert-True ($recovered.Action -eq 'Refused' -and $recovered.Restarted) 'Scenario 14: the refusal must be reported without leaving production down.'
 Assert-True ($recovered.Detail -match 'already on disk') 'Scenario 14: the operator must be told which revision is actually running.'
@@ -369,7 +397,7 @@ $script:order = @()
 $stuckTunnel = { param($C) $script:order += 'stop-tunnel-failed'; throw 'Refusing to stop: ngrok process PID 4242 does not match the AeroLink remote-demo contract.' }
 $aborted = $false
 try {
-    Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $available -TunnelStopper $stuckTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart | Out-Null
+    Invoke-AeroLinkProductionSourceReconciliation -Config $config -ServiceStateProbe $topologyPresent -SourceInspector $available -TunnelStopper $stuckTunnel -RuntimeStopper $stop -SourceAdvancer $advanceOk -Restarter $restart | Out-Null
 }
 catch { $aborted = $true; Assert-True ($_.Exception.Message -match 'does not match') 'Scenario 14: the tunnel refusal must reach the operator.' }
 Assert-True $aborted 'Scenario 14: a tunnel that cannot be stopped must abort the reconciliation.'
@@ -384,7 +412,7 @@ Assert-True (($script:order -join ',') -eq 'inspect,stop-tunnel-failed') `
 # the ordinary failure of a step whose whole job is to be careful.
 $script:order = @()
 $stubbornRuntime = { param($C, $I) $script:order += 'stop-failed'; throw 'The process on 5080 could not be attributed and was not stopped.' }
-$compensated = Invoke-AeroLinkProductionSourceReconciliation -Config $config -SourceInspector $available -TunnelStopper $stopTunnel -RuntimeStopper $stubbornRuntime -SourceAdvancer $advanceOk -Restarter $restart
+$compensated = Invoke-AeroLinkProductionSourceReconciliation -Config $config -ServiceStateProbe $topologyPresent -SourceInspector $available -TunnelStopper $stopTunnel -RuntimeStopper $stubbornRuntime -SourceAdvancer $advanceOk -Restarter $restart
 Assert-True (($script:order -join ',') -eq 'inspect,stop-tunnel,stop-failed,restart') `
     'Scenario 14: a failure after the tunnel is down must still reach the restarter.'
 Assert-True ($compensated.Action -eq 'TransitionFailed' -and $compensated.Restarted) 'Scenario 14: the pass must report the failed transition and that the service was restored.'
@@ -538,9 +566,18 @@ try { Get-AeroLinkPortOwner -Port 5080 -ConnectionProbe { param($P) throw 'The R
 catch { $refusedOnFailure = $true; Assert-True ($_.Exception.Message -match 'unknown, never free') 'Scenario 14f: the refusal must say what it means.' }
 Assert-True $refusedOnFailure 'Scenario 14f: an unreadable TCP table must refuse, so no transition can reach teardown or advance.'
 
-# An unused port yields no owned runtime, and does NOT trip the unknown-state refusal.
-$probe = Get-AeroLinkServiceTopology -Config $config -Port 59987
+# An unused port yields no owned runtime, and does NOT trip the unknown-state refusal. The process fixture
+# keeps this contract deterministic even when an unrelated/user-owned ngrok is present on the host.
+$probe = Get-AeroLinkServiceTopology -Config $config -Port 59987 -ProcessInfos @()
 Assert-True (-not $probe.RuntimeRunning) 'Scenario 14f: an unused port yields no owned runtime, without refusing.'
+
+# The same topology path still refuses an unreadable or contradictory tunnel; the fixture drives that guard
+# without touching any live process.
+$unknownTunnel = [pscustomobject]@{ ProcessId = 4242; ExecutablePath = ''; CommandLine = '' }
+$unknownTunnelRefused = $false
+try { Get-AeroLinkServiceTopology -Config $config -Port 59987 -ProcessInfos @($unknownTunnel) | Out-Null }
+catch { $unknownTunnelRefused = $true; Assert-True ($_.Exception.Message -match 'Ngrok ownership is unknown') 'Scenario 14f: unknown tunnel ownership must reach the caller.' }
+Assert-True $unknownTunnelRefused 'Scenario 14f: an unreadable tunnel must refuse rather than be treated as absent.'
 
 # --- 14g. The handoff guard expires with the generation it guarded ---
 #
