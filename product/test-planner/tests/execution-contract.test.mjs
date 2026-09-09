@@ -471,11 +471,13 @@ test('the native Windows operator owner retains the complete family and evidence
 
   // Every native test command must propagate a nonzero child exit. Telemetry and cleanup remain allowed to be
   // best-effort after the required family, but the operator proofs themselves cannot be made optional.
-  for (const step of nativeScripts.filter(name => name.endsWith('.Tests.ps1'))) {
+  for (const step of nativeScripts.filter(name => name.endsWith('.Tests.ps1') || name === 'Test-RepositoryLayout.ps1')) {
     const at = job.indexOf(`& ./product/scripts/${step}`)
     const next = job.indexOf('\n      - name:', at)
     const body = job.slice(at, next < 0 ? job.length : next)
-    assert.match(body, /if \(\$LASTEXITCODE -ne 0\)/, `${step} must propagate native failure`)
+    const invocationEnd = body.indexOf('\n', body.indexOf(`& ./product/scripts/${step}`))
+    const following = body.slice(invocationEnd < 0 ? body.length : invocationEnd).trimStart()
+    assert.match(following, /^if \(\$LASTEXITCODE -ne 0\)/, `${step} must propagate native failure immediately after invocation`)
   }
 
   const gateStart = workflow.indexOf('\n  gate:')
