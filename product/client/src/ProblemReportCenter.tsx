@@ -385,7 +385,9 @@ export default function ProblemReportCenter({
   // The routed report ID is the component's initial intent. A popstate can change it without changing
   // targetFilter, so track it explicitly and rehydrate the pane when the address names another record.
   const routedReportIdRef = useRef<string | undefined>(initialReportId);
+  const routedSnapshotIdRef = useRef<string | undefined>(initialSnapshotId);
   const routeRestorationRef = useRef(false);
+  const routeSnapshotRef = useRef<string | undefined>(undefined);
   // What the queue was actually asked for, as opposed to what is being typed. The dropdowns commit on
   // Apply filters; the search box commits itself a moment after typing stops.
   const [appliedSearch, setAppliedSearch] = useState("");
@@ -439,14 +441,21 @@ export default function ProblemReportCenter({
     selected?.state === "Closed" ||
     terminalDispositions.includes(selected?.state ?? "");
 
-  const refresh = async (selectId?: string, requestedPage = page, replaceRoute = false) => {
+  const refresh = async (
+    selectId?: string,
+    requestedPage = page,
+    replaceRoute = false,
+    restoredSnapshot?: string,
+  ) => {
     // Everything this refresh will serve is fixed here, before any request goes out: the record it asks
     // for and the selection intent it observed. If the reader opens another record while the refresh is
     // in flight, the refresh's responses belong to an older decision and must not take the pane.
     const intentAtStart = selectedIdRef.current;
     const requested = selectId ?? intentAtStart ?? initialReportId;
     const historicalRequested = Boolean(
-      initialSnapshotId && requested === initialReportId && appliedIdRef.current === undefined,
+      initialSnapshotId &&
+      requested === initialReportId &&
+      (appliedIdRef.current === undefined || restoredSnapshot === initialSnapshotId),
     );
     const sequence = ++refreshSequence.current;
     try {
@@ -577,15 +586,24 @@ export default function ProblemReportCenter({
   };
   // oxlint-disable-next-line react-hooks/exhaustive-deps -- filters are applied deliberately with Apply filters.
   useEffect(() => {
-    if (!initialReportId || routedReportIdRef.current === initialReportId) return;
+    if (
+      !initialReportId ||
+      (routedReportIdRef.current === initialReportId &&
+        routedSnapshotIdRef.current === initialSnapshotId)
+    )
+      return;
     routedReportIdRef.current = initialReportId;
+    routedSnapshotIdRef.current = initialSnapshotId;
     selectedIdRef.current = initialReportId;
     routeRestorationRef.current = true;
-  }, [initialReportId]);
+    routeSnapshotRef.current = initialSnapshotId;
+  }, [initialReportId, initialSnapshotId]);
   useEffect(() => {
     const replaceRoute = routeRestorationRef.current;
+    const restoredSnapshot = routeSnapshotRef.current;
     routeRestorationRef.current = false;
-    void refresh(undefined, page, replaceRoute);
+    routeSnapshotRef.current = undefined;
+    void refresh(undefined, page, replaceRoute, restoredSnapshot);
   }, [
     api,
     projectId,
