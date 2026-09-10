@@ -95,6 +95,16 @@ test('the zip reader bounds deflate output even when the central-directory size 
   assert.throws(() => readZipEntry(bomb, entry), /bounded output size/)
 })
 
+test('stored entries enforce actual size and refuse understated central-directory claims', () => {
+  for (const size of [2, 10 * 1024 * 1024 + 1]) {
+    const stored = buildZip([['a.json', 'x'.repeat(size)]], { method: 0 })
+    const centralOffset = stored.readUInt32LE(stored.length - 6)
+    stored.writeUInt32LE(1, 22)
+    stored.writeUInt32LE(1, centralOffset + 24)
+    assert.throws(() => readZipEntry(stored, listZipEntries(stored)[0]), /bounded output size|stored size does not match/)
+  }
+})
+
 test('a named read finds its file in an artifact that holds a directory of outputs', () => {
   // The exact shape that broke the rolling collector: `ci-metrics-run-*` uploads an output directory, and
   // tested-tree provenance began writing `validated-tree.json` beside the merged report. Two JSON files made

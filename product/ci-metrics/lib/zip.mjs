@@ -71,7 +71,11 @@ export function readZipEntry(input, entry) {
   const dataStart = entry.localOffset + 30 + nameLength + extraLength
   if (dataStart + entry.compressedSize > input.length) throw new ZipParseError(`ZIP entry "${entry.name}" data is out of bounds.`)
   const data = input.subarray(dataStart, dataStart + entry.compressedSize)
-  if (entry.method === 0) return Buffer.from(data)
+  if (entry.method === 0) {
+    if (data.length > MAX_ENTRY_BYTES) throw new ZipParseError(`ZIP entry "${entry.name}" exceeds the bounded output size.`)
+    if (data.length !== entry.uncompressedSize) throw new ZipParseError(`ZIP entry "${entry.name}" stored size does not match the record.`)
+    return Buffer.from(data)
+  }
   try {
     // The central-directory size is untrusted and may understate a compression bomb. Keep zlib's output
     // allocation bounded while inflating, then retain the exact-size check for honest archives.
