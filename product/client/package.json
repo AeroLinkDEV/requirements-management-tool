@@ -15,6 +15,7 @@
     "test:fast:logic": "playwright test --config=playwright.logic.config.ts",
     "test:fast:isolation": "node --test scripts/fast-client-isolation.test.mjs",
     "test:fast:rendered": "playwright test --config=playwright.rendered.config.ts",
+    "test:apilog": "node --test scripts/run-api-with-log.test.mjs",
     "test:focused": "playwright test",
     "test:smoke:core": "playwright test tests/application-smoke.spec.ts",
     "test:smoke": "playwright test tests/application-smoke.spec.ts tests/showcase-usability.spec.ts",

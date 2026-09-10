@@ -35,6 +35,12 @@ const skipApiBuild = process.env.AEROLINK_E2E_SKIP_BUILD === 'true'
 // point of the exercise.
 process.env.AEROLINK_E2E_API_BASE = origin
 
+// The same API transcript the development journeys keep (#939). This config has the identical gap — a
+// webServer whose stdout Playwright discards, carrying the ASP.NET Core log — and the one server here is
+// serving the built client as well, so losing its account of a request costs more, not less.
+const apiLogDir = process.env.AEROLINK_E2E_API_LOG_DIR ?? 'api-logs'
+const apiLogPath = join(apiLogDir, `api-${runId}.log`)
+
 export default defineConfig({
   testDir: './tests/production',
   globalSetup: './tests/global-setup.ts',
@@ -53,8 +59,26 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      command: `"${dotnet}" run --configuration Release ${skipApiBuild ? '--no-build ' : ''}--project ../src/AeroLink.Api --urls ${origin}`,
+      // The real command travels in the environment as a structured argument vector, so no shell has to
+      // interpret a Windows dotnet path containing spaces — and, more importantly, so the wrapper's child
+      // is the server itself rather than an intermediate shell it cannot see past.
+      command: 'node scripts/run-api-with-log.mjs',
       env: {
+        AEROLINK_E2E_API_ARGV: JSON.stringify([
+          dotnet, 'run', '--configuration', 'Release',
+          ...(skipApiBuild ? ['--no-build'] : []),
+          '--project', '../src/AeroLink.Api',
+          '--urls', origin,
+        ]),
+        AEROLINK_E2E_API_LOG: apiLogPath,
+        AEROLINK_E2E_API_LOG_LABEL: 'production-api',
+        // The same measured pair as the development journeys, for the same reason: request events are the
+        // signal a stalled request needs, and Information-level EF command logging is 97% of the volume
+        // without carrying that signal. EF at Warning keeps what EF emits at Warning or above; a slow but
+        // successful command is logged at Information and is not retained. See the note in
+        // playwright.config.ts.
+        'Logging__LogLevel__Microsoft.AspNetCore': 'Information',
+        'Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command': 'Warning',
         // Named explicitly rather than left to discovery, so a stale `dist` elsewhere on the machine can
         // never be the thing under test.
         Client__StaticFiles: join(clientDir, 'dist'),

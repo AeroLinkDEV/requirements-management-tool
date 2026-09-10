@@ -23,6 +23,18 @@ const outputDir = process.env.AEROLINK_E2E_OUTPUT_DIR ?? 'test-results'
 const reportDir = process.env.AEROLINK_E2E_REPORT_DIR ?? 'playwright-report'
 process.env.AEROLINK_E2E_API_BASE = `http://127.0.0.1:${e2eApiPort}`
 
+// Where the API's own console output is kept (#939).
+//
+// Playwright forwards a webServer's stderr by default but discards its stdout unless asked, and ASP.NET
+// Core's console logger writes every level — requests, warnings, exceptions — to stdout. So a shard could
+// fail on requests that recorded no response and still leave a complete job log containing nothing at all
+// from the server. `scripts/run-api-with-log.mjs` keeps a transcript instead.
+//
+// Deliberately a sibling of the report and results directories rather than a child of either: Playwright
+// clears its output directory when a run starts, and the server is launched before that happens.
+const apiLogDir = process.env.AEROLINK_E2E_API_LOG_DIR ?? 'api-logs'
+const apiLogPath = join(apiLogDir, `api-${runId}.log`)
+
 export default defineConfig({
   testDir: './tests',
   // The production journeys have their own config, because they need the API to serve the built client rather
@@ -67,8 +79,38 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      command: `"${dotnet}" run --configuration Release ${skipApiBuild ? '--no-build ' : ''}--project ../src/AeroLink.Api --urls http://127.0.0.1:${e2eApiPort}`,
+      // The real command travels in the environment as a structured argument vector, so no shell has to
+      // interpret a Windows dotnet path containing spaces — and, more importantly, so the wrapper's child
+      // is the server itself rather than an intermediate shell it cannot see past.
+      command: 'node scripts/run-api-with-log.mjs',
       env: {
+        AEROLINK_E2E_API_ARGV: JSON.stringify([
+          dotnet, 'run', '--configuration', 'Release',
+          ...(skipApiBuild ? ['--no-build'] : []),
+          '--project', '../src/AeroLink.Api',
+          '--urls', `http://127.0.0.1:${e2eApiPort}`,
+        ]),
+        AEROLINK_E2E_API_LOG: apiLogPath,
+        AEROLINK_E2E_API_LOG_LABEL: 'browser-api',
+        // What the transcript is actually for, chosen by measurement rather than taste.
+        //
+        // A first capture of one spec file produced 127,942 lines and 25.5 MB, of which 97% were
+        // `EntityFrameworkCore.Database.Command` at Information — mostly the showcase seed's DDL — and
+        // *none* were request events, because the shipped `appsettings.json` pins `Microsoft.AspNetCore`
+        // to Warning. That transcript could not have answered the question it exists to answer: a request
+        // that records no response needs "request starting" and "request finished", and those are exactly
+        // the lines that were missing.
+        //
+        // So the harness raises request logging and lowers the SQL flood. This is test-harness
+        // configuration, in the same block that already chooses the provider and the identity settings; no
+        // shipped configuration, assertion, timeout, retry or gate changes.
+        //
+        // EF at Warning retains what EF emits at Warning or above. It is not a promise that a slow but
+        // successful command will be recorded — EF logs those at Information, and they are gone. Accepting
+        // that is the trade for a transcript small enough to read; a slow-query detector is a different
+        // change with its own justification, and is not being smuggled in here.
+        'Logging__LogLevel__Microsoft.AspNetCore': 'Information',
+        'Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command': 'Warning',
         Database__Provider: 'Sqlite',
         DemoData__Enabled: 'false',
         Identity__SeedDemoAccounts: 'true',

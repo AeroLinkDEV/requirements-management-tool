@@ -776,6 +776,13 @@ jobs:
           npm run lint
           npm run typecheck
           npm run build
+      # The browser jobs run their API through this wrapper, so a regression in it stops those journeys
+      # starting at all. It belongs in a job the gate can fail on rather than only in advisory Fast: the
+      # properties that matter here — a failing server still failing, a killed server still leaving its
+      # transcript — are exactly the ones nobody notices are gone until an investigation needs them.
+      - name: Verify the API log wrapper contract
+        working-directory: product/client
+        run: npm run test:apilog
       - name: Mark test complete
         if: always()
         continue-on-error: true
@@ -1106,6 +1113,9 @@ jobs:
         env:
           AEROLINK_E2E_SKIP_BUILD: "true"
           PLAYWRIGHT_JSON_OUTPUT_NAME: journey-durations-${{ matrix.shard }}.json
+          # Stamped into the API transcript header so a retained log can be tied back to the shard that
+          # produced it. The artifact name already carries the shard; this survives being copied out of it.
+          AEROLINK_E2E_SHARD: ${{ matrix.shard }}
         run: |
           set -euo pipefail
           npx playwright test --list > listed.txt
@@ -1154,6 +1164,7 @@ jobs:
           path: |
             product/client/playwright-report
             product/client/test-results
+            product/client/api-logs
           if-no-files-found: ignore
           retention-days: 7
       - name: Write metrics fragment
@@ -1268,6 +1279,7 @@ jobs:
             product/client/playwright-report-production
             product/client/test-results-production
             product/client/journey-durations-production.json
+            product/client/api-logs
           if-no-files-found: ignore
           retention-days: 7
       - name: Write metrics fragment
@@ -1363,6 +1375,7 @@ jobs:
         env:
           AEROLINK_E2E_SKIP_BUILD: "true"
           PLAYWRIGHT_JSON_OUTPUT_NAME: journey-durations-full-${{ matrix.shard }}.json
+          AEROLINK_E2E_SHARD: ${{ matrix.shard }}
         run: |
           set -euo pipefail
           npx playwright test --list > listed.txt
@@ -1392,6 +1405,7 @@ jobs:
           path: |
             product/client/playwright-report
             product/client/test-results
+            product/client/api-logs
             product/client/journey-durations-full-${{ matrix.shard }}.json
             product/client/listed.txt
             product/client/plan.txt
