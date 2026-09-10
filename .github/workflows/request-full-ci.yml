@@ -10,7 +10,9 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: full-ci-request-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  # A refresh may arrive before the readiness event and wait for its Product run. It must not hold the
+  # dispatcher's concurrency slot while waiting. Both lanes still serialize their own same-head events.
+  group: full-ci-request-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}-${{ github.event.label.name == 'ready-for-full-ci' && 'dispatch' || 'refresh' }}
   cancel-in-progress: false
 
 jobs:
@@ -171,8 +173,10 @@ jobs:
             FOUND*) read -r _ run_id _ _ <<< "$match" ;;
             PENDING) run_id="" ;;
             NONE)
-              # Unrelated labels may restore the native binding, but never create a new Full run.
-              node -e 'if (process.env.REQUEST_LABEL !== "ready-for-full-ci") { console.error("No trusted Product run exists; only the readiness label may dispatch Full."); process.exit(1) }'
+              # The readiness event can be delayed behind an unrelated label event. Refreshes use the
+              # existing bounded polling loop while the separate dispatcher lane creates the trusted run.
+              # They never dispatch Full themselves, and missing proof still times out as failure.
+              if [ "$REQUEST_LABEL" = "ready-for-full-ci" ]; then
               python - <<'PY' > "$RUNNER_TEMP/full-ci-dispatch.json"
           import json, os
           print(json.dumps({
@@ -190,6 +194,7 @@ jobs:
                 --header "Content-Type: application/json" \
                 --data-binary "@$RUNNER_TEMP/full-ci-dispatch.json" \
                 "$api/actions/workflows/ci.yml/dispatches"
+              fi
               run_id=""
               ;;
             *) echo "::error::Unexpected Product-run matcher output: $match"; exit 1 ;;

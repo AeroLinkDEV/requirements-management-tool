@@ -37,7 +37,8 @@ Finish the fix, then request readiness again.
 
 Later label events retain the same real `Full Product evidence aggregate` job in the PR's latest check
 suite. For an already-ready same-repository PR, the requester revalidates its existing trusted Product
-evidence. An unrelated label cannot dispatch a new Full run. Missing readiness or failed verification makes
+evidence. An unrelated label cannot dispatch a new Full run. If its event arrives first, a separate refresh
+lane waits under the existing timeout for the readiness dispatcher. Missing readiness or failed verification makes
 the native required check fail; it must never become a skipped success or disappear behind a different name.
 
 The readiness publisher checks the complete current queue before dispatch and again before publishing. It
