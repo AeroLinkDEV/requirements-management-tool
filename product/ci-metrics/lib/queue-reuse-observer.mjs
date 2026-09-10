@@ -160,6 +160,14 @@ async function collectFallback(reader, fallbackRunId, candidateSha, now) {
       run.name !== 'Product quality gate' || run.path !== '.github/workflows/ci.yml' || run.head_branch !== 'main' ||
       !['schedule', 'workflow_dispatch'].includes(run.event)) throw new Error('Fallback is not a completed successful main diagnostic')
     const commit = result.commit = await reader.request(`${prefix}/git/commits/${run.head_sha}`)
+    result.candidateRelationship = await reader.request(`${prefix}/compare/${candidateSha}...${run.head_sha}`)
+    result.main = await reader.request(`${prefix}/branches/main`)
+    result.mainRelationship = await reader.request(`${prefix}/compare/${run.head_sha}...${result.main.commit.sha}`)
+    if (!['identical', 'ahead'].includes(result.candidateRelationship.status) ||
+      result.candidateRelationship.merge_base_commit?.sha !== candidateSha ||
+      result.main.name !== 'main' || result.main.protected !== true ||
+      !['identical', 'ahead'].includes(result.mainRelationship.status) ||
+      result.mainRelationship.merge_base_commit?.sha !== run.head_sha) throw new Error('Fallback does not contain the landed candidate on protected main')
     const changed = await compareTrustedSurfaces({ request: reader.request, repository: REUSE_REPOSITORY, candidateSha, baseSha: run.head_sha })
     result.protectedDefinitionMatches = changed.length === 0
     result.protectedChanges = changed

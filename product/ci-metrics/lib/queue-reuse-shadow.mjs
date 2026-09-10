@@ -140,6 +140,11 @@ export function evaluateQueueReuseShadow(packet, { now = Date.now(), source = 'u
     now >= Date.parse(run.updated_at) - 600_000 && now >= Date.parse(run.created_at) - 600_000, 'native execution is stale or has invalid dates')
   check('fallback-proof', fallback?.passed === true && fallback?.protectedDefinitionMatches === true &&
     fallback?.currentAttempt === true && fallback?.run?.repository?.full_name === REUSE_REPOSITORY &&
+    sha(fallback?.run?.head_sha) && ['identical', 'ahead'].includes(fallback?.candidateRelationship?.status) &&
+    fallback?.candidateRelationship?.merge_base_commit?.sha === candidate.sha &&
+    fallback?.main?.name === 'main' && fallback?.main?.protected === true &&
+    ['identical', 'ahead'].includes(fallback?.mainRelationship?.status) &&
+    fallback?.mainRelationship?.merge_base_commit?.sha === fallback.run.head_sha &&
     ['schedule', 'workflow_dispatch'].includes(fallback?.run?.event) && fallback?.run?.head_branch === 'main' &&
     now - Date.parse(fallback?.run?.updated_at) <= 30 * day && now >= Date.parse(fallback?.run?.updated_at),
   fallback?.reason ?? 'fresh complete main scheduled/manual fallback is unavailable')
@@ -153,7 +158,9 @@ export function evaluateQueueReuseShadow(packet, { now = Date.now(), source = 'u
       status: run.status, conclusion: run.conclusion },
     nonAuthoritativeOutcomes: jobs.filter(j => ['CI metrics tooling tests', 'Aggregate CI metrics'].includes(j.name))
       .map(j => ({ jobId: j.id, name: j.name, status: j.status, conclusion: j.conclusion })),
-    composition, landed: { sha: landed.sha, tree: landed.tree?.sha }, fallback: fallback ? { runId: fallback.run?.id, passed: fallback.passed, reason: fallback.reason } : null,
+    composition, landed: { sha: landed.sha, tree: landed.tree?.sha }, fallback: fallback ? { runId: fallback.run?.id,
+      sha: fallback.run?.head_sha, tree: fallback.commit?.tree?.sha,
+      candidateRelationship: fallback.candidateRelationship?.status, passed: fallback.passed, reason: fallback.reason } : null,
     reconciledCounts: reconciled?.errors?.length === 0 ? reconciled.merged.counts : null,
     reviewBoundary: 'The observer binds the exact PR head through protected readiness; it does not certify independence or truth of review comments.',
     originatingExecutions: jobs.filter(j => requiredNativeNames().includes(j.name)).map(j => ({ effectiveJobId: j.id,

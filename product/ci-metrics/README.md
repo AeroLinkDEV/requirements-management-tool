@@ -219,6 +219,8 @@ invalidation records cannot mask a newer invalidation. `filter=latest` selects t
 each retained fragment must match that job's actual originating attempt. Original start/completion timestamps
 are retained and checked for freshness. Retained executions are not labelled
 new work. Complete main schedule/manual diagnostic proof with matching protected contents is required.
+That diagnostic must include the landed candidate (the same commit or a proven descendant) and remain
+on protected main; a pre-landing diagnostic cannot supply fallback proof.
 Any gate/protected-surface change retains independent main validation.
 
 Outputs are `queue-reuse-shadow.json`, `queue-reuse-shadow.md` and the reproducible collected metadata/artifact

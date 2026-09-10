@@ -58,7 +58,9 @@ function fixture() {
     changedPaths: ['product/client/src/view.tsx'], protectedChanges: [], jobs, checks,
     evidence: { record, manifest, fragments, topology }, collectionErrors: [],
     fallback: { passed: true, protectedDefinitionMatches: true, currentAttempt: true, run: { id: 90, repository: { full_name: repository },
-      event: 'workflow_dispatch', head_branch: 'main', updated_at: iso(-50_000) } } }
+      head_sha: run.head_sha, event: 'workflow_dispatch', head_branch: 'main', updated_at: iso(-50_000) },
+      candidateRelationship: { status: 'identical', merge_base_commit: { sha: run.head_sha } },
+      main: { name: 'main', protected: true }, mainRelationship: { status: 'identical', merge_base_commit: { sha: run.head_sha } } } }
 }
 
 test('complete explicitly synthetic evidence can only be shadow positive and retains explicit test skips', () => {
@@ -116,6 +118,10 @@ const negatives = {
   'fallback-failed': p => { p.fallback.passed = false },
   'fallback-definition': p => { p.fallback.protectedDefinitionMatches = false },
   'fallback-stale': p => { p.fallback.run.updated_at = iso(-31 * 86400000) },
+  'fallback-before-landing': p => { p.fallback.candidateRelationship.status = 'behind' },
+  'fallback-wrong-candidate': p => { p.fallback.candidateRelationship.merge_base_commit.sha = hash('e') },
+  'fallback-off-main': p => { p.fallback.mainRelationship.status = 'diverged' },
+  'fallback-missing-head': p => { delete p.fallback.run.head_sha },
 }
 for (const [name, mutate] of Object.entries(negatives)) test(`shadow refuses ${name} without creating authority`, () => {
   const packet = fixture(); mutate(packet)
