@@ -225,10 +225,16 @@ for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
 
 const finish = (code, signal) => {
   const state = captureDegraded === '' ? 'complete' : `degraded (${captureDegraded})`
-  // Best-effort. On Windows a torn-down server is terminated rather than signalled, so this record is
-  // frequently absent. Its absence means normal completion was not recorded — forced termination is one
-  // explanation and a capture failure is another, which is why the state is named here rather than
-  // inferred by a reader.
+  // Best-effort, and deliberately not relied upon.
+  //
+  // Two things can stop this record existing. On Windows a torn-down server is terminated rather than
+  // signalled, so `finish` never runs. And when the transcript could not be opened or a write failed
+  // there is no file to write it to — a failed sink cannot be trusted to record its own failure, which is
+  // why the warning goes to stderr at the moment it happens rather than being saved up for a footer.
+  //
+  // So a missing end record means only: normal completion was not recorded. Inspect the process outcome
+  // and any capture warnings on stderr; forced termination is one explanation and a capture failure is
+  // another, and this record cannot distinguish them because in one of those cases it does not exist.
   writeLog(`==== api log end ${new Date().toISOString()} exit=${code ?? 'null'} signal=${signal ?? 'null'} capture=${state} ====\n`)
   if (logFd !== null) {
     try { closeSync(logFd) } catch { /* the transcript is already on disk */ }
