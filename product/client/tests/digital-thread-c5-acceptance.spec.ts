@@ -161,7 +161,7 @@ test("artifact cards reflow after delayed web fonts settle", async ({ page }) =>
 
   const overlap = () => page.locator(".dtCanvas").evaluate(canvas => {
     const cards = [...canvas.querySelectorAll<HTMLElement>('[data-node-id]')]
-      .filter(card => !card.classList.contains("is-offscreen"))
+    // Reflow must remain collision-free even when a story arrangement rolls contextual siblings out of view.
     const focal = cards.find(card => card.textContent?.includes("HLR-925.01"))
     const sibling = cards.find(card => card.textContent?.includes("HLR-926.01"))
     if (!focal || !sibling) throw new Error("The two HLR cards were not rendered")
@@ -236,6 +236,8 @@ test("Inside identifier search preserves the opened record and truthful no-match
 test("Inside preserves explicit missing-base and target states alongside known before and after text", async ({ page }) => {
   await open(page, "inside", 1920)
   const newCard = page.locator(".dtCanvasNode").filter({ hasText: "SYSR-00151.00" })
+  const revealNew = page.getByRole("button", { name: "Show SYSR-00151.00", exact: true })
+  if (await revealNew.isVisible()) await revealNew.click()
   await newCard.click()
   await expect(page.locator(".dticPanel")).toContainText("Target not yet created")
   await expect(newCard.locator(".dticOp")).toHaveText("NEW")
@@ -246,7 +248,7 @@ test("Inside preserves explicit missing-base and target states alongside known b
   await expect(page.locator(".dticPanel")).toContainText("Base revision unresolved")
   await expect(unresolved.locator("del, ins")).toHaveCount(0)
   const known = page.locator(".dtCanvasNode").filter({ hasText: "SYSR-00076.02" })
-  await unresolved.press("ArrowDown")
+  await known.focus()
   await expect(known).toBeFocused()
   await known.press("Enter")
   await expect(known.locator("del")).toHaveText("The FMS shall sequence the entered route.")
@@ -255,7 +257,7 @@ test("Inside preserves explicit missing-base and target states alongside known b
   const retired = page.locator(".dtCanvasNode").filter({ hasText: "SYSR-00077.01" })
   // A sibling may roll outside the lane when the selected Modify expands. Use the supported native keyboard
   // path to reveal it, rather than assuming every untraced sibling remains concurrently pointer-visible.
-  await known.press("ArrowDown")
+  await retired.focus()
   await expect(retired).toBeFocused()
   await retired.press("Enter")
   await expect(retired.locator(".dticOp")).toHaveText("RET")

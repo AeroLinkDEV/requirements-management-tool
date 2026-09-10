@@ -85,6 +85,8 @@ export type LaneModel = {
   laneForLevel: Map<string, number>
   problemLane: number
   verificationLane: number
+  caseLane: number
+  procedureLane: number
 }
 
 /**
@@ -108,10 +110,12 @@ export const laneModel = (orderedLevels: readonly string[] = DEFAULT_ORDERED_LEV
   const laneForLevel = new Map<string, number>()
   levels.forEach((level, index) => laneForLevel.set(level, index + 1))
   return {
-    labels: ["PROBLEM REPORT", ...levels.map(levelLaneLabel), "VERIFICATION CHANGE"],
+    labels: ["PROBLEM REPORT", ...levels.map(levelLaneLabel), "TEST CASE CHANGES", "TEST PROCEDURE CHANGES", "UNCLASSIFIED VERIFICATION CHANGE"],
     laneForLevel,
     problemLane: 0,
-    verificationLane: levels.length + 1,
+    caseLane: levels.length + 1,
+    procedureLane: levels.length + 2,
+    verificationLane: levels.length + 3,
   }
 }
 
@@ -120,7 +124,7 @@ export const laneModel = (orderedLevels: readonly string[] = DEFAULT_ORDERED_LEV
  */
 export const laneOf = (node: NetworkNode, model: LaneModel = laneModel()): number => {
   if (node.kind === "ProblemReport") return model.problemLane
-  if (node.kind === "TestChangeRequest") return model.verificationLane
+  if (node.kind === "TestChangeRequest") return node.level === "Case" ? model.caseLane : node.level === "Procedure" ? model.procedureLane : model.verificationLane
   return model.laneForLevel.get(node.level ?? "") ?? OFF_LADDER
 }
 

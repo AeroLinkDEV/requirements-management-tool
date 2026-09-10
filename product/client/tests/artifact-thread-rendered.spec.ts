@@ -834,7 +834,7 @@ test.describe("the loading frame", () => {
 })
 
 test.describe("a rolled lane survives a re-render", () => {
-  test("hovering a card does not undo a manual roll", async ({ page }) => {
+  test("leaving an intentional hover preview restores a manual roll", async ({ page }) => {
     await open(page, "dense")
     // The helper rolls a lane carrying covering records, so it is a lane the selection-sync routine has an
     // opinion about. A lane with nothing linked to the selection was never at risk, and rolling one of those
@@ -846,19 +846,13 @@ test.describe("a rolled lane survives a re-render", () => {
     // The roll must actually have moved something, or the rest of this asserts nothing.
     expect(rolled.some(card => card.y < 0)).toBe(true)
 
-    // The event is dispatched rather than driven through the pointer because the assertion is about React
-    // state causing a re-render, not about pointer actionability: zoomed in, cards sit past the viewport edge,
-    // so a real hover is a race. This is the same `onHover` path the canvas wires to `setHoveredId`.
-    await page.evaluate(() => {
-      const card = document.querySelector("[data-node-id]")!
-      card.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }))
-      card.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }))
-    })
-    await page.waitForTimeout(700)
-
-    // The roll is a deliberate act by the reader and must outlive a render that changed nothing about the
-    // board (#880 §6.3).
-    expect(positionsMatch(rolled, await cardPositions(page))).toBe(true)
+    // DEC-126 intentionally rearranges during hover, but #906's saved camera and lane positions survive exit.
+    const candidate = page.locator('.dtCanvasNode:not(.is-offscreen)[aria-pressed="false"]').first()
+    await candidate.hover()
+    await expect(page.getByRole('button', { name: 'Pin previewed record' })).toBeVisible()
+    await page.mouse.move(1, 1)
+    await expect(page.getByRole('button', { name: 'Pin previewed record' })).toHaveCount(0)
+    await expect.poll(async () => positionsMatch(rolled, await cardPositions(page))).toBe(true)
   })
 
   test("changing the selection still syncs the lanes", async ({ page }) => {

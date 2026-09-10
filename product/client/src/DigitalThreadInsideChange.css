@@ -380,12 +380,15 @@
 /* Panel placement modes (#880 §6.6). The reserved frame follows the resolved dock, so the canvas never lays
    a record out underneath whichever edge the panel took. */
 .dticPanel-bottom { left: 16px; right: 16px; bottom: 18px; height: 150px; }
+.dticPanel-bottom .dticPanelTools { position: absolute; right: 16px; top: 14px; z-index: 2; margin: 0; }
+.dticPanel-bottom .dticPanelContent > :last-child { padding-top: 32px; }
 .dticPanel-right { right: 16px; top: 70px; bottom: 22px; left: auto; width: 300px; height: auto; overflow: auto; }
 .dticPanel-left { left: 16px; top: 70px; bottom: 22px; right: auto; width: 300px; height: auto; overflow: auto; }
 
 .dticPanelContent { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 8px; overflow: auto; }
 .dticPanel-bottom .dticPanelContent { display: grid; grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; overflow: hidden; }
 .dticPanelIdentityCol { min-width: 0; overflow-y: auto; }
+.dticPanel-bottom .dticPanelIdentityCol { max-height: 100%; overflow-wrap: anywhere; }
 
 .dticPanelTools { display: flex; gap: 4px; }
 

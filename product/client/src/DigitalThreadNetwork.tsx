@@ -327,18 +327,19 @@ export default function DigitalThreadNetwork({
     [byId, canvasNodes, matchesFilters],
   )
 
+  const cardWeb = useMemo(() => hoveredId ? trace(hoveredId, canvasEdges) : web, [hoveredId, canvasEdges, web])
   const renderCard = useCallback(
     (canvasNode: CanvasNode) => {
       const node = byId.get(canvasNode.id)
       if (!node) return null
       const pill = pillFor(node.state)
       const tint = badgeTintFor(node)
-      const hop = web?.hops.get(node.id)
-      const traced = web?.nodes.has(node.id) ?? false
+      const hop = cardWeb?.hops.get(node.id)
+      const traced = cardWeb?.nodes.has(node.id) ?? false
       const classes = [
         "dtnCard",
         selectedId === node.id ? "is-selected" : "",
-        web && !traced ? "is-untraced" : "",
+        cardWeb && !traced ? "is-untraced" : "",
         matchesFilters(node) ? "" : "is-filtered",
       ]
         .filter(Boolean)
@@ -409,7 +410,7 @@ export default function DigitalThreadNetwork({
         </div>
       )
     },
-    [byId, hrefFor, matchesFilters, onOpenChange, selectedId, web],
+    [byId, hrefFor, matchesFilters, onOpenChange, selectedId, cardWeb],
   )
 
   return (
@@ -569,7 +570,7 @@ export default function DigitalThreadNetwork({
             </button>
           </div>
           <div className="dtnPanelGrid">
-            <div>
+            <div className="dtnPanelIdentityCol">
               <p className="dtnEyebrow">SELECTED RECORD</p>
               <div className="dtnPanelIdentity">
                 <ExactArtifactLink href={hrefFor?.(selected)}>{selected.displayNumber}</ExactArtifactLink>

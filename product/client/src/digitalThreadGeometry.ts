@@ -28,6 +28,19 @@ export interface CanvasEdge {
   kind?: 'suspect' | 'retire' | ''
 }
 
+/** Bring the directed story together without dropping records or changing relationship authority. */
+export const arrangeStory = (nodes: readonly CanvasNode[], story: ReadonlySet<string>): CanvasNode[] => {
+  const lanes = new Map<number, CanvasNode[]>()
+  for (const node of nodes) {
+    const lane = lanes.get(node.lane) ?? []
+    lane.push(node)
+    lanes.set(node.lane, lane)
+  }
+  return [...lanes.values()].flatMap(lane => lane
+    .slice().sort((a, b) => Number(story.has(b.id)) - Number(story.has(a.id)) || a.row - b.row || a.id.localeCompare(b.id))
+    .map((node, row) => ({ ...node, row })))
+}
+
 export interface CanvasGeometry {
   /** Card width, and the lane width the bands are drawn to. */
   laneWidth: number

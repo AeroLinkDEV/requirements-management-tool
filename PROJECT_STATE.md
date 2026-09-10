@@ -178,7 +178,7 @@ not reconstruct that lifecycle truth from roles or browser state. Review holders
 come from the frozen active `ApprovalStep` records, not current workflow configuration, base project roles, or
 Project Leadership. Incorporated, withdrawn, closed, rejected, superseded, linked, and unnumbered records leave the
 active projection under explicit family policy. The Team Work client workspace now provides the read-only,
-project-wide four-lane lifecycle board, people strip, search/build filters, layer-first contextual artifact-type
+project-wide three-lane lifecycle board (In Work, In Review, Approved), people strip, search/build filters, layer-first contextual artifact-type
 filters, current-holder grouping, and canonical record links. Selecting a person replaces the current person filter
 and keeps the board visible; current-holder detail is available only through a separate explicit action. Reusable
 person avatars use repository-owned synthetic portraits where available and retain an initials fallback. People
@@ -188,6 +188,12 @@ people holding work. Person workload counts follow that roster scope, while boar
 person-filtered scope. Project Leadership remains separate metadata and Review/Approval remain frozen
 workflow-stage meanings. Holder identity is 0..N, including parallel obligations, and no write, assignment,
 due-date, or age-in-state behavior is implied.
+
+The middle displayed lane combines canonical Review and Approval obligations. Compact cards show all next-action
+holders with their active stage purposes and truthful Assigned Build; routine metadata remains in expandable Details.
+Digital Thread hover temporarily brings the directed connected story together, retaining a stable source click target.
+Click pins; preview exit restores prior zoom, pan, and lane positions. Offscreen connected records have reveal actions,
+Case and Procedure changes have distinct lanes, and opening a change selects its exact subject on arrival (DEC-126).
 
 ## Problem Reports
 
