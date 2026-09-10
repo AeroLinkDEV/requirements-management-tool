@@ -47,9 +47,11 @@ export function reconcileReuseEvidence({ run, tree, jobs, record, manifest, frag
   for (const fragment of fragments) {
     try { validateFragment(fragment) } catch { errors.push('invalid-fragment'); continue }
     const native = byName.get(fragment.job.name)
+    const origin = native?.executionOrigin ?? (run.run_attempt === 1
+      ? { proven: native?.run_attempt === 1, attempt: 1 } : null)
     refuse(native?.run_id === run.id && native?.head_sha === run.head_sha && native?.status === 'completed' &&
-      native?.conclusion === fragment.job.result && native?.run_attempt === fragment.run.attempt &&
-      native.run_attempt <= run.run_attempt, `fragment-origin:${fragment.job.instance}`)
+      native?.conclusion === fragment.job.result && origin?.proven === true && origin.attempt === fragment.run.attempt &&
+      origin.attempt <= native.run_attempt && native.run_attempt <= run.run_attempt, `fragment-origin:${fragment.job.instance}`)
   }
   if (errors.length) return { errors: [...new Set(errors)], merged: null }
   const merged = aggregateFragments({ fragments, runMeta: topology })
@@ -151,7 +153,11 @@ export function evaluateQueueReuseShadow(packet, { now = Date.now(), source = 'u
     composition, landed: { sha: landed.sha, tree: landed.tree?.sha }, fallback: fallback ? { runId: fallback.run?.id, passed: fallback.passed, reason: fallback.reason } : null,
     reconciledCounts: reconciled?.errors?.length === 0 ? reconciled.merged.counts : null,
     reviewBoundary: 'The observer binds the exact PR head through protected readiness; it does not certify independence or truth of review comments.',
-    originatingExecutions: jobs.filter(j => requiredNativeNames().includes(j.name)).map(j => ({ jobId: j.id, name: j.name, runId: j.run_id, attempt: j.run_attempt })),
+    originatingExecutions: jobs.filter(j => requiredNativeNames().includes(j.name)).map(j => ({ effectiveJobId: j.id,
+      jobId: j.executionOrigin?.jobId ?? (run.run_attempt === 1 ? j.id : null), name: j.name, runId: j.run_id,
+      effectiveAttempt: j.run_attempt, attempt: j.executionOrigin?.attempt ?? (run.run_attempt === 1 ? j.run_attempt : null) })),
+    executionDiagnostics: packet?.jobOrigins?.ledger ? { unresolvedCopies: packet.jobOrigins.ledger.unresolvedCopies,
+      invalidTimings: packet.jobOrigins.ledger.invalidTimings } : null,
     mandatoryWork: 'All existing main-push jobs remain mandatory under their unchanged production conditions. This observer grants no skip authority.',
     potentiallyAvoidable: { estimated: true, deliveredRunnerMinutes: 0, queueJobProxyRunnerMinutes: Number.isFinite(estimatedMs) ? estimatedMs / 60_000 : null,
       limitation: 'Queue job time is only a proxy for potentially avoidable main work; it is not delivered savings or a complete historical compute ledger.' },

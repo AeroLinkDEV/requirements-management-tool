@@ -7,6 +7,7 @@ import { readSingleJsonFromZip, readNamedJsonFromZip } from './zip.mjs'
 import { compareTrustedSurfaces } from './merge-authority-github.mjs'
 import { collectMergedPaths } from './provenance.mjs'
 import { looksLikeCredential } from './fragment.mjs'
+import { resolveJobOrigins } from './api-observations.mjs'
 import { REUSE_REPOSITORY, requiredNativeNames, reconcileReuseEvidence, evaluateQueueReuseShadow } from './queue-reuse-shadow.mjs'
 
 const prefix = `/repos/${REUSE_REPOSITORY}`
@@ -70,6 +71,26 @@ export function deriveObserverTopology(run, tree) {
   } finally { rmSync(directory, { recursive: true, force: true }) }
 }
 
+export async function collectReuseJobOrigins(reader, run, jobs) {
+  if (!positive(run.run_attempt) || run.run_attempt > 30) throw new Error('Unsupported attempt count')
+  const allJobs = await readAllReusePages(reader.request, `${prefix}/actions/runs/${run.id}/jobs?filter=all`, 'jobs')
+  const attemptRuns = []
+  for (let attempt = 1; attempt <= run.run_attempt; attempt++) {
+    const metadata = await reader.request(`${prefix}/actions/runs/${run.id}/attempts/${attempt}`)
+    if (metadata.id !== run.id || metadata.run_attempt !== attempt || metadata.head_sha !== run.head_sha ||
+      metadata.repository?.full_name !== REUSE_REPOSITORY) throw new Error('Attempt source identity mismatch')
+    attemptRuns.push(metadata)
+  }
+  const ledger = resolveJobOrigins({ latestJobs: jobs, allJobs, runId: run.id, runAttempt: run.run_attempt, attemptRuns })
+  if (!ledger.attemptMetadata.complete || ledger.duplicateIds.length) throw new Error('Incomplete originating attempt metadata')
+  const unresolved = new Set([...ledger.unresolvedCopies, ...ledger.invalidTimings].map(j => j.jobId))
+  return { allJobs, attemptRuns, ledger, jobs: jobs.map(job => {
+    const origin = ledger.ledger.find(j => j.effective && j.id === job.id)
+    return { ...job, executionOrigin: { jobId: origin?.originJobId ?? null, attempt: origin?.originAttempt ?? null,
+      proven: Boolean(origin && !unresolved.has(job.id) && !unresolved.has(origin.originJobId)) } }
+  }) }
+}
+
 async function collectEvidence(reader, run, tree, jobs, topology) {
   const artifacts = await readAllReusePages(reader.request, `${prefix}/actions/runs/${run.id}/artifacts`, 'artifacts')
   async function named(name, file) {
@@ -93,8 +114,9 @@ async function collectEvidence(reader, run, tree, jobs, topology) {
     const recorded = record.jobs?.filter(j => j.instance === job.instance)
     if (recorded?.length !== 1) throw new Error(`Missing/duplicate recorded job ${job.instance}`)
     const native = jobs.filter(j => j.name === recorded[0].name)
-    if (native.length !== 1 || !positive(native[0].run_attempt) || native[0].run_attempt > run.run_attempt) throw new Error(`Unproven native fragment origin ${job.instance}`)
-    fragments.push(await named(`ci-metrics-fragment-${job.instance}-${native[0].run_attempt}`))
+    const origin = native[0]?.executionOrigin
+    if (native.length !== 1 || !origin?.proven || !positive(origin.attempt) || origin.attempt > run.run_attempt) throw new Error(`Unproven native fragment origin ${job.instance}`)
+    fragments.push(await named(`ci-metrics-fragment-${job.instance}-${origin.attempt}`))
   }
   return { record, manifest, fragments, topology, artifacts: artifacts.map(a => ({ id: a.id, name: a.name, expired: a.expired })) }
 }
@@ -118,18 +140,21 @@ async function collectFallback(reader, fallbackRunId, candidateSha, now) {
   const run = await reader.request(`${prefix}/actions/runs/${fallbackRunId}`)
   const result = { run, passed: false, reason: 'Fallback qualification incomplete' }
   try {
-    const workflow = await reader.request(`${prefix}/actions/workflows/ci.yml`)
+    const workflow = result.workflow = await reader.request(`${prefix}/actions/workflows/ci.yml`)
     if (run.repository?.full_name !== REUSE_REPOSITORY || run.status !== 'completed' || run.conclusion !== 'success' ||
       run.workflow_id !== workflow.id || workflow.path !== '.github/workflows/ci.yml' ||
       run.name !== 'Product quality gate' || run.path !== '.github/workflows/ci.yml' || run.head_branch !== 'main' ||
       !['schedule', 'workflow_dispatch'].includes(run.event)) throw new Error('Fallback is not a completed successful main diagnostic')
-    const commit = await reader.request(`${prefix}/git/commits/${run.head_sha}`)
+    const commit = result.commit = await reader.request(`${prefix}/git/commits/${run.head_sha}`)
     const changed = await compareTrustedSurfaces({ request: reader.request, repository: REUSE_REPOSITORY, candidateSha, baseSha: run.head_sha })
     result.protectedDefinitionMatches = changed.length === 0
+    result.protectedChanges = changed
     if (changed.length) throw new Error('Fallback protected definition differs from candidate')
-    const jobs = await readAllReusePages(reader.request, `${prefix}/actions/runs/${run.id}/jobs?filter=latest`, 'jobs')
+    const latestJobs = await readAllReusePages(reader.request, `${prefix}/actions/runs/${run.id}/jobs?filter=latest`, 'jobs')
+    result.jobOrigins = await collectReuseJobOrigins(reader, run, latestJobs)
+    const jobs = result.jobs = result.jobOrigins.jobs
     const names = requiredNativeNames().filter(n => !n.startsWith('Browser journeys (')).concat([1, 2, 3].map(n => `Full browser journeys (${n}/3)`))
-    const checks = await readAllReusePages(reader.request, `${prefix}/commits/${run.head_sha}/check-runs?filter=all`, 'check_runs')
+    const checks = result.checks = await readAllReusePages(reader.request, `${prefix}/commits/${run.head_sha}/check-runs?filter=all`, 'check_runs')
     for (const name of names) {
       const matches = jobs.filter(j => j.name === name)
       const native = checks.filter(c => c.name === name && c.check_suite?.id === run.check_suite_id &&
@@ -137,10 +162,10 @@ async function collectFallback(reader, fallbackRunId, candidateSha, now) {
       if (matches.length !== 1 || matches[0].status !== 'completed' || matches[0].conclusion !== 'success' || matches[0].run_id !== run.id ||
         native.length !== 1 || native[0].app?.id !== 15368 || native[0].conclusion !== 'success') throw new Error(`Fallback required proof missing: ${name}`)
     }
-    const evidence = await collectEvidence(reader, run, commit.tree.sha, jobs, deriveObserverTopology(run, commit.tree.sha))
+    const evidence = result.evidence = await collectEvidence(reader, run, commit.tree.sha, jobs, deriveObserverTopology(run, commit.tree.sha))
     const reconciliation = reconcileReuseEvidence({ run, tree: commit.tree.sha, jobs, ...evidence }, now)
     if (reconciliation.errors.length) throw new Error(reconciliation.errors.join('; '))
-    const latest = await reader.request(`${prefix}/actions/runs/${run.id}`)
+    const latest = result.latestRun = await reader.request(`${prefix}/actions/runs/${run.id}`)
     result.currentAttempt = latest.run_attempt === run.run_attempt && latest.head_sha === run.head_sha && latest.status === 'completed' && latest.conclusion === 'success'
     result.passed = result.currentAttempt
     result.reason = result.passed ? null : 'Fallback attempt changed'
@@ -173,6 +198,8 @@ export async function collectQueueReuseShadow({ runId, prNumber, fallbackRunId, 
     packet.protectedChanges = await compareTrustedSurfaces({ request: reader.request, repository: REUSE_REPOSITORY,
       candidateSha: packet.candidate.sha, baseSha: packet.composition.baseSha })
     packet.jobs = await readAllReusePages(reader.request, `${prefix}/actions/runs/${runId}/jobs?filter=latest`, 'jobs')
+    packet.jobOrigins = await collectReuseJobOrigins(reader, packet.run, packet.jobs)
+    packet.jobs = packet.jobOrigins.jobs
     packet.checks = await readAllReusePages(reader.request, `${prefix}/commits/${packet.candidate.sha}/check-runs?filter=all`, 'check_runs')
     packet.evidence = await collectEvidence(reader, packet.run, packet.candidate.tree.sha, packet.jobs, topology(packet.run, packet.candidate.tree.sha))
     packet.fallback = await collectFallback(reader, fallbackRunId, packet.candidate.sha, now)

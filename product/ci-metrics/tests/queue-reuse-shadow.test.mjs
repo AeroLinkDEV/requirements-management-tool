@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { buildFragment } from '../lib/fragment.mjs'
 import { aggregateFragments } from '../lib/aggregate.mjs'
 import { REUSE_REPOSITORY as repository, evaluateQueueReuseShadow, requiredNativeNames, renderQueueReuseShadow } from '../lib/queue-reuse-shadow.mjs'
-import { deriveObserverTopology, readAllReusePages, collectQueueReuseShadow, createReuseReader } from '../lib/queue-reuse-observer.mjs'
+import { deriveObserverTopology, readAllReusePages, collectQueueReuseShadow, collectReuseJobOrigins, createReuseReader } from '../lib/queue-reuse-observer.mjs'
 
 const now = Date.parse('2026-09-10T01:00:00Z')
 const iso = offset => new Date(now + offset).toISOString()
@@ -125,10 +125,36 @@ test('earlier successful fragment is accepted only when the effective native job
   const packet = fixture()
   packet.run.run_attempt = packet.latestRun.run_attempt = packet.evidence.record.run.attempt = packet.evidence.manifest.run.attempt = 2
   packet.evidence.topology.expectedRun.attempt = 2
+  for (const job of packet.jobs) {
+    job.executionOrigin = { jobId: job.id, attempt: 1, proven: true }
+    job.id += 1000
+    job.run_attempt = 2
+  }
   const report = evaluateQueueReuseShadow(packet, { now })
   assert.equal(report.outcome, 'would_reuse', JSON.stringify(report.conditions.filter(c => !c.passed)))
   assert.ok(report.originatingExecutions.every(j => j.attempt === 1))
   assert.equal(report.potentiallyAvoidable.deliveredRunnerMinutes, 0)
+  assert.ok(report.originatingExecutions.every(j => j.effectiveAttempt === 2 && j.effectiveJobId !== j.jobId))
+  packet.jobs[0].executionOrigin.proven = false
+  assert.notEqual(evaluateQueueReuseShadow(packet, { now }).outcome, 'would_reuse')
+})
+
+test('captured #953 API copy keeps its latest check identity and selects the actual originating attempt', async () => {
+  const capture = JSON.parse(readFileSync(new URL('./fixtures/queue-reuse-partial-job.json', import.meta.url), 'utf8'))
+  const reader = { request: async path => {
+    if (path.includes('/jobs?filter=all')) return { total_count: capture.allJobs.length, jobs: capture.allJobs }
+    return capture.attemptRuns.find(a => path.endsWith(`/attempts/${a.run_attempt}`))
+  } }
+  const origins = await collectReuseJobOrigins(reader, capture.run, capture.latestJobs)
+  assert.deepEqual(origins.jobs[0].executionOrigin, { jobId: 102565482679, attempt: 1, proven: true })
+  assert.equal(origins.jobs[0].id, 102580599062)
+  assert.equal(origins.jobs[0].run_attempt, 2)
+  assert.equal(origins.jobs[0].check_run_url, capture.latestJobs[0].check_run_url)
+  capture.allJobs = capture.allJobs.filter(j => j.run_attempt === 2)
+  const missing = await collectReuseJobOrigins(reader, capture.run, capture.latestJobs)
+  assert.equal(missing.jobs[0].executionOrigin.proven, false)
+  capture.attemptRuns[0].head_sha = hash('e')
+  await assert.rejects(collectReuseJobOrigins(reader, capture.run, capture.latestJobs), /identity mismatch/)
 })
 
 test('complete Product evidence retains the existing non-authoritative reporting failure policy visibly', () => {
