@@ -1,0 +1,515 @@
+{
+  "source": "Captured GitHub metadata from run 34380845004; offline fixture is unverified and contains only one API-job pair",
+  "run": {
+    "id": 34380845004,
+    "run_attempt": 2,
+    "head_sha": "539761fa1b04ac9a16c73ed5033be856d014687c",
+    "repository": {
+      "full_name": "AeroLinkDEV/requirements-management-tool"
+    }
+  },
+  "attemptRuns": [
+    {
+      "id": 34380845004,
+      "run_attempt": 1,
+      "head_sha": "539761fa1b04ac9a16c73ed5033be856d014687c",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "run_started_at": "2026-09-09T17:06:10Z",
+      "updated_at": "2026-09-09T17:27:05Z",
+      "repository": {
+        "full_name": "AeroLinkDEV/requirements-management-tool"
+      }
+    },
+    {
+      "id": 34380845004,
+      "run_attempt": 2,
+      "head_sha": "539761fa1b04ac9a16c73ed5033be856d014687c",
+      "status": "completed",
+      "conclusion": "success",
+      "run_started_at": "2026-09-09T17:51:42Z",
+      "updated_at": "2026-09-09T18:13:39Z",
+      "repository": {
+        "full_name": "AeroLinkDEV/requirements-management-tool"
+      }
+    }
+  ],
+  "latestJobs": [
+    {
+      "id": 102580599062,
+      "name": "API test suite (1/3)",
+      "run_id": 34380845004,
+      "run_attempt": 2,
+      "head_sha": "539761fa1b04ac9a16c73ed5033be856d014687c",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-09T17:07:40Z",
+      "completed_at": "2026-09-09T17:19:54Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-09-09T17:07:41Z",
+          "completed_at": "2026-09-09T17:07:44Z"
+        },
+        {
+          "name": "Capture job start",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-09-09T17:07:44Z",
+          "completed_at": "2026-09-09T17:07:47Z"
+        },
+        {
+          "name": "Check out repository",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-09-09T17:07:47Z",
+          "completed_at": "2026-09-09T17:07:53Z"
+        },
+        {
+          "name": "Install .NET 10",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-09-09T17:07:53Z",
+          "completed_at": "2026-09-09T17:09:02Z"
+        },
+        {
+          "name": "Cache NuGet packages",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-09-09T17:09:02Z",
+          "completed_at": "2026-09-09T17:09:14Z"
+        },
+        {
+          "name": "Restore and build this test project and its dependencies",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-09-09T17:09:14Z",
+          "completed_at": "2026-09-09T17:11:26Z"
+        },
+        {
+          "name": "Mark setup complete",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-09-09T17:11:27Z",
+          "completed_at": "2026-09-09T17:11:30Z"
+        },
+        {
+          "name": "Run this shard of the API test suite",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-09-09T17:11:30Z",
+          "completed_at": "2026-09-09T17:19:43Z"
+        },
+        {
+          "name": "Upload API test diagnostics",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 9,
+          "started_at": "2026-09-09T17:19:43Z",
+          "completed_at": "2026-09-09T17:19:43Z"
+        },
+        {
+          "name": "Mark test complete",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-09-09T17:19:43Z",
+          "completed_at": "2026-09-09T17:19:43Z"
+        },
+        {
+          "name": "Aggregate API startup telemetry",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-09-09T17:19:43Z",
+          "completed_at": "2026-09-09T17:19:45Z"
+        },
+        {
+          "name": "Upload API startup telemetry",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-09-09T17:19:45Z",
+          "completed_at": "2026-09-09T17:19:46Z"
+        },
+        {
+          "name": "Write metrics fragment",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-09-09T17:19:46Z",
+          "completed_at": "2026-09-09T17:19:47Z"
+        },
+        {
+          "name": "Upload metrics fragment",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 14,
+          "started_at": "2026-09-09T17:19:47Z",
+          "completed_at": "2026-09-09T17:19:48Z"
+        },
+        {
+          "name": "Post Cache NuGet packages",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 26,
+          "started_at": "2026-09-09T17:19:48Z",
+          "completed_at": "2026-09-09T17:19:49Z"
+        },
+        {
+          "name": "Post Install .NET 10",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 27,
+          "started_at": "2026-09-09T17:19:49Z",
+          "completed_at": "2026-09-09T17:19:49Z"
+        },
+        {
+          "name": "Post Check out repository",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 28,
+          "started_at": "2026-09-09T17:19:49Z",
+          "completed_at": "2026-09-09T17:19:52Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 29,
+          "started_at": "2026-09-09T17:19:52Z",
+          "completed_at": "2026-09-09T17:19:52Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/AeroLinkDEV/requirements-management-tool/check-runs/102580599062"
+    }
+  ],
+  "allJobs": [
+    {
+      "id": 102565482679,
+      "name": "API test suite (1/3)",
+      "run_id": 34380845004,
+      "run_attempt": 1,
+      "head_sha": "539761fa1b04ac9a16c73ed5033be856d014687c",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-09T17:07:40Z",
+      "completed_at": "2026-09-09T17:19:54Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-09-09T17:07:41Z",
+          "completed_at": "2026-09-09T17:07:44Z"
+        },
+        {
+          "name": "Capture job start",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-09-09T17:07:44Z",
+          "completed_at": "2026-09-09T17:07:47Z"
+        },
+        {
+          "name": "Check out repository",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-09-09T17:07:47Z",
+          "completed_at": "2026-09-09T17:07:53Z"
+        },
+        {
+          "name": "Install .NET 10",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-09-09T17:07:53Z",
+          "completed_at": "2026-09-09T17:09:02Z"
+        },
+        {
+          "name": "Cache NuGet packages",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-09-09T17:09:02Z",
+          "completed_at": "2026-09-09T17:09:14Z"
+        },
+        {
+          "name": "Restore and build this test project and its dependencies",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-09-09T17:09:14Z",
+          "completed_at": "2026-09-09T17:11:26Z"
+        },
+        {
+          "name": "Mark setup complete",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-09-09T17:11:27Z",
+          "completed_at": "2026-09-09T17:11:30Z"
+        },
+        {
+          "name": "Run this shard of the API test suite",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-09-09T17:11:30Z",
+          "completed_at": "2026-09-09T17:19:43Z"
+        },
+        {
+          "name": "Upload API test diagnostics",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 9,
+          "started_at": "2026-09-09T17:19:43Z",
+          "completed_at": "2026-09-09T17:19:43Z"
+        },
+        {
+          "name": "Mark test complete",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-09-09T17:19:43Z",
+          "completed_at": "2026-09-09T17:19:43Z"
+        },
+        {
+          "name": "Aggregate API startup telemetry",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-09-09T17:19:43Z",
+          "completed_at": "2026-09-09T17:19:45Z"
+        },
+        {
+          "name": "Upload API startup telemetry",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-09-09T17:19:45Z",
+          "completed_at": "2026-09-09T17:19:46Z"
+        },
+        {
+          "name": "Write metrics fragment",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-09-09T17:19:46Z",
+          "completed_at": "2026-09-09T17:19:47Z"
+        },
+        {
+          "name": "Upload metrics fragment",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 14,
+          "started_at": "2026-09-09T17:19:47Z",
+          "completed_at": "2026-09-09T17:19:48Z"
+        },
+        {
+          "name": "Post Cache NuGet packages",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 26,
+          "started_at": "2026-09-09T17:19:48Z",
+          "completed_at": "2026-09-09T17:19:49Z"
+        },
+        {
+          "name": "Post Install .NET 10",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 27,
+          "started_at": "2026-09-09T17:19:49Z",
+          "completed_at": "2026-09-09T17:19:49Z"
+        },
+        {
+          "name": "Post Check out repository",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 28,
+          "started_at": "2026-09-09T17:19:49Z",
+          "completed_at": "2026-09-09T17:19:52Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 29,
+          "started_at": "2026-09-09T17:19:52Z",
+          "completed_at": "2026-09-09T17:19:52Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/AeroLinkDEV/requirements-management-tool/check-runs/102565482679"
+    },
+    {
+      "id": 102580599062,
+      "name": "API test suite (1/3)",
+      "run_id": 34380845004,
+      "run_attempt": 2,
+      "head_sha": "539761fa1b04ac9a16c73ed5033be856d014687c",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-09T17:07:40Z",
+      "completed_at": "2026-09-09T17:19:54Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-09-09T17:07:41Z",
+          "completed_at": "2026-09-09T17:07:44Z"
+        },
+        {
+          "name": "Capture job start",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-09-09T17:07:44Z",
+          "completed_at": "2026-09-09T17:07:47Z"
+        },
+        {
+          "name": "Check out repository",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-09-09T17:07:47Z",
+          "completed_at": "2026-09-09T17:07:53Z"
+        },
+        {
+          "name": "Install .NET 10",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-09-09T17:07:53Z",
+          "completed_at": "2026-09-09T17:09:02Z"
+        },
+        {
+          "name": "Cache NuGet packages",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-09-09T17:09:02Z",
+          "completed_at": "2026-09-09T17:09:14Z"
+        },
+        {
+          "name": "Restore and build this test project and its dependencies",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-09-09T17:09:14Z",
+          "completed_at": "2026-09-09T17:11:26Z"
+        },
+        {
+          "name": "Mark setup complete",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-09-09T17:11:27Z",
+          "completed_at": "2026-09-09T17:11:30Z"
+        },
+        {
+          "name": "Run this shard of the API test suite",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-09-09T17:11:30Z",
+          "completed_at": "2026-09-09T17:19:43Z"
+        },
+        {
+          "name": "Upload API test diagnostics",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 9,
+          "started_at": "2026-09-09T17:19:43Z",
+          "completed_at": "2026-09-09T17:19:43Z"
+        },
+        {
+          "name": "Mark test complete",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-09-09T17:19:43Z",
+          "completed_at": "2026-09-09T17:19:43Z"
+        },
+        {
+          "name": "Aggregate API startup telemetry",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-09-09T17:19:43Z",
+          "completed_at": "2026-09-09T17:19:45Z"
+        },
+        {
+          "name": "Upload API startup telemetry",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-09-09T17:19:45Z",
+          "completed_at": "2026-09-09T17:19:46Z"
+        },
+        {
+          "name": "Write metrics fragment",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-09-09T17:19:46Z",
+          "completed_at": "2026-09-09T17:19:47Z"
+        },
+        {
+          "name": "Upload metrics fragment",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 14,
+          "started_at": "2026-09-09T17:19:47Z",
+          "completed_at": "2026-09-09T17:19:48Z"
+        },
+        {
+          "name": "Post Cache NuGet packages",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 26,
+          "started_at": "2026-09-09T17:19:48Z",
+          "completed_at": "2026-09-09T17:19:49Z"
+        },
+        {
+          "name": "Post Install .NET 10",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 27,
+          "started_at": "2026-09-09T17:19:49Z",
+          "completed_at": "2026-09-09T17:19:49Z"
+        },
+        {
+          "name": "Post Check out repository",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 28,
+          "started_at": "2026-09-09T17:19:49Z",
+          "completed_at": "2026-09-09T17:19:52Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 29,
+          "started_at": "2026-09-09T17:19:52Z",
+          "completed_at": "2026-09-09T17:19:52Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/AeroLinkDEV/requirements-management-tool/check-runs/102580599062"
+    }
+  ]
+}
