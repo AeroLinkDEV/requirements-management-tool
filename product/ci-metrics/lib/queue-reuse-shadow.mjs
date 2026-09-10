@@ -160,7 +160,9 @@ export function evaluateQueueReuseShadow(packet, { now = Date.now(), source = 'u
 
 export function renderQueueReuseShadow(report) {
   return ['# Queue-to-main reuse shadow', '', `Outcome: **${report.outcome}**. Source: ${report.sourceAuthenticity}. Actual skip authority: **false**.`,
-    `Run ${report.run.id}, attempt ${report.run.attempt}; candidate ${report.run.sha}; landed ${report.landed.sha}.`, '',
+    `Run ${report.run.id}, attempt ${report.run.attempt}; status ${report.run.status}; overall conclusion **${report.run.conclusion}**; candidate ${report.run.sha}; landed ${report.landed.sha}.`, '',
+    'Non-authoritative reporting outcomes (these do not replace required Product proof):',
+    ...report.nonAuthoritativeOutcomes.slice(0, 10).map(j => `- ${j.name}: ${j.status}, ${j.conclusion ?? 'unavailable'} (job ${j.jobId}).`), '',
     '| Condition | Result | Reason |', '|---|---|---|', ...report.conditions.map(c => `| ${c.name} | ${c.passed ? 'pass' : 'refuse'} | ${(c.reason ?? '').replace(/[|\r\n]/g, ' ')} |`),
     '', report.mandatoryWork, '', `Estimated queue-job proxy: ${report.potentiallyAvoidable.queueJobProxyRunnerMinutes ?? 'unavailable'} runner-minutes. Delivered savings: 0.`,
     report.potentiallyAvoidable.limitation, '', `Observer overhead: ${report.observerMs ?? 'unavailable'} ms.`, ''].join('\n')

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { buildFragment } from '../lib/fragment.mjs'
 import { aggregateFragments } from '../lib/aggregate.mjs'
-import { REUSE_REPOSITORY as repository, evaluateQueueReuseShadow, requiredNativeNames } from '../lib/queue-reuse-shadow.mjs'
+import { REUSE_REPOSITORY as repository, evaluateQueueReuseShadow, requiredNativeNames, renderQueueReuseShadow } from '../lib/queue-reuse-shadow.mjs'
 import { deriveObserverTopology, readAllReusePages, collectQueueReuseShadow, createReuseReader } from '../lib/queue-reuse-observer.mjs'
 
 const now = Date.parse('2026-09-10T01:00:00Z')
@@ -141,6 +141,8 @@ test('complete Product evidence retains the existing non-authoritative reporting
     assert.equal(report.outcome, 'would_reuse', JSON.stringify(report.conditions.filter(c => !c.passed)))
     assert.equal(report.run.conclusion, conclusion)
     assert.equal(report.nonAuthoritativeOutcomes.at(-1).conclusion, conclusion)
+    assert.ok(renderQueueReuseShadow(report).includes(`overall conclusion **${conclusion}**`))
+    assert.ok(renderQueueReuseShadow(report).includes(`Aggregate CI metrics: completed, ${conclusion}`))
     assert.equal(report.canSkip, false)
   }
 })
