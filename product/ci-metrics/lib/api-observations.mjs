@@ -721,7 +721,8 @@ function markdown(value) {
 }
 
 export function renderApiObservationMarkdown(report) {
-  const lines = ['# Authenticated API observations', '', `- Repository: \`${markdown(report.repository)}\`; runs retained: ${report.runs.length}; exclusions: ${report.exclusions.length}`, '- GitHub metadata is authenticated read-only API data. Artifact contents are runner assertions reconciled against that metadata; they do not become authenticated source claims.', '- Adoption authority: **absent**; ordinary API selection remains the current three-shard count plan.', '']
+  const retainedNonComparable = report.runs.filter((run) => run.comparability?.eligible !== true).length
+  const lines = ['# Authenticated API observations', '', `- Repository: \`${markdown(report.repository)}\`; runs retained: ${report.runs.length}; collection exclusions: ${report.exclusions.length}; retained non-comparable runs: ${retainedNonComparable}`, '- GitHub metadata is authenticated read-only API data. Artifact contents are runner assertions reconciled against that metadata; they do not become authenticated source claims.', '- Adoption authority: **absent**; ordinary API selection remains the current three-shard count plan.', '']
   lines.push('| Run | Attempt | Event role | Source commit | Inventory | Comparable |')
   lines.push('|---:|---:|---|---|---:|---|')
   for (const run of report.runs) {
@@ -729,6 +730,21 @@ export function renderApiObservationMarkdown(report) {
     lines.push(`| ${metadata.id ?? '—'} | ${metadata.attempt ?? '—'} | ${markdown(metadata.role)} | \`${markdown(metadata.commitSha)}\` | ${run.inventory?.testCount ?? '—'} / ${markdown(run.artifactAssertions?.inventoryDigest)} | ${run.comparability?.eligible === true ? 'yes' : 'no'} |`)
   }
   lines.push('')
+  lines.push('## Run dispositions')
+  lines.push('')
+  for (const run of report.runs) {
+    const metadata = run.sourceMetadata?.run ?? {}
+    const reasons = [
+      ...(Array.isArray(run.comparability?.reasons) ? run.comparability.reasons : []),
+      ...(Array.isArray(run.exclusions) ? run.exclusions.map((entry) => entry.reason) : []),
+    ].filter(Boolean)
+    lines.push(`### Run ${metadata.id ?? 'unknown'} attempt ${metadata.attempt ?? 'unknown'}`)
+    lines.push('')
+    lines.push(`- Comparable: **${run.comparability?.eligible === true}**; artifact reconciliation: **${run.artifactAssertions?.reconciled === true}**.`)
+    if (reasons.length === 0) lines.push('- No reconciliation or comparability refusal reasons.')
+    else for (const reason of reasons.slice(0, MAX_EXCLUSIONS)) lines.push(`- ${markdown(reason)}`)
+    lines.push('')
+  }
   lines.push('## Exclusions')
   lines.push('')
   if (report.exclusions.length === 0) lines.push('None.')

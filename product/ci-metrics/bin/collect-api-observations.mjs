@@ -4,7 +4,7 @@
 // GITHUB_TOKEN and GITHUB_REPOSITORY are required environment inputs. The collector never executes
 // downloaded artifact content; it parses only named api-observation.json, shard.trx, and v2 fragment JSON entries through bounded readers.
 
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { isAbsolute, relative, resolve, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -33,6 +33,7 @@ function parseArgs(argv) {
   const output = resolve(args.output)
   const temp = resolve(tmpdir())
   if (relative(temp, output).startsWith('..') || relative(temp, output).includes(':')) throw new Error('--output must be under the Windows temp directory.')
+  if (existsSync(output)) throw new Error('--output must name a new owned temp directory; refusing to overwrite existing collector output.')
   return { ...args, output }
 }
 
@@ -241,7 +242,8 @@ async function main() {
     mkdirSync(args.output, { recursive: true })
     writeFileSync(join(args.output, 'api-observations.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8')
     writeFileSync(join(args.output, 'api-observations.md'), `${renderApiObservationMarkdown(report)}\n`, 'utf8')
-    console.log(`[ci-metrics] API observations: ${report.runs.length} runs; ${report.comparability.eligibleRunCount} comparable; ${report.exclusions.length} exclusions.`)
+    const retainedNonComparableRuns = report.runs.filter((run) => run.comparability?.eligible !== true).length
+    console.log(`[ci-metrics] API observations: ${report.runs.length} runs; ${report.comparability.eligibleRunCount} comparable; collection exclusions=${report.exclusions.length}; retained non-comparable runs=${retainedNonComparableRuns}.`)
   } catch (error) {
     console.error(`[ci-metrics] API observation collection failed: ${error.message}`)
     process.exit(1)

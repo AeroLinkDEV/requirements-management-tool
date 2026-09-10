@@ -1,18 +1,33 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createReadOnlyGitHubRequest, downloadArtifactZip, fetchWorkflowRunAttempt, fetchWorkflowRuns, listGitHubPages } from '../lib/github-readonly.mjs'
+import { createReadOnlyGitHubRequest, downloadArtifactZip, fetchWorkflowRunAttempt, fetchWorkflowRuns, listGitHubPages, readBoundedResponseBody } from '../lib/github-readonly.mjs'
 
 const repository = 'AeroLinkDEV/requirements-management-tool'
 const apiRoot = `/repos/${repository}`
 
 function response({ status = 200, body = {}, headers = {} } = {}) {
   const text = JSON.stringify(body)
+  const bytes = Buffer.from(text)
   return {
     status,
     ok: status >= 200 && status < 300,
     headers: { get: (name) => headers[name.toLowerCase()] ?? null },
-    text: async () => text,
-    arrayBuffer: async () => Buffer.from(body),
+    body: streamedBody([bytes]),
+  }
+}
+
+function streamedBody(chunks) {
+  let index = 0
+  let cancelled = false
+  return {
+    getReader() {
+      return {
+        read: async () => index < chunks.length ? { done: false, value: chunks[index++] } : { done: true, value: undefined },
+        cancel: async () => { cancelled = true },
+        releaseLock: () => {},
+        get cancelled() { return cancelled },
+      }
+    },
   }
 }
 
@@ -32,6 +47,18 @@ test('read-only GitHub client sends only GET requests to the fixed repository', 
   await assert.rejects(() => request('/repos/another/project/actions/runs'), /fixed repository API scope/)
   assert.throws(() => createReadOnlyGitHubRequest({ token: 'x', repository: 'another/project' }), /only supports/)
   assert.throws(() => createReadOnlyGitHubRequest({ token: 'x', repository, apiUrl: 'https://example.test' }), /fixed/)
+})
+
+test('REST JSON bodies enforce the cumulative limit when content length is missing or lies', async () => {
+  const oversized = Buffer.alloc(5 * 1024 * 1024 + 1, 65)
+  const requestWith = (contentLength) => createReadOnlyGitHubRequest({ token: 'token-value', repository, fetchImpl: async () => ({
+    status: 200,
+    ok: true,
+    headers: { get: (name) => name === 'content-length' ? contentLength : null },
+    body: streamedBody([oversized]),
+  }) })
+  await assert.rejects(() => requestWith(null)(`${apiRoot}/actions/workflows/ci.yml`), /bounded size/)
+  await assert.rejects(() => requestWith('1')(`${apiRoot}/actions/workflows/ci.yml`), /bounded size/)
 })
 
 test('paged GitHub lists require complete totals and refuse duplicate identities', async () => {
@@ -82,7 +109,7 @@ test('artifact redirects strip bearer authorization after leaving the API origin
       status: 200,
       ok: true,
       headers: { get: () => null },
-      arrayBuffer: async () => Buffer.from('PK-test'),
+      body: streamedBody([Buffer.from('PK-test')]),
     }
   }
   const bytes = await downloadArtifactZip({ token: 'secret-token', repository, artifactId: 42, fetchImpl })
@@ -91,4 +118,61 @@ test('artifact redirects strip bearer authorization after leaving the API origin
   assert.equal(calls[1].options.headers.Authorization, undefined)
   assert.equal(calls[1].options.headers.Accept, 'application/octet-stream')
   await assert.rejects(() => downloadArtifactZip({ token: 'x', repository, artifactId: 42, fetchImpl: async () => response({ status: 302, headers: { location: 'http://objects.example.test/a.zip' } }) }), /safe HTTPS URL/)
+})
+
+test('streamed GitHub responses enforce cumulative limits and cancel on overflow', async () => {
+  let cancelled = false
+  let reads = 0
+  const stream = {
+    getReader() {
+      return {
+        read: async () => {
+          reads += 1
+          return reads <= 2 ? { done: false, value: Buffer.from('ab') } : { done: true, value: undefined }
+        },
+        cancel: async () => { cancelled = true },
+        releaseLock: () => {},
+      }
+    },
+  }
+  await assert.rejects(() => readBoundedResponseBody({ body: stream, headers: { get: () => null } }, 3, 'test response'), /exceeds the bounded size/)
+  assert.equal(cancelled, true)
+  assert.equal(reads, 2)
+
+  let lyingCancelled = false
+  const lyingLengthStream = {
+    getReader() {
+      let index = 0
+      return {
+        read: async () => index++ === 0 ? { done: false, value: Buffer.from('abcd') } : { done: true, value: undefined },
+        cancel: async () => { lyingCancelled = true },
+        releaseLock: () => {},
+      }
+    },
+  }
+  await assert.rejects(() => readBoundedResponseBody({ body: lyingLengthStream, headers: { get: (name) => name === 'content-length' ? '1' : null } }, 3, 'lying response'), /exceeds the bounded size/)
+  assert.equal(lyingCancelled, true)
+})
+
+test('artifact download applies the streamed limit before retaining oversized chunks', async () => {
+  let cancelled = false
+  let reads = 0
+  const fetchImpl = async () => ({
+    status: 200,
+    ok: true,
+    headers: { get: () => null },
+    body: {
+      getReader: () => ({
+        read: async () => {
+          reads += 1
+          return reads <= 2 ? { done: false, value: Buffer.from('ab') } : { done: true, value: undefined }
+        },
+        cancel: async () => { cancelled = true },
+        releaseLock: () => {},
+      }),
+    },
+  })
+  await assert.rejects(() => downloadArtifactZip({ token: 'token', repository, artifactId: 42, maxBytes: 3, fetchImpl }), /bounded size/)
+  assert.equal(cancelled, true)
+  assert.equal(reads, 2)
 })

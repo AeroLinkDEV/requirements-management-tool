@@ -415,6 +415,8 @@ configuration remain required for a performance conclusion; collection output al
 duration packing or any protected skip. A recovered or rerun attempt remains useful for audited weights and
 origin accounting, but is marked separately from an ordinary first-pass performance sample. Branch dispatch
 and branch push runs are also labelled as unverified diagnostic roles rather than pooled with main validation.
+The Markdown report separates collection exclusions from retained non-comparable runs and lists each run's
+reconciliation/comparability refusal reason.
 
 For a controlled experiment on Windows, use an explicit owned temp output and the same source/inventory for
 both cohorts:
@@ -430,9 +432,12 @@ node product/ci-metrics/bin/benchmark-api-packing.mjs `
 The command verifies the source commit/tree and complete inventory, builds once per cohort, runs three shards
 for the current count plan and duration candidate, preserves every TRX under the owned output, reconciles each
 result identity exactly, and records setup/build time, shard wall time, slowest shard, runner-minutes, and
-outcomes, with no retries configured. It refuses non-Windows execution, output inside the source tree, protected
-port 54329 or connection variables, and absence of all usable duration evidence. Unknown class durations use
-the documented count fallback and remain visible in the report. The benchmark is a local diagnostic; the ordinary three-shard CI
+outcomes, with no retries configured. TRX inventory/count reconciliation is separate from outcome qualification:
+explicit `NotExecuted` identities and counts remain visible, and the current/proposed skip sets must match.
+JSON duration inputs are unverified file claims even when they carry an authenticated-collector metadata claim.
+It refuses non-Windows execution, an existing output directory, output inside the source tree, protected port
+54329 or connection variables, and absence of all usable duration evidence. Unknown class durations use the
+documented count fallback and remain visible in the report. The benchmark is a local diagnostic; the ordinary three-shard CI
 selector, worker counts, required checks, and merge authority are unchanged. It records source cleanliness
 before and after both cohorts and terminates only the spawned process tree when a bounded timeout fires.
 

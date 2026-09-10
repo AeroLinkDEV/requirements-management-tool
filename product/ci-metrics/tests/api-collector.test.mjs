@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { collectApiObservations } from '../bin/collect-api-observations.mjs'
+import { renderApiObservationMarkdown } from '../lib/api-observations.mjs'
 
 const repository = 'AeroLinkDEV/requirements-management-tool'
 const root = `/repos/${repository}`
@@ -52,6 +53,17 @@ function zip(entries) {
   end.writeUInt32LE(centralBytes.length, 12)
   end.writeUInt32LE(offset, 16)
   return Buffer.concat([...local, centralBytes, end])
+}
+
+function streamedBody(bytes) {
+  let read = false
+  return {
+    getReader: () => ({
+      read: async () => read ? { done: true, value: undefined } : (read = true, { done: false, value: bytes }),
+      cancel: async () => {},
+      releaseLock: () => {},
+    }),
+  }
 }
 
 function apiArtifact({ shard, attempt, plan, discovery }) {
@@ -131,13 +143,17 @@ test('collector selects copied artifacts from the resolved originating attempt',
     if (match) return { status: 302, ok: false, headers: { get: (name) => name === 'location' ? `https://objects.example.test/${match[1]}.zip` : null } }
     const artifactId = Number(/\/(\d+)\.zip$/.exec(new URL(url).pathname)?.[1])
     const body = zipById.get(artifactId)
-    return { status: 200, ok: true, headers: { get: () => null }, arrayBuffer: async () => body }
+    return { status: 200, ok: true, headers: { get: () => null }, body: streamedBody(body) }
   }
   const report = await collectApiObservations({ token: 'token', repository, request, fetchImpl, window: 1 })
   assert.equal(report.runs.length, 1)
   assert.equal(report.collector.mode, 'injected-read-only-fixture')
   assert.equal(report.collector.sourceAuthenticated, false)
   assert.equal(report.runs[0].sourceMetadata.authenticated, false)
+  const markdown = renderApiObservationMarkdown(report)
+  assert.match(markdown, /Run dispositions/)
+  assert.match(markdown, /Recovered or rerun execution/)
+  assert.match(markdown, /retained non-comparable runs: 1/)
   assert.equal(report.runs[0].comparability.eligible, false)
   assert.equal(report.runs[0].comparability.sampleKind, 'recovered-or-rerun')
   const shard = report.runs[0].shards.find((entry) => entry.shard === 1)

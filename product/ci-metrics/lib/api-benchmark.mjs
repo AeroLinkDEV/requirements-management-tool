@@ -10,13 +10,17 @@ import { tmpdir } from 'node:os'
 import * as os from 'node:os'
 import { execFileSync, spawn } from 'node:child_process'
 import { buildCurrentCountPlan, buildDurationCandidatePlan, normalizeApiDiscovery } from './api-packing-shadow.mjs'
-import { classDurationWeights } from './api-observations.mjs'
+import { classDurationWeights, decodeXmlAttribute } from './api-observations.mjs'
 import { parseTrx } from './trx.mjs'
 
 export const API_BENCHMARK_SCHEMA = 'aerolink-api-packing-benchmark/v1'
 export const BENCHMARK_SHARD_COUNT = 3
 export const BENCHMARK_TIMEOUT_MS = 30 * 60 * 1000
 const MAX_OUTPUT_BYTES = 32 * 1024
+
+function compareStrings(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0
+}
 
 function requireObject(value, label) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object.`)
@@ -122,10 +126,11 @@ function inventoryFromInput(input) {
 
 function durationsFromInput(input, discovery) {
   const value = requireObject(input, 'observation input')
-  const authenticatedCollectorReport = value.schemaVersion === 'aerolink-api-observations/v1' && value.collector?.mode === 'authenticated-read-only'
   const candidates = []
-  if (Array.isArray(value.runs)) candidates.push(...value.runs.filter((run) => run?.artifactAssertions?.reconciled === true).map((run) => ({ candidate: run, provenance: authenticatedCollectorReport && run.sourceMetadata?.authenticated === true ? (run.comparability?.eligible === true ? 'authenticated-run-report' : 'authenticated-recovered-run') : 'caller-supplied-unverified-run' })))
-  if (value.sourceMetadata && Array.isArray(value.shards)) candidates.push({ candidate: value, provenance: value.sourceMetadata.authenticated === true && value.artifactAssertions?.reconciled === true ? 'authenticated-reconciled-run' : 'caller-supplied-unverified-run' })
+  // JSON supplied to a local benchmark is a file claim. Even a report that says it came from the
+  // authenticated collector cannot self-promote after being detached from that API session.
+  if (Array.isArray(value.runs)) candidates.push(...value.runs.filter((run) => run?.artifactAssertions?.reconciled === true).map((run) => ({ candidate: run, provenance: 'caller-supplied-unverified-run' })))
+  if (value.sourceMetadata && Array.isArray(value.shards)) candidates.push({ candidate: value, provenance: 'caller-supplied-unverified-run' })
   if (Array.isArray(value.classDurations)) candidates.push({ candidate: value, provenance: 'caller-supplied-unverified-durations' })
   for (const { candidate, provenance } of candidates) {
     if (candidate.inventory?.digest && candidate.inventory.digest !== discovery.digest) continue
@@ -138,8 +143,14 @@ function durationsFromInput(input, discovery) {
       inventoryDigest: candidate.inventory?.digest ?? discovery.digest,
       sourceCommitSha: candidate.sourceMetadata?.run?.commitSha ?? discovery.commitSha,
       sourceTreeSha: candidate.sourceMetadata?.run?.treeSha ?? discovery.treeSha,
-      metadataAuthenticated: provenance.startsWith('authenticated-'),
-      artifactReconciled: provenance.startsWith('authenticated-') && candidate.artifactAssertions?.reconciled === true,
+      metadataAuthenticated: false,
+      artifactReconciled: false,
+      metadataClaim: {
+        collectorMode: value.collector?.mode ?? null,
+        sourceMetadataAuthenticated: candidate.sourceMetadata?.authenticated === true,
+        artifactReconciled: candidate.artifactAssertions?.reconciled === true,
+        comparabilityEligible: candidate.comparability?.eligible === true,
+      },
     }
   }
   throw new Error('Observation input contains no comparable class durations for the supplied inventory.')
@@ -166,23 +177,63 @@ function classNameForTest(name) {
   return dot > 0 ? withoutArguments.slice(0, dot) : null
 }
 
-function reconcileTrx(trx, plannedTests, label) {
+export function normalizeTrxResults(trx) {
+  return {
+    ...trx,
+    // parseTrx intentionally stays a small compatibility parser and leaves XML entities encoded. Decode
+    // exactly once at this observation boundary so benchmark identities match dotnet --list-tests output.
+    tests: trx.tests.map((test, index) => ({
+      ...test,
+      className: decodeXmlAttribute(test.className, `TRX result ${index}.className`),
+      name: decodeXmlAttribute(test.name, `TRX result ${index}.name`),
+    })),
+  }
+}
+
+/** Purely reconcile one parsed TRX against planned identities; explicit skips remain exact evidence. */
+export function reconcileTrx(trx, plannedTests, label = 'benchmark shard') {
   const names = trx.tests.map((test) => test.name)
   const counts = new Map()
   for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1)
   const expected = new Set(plannedTests)
   const missing = plannedTests.filter((name) => counts.get(name) !== 1)
   const extra = names.filter((name) => !expected.has(name))
-  if (missing.length > 0 || extra.length > 0 || new Set(names).size !== names.length) {
-    return { ok: false, missing: missing.slice(0, 20), extra: extra.slice(0, 20), duplicateCount: names.length - new Set(names).size }
+  const duplicateCount = names.length - new Set(names).size
+  const classMismatch = trx.tests.some((test) => classNameForTest(test.name) !== test.className)
+  const countReconciled = trx.totals.total === plannedTests.length && trx.tests.length === plannedTests.length
+  const identityReconciled = missing.length === 0 && extra.length === 0 && duplicateCount === 0 && !classMismatch
+  const exact = identityReconciled && countReconciled
+  const skippedTests = trx.tests.filter((test) => test.outcome === 'NotExecuted').map((test) => test.name).sort(compareStrings)
+  const failedTests = trx.tests.filter((test) => test.outcome === 'Failed').map((test) => test.name).sort(compareStrings)
+  // TRX parsing rejects unknown outcomes and duplicate/missing result rows. A benchmark cohort may retain
+  // explicit skips (the two opt-out PostgreSQL tests in the calibrated source), but failures and retries
+  // remain outcome-ineligible and are reported separately from exact identity/count reconciliation.
+  const outcomeQualified = exact && failedTests.length === 0
+  let reason = null
+  if (!identityReconciled) reason = classMismatch ? 'TRX identities were present, but a result class did not match its planned test identity.' : 'TRX identities did not reconcile exactly with the planned shard.'
+  else if (!countReconciled) reason = 'TRX total count did not reconcile exactly with the planned shard.'
+  else if (!outcomeQualified) reason = 'TRX contains failed test outcomes; explicit skips remain separately visible.'
+  return {
+    // `ok` preserves the historical exact-reconciliation signal. Outcome qualification is deliberately a
+    // separate field so explicit NotExecuted rows are not mistaken for missing inventory.
+    ok: exact,
+    exact,
+    identityReconciled,
+    countReconciled,
+    outcomeQualified,
+    reason,
+    missing: missing.slice(0, 20),
+    extra: extra.slice(0, 20),
+    duplicateCount,
+    skippedTests,
+    failedTests,
+    outcomes: { passed: trx.totals.passed, failed: trx.totals.failed, skipped: trx.totals.skipped },
+    retryCount: 0,
   }
-  if (trx.tests.some((test) => classNameForTest(test.name) !== test.className)) {
-    return { ok: false, reason: 'TRX identities were present, but a result class did not match its planned test identity.', missing: [], extra: [], duplicateCount: 0 }
-  }
-  if (trx.totals.total !== plannedTests.length || trx.totals.executed !== plannedTests.length || trx.totals.passed !== plannedTests.length || trx.totals.failed !== 0 || trx.totals.skipped !== 0 || trx.tests.some((test) => test.outcome !== 'Passed')) {
-    return { ok: false, reason: 'TRX identities reconciled, but first-pass outcomes were not all Passed.', missing: [], extra: [], duplicateCount: 0 }
-  }
-  return { ok: true, missing: [], extra: [], duplicateCount: 0 }
+}
+
+function sameNames(left, right) {
+  return left.length === right.length && left.every((name, index) => name === right[index])
 }
 
 async function executeCohort({ label, plan, sourceDir, outputDir, project, environment, runner }) {
@@ -226,13 +277,13 @@ async function executeCohort({ label, plan, sourceDir, outputDir, project, envir
     })
     const wallMs = Date.now() - started
     let trx = null
-    let reconciliation = { ok: false, reason: 'TRX file was not produced.' }
+    let reconciliation = { ok: false, exact: false, identityReconciled: false, countReconciled: false, outcomeQualified: false, reason: 'TRX file was not produced.', missing: [], extra: [], duplicateCount: 0, skippedTests: [], failedTests: [], outcomes: null, retryCount: 0 }
     if (existsSync(trxPath)) {
       try {
-        trx = parseTrx(readFileSync(trxPath, 'utf8'))
+        trx = normalizeTrxResults(parseTrx(readFileSync(trxPath, 'utf8')))
         reconciliation = reconcileTrx(trx, shard.tests, `Cohort ${label} shard ${shard.shard}`)
       } catch (error) {
-        reconciliation = { ok: false, reason: `TRX parse failed: ${error.message}` }
+        reconciliation = { ok: false, exact: false, identityReconciled: false, countReconciled: false, outcomeQualified: false, reason: `TRX parse failed: ${error.message}`, missing: [], extra: [], duplicateCount: 0, skippedTests: [], failedTests: [], outcomes: null, retryCount: 0 }
       }
     }
     return {
@@ -242,9 +293,9 @@ async function executeCohort({ label, plan, sourceDir, outputDir, project, envir
       attempt: 1,
       wallMs,
       process: { ...result, command: 'dotnet', args: testArgs, stdout: boundedOutput(result.stdout), stderr: boundedOutput(result.stderr) },
-      status: result.exitCode === 0 && !result.timedOut && reconciliation.ok ? 'success' : 'failure',
+      status: result.exitCode === 0 && !result.timedOut && reconciliation.exact && reconciliation.outcomeQualified && reconciliation.retryCount === 0 ? 'success' : 'failure',
       trx: trx ? { totals: trx.totals, tests: trx.tests } : null,
-      outcomes: trx ? { passed: trx.totals.passed, failed: trx.totals.failed, skipped: trx.totals.skipped } : null,
+      outcomes: trx ? { passed: trx.totals.passed, failed: trx.totals.failed, skipped: trx.totals.skipped, skippedTests: reconciliation.skippedTests, failedTests: reconciliation.failedTests } : null,
       reconciliation,
     }
   }))
@@ -270,28 +321,31 @@ export async function runApiPackingBenchmark({ sourceDir, discovery: rawDiscover
   const sourceRelative = relative(source, output)
   if (sourceRelative === '' || (!sourceRelative.startsWith('..') && !sourceRelative.includes(':'))) throw new Error('outputDir must be outside the source tree.')
   if (source.toLowerCase() === resolve('C:\\Sean Project\\AeroLink Production').toLowerCase()) throw new Error('Benchmark refuses the dedicated production source.')
+  if (existsSync(output)) throw new Error('outputDir must name a new owned temp directory; refusing to overwrite existing benchmark output.')
   protectedDatabaseEnvironment(process.env)
   const discovery = inventoryFromInput(rawDiscovery)
   const identity = sourceIdentity(source, git)
   if (identity.commitSha !== discovery.commitSha || identity.treeSha !== discovery.treeSha) throw new Error('Source HEAD/tree does not match the supplied complete inventory.')
   const durationInput = durationsFromInput(rawObservations, discovery)
   const toolchain = toolchainSnapshot()
-  const current = buildCurrentCountPlan(discovery, BENCHMARK_SHARD_COUNT)
-  const proposed = buildDurationCandidatePlan(discovery, durationInput.weights, BENCHMARK_SHARD_COUNT)
-  planCoverage(current, discovery, 'Current plan')
-  planCoverage(proposed, discovery, 'Proposed plan')
+  const currentPlan = buildCurrentCountPlan(discovery, BENCHMARK_SHARD_COUNT)
+  const proposedPlan = buildDurationCandidatePlan(discovery, durationInput.weights, BENCHMARK_SHARD_COUNT)
+  planCoverage(currentPlan, discovery, 'Current plan')
+  planCoverage(proposedPlan, discovery, 'Proposed plan')
   mkdirSync(output, { recursive: true })
   const environment = safeChildEnvironment(process.env)
-  const cohorts = {
-    current: await executeCohort({ label: 'current', plan: current, sourceDir: source, outputDir: output, project, environment, runner }),
-    proposed: await executeCohort({ label: 'proposed', plan: proposed, sourceDir: source, outputDir: output, project, environment, runner }),
-  }
+  const current = await executeCohort({ label: 'current', plan: currentPlan, sourceDir: source, outputDir: output, project, environment, runner })
+  const proposed = await executeCohort({ label: 'proposed', plan: proposedPlan, sourceDir: source, outputDir: output, project, environment, runner })
+  const cohorts = { current, proposed }
+  const currentSkipped = current.shards.flatMap((shard) => shard.reconciliation?.skippedTests ?? []).sort(compareStrings)
+  const proposedSkipped = proposed.shards.flatMap((shard) => shard.reconciliation?.skippedTests ?? []).sort(compareStrings)
+  const explicitSkipsMatch = sameNames(currentSkipped, proposedSkipped)
   const afterIdentity = sourceIdentity(source, git)
   if (afterIdentity.commitSha !== identity.commitSha || afterIdentity.treeSha !== identity.treeSha) throw new Error('Source HEAD/tree changed during the benchmark.')
   const currentWall = cohorts.current.slowestShardWallMs
   const proposedWall = cohorts.proposed.slowestShardWallMs
   let verdict = 'insufficient-evidence'
-  if (cohorts.current.success && cohorts.proposed.success && currentWall !== null && proposedWall !== null) {
+  if (cohorts.current.success && cohorts.proposed.success && explicitSkipsMatch && currentWall !== null && proposedWall !== null) {
     if (proposedWall < currentWall * 0.95) verdict = 'promising-but-not-proven'
     else if (proposedWall > currentWall * 1.05) verdict = 'regression'
     else verdict = 'no-measured-improvement'
@@ -316,6 +370,8 @@ export async function runApiPackingBenchmark({ sourceDir, discovery: rawDiscover
         sourceTreeSha: durationInput.sourceTreeSha,
         metadataAuthenticated: durationInput.metadataAuthenticated,
         artifactReconciled: durationInput.artifactReconciled,
+        metadataClaim: durationInput.metadataClaim,
+        authenticationBasis: 'unverified-file-input; benchmark does not perform a live GitHub authentication read',
       },
       collectionTopology: 'unknown-unobserved; no regrouping inferred from VSTest output',
     },
@@ -330,18 +386,22 @@ export async function runApiPackingBenchmark({ sourceDir, discovery: rawDiscover
       cohortOrder: ['current', 'proposed'],
       orderAndCacheConfounder: 'Current runs before proposed; process timing is retained, but this single pair does not remove cache or runner-order effects.',
       gateWallClaim: 'not-measured',
+      explicitSkips: { current: currentSkipped, proposed: proposedSkipped, matching: explicitSkipsMatch },
     },
     safety: { outputOwnedTemp: true, sourceOutsideProduction: true, childEnvironment: 'credentials-and-database connection variables removed; protected port refused', data: 'API tests own disposable SQLite databases per factory; no canonical database fallback' },
-    limits: ['This is a local diagnostic experiment and does not enable duration packing.', 'Summed test durations and runner-minutes are observed process timings; they are not a whole-gate forecast.', 'A performance conclusion requires separately declared comparable cohorts and at least eight observations per configuration.', 'The three local shard processes share one machine; this is not equivalent to three hosted runners, and cold-cache equality is not guaranteed.', 'Current always runs before proposed; cache and order effects remain a limitation of this single pair.'],
+    limits: ['This is a local diagnostic experiment and does not enable duration packing.', 'Summed test durations and runner-minutes are observed process timings; they are not a whole-gate forecast.', 'A performance conclusion requires separately declared comparable cohorts and at least eight observations per configuration.', 'The three local shard processes share one machine; this is not equivalent to three hosted runners, and cold-cache equality is not guaranteed.', 'Current always runs before proposed; cache and order effects remain a limitation of this single pair.', 'Explicit NotExecuted identities must match between current and proposed cohorts; failures or retries make a cohort outcome-ineligible.'],
   }
 }
 
 export function renderApiBenchmarkMarkdown(report) {
-  const lines = ['# API packing benchmark', '', `- Mode: **${report.mode}**; source commit \`${report.source.commitSha}\`; tree \`${report.source.treeSha}\``, `- Toolchain: ${report.toolchain.platform}/${report.toolchain.arch}, OS ${report.toolchain.osRelease}, ${report.toolchain.cpuCount} logical CPUs, .NET ${report.toolchain.dotnetVersion ?? 'unavailable'}`, `- Inventory: ${report.inventory.testCount} tests across ${report.inventory.classCount} classes; digest \`${report.inventory.digest}\`; same inventory: **${report.configuration.sameInventory}**`, `- Current CI selection changed: **${report.configuration.ordinaryCiChanged}**; protected gate eligible: **${report.configuration.protectedGateEligible}**`, `- Verdict: **${report.comparison.verdict}**; complete gate timing: **not measured**`, '', '| Cohort | Setup/build | Slowest shard | Runner-minutes | Successful |', '|---|---:|---:|---:|---|']
+  const durationObservation = report.configuration.durationObservation
+  const skipSummary = (names) => `${names.slice(0, 20).map((name) => String(name).replace(/[|\r\n]/g, ' ')).join(', ') || 'none'}${names.length > 20 ? `, +${names.length - 20} more` : ''}`
+  const lines = ['# API packing benchmark', '', `- Mode: **${report.mode}**; source commit \`${report.source.commitSha}\`; tree \`${report.source.treeSha}\``, `- Toolchain: ${report.toolchain.platform}/${report.toolchain.arch}, OS ${report.toolchain.osRelease}, ${report.toolchain.cpuCount} logical CPUs, .NET ${report.toolchain.dotnetVersion ?? 'unavailable'}`, `- Inventory: ${report.inventory.testCount} tests across ${report.inventory.classCount} classes; digest \`${report.inventory.digest}\`; same inventory: **${report.configuration.sameInventory}**`, `- Duration input: ${durationObservation.provenance}; authentication basis: ${durationObservation.authenticationBasis}; metadata authentication observed by benchmark: **${durationObservation.metadataAuthenticated}**`, `- Current CI selection changed: **${report.configuration.ordinaryCiChanged}**; protected gate eligible: **${report.configuration.protectedGateEligible}**`, `- Verdict: **${report.comparison.verdict}**; complete gate timing: **not measured**`, '', '| Cohort | Setup/build | Slowest shard | Runner-minutes | Successful |', '|---|---:|---:|---:|---|']
   for (const label of ['current', 'proposed']) {
     const cohort = report.cohorts[label]
     lines.push(`| ${label} (${cohort.algorithm}) | ${cohort.setupMs} ms | ${cohort.slowestShardWallMs ?? '—'} ms | ${cohort.totalRunnerMinutes.toFixed(2)} | ${cohort.success} |`)
   }
+  lines.push('', `Explicit NotExecuted identities match across cohorts: **${report.comparison.explicitSkips.matching}**.`, `- Current (${report.comparison.explicitSkips.current.length}): ${skipSummary(report.comparison.explicitSkips.current)}`, `- Proposed (${report.comparison.explicitSkips.proposed.length}): ${skipSummary(report.comparison.explicitSkips.proposed)}`)
   lines.push('', '## Shards', '', '| Cohort | Shard | Planned tests | Wall | Status | TRX reconciliation |', '|---|---:|---:|---:|---|---|')
   for (const label of ['current', 'proposed']) for (const shard of report.cohorts[label].shards) lines.push(`| ${label} | ${shard.shard} | ${shard.plannedTests} | ${shard.wallMs ?? '—'} ms | ${shard.status} | ${shard.reconciliation?.ok ? 'exact' : 'FAILED'} |`)
   lines.push('', '## Limits', '')

@@ -33,13 +33,38 @@ function repoPath(repository, path) {
   return path
 }
 
-async function responseJson(response, path) {
+/** Read a fetch body without allocating beyond its declared safety ceiling. */
+export async function readBoundedResponseBody(response, maxBytes, label) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_ARTIFACT_BYTES) throw new Error('Response byte limit is outside the bounded range.')
   const contentLength = Number(response.headers?.get?.('content-length') ?? NaN)
-  if (Number.isFinite(contentLength) && contentLength > MAX_JSON_BYTES) throw new Error(`GitHub API response for ${path} exceeds the bounded size.`)
-  const text = await response.text()
-  if (Buffer.byteLength(text, 'utf8') > MAX_JSON_BYTES) throw new Error(`GitHub API response for ${path} exceeds the bounded size.`)
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) throw new Error(`${label} exceeds the bounded size.`)
+  const reader = response.body?.getReader?.()
+  if (!reader) throw new Error(`${label} did not provide a readable response body.`)
+  const chunks = []
+  let total = 0
   try {
-    return JSON.parse(text)
+    while (true) {
+      const result = await reader.read()
+      if (!result || typeof result !== 'object') throw new Error(`${label} returned an invalid streamed chunk.`)
+      if (result.done) break
+      const chunk = Buffer.from(result.value ?? [])
+      if (chunk.length > maxBytes - total) {
+        try { await reader.cancel('response exceeds bounded size') } catch { /* cancellation is best effort */ }
+        throw new Error(`${label} exceeds the bounded size.`)
+      }
+      chunks.push(chunk)
+      total += chunk.length
+    }
+  } finally {
+    try { reader.releaseLock?.() } catch { /* no-op */ }
+  }
+  return Buffer.concat(chunks, total)
+}
+
+async function responseJson(response, path) {
+  const bytes = await readBoundedResponseBody(response, MAX_JSON_BYTES, `GitHub API response for ${path}`)
+  try {
+    return JSON.parse(bytes.toString('utf8'))
   } catch {
     throw new Error(`GitHub API response for ${path} was not valid JSON.`)
   }
@@ -168,7 +193,7 @@ function safeArtifactLocation(location, origin) {
 }
 
 /** Download one GitHub artifact with bounded redirects and no bearer token on cross-origin locations. */
-export async function downloadArtifactZip({ fetchImpl = fetch, token, apiUrl = GITHUB_API_ORIGIN, repository = GITHUB_REPOSITORY, artifactId }) {
+export async function downloadArtifactZip({ fetchImpl = fetch, token, apiUrl = GITHUB_API_ORIGIN, repository = GITHUB_REPOSITORY, artifactId, maxBytes = MAX_ARTIFACT_BYTES }) {
   if (typeof token !== 'string' || token.length < 1 || token.length > 500) throw new Error('A GitHub token is required.')
   if (typeof fetchImpl !== 'function') throw new Error('fetchImpl must be a function.')
   const origin = apiOrigin(apiUrl)
@@ -195,11 +220,7 @@ export async function downloadArtifactZip({ fetchImpl = fetch, token, apiUrl = G
       continue
     }
     if (!response.ok) throw new Error(`GitHub artifact ${id} download returned ${response.status}.`)
-    const contentLength = Number(response.headers?.get?.('content-length') ?? NaN)
-    if (Number.isFinite(contentLength) && contentLength > MAX_ARTIFACT_BYTES) throw new Error(`GitHub artifact ${id} exceeds the bounded ZIP size.`)
-    const bytes = Buffer.from(await response.arrayBuffer())
-    if (bytes.length > MAX_ARTIFACT_BYTES) throw new Error(`GitHub artifact ${id} exceeds the bounded ZIP size.`)
-    return bytes
+    return readBoundedResponseBody(response, maxBytes, `GitHub artifact ${id} download`)
   }
   throw new Error('GitHub artifact download did not complete.')
 }

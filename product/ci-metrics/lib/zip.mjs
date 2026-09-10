@@ -73,12 +73,14 @@ export function readZipEntry(input, entry) {
   const data = input.subarray(dataStart, dataStart + entry.compressedSize)
   if (entry.method === 0) return Buffer.from(data)
   try {
-    const inflated = inflateRawSync(data)
+    // The central-directory size is untrusted and may understate a compression bomb. Keep zlib's output
+    // allocation bounded while inflating, then retain the exact-size check for honest archives.
+    const inflated = inflateRawSync(data, { maxOutputLength: MAX_ENTRY_BYTES })
     if (inflated.length !== entry.uncompressedSize) throw new ZipParseError(`ZIP entry "${entry.name}" inflated size does not match the record.`)
     return inflated
   } catch (error) {
     if (error instanceof ZipParseError) throw error
-    throw new ZipParseError(`ZIP entry "${entry.name}" could not be inflated: ${error.message}`)
+    throw new ZipParseError(`ZIP entry "${entry.name}" could not be inflated within the bounded output size.`)
   }
 }
 
