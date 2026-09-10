@@ -373,7 +373,7 @@ independently selected producer, so push/schedule reports are complete).
 Run the full suite exactly as CI does:
 
 ```powershell
-node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs product/ci-metrics/tests/api-packing-shadow.test.mjs product/ci-metrics/tests/merge-authority.test.mjs product/ci-metrics/tests/merge-authority-github.test.mjs product/ci-metrics/tests/maintenance-preflight.test.mjs product/ci-metrics/tests/maintenance-approval.test.mjs product/ci-metrics/tests/maintenance-evidence-reader.test.mjs product/ci-metrics/tests/maintenance-candidate.test.mjs
+node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs product/ci-metrics/tests/api-packing-shadow.test.mjs product/ci-metrics/tests/api-observations.test.mjs product/ci-metrics/tests/api-collector.test.mjs product/ci-metrics/tests/github-readonly.test.mjs product/ci-metrics/tests/api-benchmark.test.mjs product/ci-metrics/tests/merge-authority.test.mjs product/ci-metrics/tests/merge-authority-github.test.mjs product/ci-metrics/tests/maintenance-preflight.test.mjs product/ci-metrics/tests/maintenance-approval.test.mjs product/ci-metrics/tests/maintenance-evidence-reader.test.mjs product/ci-metrics/tests/maintenance-candidate.test.mjs
 ```
 
 The command's reported test count is the authoritative current total; historical run artifacts retain
@@ -393,6 +393,53 @@ computation, the minimal ZIP reader, and the static workflow contract.
 The API-packing-shadow subset additionally covers exact current/candidate coverage and filters, preserved
 class and explicitly declared collection groups, deterministic assignment, malformed/stale/missing/mixed
 evidence fallback, the eight-run adoption threshold, and the offline report's no-speedup limits.
+
+## Authenticated API observations and local benchmark (942, PR TWO)
+
+The API shards publish an attempt-scoped `api-observations-<shard>-<attempt>` artifact after every run. The
+artifact is built from the existing `dotnet test --list-tests` capture and current Bash partition, and retains
+the complete inventory, exact filter, timing markers, a sanitized `shard.trx`, and bounded runner/toolchain fields. It
+does not select tests or affect the gate. `bin/collect-api-observations.mjs` reads the fixed repository through
+authenticated, GET-only GitHub API calls, verifies workflow/run/attempt/commit/tree metadata, reads every page,
+keeps the effective `filter=latest` jobs alongside an origin ledger from `filter=all`, selects observation and
+fragment artifacts by the resolved originating attempt, and parses only the named JSON and TRX entries from each
+ZIP. Missing, expired, corrupt, cancelled, failed, duplicate, partial, or
+identity-inconsistent evidence remains in `exclusions`; it is never treated as zero or silently dropped.
+
+The resulting `aerolink-api-observations/v1` report labels GitHub metadata as authenticated only on the default
+fixed-origin REST path; pure builders and injected readers remain unverified. Artifact claims are always
+reconciled-but-unauthenticated, and performance comparability is separate. It records source commit/tree,
+workflow definition blob, event role, run and attempt, job origin, runner timestamps, full test identities,
+class/case durations in milliseconds, outcomes, and inventory digest. Eight comparable observations per
+configuration remain required for a performance conclusion; collection output alone does not authorize
+duration packing or any protected skip. A recovered or rerun attempt remains useful for audited weights and
+origin accounting, but is marked separately from an ordinary first-pass performance sample. Branch dispatch
+and branch push runs are also labelled as unverified diagnostic roles rather than pooled with main validation.
+The Markdown report separates collection exclusions from retained non-comparable runs and lists each run's
+reconciliation/comparability refusal reason.
+
+For a controlled experiment on Windows, use an explicit owned temp output and the same source/inventory for
+both cohorts:
+
+```powershell
+node product/ci-metrics/bin/benchmark-api-packing.mjs `
+  --source C:\path\to\source-tree `
+  --discovery C:\path\to\api-observation.json `
+  --observations C:\path\to\api-observations.json `
+  --output C:\Users\<user>\AppData\Local\Temp\aerolink-api-benchmark
+```
+
+The command verifies the source commit/tree and complete inventory, builds once per cohort, runs three shards
+for the current count plan and duration candidate, preserves every TRX under the owned output, reconciles each
+result identity exactly, and records setup/build time, shard wall time, slowest shard, runner-minutes, and
+outcomes, with no retries configured. TRX inventory/count reconciliation is separate from outcome qualification:
+explicit `NotExecuted` identities and counts remain visible, and the current/proposed skip sets must match.
+JSON duration inputs are unverified file claims even when they carry an authenticated-collector metadata claim.
+It refuses non-Windows execution, an existing output directory, output inside the source tree, protected port
+54329 or connection variables, and absence of all usable duration evidence. Unknown class durations use the
+documented count fallback and remain visible in the report. The benchmark is a local diagnostic; the ordinary three-shard CI
+selector, worker counts, required checks, and merge authority are unchanged. It records source cleanliness
+before and after both cohorts and terminates only the spawned process tree when a bounded timeout fires.
 
 The API-telemetry subset (9 tests) additionally covers non-overlapping construction/host/disposal math,
 parameterized-theory ambiguity, unmatched fixture/helper factories, connection-open separation, schema

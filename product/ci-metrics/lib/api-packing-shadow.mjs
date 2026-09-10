@@ -412,6 +412,65 @@ function buildCompositePlan(discovery, shardCount, evidence) {
   })
 }
 
+/**
+ * Build the duration candidate used by the local benchmark from already reconciled class observations.
+ *
+ * This is intentionally a separate, pure entry point so the benchmark and the offline shadow report use
+ * the same candidate algorithm.  Missing durations use the documented count fallback; they remain visible
+ * to callers through `missingDurationClasses` and never remove a class from the plan.
+ */
+export function buildDurationCandidatePlan(discovery, classDurations, shardCount = DEFAULT_API_SHARD_COUNT) {
+  const normalized = normalizeApiDiscovery(discovery)
+  const count = normalizeShardCount(shardCount)
+  const supplied = classDurations instanceof Map
+    ? Object.fromEntries(classDurations.entries())
+    : Array.isArray(classDurations)
+      ? Object.fromEntries(classDurations.map((entry) => [entry?.className, entry?.durationMs]))
+      : classDurations
+  if (supplied === null || typeof supplied !== 'object' || Array.isArray(supplied)) {
+    throw new Error('classDurations must be an object, array, or Map.')
+  }
+  const expected = new Set(normalized.classes.map((entry) => entry.className))
+  const weights = new Map()
+  for (const [className, rawDuration] of Object.entries(supplied)) {
+    if (!expected.has(className)) throw new Error(`classDurations names unknown class '${className}'.`)
+    if (rawDuration === null || rawDuration === undefined) continue
+    if (typeof rawDuration !== 'number' || !Number.isFinite(rawDuration) || rawDuration <= 0 || rawDuration > 1e12) {
+      throw new Error(`classDurations for '${className}' must be a positive finite duration in milliseconds.`)
+    }
+    weights.set(className, { className, durationMs: rawDuration, sourceRunIds: [] })
+  }
+  const observedPerCase = normalized.classes
+    .filter((entry) => weights.has(entry.className))
+    .map((entry) => weights.get(entry.className).durationMs / entry.testCount)
+    .sort((a, b) => a - b)
+  if (observedPerCase.length === 0) throw new Error('classDurations contain no usable class durations.')
+  const midpoint = Math.floor(observedPerCase.length / 2)
+  const durationPerCaseScale = observedPerCase.length % 2 === 1
+    ? observedPerCase[midpoint]
+    : (observedPerCase[midpoint - 1] + observedPerCase[midpoint]) / 2
+  for (const entry of normalized.classes) {
+    const weight = weights.get(entry.className) ?? { className: entry.className, durationMs: null, sourceRunIds: [] }
+    weight.compositeWeight = weight.durationMs === null
+      ? entry.testCount
+      : (weight.durationMs / durationPerCaseScale) + entry.testCount
+    weights.set(entry.className, weight)
+  }
+  const plan = buildCompositePlan(normalized, count, {
+    weights,
+    durationPerCaseScale,
+  })
+  plan.observationCoverage = {
+    measuredClasses: [...weights.values()].filter((entry) => entry.durationMs !== null).length,
+    totalClasses: normalized.classes.length,
+    missingDurationClasses: normalized.classes
+      .filter((entry) => weights.get(entry.className)?.durationMs === null)
+      .map((entry) => entry.className),
+    durationPerCaseScale,
+  }
+  return plan
+}
+
 function maxOf(shards, field) {
   return Math.max(...shards.map((shard) => shard[field]))
 }
