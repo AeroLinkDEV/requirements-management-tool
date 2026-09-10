@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -187,7 +187,7 @@ test('VSTest fixture parsing preserves parameterized and custom-Fact display nam
   assert.throws(() => normalizeApiDiscovery({ ...makeDiscovery(), tests: parseVstestList('    AeroLinkMalformed') }), /Cannot derive a test class/)
 })
 
-test('current count plan stays in parity with the CI individual-class packer and actual VSTest fixture', () => {
+test('current count plan preserves the synthetic edge-case fixture assignments', () => {
   const testDirectory = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
   const fixture = JSON.parse(readFileSync(join(testDirectory, 'api-packing-count-parity.json'), 'utf8'))
   const tests = parseVstestList(readFileSync(join(testDirectory, fixture.vstestList), 'utf8'))
@@ -214,6 +214,67 @@ test('current count plan stays in parity with the CI individual-class packer and
   assert.match(packer, /sort -k1,1rn -k2,2/)
   assert.match(packer, /Lightest shard takes the next heaviest class/)
   assert.doesNotMatch(packer, /collection/i)
+})
+
+test('exact maintained Bash packer agrees on counts and filter text for real and display-name captures', () => {
+  const root = dirname(fileURLToPath(import.meta.url))
+  const workflow = readFileSync(join(root, '../../../.github/workflows/ci.yml'), 'utf8')
+  const shardMatrix = workflow.slice(workflow.indexOf('  backend-api:'), workflow.indexOf('  backend-core-domain:'))
+  assert.match(shardMatrix, /shard: \[1, 2, 3\]/)
+  const start = workflow.indexOf("          grep -E '^    AeroLink'")
+  const end = workflow.indexOf('          expected=', start)
+  assert.ok(start > 0 && end > start)
+  const bash = process.platform === 'win32' ? join(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe') : 'bash'
+  if (process.platform === 'win32') assert.ok(existsSync(bash), 'Git Bash is required for current CI packer parity')
+  const directory = mkdtempSync(join(process.env.TEMP ?? process.env.TMP ?? '/tmp', 'api-packer-parity-'))
+  try {
+    const captures = ['api-vstest-real-list.txt', 'api-vstest-list.txt'].map((name) => join(root, 'fixtures', name))
+    if (process.env.API_PACKING_PARITY_CAPTURE) captures.push(process.env.API_PACKING_PARITY_CAPTURE)
+    for (const fixture of captures) {
+      const capture = readFileSync(fixture, 'utf8')
+      writeFileSync(join(directory, 'listed.txt'), capture)
+      const discovery = { ...makeDiscovery(), tests: parseVstestList(capture) }
+      const plan = buildCurrentCountPlan(discovery)
+      for (const shard of plan.shards) {
+        const script = 'set -euo pipefail\n' + workflow.slice(start, end).replace(/\r/g, '')
+          .replaceAll('${{ matrix.shard }}', String(shard.shard)).replaceAll('${{ strategy.job-total }}', '3') + '\ncat partition.txt\n'
+        const result = spawnSync(bash, ['--noprofile', '--norc', '-c', script], { cwd: directory, encoding: 'utf8' })
+        assert.equal(result.status, 0, result.stderr)
+        const [count, filter] = result.stdout.trim().split(/\r?\n/)
+        assert.equal(Number(count), shard.caseCount, fixture)
+        assert.equal(filter, shard.filter, fixture)
+      }
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
+test('discovery refuses empty, duplicate, ambiguous, unsafe and empty-shard plans', () => {
+  for (const tests of [[], ['AeroLink.Api.Tests.A.One', 'AeroLink.Api.Tests.A.One'],
+    ['AeroLink.Api.Tests.A.One', 'AeroLink.Api.Tests.A.Nested.Two'],
+    ['AeroLink.Api.Tests.A|FullyQualifiedName~B.One'], ['AeroLink.Api.Tests.A & B.One']]) {
+    assert.throws(() => buildCurrentCountPlan({ ...makeDiscovery(), tests }))
+  }
+  assert.throws(() => buildCurrentCountPlan({ ...makeDiscovery(), tests: ['AeroLink.Api.Tests.A.One'] }), /empty shard/)
+  assert.throws(() => parseVstestList(''), /non-empty/)
+})
+
+test('invalid duration units and duplicate or unknown weights visibly fall back without losing tests', () => {
+  for (const durationMs of [0, -1, NaN, Infinity, '100ms', 1e13]) {
+    const discovery = makeDiscovery()
+    const observations = makeObservations(discovery)
+    observations.weights[0].durationMs = durationMs
+    const report = buildApiPackingShadowReport({ discovery, observations })
+    assert.equal(report.evidence.fallbackUsed, true)
+    assert.equal(report.currentPlan.coverage.complete, true)
+    assert.equal(report.evidence.adoptionEligible, false)
+  }
+  for (const mutate of [(o) => o.weights.push(o.weights[0]), (o) => { o.weights[0].className = 'AeroLink.Api.Tests.Unknown' }]) {
+    const discovery = makeDiscovery()
+    const observations = makeObservations(discovery); mutate(observations)
+    const report = buildApiPackingShadowReport({ discovery, observations })
+    assert.equal(report.evidence.fallbackUsed, true)
+    assert.equal(report.proposedPlan.coverage.complete, true)
+  }
 })
 
 test('offline CLI writes bounded JSON and Markdown artifacts', () => {

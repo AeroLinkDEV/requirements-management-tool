@@ -270,6 +270,15 @@ they are caller-supplied hypothetical groups whose completeness is unverified. T
 shadow plan only, and the report shows any changed grouping. Existing CI execution and its TRX self-check
 remain the execution guard.
 
+Parity qualification runs the actual maintained Bash discovery/count/greedy/filter block on both a real
+VSTest capture excerpt and a synthetic display-name edge fixture, comparing exact filter text and counts.
+The real excerpt was captured on Windows from `ec37cf1851729a91c03bbfca7802adacd6d77105`, .NET 10,
+after building that exact source; it is historical qualification data, not an authenticated current inventory.
+Set `API_PACKING_PARITY_CAPTURE` to a fresh complete `--list-tests` capture to run the same parity check
+on a current inventory. Unsafe/overlapping class filter identities and empty shard plans are refused.
+Custom display labels in the synthetic fixture test the existing prefix parser only; arbitrary labels
+outside its `AeroLink` prefix cannot be mapped to a class by console discovery and are not supported evidence.
+
 `api-packing-observations.json` (`aerolink-api-packing-observations/v1`) is also caller-supplied offline data and
 must use `provenance: "offline-shadow-claim"`. Its successful `merge_group` Product quality-gate run IDs,
 commit/tree values, discovery digest, cohort, and `validatedTree` fields are structural claims, not

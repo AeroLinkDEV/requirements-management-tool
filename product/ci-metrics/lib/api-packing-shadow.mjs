@@ -68,11 +68,12 @@ export function sha256Json(value) {
 }
 
 function classNameForTest(testName) {
-  const withoutArguments = testName.split('(', 1)[0].trim()
+  const withoutArguments = testName.split('(', 1)[0]
   const dot = withoutArguments.lastIndexOf('.')
   if (dot <= 0 || dot === withoutArguments.length - 1) throw new Error(`Cannot derive a test class from '${testName}'.`)
   const className = withoutArguments.slice(0, dot)
   if (!className.startsWith('AeroLink.')) throw new Error(`Test '${testName}' is outside the API test namespace.`)
+  if (!/^AeroLink(?:\.[A-Za-z_][A-Za-z0-9_]*)+$/.test(className)) throw new Error('Ambiguous or unsafe API class/filter identity.')
   if (className.length > MAX_CLASS_NAME) throw new Error(`Test class '${className}' is too long.`)
   return className
 }
@@ -134,6 +135,11 @@ export function normalizeApiDiscovery(discovery) {
   const classes = [...byClass.entries()]
     .map(([className, classTests]) => ({ className, tests: classTests, testCount: classTests.length }))
     .sort((a, b) => compareStrings(a.className, b.className))
+  for (const entry of classes) {
+    if (classes.some((other) => other !== entry && `${other.className}.`.includes(`${entry.className}.`))) {
+      throw new Error('Ambiguous API class substring filters overlap.')
+    }
+  }
   const collections = []
   const classesByName = new Set(classes.map((entry) => entry.className))
   const claimedCollectionClasses = new Set()
@@ -201,7 +207,7 @@ function coverageForPlan(plan, discovery) {
   }
 }
 
-function materializePlan({ discovery, shardCount, assignments, weights = null, algorithm, grouping }) {
+function materializePlan({ discovery, shardCount, assignments, weights = null, algorithm, grouping, filterOrder = null }) {
   const shards = Array.from({ length: shardCount }, (_, index) => emptyShard(index + 1))
   for (const entry of discovery.classes) {
     const shardNumber = assignments.get(entry.className)
@@ -219,7 +225,9 @@ function materializePlan({ discovery, shardCount, assignments, weights = null, a
   for (const shard of shards) {
     shard.classes.sort(compareStrings)
     shard.tests.sort(compareStrings)
-    shard.filter = shard.classes.map((className) => `FullyQualifiedName~${className}.`).join('|')
+    const filterClasses = filterOrder ? filterOrder.filter((name) => shard.classes.includes(name)) : shard.classes
+    shard.filter = filterClasses.map((className) => `FullyQualifiedName~${className}.`).join('|')
+    if (!shard.filter) throw new Error('API packing produced an empty shard filter.')
     if (!weights) {
       shard.durationLoadMs = null
       shard.compositeLoad = null
@@ -275,6 +283,7 @@ export function buildCurrentCountPlan(discovery, shardCount = DEFAULT_API_SHARD_
     discovery: normalized,
     shardCount: count,
     assignments,
+    filterOrder: classes.map((entry) => entry.className),
     algorithm: 'current-count-greedy',
     grouping: {
       mode: 'individual-class',
