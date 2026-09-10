@@ -86,7 +86,9 @@ export async function collectReuseJobOrigins(reader, run, jobs) {
   const unresolved = new Set([...ledger.unresolvedCopies, ...ledger.invalidTimings].map(j => j.jobId))
   return { allJobs, attemptRuns, ledger, jobs: jobs.map(job => {
     const origin = ledger.ledger.find(j => j.effective && j.id === job.id)
+    const execution = allJobs.find(j => j.id === origin?.originJobId)
     return { ...job, executionOrigin: { jobId: origin?.originJobId ?? null, attempt: origin?.originAttempt ?? null,
+      startedAt: execution?.started_at ?? null, completedAt: execution?.completed_at ?? null,
       proven: Boolean(origin && !unresolved.has(job.id) && !unresolved.has(origin.originJobId)) } }
   }) }
 }
@@ -121,18 +123,30 @@ async function collectEvidence(reader, run, tree, jobs, topology) {
   return { record, manifest, fragments, topology, artifacts: artifacts.map(a => ({ id: a.id, name: a.name, expired: a.expired })) }
 }
 
-function proveComposition(candidate, pr, associatedPrs, cwd) {
+export function proveComposition(candidate, pr, associatedPrs, cwd) {
   const baseSha = candidate.parents?.[0]?.sha
   if (!sha(baseSha) || !sha(pr.head?.sha) || candidate.parents.length !== 1 || associatedPrs.length !== 1) throw new Error('Unsupported queue composition')
-  const git = args => execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 120_000, maxBuffer: 5 * 1024 * 1024, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
-  for (const value of [baseSha, pr.head.sha, candidate.sha]) {
-    try { git(['cat-file', '-e', `${value}^{commit}`]) } catch {
-      git(['-c', 'fetch.writeCommitGraph=false', 'fetch', '--no-tags', '--no-write-fetch-head', `https://github.com/${REUSE_REPOSITORY}.git`, value])
+  const directory = mkdtempSync(join(tmpdir(), 'aerolink-reuse-composition-'))
+  const options = { encoding: 'utf8', timeout: 120_000, maxBuffer: 5 * 1024 * 1024, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }
+  try {
+    // Read existing objects through an alternate. Fetch and merge-tree may write objects,
+    // so both execute only in this owned temporary bare repository.
+    const objects = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-path', 'objects'], { ...options, cwd }).trim()
+    const environment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^GIT_/i.test(name)))
+    environment.GIT_ALTERNATE_OBJECT_DIRECTORIES = objects
+    const git = args => execFileSync('git', args, { ...options, cwd: directory, env: environment }).trim()
+    git(['init', '--bare', '--quiet', directory])
+    for (const value of [baseSha, pr.head.sha, candidate.sha]) {
+      try { git(['cat-file', '-e', `${value}^{commit}`]) } catch {
+        git(['-c', 'fetch.writeCommitGraph=false', 'fetch', '--no-tags', '--no-write-fetch-head', `https://github.com/${REUSE_REPOSITORY}.git`, value])
+      }
     }
+    const treeSha = git(['merge-tree', '--write-tree', baseSha, pr.head.sha]).split(/\r?\n/)[0]
+    if (!sha(treeSha)) throw new Error('Composition did not produce one tree')
+    return { method: 'git-merge-tree', baseSha, prHeadSha: pr.head.sha, treeSha, associatedPrs: associatedPrs.map(p => p.number) }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
   }
-  const treeSha = git(['merge-tree', '--write-tree', baseSha, pr.head.sha]).split(/\r?\n/)[0]
-  if (!sha(treeSha)) throw new Error('Composition did not produce one tree')
-  return { method: 'git-merge-tree', baseSha, prHeadSha: pr.head.sha, treeSha, associatedPrs: associatedPrs.map(p => p.number) }
 }
 
 async function collectFallback(reader, fallbackRunId, candidateSha, now) {

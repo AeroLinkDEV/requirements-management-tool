@@ -111,9 +111,12 @@ export function evaluateQueueReuseShadow(packet, { now = Date.now(), source = 'u
     runId: j.run_id, runAttempt: j.run_attempt })), changedPaths: protectedChanges,
   expected: { repository: REUSE_REPOSITORY, baseBranch: 'main', headSha: candidate.sha, runId: run.id, runAttempt: run.run_attempt } })
   check('required-native-jobs', native.decision === 'PASS', native.reasons.join('; '), 'must_retest')
-  check('native-execution-age', jobs.filter(j => requiredNativeNames().includes(j.name)).every(j =>
-    Number.isFinite(Date.parse(j.completed_at)) && now - Date.parse(j.completed_at) <= 30 * day &&
-    now >= Date.parse(j.completed_at) - 600_000), 'required originating execution is stale or has invalid time')
+  check('native-execution-age', jobs.filter(j => requiredNativeNames().includes(j.name)).every(j => {
+    const completed = Date.parse(j.executionOrigin?.completedAt ?? (run.run_attempt === 1 ? j.completed_at : ''))
+    const started = Date.parse(j.executionOrigin?.startedAt ?? (run.run_attempt === 1 ? j.started_at : ''))
+    return Number.isFinite(completed) && Number.isFinite(started) && completed >= started &&
+      now - completed <= 30 * day && now >= completed - 600_000
+  }), 'required originating execution is stale or has invalid time')
   // Older in-progress invalidations are retained as separate checks. Only the newest check can bind.
   const bound = checks.filter(c => c.name === 'Trusted merge-queue binding').sort((a, b) => b.id - a.id).slice(0, 1)
   check('pinned-binding', bound.length === 1 && bound[0].app?.id === AUTHORITY_APP_ID && bound[0].head_sha === candidate.sha &&
@@ -155,6 +158,8 @@ export function evaluateQueueReuseShadow(packet, { now = Date.now(), source = 'u
     reviewBoundary: 'The observer binds the exact PR head through protected readiness; it does not certify independence or truth of review comments.',
     originatingExecutions: jobs.filter(j => requiredNativeNames().includes(j.name)).map(j => ({ effectiveJobId: j.id,
       jobId: j.executionOrigin?.jobId ?? (run.run_attempt === 1 ? j.id : null), name: j.name, runId: j.run_id,
+      startedAt: j.executionOrigin?.startedAt ?? (run.run_attempt === 1 ? j.started_at : null),
+      completedAt: j.executionOrigin?.completedAt ?? (run.run_attempt === 1 ? j.completed_at : null),
       effectiveAttempt: j.run_attempt, attempt: j.executionOrigin?.attempt ?? (run.run_attempt === 1 ? j.run_attempt : null) })),
     executionDiagnostics: packet?.jobOrigins?.ledger ? { unresolvedCopies: packet.jobOrigins.ledger.unresolvedCopies,
       invalidTimings: packet.jobOrigins.ledger.invalidTimings } : null,

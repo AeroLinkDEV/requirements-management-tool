@@ -198,9 +198,11 @@ node product/ci-metrics/bin/report-queue-reuse-shadow.mjs <queue-run-id> <merged
 ```
 
 Run it from a reviewed Windows development checkout with existing `gh` read access. It uses fixed-repository
-GitHub GETs, bounded ZIP parsing and the existing trusted topology generator. Git object fetches, when needed,
-use the fixed repository URL without moving refs/checkouts. `git merge-tree` reconstructs the composition
-without checking out or executing candidate files. No credential is exported into the packet, and existing
+GitHub GETs, bounded ZIP parsing and the existing trusted topology generator. Composition runs in an owned
+temporary bare repository, reading existing source objects through a read-only alternate. Missing-object
+fetches use the fixed repository URL and write only into that temporary repository. `git merge-tree`
+reconstructs the composition without writing source objects or checking out or executing candidate files.
+No credential is exported into the packet, and existing
 output directories are refused. This requires complete retained artifacts; missing, expired, corrupt or
 incomplete records are visible refusals.
 
@@ -214,7 +216,8 @@ The evaluator reuses the native queue job policy, strict fragment validation/agg
 eligibility/age rules. It cross-checks artifact identities, counts and selected jobs with authenticated native
 jobs, exact check-run references and pinned publishers. The newest App check governs; older in-progress
 invalidation records cannot mask a newer invalidation. `filter=latest` selects the effective job set, while
-each retained fragment must match that job's actual originating attempt. Retained executions are not labelled
+each retained fragment must match that job's actual originating attempt. Original start/completion timestamps
+are retained and checked for freshness. Retained executions are not labelled
 new work. Complete main schedule/manual diagnostic proof with matching protected contents is required.
 Any gate/protected-surface change retains independent main validation.
 

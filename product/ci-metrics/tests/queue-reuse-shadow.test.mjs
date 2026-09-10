@@ -1,10 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { buildFragment } from '../lib/fragment.mjs'
 import { aggregateFragments } from '../lib/aggregate.mjs'
 import { REUSE_REPOSITORY as repository, evaluateQueueReuseShadow, requiredNativeNames, renderQueueReuseShadow } from '../lib/queue-reuse-shadow.mjs'
-import { deriveObserverTopology, readAllReusePages, collectQueueReuseShadow, collectReuseJobOrigins, createReuseReader } from '../lib/queue-reuse-observer.mjs'
+import { deriveObserverTopology, readAllReusePages, collectQueueReuseShadow, collectReuseJobOrigins, createReuseReader, proveComposition } from '../lib/queue-reuse-observer.mjs'
 
 const now = Date.parse('2026-09-10T01:00:00Z')
 const iso = offset => new Date(now + offset).toISOString()
@@ -126,7 +129,7 @@ test('earlier successful fragment is accepted only when the effective native job
   packet.run.run_attempt = packet.latestRun.run_attempt = packet.evidence.record.run.attempt = packet.evidence.manifest.run.attempt = 2
   packet.evidence.topology.expectedRun.attempt = 2
   for (const job of packet.jobs) {
-    job.executionOrigin = { jobId: job.id, attempt: 1, proven: true }
+    job.executionOrigin = { jobId: job.id, attempt: 1, proven: true, startedAt: job.started_at, completedAt: job.completed_at }
     job.id += 1000
     job.run_attempt = 2
   }
@@ -135,6 +138,9 @@ test('earlier successful fragment is accepted only when the effective native job
   assert.ok(report.originatingExecutions.every(j => j.attempt === 1))
   assert.equal(report.potentiallyAvoidable.deliveredRunnerMinutes, 0)
   assert.ok(report.originatingExecutions.every(j => j.effectiveAttempt === 2 && j.effectiveJobId !== j.jobId))
+  packet.jobs[0].executionOrigin.startedAt = iso(-32 * 86400000)
+  packet.jobs[0].executionOrigin.completedAt = iso(-31 * 86400000)
+  assert.notEqual(evaluateQueueReuseShadow(packet, { now }).outcome, 'would_reuse')
   packet.jobs[0].executionOrigin.proven = false
   assert.notEqual(evaluateQueueReuseShadow(packet, { now }).outcome, 'would_reuse')
 })
@@ -146,15 +152,42 @@ test('captured #953 API copy keeps its latest check identity and selects the act
     return capture.attemptRuns.find(a => path.endsWith(`/attempts/${a.run_attempt}`))
   } }
   const origins = await collectReuseJobOrigins(reader, capture.run, capture.latestJobs)
-  assert.deepEqual(origins.jobs[0].executionOrigin, { jobId: 102565482679, attempt: 1, proven: true })
+  assert.deepEqual(origins.jobs[0].executionOrigin, { jobId: 102565482679, attempt: 1, proven: true,
+    startedAt: capture.allJobs[0].started_at, completedAt: capture.allJobs[0].completed_at })
   assert.equal(origins.jobs[0].id, 102580599062)
   assert.equal(origins.jobs[0].run_attempt, 2)
   assert.equal(origins.jobs[0].check_run_url, capture.latestJobs[0].check_run_url)
+  const divergent = structuredClone(capture.latestJobs)
+  divergent[0].started_at = '2026-09-10T00:00:00Z'
+  divergent[0].completed_at = '2026-09-10T00:01:00Z'
+  assert.equal((await collectReuseJobOrigins(reader, capture.run, divergent)).jobs[0].executionOrigin.proven, false)
   capture.allJobs = capture.allJobs.filter(j => j.run_attempt === 2)
   const missing = await collectReuseJobOrigins(reader, capture.run, capture.latestJobs)
   assert.equal(missing.jobs[0].executionOrigin.proven, false)
   capture.attemptRuns[0].head_sha = hash('e')
   await assert.rejects(collectReuseJobOrigins(reader, capture.run, capture.latestJobs), /identity mismatch/)
+})
+
+test('composition proof writes generated objects only into its owned temporary repository', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aerolink-reuse-source-fixture-'))
+  const git = args => execFileSync('git', args, { cwd: directory, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  const commit = message => git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', message])
+  try {
+    git(['init', '--quiet'])
+    writeFileSync(join(directory, 'one.txt'), 'base\n'); writeFileSync(join(directory, 'two.txt'), 'base\n')
+    git(['add', 'one.txt', 'two.txt']); commit('base')
+    const ancestor = git(['rev-parse', 'HEAD'])
+    writeFileSync(join(directory, 'one.txt'), 'head\n'); git(['add', 'one.txt']); commit('head')
+    const head = git(['rev-parse', 'HEAD'])
+    git(['checkout', '--quiet', '--detach', ancestor])
+    writeFileSync(join(directory, 'two.txt'), 'base advanced\n'); git(['add', 'two.txt']); commit('base advanced')
+    const base = git(['rev-parse', 'HEAD'])
+    const proof = proveComposition({ sha: base, parents: [{ sha: base }] }, { head: { sha: head } }, [{ number: 1 }], directory)
+    assert.match(proof.treeSha, /^[a-f0-9]{40}$/)
+    assert.throws(() => git(['cat-file', '-e', proof.treeSha]))
+    assert.equal(git(['rev-parse', 'HEAD']), base)
+    assert.equal(git(['status', '--porcelain']), '')
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })
 
 test('complete Product evidence retains the existing non-authoritative reporting failure policy visibly', () => {
