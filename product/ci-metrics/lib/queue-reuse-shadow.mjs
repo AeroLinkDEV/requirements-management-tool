@@ -149,6 +149,7 @@ export function evaluateQueueReuseShadow(packet, { now = Date.now(), source = 'u
     nonAuthoritativeOutcomes: jobs.filter(j => ['CI metrics tooling tests', 'Aggregate CI metrics'].includes(j.name))
       .map(j => ({ jobId: j.id, name: j.name, status: j.status, conclusion: j.conclusion })),
     composition, landed: { sha: landed.sha, tree: landed.tree?.sha }, fallback: fallback ? { runId: fallback.run?.id, passed: fallback.passed, reason: fallback.reason } : null,
+    reconciledCounts: reconciled?.errors?.length === 0 ? reconciled.merged.counts : null,
     reviewBoundary: 'The observer binds the exact PR head through protected readiness; it does not certify independence or truth of review comments.',
     originatingExecutions: jobs.filter(j => requiredNativeNames().includes(j.name)).map(j => ({ jobId: j.id, name: j.name, runId: j.run_id, attempt: j.run_attempt })),
     mandatoryWork: 'All existing main-push jobs remain mandatory under their unchanged production conditions. This observer grants no skip authority.',
@@ -161,6 +162,9 @@ export function evaluateQueueReuseShadow(packet, { now = Date.now(), source = 'u
 export function renderQueueReuseShadow(report) {
   return ['# Queue-to-main reuse shadow', '', `Outcome: **${report.outcome}**. Source: ${report.sourceAuthenticity}. Actual skip authority: **false**.`,
     `Run ${report.run.id}, attempt ${report.run.attempt}; status ${report.run.status}; overall conclusion **${report.run.conclusion}**; candidate ${report.run.sha}; landed ${report.landed.sha}.`, '',
+    `Composition: PR head ${report.composition.prHeadSha ?? 'unavailable'} plus base ${report.composition.baseSha ?? 'unavailable'}; tree ${report.landed.tree ?? 'unavailable'}.`,
+    `Fallback run: ${report.fallback?.runId ?? 'unavailable'}; qualified: ${report.fallback?.passed === true}.`,
+    `Reconciled test counts: ${report.reconciledCounts ? countsKeys.map(k => `${k}=${report.reconciledCounts[k]}`).join(', ') : 'unavailable'}.`, '',
     'Non-authoritative reporting outcomes (these do not replace required Product proof):',
     ...report.nonAuthoritativeOutcomes.slice(0, 10).map(j => `- ${j.name}: ${j.status}, ${j.conclusion ?? 'unavailable'} (job ${j.jobId}).`), '',
     '| Condition | Result | Reason |', '|---|---|---|', ...report.conditions.map(c => `| ${c.name} | ${c.passed ? 'pass' : 'refuse'} | ${(c.reason ?? '').replace(/[|\r\n]/g, ' ')} |`),
