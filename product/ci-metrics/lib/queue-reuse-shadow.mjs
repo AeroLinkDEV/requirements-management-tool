@@ -108,6 +108,9 @@ export function evaluateQueueReuseShadow(packet, { now = Date.now(), source = 'u
     runId: j.run_id, runAttempt: j.run_attempt })), changedPaths: protectedChanges,
   expected: { repository: REUSE_REPOSITORY, baseBranch: 'main', headSha: candidate.sha, runId: run.id, runAttempt: run.run_attempt } })
   check('required-native-jobs', native.decision === 'PASS', native.reasons.join('; '), 'must_retest')
+  check('native-execution-age', jobs.filter(j => requiredNativeNames().includes(j.name)).every(j =>
+    Number.isFinite(Date.parse(j.completed_at)) && now - Date.parse(j.completed_at) <= 30 * day &&
+    now >= Date.parse(j.completed_at) - 600_000), 'required originating execution is stale or has invalid time')
   // Older in-progress invalidations are retained as separate checks. Only the newest check can bind.
   const bound = checks.filter(c => c.name === 'Trusted merge-queue binding').sort((a, b) => b.id - a.id).slice(0, 1)
   check('pinned-binding', bound.length === 1 && bound[0].app?.id === AUTHORITY_APP_ID && bound[0].head_sha === candidate.sha &&
@@ -128,7 +131,7 @@ export function evaluateQueueReuseShadow(packet, { now = Date.now(), source = 'u
     check('reconciled-evidence', reconciled.errors.length === 0, reconciled.errors.join('; '))
   } catch { check('reconciled-evidence', false, 'malformed or unavailable artifact evidence') }
   check('fresh-native-time', Number.isFinite(Date.parse(run.updated_at)) && now - Date.parse(run.updated_at) <= 30 * day &&
-    now >= Date.parse(run.created_at) - 600_000, 'native execution is stale or has invalid dates')
+    now >= Date.parse(run.updated_at) - 600_000 && now >= Date.parse(run.created_at) - 600_000, 'native execution is stale or has invalid dates')
   check('fallback-proof', fallback?.passed === true && fallback?.protectedDefinitionMatches === true &&
     fallback?.currentAttempt === true && fallback?.run?.repository?.full_name === REUSE_REPOSITORY &&
     ['schedule', 'workflow_dispatch'].includes(fallback?.run?.event) && fallback?.run?.head_branch === 'main' &&

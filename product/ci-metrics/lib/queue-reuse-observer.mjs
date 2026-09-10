@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { readSingleJsonFromZip, readNamedJsonFromZip } from './zip.mjs'
 import { compareTrustedSurfaces } from './merge-authority-github.mjs'
 import { collectMergedPaths } from './provenance.mjs'
+import { looksLikeCredential } from './fragment.mjs'
 import { REUSE_REPOSITORY, requiredNativeNames, reconcileReuseEvidence, evaluateQueueReuseShadow } from './queue-reuse-shadow.mjs'
 
 const prefix = `/repos/${REUSE_REPOSITORY}`
@@ -77,7 +78,13 @@ async function collectEvidence(reader, run, tree, jobs, topology) {
       throw new Error(`Missing, expired, duplicated or oversized artifact: ${name}`)
     }
     const archive = await reader.zip(matches[0].id)
-    return file ? readNamedJsonFromZip(archive, file) : readSingleJsonFromZip(archive)
+    const data = file ? readNamedJsonFromZip(archive, file) : readSingleJsonFromZip(archive)
+    function rejectCredential(value) {
+      if (typeof value === 'string' && looksLikeCredential(value)) throw new Error('Artifact contains prohibited credential-like data')
+      if (value && typeof value === 'object') for (const child of Object.values(value)) rejectCredential(child)
+    }
+    rejectCredential(data)
+    return data
   }
   const record = await named(`ci-metrics-run-${run.id}-${run.run_attempt}`, 'run-metrics.json')
   const manifest = await named(`validated-tree-${run.id}-${run.run_attempt}`, 'validated-tree.json')

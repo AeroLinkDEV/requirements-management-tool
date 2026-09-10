@@ -95,6 +95,8 @@ const negatives = {
   'newer-attempt': p => { p.latestRun.run_attempt++ },
   'active-attempt': p => { p.latestRun.status = 'in_progress' },
   'stale-run': p => { p.run.updated_at = iso(-31 * 86400000) },
+  'stale-origin': p => { p.jobs[2].completed_at = iso(-31 * 86400000) },
+  'future-run': p => { p.run.updated_at = iso(86400000) },
   'stale-artifact': p => { p.evidence.manifest.validatedAt = iso(-31 * 86400000) },
   'missing-fragment': p => { p.evidence.fragments.pop() },
   'duplicate-fragment': p => { p.evidence.fragments.push(p.evidence.fragments[0]) },
