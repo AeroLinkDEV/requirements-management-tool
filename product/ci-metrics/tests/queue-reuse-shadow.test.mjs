@@ -94,6 +94,7 @@ const negatives = {
   'missing-job': p => { p.jobs.splice(2, 1) },
   'newer-attempt': p => { p.latestRun.run_attempt++ },
   'active-attempt': p => { p.latestRun.status = 'in_progress' },
+  'conclusion-drift': p => { p.latestRun.conclusion = 'cancelled' },
   'stale-run': p => { p.run.updated_at = iso(-31 * 86400000) },
   'stale-origin': p => { p.jobs[2].completed_at = iso(-31 * 86400000) },
   'future-run': p => { p.run.updated_at = iso(86400000) },
@@ -128,6 +129,20 @@ test('earlier successful fragment is accepted only when the effective native job
   assert.equal(report.outcome, 'would_reuse', JSON.stringify(report.conditions.filter(c => !c.passed)))
   assert.ok(report.originatingExecutions.every(j => j.attempt === 1))
   assert.equal(report.potentiallyAvoidable.deliveredRunnerMinutes, 0)
+})
+
+test('complete Product evidence retains the existing non-authoritative reporting failure policy visibly', () => {
+  for (const conclusion of ['failure', 'cancelled']) {
+    const packet = fixture()
+    packet.run.conclusion = packet.latestRun.conclusion = conclusion
+    packet.jobs.push({ id: 500, name: 'Aggregate CI metrics', status: 'completed', conclusion,
+      run_id: packet.run.id, run_attempt: 1, head_sha: packet.run.head_sha })
+    const report = evaluateQueueReuseShadow(packet, { now })
+    assert.equal(report.outcome, 'would_reuse', JSON.stringify(report.conditions.filter(c => !c.passed)))
+    assert.equal(report.run.conclusion, conclusion)
+    assert.equal(report.nonAuthoritativeOutcomes.at(-1).conclusion, conclusion)
+    assert.equal(report.canSkip, false)
+  }
 })
 
 test('pagination refuses truncated counts, duplicate records, malformed batches and changing totals', async () => {

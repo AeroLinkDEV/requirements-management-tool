@@ -101,7 +101,8 @@ export function evaluateQueueReuseShadow(packet, { now = Date.now(), source = 'u
   check('workflow-identity', workflow.id === run.workflow_id && workflow.path === '.github/workflows/ci.yml' &&
     run.path === workflow.path && run.name === 'Product quality gate', 'wrong native workflow identity', 'must_retest')
   check('current-attempt', latestRun?.id === run.id && latestRun?.head_sha === run.head_sha &&
-    latestRun?.run_attempt === run.run_attempt && latestRun?.status === 'completed', 'newer or active attempt supersedes evidence')
+    latestRun?.run_attempt === run.run_attempt && latestRun?.status === 'completed' && latestRun?.conclusion === run.conclusion,
+  'newer, active or changed attempt supersedes evidence')
   const native = evaluateMergeGroupCandidate({ run: { repository: run.repository?.full_name, workflowName: run.name,
     workflowPath: run.path, event: run.event, headSha: run.head_sha, headBranch: run.head_branch, runId: run.id,
     runAttempt: run.run_attempt, status: run.status }, jobs: jobs.map(j => ({ name: j.name, conclusion: j.conclusion,
@@ -143,7 +144,10 @@ export function evaluateQueueReuseShadow(packet, { now = Date.now(), source = 'u
   const avoidableNames = reconciled?.merged?.jobs?.filter(j => avoidableGroups.includes(j.group)).map(j => j.name) ?? []
   const estimatedMs = jobs.filter(j => avoidableNames.includes(j.name)).reduce((sum, j) => sum + Math.max(0, Date.parse(j.completed_at) - Date.parse(j.started_at)), 0)
   return { schemaVersion: REUSE_SCHEMA, mode: 'shadow-only', sourceAuthenticity: source, outcome, canSkip: false,
-    executionSelectorChanged: false, adoptionEligible: false, conditions, run: { id: run.id, attempt: run.run_attempt, sha: run.head_sha },
+    executionSelectorChanged: false, adoptionEligible: false, conditions, run: { id: run.id, attempt: run.run_attempt, sha: run.head_sha,
+      status: run.status, conclusion: run.conclusion },
+    nonAuthoritativeOutcomes: jobs.filter(j => ['CI metrics tooling tests', 'Aggregate CI metrics'].includes(j.name))
+      .map(j => ({ jobId: j.id, name: j.name, status: j.status, conclusion: j.conclusion })),
     composition, landed: { sha: landed.sha, tree: landed.tree?.sha }, fallback: fallback ? { runId: fallback.run?.id, passed: fallback.passed, reason: fallback.reason } : null,
     reviewBoundary: 'The observer binds the exact PR head through protected readiness; it does not certify independence or truth of review comments.',
     originatingExecutions: jobs.filter(j => requiredNativeNames().includes(j.name)).map(j => ({ jobId: j.id, name: j.name, runId: j.run_id, attempt: j.run_attempt })),
