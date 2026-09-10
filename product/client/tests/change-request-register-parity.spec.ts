@@ -84,6 +84,20 @@ test('the requirements register keeps its shape on the shared component', async 
   await testInfo.attach('requirements-register-normal', { body: await page.screenshot(), contentType: 'image/png' })
 })
 
+test('unavailable direct trace never claims that no relationships are recorded', async ({ page }) => {
+  await login(page)
+  await openFrom(page, 'systems/change-requests')
+  await page.route('**/api/change-requests/*/trace?directOnly=true', route => route.fulfill({
+    status: 413, json: { code: 'trace_work_limit' },
+  }))
+  await page.locator('.historyRow.allocation').first().click()
+  await page.getByRole('tab', { name: 'Trace & impact' }).click()
+  const inspector = page.getByRole('complementary', { name: /detail$/ })
+  await expect(inspector).toContainText('The server did not expose a trace projection')
+  await expect(inspector).not.toContainText('No immediate upstream relationship')
+  await expect(inspector).not.toContainText('No immediate downstream relationship')
+})
+
 test('requirements register preserves deep-link history, native links, and authoritative trace facts', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
@@ -103,7 +117,7 @@ test('requirements register preserves deep-link history, native links, and autho
   const secondParentId = '33333333-3333-4333-8333-333333333333'
   const secondTcrId = '44444444-4444-4444-8444-444444444444'
   const grandchildId = '55555555-5555-4555-8555-555555555555'
-  await page.route('**/api/change-requests/*/trace', async route => {
+  await page.route('**/api/change-requests/*/trace?directOnly=true', async route => {
     await route.fulfill({ json: {
       projectId, rootChangeRequestId: rootId,
       rootArtifactId: rootId, rootArtifactKind: 'ChangeRequest',

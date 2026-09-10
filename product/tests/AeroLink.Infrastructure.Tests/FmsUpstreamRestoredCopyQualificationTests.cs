@@ -35,6 +35,17 @@ public sealed class FmsUpstreamRestoredCopyQualificationTests
                 && source.State != ChangeRequestState.SelectedForBaseline
             select link.Id).CountAsync();
         Assert.Equal(0, invalid);
+        var policy = await new EffectiveProjectLadderPolicyResolver(db).ResolveAsync(project.Id);
+        foreach (var number in new[] { "HLRCR-00136", "LLRCR-00134" })
+        {
+            var root = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.ProjectId == project.Id && x.BaseNumber == number);
+            var direct = await ChangeRequestTraceProjection.ForChangeRequestAsync(db, project.Id, root.Id,
+                policy, CancellationToken.None, directOnly: true);
+            Assert.NotNull(direct);
+            Assert.True(direct.DirectOnly);
+            Assert.Contains(direct.Edges, edge => edge.ToId == root.Id && edge.Provenance.Any(fact => fact.Kind == "AuthorStated" && fact.IsLive));
+            Assert.All(direct.Edges, edge => Assert.True(edge.FromId == root.Id || edge.ToId == root.Id));
+        }
         var second = await seeder.UpgradeAsync(program.Id);
         Assert.DoesNotContain(second, step => step.StartsWith("approved-upstream-correction-1006:", StringComparison.Ordinal));
     }

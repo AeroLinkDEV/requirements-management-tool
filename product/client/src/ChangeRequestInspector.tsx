@@ -148,7 +148,7 @@ export default function ChangeRequestInspector({
         }
         throw new Error('detail')
       }),
-      fetch(`${api}/${kind === 'ChangeRequest' ? `api/change-requests/${id}/trace` : `api/test-change-reviews/${id}/trace`}`)
+      fetch(`${api}/${kind === 'ChangeRequest' ? `api/change-requests/${id}/trace` : `api/test-change-reviews/${id}/trace`}?directOnly=true`)
         .then(response => response.ok ? response.json() as Promise<Trace> : undefined)
         .catch(() => undefined),
       discussionPromise,
@@ -224,10 +224,11 @@ export default function ChangeRequestInspector({
     {tab === 'trace' && <div className="inspectorBody traceInspector">
       {trace?.state && <p className="traceStateLine"><span>Trace status</span><b>{stateLabel(trace.state.upstream)}</b><i>upstream</i><b>{stateLabel(trace.state.downstream)}</b><i>downstream</i><b>{stateLabel(trace.state.overall)}</b><i>overall</i></p>}
       {trace?.state?.warnings?.map(warning => <p className="inspectorNote warn" key={warning}>{warning}</p>)}
-      <h3>Upstream</h3>
+      {trace && <><h3>Upstream</h3>
       {upstream.length ? upstream.map(edge => { const otherId = edge.toId === rootId ? edge.fromId : edge.toId; const otherKind = edge.toId === rootId ? edge.fromKind : edge.toKind; const node = nodeById.get(otherId); return <TraceEdgeCard key={`${edge.fromId}-${edge.toId}-${edge.relation}`} edge={edge} node={node} otherKind={otherKind} href={node ? artifactHref?.(node) : undefined} /> }) : <div className="traceEmpty"><span>No immediate upstream relationship is recorded.</span></div>}
       <h3>Downstream / verification impact</h3>
       {downstream.length ? downstream.map(edge => { const otherId = edge.fromId === rootId ? edge.toId : edge.fromId; const otherKind = edge.fromId === rootId ? edge.toKind : edge.fromKind; const node = nodeById.get(otherId); return <TraceEdgeCard key={`${edge.fromId}-${edge.toId}-${edge.relation}`} edge={edge} node={node} otherKind={otherKind} href={node ? artifactHref?.(node) : undefined} /> }) : <div className="traceEmpty"><span>No immediate downstream relationship or verification impact is recorded.</span></div>}
+      </>}
       {digitalThreadHref && <ExactArtifactLink className="openDigitalThread" href={digitalThreadHref}>Open Digital Thread →</ExactArtifactLink>}
       {!trace && <p className="inspectorNote warn">The server did not expose a trace projection for this exact record. No client-side relationship has been inferred.</p>}
     </div>}

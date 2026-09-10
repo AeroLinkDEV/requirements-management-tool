@@ -422,6 +422,13 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
         Assert.Equal("AssessmentDerived", Assert.Single(pair.GetProperty("provenance").EnumerateArray())
             .GetProperty("kind").GetString());
         Assert.Equal("Answered", trace.GetProperty("state").GetProperty("upstream").GetString());
+        var direct = await client.GetFromJsonAsync<JsonElement>($"/api/change-requests/{fixture.ChildId}/trace?directOnly=true");
+        Assert.True(direct.GetProperty("directOnly").GetBoolean());
+        Assert.Contains(direct.GetProperty("edges").EnumerateArray(), edge =>
+            edge.GetProperty("fromId").GetGuid() == fixture.CurrentSourceId
+            && edge.GetProperty("toId").GetGuid() == fixture.ChildId);
+        Assert.All(direct.GetProperty("edges").EnumerateArray(), edge =>
+            Assert.True(edge.GetProperty("fromId").GetGuid() == fixture.ChildId || edge.GetProperty("toId").GetGuid() == fixture.ChildId));
         using var history = await client.GetAsync($"/api/history/change-requests?projectId={fixture.ProjectId}&page=1&pageSize=50");
         Assert.Equal(HttpStatusCode.OK, history.StatusCode);
         var historyBody = JsonSerializer.Deserialize<JsonElement>(await history.Content.ReadAsStringAsync());
@@ -436,6 +443,8 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
         var refusedBody = await refused.Content.ReadAsStringAsync();
         Assert.DoesNotContain(fixture.ChildId.ToString(), refusedBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(fixture.CurrentSourceId.ToString(), refusedBody, StringComparison.OrdinalIgnoreCase);
+        using var directRefused = await outsider.GetAsync($"/api/change-requests/{fixture.ChildId}/trace?directOnly=true");
+        Assert.Equal(HttpStatusCode.Forbidden, directRefused.StatusCode);
     }
 
     [Fact]

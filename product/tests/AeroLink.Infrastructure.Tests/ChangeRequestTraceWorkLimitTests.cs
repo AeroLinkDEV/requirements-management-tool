@@ -13,6 +13,39 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class ChangeRequestTraceWorkLimitTests
 {
     [Fact]
+    public async Task Direct_trace_does_not_expand_a_parents_large_connected_component()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var parent = fixture.CreateChangeRequest("SRCR-11000");
+        var children = Enumerable.Range(1, 1000)
+            .Select(i => fixture.CreateChangeRequest($"SRCR-{11000 + i:00000}")).ToList();
+        foreach (var child in children)
+            child.AddUpstreamLink("author", parent.Id, parent.DisplayNumber, fixture.Release.Id,
+                fixture.Release.Version, "Exact parent", fixture.Now);
+        fixture.Db.Add(parent);
+        fixture.Db.AddRange(children);
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+        var root = children[0];
+
+        await Assert.ThrowsAsync<TraceWorkLimitException>(() => ChangeRequestTraceProjection.ForChangeRequestAsync(
+            fixture.Db, fixture.Project.Id, root.Id, LegacyLadderPolicy.Instance, CancellationToken.None));
+        var direct = await ChangeRequestTraceProjection.ForChangeRequestAsync(
+            fixture.Db, fixture.Project.Id, root.Id, LegacyLadderPolicy.Instance, CancellationToken.None, directOnly: true);
+        Assert.NotNull(direct);
+        Assert.True(direct.DirectOnly);
+        Assert.Equal(2, direct.Nodes.Count);
+        Assert.Contains(direct.Nodes, node => node.Id == parent.Id);
+        Assert.Contains(direct.Nodes, node => node.Id == root.Id);
+        var edge = Assert.Single(direct.Edges);
+        Assert.Equal(parent.Id, edge.FromId);
+        Assert.Equal(root.Id, edge.ToId);
+        // An over-large immediate neighbourhood still refuses; this is not a budget bypass.
+        await Assert.ThrowsAsync<TraceWorkLimitException>(() => ChangeRequestTraceProjection.ForChangeRequestAsync(
+            fixture.Db, fixture.Project.Id, parent.Id, LegacyLadderPolicy.Instance, CancellationToken.None, directOnly: true));
+    }
+
+    [Fact]
     public async Task Rooted_trace_rejects_a_network_over_the_node_limit()
     {
         await using var fixture = await Fixture.CreateAsync();
