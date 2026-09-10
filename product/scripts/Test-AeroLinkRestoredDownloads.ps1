@@ -12,6 +12,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Net.Http
+if (-not (Get-Module -Name AeroLinkProcessEnvironment)) {
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessEnvironment.psm1')
+}
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 # The CALLER names the executable, because only the caller knows which one it just built.
 #
@@ -52,8 +55,8 @@ $settings = [ordered]@{
 }
 $process = $null
 try {
+    $previous = Get-AeroLinkProcessEnvironmentSnapshot -Name @($settings.Keys)
     foreach ($entry in $settings.GetEnumerator()) {
-        $previous[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
     }
     # Launch the application executable itself so the tracked process is the listener, not a
@@ -137,6 +140,6 @@ finally {
     finally {
         # Production rollback/restart must never inherit the validation database, evidence root,
         # token, or read-only mode, even when listener cleanup itself fails.
-        foreach ($entry in $previous.GetEnumerator()) { [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process') }
+        Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $previous
     }
 }

@@ -2,6 +2,9 @@
 param([string]$PostgresBin)
 
 $ErrorActionPreference = 'Stop'
+if (-not (Get-Module -Name AeroLinkProcessEnvironment)) {
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessEnvironment.psm1')
+}
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
 if (-not $PostgresBin) { $PostgresBin = Join-Path $productRoot '.local\postgresql\pgsql\bin' }
@@ -28,7 +31,7 @@ $isolatedEvidence = Join-Path $productRoot ".local\restore-validation\q-$shortTo
 $pgLog = Join-Path $root 'postgres.log'; $apiOut = Join-Path $root 'seed-api.stdout.log'; $apiErr = Join-Path $root 'seed-api.stderr.log'
 $pgPort = Get-FreePort; if ($pgPort -eq 54329) { $pgPort = Get-FreePort }; $seedApiPort = Get-FreePort
 $api = $null; $postgresStarted = $false; $previous = @{}
-$priorEvidenceRoot = [Environment]::GetEnvironmentVariable('Evidence__Root','Process')
+$priorEvidenceRoot = Get-AeroLinkProcessEnvironmentSnapshot -Name @('Evidence__Root')
 New-Item -ItemType Directory -Path $root,$sourceEvidence,$backupRoot,$oldEvidence -Force | Out-Null
 try {
     Invoke-Checked (Join-Path $PostgresBin 'initdb.exe') @('-D',$data,'-U','postgres','-A','trust','--encoding=UTF8')
@@ -43,7 +46,8 @@ try {
         'ConnectionStrings__AeroLink'="Host=127.0.0.1;Port=$pgPort;Database=aerolink_source;Username=postgres"
         'Evidence__Root'=$sourceEvidence; 'DemoData__Enabled'='true'; 'Identity__SeedDemoAccounts'='true'; 'Identity__AllowDemoAccounts'='true'; 'Identity__CookieSecure'='false'
     }
-    foreach ($item in $settings.GetEnumerator()) { $previous[$item.Key]=[Environment]::GetEnvironmentVariable($item.Key,'Process'); [Environment]::SetEnvironmentVariable($item.Key,$item.Value,'Process') }
+    $previous = Get-AeroLinkProcessEnvironmentSnapshot -Name @($settings.Keys)
+    foreach ($item in $settings.GetEnumerator()) { [Environment]::SetEnvironmentVariable($item.Key,$item.Value,'Process') }
     $apiProject = Join-Path $productRoot 'src\AeroLink.Api\AeroLink.Api.csproj'
     $api = Start-Process -FilePath 'dotnet' -ArgumentList "run --configuration Release --no-build --no-launch-profile --project `"$apiProject`"" `
         -WorkingDirectory $repositoryRoot -RedirectStandardOutput $apiOut -RedirectStandardError $apiErr -WindowStyle Hidden -PassThru
@@ -51,7 +55,7 @@ try {
     for ($attempt=0;$attempt -lt 180;$attempt++) { if($api.HasExited){break};try{$response=Invoke-WebRequest -Uri "http://127.0.0.1:$seedApiPort/health/ready" -UseBasicParsing -TimeoutSec 2;if($response.StatusCode -eq 200){$ready=$true;break}}catch{};Start-Sleep -Milliseconds 500 }
     if(-not $ready){throw "Disposable seed API did not become ready. See $apiErr"}
     Stop-Process -Id $api.Id -Force; $api.WaitForExit(10000)|Out-Null; $api=$null
-    foreach($item in $previous.GetEnumerator()){[Environment]::SetEnvironmentVariable($item.Key,$item.Value,'Process')};$previous=@{}
+    Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $previous;$previous=@{}
 
     $env:Evidence__Root = $sourceEvidence
     & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -RetentionDays 0 -Database aerolink_source -PostgresPort $pgPort `
@@ -113,8 +117,8 @@ try {
 }
 finally {
     if($api -and -not $api.HasExited){Stop-Process -Id $api.Id -Force -ErrorAction SilentlyContinue}
-    foreach($item in $previous.GetEnumerator()){[Environment]::SetEnvironmentVariable($item.Key,$item.Value,'Process')}
-    [Environment]::SetEnvironmentVariable('Evidence__Root',$priorEvidenceRoot,'Process')
+    if($previous.Count -gt 0){Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $previous}
+    Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $priorEvidenceRoot
     if($postgresStarted){& (Join-Path $PostgresBin 'pg_ctl.exe') -D $data -m immediate -w stop | Out-Null}
     if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force}
     if(Test-Path -LiteralPath $backupRoot){Remove-Item -LiteralPath $backupRoot -Recurse -Force}

@@ -1,8 +1,11 @@
 $ErrorActionPreference = 'Stop'
 $restore = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -Raw
 $download = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-AeroLinkRestoredDownloads.ps1') -Raw
+$qualification = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'AeroLinkRestoreQualification.Tests.ps1') -Raw
+$environmentTests = Join-Path $PSScriptRoot 'AeroLinkProcessEnvironment.Tests.ps1'
+$environmentTestsSource = Get-Content -LiteralPath $environmentTests -Raw
 $program = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\src\AeroLink.Api\Program.cs') -Raw
-foreach ($path in @('Backup-AeroLink.ps1','Restore-AeroLink.ps1','Test-AeroLinkRestoredDownloads.ps1','AeroLinkRestoreQualification.Tests.ps1')) {
+foreach ($path in @('Backup-AeroLink.ps1','Restore-AeroLink.ps1','Test-AeroLinkRestoredDownloads.ps1','AeroLinkRestoreQualification.Tests.ps1','AeroLinkProcessEnvironment.psm1','AeroLinkProcessEnvironment.Tests.ps1')) {
     $errors=$null;$tokens=$null
     [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $path),[ref]$tokens,[ref]$errors)|Out-Null
     if($errors.Count -gt 0){throw "$path has a PowerShell parse error: $($errors[0].Message)"}
@@ -20,6 +23,13 @@ if(-not $restore.Contains("Disposable restore qualification is forbidden on the 
 if(-not $download.Contains('X-AeroLink-Restore-Validation') -or -not $program.Contains('restore_validation_read_only') -or -not $program.Contains('typeof(IHostedService)')){throw 'The isolated API-download validation token/read-only boundary is incomplete.'}
 if($download.Contains("Start-Process -FilePath 'dotnet'")){throw 'Restore validation still tracks a dotnet-run parent instead of the API listener process.'}
 if(-not $download.Contains('$apiExecutable') -or -not $download.Contains('remained in use after process cleanup')){throw 'Restore validation does not launch the built API directly and prove its port is released.'}
+if(-not $download.Contains('if (-not (Get-Module -Name AeroLinkProcessEnvironment))') -or $download.Contains("AeroLinkProcessEnvironment.psm1') -Force")){throw 'Restore validation must reuse the loaded process-environment helper rather than force-reloading it in a nested scope.'}
+if(-not $download.Contains('Get-AeroLinkProcessEnvironmentSnapshot -Name @($settings.Keys)')){throw 'Restore validation does not snapshot exact process-environment presence before overriding settings.'}
+if(-not $download.Contains('Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $previous')){throw 'Restore validation does not restore the exact process-environment snapshot.'}
+if($download.Contains('foreach ($entry in $previous.GetEnumerator()) { [Environment]::SetEnvironmentVariable')){throw 'Restore validation still conflates absent and empty process variables.'}
+if(-not $qualification.Contains('if (-not (Get-Module -Name AeroLinkProcessEnvironment))') -or $qualification.Contains("AeroLinkProcessEnvironment.psm1') -Force") -or -not $qualification.Contains('Get-AeroLinkProcessEnvironmentSnapshot') -or -not $qualification.Contains('Restore-AeroLinkProcessEnvironmentSnapshot')){throw 'Disposable restore qualification does not preserve exact process-environment presence without force-reloading the helper.'}
+if(-not $environmentTestsSource.Contains('if (-not (Get-Module -Name AeroLinkProcessEnvironment))') -or $environmentTestsSource.Contains("AeroLinkProcessEnvironment.psm1') -Force")){throw 'The in-process process-environment regression must reuse the caller-loaded helper rather than force-reloading it.'}
+if($qualification.Contains('foreach($item in $previous.GetEnumerator()){[Environment]::SetEnvironmentVariable')){throw 'Disposable restore qualification still conflates absent and empty process variables.'}
 # The build to validate with is named by the caller and never chosen here. Preferring whichever configuration
 # had output on disk let an established installation validate an upgraded clone with a stale Release binary
 # from its previous production run; a binary predating the read-only boundary would ignore these settings and
@@ -41,5 +51,57 @@ foreach($route in @('POST /api/auth/login','GET /api/auth/me','POST /api/auth/lo
 }
 if(-not $download.Contains('does not declare the required authentication routes')){throw 'Isolated validation does not fail when the required authentication routes are missing.'}
 if($download.IndexOf('finally {', $download.IndexOf('finally {') + 1) -lt 0 -or -not $download.Contains('Production rollback/restart must never inherit')){throw 'Restore validation does not restore its parent environment in a nested cleanup finally.'}
+if (-not (Get-Module -Name AeroLinkProcessEnvironment)) {
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessEnvironment.psm1')
+}
+$callerProbeNames = @('ConnectionStrings__AeroLink', 'Evidence__Root', 'ASPNETCORE_ENVIRONMENT')
+$callerBefore = Get-AeroLinkProcessEnvironmentSnapshot -Name $callerProbeNames
+$emptyProbeBefore = Get-AeroLinkProcessEnvironmentSnapshot -Name @('AEROLINK_981_EMPTY_PROBE')
+function Assert-CallerEnvironment {
+    param([hashtable]$Expected, [string]$Context)
+    foreach ($name in $callerProbeNames) {
+        $actual = [Environment]::GetEnvironmentVariable($name, 'Process')
+        if ($Expected[$name].Present) {
+            if ($actual -ne [string]$Expected[$name].Value) {
+                throw "$Context did not restore $name exactly."
+            }
+        }
+        elseif ($null -ne $actual) {
+            throw "$Context left $name present when the caller had it absent."
+        }
+    }
+}
+try {
+    $emptyStateSupported = $false
+    [Environment]::SetEnvironmentVariable('AEROLINK_981_EMPTY_PROBE', '', 'Process')
+    if ([Environment]::GetEnvironmentVariable('AEROLINK_981_EMPTY_PROBE', 'Process') -eq '') {
+        $emptyStateSupported = $true
+    }
+    [Environment]::SetEnvironmentVariable('AEROLINK_981_EMPTY_PROBE', $null, 'Process')
+
+    [Environment]::SetEnvironmentVariable('ConnectionStrings__AeroLink', 'caller-populated-sentinel', 'Process')
+    [Environment]::SetEnvironmentVariable('ASPNETCORE_ENVIRONMENT', $null, 'Process')
+    if ($emptyStateSupported) {
+        [Environment]::SetEnvironmentVariable('Evidence__Root', '', 'Process')
+    }
+    else {
+        [Environment]::SetEnvironmentVariable('Evidence__Root', 'caller-populated-sentinel', 'Process')
+    }
+    $callerDuringTest = Get-AeroLinkProcessEnvironmentSnapshot -Name $callerProbeNames
+
+    & $environmentTests
+    Assert-CallerEnvironment $callerDuringTest 'In-process environment test'
+
+    $otherEngine = if ($PSVersionTable.PSEdition -eq 'Core') { Get-Command powershell.exe -ErrorAction SilentlyContinue } else { Get-Command pwsh.exe -ErrorAction SilentlyContinue }
+    if ($otherEngine) {
+        & $otherEngine.Source -NoProfile -ExecutionPolicy Bypass -File $environmentTests
+        if ($LASTEXITCODE -ne 0) { throw "AeroLink process-environment tests failed under $($otherEngine.Source)." }
+        Assert-CallerEnvironment $callerDuringTest 'Child-process environment test'
+    }
+}
+finally {
+    Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $callerBefore
+    Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $emptyProbeBefore
+}
 [pscustomobject]@{Passed=$true;ShadowDatabase=$true;ReversibleActivation=$true;ReadOnlyApiDownloads=$true;PersistentPortFence=$true}
 $global:LASTEXITCODE=0
