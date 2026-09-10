@@ -188,6 +188,44 @@ observation and a separate review.
 
 ## Trusted merge-queue binding
 
+### Standalone queue-to-main reuse observer
+
+`bin/report-queue-reuse-shadow.mjs` is an explicit read-only diagnostic. It does not run automatically,
+write workflow outputs, publish checks or feed the production provenance consumer:
+
+```powershell
+node product/ci-metrics/bin/report-queue-reuse-shadow.mjs <queue-run-id> <merged-pr-number> <main-diagnostic-run-id> <new-output-directory>
+```
+
+Run it from a reviewed Windows development checkout with existing `gh` read access. It uses fixed-repository
+GitHub GETs, bounded ZIP parsing and the existing trusted topology generator. Git object fetches, when needed,
+use the fixed repository URL without moving refs/checkouts. `git merge-tree` reconstructs the composition
+without checking out or executing candidate files. No credential is exported into the packet, and existing
+output directories are refused. This requires complete retained artifacts; missing, expired, corrupt or
+incomplete records are visible refusals.
+
+The first supported composition is deliberately narrow: one authenticated merged PR, one candidate parent,
+the exact native queue commit also landed on protected main, and the authenticated PR head merged into that
+parent reconstructs its tree. A deleted queue branch is unnecessary. Multi-PR, rewritten-commit or unprovable
+compositions remain unsupported. The observer binds the exact PR head through the protected readiness App;
+it does not certify the independence or truth of review-comment authorship.
+
+The evaluator reuses the native queue job policy, strict fragment validation/aggregation and shared manifest
+eligibility/age rules. It cross-checks artifact identities, counts and selected jobs with authenticated native
+jobs, exact check-run references and pinned publishers. The newest App check governs; older in-progress
+invalidation records cannot mask a newer invalidation. `filter=latest` selects the effective job set, while
+each retained fragment must match that job's actual originating attempt. Retained executions are not labelled
+new work. Complete main schedule/manual diagnostic proof with matching protected contents is required.
+Any gate/protected-surface change retains independent main validation.
+
+Outputs are `queue-reuse-shadow.json`, `queue-reuse-shadow.md` and the reproducible collected metadata/artifact
+packet `queue-reuse-evidence.json`. Outcomes are `would_reuse`, `must_retest` or `insufficient_evidence`;
+`canSkip` and adoption eligibility remain false for every outcome. Queue job time is labelled only as an
+estimated proxy for potentially avoidable work, with zero delivered savings. The report retains conditions,
+source/run/attempt/composition identities, mandatory work and observer overhead. Local fixture replays are
+explicitly unverified. A later enforcement rollout needs its own decision, review, representative reliability
+evidence and protected integration; this observer grants none of that authority.
+
 Two protected-default-branch paths publish the same App-bound `Trusted merge-queue binding` check. The
 trusted Full requester publishes it on an exact pull-request head only after the existing Product evidence
 and live readiness checks succeed; GitHub requires that pull-request check before an entry can join the
@@ -373,7 +411,7 @@ independently selected producer, so push/schedule reports are complete).
 Run the full suite exactly as CI does:
 
 ```powershell
-node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs product/ci-metrics/tests/api-packing-shadow.test.mjs product/ci-metrics/tests/api-observations.test.mjs product/ci-metrics/tests/api-collector.test.mjs product/ci-metrics/tests/github-readonly.test.mjs product/ci-metrics/tests/api-benchmark.test.mjs product/ci-metrics/tests/merge-authority.test.mjs product/ci-metrics/tests/merge-authority-github.test.mjs product/ci-metrics/tests/maintenance-preflight.test.mjs product/ci-metrics/tests/maintenance-approval.test.mjs product/ci-metrics/tests/maintenance-evidence-reader.test.mjs product/ci-metrics/tests/maintenance-candidate.test.mjs
+node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs product/ci-metrics/tests/api-packing-shadow.test.mjs product/ci-metrics/tests/queue-reuse-shadow.test.mjs product/ci-metrics/tests/api-observations.test.mjs product/ci-metrics/tests/api-collector.test.mjs product/ci-metrics/tests/github-readonly.test.mjs product/ci-metrics/tests/api-benchmark.test.mjs product/ci-metrics/tests/merge-authority.test.mjs product/ci-metrics/tests/merge-authority-github.test.mjs product/ci-metrics/tests/maintenance-preflight.test.mjs product/ci-metrics/tests/maintenance-approval.test.mjs product/ci-metrics/tests/maintenance-evidence-reader.test.mjs product/ci-metrics/tests/maintenance-candidate.test.mjs
 ```
 
 The command's reported test count is the authoritative current total; historical run artifacts retain
