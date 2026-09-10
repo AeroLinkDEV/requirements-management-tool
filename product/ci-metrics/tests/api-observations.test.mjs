@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { buildCurrentCountPlan, normalizeApiDiscovery, parseVstestList } from '../lib/api-packing-shadow.mjs'
-import { API_OBSERVATION_ARTIFACT_SCHEMA, buildApiObservationRun, classDurationWeights, decodeXmlAttribute, looksLikeObservationCredential, normalizeApiObservationArtifact, reconcileApiObservationArtifact, resolveJobOrigins } from '../lib/api-observations.mjs'
+import { API_OBSERVATION_ARTIFACT_SCHEMA, API_WORKFLOW_NAME, buildApiObservationRun, classDurationWeights, decodeXmlAttribute, looksLikeObservationCredential, normalizeApiObservationArtifact, reconcileApiObservationArtifact, resolveJobOrigins, singleWorkflowRefForRun, WORKFLOW_REF_BASIS } from '../lib/api-observations.mjs'
 import { buildFragment } from '../lib/fragment.mjs'
 
 const commitSha = 'a'.repeat(40)
@@ -25,8 +25,9 @@ const discovery = normalizeApiDiscovery({
   ],
 })
 const plan = buildCurrentCountPlan(discovery, 3)
-const run = { id: 42, run_attempt: 2, name: 'Product quality gate', workflow_id: 7, workflow_ref: 'AeroLinkDEV/requirements-management-tool/.github/workflows/ci.yml@refs/heads/main', event: 'merge_group', status: 'completed', conclusion: 'success', head_sha: commitSha, repository: { full_name: 'AeroLinkDEV/requirements-management-tool' }, created_at: '2026-09-09T01:00:00Z', updated_at: '2026-09-09T01:10:00Z' }
-const workflow = { id: 7, path: '.github/workflows/ci.yml' }
+const run = { id: 42, run_attempt: 2, name: API_WORKFLOW_NAME, path: '.github/workflows/ci.yml', workflow_id: 7, event: 'merge_group', head_branch: 'main', status: 'completed', conclusion: 'success', head_sha: commitSha, repository: { full_name: 'AeroLinkDEV/requirements-management-tool' }, created_at: '2026-09-09T01:00:00Z', updated_at: '2026-09-09T01:10:00Z' }
+const workflow = { id: 7, name: API_WORKFLOW_NAME, path: '.github/workflows/ci.yml' }
+const workflowRef = 'AeroLinkDEV/requirements-management-tool/.github/workflows/ci.yml@refs/heads/main'
 
 function trxFor(shard) {
   const tests = plan.shards.find((entry) => entry.shard === shard).tests
@@ -64,7 +65,7 @@ function jobFor(shard, attempt = 2) {
 function fragmentFor(shard, attempt = run.run_attempt) {
   const counts = plan.shards.find((entry) => entry.shard === shard).caseCount
   return buildFragment({
-    run: { id: run.id, attempt, event: run.event, sha: commitSha, tree: treeSha, workflow: run.name, workflowRef: run.workflow_ref, repository: 'AeroLinkDEV/requirements-management-tool' },
+    run: { id: run.id, attempt, event: run.event, sha: commitSha, tree: treeSha, workflow: run.name, workflowRef, repository: 'AeroLinkDEV/requirements-management-tool' },
     job: { group: 'backend-api', instance: `backend-api-${shard}`, name: jobFor(shard).name, needs: [], result: 'success' },
     timings: { jobStartMs: 1000, setupEndMs: 2000, testEndMs: 6000, jobEndMs: 7000, setupMs: 1000, testMs: 4000, postTestMs: 1000, missing: {} },
     counts: { expected: counts, executed: counts, passed: counts, failed: 0, skipped: 0, flaky: null, source: 'trx', missing: null },
@@ -82,6 +83,29 @@ test('artifact and TRX reconciliation retains exact identities and class duratio
   assert.equal(result.trx.totals.total, plan.shards[0].tests.length)
   assert.equal(result.trx.tests.length, result.classDurations.reduce((sum, entry) => sum + entry.tests, 0))
   assert.equal(result.timingComplete, true)
+})
+
+test('workflow reference is derived from realistic REST run metadata without workflow_ref', () => {
+  assert.equal(singleWorkflowRefForRun(run, workflow), workflowRef)
+  assert.equal(singleWorkflowRefForRun(run), workflowRef)
+  const queueRun = { ...run, head_branch: 'gh-readonly-queue/main/pr-123-a'.padEnd(56, '0') }
+  assert.equal(singleWorkflowRefForRun(queueRun, workflow), `${workflowRef.replace('refs/heads/main', `refs/heads/${queueRun.head_branch}`)}`)
+})
+
+test('workflow reference derivation refuses repository, workflow, path, tag, and unsafe branch ambiguity', () => {
+  assert.throws(() => singleWorkflowRefForRun({ ...run, repository: { full_name: 'someone/else' } }, workflow), /another repository/)
+  assert.throws(() => singleWorkflowRefForRun({ ...run, name: 'Other workflow' }, workflow), /not Product quality gate/)
+  assert.throws(() => singleWorkflowRefForRun({ ...run, path: '.github/workflows/other.yml' }, workflow), /run path/)
+  assert.throws(() => singleWorkflowRefForRun(run, { ...workflow, path: '.github/workflows/other.yml' }), /not Product quality gate/)
+  assert.throws(() => singleWorkflowRefForRun({ ...run, head_branch: 'refs/heads/main' }, workflow), /head_branch/)
+  assert.throws(() => singleWorkflowRefForRun({ ...run, head_branch: 'refs/tags/v1.0.0' }, workflow), /head_branch/)
+  assert.throws(() => singleWorkflowRefForRun({ ...run, head_branch: 'main?unexpected' }, workflow), /head_branch/)
+  assert.throws(() => singleWorkflowRefForRun({ ...run, head_branch: undefined }, workflow), /head_branch/)
+})
+
+test('artifact workflow reference is checked against the derived run reference', () => {
+  const wrong = artifactFor(1, { run: { ...artifactFor(1).run, workflowRef: `${workflowRef.slice(0, -4)}test` } })
+  assert.throws(() => reconcileApiObservationArtifact({ artifact: wrong, trxText: trxFor(1), apiRun: run, apiJob: jobFor(1), treeSha, workflow }), /workflow reference/)
 })
 
 test('artifact reconciliation rejects a job whose head SHA differs from the run', () => {
@@ -121,11 +145,13 @@ test('artifact normalization accepts maintained count-desc filter order with une
 
 test('pure run builder keeps fixture metadata unverified by default', () => {
   const firstPassRun = { ...run, run_attempt: 1 }
-  const artifactResults = [1, 2, 3].map((shard) => ({ shard, artifact: artifactFor(shard, { run: { id: run.id, attempt: 1, event: run.event, sha: commitSha, tree: treeSha, workflow: 'Product quality gate', workflowRef: run.workflow_ref } }), trxText: trxFor(shard), job: jobFor(shard, 1) }))
+  const artifactResults = [1, 2, 3].map((shard) => ({ shard, artifact: artifactFor(shard, { run: { id: run.id, attempt: 1, event: run.event, sha: commitSha, tree: treeSha, workflow: API_WORKFLOW_NAME, workflowRef } }), trxText: trxFor(shard), job: jobFor(shard, 1) }))
   const jobs = [1, 2, 3].map((shard) => jobFor(shard, 1))
   jobs.push({ id: 99, run_id: run.id, run_attempt: 1, name: 'API test suite (1/3)', status: 'completed', conclusion: 'success' })
   const report = buildApiObservationRun({ apiRun: firstPassRun, workflow, workflowDefinition: { sha: 'c'.repeat(40) }, treeSha, artifactResults, latestJobs: jobs.slice(0, 3), allJobs: jobs, fragmentResults: [1, 2, 3].map((shard) => ({ shard, fragment: fragmentFor(shard, 1) })) })
   assert.equal(report.sourceMetadata.authenticated, false)
+  assert.equal(report.sourceMetadata.workflow.workflowRef, workflowRef)
+  assert.equal(report.sourceMetadata.workflow.workflowRefBasis, WORKFLOW_REF_BASIS)
   assert.equal(report.artifactAssertions.authenticated, false)
   assert.equal(report.artifactAssertions.reconciled, true)
   assert.equal(report.artifactAssertions.fragmentsComplete, true)
@@ -186,7 +212,7 @@ test('invalid timing on an unrelated skipped job remains diagnostic without excl
     workflow,
     workflowDefinition: { sha: 'c'.repeat(40) },
     treeSha,
-    artifactResults: [1, 2, 3].map((shard) => ({ shard, artifact: artifactFor(shard, { run: { id: run.id, attempt: 1, event: run.event, sha: commitSha, tree: treeSha, workflow: 'Product quality gate', workflowRef: run.workflow_ref } }), trxText: trxFor(shard), job: jobFor(shard, 1) })),
+    artifactResults: [1, 2, 3].map((shard) => ({ shard, artifact: artifactFor(shard, { run: { id: run.id, attempt: 1, event: run.event, sha: commitSha, tree: treeSha, workflow: API_WORKFLOW_NAME, workflowRef } }), trxText: trxFor(shard), job: jobFor(shard, 1) })),
     latestJobs: [...jobs, skipped],
     allJobs: [...jobs, skipped],
     fragmentResults: [1, 2, 3].map((shard) => ({ shard, fragment: fragmentFor(shard, 1) })),
@@ -207,7 +233,7 @@ test('an originating-attempt artifact remains bound to its origin while retainin
   origin.id = 801
   const effective = jobFor(1, 2)
   effective.id = 1801
-  const oldArtifact = artifactFor(1, { run: { id: run.id, attempt: 1, event: run.event, sha: commitSha, tree: treeSha, workflow: run.name, workflowRef: run.workflow_ref } })
+  const oldArtifact = artifactFor(1, { run: { id: run.id, attempt: 1, event: run.event, sha: commitSha, tree: treeSha, workflow: run.name, workflowRef } })
   const result = reconcileApiObservationArtifact({ artifact: oldArtifact, trxText: trxFor(1), apiRun: run, apiJob: origin, effectiveApiJob: effective, treeSha, workflow })
   assert.equal(result.job.id, effective.id)
   assert.equal(result.originJob.id, origin.id)

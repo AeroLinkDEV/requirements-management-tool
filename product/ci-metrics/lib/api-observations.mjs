@@ -17,6 +17,7 @@ export const API_SHARD_COUNT = 3
 export const MAX_OBSERVATION_RUNS = 40
 export const MAX_RESULT_ROWS = 30_000
 export const MAX_EXCLUSIONS = 200
+export const WORKFLOW_REF_BASIS = 'fixed-repository-workflow-path-and-authenticated-head-branch'
 
 const SHA40 = /^[0-9a-f]{40}$/i
 const SHA64 = /^[0-9a-f]{64}$/i
@@ -29,6 +30,45 @@ const SAFE_PARAMETERIZED_TEST_IDENTITIES = new Set([
   'AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.Missing_or_incorrect_password_refuses_signature_without_any_partial_transition(password: null)',
   'AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.Missing_or_incorrect_password_refuses_signature_without_any_partial_transition(password: "not-the-current-password")',
 ])
+
+function fixedWorkflowPath(workflow, run) {
+  if (workflow !== null && workflow !== undefined && (typeof workflow !== 'object' || Array.isArray(workflow))) {
+    throw new Error('Authenticated workflow metadata is malformed.')
+  }
+  const workflowName = workflow?.name ?? run.name
+  const workflowPath = workflow?.path ?? run.path
+  if (workflowName !== API_WORKFLOW_NAME || workflowPath !== API_WORKFLOW_PATH) {
+    throw new Error('Authenticated workflow metadata is not Product quality gate at .github/workflows/ci.yml.')
+  }
+  if (run.path !== undefined && run.path !== API_WORKFLOW_PATH) {
+    throw new Error('Authenticated workflow run path does not match .github/workflows/ci.yml.')
+  }
+  return API_WORKFLOW_PATH
+}
+
+function safeHeadBranch(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 255 || /[\r\n]/.test(value)) {
+    throw new Error('Authenticated workflow run head_branch is missing or unsafe.')
+  }
+  // GitHub supplies a bare branch here. Do not accept a ref or a tag and do not let branch text alter the
+  // constructed workflow reference. This permits normal slash-separated branch names while rejecting the
+  // characters and ref spellings that make a Git ref ambiguous in this evidence record.
+  if (value.startsWith('refs/') || value.startsWith('/') || value.endsWith('/') || value.includes('//') || value.includes('..') || value.includes('@{') || value.endsWith('.lock') || /[\\~^:?*\[\]\s\0]/.test(value)) {
+    throw new Error('Authenticated workflow run head_branch is missing or unsafe.')
+  }
+  return value
+}
+
+/** Derive the one supported workflow reference from fixed authenticated metadata, never from artifact text. */
+export function singleWorkflowRefForRun(run, workflow = undefined) {
+  const value = object(run, 'GitHub workflow run')
+  const repository = value.repository?.full_name ?? value.repository
+  if (repository !== API_REPOSITORY) throw new Error('GitHub workflow run belongs to another repository.')
+  if (value.name !== API_WORKFLOW_NAME) throw new Error('GitHub workflow run is not Product quality gate.')
+  fixedWorkflowPath(workflow, value)
+  const branch = safeHeadBranch(value.head_branch)
+  return `${API_REPOSITORY}/${API_WORKFLOW_PATH}@refs/heads/${branch}`
+}
 
 export function looksLikeObservationCredential(value) {
   return looksLikeCredential(value) && !SAFE_PARAMETERIZED_TEST_IDENTITIES.has(value)
@@ -301,7 +341,7 @@ function expectedFragmentResult(job) {
   return 'unavailable'
 }
 
-function reconcileApiFragment({ fragment, apiRun, apiJob, treeSha, shard, trx }) {
+function reconcileApiFragment({ fragment, apiRun, apiJob, treeSha, shard, trx, workflow }) {
   try {
     validateFragment(fragment)
   } catch (error) {
@@ -313,7 +353,8 @@ function reconcileApiFragment({ fragment, apiRun, apiJob, treeSha, shard, trx })
   if (fragmentRun.id !== apiRun.id || fragmentRun.attempt !== apiJob.runAttempt || fragmentRun.event !== apiRun.event || fragmentRun.sha !== apiRun.head_sha || fragmentRun.tree !== treeSha || fragmentRun.repository !== API_REPOSITORY) {
     throw new Error('Metrics fragment run identity does not match authenticated GitHub metadata.')
   }
-  if (fragmentRun.workflow !== API_WORKFLOW_NAME || fragmentRun.workflowRef !== apiRun.workflow_ref) {
+  const workflowRef = singleWorkflowRefForRun(apiRun, workflow)
+  if (fragmentRun.workflow !== API_WORKFLOW_NAME || fragmentRun.workflowRef !== workflowRef) {
     throw new Error('Metrics fragment workflow identity does not match the authenticated run.')
   }
   const fragmentJob = object(value.job, 'metrics fragment.job')
@@ -364,8 +405,8 @@ export function reconcileApiObservationArtifact({ artifact, trxText, apiRun, api
   if (run.id !== normalized.run.id || normalized.run.attempt > (run.run_attempt ?? 1) || run.event !== normalized.run.event || run.head_sha !== normalized.run.sha || normalized.run.tree !== treeSha) {
     throw new Error('Artifact run identity does not match authenticated GitHub metadata.')
   }
-  if (run.name !== API_WORKFLOW_NAME || normalized.run.workflow !== API_WORKFLOW_NAME) throw new Error('Artifact workflow identity is not Product quality gate.')
-  if (typeof run.workflow_ref !== 'string' || normalized.run.workflowRef !== run.workflow_ref) throw new Error('Artifact workflow reference does not match authenticated GitHub metadata.')
+  const workflowRef = singleWorkflowRefForRun(run, workflow)
+  if (normalized.run.workflow !== API_WORKFLOW_NAME || normalized.run.workflowRef !== workflowRef) throw new Error('Artifact workflow reference does not match authenticated GitHub metadata.')
   const job = jobIdentity(apiJob)
   if (job.runId !== normalized.run.id || job.runAttempt !== normalized.run.attempt || !/^API test suite \(\d+\/3\)$/.test(job.name)) {
     throw new Error('Artifact job identity does not match an API shard job.')
@@ -549,6 +590,7 @@ export function buildApiObservationRun({ apiRun, workflow, workflowDefinition, t
   const run = object(apiRun, 'GitHub workflow run')
   const runId = positiveInt(run.id, 'GitHub workflow run.id')
   const runAttempt = positiveInt(run.run_attempt ?? 1, 'GitHub workflow run.run_attempt', 1000)
+  const workflowRef = singleWorkflowRefForRun(run, workflow)
   const exclusions = []
   const reconciled = []
   for (const entry of Array.isArray(artifactResults) ? artifactResults : []) {
@@ -573,7 +615,7 @@ export function buildApiObservationRun({ apiRun, workflow, workflowDefinition, t
         const shard = positiveInt(entry.shard, 'metrics fragment shard', API_SHARD_COUNT)
         const artifactResult = byShard.get(shard)
         if (!artifactResult) throw new Error(`Metrics fragment for shard ${shard} has no reconciled API artifact.`)
-        const fragment = reconcileApiFragment({ fragment: entry.fragment, apiRun: run, apiJob: artifactResult.originJob ?? artifactResult.job, treeSha, shard, trx: artifactResult.trx })
+        const fragment = reconcileApiFragment({ fragment: entry.fragment, apiRun: run, apiJob: artifactResult.originJob ?? artifactResult.job, treeSha, shard, trx: artifactResult.trx, workflow })
         if (reconciledFragments.some((other) => other.shard === shard)) throw new Error(`Duplicate metrics fragment for API shard ${shard}.`)
         reconciledFragments.push({ shard, fragment })
       } catch (error) {
@@ -638,6 +680,8 @@ export function buildApiObservationRun({ apiRun, workflow, workflowDefinition, t
       id: workflow?.id ?? run.workflow_id ?? null,
       name: run.name ?? null,
       path: workflow?.path ?? run.path ?? API_WORKFLOW_PATH,
+      workflowRef,
+      workflowRefBasis: WORKFLOW_REF_BASIS,
       definitionRevision: workflowDefinition?.sha ?? null,
     },
     run: {

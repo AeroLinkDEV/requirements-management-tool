@@ -124,7 +124,7 @@ test('collector selects copied artifacts from the resolved originating attempt',
     zipById.set(artifactId, zip([['api-observation.json', JSON.stringify(apiArtifact({ shard, attempt, plan, discovery: normalized }))], ['shard.trx', trxFor(plan, shard)]]))
     zipById.set(fragmentId, zip([[`fragment-backend-api-${shard}.json`, JSON.stringify(fragmentFor({ shard, attempt, plan }))]]))
   }
-  const run = { id: 42, run_attempt: 2, name: 'Product quality gate', workflow_id: 7, workflow_ref: workflowRef, event: 'merge_group', status: 'completed', conclusion: 'success', head_sha: commitSha, repository: { full_name: repository }, created_at: '2026-09-09T01:00:00Z', updated_at: '2026-09-09T01:10:00Z' }
+  const run = { id: 42, run_attempt: 2, name: 'Product quality gate', path: '.github/workflows/ci.yml', workflow_id: 7, event: 'merge_group', head_branch: 'main', status: 'completed', conclusion: 'success', head_sha: commitSha, repository: { full_name: repository }, created_at: '2026-09-09T01:00:00Z', updated_at: '2026-09-09T01:10:00Z' }
   const request = async (path) => {
     if (path === `${root}/actions/workflows/ci.yml`) return { id: 7, name: 'Product quality gate', path: '.github/workflows/ci.yml' }
     if (path.includes('/actions/workflows/ci.yml/runs?')) return { total_count: 1, workflow_runs: [run] }
@@ -150,6 +150,8 @@ test('collector selects copied artifacts from the resolved originating attempt',
   assert.equal(report.collector.mode, 'injected-read-only-fixture')
   assert.equal(report.collector.sourceAuthenticated, false)
   assert.equal(report.runs[0].sourceMetadata.authenticated, false)
+  assert.equal(report.runs[0].sourceMetadata.workflow.workflowRef, workflowRef)
+  assert.equal(report.runs[0].sourceMetadata.workflow.workflowRefBasis, 'fixed-repository-workflow-path-and-authenticated-head-branch')
   const markdown = renderApiObservationMarkdown(report)
   assert.match(markdown, /Run dispositions/)
   assert.match(markdown, /Recovered or rerun execution/)
