@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { buildCurrentCountPlan, normalizeApiDiscovery, parseVstestList } from '../lib/api-packing-shadow.mjs'
-import { API_OBSERVATION_ARTIFACT_SCHEMA, buildApiObservationRun, classDurationWeights, decodeXmlAttribute, normalizeApiObservationArtifact, reconcileApiObservationArtifact, resolveJobOrigins } from '../lib/api-observations.mjs'
+import { API_OBSERVATION_ARTIFACT_SCHEMA, buildApiObservationRun, classDurationWeights, decodeXmlAttribute, looksLikeObservationCredential, normalizeApiObservationArtifact, reconcileApiObservationArtifact, resolveJobOrigins } from '../lib/api-observations.mjs'
 import { buildFragment } from '../lib/fragment.mjs'
 
 const commitSha = 'a'.repeat(40)
@@ -119,13 +119,13 @@ test('artifact normalization accepts maintained count-desc filter order with une
   assert.equal(normalized.plan.shards[selected.shard - 1].filter, selected.filter)
 })
 
-test('complete run records authenticated metadata separately from reconciled artifact assertions', () => {
+test('pure run builder keeps fixture metadata unverified by default', () => {
   const firstPassRun = { ...run, run_attempt: 1 }
   const artifactResults = [1, 2, 3].map((shard) => ({ shard, artifact: artifactFor(shard, { run: { id: run.id, attempt: 1, event: run.event, sha: commitSha, tree: treeSha, workflow: 'Product quality gate', workflowRef: run.workflow_ref } }), trxText: trxFor(shard), job: jobFor(shard, 1) }))
   const jobs = [1, 2, 3].map((shard) => jobFor(shard, 1))
   jobs.push({ id: 99, run_id: run.id, run_attempt: 1, name: 'API test suite (1/3)', status: 'completed', conclusion: 'success' })
   const report = buildApiObservationRun({ apiRun: firstPassRun, workflow, workflowDefinition: { sha: 'c'.repeat(40) }, treeSha, artifactResults, latestJobs: jobs.slice(0, 3), allJobs: jobs, fragmentResults: [1, 2, 3].map((shard) => ({ shard, fragment: fragmentFor(shard, 1) })) })
-  assert.equal(report.sourceMetadata.authenticated, true)
+  assert.equal(report.sourceMetadata.authenticated, false)
   assert.equal(report.artifactAssertions.authenticated, false)
   assert.equal(report.artifactAssertions.reconciled, true)
   assert.equal(report.artifactAssertions.fragmentsComplete, true)
@@ -134,6 +134,12 @@ test('complete run records authenticated metadata separately from reconciled art
   assert.equal(report.attempts.ledger.find((entry) => entry.id === 99).effective, false)
   assert.equal(report.inventory.testCount, 4)
   assert.equal(classDurationWeights(report).size, 4)
+})
+
+test('credential guard preserves the two maintained harmless password identities only', () => {
+  assert.equal(looksLikeObservationCredential('AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.Missing_or_incorrect_password_refuses_signature_without_any_partial_transition(password: null)'), false)
+  assert.equal(looksLikeObservationCredential('AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.Missing_or_incorrect_password_refuses_signature_without_any_partial_transition(password: "not-the-current-password")'), false)
+  assert.equal(looksLikeObservationCredential('AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.Missing_or_incorrect_password_refuses_signature_without_any_partial_transition(password: "hunter2")'), true)
 })
 
 test('attempt ledger resolves a copied partial-rerun job to its earlier execution', () => {

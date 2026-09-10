@@ -22,15 +22,31 @@ const SHA40 = /^[0-9a-f]{40}$/i
 const SHA64 = /^[0-9a-f]{64}$/i
 const MAX_TIMESTAMP_MS = 10_000_000_000_000
 
+// One maintained API test displays two deliberately harmless password arguments in its fully-qualified
+// identity. Preserve that identity for exact inventory/TRX reconciliation while continuing to reject every
+// other credential-shaped value before it reaches an observation artifact.
+const SAFE_PARAMETERIZED_TEST_IDENTITIES = new Set([
+  'AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.Missing_or_incorrect_password_refuses_signature_without_any_partial_transition(password: null)',
+  'AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.Missing_or_incorrect_password_refuses_signature_without_any_partial_transition(password: "not-the-current-password")',
+])
+
+export function looksLikeObservationCredential(value) {
+  return looksLikeCredential(value) && !SAFE_PARAMETERIZED_TEST_IDENTITIES.has(value)
+}
+
 function object(value, label) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object.`)
   return value
 }
 
-function boundedString(value, label, max = 300) {
+function boundedText(value, label, max = 300, rejectCredential = true) {
   if (typeof value !== 'string' || value.length === 0 || value.length > max || /[\r\n]/.test(value)) throw new Error(`${label} must be a bounded non-empty string.`)
-  if (looksLikeCredential(value)) throw new Error(`${label} contains a credential-shaped value.`)
+  if (rejectCredential && looksLikeCredential(value)) throw new Error(`${label} contains a credential-shaped value.`)
   return value
+}
+
+function boundedString(value, label, max = 300) {
+  return boundedText(value, label, max, true)
 }
 
 /** Decode one XML attribute layer emitted by the maintained TRX parser. */
@@ -64,8 +80,10 @@ export function decodeXmlAttribute(value, label = 'XML attribute') {
 }
 
 function decodedBoundedString(value, label, max = 300) {
-  const decoded = decodeXmlAttribute(boundedString(value, label, max), label)
-  if (decoded.length === 0 || decoded.length > max || /[\r\n]/.test(decoded) || looksLikeCredential(decoded)) throw new Error(`${label} contains an invalid decoded value.`)
+  // Check the credential shape after decoding so XML entities cannot evade the guard, while allowing the
+  // two reviewed harmless password display values used by the maintained parameterized test identities.
+  const decoded = decodeXmlAttribute(boundedText(value, label, max, false), label)
+  if (decoded.length === 0 || decoded.length > max || /[\r\n]/.test(decoded) || looksLikeObservationCredential(decoded)) throw new Error(`${label} contains an invalid decoded value.`)
   return decoded
 }
 
@@ -100,11 +118,14 @@ function sortedUnique(values, label, max = MAX_RESULT_ROWS) {
   const seen = new Set()
   for (const value of values) {
     if (typeof value !== 'string' || value.length === 0 || value.length > 1_000 || /[\r\n]/.test(value)) throw new Error(`${label} contains an invalid identity.`)
-    if (looksLikeCredential(value)) throw new Error(`${label} contains a credential-shaped identity.`)
+    if (looksLikeObservationCredential(value)) throw new Error(`${label} contains a credential-shaped identity.`)
     if (seen.has(value)) throw new Error(`${label} contains duplicate identity '${value}'.`)
     seen.add(value)
   }
-  return [...seen].sort((a, b) => a.localeCompare(b))
+  // Match the maintained plan's code-unit ordering (`<`), rather than locale-sensitive
+  // ordering. Parameterized display names can contain punctuation/case where localeCompare
+  // would reorder an otherwise exact current partition.
+  return [...seen].sort((a, b) => a < b ? -1 : a > b ? 1 : 0)
 }
 
 function validateTiming(timing) {
@@ -523,8 +544,8 @@ function eventRole(run) {
           : event === 'workflow_dispatch' ? (main ? 'main-manual-diagnostic' : 'branch-dispatch-role-unverified') : 'unknown'
 }
 
-/** Combine all API shard observations for one authenticated run. */
-export function buildApiObservationRun({ apiRun, workflow, workflowDefinition, treeSha, artifactResults, latestJobs, allJobs, attemptRuns = undefined, fragmentResults = undefined }) {
+/** Combine all API shard observations for one run; authentication is explicit and defaults to unverified. */
+export function buildApiObservationRun({ apiRun, workflow, workflowDefinition, treeSha, artifactResults, latestJobs, allJobs, attemptRuns = undefined, fragmentResults = undefined, sourceAuthenticated = false }) {
   const run = object(apiRun, 'GitHub workflow run')
   const runId = positiveInt(run.id, 'GitHub workflow run.id')
   const runAttempt = positiveInt(run.run_attempt ?? 1, 'GitHub workflow run.run_attempt', 1000)
@@ -611,7 +632,7 @@ export function buildApiObservationRun({ apiRun, workflow, workflowDefinition, t
   if (run.status !== 'completed') comparabilityReasons.push('Run is not completed.')
   if (runAttempt !== 1) comparabilityReasons.push('Recovered or rerun execution is retained for audit and weights, but is not an ordinary first-pass performance sample.')
   const metadata = {
-    authenticated: true,
+    authenticated: sourceAuthenticated === true,
     repository: API_REPOSITORY,
     workflow: {
       id: workflow?.id ?? run.workflow_id ?? null,

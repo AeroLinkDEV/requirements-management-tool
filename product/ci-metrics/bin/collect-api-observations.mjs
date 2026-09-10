@@ -121,6 +121,9 @@ export async function collectApiObservations({ token, repository = API_REPOSITOR
   if (repository !== API_REPOSITORY) throw new Error(`GITHUB_REPOSITORY must be ${API_REPOSITORY}.`)
   if (!token) throw new Error('A GitHub token is required.')
   if (!Number.isSafeInteger(window) || window < 1 || window > MAX_OBSERVATION_RUNS) throw new Error(`window must be 1 through ${MAX_OBSERVATION_RUNS}.`)
+  // A caller-supplied reader is a fixture seam, even when it receives a token-shaped argument. Only the
+  // default fixed-origin REST client path may attribute GitHub authentication to the source metadata.
+  const sourceAuthenticated = request === undefined && fetchImpl === globalThis.fetch
   const read = request ?? createReadOnlyGitHubRequest({ token, repository, apiUrl, fetchImpl })
   const workflow = await fetchWorkflow({ request: read, repository })
   const allRuns = await fetchWorkflowRuns({ request: read, repository })
@@ -183,6 +186,7 @@ export async function collectApiObservations({ token, repository = API_REPOSITOR
         allJobs,
         attemptRuns,
         fragmentResults: readFragments.sort((a, b) => a.shard - b.shard),
+        sourceAuthenticated,
       })
       for (const entry of observation.shards) {
         const start = parseIsoMs(entry.job.startedAt)
@@ -200,7 +204,8 @@ export async function collectApiObservations({ token, repository = API_REPOSITOR
     schemaVersion: API_OBSERVATION_REPORT_SCHEMA,
     repository: API_REPOSITORY,
     collector: {
-      mode: 'authenticated-read-only',
+      mode: sourceAuthenticated ? 'authenticated-read-only' : 'injected-read-only-fixture',
+      sourceAuthenticated,
       workflow: { id: workflow.id, name: workflow.name, path: workflow.path },
       source: 'GitHub Actions REST API plus attempt-scoped API observation artifacts',
       defaultShardCount: API_SHARD_COUNT,

@@ -406,8 +406,9 @@ fragment artifacts by the resolved originating attempt, and parses only the name
 ZIP. Missing, expired, corrupt, cancelled, failed, duplicate, partial, or
 identity-inconsistent evidence remains in `exclusions`; it is never treated as zero or silently dropped.
 
-The resulting `aerolink-api-observations/v1` report labels GitHub metadata as authenticated, artifact claims as
-reconciled-but-unauthenticated, and performance comparability separately. It records source commit/tree,
+The resulting `aerolink-api-observations/v1` report labels GitHub metadata as authenticated only on the default
+fixed-origin REST path; pure builders and injected readers remain unverified. Artifact claims are always
+reconciled-but-unauthenticated, and performance comparability is separate. It records source commit/tree,
 workflow definition blob, event role, run and attempt, job origin, runner timestamps, full test identities,
 class/case durations in milliseconds, outcomes, and inventory digest. Eight comparable observations per
 configuration remain required for a performance conclusion; collection output alone does not authorize

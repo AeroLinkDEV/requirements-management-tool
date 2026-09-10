@@ -5,9 +5,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { buildCurrentCountPlan, normalizeApiDiscovery, parseVstestList, API_DISCOVERY_SCHEMA_VERSION, API_PROJECT, API_REPOSITORY, API_DISCOVERY_SOURCE } from '../lib/api-packing-shadow.mjs'
-import { API_OBSERVATION_ARTIFACT_SCHEMA, API_SHARD_COUNT, decodeXmlAttribute } from '../lib/api-observations.mjs'
+import { API_OBSERVATION_ARTIFACT_SCHEMA, API_SHARD_COUNT, decodeXmlAttribute, looksLikeObservationCredential } from '../lib/api-observations.mjs'
 import { parseTrx } from '../lib/trx.mjs'
-import { looksLikeCredential } from '../lib/fragment.mjs'
 
 const env = (name) => process.env[name] ?? ''
 const [listedPath, partitionPath, trxPath, outputPath] = process.argv.slice(2)
@@ -67,7 +66,7 @@ function safeTrx(xmlText) {
   const definitions = parsed.tests.map((test, index) => {
     const classNameValue = decodeXmlAttribute(test.className, `TRX result ${index}.className`)
     const nameValue = decodeXmlAttribute(test.name, `TRX result ${index}.name`)
-    if (looksLikeCredential(classNameValue) || looksLikeCredential(nameValue)) throw new Error('TRX identity contains a credential-shaped value.')
+    if (looksLikeObservationCredential(classNameValue) || looksLikeObservationCredential(nameValue)) throw new Error('TRX identity contains a credential-shaped value.')
     const id = `observation-${index + 1}`
     const className = xml(classNameValue)
     const method = xml(nameValue.split('(', 1)[0].split('.').at(-1))

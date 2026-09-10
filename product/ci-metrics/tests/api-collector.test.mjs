@@ -135,6 +135,9 @@ test('collector selects copied artifacts from the resolved originating attempt',
   }
   const report = await collectApiObservations({ token: 'token', repository, request, fetchImpl, window: 1 })
   assert.equal(report.runs.length, 1)
+  assert.equal(report.collector.mode, 'injected-read-only-fixture')
+  assert.equal(report.collector.sourceAuthenticated, false)
+  assert.equal(report.runs[0].sourceMetadata.authenticated, false)
   assert.equal(report.runs[0].comparability.eligible, false)
   assert.equal(report.runs[0].comparability.sampleKind, 'recovered-or-rerun')
   const shard = report.runs[0].shards.find((entry) => entry.shard === 1)
