@@ -1,8 +1,10 @@
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -72,6 +74,91 @@ public sealed class SaveChangesContractTests
         Assert.Equal(EntityState.Unchanged, db.Entry(request).State);
         Assert.Equal(0, await db.SaveChangesAsync());
         Assert.Equal(1, await db.IntegrationEvents.CountAsync(x => x.AggregateId == request.Id));
+    }
+
+    [Fact]
+    public async Task Added_lifecycle_event_key_is_deduplicated_but_an_unchanged_history_event_does_not_suppress_a_new_change()
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options;
+        await using var db = new AeroLinkDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var now = DateTimeOffset.UtcNow;
+        var program = new ProgramRecord("Lifecycle dedupe", "LIFE");
+        var project = new ProjectRecord(program.Id, "Lifecycle project", "Lifecycle product");
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        var request = new SystemChangeRequest("SRCR-00001", 0, project.Id, release.Id,
+            "Original title", "Problem", "Analysis", "Solution", "author", now);
+        var existing = new IntegrationEvent(project.Id, "aerolink.change-request.changed", "ChangeRequest",
+            request.Id, "{\"sentinel\":true}", "seed", now);
+        db.AddRange(program, project, release, request, existing);
+
+        await db.SaveChangesAsync();
+
+        var afterInitialSave = await db.IntegrationEvents.AsNoTracking()
+            .Where(x => x.AggregateId == request.Id).ToListAsync();
+        var retained = Assert.Single(afterInitialSave);
+        Assert.Equal(existing.Id, retained.Id);
+        Assert.Equal("{\"sentinel\":true}", retained.PayloadJson);
+
+        db.ChangeTracker.Clear();
+        var trackedHistory = await db.IntegrationEvents.SingleAsync(x => x.Id == existing.Id);
+        Assert.Equal(EntityState.Unchanged, db.Entry(trackedHistory).State);
+        var persisted = await db.SystemChangeRequests.SingleAsync(x => x.Id == request.Id);
+        persisted.UpdateDraft("author", "Revised title", "Problem", "Analysis", "Solution", [], now.AddMinutes(1));
+        await db.SaveChangesAsync();
+
+        var afterRevision = await db.IntegrationEvents.AsNoTracking()
+            .Where(x => x.AggregateId == request.Id).ToListAsync();
+        Assert.Equal(2, afterRevision.Count);
+        Assert.Contains(afterRevision, x => x.Id == existing.Id && x.PayloadJson == "{\"sentinel\":true}");
+        Assert.Contains(afterRevision, x => x.Id != existing.Id && x.EventType == "aerolink.change-request.changed");
+    }
+
+    [Fact]
+    public async Task Lifecycle_event_deduplication_does_not_add_a_tracker_scan_per_pending_request()
+    {
+        static async Task<int> SaveRequestBatchAsync(int requestCount)
+        {
+            var detections = 0;
+            await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+            await connection.OpenAsync();
+            var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+                .UseSqlite(connection)
+                .LogTo(_ => detections++, [CoreEventId.DetectChangesCompleted])
+                .Options;
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("Lifecycle detection", "LDET");
+            var project = new ProjectRecord(program.Id, "Lifecycle detection project", "Lifecycle detection");
+            var release = new SoftwareRelease(project.Id, "1.0", false);
+            db.AddRange(program, project, release);
+            await db.SaveChangesAsync();
+            detections = 0;
+
+            for (var index = 0; index < requestCount; index++)
+            {
+                db.SystemChangeRequests.Add(new SystemChangeRequest(
+                    $"SRCR-{index + 1:D5}", 0, project.Id, release.Id,
+                    $"Request {index + 1}", "Problem", "Analysis", "Solution", "author", now));
+            }
+
+            await db.SaveChangesAsync();
+            var saveDetections = detections;
+            Assert.Equal(requestCount, await db.IntegrationEvents.CountAsync());
+            return saveDetections;
+        }
+
+        var oneRequest = await SaveRequestBatchAsync(1);
+        var twentyRequests = await SaveRequestBatchAsync(20);
+
+        Assert.True(oneRequest > 0, "The EF diagnostic probe must observe real change detection.");
+        Assert.True(twentyRequests <= oneRequest + 2,
+            $"A 20-request lifecycle batch caused {twentyRequests} full graph scans versus {oneRequest} for one request.");
     }
 
     [Fact]
