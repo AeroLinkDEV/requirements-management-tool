@@ -3,6 +3,7 @@ import {
   MIN_ZOOM,
   EDGE_LAYER_OVERHANG,
   compactLanes,
+  arrangeStory,
   edgeIdentity,
   edgePath,
   isIntraLane,
@@ -37,6 +38,17 @@ const FRAME = { x: 0, y: 0, width: 1280, height: 684 }
 const LANES = [6, 8, 9, 7, 7]
 
 test.describe("digital thread canvas geometry", () => {
+  test("story arrangement retrieves distant rows without traversing sibling branches or mutating input", () => {
+    const records = [{ id: "pr", lane: 0, row: 0 }, { id: "sibling", lane: 1, row: 0 }, { id: "hlr", lane: 1, row: 30 }, { id: "case", lane: 2, row: 40 }]
+    const edges = [{ from: "pr", to: "hlr", label: "resolves" }, { from: "pr", to: "sibling", label: "resolves" }, { from: "hlr", to: "case", label: "verifies" }, { from: "case", to: "hlr", label: "cycle" }]
+    const story = trace("hlr", edges)
+    expect(story.nodes.has("sibling")).toBe(false)
+    const arranged = arrangeStory(records, story.nodes)
+    expect(arranged.find(node => node.id === "case")?.row).toBe(0)
+    expect(arranged.find(node => node.id === "hlr")?.row).toBe(0)
+    expect(new Set(arranged.map(node => node.id))).toEqual(new Set(records.map(node => node.id)))
+    expect(records[2].row).toBe(30)
+  })
   test("uses a stable directed identity for edges", () => {
     expect(edgeIdentity("source", "target")).toBe("source>target")
   })

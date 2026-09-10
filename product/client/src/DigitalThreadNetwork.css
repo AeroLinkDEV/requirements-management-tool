@@ -172,19 +172,22 @@
   height: 150px;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .dtnPanelTools { position: static; display: flex; justify-content: flex-end; flex: 0 0 24px; gap: 4px; z-index: 2; margin-bottom: 4px; }
 
-/* A bottom dock keeps its tools in normal flow. This gives the panel a measured toolbar row rather than relying
-   on an action-column offset that can overlap the primary action at compact widths. */
+/* Dock controls share the action column's reserved header space; the content columns start at the top. */
 .dtnPanel-bottom .dtnPanelTools {
-  position: static;
+  position: absolute;
+  right: 16px;
+  top: 14px;
   flex: 0 0 auto;
   align-self: stretch;
   margin: 0 0 4px;
 }
+
+.dtnPanel-bottom .dtnPanelGrid > :last-child { padding-top: 32px; }
 
 .dtnPanelTools button {
   min-height: 24px;
@@ -259,6 +262,8 @@
 .dtnPanel-bottom .dtnPanelActions { min-height: 0; }
 .dtnPanel-bottom .dtnPanelIdentityCol,
 .dtnPanel-bottom .dtnPanelCol { overflow: hidden; }
+.dtnPanelIdentityCol { min-width: 0; overflow-wrap: anywhere; }
+.dtnPanel-bottom .dtnPanelIdentityCol { overflow: auto; }
 
 .dtnPanelActions button {
   min-height: 32px;

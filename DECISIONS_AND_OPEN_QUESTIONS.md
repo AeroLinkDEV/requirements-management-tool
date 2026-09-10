@@ -2432,6 +2432,14 @@ successful when the reviewed merge candidate contains no trace of it.
 - **FMS exception:** The owner requested removal of Customer/Interface demonstration artifacts across all FMS builds and history, superseding #889's acceptance of retained Interface history. The audited population is eight owned synthetic Interface CR aggregates and no Customer/Interface requirements. An explicit operator correction may remove that exact dependency manifest after a verified backup and disposable-copy qualification. It must fail closed on unexpected ownership, released material, external files or dependencies; prove unrelated rows and trigger settings unchanged; and preserve a recovery receipt outside the application data.
 - **Preserved boundary:** This is not a normal controlled-record deletion workflow or permission to reset FMS, other projects, signatures or manifests for convenience. Invalid active upstream links receive attributable correction; earlier review snapshots keep their original contents and hashes. Unowned author work is left truthfully incomplete when maintenance has no authoritative replacement answer.
 
+### DEC-126 - Team Work Next Actions and Intentional Digital Thread Story Arrangement
+
+- **Status:** Accepted by the product owner, 2026-09-10, issue #1016 S06/S07/S09-S12.
+- Team Work displays In Work, In Review, and Approved. In Review combines canonical review and approval lanes for presentation; frozen stage obligations, signatures, parallel holders, approval versus release, and family lifecycle policies remain authoritative and unchanged. Compact cards show next actions and assigned build; explanatory metadata remains available in Details.
+- Digital Thread hover deliberately and temporarily arranges the directed upstream/downstream story, including records outside prior lane windows. This supersedes the prior no-hover-rearrangement behavior associated with #906, while preserving DEC-120 legibility limits and stable positions on ordinary rerenders. Shared ancestors do not imply sibling traversal or invented direct edges.
+- A short dwell starts preview. A stationary copy of the source remains the click target while the graph rearranges. Click pins the subject; leaving restores the prior overview or pinned view, including zoom, pan and lane positions. Camera adjustments during preview are temporary and are discarded on exit. Keyboard activation and touch selection pin without requiring hover; reduced motion avoids lane easing.
+- Individual cards remain available. Stories larger than the readable frame offer explicit actions to reveal offscreen connected records. Case and Procedure change lanes use server-stated artifact kind. Opening a change selects its exact subject even before its proposal content arrives.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

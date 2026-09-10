@@ -11,7 +11,7 @@
 .teamWorkTotals dd { margin: 2px 0 0; color: var(--ink-900); font-size: 20px; font-weight: 800; }
 .teamWorkBoardViewport { min-width: 0; }
 .teamWorkBoardViewportHint { display: none; }
-.teamWorkBoard { width: 100%; min-width: 0; box-sizing: border-box; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; overflow-x: visible; overflow-y: hidden; padding-bottom: 6px; }
+.teamWorkBoard { width: 100%; min-width: 0; box-sizing: border-box; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; overflow-x: visible; overflow-y: hidden; padding-bottom: 6px; }
 .teamWorkLane { min-width: 0; min-height: 300px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #f6f8f9; }
 .teamWorkLane[data-lane="work"] { border-top: 3px solid #936814; }
 .teamWorkLane[data-lane="review"] { border-top: 3px solid #684bb1; }
@@ -24,6 +24,11 @@
 .teamWorkLaneItems { display: grid; gap: 10px; max-height: calc(100vh - 245px); overflow-y: auto; padding-top: 12px; }
 .teamWorkCard { display: block; padding: 14px; border: 1px solid #d8e0e5; border-radius: 10px; background: #fff; color: inherit; text-decoration: none; box-shadow: 0 2px 5px rgba(18, 37, 65, .05); }
 .teamWorkCard:hover, .teamWorkCard:focus-visible { border-color: var(--teal-700); box-shadow: 0 4px 11px rgba(18, 37, 65, .12); outline: none; }
+.teamWorkCardLink { display: block; color: inherit; text-decoration: none; overflow-wrap: anywhere; }
+.teamWorkCardLink:focus-visible, .teamWorkCardDetails summary:focus-visible { outline: 2px solid var(--teal-700); outline-offset: 3px; }
+.teamWorkCardDetails { margin-top: 8px; font-size: 12px; }
+.teamWorkCardDetails summary { cursor: pointer; color: var(--teal-700); width: fit-content; padding: 4px 0; }
+.teamWorkCardDetails[open] .teamWorkCardFacts { margin-top: 8px; }
 .teamWorkCardTopline { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 8px; }
 .teamWorkCardBadge, .teamWorkCardDeferred { font-size: 12px; font-weight: 750; }
 .teamWorkCardBadge { padding: 3px 7px; border-radius: 5px; }
@@ -58,7 +63,7 @@
 .teamWorkLoadingCard { height: 122px; margin-bottom: 10px; border-radius: 9px; background: linear-gradient(100deg, #e7edef 20%, #f6f8f9 38%, #e7edef 56%); background-size: 250% 100%; animation: team-work-shimmer 1.3s infinite; }
 .teamWorkLoadingCard.short { height: 90px; }
 @keyframes team-work-shimmer { to { background-position: -150% 0; } }
-@media (max-width: 1100px) { .teamWorkBoard { grid-template-columns: repeat(4, minmax(228px, 1fr)); overflow-x: auto; } .teamWorkBoardViewportHint { display: flex; align-items: center; gap: 6px; margin: 0 0 6px 2px; color: var(--ink-500); font-size: 12px; } }
+@media (max-width: 1100px) { .teamWorkBoard { grid-template-columns: repeat(3, minmax(228px, 1fr)); overflow-x: auto; } .teamWorkBoardViewportHint { display: flex; align-items: center; gap: 6px; margin: 0 0 6px 2px; color: var(--ink-500); font-size: 12px; } }
 @media (max-width: 650px) { .teamWorkPage { padding: 18px 16px 28px; } .teamWorkPageHeader { align-items: start; flex-direction: column; } .teamWorkTotalsGroup { width: 100%; justify-items: stretch; } .teamWorkScopeLabel { text-align: left; } .teamWorkTotals { width: 100%; } .teamWorkTotals div { flex: 1; text-align: left; } }
 
 .teamWorkPeople { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
@@ -92,6 +97,12 @@
 .teamWorkFilterRow { display: flex; flex-wrap: wrap; gap: 8px 14px; }
 .teamWorkFilterGroup { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .teamWorkFilterGroup > span { margin-right: 3px; color: var(--ink-500); font-size: 12px; font-weight: 700; }
+.teamWorkFilterGroup > label { color: var(--ink-500); font-size: 12px; font-weight: 700; }
+.teamWorkFilterGroup select { min-height: 33px; max-width: 100%; border: 1px solid #bac8ce; border-radius: 6px; padding: 5px 9px; font: inherit; font-size: 12px; background: white; }
+.teamWorkFilters { grid-template-columns: minmax(170px, 230px) minmax(0, 1fr); align-items: end; }
+.teamWorkSelectedFilter { grid-column: 1 / -1; }
+.teamWorkFilterRow { align-items: center; }
+@media (max-width: 900px) { .teamWorkFilters { grid-template-columns: minmax(0, 1fr); } }
 .teamWorkFilterGroup button { min-height: 31px; padding: 5px 9px; border: 1px solid #bac8ce; border-radius: 6px; background: #fff; color: var(--ink-700); font-size: 12px; cursor: pointer; }
 .teamWorkFilterGroup button:hover, .teamWorkFilterGroup button:focus-visible, .teamWorkFilterGroup button.active { border-color: var(--teal-700); background: #e5f2ee; color: var(--teal-700); outline: none; }
 .teamWorkHolderBoard { display: grid; gap: 14px; }

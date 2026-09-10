@@ -132,12 +132,17 @@ export default function DigitalThreadInsideChange({
   representation = "map",
 }: DigitalThreadInsideChangeProps) {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all")
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(opened.id)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [dockPreference, setDockPreference] = useState<PanelDock>("bottom")
   const [identifierQuery, setIdentifierQuery] = useState("")
   const liveRegion = useRef<HTMLDivElement | null>(null)
   const canvasViewRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    setSelectedId(opened.id)
+    setHoveredId(null)
+  }, [opened.id])
 
   useEffect(() => {
     const element = canvasViewRef.current
@@ -181,8 +186,8 @@ export default function DigitalThreadInsideChange({
    * looking at proposal content with nothing on lane 0 to say which change it belongs to.
    */
   const registerNodes = useMemo(
-    () => register.filter(node => node.id === opened.id || matchesType(node, typeFilter)),
-    [opened.id, register, typeFilter],
+    () => [opened, ...register.filter(node => node.id !== opened.id && matchesType(node, typeFilter))],
+    [opened, register, typeFilter],
   )
 
 /**
@@ -432,6 +437,7 @@ export default function DigitalThreadInsideChange({
     canvasViewRef,
   )
 
+  const cardWeb = useMemo(() => hoveredId ? trace(hoveredId, canvasEdges) : web, [hoveredId, canvasEdges, web])
   const renderCard = useCallback(
     (canvasNode: CanvasNode) => {
       const card = cards.get(canvasNode.id)
@@ -439,12 +445,12 @@ export default function DigitalThreadInsideChange({
 
       // Untraced records recede rather than vanish, so the shape of the change stays readable around what
       // the reader selected. The hop badge says how far a record is from the focus.
-      const hop = web?.hops.get(canvasNode.id)
-      const traced = web?.nodes.has(canvasNode.id) ?? false
-      const traceClass = web && !traced ? " is-untraced" : ""
+      const hop = cardWeb?.hops.get(canvasNode.id)
+      const traced = cardWeb?.nodes.has(canvasNode.id) ?? false
+      const traceClass = cardWeb && !traced ? " is-untraced" : ""
       const hopBadge =
         traced && hop ? (
-          <span className="dticHop" title={`${hop} hop${hop === 1 ? "" : "s"} from the selected record`}>
+          <span className="dticHop" title={`${hop} hop${hop === 1 ? "" : "s"} from this story's subject`}>
             {hop}
           </span>
         ) : null
@@ -732,7 +738,7 @@ export default function DigitalThreadInsideChange({
         </div>
       )
     },
-    [cards, downstreamNotices, hrefFor, opened.id, retireCascadeIds, web],
+    [cards, downstreamNotices, hrefFor, opened.id, retireCascadeIds, cardWeb],
   )
 
   const handleSelect = useCallback(
@@ -936,7 +942,7 @@ export default function DigitalThreadInsideChange({
             tracedEdges={web?.edges}
             frameInset={frameInset}
             frameIds={selectedId ? [...(web?.nodes ?? [])] : undefined}
-            framingIntent="selection"
+            framingIntent="landing"
             landingId={opened.id}
             onFramingNeedsRoom={representation === "map" ? reportNeedsRoom : undefined}
             ariaLabel={`Inside ${opened.displayNumber}`}

@@ -297,14 +297,14 @@ test.describe("active-view table representations", () => {
     if (!target) throw new Error("the network projection should carry a Change Request")
 
     const networkCard = page.locator(".dtnCard").filter({ hasText: target.displayNumber }).first()
-    await networkCard.click()
+    // A split verification lane can place this record outside the initial horizontal frame.
+    // Native keyboard focus reveals the exact record before activating it.
+    await networkCard.locator("..").focus()
+    await networkCard.locator("..").press("Enter")
     await networkCard.getByRole("button", { name: "Open this change" }).click()
     await expect(page.locator(".dticRoot")).toBeVisible()
-    // Entering Inside opens the focal change but deliberately starts with no selected card. Select the real
-    // register node through the canvas's native button contract before exercising its inspector.
+    // Opening Inside immediately selects the exact change, including its inspector.
     const insideNode = page.locator(".dtCanvasNode").filter({ hasText: target.displayNumber }).first()
-    await insideNode.focus()
-    await page.keyboard.press("Enter")
     await expect(insideNode).toHaveAttribute("aria-pressed", "true")
     await page.getByRole("button", { name: "SYS", exact: true }).click()
     const insidePanel = page.locator(".dticPanel")
@@ -541,7 +541,8 @@ test.describe("selection and navigation coherence", () => {
     if (!first || !second) throw new Error("rendered Change Requests should retain their API identities")
 
     const cardFor = (displayNumber: string) => page.locator(".dtnCard").filter({ hasText: displayNumber }).first()
-    await cardFor(first.displayNumber).click()
+    await cardFor(first.displayNumber).locator("..").focus()
+    await cardFor(first.displayNumber).locator("..").press("Enter")
     await expect(page.locator(".dtnCard.is-selected")).toContainText(first.displayNumber)
     await expect(page.getByRole("button", { name: "Inside a change" })).toBeEnabled()
     expect(page.url()).toContain(`/traceability/change-requests/${first.id}`)
@@ -1238,7 +1239,8 @@ test.describe("route state is real state", () => {
     await selectProgram(page, "Flight Management System Live Program")
     await openThread(page)
 
-    await page.locator(".dtnCard").first().click()
+    await page.locator(".dtnCard").first().locator("..").focus()
+    await page.locator(".dtnCard").first().locator("..").press("Enter")
     await expect(page.locator(".dtnCard.is-selected")).toHaveCount(1)
     await page.locator(".dtnPanel").getByRole("button", { name: "Open this change" }).click()
     await expect(page.locator(".dticRoot")).toBeVisible()
@@ -1262,7 +1264,8 @@ test.describe("route state is real state", () => {
     await selectProgram(page, "Flight Management System Live Program")
     await openThread(page)
 
-    await page.locator(".dtnCard").first().click()
+    await page.locator(".dtnCard").first().locator("..").focus()
+    await page.locator(".dtnCard").first().locator("..").press("Enter")
     await page.locator(".dtnPanel").getByRole("button", { name: "Open this change" }).click()
     await expect(page.locator(".dticRoot")).toBeVisible()
 

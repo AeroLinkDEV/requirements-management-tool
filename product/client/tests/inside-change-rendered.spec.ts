@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 
 /**
  * Rendered behaviour of the inside-a-change view.
@@ -10,6 +10,18 @@ import { expect, test } from "@playwright/test"
  */
 
 const fixture = (scenario: string) => `/tests/fixtures/inside-change.html?case=${scenario}`
+
+const selectModifyProposal = async (page: Page) => {
+  // Arrival now frames the opened CR at readable size. Its tall proposal lane may need the explicit reveal
+  // action; a raw click on an offscreen card would bypass the reader's actual navigation path.
+  await expect(page.locator('.dtCanvas')).toBeVisible()
+  await page.waitForTimeout(700)
+  const reveal = page.getByRole('button', { name: 'Show SR-00010.01', exact: true })
+  if (await reveal.isVisible()) await reveal.click()
+  await expect(page.locator('[data-node-id="SR-00010.01"]')).not.toHaveClass(/is-offscreen/)
+  await page.locator('.dticProposal:has-text("SR-00010.01")').click()
+  await expect(page.locator('[data-node-id="SR-00010.01"]')).toHaveAttribute('aria-pressed', 'true')
+}
 
 test.describe("requirement proposals", () => {
   test("a Modify shows its badge and a truthful before/after", async ({ page }) => {
@@ -188,7 +200,7 @@ test.describe("trace and interaction", () => {
   test("selecting a card traces its web and pushes the rest back", async ({ page }) => {
     await page.goto(fixture("requirement"))
 
-    await page.locator('.dticProposal:has-text("SR-00010.01")').click()
+    await selectModifyProposal(page)
 
     // Its allocated downstream is in the web; an unrelated proposal is not.
     await expect(page.locator('.dticAllocation:has-text("HLR-00020.00")')).not.toHaveClass(/is-untraced/)
@@ -222,7 +234,7 @@ test.describe("trace and interaction", () => {
 test.describe("panel placement", () => {
   test("the panel offers bottom, right and auto, and auto picks the emptier side", async ({ page }) => {
     await page.goto(fixture("requirement"))
-    await page.locator('.dticProposal:has-text("SR-00010.01")').click()
+    await selectModifyProposal(page)
 
     const panel = page.locator(".dticPanel")
     await expect(panel).toHaveClass(/dticPanel-bottom/)
@@ -238,7 +250,7 @@ test.describe("panel placement", () => {
 
   test("the panel lists the whole traced web, marking deeper hops", async ({ page }) => {
     await page.goto(fixture("requirement"))
-    await page.locator('.dticProposal:has-text("SR-00010.01")').click()
+    await selectModifyProposal(page)
 
     // Two columns: upstream and downstream. Each lists the whole traced web, not just the first hop.
     await expect(page.locator(".dticPanelCol")).toHaveCount(2)
@@ -331,10 +343,9 @@ test.describe("exact identity on the board", () => {
 /**
  * The same §6.6 guarantee, asserted for this view in its own right.
  *
- * Non-occlusion is a shared-canvas rule. #880 §10.1 stopped the board zooming out past the legibility floor to
- * make a wide one-hop set fit beside a side dock, so the panel is what gives way — and a linked record must
- * never be hidden to keep the panel where it was. The fail-safe was wired into one view first, which is how
- * the other two kept the defect; each view that renders the panel now proves it.
+ * Non-occlusion is a shared-canvas rule. #1016 retains legibility and individual cards, so a tall proposal lane
+ * can exceed the readable frame. Such records must have explicit working reveal actions. Each direct record,
+ * whether initially visible or revealed, must be clear of the inspector without changing the pinned subject.
  */
 test.describe("the detail panel never rests on a directly linked record", () => {
   for (const mode of ["Bottom", "Right", "Auto"]) {
@@ -363,10 +374,18 @@ test.describe("the detail panel never rests on a directly linked record", () => 
       const canvas = (await page.locator(".dtCanvas").boundingBox())!
       const names = await page.locator(".dticRel button:not(.is-far) > span").allInnerTexts()
       expect(names.length, "the selected record should have direct links to check").toBeGreaterThan(0)
+      const pinned = await page.locator('.dtCanvasNode[aria-pressed="true"]').getAttribute('data-node-id')
+      expect(pinned).toBeTruthy()
 
       for (const name of names) {
         const card = page.locator(`.dtCanvasNode:has(.dticCard:has-text("${name}"))`).first()
         expect(await card.count(), `${name} is a direct link and must be on the board`).toBeGreaterThan(0)
+        if ((await card.getAttribute('class'))?.includes('is-offscreen')) {
+          const reveal = page.getByRole('button', { name: `Show ${name}`, exact: true })
+          await expect(reveal, `${name} must never be silently hidden`).toBeVisible()
+          await reveal.click()
+          await expect(page.locator('.dtCanvasNode[aria-pressed="true"]')).toHaveAttribute('data-node-id', pinned!)
+        }
         await expect(card, `${name} is hidden rather than fitted beside the ${mode} panel`)
           .not.toHaveClass(/is-offscreen/)
 

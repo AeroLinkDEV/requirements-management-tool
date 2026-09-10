@@ -295,20 +295,22 @@
   height: 150px;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   row-gap: 4px;
 }
 
 .dtaPanelTools { position: static; display: flex; justify-content: flex-end; flex: 0 0 24px; gap: 4px; z-index: 2; margin-bottom: 4px; }
 
-/* A bottom dock keeps its tools in normal flow. This gives the panel a measured toolbar row rather than relying
-   on an action-column offset that can overlap the primary action at compact widths. */
+/* Dock controls share the action column's reserved header space; the content columns start at the top. */
 .dtaPanel-bottom .dtaPanelTools {
-  position: static;
+  position: absolute;
+  right: 16px;
+  top: 14px;
   flex: 0 0 auto;
   align-self: stretch;
   margin: 0 0 4px;
 }
+.dtaPanel-bottom .dtaPanelActions { padding-top: 32px; }
 
 .dtaPanelTools button {
   min-height: 24px;

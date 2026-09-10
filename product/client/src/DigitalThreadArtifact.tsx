@@ -334,21 +334,22 @@ export default function DigitalThreadArtifact({
     [selectedId, tableIdentity, tableRelations, web],
   )
 
+  const cardWeb = useMemo(() => hoveredId ? trace(hoveredId, model.edges) : web, [hoveredId, model.edges, web])
   const renderCard = useCallback(
     (canvasNode: CanvasNode) => {
       const node = byId.get(canvasNode.id)
       if (!node) return null
       const pill = pillFor(node.state)
       const tint = badgeTintFor(node)
-      const hop = web?.hops.get(node.id)
-      const traced = web?.nodes.has(node.id) ?? false
+      const hop = cardWeb?.hops.get(node.id)
+      const traced = cardWeb?.nodes.has(node.id) ?? false
       const isSuspect = suspect.has(node.id)
       const classes = [
         "dtaCard",
         selectedId === node.id ? "is-selected" : "",
         isSuspect ? "is-suspect" : "",
         node.isFocal ? "is-focal" : "",
-        web && !traced ? "is-untraced" : "",
+        cardWeb && !traced ? "is-untraced" : "",
         matchesFilters(node) ? "" : "is-filtered",
       ]
         .filter(Boolean)
@@ -357,7 +358,7 @@ export default function DigitalThreadArtifact({
       return (
         <div className={classes}>
           {traced && hop ? (
-            <span className="dtaHop" title={`${hop} hop${hop === 1 ? "" : "s"} from the selected record`}>
+            <span className="dtaHop" title={`${hop} hop${hop === 1 ? "" : "s"} from this story's subject`}>
               {hop}
             </span>
           ) : null}
@@ -490,7 +491,7 @@ export default function DigitalThreadArtifact({
         </div>
       )
     },
-    [byId, edges, evidenceHref, hrefFor, matchesFilters, onOpenChange, selectedId, suspect, web],
+    [byId, edges, evidenceHref, hrefFor, matchesFilters, onOpenChange, selectedId, suspect, cardWeb],
   )
 
   const focal = thread ? nodes.find(node => node.isFocal) ?? null : null

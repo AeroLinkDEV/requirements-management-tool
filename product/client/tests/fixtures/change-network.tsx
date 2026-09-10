@@ -89,7 +89,26 @@ const serverChainProjection: NetworkProjection = {
 }
 
 const scenario = new URLSearchParams(window.location.search).get("case") ?? "default"
-const chosen = scenario === "server" ? serverChainProjection : projection
+const hoverProjection: NetworkProjection = {
+  ...serverChainProjection,
+  nodes: [
+    node({ id: "pr-5", kind: "ProblemReport", displayNumber: "PR-00005", state: "Open" }),
+    ...Array.from({ length: 18 }, (_, i) => node({ id: `other-${i}`, kind: "ChangeRequest", displayNumber: `HLRCR-${String(i).padStart(5, "0")}`, level: "HighLevel" })),
+    node({ id: "hlr-127", kind: "ChangeRequest", displayNumber: "HLRCR-00127", level: "HighLevel" }),
+    ...Array.from({ length: 18 }, (_, i) => node({ id: `case-${i}`, kind: "TestChangeRequest", displayNumber: `HLRTCCR-${String(i).padStart(6, "0")}`, level: "Case" })),
+    node({ id: "case-34", kind: "TestChangeRequest", displayNumber: "HLRTCCR-000034", level: "Case" }),
+    node({ id: "proc-34", kind: "TestChangeRequest", displayNumber: "HLRTPCR-000034", level: "Procedure" }),
+  ],
+  edges: [
+    edge("pr-5", "ProblemReport", "hlr-127", "ChangeRequest", "ProblemReportResolution"),
+    edge("hlr-127", "ChangeRequest", "case-34", "TestChangeRequest", "CoveredByTestChangeRequest"),
+    edge("case-34", "TestChangeRequest", "proc-34", "TestChangeRequest", "Upstream"),
+  ],
+}
+const denseProjection = { ...hoverProjection, edges: [...hoverProjection.edges,
+  ...Array.from({ length: 18 }, (_, index) => edge("hlr-127", "ChangeRequest", `case-${index}`, "TestChangeRequest", "CoveredByTestChangeRequest")),
+] }
+const chosen = scenario === "dense" ? denseProjection : scenario === "hover" ? hoverProjection : scenario === "server" ? serverChainProjection : projection
 
 createRoot(document.getElementById("root")!).render(
   <DigitalThreadNetwork projection={chosen} buildLabel="Build 1.6" />,

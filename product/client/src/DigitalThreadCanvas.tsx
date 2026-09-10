@@ -8,6 +8,8 @@ import {
   type FrameIntent,
   type LayoutResult,
   anchorInLane,
+  arrangeStory,
+  trace,
   clampOffsets,
   edgeIdentity,
   edgePath,
@@ -104,25 +106,70 @@ const nestedControl = (target: EventTarget | null): boolean => {
  */
 export default function DigitalThreadCanvas({
   lanes,
-  nodes,
+  nodes: sourceNodes,
   edges,
   renderCard,
   laneCount,
   laneNotice,
-  selectedId = null,
-  onSelect,
+  selectedId: pinnedId = null,
+  onSelect: onPin,
   onHover,
-  frameInset,
-  tracedEdges,
-  frameIds,
+  frameInset: inspectorInset,
+  tracedEdges: suppliedTracedEdges,
+  frameIds: suppliedFrameIds,
   framingIntent = "selection",
   landingId = null,
-  onFramingNeedsRoom,
+  onFramingNeedsRoom: requestDockRoom,
   ariaLabel = "Digital Thread canvas",
 }: DigitalThreadCanvasProps) {
+  const [preview, setPreview] = useState<{ id: string; rect: DOMRect } | null>(null)
+  const previewNode = preview ? sourceNodes.find(node => node.id === preview.id) : undefined
+  // A temporary preview must not permanently redock the pinned inspector. Oversized stories retain reveal
+  // actions; pinning can then request the normal persistent dock fallback.
+  const onFramingNeedsRoom = previewNode ? undefined : requestDockRoom
+  const selectedId = previewNode?.id ?? pinnedId
+  const frameInset = { ...inspectorInset, bottom: (inspectorInset?.bottom ?? 0) + (selectedId ? 64 : 0) }
+  const story = useMemo(() => selectedId ? trace(selectedId, edges) : null, [selectedId, edges])
+  const nodes = useMemo(() => story ? arrangeStory(sourceNodes, story.nodes) : sourceNodes, [sourceNodes, story])
+  const tracedEdges = story?.edges ?? suppliedTracedEdges
+  const frameIds = useMemo(() => story ? [...story.nodes] : suppliedFrameIds, [story, suppliedFrameIds])
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const previewSnapshot = useRef<{ transform: { x: number; y: number; zoom: number }; offsets: number[]; targets: number[]; geometry: LayoutResult | null } | null>(null)
+  const restorePreview = useRef(false)
+  const previewDrag = useRef<{ x: number; y: number; tx: number; ty: number; moved: boolean } | null>(null)
+  const sourceSignature = sourceNodes.map(node => `${node.id}:${node.lane}:${node.row}`).join("|")
+  useEffect(() => {
+    if (previewTimer.current !== null) clearTimeout(previewTimer.current)
+    previewTimer.current = null
+    previewSnapshot.current = null
+    restorePreview.current = false
+    setPreview(null)
+    onHover?.(null)
+  }, [pinnedId, sourceSignature, onHover])
+  const clearPreviewTimer = () => {
+    if (previewTimer.current !== null) clearTimeout(previewTimer.current)
+    previewTimer.current = null
+  }
+  const exitPreview = () => {
+    clearPreviewTimer()
+    if (!preview) return
+    restorePreview.current = true
+    setPreview(null)
+    onHover?.(null)
+  }
+  const onSelect = useCallback((id: string | null) => {
+    if (previewTimer.current !== null) clearTimeout(previewTimer.current)
+    previewTimer.current = null
+    previewSnapshot.current = null
+    restorePreview.current = false
+    setPreview(null)
+    onHover?.(null)
+    onPin?.(id)
+  }, [onHover, onPin])
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const sceneRef = useRef<HTMLDivElement | null>(null)
   const edgeLayerRef = useRef<SVGSVGElement | null>(null)
+  const offscreenRefs = useRef(new Map<string, HTMLButtonElement>())
   const cardRefs = useRef(new Map<string, HTMLDivElement>())
   const edgeRefs = useRef<
     {
@@ -346,6 +393,9 @@ export default function DigitalThreadCanvas({
     if (!box || !scene) return
 
     const rawResult = layout(counts, box, transform.current.zoom)
+    // Measure at the destination density. A restored camera can change the tier; measuring the previous
+    // tier's shorter cards first would clamp saved lane offsets before the full card height returns.
+    scene.dataset.tier = String(rawResult.tier)
     // Selected and wrapped cards can add real scene height. Extend the lane's rolling extent from the same
     // measurements used for positions so a shifted final card remains reachable by keyboard and scrub.
     const measuredCardHeights = new Map<string, number>()
@@ -415,6 +465,16 @@ export default function DigitalThreadCanvas({
       // Wholly inside, not merely overlapping: a card straddling the panel edge is still a card the panel is
       // covering, and §6.6 admits no partial version of that.
       const inFrame = left >= box.x - 1 && right <= box.x + box.width + 1
+      const top = position.y * transform.current.zoom + transform.current.y
+      const bottom = top + (card.offsetHeight || geometry.cardHeight) * transform.current.zoom
+      const fullyVisible = inFrame && top >= box.y - 1 && bottom <= box.y + box.height + 1 && isVisible(position.y, geometry, bandHeight)
+      const indicator = offscreenRefs.current.get(node.id)
+      if (indicator) {
+        const filtered = Boolean(card.querySelector(".is-filtered"))
+        indicator.hidden = fullyVisible && !filtered
+        indicator.disabled = filtered
+        indicator.textContent = `${filtered ? "Excluded by filters:" : "Show"} ${card.querySelector(".dtnId, .dticId, .dtaId, .exactArtifactLink, strong")?.textContent ?? "connected record"}`
+      }
       card.classList.toggle(
         "is-offscreen",
         (!isVisible(position.y, geometry, bandHeight) || !inFrame) && selectedId !== node.id,
@@ -612,7 +672,7 @@ export default function DigitalThreadCanvas({
       path.classList.toggle("is-untraced", traceActive && !traced)
       dot.classList.toggle("is-untraced", traceActive && !traced)
 
-      path.style.opacity = inWindow ? "" : "0.06"
+      path.style.opacity = inWindow || traced ? "" : "0.06"
       dot.style.opacity = path.style.opacity
       if (label) {
         // An intra-lane edge bows into the gutter beside its lane, so its label follows it there. Taking the
@@ -655,6 +715,13 @@ export default function DigitalThreadCanvas({
   }, [])
 
   const settle = useCallback(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      if (animation.current !== null) cancelAnimationFrame(animation.current)
+      animation.current = null
+      offsets.current = [...targets.current]
+      committedPaint.current()
+      return
+    }
     if (animation.current !== null) return
     const tick = () => {
       const stepped = stepTowards(offsets.current, targets.current)
@@ -907,6 +974,19 @@ export default function DigitalThreadCanvas({
 
 
   useEffect(() => {
+    if (restorePreview.current && previewSnapshot.current) {
+      transform.current = { ...previewSnapshot.current.transform }
+      offsets.current = [...previewSnapshot.current.offsets]
+      targets.current = [...previewSnapshot.current.targets]
+      // Offsets belong to the saved density's geometry. Comparing them with preview geometry would rescale
+      // them a second time in paint(), shifting a manually rolled lane on exit.
+      geometryRef.current = previewSnapshot.current.geometry
+      previewSnapshot.current = null
+      restorePreview.current = false
+      framedFor.current = framing?.key ?? null
+      paint()
+      return
+    }
     if (!framing) {
       framedFor.current = null
       return
@@ -915,11 +995,12 @@ export default function DigitalThreadCanvas({
     // Consumed only once the framing has actually applied. If the frame is not usable yet the key stays
     // pending, and the resize path retries it the moment a real rect arrives.
     if (applyFraming(framing)) framedFor.current = framing.key
-  }, [applyFraming, framing])
+  }, [applyFraming, framing, paint])
 
   useEffect(
     () => () => {
       if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
+      if (previewTimer.current !== null) clearTimeout(previewTimer.current)
     },
     [],
   )
@@ -958,6 +1039,8 @@ export default function DigitalThreadCanvas({
   const onPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) return
+      if (previewTimer.current !== null) clearTimeout(previewTimer.current)
+      previewTimer.current = null
       // A nested card action has its own click/default-action semantics. Returning before pointer capture keeps
       // the viewport from consuming its eventual pointerup as a card selection (F4).
       if (nestedControl(event.target)) return
@@ -1028,10 +1111,10 @@ export default function DigitalThreadCanvas({
         transform.current = { ...transform.current, x: start.tx + dx, y: start.ty + dy }
         paint()
       }
-      const up = () => {
+      const up = (upEvent: PointerEvent) => {
       element.classList.remove("is-panning", "is-rolling", "is-idle")
         scrubbing.current = false
-        if (!start.moved) onSelect?.(card?.dataset.nodeId ?? null)
+        if (!start.moved && upEvent.type !== "pointercancel") onSelect?.(card?.dataset.nodeId ?? null)
         element.removeEventListener("pointermove", move)
         element.removeEventListener("pointerup", up)
         element.removeEventListener("pointercancel", up)
@@ -1197,6 +1280,7 @@ export default function DigitalThreadCanvas({
       tabIndex={0}
       onWheel={onWheel}
       onPointerDown={onPointerDown}
+      onPointerLeave={exitPreview}
       onFocusCapture={event => {
         if (!nestedControl(event.target)) return
         // Native focus remains native; only prevent the transformed wrapper from becoming its scroll owner.
@@ -1207,6 +1291,33 @@ export default function DigitalThreadCanvas({
         if (!(event.target as HTMLElement).closest("[data-node-id]")) fitAll()
       }}
     >
+      {preview && previewNode && <div className="dtCanvasHoverTarget" role="button" tabIndex={-1}
+        aria-label="Pin previewed record" style={{ position: "fixed", left: preview.rect.left, top: preview.rect.top, width: preview.rect.width, height: preview.rect.height }}
+        onPointerDown={event => {
+          event.stopPropagation()
+          if (event.button !== 0 || nestedControl(event.target)) return
+          previewDrag.current = { x: event.clientX, y: event.clientY, tx: transform.current.x, ty: transform.current.y, moved: false }
+          event.currentTarget.setPointerCapture(event.pointerId)
+        }}
+        onPointerMove={event => {
+          const drag = previewDrag.current
+          if (!drag) return
+          const dx = event.clientX - drag.x, dy = event.clientY - drag.y
+          if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true
+          if (drag.moved) { transform.current = { ...transform.current, x: drag.tx + dx, y: drag.ty + dy }; paint() }
+        }}
+        onPointerUp={event => {
+          const drag = previewDrag.current
+          previewDrag.current = null
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+          if (drag && !drag.moved) onSelect(preview.id)
+        }}
+        onPointerCancel={() => { previewDrag.current = null; exitPreview() }}
+        onKeyDown={event => { if (!nestedControl(event.target) && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onSelect(preview.id) } }}
+        onPointerLeave={() => { if (!previewDrag.current) exitPreview() }}>
+        <div>{renderCard(previewNode)}</div>
+        <span>Click to pin story</span>
+      </div>}
       <div
         className="dtCanvasControls"
         role="toolbar"
@@ -1232,6 +1343,13 @@ export default function DigitalThreadCanvas({
         <button type="button" onClick={fitAll} title="Fit the projected board; tall lanes remain independently scrollable">Fit board</button>
       </div>
       <div className="dtCanvasPlacementNotice" role="status" aria-live="polite" hidden />
+      {story && <nav className="dtCanvasOffscreen" style={{ bottom: (inspectorInset?.bottom ?? 0) + 6 }} aria-label="Connected records outside view" onPointerDown={event => event.stopPropagation()}>
+        {sourceNodes.filter(node => story.nodes.has(node.id)).map(({ id }) => <button key={id} type="button"
+          ref={element => { if (element) offscreenRefs.current.set(id, element); else offscreenRefs.current.delete(id) }}
+          onClick={() => { const node = nodes.find(candidate => candidate.id === id); if (node) reveal(node) }}>
+          Show connected record
+        </button>)}
+      </nav>}
       <div className="dtCanvasScene" ref={sceneRef}>
         <div className="dtCanvasBands">
           {lanes.map((title, lane) => {
@@ -1300,7 +1418,7 @@ export default function DigitalThreadCanvas({
               // lane window is never the stop, so focus cannot land somewhere the reader cannot see.
               tabIndex={rovingFor(node.lane) === node.id ? 0 : -1}
               role="button"
-              aria-pressed={selectedId === node.id}
+              aria-pressed={pinnedId === node.id}
               // Tab across lanes reveals too, not only arrows within one. A lane's stop can be outside the
               // free frame on a board wider than the viewport, and #880 §6.9 does not care how focus got
               // there: it must not rest on a card the reader cannot see. Revealing rather than dropping the
@@ -1326,14 +1444,23 @@ export default function DigitalThreadCanvas({
                 if (event.key !== "Enter" && event.key !== " ") return
                 event.preventDefault()
                 event.stopPropagation()
-                onSelect?.(selectedId === node.id ? null : node.id)
+                onSelect?.(pinnedId === node.id ? null : node.id)
               }}
               ref={element => {
                 if (element) cardRefs.current.set(node.id, element)
                 else cardRefs.current.delete(node.id)
               }}
-              onMouseEnter={() => onHover?.(node.id)}
-              onMouseLeave={() => onHover?.(null)}
+              onPointerEnter={event => {
+                if (event.pointerType !== "mouse" || event.buttons || preview || node.id === pinnedId) return
+                clearPreviewTimer()
+                const rect = event.currentTarget.getBoundingClientRect()
+                previewTimer.current = setTimeout(() => {
+                  previewSnapshot.current = { transform: { ...transform.current }, offsets: [...offsets.current], targets: [...targets.current], geometry: geometryRef.current }
+                  setPreview({ id: node.id, rect })
+                  onHover?.(node.id)
+                }, 300)
+              }}
+              onPointerLeave={clearPreviewTimer}
             >
               {renderCard(node)}
             </div>

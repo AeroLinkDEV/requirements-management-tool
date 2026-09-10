@@ -32,6 +32,10 @@ test.describe("change network presentation", () => {
     const m = laneModel(["System", "HighLevel", "LowLevel"])
     expect(laneOf(node({ id: "PR-1", kind: "ProblemReport" }), m)).toBe(m.problemLane)
     expect(laneOf(node({ id: "d", kind: "TestChangeRequest" }), m)).toBe(m.verificationLane)
+    expect(laneOf(node({ id: "misleading-TPCR", kind: "TestChangeRequest", level: "Case" }), m)).toBe(m.caseLane)
+    expect(laneOf(node({ id: "misleading-TCCR", kind: "TestChangeRequest", level: "Procedure" }), m)).toBe(m.procedureLane)
+    expect(m.labels[m.caseLane]).toBe("TEST CASE CHANGES")
+    expect(m.labels[m.procedureLane]).toBe("TEST PROCEDURE CHANGES")
     // The ladder runs left to right in the order the project configured.
     expect(laneOf(node({ id: "a", level: "System" }), m)).toBeLessThan(laneOf(node({ id: "b", level: "HighLevel" }), m))
     expect(laneOf(node({ id: "b", level: "HighLevel" }), m)).toBeLessThan(laneOf(node({ id: "c", level: "LowLevel" }), m))
@@ -135,7 +139,7 @@ test.describe("configurable ladder layers", () => {
     expect(model.labels[0]).toBe("PROBLEM REPORT")
     expect(model.labels[1]).toBe("CUSTOMER CHANGE")
     expect(model.labels[2]).toBe("INTERFACE / ICD CHANGE")
-    expect(model.labels[model.labels.length - 1]).toBe("VERIFICATION CHANGE")
+    expect(model.labels[model.labels.length - 1]).toBe("UNCLASSIFIED VERIFICATION CHANGE")
 
     // A project that orders them the other way gets that, with no client change.
     const swapped = laneModel(["Interface", "Customer", "System"])
@@ -196,7 +200,9 @@ test.describe("records at a level the ladder does not configure", () => {
       "SYSTEM CHANGE",
       "SOFTWARE HLR CHANGE",
       "SOFTWARE LLR CHANGE",
-      "VERIFICATION CHANGE",
+      "TEST CASE CHANGES",
+      "TEST PROCEDURE CHANGES",
+      "UNCLASSIFIED VERIFICATION CHANGE",
     ])
 
     const iface = node({ id: "ifc", level: "Interface" })
@@ -249,13 +255,15 @@ test("the loading frame uses the project's own ladder, so the lane set does not 
     "SYSTEM CHANGE",
     "SOFTWARE HLR CHANGE",
     "SOFTWARE LLR CHANGE",
-    "VERIFICATION CHANGE",
+    "TEST CASE CHANGES",
+    "TEST PROCEDURE CHANGES",
+    "UNCLASSIFIED VERIFICATION CHANGE",
   ])
   expect(whenLoaded).toEqual(whileLoading)
 
   // And the fallback really is different, which is why the caller has to supply the ladder rather than let it
   // default: this is the seven-lane frame FMS would otherwise flash before its response landed.
-  expect(laneModel().labels).toHaveLength(7)
+  expect(laneModel().labels).toHaveLength(9)
   expect(laneModel().labels).toContain("CUSTOMER CHANGE")
   expect(laneModel().labels).toContain("INTERFACE / ICD CHANGE")
 })

@@ -76,12 +76,12 @@ type TeamWorkHolderBasis =
   | "selectedAssessmentApprover";
 
 const lanes: ReadonlyArray<{ id: LaneId; title: string; description: string }> = [
-  { id: "work", title: "In work", description: "Active authoring and assigned work" },
-  { id: "review", title: "In review", description: "Review obligations in progress" },
-  { id: "sign", title: "Awaiting signature", description: "Approval obligations in progress" },
+  { id: "work", title: "In Work", description: "Active authoring and assigned work" },
+  { id: "review", title: "In Review", description: "Review and approval obligations in progress" },
   { id: "approved", title: "Approved", description: "Approved controlled work" },
 ];
-const laneIds = new Set<LaneId>(lanes.map(lane => lane.id));
+const displayLane = (lane: LaneId): LaneId => lane === "sign" ? "review" : lane;
+const laneIds = new Set<LaneId>(["work", "review", "sign", "approved"]);
 const laneKeys = ["work", "review", "sign", "approved"] as const;
 const familyIds = new Set<TeamWorkFamily>([
   "system", "software", "interface", "verification", "problemReport", "assessment",
@@ -449,31 +449,44 @@ function urlWithoutHolder(url = new URL(window.location.href)) {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
-function TeamWorkCard({ item, people }: { item: TeamWorkItem; people: Map<string, TeamWorkPerson> }) {
+function TeamWorkCard({ item, people, showStage = false }: { item: TeamWorkItem; people: Map<string, TeamWorkPerson>; showStage?: boolean }) {
   const badge = item.family === "assessment" ? "Assessment" : item.prefix || familyBadgeLabels[item.family];
   const identity = item.family === "assessment" ? item.category! : item.number!;
   const holders = item.currentHolderIds.map(id => displayNameFor(id, people));
+  const nextActions = item.currentHolderIds.map(id => {
+    const stages = [...new Set(item.activeStageObligations.filter(obligation => obligation.holderId.toLowerCase() === id.toLowerCase())
+      .map(obligation => obligation.stageKind === "review" ? "Review" : "Approval"))];
+    if (!stages.length && item.holderBasis === "selectedAssessmentApprover") stages.push("Approval");
+    return `${displayNameFor(id, people)}${stages.length ? ` (${stages.join(" + ")})` : ""}`;
+  });
   const raisedBy = item.raisedByKind
     ? originLabels[item.raisedByKind]
       ? `Origin: ${originLabels[item.raisedByKind]}`
       : item.raisedById ? `Raised by: ${displayNameFor(item.raisedById, people)}` : undefined
     : undefined;
   return (
-    <a className="teamWorkCard" data-team-work-card="true" href={item.openUrl}>
+    <article className="teamWorkCard" data-team-work-card="true">
+      <a className="teamWorkCardLink" href={item.openUrl}>
       <div className="teamWorkCardTopline">
         <span className={`teamWorkCardBadge family-${item.family}`} data-family={item.family}>{badge}</span>
         {item.deferred && <span className="teamWorkCardDeferred">Deferred</span>}
       </div>
       <div className="teamWorkCardIdentity">
         <strong>{identity}</strong>
-        {item.category && item.number && <span>{item.category}</span>}
       </div>
       <h3>{item.title.trim() || "Title not recorded"}</h3>
-      <div className={`teamWorkLanePill lane-${item.lane}`}>
+      {showStage && <div className={`teamWorkLanePill lane-${item.lane}`}>
         <i aria-hidden="true" />
-        {lanes.find(lane => lane.id === item.lane)?.title}
+        {lanes.find(lane => lane.id === displayLane(item.lane))?.title}
         <span aria-hidden="true">→</span>
-      </div>
+      </div>}
+      <dl className="teamWorkCardFacts">
+        <div><dt>Next action</dt><dd>{nextActions.length ? nextActions.join(", ") : item.lane === "approved" ? "No outstanding action" : "No current holder"}</dd></div>
+        <div><dt>Assigned Build</dt><dd>{item.deferred ? "Deferred · not assigned" : item.allocation ? `Build ${item.allocation.releaseVersion}${item.allocation.isReleased ? " · released" : " · in work"}` : item.release ? `Build ${item.release.version}${item.release.isReleased ? " · released" : " · in work"}` : "Unassigned"}</dd></div>
+        {(item.deferredFromState || item.nativeOutcome || /returned|blocked/i.test(item.nativeState)) && <div><dt>Status</dt><dd>{stateLabel(item.nativeState)}{item.nativeOutcome ? ` · ${stateLabel(item.nativeOutcome)}` : ""}{item.deferredFromState ? ` · from ${stateLabel(item.deferredFromState)}` : ""}</dd></div>}
+      </dl>
+      </a>
+      <details className="teamWorkCardDetails"><summary>Details</summary>
       <dl className="teamWorkCardFacts">
         <div>
           <dt>Native state</dt>
@@ -494,7 +507,7 @@ function TeamWorkCard({ item, people }: { item: TeamWorkItem; people: Map<string
           </div>
         )}
         <div>
-          <dt>Release</dt>
+          <dt>{item.family === "assessment" ? "Assessment build" : "Target Build"}</dt>
           <dd>{item.release ? `Build ${item.release.version}` : "Release not recorded"}</dd>
         </div>
         {item.allocation && (
@@ -514,7 +527,8 @@ function TeamWorkCard({ item, people }: { item: TeamWorkItem; people: Map<string
           <dd><time dateTime={item.updatedAt}>{formatOrdinaryDateTime(item.updatedAt)}</time></dd>
         </div>
       </dl>
-    </a>
+      </details>
+    </article>
   );
 }
 
@@ -583,11 +597,10 @@ function PersonStrip({ people, selected, search, scopeLabel, viewer, onSelect, o
                 </span>
                 <span
                   className="teamWorkLoadShape"
-                  aria-label={`${person.holds} holds: ${person.byLane.work} in work, ${person.byLane.review} in review, ${person.byLane.sign} awaiting signature, ${person.byLane.approved} approved`}
+                  aria-label={`${person.holds} holds: ${person.byLane.work} in work, ${person.byLane.review + person.byLane.sign} in review, ${person.byLane.approved} approved`}
                 >
                   <i style={{ height: `${Math.min(100, person.byLane.work * 18)}%` }} />
-                  <i style={{ height: `${Math.min(100, person.byLane.review * 18)}%` }} />
-                  <i style={{ height: `${Math.min(100, person.byLane.sign * 18)}%` }} />
+                  <i style={{ height: `${Math.min(100, (person.byLane.review + person.byLane.sign) * 18)}%` }} />
                   <i style={{ height: `${Math.min(100, person.byLane.approved * 18)}%` }} />
                 </span>
               </button>
@@ -692,20 +705,20 @@ function TeamWorkDrawer({ person, items, people, emptyMessage, onClose }: {
           <span>Load shape</span>
           <div
             className="teamWorkDrawerLoadBar"
-            aria-label={`${person.byLane.work} in work, ${person.byLane.review} in review, ${person.byLane.sign} awaiting signature, ${person.byLane.approved} approved`}
+            aria-label={`${person.byLane.work} in work, ${person.byLane.review + person.byLane.sign} in review, ${person.byLane.approved} approved`}
           >
-            {laneKeys.map(lane => person.byLane[lane] > 0 && (
+            {lanes.map(({ id: lane }) => (person.byLane[lane] + (lane === "review" ? person.byLane.sign : 0)) > 0 && (
               <i
                 className={`load-${lane}`}
                 key={lane}
-                style={{ width: `${person.holds ? person.byLane[lane] / person.holds * 100 : 0}%` }}
+                style={{ width: `${person.holds ? (person.byLane[lane] + (lane === "review" ? person.byLane.sign : 0)) / person.holds * 100 : 0}%` }}
               />
             ))}
           </div>
         </div>
         <div className="teamWorkDrawerRows">
           {lanes.map(lane => {
-            const laneItems = personItems.filter(item => item.lane === lane.id);
+            const laneItems = personItems.filter(item => displayLane(item.lane) === lane.id);
             if (!laneItems.length) return null;
             return (
               <section key={lane.id}>
@@ -753,7 +766,7 @@ function TeamWorkBoard({ items, group, people, personRank, selectedPerson, onHol
           aria-label="Team Work lifecycle lanes"
         >
           {lanes.map(lane => {
-            const laneItems = items.filter(item => item.lane === lane.id);
+            const laneItems = items.filter(item => displayLane(item.lane) === lane.id);
             return (
               <section
                 className="teamWorkLane"
@@ -842,7 +855,7 @@ function TeamWorkBoard({ items, group, people, personRank, selectedPerson, onHol
             </header>
             <div className="teamWorkHolderItems">
               {holderItems.map(item => (
-                <TeamWorkCard key={`${holder}-${item.family}-${item.id}`} item={item} people={people} />
+                <TeamWorkCard key={`${holder}-${item.family}-${item.id}`} item={item} people={people} showStage />
               ))}
             </div>
           </section>
@@ -1255,15 +1268,15 @@ export default function TeamWork({ api, projectId, user }: {
                 ))}
               </div>
               <div className="teamWorkFilterGroup" role="group" aria-label="Artifact Type">
-                <span>Artifact Type</span>
-                <button type="button" className={artifactType === "all" ? "active" : ""} onClick={() => setArtifactType("all")}>
-                  All ({facetItems.length})
-                </button>
+                <label htmlFor="team-work-artifact-type">Artifact Type</label>
+                <select id="team-work-artifact-type" value={artifactType} onChange={event => setArtifactType(event.target.value)}>
+                <option value="all">All ({facetItems.length})</option>
                 {artifactTypeOptions.map(option => (
-                  <button type="button" key={option.id} className={artifactType === option.id ? "active" : ""} onClick={() => setArtifactType(option.id)}>
+                  <option key={option.id} value={option.id}>
                     {option.label} ({facetItems.filter(item => artifactTypeFor(item).toLowerCase() === option.id.toLowerCase()).length})
-                  </button>
+                  </option>
                 ))}
+                </select>
               </div>
             </div>
           </section>
