@@ -6,6 +6,14 @@ Date: 2026-08-13; merge-queue cutover: 2026-09-04
 > [CI_COST_AND_READINESS_REVIEW.md](CI_COST_AND_READINESS_REVIEW.md), whose numbers describe a suite roughly a
 > quarter of its present size. The workflows themselves remain the authority on what runs.
 
+> **Read this before quoting any figure below as current.** The `10m14s` critical path and the other timings
+> in this document are **dated historical measurements** taken against much smaller suites. They have not been
+> re-measured on the same basis. A later descriptive observation study and the owner scope decision that
+> closed the #942 throughput review are recorded in
+> [Throughput review closeout, September 2026 (#942)](#throughput-review-closeout-september-2026-942) at the
+> end of this document. That section's figures use different definitions and a different method, and the two
+> sets must not be compared as though they shared a clock.
+
 ## Why this exists
 
 A pull request that is green is not necessarily a pull request that is merged. When this was first measured,
@@ -618,10 +626,20 @@ converted full-concurrency run can establish whether the 15% wall-clock gate is 
 
 ### Disposition
 
-**#563 and #566 remain open.** Do not close the rollout issue, claim the migration ceiling, or treat the aggregate host-time accounting as a
-wall-clock gate result. Convert the reusable classes incrementally, publish class-by-shard attribution,
-and measure enough randomized full-concurrency runs to see past the observed spread. The schema-template
-copy experiment above remains a negative result and should not be repeated.
+**#563 and #566 were both closed `not_planned` on 2026-08-17.** The host-reuse rollout and the rule-matrix
+migration are not planned work, and the incremental-conversion instruction this section used to carry is
+withdrawn. Do not convert the reusable classes, publish class-by-shard attribution for that rollout, or
+commission randomized full-concurrency runs to qualify it. #677 subsequently retired
+`measure-api-host-reuse.ps1`, the tool that produced the evidence such a rollout would need, so restarting
+this would mean rebuilding measurement that was removed on purpose.
+
+#942 re-derived the migration data and recorded that closing #566 was right: 37 tests / 51 cases were
+migration candidates, 17 already non-hosted, leaving roughly 16 hosted tests — about 1.7% of the suite as
+measured at that time. Do not re-propose either issue on intuition.
+
+The measurements above stand as a dated historical record. The schema-template copy experiment remains a
+negative result and should not be repeated, the aggregate host-time accounting is still not a wall-clock gate
+result, and the migration ceiling is still not established.
 
 ## Baseline provenance (#567 acceptance criterion 14)
 
@@ -646,3 +664,176 @@ being re-proposed.
 Subsequent measurement changes are recorded separately: #571 (metrics foundation), #573 (rolling
 collector), #574 (tested-tree provenance), #586 (read run metrics by name), #589 (full-gate scope label),
 and #590 (evidence expiry and gate self-modification).
+
+## Throughput review closeout, September 2026 (#942)
+
+Issue #942 reviewed where the gate's time and runner cost go and proposed eleven findings (F1-F11). It closed
+under owner decision **OWNER-942-SCOPE-01** as a **throughput-review and disposition record** — not as
+certification that every proposed optimization was implemented, and not as a demonstration of a hosted
+whole-gate improvement.
+
+Owner decision by Sean McCarthy, adopted on ChatGPT's recommendation under explicit delegation. Independent
+review of the underlying study: CG942-A-1, CG942-B-1, CG942-B2-1 and CG942-D-1, with a final method addendum.
+The disposition record and evidence references are on
+[#942](https://github.com/AeroLinkDEV/requirements-management-tool/issues/942).
+
+### The September 2026 descriptive observation study
+
+Derived from authenticated GitHub Actions job metadata over an inventory of the 300 most recent Product runs
+(of 1,131 filtered), covering **2026-09-01T15:55:46Z to 2026-09-10T19:04:40Z**. Two sub-samples were drawn,
+with **different bounds that must not be merged**:
+
+- **Successful-run groups** — 85 successful *first workflow attempt* runs, primarily **2026-09-08 to 2026-09-10**.
+- **Failure sample** — 33 failure-conclusion runs, **2026-09-01T23:56:58Z to 2026-09-10T17:54:32Z**.
+
+These are **descriptive observations grouped by event role and executed-job count** — not controlled or
+homogeneous performance cohorts. Equal executed-job counts may hide different selected test inventories,
+workflow definitions, runner images or toolchains; that comparability was not comprehensively established.
+The runs span **multiple source revisions** and are not pinned to one commit. The sample is not a complete
+repository-wide population.
+
+| Role group (executed jobs) | Observations | Runner-minutes median | Wall-span proxy median |
+|---|---:|---:|---:|
+| PR-readiness dispatch (17) | 9 | 151.23 | 23.05m |
+| Merge-queue candidate (17) | 41 | 152.48 | 22.17m |
+| Push on `main` (13) | 35 | 80.73 | 22.35m |
+
+**Definitions — these are different clocks.**
+
+- **Runner-minutes** — sum of (`completed_at` − `started_at`) over non-skipped job records. Not a billed
+  financial cost. Included job intervals **contain configured test retries performed inside those jobs**;
+  their separate contribution was not measured. Retry status is *unavailable*, not zero.
+- **Wall-span proxy** — (`run.updated_at` − `run.run_started_at`). `updated_at` is **not** established as a
+  terminal execution timestamp. This is **not** comparable with the instrumented critical path recorded
+  earlier in this document, and it is not a replacement for the absent same-method remeasurement.
+- **Latest-finishing included job under the analysis exclusion filter** — the job with the latest
+  `completed_at` among non-skipped jobs, excluding two named aggregate jobs. The analysis did **not** traverse
+  the workflow dependency graph or verify required-job membership. It is therefore **not** a
+  required-dependency result, **not** a validated historical critical path, and **not** proof of what actually
+  delayed the gate.
+
+Later workflow attempts and other excluded observations are separate from the selected groups. Retained job
+copies in later attempts are counted once at their originating execution and must never be counted again as
+new execution.
+
+The sum of the three role-group medians is approximately **384.4 Product runner-minutes**. That is an
+**illustration** of one merge's three gate runs — a sum of marginal medians, not the median of matched
+lifecycle totals. It excludes separately scoped Fast, requester and binding work. It is **not** a measured
+per-pull-request lifecycle total, **not** a billed cost, and **not** evidence of improvement against the
+review's original approximately 400-minute framing.
+
+Under that filter, `AeroLink.Infrastructure.Tests` was the latest-finishing included job in **31 of 41**
+merge-queue, **32 of 35** main-push and **7 of 9** readiness observations. This supports **investigation
+priority within this sample only**.
+
+### What the study did and did not establish
+
+**No attributable hosted whole-gate improvement was established by this descriptive observation study.** That
+statement is about the evidence available to the study. It does **not** deny the separately recorded targeted
+local work reductions delivered against individual changes, and it does **not** demonstrate that no effect
+exists.
+
+Negative, inconclusive and unresolved results, retained:
+
+- **API duration-based shard packing** measured **+1.7853%** on the slowest shard in a single predeclared
+  local pair. **Inconclusive at one observation per configuration and unadopted — not disproven.** The
+  advisory tooling and the original experiment are preserved.
+- **Narrowing the journey subset on backend-only changes** (F9) is **measurement-incomplete**. An early proxy
+  that inferred change content from which jobs executed was **invalid**, because the classifier selects every
+  area for `schedule`, `workflow_dispatch`, `push` and `merge_group` without consulting the diff. A later
+  reconstruction used a pinned classifier and bases reconstructed against the then-current `origin/main`
+  rather than each run's original immutable base input; it produced **exploratory reconstructions, not
+  confirmed backend-only positive examples**. No verified counterexample, and no population traffic rate, was
+  established. Broad browser coverage is retained because no accepted evidence authorizes reducing it.
+- **Queue-to-main evidence reuse** is a **standalone, manually invoked shadow evaluator** with no automated
+  observation hook and no operational skip authority. Its fallback predicate requires main diagnostic evidence
+  containing the landed candidate, so its demonstrated cases do **not** establish eligibility at the original
+  main-push decision. **No operational reuse saving was demonstrated**, and the operational opportunity is not
+  quantified.
+- **Execution cost associated with browser-only-failure runs.** Across the 33 inspected failure-conclusion
+  runs in the wider 2026-09-01 to 2026-09-10 window, total failed-run execution was 4,132.6 runner-minutes, of
+  which **runs whose only recorded failure-conclusion job lanes were browser-family lanes** accounted for
+  2,639.8. The subtotal was independently reproduced from the supplied extract; **underlying causes and
+  complete execution qualification were not**. This does not claim that every other selected required check
+  passed, and it is **not** measured flakiness, waste, recoverable cost, or an optimization ranking. Browser
+  reliability is tracked separately under #939 and #986.
+
+### Suite-size snapshot at `d2ca7fa0202580b8cf4313606d4f56f8e072ec69` (2026-09-10)
+
+A **dated partial snapshot**, not completion of the growth monitoring F8 proposes.
+
+| Measure | Recorded earlier in this document | At this commit |
+|---|---:|---:|
+| Browser journey spec files | 104 | 151 |
+| Journey spec files with recorded scheduling weights | 104 | 145 |
+| Stale weight entries | — | 0 |
+| `ShowcaseCollection` bound classes | 5 (#942, 2026-09-07) | 11 |
+| `DisableParallelization` collection definitions | 13 (#942, 2026-09-07) | 16 |
+| Tests per assembly | — | **not collected** |
+| Runtime-discovered journey test identities | — | **not collected** |
+
+Counts are **static counts of source declarations**, not runtime-expanded test identities. The two unavailable
+rows were deliberately not collected; obtaining them requires test discovery, which was outside the read-only
+scope. Six spec files carry no recorded scheduling weight: `requirement-redline-rendered`,
+`team-work-rendered`, `upstream-change-request-authoring`, `webhook-delivery-operations`,
+`workspace-contract`, `workspace-navigation`. `team-work-rendered.spec.ts` arrived with #1017; whether the
+others are additions, renames or prior omissions is **not established**, and no rate of decay is claimed.
+Missing weights are an optimisation input only — `plan-journey-shard.mjs` weights an unknown file at the
+median and correctness never depends on it.
+
+The existing rolling regression detector compares adjacent windows. **It can miss sustained cumulative growth
+when individual adjacent-window comparisons remain below its thresholds** — which is what the #942 review
+found had happened. F8 proposes improving visibility and actionable reporting; it would not guarantee that a
+performance regression can never recur.
+
+### Adopted dispositions (OWNER-942-SCOPE-01)
+
+Labels are deliberate: **AMENDED FOR CLOSEOUT**, **DEFERRED**, **RETAINED**, **NOT PURSUED** and
+**UNEXERCISED** are not "passed".
+
+| Item | Disposition |
+|---|---|
+| **F1** post-merge binding | **DEFERRED.** Implementation and activation deferred; reuse remains disabled. Operational opportunity and net benefit remain unquantified. A future assignment must establish the complete decision-time evidence policy and distinguish it from the standalone shadow evaluator. "Tree equality plus weekly schedule" is not a complete authorization contract. |
+| **F3** Infrastructure | **RETAINED** as separately scoped investigation/design work after the reporting follow-on. Additional shards, `ShowcaseCollection` splitting and greater concurrency are **not** preselected as the solution. |
+| **F4(b)** scheduling-weight coverage | **RETAINED** with the F8 reporting follow-on, with its own acceptance row. Missing or stale weights must not silently reduce coverage. |
+| **F5** API duration packing | **NOT PURSUED** in the present programme. Inconclusive and unadopted, **not** disproven. Tooling and the original experiment preserved. |
+| **F6** planner/contracts platform move | **NOT PURSUED** in the present programme. A prioritization decision, **not** proof that a platform-neutral subset could never reduce cost. Existing Windows qualification preserved. |
+| **F8** recurrence control | **RETAINED** as the next planned engineering follow-on, in all three parts: an absolute critical-path budget, a long-window comparison, and automated suite-size counters. |
+| **F9** browser selection | **RETAIN BROAD COVERAGE.** No selection change. An owner decision under uncertainty, not experimental disproof of every narrower policy. |
+| **F10** changed-area-weighted backend Fast | **RETAINED** as lower-priority, separately scoped design/qualification work. Full remains merge authority; the Fast budget evidence remains unresolved. |
+
+Retained obligations are recorded under their existing identifiers. **Creating a child issue does not complete
+a parent requirement**, and no follow-on issue is a prerequisite of this closeout.
+
+### Original acceptance criteria under the amended scope
+
+| # | Criterion | Status under OWNER-942-SCOPE-01 |
+|---|---|---|
+| 1 | Before/after **job** timings per item | **DOCUMENTED LIMITATION.** Per-delivery hosted-timing gaps accepted as limitations of a finite review. Missing comparisons are not marked supplied and no associated hosted saving is claimed. Future performance-changing work defines and satisfies its own measurement acceptance. |
+| 2 | Eight or more comparable runs for a claimed wall-clock saving | **PRESERVED.** This closeout makes no such claim and required no sample-quota campaign. The standard is unchanged for future claims. |
+| 3 | Nothing from the rejected list re-implemented | **MET.** Shard counts unchanged; no host reuse, schema-template copy or shared build artifact. |
+| 4 | F3, F4 and F5 measured together | **AMENDED FOR CLOSEOUT.** Not met as originally written. Replaced by a requirement to document individual dispositions, available integrated observations and the absence of a demonstrated combined improvement. Future performance-changing work arising from these proposals must assess the concurrently selected Infrastructure, browser and API lanes and the whole-gate outcome using an explicit comparison protocol; **a faster individual lane is not evidence of a faster gate**. Unadopted proposals need not be implemented to reproduce the originally projected configuration. This does not mark the original requirement passed and does not weaken the standard for future claims. |
+| 5 | No required check, protection rule or gate-failure list weakened | **MET** for the current workflow definition and the review's own actions. Not a historical audit of every merged branch. |
+| 6 | F1 preserves its refusals; a negative test proves a mismatched tree refuses | **UNEXERCISED, NOT PASSED.** Transfers to any future F1 implementation or activation, including protected-definition refusals, tree-SHA equality, the 30-day evidence-age rule, authenticated run/attempt and trusted-evidence binding, and negative cases proving ineligible evidence cannot suppress required testing. Deferring F1 removes its qualification from this closeout; it does not waive it, and shadow tests are not operational F1 acceptance. |
+| 7 | F3 preserves `DisableParallelization`; self-verifies shard counts | **UNEXERCISED, NOT PASSED.** Transfers to any future F3 partition or concurrency change, including isolation, complete non-duplicated coverage, count reconciliation against actual results, empty/malformed-partition refusals, diagnostic retention and process/resource safety. Deferring F3 does not waive these or establish that sharding is safe or beneficial. |
+| 8 | F4/F5 duration data stays an optimisation input only | **MET.** An unknown file is weighted at the median; correctness never depends on it. |
+| 9 | No test deleted or moved | **MET WITHIN A BOUNDED AUDIT.** No removals matching the inspected declaration patterns were observed across the eleven audited delivery merges. Not a runtime-identity or assertion-semantics audit. |
+| 10 | Persistent PostgreSQL (54329) and `product/.local` untouched | **MET** for the review's own actions; historical branches rest on their accepted delivery records. |
+| 11 | This document updated with the new baseline, growth table and negative results | **AMENDED FOR CLOSEOUT** and satisfied by this reconciliation. A **new same-method baseline measurement is not required**; its absence remains documented, and the descriptive wall-span proxy is not its replacement. |
+
+**Scheduled-path qualification** is preserved as a gap recorded at the investigation snapshot: the weekly
+Product schedule had not completed successfully since 2026-08-10 at that time, and no scheduled run had
+occurred since the change that addressed the mechanism. It is not treated as a demonstrated defect or a
+completed proof, and no scheduled run was commissioned or awaited for this closeout. **Applicable
+periodic-validation evidence must be established before any future F1 activation.**
+
+Other documented limitations of the study, which are **not** new research assignments and do not silently
+become verified facts: historical per-run dependency topology, immutable pull-request base provenance, failure
+causes, configured retry contributions, and the authenticity and completeness of the underlying captures.
+
+### For anyone proposing throughput work after this
+
+The review's durable lesson is not a number. It is that a faster individual lane is not a faster gate, that
+job selection does not tell you what a change touched, and that a single observation is not a measurement.
+Read [AGENTS.md](../../AGENTS.md) on measurement-driven CI change, satisfy amended criterion 4's comparison
+requirement, and inherit criteria 6 and 7 if the work touches post-merge evidence reuse or test partitioning.
