@@ -7,36 +7,68 @@
 // either, so stderr reaches the job console and stdout does not.
 //
 // That asymmetry is the whole problem, because ASP.NET Core's console logger writes *every* level to
-// stdout by default and this repository never raises `LogToStandardErrorThreshold`. The API's request
-// log, its warnings and its exceptions therefore all travel on the one stream Playwright drops. When a
-// browser journey recorded requests that never completed (#939, candidate `5817a4c2`), the complete
-// retained job log contained no API output at all — not because the server was silent, but because the
-// stream carrying its account of those requests was discarded before anything could retain it.
+// stdout and this repository never raises `LogToStandardErrorThreshold`. The API's request log, its
+// warnings and its exceptions therefore all travel on the one stream Playwright drops. When a browser
+// journey recorded requests that never completed (#939, candidate `5817a4c2`), the complete retained job
+// log contained no API output at all — not because the server was silent, but because the stream carrying
+// its account of those requests was discarded before anything could retain it.
 //
-// Forwarding stdout as well would put the output in the console, but the console is not an artifact and
-// a job that dies during startup may never flush a reporter. So this wrapper owns a file instead. It is
+// Forwarding stdout as well would put the output in the console, but the console is not an artifact and a
+// job that dies during startup may never flush a reporter. So this wrapper owns a file instead. It is
 // deliberately a wrapper rather than a Playwright reporter for three reasons: a reporter cannot capture
 // output from a webServer that fails before the run begins, a reporter's output is bound to the console
 // this is trying to stop flooding, and a wrapper can be tested on its own without starting Playwright.
 //
 // What it must not do is change the outcome. The child's exit code is this process's exit code, the
-// child's stderr still reaches the parent exactly as before, and a failure to open the log file is
-// reported and then ignored — diagnostics that can turn a passing run red are worse than no diagnostics.
+// child's stderr still reaches the parent exactly as before, and a failure to open or write the log is
+// reported and then tolerated — diagnostics that can turn a passing run red are worse than no diagnostics.
+//
+// ---------------------------------------------------------------------------------------------------
+// Process ownership, stated exactly, because getting this wrong orphans a server
+//
+// The command is spawned WITHOUT a shell, from a structured argument vector. An intermediate shell would
+// add a process boundary that this wrapper cannot see past: signalling it would leave the real server
+// running with its pipes open, which is precisely the defect this file was first written with.
+//
+// Removing the shell is not by itself sufficient. `dotnet run` launches the application as a further
+// child, so the owned unit is a *tree*, never a single PID.
+//
+// The supported guarantee is therefore: **the outer owner terminates the tree.** Playwright does exactly
+// that — `taskkill /pid <pid> /T /F` on Windows (see `playwright/lib/runner/index.js`), a group signal
+// elsewhere — and this wrapper stays attached to that tree rather than detaching from it. The signal
+// handling below is an addition for the cases the platform lets a process catch, not a replacement for
+// it: a Windows `TerminateProcess` is uncatchable and no JavaScript handler can respond to one.
+//
+// Anything the wrapper kills, it kills by the PID it started, as a tree, and never by process name.
 
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { closeSync, mkdirSync, openSync, writeSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
-/** The command to run, as a shell string. Passed by environment rather than argv so a Windows path with
- * spaces is not re-parsed by `cmd /c` on its way through Playwright's own shell invocation. */
-const command = process.env.AEROLINK_E2E_API_COMMAND
+/** The command to run, as a JSON argument vector: `["<exe>", "<arg>", ...]`.
+ *
+ * Structured rather than a shell string so that a Windows dotnet path containing spaces needs no quoting
+ * and no shell to interpret it. */
+const argvJson = process.env.AEROLINK_E2E_API_ARGV
 
 /** Where to write the transcript. Absent means "no file", which stays a working run rather than an error:
  * a developer invoking the config directly should not have to configure logging to run the suite. */
 const logPath = process.env.AEROLINK_E2E_API_LOG
 
-if (!command) {
-  process.stderr.write('run-api-with-log: AEROLINK_E2E_API_COMMAND is not set.\n')
+if (!argvJson) {
+  process.stderr.write('run-api-with-log: AEROLINK_E2E_API_ARGV is not set.\n')
+  process.exit(2)
+}
+
+let argv
+try {
+  argv = JSON.parse(argvJson)
+} catch (error) {
+  process.stderr.write(`run-api-with-log: AEROLINK_E2E_API_ARGV is not valid JSON (${error.message}).\n`)
+  process.exit(2)
+}
+if (!Array.isArray(argv) || argv.length === 0 || argv.some(item => typeof item !== 'string')) {
+  process.stderr.write('run-api-with-log: AEROLINK_E2E_API_ARGV must be a non-empty array of strings.\n')
   process.exit(2)
 }
 
@@ -53,14 +85,20 @@ const identity = {
   label: process.env.AEROLINK_E2E_API_LOG_LABEL ?? 'api',
 }
 
-/** An open file descriptor rather than a write stream, and every line committed with `writeSync`.
+/** An open file descriptor rather than a write stream, and every record committed with `writeSync`.
  *
- * Playwright stops the server by killing the process tree, and on Windows — which is where this suite
- * runs — that is `TerminateProcess`, not a signal a Node process can catch and drain. A buffered stream
- * loses whatever had not yet been handed to the OS at that moment, and the lines most likely to still be
- * in that buffer are the last ones before the kill, which are exactly the lines worth having. Paying a
- * syscall per line buys the guarantee that anything the API printed is on disk as soon as it is read. */
+ * Playwright stops the server by killing the process tree, and on Windows that is `TerminateProcess`, not
+ * a signal a Node process can catch and drain. A buffered stream loses whatever had not yet been handed
+ * to the OS at that moment, and the records most likely to still be in that buffer are the last ones
+ * before the kill, which are the ones worth having.
+ *
+ * This makes each record durable against the wrapper being killed. It says nothing about output the API
+ * had produced but that had not yet reached this process, and it is not a power-loss claim. */
 let logFd = null
+/** Set once if the transcript could not be opened or a write failed, so the end record can say the
+ * transcript is incomplete instead of implying it is whole. */
+let captureDegraded = ''
+
 if (logPath) {
   try {
     const absolute = resolve(logPath)
@@ -69,43 +107,66 @@ if (logPath) {
     // never silently erase the earlier transcript.
     logFd = openSync(absolute, 'a')
   } catch (error) {
-    // Explicitly a warning, not a failure. See the note above about diagnostics that can redden a run.
-    process.stderr.write(`run-api-with-log: could not open ${logPath} (${error.message}); continuing without it.\n`)
+    captureDegraded = `open failed: ${error.message}`
+    process.stderr.write(`run-api-with-log: could not open ${logPath} (${error.message}); continuing with diagnostics unavailable.\n`)
     logFd = null
   }
 }
 
-/** Writing must never be the thing that kills the run, so a failed write disables logging and says so
- * once rather than throwing into a stream handler nobody is watching. */
+/** Writing must never be the thing that kills the run, so a failed write disables logging, records why,
+ * and says so once rather than throwing into a handler nobody is watching. */
 const writeLog = text => {
   if (logFd === null) return
   try {
     writeSync(logFd, text)
   } catch (error) {
-    process.stderr.write(`run-api-with-log: log write failed (${error.message}); continuing without it.\n`)
+    captureDegraded = `write failed: ${error.message}`
+    process.stderr.write(`run-api-with-log: log write failed (${error.message}); continuing with diagnostics unavailable.\n`)
     try { closeSync(logFd) } catch { /* already unusable */ }
     logFd = null
   }
 }
 
 writeLog(`==== api log start ${JSON.stringify(identity)} ====\n`)
-writeLog(`==== command: ${command}\n`)
+writeLog(`==== argv: ${JSON.stringify(argv)}\n`)
 
-/** Each line is stamped as it arrives so a stalled request can be located in time against the Playwright
- * trace, which is the join this investigation actually needs. Chunks are not lines, so a partial trailing
- * line is held until the rest of it turns up. */
+/**
+ * Persists output the moment it arrives, without waiting for a line to be finished.
+ *
+ * The obvious implementation holds a partial line until its newline turns up. That loses the fragment
+ * outright when the server is terminated mid-line — which is the normal way this server ends — so the
+ * last thing it said before dying is exactly what would go missing.
+ *
+ * Every byte received is therefore written once, immediately, and nothing is buffered waiting for a
+ * terminator. The tag says how to reassemble:
+ *
+ *   `out`  / `err`   a whole line
+ *   `out~` / `err~`  a piece of a line; more of that line follows
+ *   `out^` / `err^`  the piece that finishes a line begun by `~`
+ *
+ * A reader joins consecutive `~` records for one stream and closes the line at the `^`. No record is ever
+ * written twice, so a transcript cannot double-count what it received.
+ *
+ * The streams are read with `setEncoding('utf8')`, so Node's decoder holds back an incomplete multi-byte
+ * sequence and a character is never split across two records.
+ */
 const makeStamper = stream => {
-  let pending = ''
+  let midLine = false
   return {
     push(chunk) {
-      pending += chunk
-      const lines = pending.split(/\r?\n/)
-      pending = lines.pop() ?? ''
-      for (const line of lines) writeLog(`${new Date().toISOString()} ${stream} ${line}\n`)
-    },
-    flush() {
-      if (pending.length > 0) writeLog(`${new Date().toISOString()} ${stream} ${pending}\n`)
-      pending = ''
+      let rest = chunk
+      let newline = rest.indexOf('\n')
+      while (newline >= 0) {
+        const piece = rest.slice(0, newline).replace(/\r$/, '')
+        writeLog(`${new Date().toISOString()} ${stream}${midLine ? '^' : ''} ${piece}\n`)
+        midLine = false
+        rest = rest.slice(newline + 1)
+        newline = rest.indexOf('\n')
+      }
+      if (rest.length > 0) {
+        writeLog(`${new Date().toISOString()} ${stream}~ ${rest}\n`)
+        midLine = true
+      }
     },
   }
 }
@@ -113,37 +174,62 @@ const makeStamper = stream => {
 const out = makeStamper('out')
 const err = makeStamper('err')
 
-const child = spawn(command, { shell: true, stdio: ['ignore', 'pipe', 'pipe'] })
+const child = spawn(argv[0], argv.slice(1), { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
 
 child.stdout.setEncoding('utf8')
 child.stderr.setEncoding('utf8')
 child.stdout.on('data', chunk => out.push(chunk))
 child.stderr.on('data', chunk => {
   err.push(chunk)
-  // Unchanged from what Playwright already did with stderr. Removing this would quietly take away
-  // console visibility that people currently rely on when a server refuses to start.
+  // Unchanged from what Playwright already did with stderr. Removing this would quietly take away console
+  // visibility that people currently rely on when a server refuses to start.
   process.stderr.write(chunk)
 })
 
-/** Playwright stops the server by signalling this process; the child is what actually has to go. Only
- * processes this wrapper started are touched. */
+/**
+ * Terminates the owned tree by the PID this wrapper started.
+ *
+ * The same mechanism the repository already uses for an owned server it must stop
+ * (`product/ci-metrics/lib/api-benchmark.mjs`): `taskkill /T /F` on Windows so descendants go with the
+ * parent, a signal elsewhere. Never a sweep by process name, and never a PID this wrapper did not start.
+ */
+const terminateOwnedTree = () => {
+  const running = child.pid !== undefined && child.exitCode === null && child.signalCode === null
+  if (!running) return
+  try {
+    if (process.platform === 'win32') {
+      // `/T` is what reaches `dotnet run`'s own child. Without it the application keeps running.
+      execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, timeout: 5_000, stdio: 'ignore' })
+    } else {
+      // Not detached, so this process has no group of its own to signal — deliberately, because
+      // detaching would take the server out of the tree the outer owner tears down. Signalling the child
+      // directly is what is available here; descendant cleanup on this platform is the outer owner's.
+      child.kill('SIGTERM')
+    }
+  } catch {
+    // Already gone, or refused. Either way there is nothing further this wrapper can or should do, and
+    // the outer owner's own tree teardown still applies.
+  }
+}
+
+/** Only for the shutdowns a platform actually lets a process catch. A Windows `TerminateProcess` is not
+ * one of them; that case is covered by the outer owner killing the tree, as documented at the top. */
 let signalled = false
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
   process.on(signal, () => {
     if (signalled) return
     signalled = true
-    if (child.exitCode === null && child.signalCode === null) child.kill(signal)
+    terminateOwnedTree()
   })
 }
 
 const finish = (code, signal) => {
-  out.flush()
-  err.flush()
-  // Best-effort. On Windows a torn-down server is terminated rather than signalled, so this closing line
-  // is frequently absent — that is a known and accepted limitation, and its absence means "the wrapper
-  // was killed", never "capture failed". The transcript's content is already durable regardless, because
-  // every line above was committed synchronously as it arrived.
-  writeLog(`==== api log end ${new Date().toISOString()} exit=${code ?? 'null'} signal=${signal ?? 'null'} ====\n`)
+  const state = captureDegraded === '' ? 'complete' : `degraded (${captureDegraded})`
+  // Best-effort. On Windows a torn-down server is terminated rather than signalled, so this record is
+  // frequently absent. Its absence means normal completion was not recorded — forced termination is one
+  // explanation and a capture failure is another, which is why the state is named here rather than
+  // inferred by a reader.
+  writeLog(`==== api log end ${new Date().toISOString()} exit=${code ?? 'null'} signal=${signal ?? 'null'} capture=${state} ====\n`)
   if (logFd !== null) {
     try { closeSync(logFd) } catch { /* the transcript is already on disk */ }
     logFd = null
@@ -155,7 +241,7 @@ const finish = (code, signal) => {
 
 child.on('error', error => {
   process.stderr.write(`run-api-with-log: failed to start the API command (${error.message}).\n`)
-  err.push(`wrapper: spawn failed: ${error.message}`)
+  err.push(`wrapper: spawn failed: ${error.message}\n`)
   finish(1, null)
 })
 

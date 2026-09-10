@@ -79,11 +79,17 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      // The real command travels in the environment rather than in this string, so a Windows dotnet path
-      // containing spaces is not re-parsed by the wrapper after the platform shell has already had it.
+      // The real command travels in the environment as a structured argument vector, so no shell has to
+      // interpret a Windows dotnet path containing spaces — and, more importantly, so the wrapper's child
+      // is the server itself rather than an intermediate shell it cannot see past.
       command: 'node scripts/run-api-with-log.mjs',
       env: {
-        AEROLINK_E2E_API_COMMAND: `"${dotnet}" run --configuration Release ${skipApiBuild ? '--no-build ' : ''}--project ../src/AeroLink.Api --urls http://127.0.0.1:${e2eApiPort}`,
+        AEROLINK_E2E_API_ARGV: JSON.stringify([
+          dotnet, 'run', '--configuration', 'Release',
+          ...(skipApiBuild ? ['--no-build'] : []),
+          '--project', '../src/AeroLink.Api',
+          '--urls', `http://127.0.0.1:${e2eApiPort}`,
+        ]),
         AEROLINK_E2E_API_LOG: apiLogPath,
         AEROLINK_E2E_API_LOG_LABEL: 'browser-api',
         // What the transcript is actually for, chosen by measurement rather than taste.
@@ -97,8 +103,12 @@ export default defineConfig({
         //
         // So the harness raises request logging and lowers the SQL flood. This is test-harness
         // configuration, in the same block that already chooses the provider and the identity settings; no
-        // shipped configuration, assertion, timeout, retry or gate changes. EF is lowered to Warning rather
-        // than off so a failing or long-running command still appears.
+        // shipped configuration, assertion, timeout, retry or gate changes.
+        //
+        // EF at Warning retains what EF emits at Warning or above. It is not a promise that a slow but
+        // successful command will be recorded — EF logs those at Information, and they are gone. Accepting
+        // that is the trade for a transcript small enough to read; a slow-query detector is a different
+        // change with its own justification, and is not being smuggled in here.
         'Logging__LogLevel__Microsoft.AspNetCore': 'Information',
         'Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command': 'Warning',
         Database__Provider: 'Sqlite',
