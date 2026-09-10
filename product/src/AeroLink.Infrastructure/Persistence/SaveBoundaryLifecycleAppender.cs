@@ -169,12 +169,13 @@ internal sealed class SaveBoundaryLifecycleAppender(AeroLinkDbContext db)
             .Where(x => projectIds.Contains(x.ProjectId) && x.IsEnabled)
             .ToListAsync(cancellationToken);
 
+        var addedEventKeys = db.ChangeTracker.Entries<IntegrationEvent>()
+            .Where(x => x.State == EntityState.Added)
+            .Select(x => (x.Entity.AggregateId, x.Entity.EventType))
+            .ToHashSet();
         foreach (var item in pending)
         {
-            if (db.ChangeTracker.Entries<IntegrationEvent>().Any(x =>
-                    x.State == EntityState.Added
-                    && x.Entity.AggregateId == item.AggregateId
-                    && x.Entity.EventType == item.EventType))
+            if (!addedEventKeys.Add((item.AggregateId, item.EventType)))
                 continue;
 
             var payload = JsonSerializer.Serialize(item.Payload,
