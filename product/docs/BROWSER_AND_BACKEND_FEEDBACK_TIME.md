@@ -8,8 +8,8 @@ Date: 2026-08-13; merge-queue cutover: 2026-09-04
 
 > **Read this before quoting any figure below as current.** The `10m14s` critical path and the other timings
 > in this document are **dated historical measurements** taken against much smaller suites. They have not been
-> re-measured on the same basis. A later descriptive observation study and the owner scope decision that
-> closed the #942 throughput review are recorded in
+> re-measured on the same basis. A later descriptive observation study and the adopted owner scope decision
+> governing #942's closeout are recorded in
 > [Throughput review closeout, September 2026 (#942)](#throughput-review-closeout-september-2026-942) at the
 > end of this document. That section's figures use different definitions and a different method, and the two
 > sets must not be compared as though they shared a clock.
@@ -633,9 +633,10 @@ commission randomized full-concurrency runs to qualify it. #677 subsequently ret
 `measure-api-host-reuse.ps1`, the tool that produced the evidence such a rollout would need, so restarting
 this would mean rebuilding measurement that was removed on purpose.
 
-#942 re-derived the migration data and recorded that closing #566 was right: 37 tests / 51 cases were
-migration candidates, 17 already non-hosted, leaving roughly 16 hosted tests — about 1.7% of the suite as
-measured at that time. Do not re-propose either issue on intuition.
+[#942](https://github.com/AeroLinkDEV/requirements-management-tool/issues/942)'s F11 discussion revisited the
+rule-matrix migration data recorded above and concluded that closing #566 was right: the migratable share of
+the hosted API suite is small enough that relocating it is not the API lever. Do not re-propose either issue
+on intuition; read that discussion first.
 
 The measurements above stand as a dated historical record. The schema-template copy experiment remains a
 negative result and should not be repeated, the aggregate host-time accounting is still not a wall-clock gate
@@ -667,15 +668,50 @@ and #590 (evidence expiry and gate self-modification).
 
 ## Throughput review closeout, September 2026 (#942)
 
-Issue #942 reviewed where the gate's time and runner cost go and proposed eleven findings (F1-F11). It closed
-under owner decision **OWNER-942-SCOPE-01** as a **throughput-review and disposition record** — not as
-certification that every proposed optimization was implemented, and not as a demonstration of a hosted
+Issue #942 reviewed where the gate's time and runner cost go and recorded findings F1–F11. Under
+**OWNER-942-SCOPE-01**, its closeout scope is a **throughput-review and disposition record** — not
+certification that every proposed optimization was implemented, and not a demonstration of a hosted
 whole-gate improvement.
 
-Owner decision by Sean McCarthy, adopted on ChatGPT's recommendation under explicit delegation. Independent
-review of the underlying study: CG942-A-1, CG942-B-1, CG942-B2-1 and CG942-D-1, with a final method addendum.
-The disposition record and evidence references are on
+The scope decision is adopted. Issue closure requires accepted documentation review, subsequently authorized
+protected integration with the landed text verified, and recording the decision and accepted evidence
+references on #942. **Only Sean may close the issue.**
+
+Owner decision by Sean McCarthy, adopted on ChatGPT's recommendation under explicit delegation — not an
+independent human technical review, a GitHub approval, or a merge approval. Independent review of the
+underlying study: CG942-A-1, CG942-B-1, CG942-B2-1 and CG942-D-1, with a final method addendum.
+
+### Where the underlying evidence lives
+
+The delivered changes below carry their own accepted acceptance records on their pull requests and issues.
+The investigation that produced the observations in this section, its independent reviews, and the adopted
+disposition record are recorded on
 [#942](https://github.com/AeroLinkDEV/requirements-management-tool/issues/942).
+
+The raw run captures, observation ledger, failed-run classification extract and reviewer method addendum
+behind the figures in this section were prepared as a local evidence packet and have **no public reference**.
+Where a statement below depends on them, the necessary qualification is stated inline rather than delegated
+to a link.
+
+### What was delivered under the review
+
+Each entry carries its own accepted record on its pull request or issue. **No performance claim is made here
+for any of them**; where a delivery recorded targeted local work reductions, those remain reported at their
+own measurement boundary and are not hosted whole-gate results.
+
+| Delivery | What it did |
+|---|---|
+| #946 | Evidence and count reconciliation; scheduled browser completion required in the scheduled gate |
+| #947 | Refreshed browser scheduling weights from recent queue evidence, with a provenance record |
+| #949 | Isolated client behaviour checks in the advisory Fast lane |
+| #951, #953 | Native operator-contract deduplication; backend test-project graph builds |
+| #952, #1013 | Targeted persistence and lifecycle-seed scan reductions |
+| #962, #1009 | Advisory API-packing report, authenticated observation collector and controlled benchmark — advisory, not wired into ordinary CI |
+| #1010 | Standalone queue-to-main evidence reuse evaluator — shadow only, no skip authority |
+| #1012 | Retained browser API logging — **diagnostics, not a demonstrated reliability fix** |
+
+The earlier sections of this document remain the detailed record for the sharding, packing and cadence work
+that preceded them.
 
 ### The September 2026 descriptive observation study
 
@@ -739,9 +775,11 @@ Negative, inconclusive and unresolved results, retained:
   local pair. **Inconclusive at one observation per configuration and unadopted — not disproven.** The
   advisory tooling and the original experiment are preserved.
 - **Narrowing the journey subset on backend-only changes** (F9) is **measurement-incomplete**. An early proxy
-  that inferred change content from which jobs executed was **invalid**, because the classifier selects every
-  area for `schedule`, `workflow_dispatch`, `push` and `merge_group` without consulting the diff. A later
-  reconstruction used a pinned classifier and bases reconstructed against the then-current `origin/main`
+  that inferred change content from which jobs executed was **invalid**, because job selection does not
+  uniquely identify change content: broad effective events and broad-path rules can select all areas, while
+  authenticated PR-readiness dispatches can instead pass an effective `pull_request` context to the
+  classifier. Whether a client job ran was therefore not a reliable substitute for the original immutable
+  change set. A later reconstruction used a pinned classifier and bases reconstructed against the then-current `origin/main`
   rather than each run's original immutable base input; it produced **exploratory reconstructions, not
   confirmed backend-only positive examples**. No verified counterexample, and no population traffic rate, was
   established. Broad browser coverage is retained because no accepted evidence authorizes reducing it.
@@ -782,28 +820,36 @@ Missing weights are an optimisation input only — `plan-journey-shard.mjs` weig
 median and correctness never depends on it.
 
 The existing rolling regression detector compares adjacent windows. **It can miss sustained cumulative growth
-when individual adjacent-window comparisons remain below its thresholds** — which is what the #942 review
-found had happened. F8 proposes improving visibility and actionable reporting; it would not guarantee that a
+when individual adjacent-window comparisons remain below its thresholds.** That design limitation is the
+motivation for F8; F8 proposes improving visibility and actionable reporting, and would not guarantee that a
 performance regression can never recur.
 
 ### Adopted dispositions (OWNER-942-SCOPE-01)
 
-Labels are deliberate: **AMENDED FOR CLOSEOUT**, **DEFERRED**, **RETAINED**, **NOT PURSUED** and
-**UNEXERCISED** are not "passed".
+A **condensed summary** of the adopted decisions, not a verbatim quotation; the full text is the owner
+decision record on #942. Labels are deliberate: **AMENDED FOR CLOSEOUT**, **DEFERRED**, **RETAINED**,
+**NOT PURSUED** and **UNEXERCISED** are not "passed". The decision identifiers D1–D7c are mapped to their
+findings so every adopted decision is accounted for.
 
-| Item | Disposition |
-|---|---|
-| **F1** post-merge binding | **DEFERRED.** Implementation and activation deferred; reuse remains disabled. Operational opportunity and net benefit remain unquantified. A future assignment must establish the complete decision-time evidence policy and distinguish it from the standalone shadow evaluator. "Tree equality plus weekly schedule" is not a complete authorization contract. |
-| **F3** Infrastructure | **RETAINED** as separately scoped investigation/design work after the reporting follow-on. Additional shards, `ShowcaseCollection` splitting and greater concurrency are **not** preselected as the solution. |
-| **F4(b)** scheduling-weight coverage | **RETAINED** with the F8 reporting follow-on, with its own acceptance row. Missing or stale weights must not silently reduce coverage. |
-| **F5** API duration packing | **NOT PURSUED** in the present programme. Inconclusive and unadopted, **not** disproven. Tooling and the original experiment preserved. |
-| **F6** planner/contracts platform move | **NOT PURSUED** in the present programme. A prioritization decision, **not** proof that a platform-neutral subset could never reduce cost. Existing Windows qualification preserved. |
-| **F8** recurrence control | **RETAINED** as the next planned engineering follow-on, in all three parts: an absolute critical-path budget, a long-window comparison, and automated suite-size counters. |
-| **F9** browser selection | **RETAIN BROAD COVERAGE.** No selection change. An owner decision under uncertainty, not experimental disproof of every narrower policy. |
-| **F10** changed-area-weighted backend Fast | **RETAINED** as lower-priority, separately scoped design/qualification work. Full remains merge authority; the Fast budget evidence remains unresolved. |
+| Item | Decision | Disposition |
+|---|---|---|
+| **F1** post-merge binding | D1 | **DEFERRED.** Implementation and activation deferred; reuse remains disabled. Operational opportunity and net benefit remain unquantified. A future assignment must establish the complete decision-time evidence policy and distinguish it from the standalone shadow evaluator. "Tree equality plus weekly schedule" is not a complete authorization contract. |
+| **F3** Infrastructure | D3 | **RETAINED** as separately scoped investigation/design work after the reporting follow-on. Additional shards, `ShowcaseCollection` splitting and greater concurrency are **not** preselected as the solution. |
+| **F4(b)** scheduling-weight coverage | D7a | **RETAINED** with the F8 reporting follow-on, with its own acceptance row. Missing or stale weights must not silently reduce coverage. |
+| **F5** API duration packing | D4 | **NOT PURSUED** in the present programme. Inconclusive and unadopted, **not** disproven. Tooling and the original experiment preserved. |
+| **F6** planner/contracts platform move | D7b | **NOT PURSUED** in the present programme. A prioritization decision, **not** proof that a platform-neutral subset could never reduce cost. Existing Windows qualification preserved. |
+| **F8** recurrence control | D2 | **RETAINED** as the next planned engineering follow-on, in all three parts: an absolute critical-path budget, a long-window comparison, and automated suite-size counters. |
+| **F9** browser selection | D5 | **RETAIN BROAD COVERAGE.** No selection change. An owner decision under uncertainty, not experimental disproof of every narrower policy. |
+| **F10** changed-area-weighted backend Fast | D7c | **RETAINED** as lower-priority, separately scoped design/qualification work. Full remains merge authority; the Fast budget evidence remains unresolved. |
+
+| **This reconciliation** | D6 | Local documentation preparation authorized; **publication and integration require their separately authorized stage**. |
 
 Retained obligations are recorded under their existing identifiers. **Creating a child issue does not complete
 a parent requirement**, and no follow-on issue is a prerequisite of this closeout.
+
+**Sean remains the custodian for commissioning and assigning retained future work. No agent is assigned that
+work by implication.** Retained follow-ons require separate assignments; the scope decision does not
+authorize their implementation.
 
 ### Original acceptance criteria under the amended scope
 
@@ -811,21 +857,22 @@ a parent requirement**, and no follow-on issue is a prerequisite of this closeou
 |---|---|---|
 | 1 | Before/after **job** timings per item | **DOCUMENTED LIMITATION.** Per-delivery hosted-timing gaps accepted as limitations of a finite review. Missing comparisons are not marked supplied and no associated hosted saving is claimed. Future performance-changing work defines and satisfies its own measurement acceptance. |
 | 2 | Eight or more comparable runs for a claimed wall-clock saving | **PRESERVED.** This closeout makes no such claim and required no sample-quota campaign. The standard is unchanged for future claims. |
-| 3 | Nothing from the rejected list re-implemented | **MET.** Shard counts unchanged; no host reuse, schema-template copy or shared build artifact. |
-| 4 | F3, F4 and F5 measured together | **AMENDED FOR CLOSEOUT.** Not met as originally written. Replaced by a requirement to document individual dispositions, available integrated observations and the absence of a demonstrated combined improvement. Future performance-changing work arising from these proposals must assess the concurrently selected Infrastructure, browser and API lanes and the whole-gate outcome using an explicit comparison protocol; **a faster individual lane is not evidence of a faster gate**. Unadopted proposals need not be implemented to reproduce the originally projected configuration. This does not mark the original requirement passed and does not weaken the standard for future claims. |
+| 3 | Nothing from the rejected list re-implemented | **MET.** No resumption of the rejected host-reuse rollout, per-test schema-template copy experiment, or shared-build-artifact proposal was established in the reviewed delivery scope. Shard counts unchanged. |
+| 4 | F3, F4 and F5 measured together | **AMENDED FOR CLOSEOUT.** Not met as originally written. Replaced by a requirement to document individual dispositions, available integrated observations and the absence of a demonstrated combined improvement. Future performance-changing work arising from these proposals must assess the concurrently selected Infrastructure, browser and API lanes and the whole-gate outcome using an explicit comparison protocol; **a faster individual lane is not sufficient evidence of a faster gate**. Unadopted proposals need not be implemented to reproduce the originally projected configuration. This does not mark the original requirement passed and does not weaken the standard for future claims. |
 | 5 | No required check, protection rule or gate-failure list weakened | **MET** for the current workflow definition and the review's own actions. Not a historical audit of every merged branch. |
 | 6 | F1 preserves its refusals; a negative test proves a mismatched tree refuses | **UNEXERCISED, NOT PASSED.** Transfers to any future F1 implementation or activation, including protected-definition refusals, tree-SHA equality, the 30-day evidence-age rule, authenticated run/attempt and trusted-evidence binding, and negative cases proving ineligible evidence cannot suppress required testing. Deferring F1 removes its qualification from this closeout; it does not waive it, and shadow tests are not operational F1 acceptance. |
 | 7 | F3 preserves `DisableParallelization`; self-verifies shard counts | **UNEXERCISED, NOT PASSED.** Transfers to any future F3 partition or concurrency change, including isolation, complete non-duplicated coverage, count reconciliation against actual results, empty/malformed-partition refusals, diagnostic retention and process/resource safety. Deferring F3 does not waive these or establish that sharding is safe or beneficial. |
 | 8 | F4/F5 duration data stays an optimisation input only | **MET.** An unknown file is weighted at the median; correctness never depends on it. |
 | 9 | No test deleted or moved | **MET WITHIN A BOUNDED AUDIT.** No removals matching the inspected declaration patterns were observed across the eleven audited delivery merges. Not a runtime-identity or assertion-semantics audit. |
 | 10 | Persistent PostgreSQL (54329) and `product/.local` untouched | **MET** for the review's own actions; historical branches rest on their accepted delivery records. |
-| 11 | This document updated with the new baseline, growth table and negative results | **AMENDED FOR CLOSEOUT** and satisfied by this reconciliation. A **new same-method baseline measurement is not required**; its absence remains documented, and the descriptive wall-span proxy is not its replacement. |
+| 11 | This document updated with the new baseline, growth table and negative results | **AMENDED FOR CLOSEOUT.** Discharged only when this reconciliation has been accepted through review and subsequently integrated through the authorized protected path with the landed text verified. A **new same-method baseline measurement is not required**; its absence remains documented, and the descriptive wall-span proxy is not its replacement. |
 
 **Scheduled-path qualification** is preserved as a gap recorded at the investigation snapshot: the weekly
 Product schedule had not completed successfully since 2026-08-10 at that time, and no scheduled run had
-occurred since the change that addressed the mechanism. It is not treated as a demonstrated defect or a
-completed proof, and no scheduled run was commissioned or awaited for this closeout. **Applicable
-periodic-validation evidence must be established before any future F1 activation.**
+occurred since the #946 changes to the scheduled-validation path. The cause of the intervening cancellations
+was not demonstrated. It is not treated as a demonstrated defect or a completed proof, and no scheduled run
+was commissioned or awaited for this closeout. **Applicable periodic-validation evidence must be established
+before any future F1 activation.**
 
 Other documented limitations of the study, which are **not** new research assignments and do not silently
 become verified facts: historical per-run dependency topology, immutable pull-request base provenance, failure
@@ -833,7 +880,9 @@ causes, configured retry contributions, and the authenticity and completeness of
 
 ### For anyone proposing throughput work after this
 
-The review's durable lesson is not a number. It is that a faster individual lane is not a faster gate, that
-job selection does not tell you what a change touched, and that a single observation is not a measurement.
+The review's durable lesson is not a number. A faster individual lane alone does not establish a faster gate;
+job selection alone does not establish what a change touched; and a single observation does not establish a
+repeatable performance improvement.
+
 Read [AGENTS.md](../../AGENTS.md) on measurement-driven CI change, satisfy amended criterion 4's comparison
 requirement, and inherit criteria 6 and 7 if the work touches post-merge evidence reuse or test partitioning.
