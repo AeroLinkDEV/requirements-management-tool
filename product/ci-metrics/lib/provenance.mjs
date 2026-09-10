@@ -177,6 +177,9 @@ export function validateManifest(manifest) {
     errors.push('Manifest has no gates evidence.')
   } else {
     if (typeof gates.gatePassed !== 'boolean' || typeof gates.allSelectedPassed !== 'boolean') errors.push('Gate result flags must be boolean.')
+    if (!Number.isInteger(gates.missingTotal) || gates.missingTotal < 0) {
+      errors.push('gates.missingTotal must be a non-negative integer.')
+    }
   }
   const json = JSON.stringify(manifest)
   if (Buffer.byteLength(json, 'utf8') > 256 * 1024) errors.push('Manifest exceeds the bounded size.')
@@ -195,12 +198,16 @@ export function deriveEligibility(manifest) {
     if (Array.isArray(gates.selected) && gates.selected.some((job) => !job || job.result !== 'success')) {
       reasons.push('A selected gate did not succeed.')
     }
-    if (Array.isArray(gates.missing) && gates.missing.length > 0) reasons.push('Missing gate evidence is present.')
+    if (!Array.isArray(gates.missing) || gates.missing.length > 0) reasons.push('Missing gate evidence is present or unavailable.')
+    if (gates.missingTotal !== 0) {
+      reasons.push('Missing gate evidence total is present or unavailable.')
+    }
   }
   const totals = manifest?.verifiedTotals ?? {}
   for (const key of ['expected', 'executed', 'passed', 'failed', 'skipped']) {
     if (!Number.isInteger(totals[key]) || totals[key] < 0) reasons.push(`verifiedTotals.${key} is not a non-negative integer.`)
   }
+  if (totals.failed !== 0) reasons.push('Failed tests cannot authorize a post-merge skip.')
   if (Number.isInteger(totals.expected) && Number.isInteger(totals.executed) && Number.isInteger(totals.skipped) &&
     totals.expected !== totals.executed + totals.skipped) {
     reasons.push('verifiedTotals are incoherent: expected must equal executed + skipped.')

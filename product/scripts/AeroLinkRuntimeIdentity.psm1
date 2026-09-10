@@ -23,6 +23,7 @@
 #>
 
 Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessControl.psm1')
 
 # Above this many changed/untracked files a dirty worktree is not fingerprinted. The cost is a restart, which
 # is correct behaviour; the alternative is minutes of hashing on every launch.
@@ -278,12 +279,32 @@ function Get-AeroLinkPortOwner {
     # belong to another user. Both still fail closed - nothing is stopped on a guess - but the operator is
     # told which of the two it is, instead of being sent to close an application that may not exist.
     $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($owners[0])" -ErrorAction SilentlyContinue
-    $attributable = [bool]$process
+    if ($process -and (-not $process.ExecutablePath -or -not $process.CommandLine)) {
+        try {
+            $native = Get-AeroLinkNativeProcessIdentity -ProcessId $owners[0]
+            if (-not $process.CreationDate -or
+                ([DateTimeOffset]$process.CreationDate).UtcDateTime.ToString('yyyyMMddHHmmssffffff') -ne
+                ([DateTimeOffset]$native.StartedAt).UtcDateTime.ToString('yyyyMMddHHmmssffffff')) { throw 'Process identity changed during enumeration.' }
+            $process = [pscustomobject]@{ ExecutablePath=$native.ExecutablePath; CommandLine=$native.CommandLine; CreationDate=$process.CreationDate }
+        } catch { }
+    }
+    $attributable = [bool]($process -and $process.ExecutablePath -and $process.CommandLine)
+    $startedAt = $null
+    if ($attributable) {
+        try {
+            $startedAt = Get-AeroLinkProcessStartIdentity -ProcessId $owners[0]
+            if (-not $process.CreationDate -or
+                ([DateTimeOffset]$process.CreationDate).UtcDateTime.ToString('yyyyMMddHHmmssffffff') -ne
+                ([DateTimeOffset]$startedAt).UtcDateTime.ToString('yyyyMMddHHmmssffffff')) { $attributable = $false }
+        }
+        catch { $attributable = $false }
+    }
     return [pscustomobject]@{
         Found          = $true
         Ambiguous      = $false
         Attributable   = $attributable
         ProcessId      = [int]$owners[0]
+        StartedAt      = $startedAt
         CommandLine    = if ($process) { [string]$process.CommandLine } else { $null }
         ExecutablePath = if ($process) { [string]$process.ExecutablePath } else { $null }
         Detail         = if ($attributable) { "Port $Port is held by PID $($owners[0])." }
@@ -326,6 +347,21 @@ function Test-AeroLinkProcessOwnership {
     $candidate = "$ExecutablePath $CommandLine"
     foreach ($fragment in $required) {
         if ($candidate.IndexOf($fragment, [StringComparison]::OrdinalIgnoreCase) -lt 0) { return $false }
+        if ($fragment.TrimEnd('\', '/').EndsWith('AeroLink.Api', [StringComparison]::OrdinalIgnoreCase)) {
+            # A foreign executable cannot acquire API ownership by quoting our project directory in an
+            # argument. The OS image must be our apphost, or dotnet must execute our exact DLL argument.
+            if ([string]::IsNullOrWhiteSpace($ExecutablePath)) { return $false }
+            $directory = [IO.Path]::GetFullPath($fragment).TrimEnd('\', '/') + '\'
+            $image = [IO.Path]::GetFullPath($ExecutablePath)
+            $apphost = $image.StartsWith($directory, [StringComparison]::OrdinalIgnoreCase) -and
+                [IO.Path]::GetFileName($image) -ieq 'AeroLink.Api.exe'
+            if (-not $apphost) {
+                if ([IO.Path]::GetFileName($image) -ine 'dotnet.exe' -or [string]::IsNullOrWhiteSpace($CommandLine)) { return $false }
+                $arguments = [AeroLink.ProcessAccess]::Arguments($CommandLine)
+                if ($arguments.Count -lt 2 -or -not $arguments[1].StartsWith($directory, [StringComparison]::OrdinalIgnoreCase) -or
+                    [IO.Path]::GetFileName($arguments[1]) -ine 'AeroLink.Api.dll') { return $false }
+            }
+        }
     }
     return $true
 }
@@ -357,6 +393,8 @@ function Resolve-AeroLinkRuntimeDisposition {
         # beyond the bounded limit, and PowerShell converts that null to an empty string on the way in.
         [Parameter(Mandatory)][AllowNull()][AllowEmptyString()][string]$ExpectedSourceIdentity,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$OwnershipFragments,
+        [string]$ExpectedInstanceId,
+        [string]$ExpectedClassification,
         [scriptblock]$PortOwnerProbe,
         [scriptblock]$RuntimeProbe,
         [scriptblock]$ReadyProbe
@@ -369,7 +407,7 @@ function Resolve-AeroLinkRuntimeDisposition {
     if ($owner.Ambiguous) {
         return [pscustomobject]@{ Disposition = 'Refuse'; ProcessId = $null; Detail = "$($owner.Detail) AeroLink will not stop a process it cannot attribute." }
     }
-    if (-not (Test-AeroLinkProcessOwnership -CommandLine $owner.CommandLine -ExecutablePath $owner.ExecutablePath -OwnershipFragments $OwnershipFragments)) {
+    if (-not $owner.Attributable -or -not (Test-AeroLinkProcessOwnership -CommandLine $owner.CommandLine -ExecutablePath $owner.ExecutablePath -OwnershipFragments $OwnershipFragments)) {
         $detail = if ($owner.Attributable) {
             "Port $Port is occupied by another application (PID $($owner.ProcessId)). AeroLink never stops a process it does not own. Close it and run this launcher again."
         }
@@ -382,6 +420,19 @@ function Resolve-AeroLinkRuntimeDisposition {
     $identity = if ($RuntimeProbe) { & $RuntimeProbe $BaseUri } else { Get-AeroLinkRuntimeIdentity -BaseUri $BaseUri }
     if ($null -eq $identity) {
         return [pscustomobject]@{ Disposition = 'RestartUnidentified'; ProcessId = $owner.ProcessId; Detail = "The AeroLink process on port $Port (PID $($owner.ProcessId)) publishes no runtime identity, so it cannot be proven to match this source. It will be restarted." }
+    }
+
+    # Source and mode alone do not identify an installation. Refuse a contradictory or absent installation
+    # identity when the caller supplies its expected binding; never reuse or restart another installation.
+    foreach ($binding in @(
+        @{ Expected = $ExpectedInstanceId; Property = 'id' },
+        @{ Expected = $ExpectedClassification; Property = 'classification' }
+    )) {
+        if ([string]::IsNullOrWhiteSpace($binding.Expected)) { continue }
+        $actual = if ($identity.PSObject.Properties['instance'] -and $identity.instance -and $identity.instance.PSObject.Properties[$binding.Property]) { [string]$identity.instance.($binding.Property) } else { '' }
+        if (-not [string]::Equals($actual, $binding.Expected, [StringComparison]::OrdinalIgnoreCase)) {
+            return [pscustomobject]@{ Disposition = 'Refuse'; ProcessId = $owner.ProcessId; Detail = "The AeroLink listener on port $Port does not prove the expected installation $($binding.Property). Nothing was stopped." }
+        }
     }
 
     $runtimeMode = [string]$identity.mode
@@ -401,6 +452,13 @@ function Resolve-AeroLinkRuntimeDisposition {
         return [pscustomobject]@{ Disposition = 'RestartUnready'; ProcessId = $owner.ProcessId; Detail = "The AeroLink process on port $Port matches this source and mode but is not reporting ready. It will be restarted." }
     }
 
+    if (-not $PortOwnerProbe) {
+        $currentOwner = Get-AeroLinkPortOwner -Port $Port
+        if (-not $currentOwner.Found -or -not $currentOwner.Attributable -or $currentOwner.ProcessId -ne $owner.ProcessId -or
+            $currentOwner.StartedAt -ne $owner.StartedAt -or $currentOwner.ExecutablePath -ine $owner.ExecutablePath) {
+            return [pscustomobject]@{ Disposition = 'Refuse'; ProcessId = $owner.ProcessId; Detail = 'Listener process identity changed during runtime proof. Nothing was stopped.' }
+        }
+    }
     return [pscustomobject]@{ Disposition = 'Reuse'; ProcessId = $owner.ProcessId; Detail = "The AeroLink process on port $Port (PID $($owner.ProcessId)) already runs this exact source in $ExpectedMode mode and is ready." }
 }
 
@@ -432,7 +490,8 @@ function Stop-AeroLinkOwnedListener {
         [Parameter(Mandatory)][int]$Port,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$OwnershipFragments,
         [scriptblock]$PortOwnerProbe,
-        [scriptblock]$Stopper
+        [scriptblock]$Stopper,
+        [scriptblock]$OnStopped
     )
     $owner = if ($PortOwnerProbe) { & $PortOwnerProbe $Port } else { Get-AeroLinkPortOwner -Port $Port }
     if (-not $owner.Found) { return [pscustomobject]@{ Stopped = $false; ProcessId = $null; Detail = $owner.Detail } }
@@ -443,12 +502,9 @@ function Stop-AeroLinkOwnedListener {
         }
         throw "Port $Port is held by PID $($owner.ProcessId), but its command line could not be read, so AeroLink cannot tell whether it owns it. Nothing was stopped."
     }
-    if ($Stopper) { & $Stopper $owner.ProcessId }
+    if ($Stopper) { & $Stopper $owner.ProcessId; if ($OnStopped) { & $OnStopped } }
     else {
-        Stop-Process -Id $owner.ProcessId -Force
-        # Long enough that a start does not race a not-quite-dead listener, which fails in a way nothing here
-        # would explain.
-        Start-Sleep -Milliseconds 800
+        Stop-AeroLinkProvenProcess -Process $owner -OnStopped $OnStopped
     }
     return [pscustomobject]@{ Stopped = $true; ProcessId = $owner.ProcessId; Detail = "Stopped the AeroLink-owned process on port $Port (PID $($owner.ProcessId))." }
 }

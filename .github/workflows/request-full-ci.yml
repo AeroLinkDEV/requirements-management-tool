@@ -32,6 +32,10 @@ jobs:
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
     steps:
+      - name: Install Node.js for the trusted readiness-target guard
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
       - name: Authenticate live ready PR, dispatch once, and bind exact Product success
         shell: bash
         run: |
@@ -42,6 +46,47 @@ jobs:
             --header "Accept: application/vnd.github+json"
             --header "X-GitHub-Api-Version: 2022-11-28"
           )
+
+          # This protected-runner helper never comes from candidate code. Readiness and queue binding use
+          # the same required App context, so a queue commit must never be approved through PR readiness.
+          cat > "$RUNNER_TEMP/verify-readiness-target.mjs" <<'NODE_READINESS_TARGET'
+          import { pathToFileURL } from 'node:url'
+
+          export function verifyReadinessTarget(headSha, queue) {
+            if (typeof headSha !== 'string' || !/^[0-9a-f]{40}$/.test(headSha)) throw new Error('Invalid readiness SHA.')
+            const entries = queue?.data?.repository?.mergeQueue?.entries
+            if ((queue?.errors && (!Array.isArray(queue.errors) || queue.errors.length > 0)) ||
+                entries?.pageInfo?.hasNextPage !== false || !Array.isArray(entries?.nodes)) {
+              throw new Error('Queue response is incomplete.')
+            }
+            for (const entry of entries.nodes) {
+              const candidate = entry?.headCommit?.oid
+              if (typeof candidate !== 'string' || !/^[0-9a-f]{40}$/.test(candidate)) throw new Error('Queue candidate identity is unresolved.')
+              if (candidate === headSha) throw new Error('Readiness SHA is a current queue candidate.')
+            }
+          }
+
+          async function main() {
+            const [owner, name] = process.env.GITHUB_REPOSITORY.split('/')
+            const response = await fetch(`${process.env.GITHUB_API_URL}/graphql`, {
+              method: 'POST', signal: AbortSignal.timeout(30_000),
+              headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, Accept: 'application/vnd.github+json',
+                'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28' },
+              body: JSON.stringify({ variables: { owner, name },
+                query: 'query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mergeQueue{entries(first:100){nodes{headCommit{oid}} pageInfo{hasNextPage}}}}}' }),
+            })
+            if (!response.ok) throw new Error('Queue API read failed.')
+            verifyReadinessTarget(process.env.HEAD_SHA, await response.json())
+          }
+
+          if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+            main().catch(() => {
+              // Never print API bodies, inherited credentials or candidate-controlled exception text.
+              console.error('PR readiness refused: target is a queue commit or its distinct identity is unverified.')
+              process.exitCode = 1
+            })
+          }
+          NODE_READINESS_TARGET
 
           verify_live_pr() {
             curl --fail-with-body --silent --show-error "${headers[@]}" \
@@ -118,6 +163,7 @@ jobs:
           }
 
           verify_live_pr
+          node "$RUNNER_TEMP/verify-readiness-target.mjs"
           match="$(find_product_run)"
           case "$match" in
             ERROR*) echo "::error::$match"; exit 1 ;;
@@ -243,6 +289,8 @@ jobs:
           MERGE_AUTHORITY_TOKEN: ${{ steps.authority-token.outputs.token }}
         run: |
           set -euo pipefail
+          # A queue alias can appear while Full CI runs. Recheck after that wait, before App publication.
+          node "$RUNNER_TEMP/verify-readiness-target.mjs"
           python - <<'PY' > "$RUNNER_TEMP/merge-authority-pr-check.json"
           import json
           import os

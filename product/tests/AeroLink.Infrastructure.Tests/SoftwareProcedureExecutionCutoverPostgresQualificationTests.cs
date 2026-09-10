@@ -109,8 +109,16 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
                 Task.Run(() => CatchAsync(() =>
                     new SoftwareProcedureExecutionCutoverAuthority(second, legacy, typed)
                         .EnsureCompletedAsync())));
-            Assert.Equal(1, parallel.Sum(x => x.ProceduresGenerated));
-            Assert.Equal(1, parallel.Count(x => x.ProceduresGenerated > 0));
+            // The returned record is the immutable completion summary, not per-invocation work. CatchAsync
+            // normalizes the documented ladder optimistic-version collision to the all-zero no-work result;
+            // otherwise a caller performs/reuses the one committed cutover and receives the completed totals.
+            // Both callers may therefore report ProceduresGenerated=1 while the database contains exactly one
+            // Procedure.
+            var completedOutcome = new SoftwareProcedureCutoverResult(1, 1, 1, 1, 1, 0);
+            var noWorkOutcome = new SoftwareProcedureCutoverResult(0, 0, 0, 0, 0, 0);
+            Assert.Contains(completedOutcome, parallel);
+            Assert.All(parallel, result => Assert.True(result == completedOutcome || result == noWorkOutcome,
+                $"A concurrent caller returned an outcome that is neither the committed completion nor the documented no-work loser: {result}."));
 
             // The loser must leave NO partial state: the persisted database has exactly one winner outcome.
             await using var check = await DatabaseAsync(concurrentConnection);
@@ -125,6 +133,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
                 .Select(x => x.Id).SingleAsync();
             Assert.Equal(1, await check.TestProcedureRevisions.AsNoTracking()
                 .CountAsync(x => x.ProcedureId == procedureId));
+            Assert.Equal(1, await check.TestProcedureMigrationSources.AsNoTracking()
+                .CountAsync(x => x.ProjectId == projectId));
             Assert.Equal(1, await check.TestCaseProcedureLinks.AsNoTracking().CountAsync());
             Assert.Equal(1, await check.TestExecutions.AsNoTracking()
                 .CountAsync(x => x.ProjectId == projectId
@@ -144,6 +154,9 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
                     && x.Target == $"Project:{projectId}"));
             Assert.Equal(1, await check.SecurityAuditEvents.AsNoTracking()
                 .CountAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.Completed"));
+            Assert.Equal(1, await check.SecurityAuditEvents.AsNoTracking()
+                .CountAsync(x => x.EventType == "VerificationExecutionCutover.SoftwareProcedures.v1.ProcedureGenerated"
+                    && x.Target.StartsWith("TestCaseProcedureLink:")));
             Assert.Equal(1, await check.GovernedMigrationCompletions.AsNoTracking()
                 .CountAsync(x => x.Marker == "VerificationExecutionCutover.SoftwareProcedures.v1"));
             Assert.Equal(0, await check.SecurityAuditEvents.AsNoTracking()

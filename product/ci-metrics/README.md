@@ -32,8 +32,12 @@ artifacts) with:
   semantics are explicit: `expected` is the planned unique-test count, `executed` excludes skipped tests,
   `passed` is the final-pass total (clean plus retry-passes), and `flaky` is the retry-pass count.
   Row-derived flaky titles must agree with `stats.flaky`. All counters must be non-negative and internally
-  consistent (`expected === executed + skipped` and `executed === passed + failed` for Playwright and
-  node-junit; `executed + skipped <= expected` and `passed + failed <= executed` for TRX); a missing
+  consistent (`expected === executed + skipped` and `executed === passed + failed`). New TRX parsing
+  reconciles every result row against total/executed/passed/failed counters and counts only explicit
+  `NotExecuted` rows as skips. It accepts the xUnit adapter's zero `notExecuted` counter when those
+  rows prove the skips; missing rows, unsupported outcomes and contradictory nonzero counters make
+  counts unavailable. Read-time fragment validation still accepts historical TRX counters with
+  `executed + skipped <= expected` and `passed + failed <= executed`; a missing
   per-test duration makes the class/spec duration unknown rather than zero. A Playwright flaky count
   without title evidence is never silent: the writer records an explicit `counts.missing` reason when the
   report has no suites hierarchy or no titles could be derived, and the structured flags
@@ -122,12 +126,30 @@ default-branch code and never executes PR content.
   head SHA for non-PR records, and the GitHub-side commit tree for the tested commit (so a record cannot
   self-attest its tree);
 - enriches each record with Actions queue delay and cancellation consumption (`queueAndCancellation`);
-- groups like-for-like runs (docs-only, backend-only, client-only, browser-only, postgresql-only, mixed,
-  push-main, scheduled, manual) and computes median/p95 for the critical path and each job group, plus
-  count, flake-title, and cache trends;
+- separates event roles and changed-area scopes (for example, `dispatch-backend-only`, `dispatch-mixed`,
+  `queue-mixed`, `push-main`, `scheduled`), with a `rerun-` prefix for later attempts, and computes
+  median/p95 for the critical path and each job group, plus
+  expected/executed/passed/failed/skipped/flaky count, flake-title, and cache trends;
 - detects sustained regressions only with enough comparable evidence (window and minimum-run guards;
   noise never fires);
 - publishes `rolling-metrics.json` + `rolling-metrics.md` as a 30-day artifact.
+
+Cadence accounting includes pre-queue `pull_request`/`workflow_dispatch` runs, `merge_group` runs whose
+queue ref names the primary PR, and `push` runs on the exact merge commit. Attribution is observational:
+branch/lifetime matching is not trusted readiness identity, a primary queue ref does not enumerate all
+composed members, and fetched history can omit older work. The report states these limits. These are
+observed Product runs and attempts, including selected scopes and failures, not counts of successful
+complete gates. Event/area/attempt grouping still does not prove equal test sets or runner environments;
+performance qualification must pair exact baseline/treatment configurations independently.
+
+All browser lanes retain JSON results and available failed-attempt traces for seven days even when a
+retry passes. The scheduled/manual browser lane uses the duration packer with its three existing runners
+and a 30-minute job limit. It contributes to the aggregate and its critical path; incomplete scheduled
+proof cannot produce a successful aggregate. Schedule/manual diagnostics use separate concurrency groups
+from ordinary main pushes. A changed timeout or partition is not evidence of successful hosted completion.
+The rolling collector reports the latest scheduled main run and the age of the last successful completion
+directly from Actions metadata, including cancelled runs with no metrics artifact. Missing history or
+unusable timestamps leave freshness unavailable, never zero. This observation is advisory, not reuse authority.
 
 `bin/update-regression-tracker.mjs` updates a single durable issue (`CI rolling regression tracker`)
 when sustained regressions exist or when every previously tracked category has determinate recovery
@@ -144,7 +166,10 @@ Rolling output is never merge authority. The live ruleset requires the App-bound
 merged run record: repository, workflow and revision, run id/attempt, PR/base/head identity, exact
 checked-out commit and tree, event, classifier outputs, per-job gate results, verified totals, and
 `canAuthorizePostMergeSkip` (true only when the gate and every selected product job passed with zero
-missing). The manifest is labelled `shadow` because same-workflow code is PR-controlled on pull_request
+missing, zero failed tests and coherent verified totals, using the consumer's same eligibility function).
+The manifest carries both the bounded missing-entry list and its authoritative `missingTotal`; an absent,
+invalid, or nonzero total remains ineligible even when the bounded list is empty.
+The manifest is labelled `shadow` because same-workflow code is PR-controlled on pull_request
 runs, and it is uploaded only when the aggregate job succeeds (30-day retention).
 
 `.github/workflows/ci-main-provenance.yml` observes every completed quality-gate run. For main pushes it
@@ -339,7 +364,7 @@ independently selected producer, so push/schedule reports are complete).
 Run the full suite exactly as CI does:
 
 ```powershell
-node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs product/ci-metrics/tests/api-packing-shadow.test.mjs product/ci-metrics/tests/merge-authority.test.mjs product/ci-metrics/tests/merge-authority-github.test.mjs
+node --test product/ci-metrics/tests/trx.test.mjs product/ci-metrics/tests/playwright.test.mjs product/ci-metrics/tests/fragment.test.mjs product/ci-metrics/tests/aggregate.test.mjs product/ci-metrics/tests/build-run-meta.test.mjs product/ci-metrics/tests/junit.test.mjs product/ci-metrics/tests/ci-workflow-contract.test.mjs product/ci-metrics/tests/zip.test.mjs product/ci-metrics/tests/rolling.test.mjs product/ci-metrics/tests/provenance.test.mjs product/ci-metrics/tests/api-telemetry.test.mjs product/ci-metrics/tests/api-packing-shadow.test.mjs product/ci-metrics/tests/merge-authority.test.mjs product/ci-metrics/tests/merge-authority-github.test.mjs product/ci-metrics/tests/maintenance-preflight.test.mjs product/ci-metrics/tests/maintenance-approval.test.mjs product/ci-metrics/tests/maintenance-evidence-reader.test.mjs product/ci-metrics/tests/maintenance-candidate.test.mjs
 ```
 
 The command's reported test count is the authoritative current total; historical run artifacts retain

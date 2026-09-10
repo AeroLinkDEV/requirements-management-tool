@@ -8,6 +8,7 @@ using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Notifications;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
@@ -280,6 +281,21 @@ public sealed class NotificationOutboxTests
         }
     }
 
+    private sealed class FailOnceSaveInterceptor : SaveChangesInterceptor
+    {
+        private int _failed;
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.CompareExchange(ref _failed, 1, 0) == 0)
+                throw new DbUpdateException("Injected uncertain notification save.");
+            return ValueTask.FromResult(result);
+        }
+    }
+
     private static (NotificationLinkBuilder Links, UnsubscribeTokenService Tokens) Support(bool withBaseUrl = true)
     {
         var settings = new Dictionary<string, string?>
@@ -334,6 +350,32 @@ public sealed class NotificationOutboxTests
             Assert.Equal(NotificationDeliveryState.Pending, delivery.State);
             Assert.Equal("approver.user", delivery.Recipient);
             Assert.Equal("approver@example.test", delivery.Address);
+        }
+        finally { File.Delete(seed.Path); }
+    }
+
+    [Fact]
+    public async Task Retrying_an_uncertain_save_does_not_append_a_second_delivery_for_the_same_notification()
+    {
+        var seed = await SeedAsync();
+        try
+        {
+            var interceptor = new FailOnceSaveInterceptor();
+            var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+                .UseSqlite($"Data Source={seed.Path};Pooling=False")
+                .AddInterceptors(interceptor)
+                .Options;
+            await using var db = new AeroLinkDbContext(options);
+            db.UserNotifications.Add(Notification(seed.ProjectId));
+
+            await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+            // The failure is before provider persistence, but QueueNotificationDeliveriesAsync has already
+            // attached the delivery. Re-entering the authoritative pipeline must reuse that tracked row.
+            await db.SaveChangesAsync();
+
+            await using var assert = new AeroLinkDbContext(seed.Options);
+            Assert.Single(await assert.UserNotifications.AsNoTracking().ToListAsync());
+            Assert.Single(await assert.NotificationDeliveries.AsNoTracking().ToListAsync());
         }
         finally { File.Delete(seed.Path); }
     }

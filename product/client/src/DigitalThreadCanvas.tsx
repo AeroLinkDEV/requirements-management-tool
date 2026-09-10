@@ -151,6 +151,7 @@ export default function DigitalThreadCanvas({
   const geometryRef = useRef<LayoutResult | null>(null)
   const frameSignature = useRef("")
   const animation = useRef<number | null>(null)
+  const reflowFrame = useRef<number | null>(null)
   const scrubbing = useRef(false)
   /** The framing key the selection effect last acted on, so a re-render alone cannot reset a rolled lane. */
   const framedFor = useRef<string | null>(null)
@@ -202,6 +203,10 @@ export default function DigitalThreadCanvas({
     laneCount ? laneCount(lane) : nodes.filter(node => node.lane === lane).length,
   )
   const countsKey = measuredCounts.join(",")
+  // Card identities determine which DOM elements the geometry observer must watch. Keeping this separate from
+  // the full node array avoids resubscribing when a projection recreates equivalent records while still
+  // covering cards entering or leaving the canvas.
+  const cardIdsKey = nodes.map(node => node.id).join(",")
 
   /**
    * The same numbers, but with an identity that only changes when the numbers do.
@@ -638,6 +643,17 @@ export default function DigitalThreadCanvas({
   const committedPaint = useRef(paint)
   useLayoutEffect(() => { committedPaint.current = paint }, [paint])
 
+  // ResizeObserver callbacks run during the browser's resize notification phase. Defer the repaint to the next
+  // frame so writing corrected card positions cannot trigger a resize-observer loop. This also coalesces a font
+  // loading event with the card resize notifications it causes.
+  const schedulePaint = useCallback(() => {
+    if (reflowFrame.current !== null) return
+    reflowFrame.current = requestAnimationFrame(() => {
+      reflowFrame.current = null
+      committedPaint.current()
+    })
+  }, [])
+
   const settle = useCallback(() => {
     if (animation.current !== null) return
     const tick = () => {
@@ -854,15 +870,36 @@ export default function DigitalThreadCanvas({
     }
     measure()
     const timers = [window.setTimeout(measure, 50), window.setTimeout(measure, 350)]
-    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null
+    const observer = typeof ResizeObserver === "function"
+      ? new ResizeObserver(entries => {
+        // The viewport observer keeps the existing frame and dock behavior. Cards need a deferred paint of
+        // their own: web-font substitution can change a selected card's border box without changing the frame.
+        if (entries.some(entry => entry.target !== element)) schedulePaint()
+        if (entries.some(entry => entry.target === element)) measure()
+      })
+      : null
     observer?.observe(element)
+    cardRefs.current.forEach(card => observer?.observe(card))
+    const fonts = document.fonts
+    const onFontEvent = () => schedulePaint()
+    fonts?.addEventListener("loadingdone", onFontEvent)
+    fonts?.addEventListener("loadingerror", onFontEvent)
+    // A font can finish between the initial measure and listener registration. The ready promise covers that
+    // settled state, while loadingdone above handles later faces requested by a view.
+    void fonts?.ready.then(onFontEvent, onFontEvent)
     window.addEventListener("resize", measure)
     return () => {
       timers.forEach(window.clearTimeout)
       observer?.disconnect()
+      if (reflowFrame.current !== null) {
+        window.cancelAnimationFrame(reflowFrame.current)
+        reflowFrame.current = null
+      }
+      fonts?.removeEventListener("loadingdone", onFontEvent)
+      fonts?.removeEventListener("loadingerror", onFontEvent)
       window.removeEventListener("resize", measure)
     }
-  }, [applyFraming, countsKey, land])
+  }, [applyFraming, cardIdsKey, countsKey, land, schedulePaint])
 
   useEffect(() => {
     paint()

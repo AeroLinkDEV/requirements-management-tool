@@ -145,7 +145,7 @@ try {
     if (-not $production -and -not ($resolvedTarget + [IO.Path]::DirectorySeparatorChar).StartsWith($validationRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'The isolated evidence target must remain under the installation restore-validation root.' }
     $parent = Split-Path $resolvedTarget -Parent; New-Item -ItemType Directory -Path $parent -Force | Out-Null
     $incoming = Join-Path $parent ('.restore-incoming-' + $token)
-    if (Test-Path -LiteralPath $incoming) { Remove-Item -LiteralPath $incoming -Recurse -Force }
+    if (Test-Path -LiteralPath $incoming) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $incoming) -Recurse -Force }
     New-Item -ItemType Directory -Path $incoming -Force | Out-Null
     if (Test-Path -LiteralPath $evidenceSource) { Copy-AeroLinkEvidenceTree -Source $evidenceSource -Destination $incoming }
     [void](Test-AeroLinkAttachmentInventory -Inventory $restoredInventory -EvidenceRoot $incoming)
@@ -158,7 +158,7 @@ try {
     Invoke-Fault 'AfterPreActivationValidation'
 
     if (-not $production) {
-        if (Test-Path -LiteralPath $resolvedTarget) { Remove-Item -LiteralPath $resolvedTarget -Recurse -Force }
+        if (Test-Path -LiteralPath $resolvedTarget) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $resolvedTarget) -Recurse -Force }
         Move-Item -LiteralPath $incoming -Destination $resolvedTarget; $incoming = $null
         [void](Test-AeroLinkAttachmentInventory -Inventory $restoredInventory -EvidenceRoot $resolvedTarget)
         $finalDownloads = if ($deferCurrentCode) { $deferredResult } else { Test-RestoredApi $restoreDatabase $resolvedTarget $restoredInventory ($ValidationApiPort + 1) }
@@ -210,8 +210,8 @@ catch {
     throw $failure
 }
 finally {
-    if ($incoming -and (Test-Path -LiteralPath $incoming)) { Remove-Item -LiteralPath $incoming -Recurse -Force }
-    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force }
+    if ($incoming -and (Test-Path -LiteralPath $incoming)) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $incoming) -Recurse -Force }
+    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $temporary) -Recurse -Force }
     if ($production -and -not $databaseActivated) {
         try { Remove-Database $restoreDatabase } catch { }
     }

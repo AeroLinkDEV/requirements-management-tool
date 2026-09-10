@@ -85,7 +85,7 @@ try {
 finally {
     $resolvedBackup = [IO.Path]::GetFullPath($backupRoot) + [IO.Path]::DirectorySeparatorChar
     $resolvedStaging = [IO.Path]::GetFullPath($staging)
-    if ((Test-Path $staging) -and $resolvedStaging.StartsWith($resolvedBackup, [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $staging -Recurse -Force }
+    if ((Test-Path $staging) -and $resolvedStaging.StartsWith($resolvedBackup, [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $staging) -Recurse -Force }
 }
 
 if ($RetentionDays -gt 0) {

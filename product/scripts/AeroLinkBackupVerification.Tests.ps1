@@ -12,12 +12,19 @@ if($verifySource.IndexOf('if($cleanupError){throw "Backup archive content verifi
 if($verifySource -notlike '*Write-Warning "Backup verification cleanup failed; the temporary directory remains at*'){throw 'Cleanup failure must warn with the retained temporary path.'}
 try{
  $object=Join-Path $staging 'evidence\ab\object.docx';[IO.File]::WriteAllText($object,'controlled backup object');$hash=(Get-FileHash -LiteralPath $object -Algorithm SHA256).Hash.ToLowerInvariant();$size=(Get-Item -LiteralPath $object).Length
+ # Existing quarantine names can fit HOME but exceed MAX_PATH once restore adds
+ # a validation directory. Exercise inventory, ZIP, hashing and cleanup in PS 5.1.
+ $longRelative='ab/'+('q'*170)+'.stage'
+ $longObject=Join-Path (Join-Path $staging 'evidence') $longRelative
+ if($longObject.Length -le 260){throw 'The regression fixture must exceed MAX_PATH.'}
+ $longIo=if([IO.Path]::DirectorySeparatorChar -eq '\'){'\\?\'+$longObject}else{$longObject}
+ [IO.File]::WriteAllText($longIo,'retained quarantine object')
  [IO.File]::WriteAllText((Join-Path $staging 'aerolink-postgresql.dump'),'disposable dump fixture')
  $inventory=@([pscustomobject]@{Id=[Guid]::NewGuid();StorageKey='ab/object.docx';Size=$size;Sha256=$hash;ArtifactType='ManagedDocument';ArtifactId=[Guid]::NewGuid();RevisionId=[Guid]::NewGuid()})
  ConvertTo-Json -InputObject $inventory -Depth 4|Set-Content -LiteralPath (Join-Path $staging 'attachment-inventory.json') -Encoding UTF8
  $files=Get-AeroLinkBackupFileInventory -StagingRoot $staging
  if(@($files|Where-Object{([string]$_.Path) -like '*\*'}).Count -ne 0){throw 'The production file inventory still emits backslash-separated manifest paths.'}
- $manifest=[ordered]@{FormatVersion=2;CreatedAtUtc=(Get-Date).ToUniversalTime().ToString('o');Application=@{SourceSha='test';SchemaVersion='test'};Database=@{Name='test';Dump='aerolink-postgresql.dump'};Storage=@{Scheme='filesystem-v1';SourceRoot='fixture';ArchiveRoot='evidence';ObjectCount=1;AttachmentCount=1;ReferencedBytes=$size;UnreferencedObjectCount=0;UnreferencedObjects=@()};AttachmentInventory='attachment-inventory.json';Files=$files}
+ $manifest=[ordered]@{FormatVersion=2;CreatedAtUtc=(Get-Date).ToUniversalTime().ToString('o');Application=@{SourceSha='test';SchemaVersion='test'};Database=@{Name='test';Dump='aerolink-postgresql.dump'};Storage=@{Scheme='filesystem-v1';SourceRoot='fixture';ArchiveRoot='evidence';ObjectCount=1;AttachmentCount=1;ReferencedBytes=$size;UnreferencedObjectCount=1;UnreferencedObjects=@($longRelative)};AttachmentInventory='attachment-inventory.json';Files=$files}
  $manifest|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $staging 'manifest.json') -Encoding UTF8
  $archive=Join-Path $relocated 'portable backup.zip';Compress-AeroLinkBackupArchive -SourceDirectory $staging -DestinationArchive $archive
  Add-Type -AssemblyName System.IO.Compression;Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -34,6 +41,14 @@ try{
  $archiveHash=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant();"$archiveHash  portable backup.zip"|Set-Content -LiteralPath "$archive.sha256" -Encoding ASCII
  $verified=& $verifyScript -BackupArchive $archive -VerificationRoot $verificationRoot
  if(-not $verified.Valid -or $verified.ReferencedAttachments -ne 1 -or $verified.ReferencedObjects -ne 1){throw 'A relocated valid archive did not verify.'}
+ if(@($verified.UnreferencedObjects).Count -ne 1 -or $verified.UnreferencedObjects[0] -ne $longRelative){throw 'Long quarantine evidence identity was not retained.'}
+ if(Get-Command robocopy.exe -ErrorAction SilentlyContinue){
+  $copiedEvidence=Join-Path $root ('restored-evidence-'+('d'*40))
+  Copy-AeroLinkEvidenceTree -Source (Join-Path $staging 'evidence') -Destination $copiedEvidence
+  $longInventory=@([pscustomobject]@{Id=[Guid]::NewGuid();StorageKey=$longRelative;Size=([IO.FileInfo]$longIo).Length;Sha256=(Get-FileHash -LiteralPath $longIo).Hash})
+  $copyVerified=Test-AeroLinkAttachmentInventory -Inventory $longInventory -EvidenceRoot $copiedEvidence
+  if($copyVerified.ReferencedObjects -ne 1 -or $copyVerified.VerifiedBytes -ne $longInventory[0].Size){throw 'Restored long evidence path did not retain its exact bytes.'}
+ }
  if(@(Get-ChildItem -LiteralPath $verificationRoot -Force).Count -ne 0){throw 'The verification root was not empty after a successful verification.'}
  $ps51=Get-Command powershell.exe -ErrorAction SilentlyContinue
  $ansiEscape=[char]27+'\[[0-9;]*m'
@@ -89,4 +104,4 @@ try{
 
  [pscustomobject]@{Passed=$true;RelocatedArchive=$archive;ReferencedAttachments=$verified.ReferencedAttachments;EntryNamesPortable=$true;BackslashEntryCount=0;WindowsPowerShell51Verified=[bool]$ps51;PowerShell7Verified=[bool]$pwsh;LegacyBackslashArchiveVerified=$legacyVerified.Valid;TraversalRejected=$true;MalformedRejected=$true;CorruptionRejected=$true}
  $global:LASTEXITCODE=0
-}finally{if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force};if(Test-Path -LiteralPath $root){throw 'The disposable backup verification root remained after cleanup.'}}
+}finally{if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $root) -Recurse -Force};if(Test-Path -LiteralPath $root){throw 'The disposable backup verification root remained after cleanup.'}}

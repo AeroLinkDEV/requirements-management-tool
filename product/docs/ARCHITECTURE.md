@@ -4,6 +4,8 @@
 
 AeroLink begins as a modular monolith: one deployable ASP.NET Core backend with explicit domain, infrastructure, and API boundaries, plus a React web client. This keeps controlled workflows transactional and understandable while leaving clean seams for later modules.
 
+The ordered persistence phases and transaction/failure semantics are documented in [SAVE_BOUNDARY.md](SAVE_BOUNDARY.md).
+
 ## Technology decisions
 
 - React and TypeScript for the browser client
@@ -40,6 +42,15 @@ has linked evidence, then one with a result, then the controlled number as a sta
 evidence reference remains useful context but does not make the evidence stage complete. The general
 relationship explorer remains available; the compact path is an assurance projection, not a new trace store.
 
+Critical review mutations use an application service boundary between HTTP and the aggregates. TCR submit and
+approve orchestration lives in `TestChangeReviewWorkflowService`: endpoint modules bind requests and perform
+resource-entry checks, while the service resolves the active or frozen workflow, freezes authority provenance
+and impact snapshots, transitions the aggregate, creates notifications and signatures, and owns the approval
+transaction. `WorkflowAuthorityService` is the shared resolver for TCR and change-request paths; it is not
+hosted by an endpoint module, so those paths cannot depend on one another for authority decisions. Aggregate
+methods remain responsible for lifecycle invariants, and the service preserves the approval two-save ordering
+needed before downstream Case assessment work is written.
+
 Software-build identity is canonical: a release version such as `1.6` is represented by `SW-01.60`. The
 historical `CandidateBaseline` and executable `SoftwareBuild` persistence records are implementation facets of
 that one software build, not separate product concepts presented to the user.
@@ -62,6 +73,18 @@ commit-in-build proof remain later integration depth. AeroLink never clones a re
 
 Repository interfaces are defined in the domain project and implemented in infrastructure. Provider choice is configuration-driven. PostgreSQL uses versioned EF migrations at application startup; SQLite remains isolated to tests and disposable local scenarios.
 
+The change-request child graph is selected explicitly by caller through the load contract documented in
+[CHANGE_REQUEST_LOADS.md](CHANGE_REQUEST_LOADS.md). This keeps read and command paths from purchasing all
+controlled history by default while preserving a consistent snapshot for split collection loads.
+
+`AeroLinkDbContext` exposes asynchronous persistence as its single supported write boundary. `SaveChangesAsync`
+performs the provider reads and controlled preparation needed for aggregate child-state repair, versioning,
+integrity checks, lifecycle events, and notification outbox rows before one EF write. The synchronous EF
+overloads fail before tracker or provider mutation and are marked as compile-time errors for direct
+`AeroLinkDbContext` callers; callers typed as `DbContext` receive the same runtime guard. Code that requests
+`SaveChangesAsync(false)` owns the usual EF deferred `AcceptAllChanges` decision and must accept the tracked
+states before beginning another logical unit of work.
+
 Fresh installations contain no assumed program. The onboarding transaction creates the Program, its first Project/software product, and its initial release together. FMS records are optional demo data controlled by configuration and are disabled by default.
 
 Enterprise authoring extends the existing requirement aggregate instead of replacing it. Stable artifacts and immutable requirement revisions remain authoritative; revision profiles add schema-bound rich content and classifications, specification nodes add reusable document placement, and comments/views/jobs preserve collaboration and high-volume operations as separate attributable records. Existing Projects are synchronized idempotently so the new workspace can be introduced without rewriting approved history.
@@ -80,9 +103,12 @@ Files are streamed to protected local content-addressed storage, SHA-256 hashed,
 
 ## Open Digital Thread boundary
 
+The [bounded Digital Thread read contract](DIGITAL_THREAD_READS.md) describes typed frontier selection, explicit work limits, and the derived frozen-review adjacency lookup. Original snapshots remain the historical provenance authority.
+
+
 AeroLink 2.0 introduces a separate machine-access boundary under `/api/v1`. Machine identities belong to exactly one Project, receive explicit scopes, and authenticate with one-time API keys whose secrets are never persisted. The first public resources expose cursor-paginated, ETag-bearing requirement reads and idempotent external-event ingestion without exposing internal tables or browser-session behavior.
 
-Integration events and webhook deliveries are durable, separate records. Event creation and delivery creation share the application transaction; a hosted dispatcher signs JSON envelopes with HMAC-SHA256, applies exponential retry, and retains delivered, retry-scheduled, and dead-letter outcomes for operator replay. Webhook signing secrets are protected through ASP.NET Core Data Protection and outbound targets fail closed against insecure or private destinations unless a development-only override is configured.
+Integration events and webhook deliveries are durable, separate records. Event creation and delivery creation share the application transaction; a hosted dispatcher claims due work with a conditional, expiring token, signs JSON envelopes with HMAC-SHA256, applies exponential retry, and retains bounded per-attempt outcomes for operator replay. Delivery is at-least-once: the stable event and delivery IDs are the receiver deduplication keys when a receiver accepts a request before local completion is recorded. Enabled-subscription and due-time filtering happens before the bounded dispatch batch, so disabled or future work cannot starve eligible work. Webhook signing secrets are protected through ASP.NET Core Data Protection and outbound targets fail closed against insecure or private destinations unless a development-only override is configured.
 
 The Integration Command Center is the human control plane over these records. It shows scoped identities, endpoints, event activity, delivery health, replay actions, existing interchange history, and the ReqIF evolution path without creating an alternate approval path for requirements.
 

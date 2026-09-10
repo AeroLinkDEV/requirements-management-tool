@@ -1,3 +1,4 @@
+using static AeroLink.Infrastructure.Persistence.FrozenReviewTraceParser;
 using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
@@ -81,7 +82,8 @@ public sealed record ChangeRequestTraceProjectionResult(
     IReadOnlyList<ChangeRequestTraceEdge> Edges,
     ChangeRequestTraceState? State,
     Guid? RootArtifactId = null,
-    string? RootArtifactKind = null);
+    string? RootArtifactKind = null,
+    bool DirectOnly = false);
 
 /// <summary>
 /// The change-control network for one exact build: every change request and test change request targeting it,
@@ -115,7 +117,7 @@ public sealed record ChangeRequestNetworkResult(
 /// code) in set-based batches, then performs the bounded, deterministic walk in memory. No client is allowed
 /// to infer provenance or lifecycle meaning from a collection of unrelated API responses.
 /// </summary>
-public static class ChangeRequestTraceProjection
+public static partial class ChangeRequestTraceProjection
 {
     private sealed record CrRow(Guid Id, Guid ProjectId, Guid TargetReleaseId, string BaseNumber, int Revision,
         string Title, ChangeRequestState State, ChangeRequestType Type, RequirementLevel? SoftwareLevel,
@@ -134,11 +136,6 @@ public static class ChangeRequestTraceProjection
         public bool IsSuspect { get; set; } = isSuspect;
         public List<ChangeRequestTraceProvenance> Provenance { get; } = [];
     }
-    private sealed record FrozenTrace(Guid UpstreamId, string Kind, Guid? SourceId, Guid? AssessmentId,
-        Guid? AssessmentLinkId, string? Rationale = null, string? ActorId = null,
-        DateTimeOffset? StatedAt = null, Guid? UpstreamBuildId = null, string? UpstreamBuildVersion = null,
-        Guid? BuildId = null);
-
     private static readonly TestChangeReviewOriginKind[] CaseOrigins =
         [TestChangeReviewOriginKind.CaseChange, TestChangeReviewOriginKind.CaseAssessment,
             TestChangeReviewOriginKind.CaseReview];
@@ -146,16 +143,16 @@ public static class ChangeRequestTraceProjection
     /// <summary>Projects one exact CR after its caller has established Project access.</summary>
     public static async Task<ChangeRequestTraceProjectionResult?> ForChangeRequestAsync(
         AeroLinkDbContext db, Guid projectId, Guid rootChangeRequestId, ILadderPolicy policy,
-        CancellationToken ct)
+        CancellationToken ct, bool directOnly = false)
     {
-        var projection = await BuildAsync(db, projectId, rootChangeRequestId, "ChangeRequest", policy, ct);
+        var projection = await BuildAsync(db, projectId, rootChangeRequestId, "ChangeRequest", policy, ct, directOnly: directOnly);
         return projection;
     }
 
     /// <summary>Projects one exact Test Change Request root through the same composed, bounded graph.</summary>
     public static Task<ChangeRequestTraceProjectionResult?> ForTestChangeReviewAsync(
         AeroLinkDbContext db, Guid projectId, Guid rootTestChangeReviewId, ILadderPolicy policy,
-        CancellationToken ct) => BuildAsync(db, projectId, rootTestChangeReviewId, "TestChangeRequest", policy, ct);
+        CancellationToken ct, bool directOnly = false) => BuildAsync(db, projectId, rootTestChangeReviewId, "TestChangeRequest", policy, ct, directOnly: directOnly);
 
     /// <summary>
     /// Projects the whole change-control network for one exact build in a single read.
@@ -170,12 +167,14 @@ public static class ChangeRequestTraceProjection
         CancellationToken ct)
     {
         var ladder = policy.OrderedLevels.Select(x => x.ToString()).ToList();
-        var projection = await BuildAsync(db, projectId, Guid.Empty, NetworkRootKind, policy, ct, releaseId);
+        var ceiling = Math.Clamp(maxNodes, 1, TraceReadBudget.MaximumNodes);
+        var budget = new TraceReadBudget();
+        var scope = await SelectBuildAsync(db, projectId, releaseId, ceiling, budget, ct);
+        var projection = await BuildAsync(db, projectId, Guid.Empty, NetworkRootKind, policy, ct, releaseId, scope, budget);
         if (projection is null) return new(projectId, releaseId, [], [], false, ladder);
 
-        var ceiling = maxNodes < 1 ? 1 : maxNodes;
         if (projection.Nodes.Count <= ceiling)
-            return new(projectId, releaseId, projection.Nodes, projection.Edges, false, ladder);
+            return new(projectId, releaseId, projection.Nodes, projection.Edges, scope.Truncated, ladder);
 
         // Over the ceiling the network is cut deterministically and the cut is declared. Dropping records from
         // a traceability view without saying so would be a false statement about traceability, so the caller is
@@ -211,15 +210,23 @@ public static class ChangeRequestTraceProjection
 
     private static async Task<ChangeRequestTraceProjectionResult?> BuildAsync(
         AeroLinkDbContext db, Guid projectId, Guid rootId, string rootKind, ILadderPolicy policy,
-        CancellationToken ct, Guid? networkReleaseId = null)
+        CancellationToken ct, Guid? networkReleaseId = null, TraceScope? selectedScope = null, TraceReadBudget? readBudget = null,
+        bool directOnly = false)
     {
         var isNetwork = rootKind == NetworkRootKind;
+        var budget = readBudget ?? new TraceReadBudget();
+        var scope = selectedScope ?? await DiscoverAsync(db, projectId, rootId, rootKind, policy, budget, ct, directOnly);
+        var crIds = scope.Changes.ToArray();
+        var tcrIds = scope.Reviews.ToArray();
+        var reqIds = scope.Requirements.ToArray();
+        var codeIds = scope.Code.ToArray();
+        var reportIds = scope.Reports.ToArray();
         var allCr = await db.SystemChangeRequests.AsNoTracking()
-            .Where(x => x.ProjectId == projectId)
+            .Where(x => x.ProjectId == projectId && crIds.Contains(x.Id))
             .Select(x => new CrRow(x.Id, x.ProjectId, x.TargetReleaseId, x.BaseNumber, x.Revision,
                 x.Title, x.State, x.Type, x.SoftwareLevel, x.NoUpstreamRationale,
                 x.InheritedUpstreamContextJson, x.UpstreamAnswerAffirmed))
-            .ToListAsync(ct);
+            .ReadTraceAsync(budget, ct);
         var byCr = allCr.ToDictionary(x => x.Id);
         var rootCr = rootKind == "ChangeRequest" && byCr.ContainsKey(rootId) ? rootId : Guid.Empty;
         if (rootKind == "ChangeRequest" && rootCr == Guid.Empty) return null;
@@ -230,13 +237,15 @@ public static class ChangeRequestTraceProjection
                               join parent in db.SystemChangeRequests.AsNoTracking()
                                   on link.UpstreamChangeRequestId equals parent.Id
                               where child.ProjectId == projectId && parent.ProjectId == projectId
+                                  && crIds.Contains(child.Id) && crIds.Contains(parent.Id)
                               select new { link.Id, link.ChangeRequestId, link.UpstreamChangeRequestId, link.UpstreamBuildId,
                                   link.UpstreamBuildVersion, link.Rationale, link.ActorId, link.StatedAt })
-            .ToListAsync(ct);
+            .ReadTraceAsync(budget, ct);
         var assessments = await (from assessment in db.DownstreamChangeAssessments.AsNoTracking()
                                  join link in db.DownstreamAssessmentChangeRequestLinks.AsNoTracking()
                                      on assessment.Id equals link.AssessmentId
                                  where assessment.ProjectId == projectId
+                                     && crIds.Contains(assessment.SourceChangeRequestId) && crIds.Contains(link.ChangeRequestId)
                                      && assessment.State != DownstreamAssessmentState.Superseded
                                  select new
                                  {
@@ -244,34 +253,58 @@ public static class ChangeRequestTraceProjection
                                      assessment.Outcome, assessment.TargetLevel,
                                      assessment.SourceChangeRequestId, LinkId = link.Id,
                                      ChildId = link.ChangeRequestId
-                                 }).ToListAsync(ct);
+                                 }).ReadTraceAsync(budget, ct);
         authored = authored.Where(x => byCr.ContainsKey(x.ChangeRequestId)
             && byCr.ContainsKey(x.UpstreamChangeRequestId)).ToList();
         assessments = assessments.Where(x => byCr.TryGetValue(x.SourceChangeRequestId, out var source)
             && byCr.TryGetValue(x.ChildId, out var child)
             && IsCurrentAssessmentEdge(x.ProjectId, x.State, x.ReleaseId, x.TargetLevel,
                 Identity(source), Identity(child), policy)).ToList();
-        var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId)
-            .ToDictionaryAsync(x => x.Id, x => x.Version, ct);
-        var reopenings = await (from reopening in db.DownstreamAssessmentReopenings.AsNoTracking()
-                                join assessment in db.DownstreamChangeAssessments.AsNoTracking()
-                                    on reopening.AssessmentId equals assessment.Id
-                                where assessment.ProjectId == projectId
-                                select new
-                                {
-                                    reopening.Id, reopening.AssessmentId, reopening.Reason, reopening.ActorId,
-                                    reopening.OccurredAt, reopening.PreviousState, reopening.PreviousOutcome
-                                }).ToListAsync(ct);
-        var reopeningByAssessment = reopenings
-            .GroupBy(x => x.AssessmentId)
-            .ToDictionary(x => x.Key, x => x.OrderBy(y => y.OccurredAt).ThenBy(y => y.Id).ToList());
+        var snapshotIds = await BoundedSnapshotIdsAsync(db, projectId, crIds, budget, ct);
         var frozenCycles = await (from cycle in db.ReviewCycles.AsNoTracking()
-                                  join change in db.SystemChangeRequests.AsNoTracking()
-                                      on cycle.ChangeRequestId equals change.Id
-                                  where change.ProjectId == projectId
+                                  join change in db.SystemChangeRequests.AsNoTracking() on cycle.ChangeRequestId equals change.Id
+                                  where change.ProjectId == projectId && snapshotIds.Contains(cycle.Id)
                                   select new { ChangeRequestId = cycle.ChangeRequestId!.Value,
                                       cycle.StartedAt, cycle.SnapshotContractVersion, cycle.SnapshotJson })
-            .ToListAsync(ct);
+            .ReadTraceAsync(budget, ct);
+        var frozenEvidence = frozenCycles.SelectMany(x => ParseFrozenTrace(x.SnapshotJson)).ToList();
+        var frozenAssessmentIds = frozenEvidence.Where(x => x.AssessmentId != null).Select(x => x.AssessmentId!.Value).Distinct().ToArray();
+        var liveFrozenAssessmentIds = new HashSet<Guid>();
+        if (frozenAssessmentIds.Length > 0)
+        {
+            // A capped network may omit the current child of a frozen assessment. Its historical status still
+            // answers whether that exact assessment has a valid live link anywhere in the authorized Project.
+            var liveCandidates = await (from assessment in db.DownstreamChangeAssessments.AsNoTracking()
+                join link in db.DownstreamAssessmentChangeRequestLinks.AsNoTracking() on assessment.Id equals link.AssessmentId
+                join source in db.SystemChangeRequests.AsNoTracking() on assessment.SourceChangeRequestId equals source.Id
+                join child in db.SystemChangeRequests.AsNoTracking() on link.ChangeRequestId equals child.Id
+                where assessment.ProjectId == projectId && source.ProjectId == projectId && child.ProjectId == projectId
+                    && frozenAssessmentIds.Contains(assessment.Id) && assessment.State != DownstreamAssessmentState.Superseded
+                select new { assessment.Id, assessment.State, assessment.ReleaseId, assessment.TargetLevel,
+                    Source = new CrIdentity(source.ProjectId, source.TargetReleaseId, source.Type, source.SoftwareLevel, source.State),
+                    Child = new CrIdentity(child.ProjectId, child.TargetReleaseId, child.Type, child.SoftwareLevel, child.State) })
+                .ReadTraceAsync(budget, ct);
+            liveFrozenAssessmentIds.UnionWith(liveCandidates.Where(x => IsCurrentAssessmentEdge(projectId,
+                x.State, x.ReleaseId, x.TargetLevel, x.Source, x.Child, policy)).Select(x => x.Id));
+        }
+        var evidenceBuildIds = frozenEvidence.SelectMany(x => new[] { x.BuildId, x.UpstreamBuildId })
+            .Where(x => x != null).Select(x => x!.Value).Concat(authored.Select(x => x.UpstreamBuildId))
+            .Concat(assessments.Select(x => x.ReleaseId)).Distinct().ToArray();
+        var releaseRows = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId
+                && (evidenceBuildIds.Contains(x.Id)
+                    || db.SystemChangeRequests.Any(cr => cr.ProjectId == projectId && crIds.Contains(cr.Id) && cr.TargetReleaseId == x.Id)
+                    || db.TestChangeReviews.Any(tcr => tcr.ProjectId == projectId && tcrIds.Contains(tcr.Id) && tcr.ReleaseId == x.Id)
+                    || db.CodeTraceabilityRecords.Any(code => code.ProjectId == projectId && codeIds.Contains(code.Id) && code.ReleaseId == x.Id)
+                    || db.ProblemReports.Any(report => report.ProjectId == projectId && reportIds.Contains(report.Id) && report.TargetReleaseId == x.Id)))
+            .Select(x => new { x.Id, x.Version }).ReadTraceAsync(budget, ct);
+        var releases = releaseRows.ToDictionary(x => x.Id, x => x.Version);
+        var reopenings = await (from reopening in db.DownstreamAssessmentReopenings.AsNoTracking()
+                                join assessment in db.DownstreamChangeAssessments.AsNoTracking() on reopening.AssessmentId equals assessment.Id
+                                where assessment.ProjectId == projectId && frozenAssessmentIds.Contains(assessment.Id)
+                                select new { reopening.Id, reopening.AssessmentId, reopening.Reason, reopening.ActorId,
+                                    reopening.OccurredAt, reopening.PreviousState, reopening.PreviousOutcome }).ReadTraceAsync(budget, ct);
+        var reopeningByAssessment = reopenings.GroupBy(x => x.AssessmentId)
+            .ToDictionary(x => x.Key, x => x.OrderBy(y => y.OccurredAt).ThenBy(y => y.Id).ToList());
 
         // A relation row is the traversal authority. Walk both directions over the exact CR identities and
         // retain one deterministic edge per pair; assessment and authored facts are merged, never duplicated.
@@ -288,10 +321,16 @@ public static class ChangeRequestTraceProjection
             if (!edge.Provenance.Contains(provenance)) edge.Provenance.Add(provenance);
         }
         foreach (var link in authored)
+        {
+            var eligible = byCr.TryGetValue(link.UpstreamChangeRequestId, out var parent)
+                && byCr.TryGetValue(link.ChangeRequestId, out var child)
+                && IsCurrentAuthoredPair(Identity(child), Identity(parent), link.UpstreamBuildId, policy);
             AddPair(link.ChangeRequestId, link.UpstreamChangeRequestId,
                 new("AuthorStated", link.Id, Rationale: link.Rationale, ActorId: link.ActorId,
                     StatedAt: link.StatedAt, UpstreamBuildId: link.UpstreamBuildId,
-                    UpstreamBuildVersion: link.UpstreamBuildVersion));
+                    UpstreamBuildVersion: link.UpstreamBuildVersion, IsLive: eligible,
+                    Status: eligible ? null : "Upstream revision is not eligible for this exact parent/build relationship; corrective authoring is required."));
+        }
         foreach (var link in assessments)
             AddPair(link.ChildId, link.SourceChangeRequestId,
                 new("AssessmentDerived", link.Id, link.Id, link.LinkId,
@@ -300,6 +339,8 @@ public static class ChangeRequestTraceProjection
         // exact evidence it froze, so retain it as historical provenance without reanimating a live edge.
         foreach (var cycle in frozenCycles.Where(x => byCr.ContainsKey(x.ChangeRequestId)
                      && x.SnapshotContractVersion >= 3))
+        {
+            ct.ThrowIfCancellationRequested();
             foreach (var frozen in ParseFrozenTrace(cycle.SnapshotJson))
             {
                 var reopening = frozen.AssessmentId is Guid assessmentId
@@ -307,7 +348,7 @@ public static class ChangeRequestTraceProjection
                     ? recordedReopenings.FirstOrDefault(x => x.OccurredAt >= cycle.StartedAt)
                     : null;
                 var liveAssessment = frozen.AssessmentId is Guid liveAssessmentId
-                    && assessments.Any(x => x.Id == liveAssessmentId);
+                    && liveFrozenAssessmentIds.Contains(liveAssessmentId);
                 AddPair(cycle.ChangeRequestId, frozen.UpstreamId,
                     new(frozen.Kind, frozen.SourceId,
                         frozen.AssessmentId, frozen.AssessmentLinkId, IsLive: false,
@@ -329,6 +370,7 @@ public static class ChangeRequestTraceProjection
                         PreviousState: reopening?.PreviousState.ToString(),
                         PreviousOutcome: reopening?.PreviousOutcome.ToString()));
             }
+        }
 
         var nodes = new Dictionary<(string Kind, Guid Id), ChangeRequestTraceNode>();
         foreach (var id in byCr.Keys.OrderBy(x => x))
@@ -343,17 +385,22 @@ public static class ChangeRequestTraceProjection
 
         // Existing TCR source identities, including immutable package source snapshots, are all read in one
         // batch. Source snapshots are parsed only after the query; JSON is evidence, never a new relationship store.
-        var reviewRows = await db.TestChangeReviews.AsNoTracking().Where(x => x.ProjectId == projectId)
+        var reviewRows = await db.TestChangeReviews.AsNoTracking().Where(x => x.ProjectId == projectId && tcrIds.Contains(x.Id))
             .Select(x => new { x.Id, x.ReleaseId, x.BaseNumber, x.Revision, x.Title, x.State, x.ArtifactKind,
                 x.ChangeRequestId, x.OriginKind, x.OriginReferenceId })
-            .ToListAsync(ct);
+            .ReadTraceAsync(budget, ct);
         var reviewIds = reviewRows.Select(x => x.Id).ToHashSet();
         var claims = await db.TestChangeRequestClaims.AsNoTracking()
             .Where(x => reviewIds.Contains(x.TestChangeReviewId))
             .Select(x => new { x.TestChangeReviewId, x.ChangeRequestId, x.Id })
-            .ToListAsync(ct);
+            .ReadTraceAsync(budget, ct);
         var tcrById = reviewRows.ToDictionary(x => x.Id);
         if (rootKind == "TestChangeRequest" && !tcrById.ContainsKey(rootId)) return null;
+        if (isNetwork)
+            foreach (var review in reviewRows)
+                nodes[("TestChangeRequest", review.Id)] = new(review.Id, "TestChangeRequest",
+                    Display(review.BaseNumber, review.Revision), review.Title, review.State.ToString(), projectId,
+                    review.ReleaseId, releases.GetValueOrDefault(review.ReleaseId), review.Revision, review.ArtifactKind.ToString());
         if (rootKind == "TestChangeRequest")
         {
             var rootTcr = tcrById[rootId];
@@ -391,10 +438,10 @@ public static class ChangeRequestTraceProjection
                 && CaseOrigins.Contains(x.OriginKind)).ToList();
         var changeOrigins = await db.Set<TestProcedureChange>().AsNoTracking()
             .Where(x => procedureTcrs.Select(p => p.OriginReferenceId).Contains(x.Id))
-            .Select(x => new { x.Id, x.TestChangeReviewId }).ToListAsync(ct);
+            .Select(x => new { x.Id, x.TestChangeReviewId }).ReadTraceAsync(budget, ct);
         var assessmentOrigins = await db.VerificationImpactItems.AsNoTracking()
             .Where(x => procedureTcrs.Select(p => p.OriginReferenceId).Contains(x.Id))
-            .Select(x => new { x.Id, x.TestChangeReviewId }).ToListAsync(ct);
+            .Select(x => new { x.Id, x.TestChangeReviewId }).ReadTraceAsync(budget, ct);
         var caseProcedurePairs = procedureTcrs.Select(procedureTcr =>
         {
             var caseTcr = procedureTcr.OriginKind switch
@@ -435,17 +482,17 @@ public static class ChangeRequestTraceProjection
         var requirementRevisions = await (from revision in db.RequirementRevisions.AsNoTracking()
                                            join artifact in db.Requirements.AsNoTracking()
                                                on revision.ArtifactId equals artifact.Id
-                                           where artifact.ProjectId == projectId
+                                           where artifact.ProjectId == projectId && reqIds.Contains(revision.Id)
                                            select new { revision.Id, revision.ArtifactId, artifact.BaseNumber,
                                                revision.Revision, revision.Statement, artifact.Level,
-                                               revision.SourceChangeRequestId }).ToListAsync(ct);
+                                               revision.SourceChangeRequestId }).ReadTraceAsync(budget, ct);
         var requirementRevisionIds = requirementRevisions.Select(x => x.Id).ToList();
         var baselineMemberships = await (from selection in db.BaselineRequirements.AsNoTracking()
                                          join baseline in db.CandidateBaselines.AsNoTracking()
                                              on selection.BaselineId equals baseline.Id
                                          where baseline.ProjectId == projectId
                                              && requirementRevisionIds.Contains(selection.RevisionId)
-                                         select new { selection.RevisionId, selection.BaselineId }).ToListAsync(ct);
+                                         select new { selection.RevisionId, selection.BaselineId }).ReadTraceAsync(budget, ct);
         var membershipsByRevision = baselineMemberships
             .GroupBy(x => x.RevisionId)
             .ToDictionary(x => x.Key, x => (IReadOnlyList<Guid>)x.Select(y => y.BaselineId).Distinct().OrderBy(y => y).ToList());
@@ -464,7 +511,7 @@ public static class ChangeRequestTraceProjection
         // that deliberately.
         var liveOnly = true;
         var allRequirementLinks = await db.RequirementTraces.AsNoTracking()
-            .Where(x => x.ProjectId == projectId)
+            .Where(x => x.ProjectId == projectId && reqIds.Contains(x.SourceRevisionId) && reqIds.Contains(x.TargetRevisionId))
             .Select(x => new { x.Id, x.SourceRevisionId, x.TargetRevisionId, x.Type,
                 x.ExactLinkSuspectLifecycleId,
                 IsSuspect = x.ExactLinkSuspectLifecycleId != null
@@ -474,7 +521,7 @@ public static class ChangeRequestTraceProjection
                         && lifecycle.LinkKind == ExactLinkKind.RequirementTrace
                         && lifecycle.LinkId == x.Id
                         && lifecycle.State != ExactLinkLifecycleState.Closed) })
-            .ToListAsync(ct);
+            .ReadTraceAsync(budget, ct);
         if (liveOnly) allRequirementLinks = allRequirementLinks.Where(x => !x.IsSuspect).ToList();
         foreach (var requirement in requirementRevisions)
         {
@@ -498,9 +545,9 @@ public static class ChangeRequestTraceProjection
             edgeBuilders.Add(edge);
         }
         var code = await db.CodeTraceabilityRecords.AsNoTracking()
-            .Where(x => x.ProjectId == projectId)
+            .Where(x => x.ProjectId == projectId && codeIds.Contains(x.Id))
             .Select(x => new { x.Id, x.RequirementRevisionId, x.ReleaseId, x.Disposition, x.MergeRequestReference })
-            .ToListAsync(ct);
+            .ReadTraceAsync(budget, ct);
         foreach (var record in code)
         {
             nodes[("CodeTraceability", record.Id)] = new(record.Id, "CodeTraceability", record.MergeRequestReference,
@@ -517,16 +564,23 @@ public static class ChangeRequestTraceProjection
         // block is scoped rather than added to the shared graph.
         if (isNetwork)
         {
+            var reports = await db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == projectId && reportIds.Contains(x.Id))
+                .Select(x => new { x.Id, x.ReportNumber, x.Revision, x.Title, x.State, x.TargetReleaseId }).ReadTraceAsync(budget, ct);
+            foreach (var report in reports)
+                nodes[("ProblemReport", report.Id)] = new(report.Id, "ProblemReport", Display(report.ReportNumber, report.Revision),
+                    report.Title, report.State.ToString(), projectId, report.TargetReleaseId,
+                    report.TargetReleaseId is Guid build ? releases.GetValueOrDefault(build) : null, report.Revision, null);
             var problemLinks = await (from link in db.ProblemReportLinks.AsNoTracking()
                                       join report in db.ProblemReports.AsNoTracking()
                                           on link.ProblemReportId equals report.Id
-                                      where report.ProjectId == projectId
+                                      where report.ProjectId == projectId && reportIds.Contains(report.Id)
+                                          && ((link.ArtifactType == "ChangeRequest" && crIds.Contains(link.ArtifactId)) || (link.ArtifactType == "TestChangeRequest" && tcrIds.Contains(link.ArtifactId)))
                                           && (link.ArtifactType == "ChangeRequest"
                                               || link.ArtifactType == "TestChangeRequest")
                                       select new { link.Id, link.ProblemReportId, link.ArtifactType,
                                           link.ArtifactId, link.Relationship, report.ReportNumber,
                                           report.Revision, report.Title, report.State, report.TargetReleaseId })
-                .ToListAsync(ct);
+                .ReadTraceAsync(budget, ct);
             foreach (var link in problemLinks)
             {
                 var targetKind = link.ArtifactType;
@@ -555,9 +609,14 @@ public static class ChangeRequestTraceProjection
             fromSet.Add(to); toSet.Add(from);
         }
         var typedEdges = edgeBuilders.Where(x => nodes.ContainsKey((x.FromKind, x.FromId))
-                && nodes.ContainsKey((x.ToKind, x.ToId))).ToList();
+                && nodes.ContainsKey((x.ToKind, x.ToId))
+                && (!directOnly || (x.FromKind == rootKind && x.FromId == rootId)
+                    || (x.ToKind == rootKind && x.ToId == rootId))).ToList();
         foreach (var edge in typedEdges)
+        {
+            ct.ThrowIfCancellationRequested();
             Connect((edge.FromKind, edge.FromId), (edge.ToKind, edge.ToId));
+        }
         var visited = new HashSet<(string Kind, Guid Id)>();
         if (isNetwork)
         {
@@ -568,15 +627,15 @@ public static class ChangeRequestTraceProjection
                 if ((entry.Key.Kind == "ChangeRequest" || entry.Key.Kind == "TestChangeRequest")
                     && entry.Value.BuildId == networkReleaseId)
                     visited.Add(entry.Key);
-            foreach (var edge in typedEdges)
-                if (edge.FromKind == "ProblemReport" && visited.Contains((edge.ToKind, edge.ToId)))
-                    visited.Add((edge.FromKind, edge.FromId));
+            foreach (var reportId in scope.Reports)
+                if (nodes.ContainsKey(("ProblemReport", reportId))) visited.Add(("ProblemReport", reportId));
         }
         else
         {
             var pending = new Stack<(string Kind, Guid Id)>([(rootKind, rootId)]);
             while (pending.Count > 0)
             {
+                ct.ThrowIfCancellationRequested();
                 var current = pending.Pop();
                 if (!visited.Add(current) || !graph.TryGetValue(current, out var next)) continue;
                 foreach (var node in next.OrderByDescending(x => x.Kind).ThenByDescending(x => x.Id)) pending.Push(node);
@@ -586,7 +645,7 @@ public static class ChangeRequestTraceProjection
         // computing it per change request would be the expensive part of an otherwise single-pass read.
         var state = rootKind == "ChangeRequest"
             ? (await ComputeStatesAsync(db, projectId,
-                byCr.Values.Where(x => visited.Contains(("ChangeRequest", x.Id))).ToList(), policy, ct))[rootCr]
+                [byCr[rootCr]], policy, ct, budget))[rootCr]
             : null;
         var edges = typedEdges.Where(x => visited.Contains((x.FromKind, x.FromId))
                 && visited.Contains((x.ToKind, x.ToId)))
@@ -597,21 +656,24 @@ public static class ChangeRequestTraceProjection
                     group.Any(x => x.IsSuspect)))
             .OrderBy(x => x.FromKind).ThenBy(x => x.FromId).ThenBy(x => x.ToKind).ThenBy(x => x.ToId)
             .ThenBy(x => x.Relation).ToList();
+        ct.ThrowIfCancellationRequested();
         return new(projectId, rootKind == "ChangeRequest" ? rootCr : Guid.Empty,
             nodes.Where(x => visited.Contains(x.Key)).Select(x => x.Value)
                 .OrderBy(x => x.Kind).ThenBy(x => x.DisplayNumber).ThenBy(x => x.Id).ToList(), edges, state,
-            rootId, rootKind);
+            rootId, rootKind, directOnly);
     }
 
     private static async Task<IReadOnlyDictionary<Guid, ChangeRequestTraceState>> ComputeStatesAsync(
         AeroLinkDbContext db, Guid projectId, IReadOnlyCollection<CrRow> rows, ILadderPolicy policy,
-        CancellationToken ct)
+        CancellationToken ct, TraceReadBudget? budget = null)
     {
         var ids = rows.Select(x => x.Id).ToHashSet();
-        var links = await db.ChangeRequestUpstreamLinks.AsNoTracking()
-            .Where(x => ids.Contains(x.ChangeRequestId))
-            .Select(x => new { x.ChangeRequestId, x.UpstreamChangeRequestId })
-            .ToListAsync(ct);
+        var links = await (from link in db.ChangeRequestUpstreamLinks.AsNoTracking()
+            join source in db.SystemChangeRequests.AsNoTracking() on link.UpstreamChangeRequestId equals source.Id
+            where ids.Contains(link.ChangeRequestId)
+            select new { link.ChangeRequestId, link.UpstreamChangeRequestId, link.UpstreamBuildId,
+                Source = new CrIdentity(source.ProjectId, source.TargetReleaseId, source.Type, source.SoftwareLevel, source.State) })
+            .ReadTraceAsync(budget, ct);
         // Read the assessment decision independently from its optional child links. An assessment can be
         // Pending, NoChangeRequired, or ChangeRequired before a downstream CR exists; an inner join would
         // erase that authoritative state and incorrectly report NoDownstreamWork.
@@ -622,19 +684,19 @@ public static class ChangeRequestTraceProjection
                         && ids.Contains(link.ChangeRequestId))))
             .Select(x => new { x.Id, x.ProjectId, x.SourceChangeRequestId, x.State, x.Outcome,
                 x.ReleaseId, x.TargetLevel })
-            .ToListAsync(ct);
+            .ReadTraceAsync(budget, ct);
         var assessmentIds = assessments.Select(x => x.Id).ToHashSet();
         var assessmentLinks = await db.DownstreamAssessmentChangeRequestLinks.AsNoTracking()
             .Where(x => assessmentIds.Contains(x.AssessmentId))
             .Select(x => new { Id = x.AssessmentId, ChildId = x.ChangeRequestId })
-            .ToListAsync(ct);
+            .ReadTraceAsync(budget, ct);
         var assessmentById = assessments.ToDictionary(x => x.Id);
         var targetIds = assessmentLinks.Select(x => x.ChildId).Distinct().ToList();
         var identityIds = assessments.Select(x => x.SourceChangeRequestId).Concat(targetIds).Distinct().ToList();
         var identities = await db.SystemChangeRequests.AsNoTracking()
             .Where(x => x.ProjectId == projectId && identityIds.Contains(x.Id))
             .Select(x => new { x.Id, x.ProjectId, x.TargetReleaseId, x.Type, x.SoftwareLevel,
-                x.BaseNumber, x.Revision, x.State }).ToListAsync(ct);
+                x.BaseNumber, x.Revision, x.State }).ReadTraceAsync(budget, ct);
         var targets = identities.Where(x => targetIds.Contains(x.Id)).ToList();
         var targetById = targets.ToDictionary(x => x.Id);
         var sourceIds = assessments.Select(x => x.SourceChangeRequestId).Distinct().ToList();
@@ -645,19 +707,22 @@ public static class ChangeRequestTraceProjection
         var targetIdentityById = targets.ToDictionary(x => x.Id,
             x => new CrIdentity(x.ProjectId, x.TargetReleaseId, x.Type, x.SoftwareLevel, x.State));
         var targetBaseNumbers = targets.Select(x => x.BaseNumber).Distinct().ToList();
-        var latestTargetRevision = await db.SystemChangeRequests.AsNoTracking()
+        var latestTargetRevisionRows = await db.SystemChangeRequests.AsNoTracking()
             .Where(x => x.ProjectId == projectId && targetBaseNumbers.Contains(x.BaseNumber))
             .GroupBy(x => x.BaseNumber)
             .Select(x => new { BaseNumber = x.Key, Revision = x.Max(y => y.Revision) })
-            .ToDictionaryAsync(x => x.BaseNumber, x => x.Revision, ct);
+            .ReadTraceAsync(budget, ct);
+        var latestTargetRevision = latestTargetRevisionRows.ToDictionary(x => x.BaseNumber, x => x.Revision);
+        var snapshotIds = budget is null ? null : await BoundedSnapshotIdsAsync(db, projectId, ids, budget, ct);
         var frozenCycles = await (from cycle in db.ReviewCycles.AsNoTracking()
                                   join change in db.SystemChangeRequests.AsNoTracking()
                                       on cycle.ChangeRequestId equals change.Id
                                   where change.ProjectId == projectId
                                       && cycle.ChangeRequestId != null && ids.Contains(cycle.ChangeRequestId.Value)
                                       && cycle.SnapshotContractVersion >= 3
+                                      && (snapshotIds == null || snapshotIds.Contains(cycle.Id))
                                   select new { ChangeRequestId = cycle.ChangeRequestId!.Value, cycle.SnapshotJson })
-            .ToListAsync(ct);
+            .ReadTraceAsync(budget, ct);
         var frozenAnswers = frozenCycles.GroupBy(x => x.ChangeRequestId)
             .ToDictionary(x => x.Key, x => x.Any(y => ParseFrozenTrace(y.SnapshotJson).Count > 0
                 || HasFrozenAnswer(y.SnapshotJson)));
@@ -665,6 +730,12 @@ public static class ChangeRequestTraceProjection
         foreach (var row in rows)
         {
             var level = ChangeRequestLevel(row);
+            if (level is null || !policy.OrderedLevels.Contains(level.Value))
+            {
+                result[row.Id] = new("NotApplicable", "NotApplicable", "OffLadder", false,
+                    ["Historical change request level is not configured in the current Project ladder."]);
+                continue;
+            }
             var top = level is not null && policy.ParentLevels(level.Value).Count == 0;
             var rowLinks = links.Where(x => x.ChangeRequestId == row.Id).ToList();
             var derivedAnswer = assessmentLinks.Any(x => x.ChildId == row.Id
@@ -673,13 +744,22 @@ public static class ChangeRequestTraceProjection
                 && targetIdentityById.TryGetValue(x.ChildId, out var child)
                 && IsCurrentAssessmentEdge(assessment.ProjectId, assessment.State, assessment.ReleaseId, assessment.TargetLevel,
                     source, child, policy));
-            var authoredAnswer = rowLinks.Count > 0 || !string.IsNullOrWhiteSpace(row.NoUpstreamRationale)
+            var invalidAuthoredAnswer = rowLinks.Any(x => !IsCurrentAuthoredPair(Identity(row), x.Source, x.UpstreamBuildId, policy));
+            var invalidDerivedAnswer = assessmentLinks.Any(x => x.ChildId == row.Id
+                && assessmentById.TryGetValue(x.Id, out var assessment)
+                && sourceById.TryGetValue(assessment.SourceChangeRequestId, out var source)
+                && !ChangeRequestUpstreamEligibility.IsApproved(source.State)
+                && IsApplicableAssessmentPair(assessment.ProjectId, assessment.State, assessment.ReleaseId,
+                    assessment.TargetLevel, source, Identity(row), policy));
+            var authoredAnswer = rowLinks.Count > 0 && !invalidAuthoredAnswer || !string.IsNullOrWhiteSpace(row.NoUpstreamRationale)
                 || row.InheritedUpstreamContextJson is not null && row.UpstreamAnswerAffirmed;
             var frozenAnswer = frozenAnswers.GetValueOrDefault(row.Id);
             var historicalFrozenAnswer = row.State != ChangeRequestState.Draft && frozenAnswer;
-            var upstream = top ? "Root" : authoredAnswer || derivedAnswer || historicalFrozenAnswer ? "Answered"
+            var upstream = top ? "Root" : invalidAuthoredAnswer || invalidDerivedAnswer ? "UpstreamGap" : authoredAnswer || derivedAnswer || historicalFrozenAnswer ? "Answered"
                 : row.State == ChangeRequestState.Draft ? "IncompleteAuthoring" : "UpstreamGap";
             var warnings = new List<string>();
+            if (invalidAuthoredAnswer || invalidDerivedAnswer)
+                warnings.Add("An upstream revision is not eligible for this exact parent/build relationship; correct the active answer. Frozen reviews remain historical evidence.");
             if (!top && !authoredAnswer && !derivedAnswer && !historicalFrozenAnswer)
                 warnings.Add(row.State == ChangeRequestState.Draft
                     ? "No upstream answer is authored yet; complete it before review."
@@ -741,9 +821,23 @@ public static class ChangeRequestTraceProjection
     private static CrIdentity Identity(CrRow row) =>
         new(row.ProjectId, row.TargetReleaseId, row.Type, row.SoftwareLevel, row.State);
 
+    private static bool IsCurrentAuthoredPair(CrIdentity child, CrIdentity source, Guid capturedBuildId, ILadderPolicy policy)
+    {
+        var childLevel = ChangeRequestLevel(child.Type, child.SoftwareLevel);
+        var parentLevel = ChangeRequestLevel(source.Type, source.SoftwareLevel);
+        return ChangeRequestUpstreamEligibility.IsApproved(source.State) && child.ProjectId == source.ProjectId
+            && capturedBuildId == source.TargetReleaseId && childLevel is { } level && parentLevel is { } parent
+            && policy.OrderedLevels.Contains(level) && policy.ParentLevels(level).Contains(parent);
+    }
+
     private static bool IsCurrentAssessmentEdge(Guid projectId, DownstreamAssessmentState assessmentState,
         Guid assessmentReleaseId,
         RequirementLevel assessmentTargetLevel, CrIdentity source, CrIdentity child, ILadderPolicy policy)
+        => ChangeRequestUpstreamEligibility.IsApproved(source.State)
+            && IsApplicableAssessmentPair(projectId, assessmentState, assessmentReleaseId, assessmentTargetLevel, source, child, policy);
+
+    private static bool IsApplicableAssessmentPair(Guid projectId, DownstreamAssessmentState assessmentState,
+        Guid assessmentReleaseId, RequirementLevel assessmentTargetLevel, CrIdentity source, CrIdentity child, ILadderPolicy policy)
     {
         if (assessmentState == DownstreamAssessmentState.Superseded
             || source.ProjectId != projectId || child.ProjectId != projectId)
@@ -751,6 +845,7 @@ public static class ChangeRequestTraceProjection
         var sourceLevel = ChangeRequestLevel(source.Type, source.SoftwareLevel);
         var childLevel = ChangeRequestLevel(child.Type, child.SoftwareLevel);
         return sourceLevel is not null && childLevel is not null
+            && policy.OrderedLevels.Contains(childLevel.Value)
             && assessmentReleaseId == child.TargetReleaseId
             && source.TargetReleaseId == child.TargetReleaseId
             && assessmentTargetLevel == childLevel
@@ -782,47 +877,6 @@ public static class ChangeRequestTraceProjection
         catch (JsonException) { return []; }
     }
 
-    private static IReadOnlyList<FrozenTrace> ParseFrozenTrace(string json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return [];
-        try
-        {
-            using var document = JsonDocument.Parse(json);
-            if (document.RootElement.ValueKind != JsonValueKind.Object) return [];
-            var result = new List<FrozenTrace>();
-            if (document.RootElement.TryGetProperty("authoredLinks", out var authored)
-                && authored.ValueKind == JsonValueKind.Array)
-                foreach (var link in authored.EnumerateArray())
-                {
-                    if (TryGuid(link, "upstreamChangeRequestId", out var id)
-                        || TryGuid(link, "UpstreamChangeRequestId", out id))
-                    {
-                        result.Add(new(id, "FrozenAuthorStatedEvidence", TryGuid(link, "id") ?? TryGuid(link, "Id"), null, null,
-                            TryString(link, "rationale") ?? TryString(link, "Rationale"),
-                            TryString(link, "actorId") ?? TryString(link, "ActorId"),
-                            TryDate(link, "statedAt") ?? TryDate(link, "StatedAt"),
-                            TryGuid(link, "upstreamBuildId") ?? TryGuid(link, "UpstreamBuildId"),
-                            TryString(link, "upstreamBuildVersion") ?? TryString(link, "UpstreamBuildVersion")));
-                    }
-                }
-            if (document.RootElement.TryGetProperty("derivedLinks", out var derived)
-                && derived.ValueKind == JsonValueKind.Array)
-                foreach (var link in derived.EnumerateArray())
-                {
-                    if (TryGuid(link, "upstreamChangeRequestId", out var id)
-                        || TryGuid(link, "UpstreamChangeRequestId", out id))
-                    {
-                        var assessmentId = TryGuid(link, "assessmentId") ?? TryGuid(link, "AssessmentId");
-                        var assessmentLinkId = TryGuid(link, "assessmentLinkId") ?? TryGuid(link, "AssessmentLinkId");
-                        result.Add(new(id, "FrozenReviewEvidence", assessmentLinkId ?? assessmentId,
-                            assessmentId, assessmentLinkId, BuildId: TryGuid(link, "buildId") ?? TryGuid(link, "BuildId")));
-                    }
-                }
-            return result.Distinct().OrderBy(x => x.UpstreamId).ThenBy(x => x.Kind).ToList();
-        }
-        catch (JsonException) { return []; }
-    }
-
     private static bool HasFrozenAnswer(string json)
     {
         if (string.IsNullOrWhiteSpace(json)) return false;
@@ -839,23 +893,5 @@ public static class ChangeRequestTraceProjection
         catch (JsonException) { return false; }
     }
 
-    private static Guid? TryGuid(JsonElement element, string name)
-    {
-        if (!element.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.String
-            || !Guid.TryParse(value.GetString(), out var id) || id == Guid.Empty) return null;
-        return id;
-    }
 
-    private static string? TryString(JsonElement element, string name) =>
-        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
-            ? value.GetString() : null;
-
-    private static DateTimeOffset? TryDate(JsonElement element, string name) =>
-        TryString(element, name) is { } value && DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
-
-    private static bool TryGuid(JsonElement element, string name, out Guid id)
-    {
-        id = TryGuid(element, name) ?? Guid.Empty;
-        return id != Guid.Empty;
-    }
 }

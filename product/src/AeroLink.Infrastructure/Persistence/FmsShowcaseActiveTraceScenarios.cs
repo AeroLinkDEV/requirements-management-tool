@@ -42,7 +42,7 @@ public sealed partial class FmsShowcaseSeeder
             join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id
             join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
             where member.BaselineId == baselineId && artifact.ProjectId == project.Id
-            select new { artifact.BaseNumber, artifact.Level, revision.Id, revision.Revision, revision.Statement })
+            select new { artifact.BaseNumber, artifact.Level, revision.Id, revision.Revision, revision.Statement, revision.SourceChangeRequestId })
             .ToDictionaryAsync(x => x.BaseNumber, ct);
         var memberIds = members.Values.Select(x => x.Id).ToList();
         var memberById = members.Values.ToDictionary(x => x.Id);
@@ -126,9 +126,17 @@ public sealed partial class FmsShowcaseSeeder
                     impactDispositionJson: RequirementAuthoringJson.PendingImpactDispositions,
                     proposedUpstreamRevisionIdsJson: parentRequirement is { } parentId
                         ? JsonSerializer.Serialize(new[] { parentId }) : "[]", ladderPolicy: policy);
-                if (parent is not null)
-                    request.AddUpstreamLink(author, parent.Id, parent.DisplayNumber, release.Id, release.Version,
-                        $"This {level} proposal develops the same {topic} {scenario.Name} change at the next configured level.", at);
+                if (parentRequirement is { } upstreamRequirement)
+                {
+                    var approvedSourceId = memberById[upstreamRequirement].SourceChangeRequestId
+                        ?? throw new InvalidOperationException("The exact baseline parent has no source change request.");
+                    var approvedSource = await db.SystemChangeRequests.AsNoTracking().SingleAsync(x => x.Id == approvedSourceId, ct);
+                    if (!ChangeRequestUpstreamEligibility.IsApproved(approvedSource.State))
+                        throw new InvalidOperationException("The exact baseline parent source is no longer approved.");
+                    var sourceBuild = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == approvedSource.TargetReleaseId, ct);
+                    request.AddUpstreamLink(author, approvedSource.Id, approvedSource.DisplayNumber, sourceBuild.Id, sourceBuild.Version,
+                        $"The approved exact baseline parent {memberById[upstreamRequirement].BaseNumber} remains controlling for this {topic} refinement in build {release.Version}.", at);
+                }
                 if (index == 1 && level == RequirementLevel.HighLevel)
                     parallelReviewRequest = request;
                 db.SystemChangeRequests.Add(request);

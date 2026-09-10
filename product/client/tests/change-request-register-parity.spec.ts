@@ -2,6 +2,16 @@ import { expect, test, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { login } from './auth'
 
+let routeHandlerFinished = true
+
+test.afterEach(async ({ page }) => {
+  // A test may finish as soon as its assertion passes while a page.route handler is still fetching
+  // or parsing a response. Wait for those handlers before Playwright closes the context, otherwise
+  // the next test inherits "Test ended" or "Response has been disposed" from this test's work.
+  await page.unrouteAll({ behavior: 'wait' })
+  expect(routeHandlerFinished).toBe(true)
+})
+
 const pngSize = (path: string) => {
   const bytes = readFileSync(path)
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
@@ -74,6 +84,20 @@ test('the requirements register keeps its shape on the shared component', async 
   await testInfo.attach('requirements-register-normal', { body: await page.screenshot(), contentType: 'image/png' })
 })
 
+test('unavailable direct trace never claims that no relationships are recorded', async ({ page }) => {
+  await login(page)
+  await openFrom(page, 'systems/change-requests')
+  await page.route('**/api/change-requests/*/trace?directOnly=true', route => route.fulfill({
+    status: 413, json: { code: 'trace_work_limit' },
+  }))
+  await page.locator('.historyRow.allocation').first().click()
+  await page.getByRole('tab', { name: 'Trace & impact' }).click()
+  const inspector = page.getByRole('complementary', { name: /detail$/ })
+  await expect(inspector).toContainText('The server did not expose a trace projection')
+  await expect(inspector).not.toContainText('No immediate upstream relationship')
+  await expect(inspector).not.toContainText('No immediate downstream relationship')
+})
+
 test('requirements register preserves deep-link history, native links, and authoritative trace facts', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1600, height: 900 })
@@ -93,7 +117,7 @@ test('requirements register preserves deep-link history, native links, and autho
   const secondParentId = '33333333-3333-4333-8333-333333333333'
   const secondTcrId = '44444444-4444-4444-8444-444444444444'
   const grandchildId = '55555555-5555-4555-8555-555555555555'
-  await page.route('**/api/change-requests/*/trace', async route => {
+  await page.route('**/api/change-requests/*/trace?directOnly=true', async route => {
     await route.fulfill({ json: {
       projectId, rootChangeRequestId: rootId,
       rootArtifactId: rootId, rootArtifactKind: 'ChangeRequest',
@@ -106,9 +130,9 @@ test('requirements register preserves deep-link history, native links, and autho
         { id: grandchildId, kind: 'ChangeRequest', projectId, buildId: releaseId, displayNumber: 'SRCR-GRANDCHILD.00', title: 'Indirect grandchild must stay out of inspector', state: 'Draft', revision: 0 },
       ],
       edges: [
-        { fromId: rootId, fromKind: 'ChangeRequest', toId: parentId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: parentId, rationale: 'Controlled parent rationale.' }] },
+        { fromId: parentId, fromKind: 'ChangeRequest', toId: rootId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: parentId, rationale: 'Controlled parent rationale.' }] },
         { fromId: rootId, fromKind: 'ChangeRequest', toId: tcrId, toKind: 'TestChangeRequest', relation: 'CoveredByTestChangeRequest', provenance: [{ kind: 'AssessmentDerived', sourceId: tcrId, status: 'Change required.' }] },
-        { fromId: rootId, fromKind: 'ChangeRequest', toId: secondParentId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: secondParentId, rationale: 'Second direct parent rationale.' }] },
+        { fromId: secondParentId, fromKind: 'ChangeRequest', toId: rootId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: secondParentId, rationale: 'Second direct parent rationale.' }] },
         { fromId: rootId, fromKind: 'ChangeRequest', toId: secondTcrId, toKind: 'TestChangeRequest', relation: 'CoveredByTestChangeRequest', provenance: [{ kind: 'AssessmentDerived', sourceId: secondTcrId, status: 'No change required.' }] },
         { fromId: parentId, fromKind: 'ChangeRequest', toId: grandchildId, toKind: 'ChangeRequest', relation: 'Upstream', provenance: [{ kind: 'AuthorStated', sourceId: grandchildId }] },
       ],
@@ -405,4 +429,28 @@ test('register authorship names the person, keeps the role secondary, and preser
 
   // The initials chip that made the row read "SR · Systems Requirements Author" is gone entirely.
   await expect(page.locator('.personMeta > i')).toHaveCount(0)
+})
+
+test('in-flight route handlers settle before browser teardown', async ({ page }) => {
+  routeHandlerFinished = false
+  let handlerStarted = false
+  let releaseHandler!: () => void
+  const handlerReleased = new Promise<void>(resolve => {
+    releaseHandler = resolve
+  })
+  await page.route('**/route-handler-teardown-probe', async route => {
+    handlerStarted = true
+    await handlerReleased
+    const response = await route.fetch()
+    await route.fulfill({ response })
+    routeHandlerFinished = true
+  })
+  await page.goto('/')
+  await page.evaluate(() => {
+    void fetch('/route-handler-teardown-probe')
+  })
+  await expect.poll(() => handlerStarted).toBe(true)
+  // The test body deliberately ends before this releases. The afterEach cleanup must wait for
+  // route.fetch and route.fulfill to finish instead of letting context teardown interrupt them.
+  setTimeout(releaseHandler, 250)
 })

@@ -6,11 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "oxlint && npm run check:case",
+    "lint": "oxlint && npm run check:case && npm run format:check",
     "check:case": "node scripts/check-filename-case.mjs",
     "typecheck": "tsc -b --pretty false",
     "preview": "vite preview",
     "test:fast": "npm run lint && npm run typecheck",
+    "test:fast:routes": "node scripts/check-fast-client-routing.mjs",
+    "test:fast:logic": "playwright test --config=playwright.logic.config.ts",
+    "test:fast:isolation": "node --test scripts/fast-client-isolation.test.mjs",
+    "test:fast:rendered": "playwright test --config=playwright.rendered.config.ts",
     "test:focused": "playwright test",
     "test:smoke:core": "playwright test tests/application-smoke.spec.ts",
     "test:smoke": "playwright test tests/application-smoke.spec.ts tests/showcase-usability.spec.ts",
@@ -18,7 +22,9 @@
     "test:e2e": "playwright test",
     "test:e2e:sharded": "node scripts/run-sharded-e2e.mjs",
     "test:production": "npm run build && playwright test --config=playwright.production.config.ts",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "format:check": "prettier --check src/ManagedDocumentationCenter.tsx src/ProblemReportCenter.tsx",
+    "format:write": "prettier --write src/ManagedDocumentationCenter.tsx src/ProblemReportCenter.tsx"
   },
   "dependencies": {
     "@fontsource/dm-sans": "^5.3.0",
@@ -34,6 +40,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "oxlint": "^1.71.0",
+    "prettier": "3.9.6",
     "typescript": "~6.0.2",
     "vite": "^8.1.1"
   }

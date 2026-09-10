@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory)][string]$Database,
     [Parameter(Mandatory)][string]$EvidenceRoot,
-    [Parameter(Mandatory)][object[]]$AttachmentInventory,
+    [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$AttachmentInventory,
     [int]$PostgresPort = 54329,
     [int]$ApiPort = 5091,
     [string]$LogRoot,

@@ -210,6 +210,77 @@ reboot can never block a fresh start; live ownership, port, runtime identity and
 If the production launcher exits with a terminal refusal, recovery reports that refusal within seconds and
 quotes the reason the launcher gave. It no longer waits out the readiness timeout for a port that cannot open.
 
+### HOME process control and first deployment
+
+Ordinary production Start preserves the current tunnel state. An exact ready API is reused without a client
+build or PostgreSQL startup. Reuse requires the dedicated source, launcher mode, installation classification
+and instance ID. If source or runtime replacement is needed, the controller captures its obligation, stops
+the owned tunnel before the API, and keeps that obligation through source re-entry, upgrade, build and startup.
+The replacement API receives an owed public notification origin before it starts. Its new listener PID and
+start identity own the origin proof before tunnel restoration; public 401 and readiness are checked again.
+An incomplete owed restoration exits unsuccessfully even when a safe local API remains available.
+
+API and ngrok ownership uses live Windows executable/command-line and process-creation evidence, not a saved
+PID or a health response alone. Supported creators add limited-query/terminate/synchronize access for the
+operator's account SID to each new service process, retaining the existing ACL. This makes the same process
+accessible from the account's S4U and ordinary interactive logons without granting Everyone access or changing
+the caller's token. CIM may still hide fields across those logons after the grant. In that case a native
+query reads the executable, full command line and creation time through one limited-query process handle,
+then checks the creation time against the enumerated process. Failure remains unknown, never absent;
+the grant does not provide process-memory write, full-access or token rights.
+API startup uses the built apphost directly so access is established before readiness,
+including for a process whose database readiness fails. Termination pins a native process handle and verifies
+the expected executable and exact start time, rejecting stale PIDs. Ngrok's full supported argument sequence
+must match; extra URL/config/policy overrides are not treated as the configured tunnel.
+
+One installation lease coordinates production Start, remote-demo Start/Stop, and source reconciliation.
+The OS file handle remains held through a fresh child continuation. Only a descendant with the matching
+per-run capability and live owner creation identity can share it. Contending invocations fail promptly with a
+retry diagnosis. Each child holds a separate OS witness so parent interruption cannot admit a competing
+transition while the child is still running. An interrupted quiescing transition retains its installation/source-bound
+restoration intent. The next launcher revalidates live ownership and current source before recovering; this intent
+is never process provenance. Completed intent is not replayed, and a successful explicit Stop supersedes it.
+Ordinary production/preserve-state and explicit remote Start/scheduled keep-ready remain separate
+policies. No durable disabled-tunnel preference is introduced.
+
+**First deployment of this contract requires the one elevated setup approved in DEC-122.** A pre-fix launcher
+can refuse before it fetches the fix, so first obtain the merged setup code without moving the development
+checkout. In the canonical repository, fetch and create a temporary source-only worktree:
+
+```powershell
+git fetch origin
+$setupSource = Join-Path $env:TEMP ('aerolink-home-setup-' + [guid]::NewGuid().ToString('N'))
+git worktree add --detach $setupSource origin/main
+```
+
+From an elevated **Windows PowerShell under the same operator account**, run the script at that exact
+`$setupSource` path:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<setupSource>\product\scripts\Initialize-AeroLinkHomeProcessControl.ps1"
+```
+
+Setup verifies clean fetched main of the same repository, the dedicated source/data binding and HOME instance.
+It temporarily disables the existing supported recovery triggers, waits boundedly for an old controller to
+finish, and restores the previous enabled states in `finally`. It grants access only after proving the legacy
+API/tunnel contracts and process starts. The only filesystem ACL change is operator Modify access on the
+installation's bootstrap coordination directory. It then runs the existing dedicated production launch/update
+path through a temporary Limited S4U task under the same account, while legacy recovery triggers are still paused.
+The replacement service is never created from the interactive setup token. Windows may give a LeastPrivilege
+S4U task for an administrator account a high-integrity batch token; the access grant and native query/stop
+were qualified from ordinary PowerShell against that actual boundary. The temporary task is removed on completion;
+its log and result remain in the bootstrap directory. Before that handoff, the approved setup generation
+captures restoration intent, quiesces proven legacy services and uses the existing strict source authority to
+fast-forward the dedicated checkout. This is necessary because a legacy launcher still relies on hidden CIM
+fields even after access is granted. No source gate is bypassed. The new Limited launcher consumes the intent to
+reach the fixed controller. Existing database/evidence locations and the ordinary clone-validated upgrade
+boundary remain authoritative. Setup never runs an API from the temporary worktree.
+
+After setup, run the stable production BAT from ordinary Explorer/PowerShell and verify unchanged PIDs on
+reuse, or the new runtime/origin and protected tunnel after a required transition. A one-time setup pass is
+not evidence that the S4U/non-admin or final HOME acceptance matrix has passed; retain those results separately
+on the delivery issue. Foreign/unprovable processes or unresolved configuration remain explicit refusals.
+
 ### Database upgrade posture, before the web server
 
 Both launchers ask what this build would do to this database **before** building a client or starting an API:
@@ -496,6 +567,20 @@ Relevant production settings are:
 
 Webhook requests include `X-AeroLink-Event`, `X-AeroLink-Delivery`, `X-AeroLink-Timestamp`, and `X-AeroLink-Signature`. Consumers must reject stale timestamps and verify the `v1=<hex>` HMAC-SHA256 over `<timestamp>.<raw request body>` before parsing the payload. Multi-instance deployments must use a shared, protected ASP.NET Core Data Protection key ring so encrypted webhook secrets and browser mutation tokens remain valid across instances.
 
+Webhook dispatch is at-least-once. Each attempt has a durable claim token and a two-minute lease; a worker crash,
+shutdown, or uncertain response returns the delivery to the retry path while preserving the
+stable `X-AeroLink-Delivery` and event IDs. A receiver may therefore see the same delivery more than once and must
+deduplicate on that delivery ID. A shutdown or disabled-before-send release records a cancelled physical attempt but
+does not consume the five failed-receiver-attempt budget. Disabled subscriptions retain their pending backlog and do not consume the active
+dispatch batch; enabling the subscription makes that backlog eligible again. Integration health reports expired claims
+as an attention condition, and the Integration Center places expired activity ahead of the recent activity list so an
+operator can inspect and replay it safely. Replaying an expired claim closes its prior attempt history before starting
+the same durable delivery again. Before upgrading to this claim protocol, stop or drain old dispatcher processes;
+old binaries do not understand claim tokens and must not run concurrently with the new dispatcher during the upgrade.
+The additive upgrade records pre-claim `Delivering` rows as an explicit `LegacyRecovered` history outcome with
+unknown owner/token/start time, while preserving their attempt count, response status, and prior error text. Rows at
+the five-attempt limit become dead-lettered during that repair.
+
 ### Webhook egress and redirect policy
 
 - Webhook endpoints must use HTTPS. `Integrations__AllowInsecureWebhookTargets=true` may permit plain HTTP only in isolated development. No other URI scheme is accepted, with or without the development overrides.
@@ -583,6 +668,20 @@ After reviewing the exact keep/delete list, apply it with `-Apply`. The command 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\Prune-LocalShowcasePrograms.ps1 -Apply
 ```
+
+### September 9 FMS historical correction
+
+DEC-125 and issue #1006 authorize one explicit exception for the audited, owned synthetic Interface aggregates across FMS history. `Repair-FmsDemoHistory.ps1` previews their exact dependency manifest by default. It refuses unexpected ownership, Customer/Interface requirements, released material or attachment dependencies; these require a newly reviewed manifest. The command does not reset the database or remove other Programs.
+
+Supply the exact installation PostgreSQL binaries, the runtime evidence root and a receipt directory outside application data:
+
+```powershell
+& product/scripts/Repair-FmsDemoHistory.ps1 -PostgresBin '<installation PostgreSQL bin>' -EvidenceRoot '<runtime evidence root>' -ReceiptDirectory '<operator recovery directory>'
+```
+
+First qualify `-Apply` on a disposable restored copy using `-Database` and `-PostgresPort` for that copy and its isolated `-EvidenceRoot`. Verify its complete application upgrade and controlled reads. For the qualified HOME correction, stop the supported HOME host, then run the same command with `-Apply` against the exact installation. It creates and verifies a fresh full backup, refuses a manifest changed since preview, holds database locks during the narrowly scoped trigger exception, and proves all unrelated rows and original trigger modes unchanged before commit. Retain the preview, applied manifest, recovery archive and JSON receipt. Any refusal or proof failure rolls the transaction back. There is no backup bypass.
+
+The normal explicit showcase upgrade separately replaces invalid active upstream links in owned scenarios with the approved exact source of the baseline parent. A review interrupted by that correction keeps its prior snapshot and receives a new review cycle. Maintenance removes unapproved links from other active FMS author work without inventing an answer; those Drafts are visibly incomplete until authored. This correction never approves a revision automatically.
 
 ## Backup and verification
 

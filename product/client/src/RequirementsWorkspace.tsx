@@ -1,3 +1,4 @@
+import { useLatestRequest } from "./useLatestRequest";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PersonName } from "./People";
 import { artifactAcronym, coverageLabel, stateLabel, verificationArtifactNoun } from './presentation'
@@ -258,7 +259,7 @@ export default function RequirementsWorkspace({
   const autoSelected = useRef(false);
   const proposalTrigger = useRef<HTMLButtonElement>(null);
   const proposalSearchInput = useRef<HTMLInputElement>(null);
-  const loadGeneration = useRef(0);
+  const { begin: beginLoad, invalidate: invalidateLoad } = useLatestRequest();
   // Inspector fetches answer for one requirement, and a slower earlier read must never replace a newer
   // one: open() assigns the selected requirement before its responses arrive, so the comment form can be
   // used while that requirement's own detail and comment requests are still in flight — and a successful
@@ -401,36 +402,35 @@ export default function RequirementsWorkspace({
     [data?.specifications, scope],
   );
   const load = useCallback(async () => {
-    const generation = ++loadGeneration.current;
+    const current = beginLoad();
     setLoading(true);
     try {
       const response = await fetch(
         `${api}/api/enterprise-requirements/workspace?${params}`,
       );
-      if (generation !== loadGeneration.current) return;
+      if (!current()) return;
       if (response.ok) {
         const payload = await response.json();
-        if (generation !== loadGeneration.current) return;
+        if (!current()) return;
         setData(payload);
         setError("");
-      } else
-        setError(
-          (await response.json()).error ||
-            "Requirements workspace could not be loaded.",
-        );
+      } else {
+        const failure = await response.json();
+        if (current()) setError(failure.error || "Requirements workspace could not be loaded.");
+      }
     } catch {
-      if (generation !== loadGeneration.current) return;
+      if (!current()) return;
       setError(
         "Requirements could not be loaded. Check the AeroLink service and try again.",
       );
     } finally {
-      if (generation === loadGeneration.current) setLoading(false);
+      if (current()) setLoading(false);
     }
-  }, [api, params]);
+  }, [api, params, beginLoad]);
   useEffect(() => {
     const timer = setTimeout(load, 180);
-    return () => clearTimeout(timer);
-  }, [load]);
+    return () => { clearTimeout(timer); invalidateLoad(); };
+  }, [load, invalidateLoad]);
   const loadComments = async (artifactId: string) => {
     const intent = ++commentIntent.current;
     const response = await fetch(

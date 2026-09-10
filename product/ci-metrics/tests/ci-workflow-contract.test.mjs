@@ -14,12 +14,216 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const workflowPath = join(repoRoot, '.github', 'workflows', 'ci.yml')
+
+test('all browser lanes retain actual reports and failure traces after retry success', () => {
+  for (const [job, results, report] of [
+    ['browser-pr', 'test-results', 'journey-durations-${{ matrix.shard }}.json'],
+    ['browser-production', 'test-results-production', 'journey-durations-production.json'],
+    ['browser-full', 'test-results', 'journey-durations-full-${{ matrix.shard }}.json'],
+  ]) {
+    const uploads = stepBlocks(jobBodies(workflowLines())[job])
+      .filter((block) => /uses: actions\/upload-artifact/.test(block.lines.join('\n')))
+    for (const path of [results, report]) {
+      const upload = uploads.find((block) => block.lines.some((line) => line.trim() === `product/client/${path}` || line.trim() === `path: product/client/${path}`))
+      assert.ok(upload, `${job} must upload ${path}`)
+      assert.match(upload.lines.join('\n'), /^        if: always\(\)$/m, `${job} must retain evidence on retry-pass and cancellation`)
+      assert.match(upload.lines.join('\n'), /retention-days: 7/)
+    }
+  }
+})
+
+test('scheduled proof uses bounded duration packing and cannot be cancelled by a main push', () => {
+  const workflow = workflowLines().join('\n')
+  const group = workflow.split('\n').find((line) => line.startsWith('  group: quality-'))
+  assert.ok(group.includes("github.event_name == 'schedule' && 'scheduled'"))
+  assert.ok(group.includes("github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && format('diagnostics-{0}', github.ref)"))
+  assert.ok(group.includes('inputs.pull_request_number || github.event.pull_request.number || github.ref'))
+  const full = jobBodies(workflowLines())['browser-full'].join('\n')
+  assert.match(full, /timeout-minutes: 30/)
+  assert.match(full, /shard: \[1, 2, 3\]/)
+  assert.match(full, /scripts\/plan-journey-shard\.mjs listed\.txt/)
+  assert.match(full, /\[ "\$actual" != "\$expected" \]/)
+  assert.doesNotMatch(full, /playwright test --shard/)
+})
+
+test('run metadata receives dispatch mode and PR identity inputs used by browser topology', () => {
+  const report = jobBodies(workflowLines())['metrics-report'].join('\n')
+  for (const name of ['FULL_DIAGNOSTICS', 'PULL_REQUEST_NUMBER', 'PULL_REQUEST_BASE_SHA', 'PULL_REQUEST_HEAD_SHA']) {
+    assert.match(report, new RegExp(`${name}: \\$\\{\\{\\s*inputs\\.`), `${name} must come from workflow_dispatch inputs`)
+  }
+})
+
+test('the actual aggregate shell rejects incomplete scheduled and manual browser proof', () => {
+  const gate = jobBodies(workflowLines()).gate
+  assert.match(gate.join('\n'), /needs: \[[^\n]*browser-full/)
+  const step = stepBlocks(gate).find((block) => block.name === 'Summarise and enforce')
+  assert.ok(step, 'the aggregate must contain the enforcement step')
+  const runStart = step.lines.findIndex((line) => line === '        run: |')
+  assert.ok(runStart >= 0, 'the aggregate must execute a shell script')
+  const script = step.lines.slice(runStart + 1).filter((line) => line.startsWith('          ')).map((line) => line.slice(10)).join('\n')
+  const envNames = step.lines.slice(0, runStart).flatMap((line) => /^          ([A-Z_]+):/.exec(line)?.[1] ?? [])
+  const directory = mkdtempSync(join(tmpdir(), 'aerolink-942-gate-'))
+  const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash'
+  try {
+    for (const [event, fullDiagnostics] of [
+      ['schedule', 'true'], ['workflow_dispatch', 'true'], ['workflow_dispatch', 'false'],
+      ['pull_request', 'true'], ['pull_request', 'false'], ['merge_group', 'true'], ['push', 'true'],
+    ]) {
+      for (const result of ['success', 'failure', 'cancelled', 'skipped', '']) {
+        const env = {
+          ...process.env,
+          ...Object.fromEntries(envNames.map((name) => [name, ''])),
+          BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'success', BACKEND_CORE_INFRASTRUCTURE: 'success',
+          BACKEND: 'false', CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success',
+          POSTGRESQL: 'success', METRICS_TOOLING: 'success', DOCS_ONLY: 'false', LAUNCHERS_ONLY: 'false',
+          POST_MERGE_SKIP: 'false', EVENT_NAME: event, FULL_DIAGNOSTICS: fullDiagnostics, BROWSER_FULL: result,
+          GITHUB_STEP_SUMMARY: join(directory, 'summary.md').replaceAll('\\', '/'),
+        }
+        const child = spawnSync(bash, ['-c', script], { encoding: 'utf8', env })
+        const required = event === 'schedule' || (event === 'workflow_dispatch' && fullDiagnostics === 'true')
+        const shouldFail = ['failure', 'cancelled'].includes(result) || (required && result !== 'success')
+        assert.equal(child.status, shouldFail ? 1 : 0, `${event}/${fullDiagnostics}/${result}: ${child.error ?? child.stderr}\n${child.stdout}`)
+      }
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('the actual aggregate shell requires the native operator owner except documented skips', () => {
+  const jobs = jobBodies(workflowLines())
+  const gate = jobs.gate
+  const step = stepBlocks(gate).find((block) => block.name === 'Summarise and enforce')
+  assert.ok(step, 'the aggregate must contain the enforcement step')
+  const runStart = step.lines.findIndex((line) => line === '        run: |')
+  assert.ok(runStart >= 0, 'the aggregate must execute a shell script')
+  const script = step.lines.slice(runStart + 1).filter((line) => line.startsWith('          ')).map((line) => line.slice(10)).join('\n')
+  const envNames = step.lines.slice(0, runStart).flatMap((line) => /^          ([A-Z_]+):/.exec(line)?.[1] ?? [])
+  const directory = mkdtempSync(join(tmpdir(), 'aerolink-951-operator-gate-'))
+  const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash'
+  const base = {
+    ...process.env,
+    ...Object.fromEntries(envNames.map((name) => [name, ''])),
+    BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'success', BACKEND_CORE_INFRASTRUCTURE: 'success',
+    CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success', BROWSER_FULL: 'success',
+    POSTGRESQL: 'success', METRICS_TOOLING: 'success', DOCS_ONLY: 'false', LAUNCHERS_ONLY: 'false',
+    POST_MERGE_SKIP: 'false', EVENT_NAME: 'pull_request', FULL_DIAGNOSTICS: 'false',
+    GITHUB_STEP_SUMMARY: join(directory, 'summary.md').replaceAll('\\', '/'),
+  }
+  const invoke = (overrides) => spawnSync(bash, ['-c', script], {
+    encoding: 'utf8', env: { ...base, ...overrides },
+  })
+  try {
+    for (const status of ['failure', 'cancelled', 'skipped', '']) {
+      const child = invoke({ CONTRACTS: status })
+      assert.equal(child.status, 1, `non-documentation operator owner status ${JSON.stringify(status)} must fail: ${child.error ?? child.stderr}\n${child.stdout}`)
+    }
+    assert.equal(invoke({ CONTRACTS: 'success' }).status, 0, 'a successful operator owner must satisfy the aggregate')
+    assert.equal(invoke({ DOCS_ONLY: 'true', CONTRACTS: 'skipped' }).status, 0, 'documentation-only runs may skip the operator owner')
+    assert.equal(invoke({ POST_MERGE_SKIP: 'true', CONTRACTS: 'skipped' }).status, 0, 'the modeled post-merge skip may omit the operator owner')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('the actual aggregate shell rejects a selected backend without its whole-solution owner', () => {
+  const gate = jobBodies(workflowLines()).gate
+  const step = stepBlocks(gate).find((block) => block.name === 'Summarise and enforce')
+  assert.ok(step, 'the aggregate must contain the enforcement step')
+  const runStart = step.lines.findIndex((line) => line === '        run: |')
+  assert.ok(runStart >= 0, 'the aggregate must execute a shell script')
+  const script = step.lines.slice(runStart + 1).filter((line) => line.startsWith('          ')).map((line) => line.slice(10)).join('\n')
+  const envNames = step.lines.slice(0, runStart).flatMap((line) => /^          ([A-Z_]+):/.exec(line)?.[1] ?? [])
+  const directory = mkdtempSync(join(tmpdir(), 'aerolink-953-gate-'))
+  const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash'
+  try {
+    const modes = [
+      ['ordinary PR', 'pull_request', 'false'],
+      ['ready-for-full-ci effective PR', 'pull_request', 'false'],
+      ['merge queue', 'merge_group', 'false'],
+      ['main push', 'push', 'false'],
+      ['scheduled qualification', 'schedule', 'true'],
+      ['manual diagnostics', 'workflow_dispatch', 'true'],
+      ['manual ready-for-full-ci', 'pull_request', 'false'],
+    ]
+    for (const [label, event, fullDiagnostics] of modes) {
+      const env = {
+        ...process.env,
+        ...Object.fromEntries(envNames.map((name) => [name, ''])),
+        BACKEND: 'true', BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'skipped', BACKEND_CORE_INFRASTRUCTURE: 'success',
+        CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success', BROWSER_FULL: 'success',
+        POSTGRESQL: 'success', METRICS_TOOLING: 'success', DOCS_ONLY: 'false', LAUNCHERS_ONLY: 'false',
+        POST_MERGE_SKIP: 'false', EVENT_NAME: event, FULL_DIAGNOSTICS: fullDiagnostics,
+        GITHUB_STEP_SUMMARY: join(directory, `${label.replaceAll(/[^a-z0-9]+/gi, '-')}.md`).replaceAll('\\', '/'),
+      }
+      const child = spawnSync(bash, ['-c', script], { encoding: 'utf8', env })
+      assert.equal(child.status, 1, `${label} must reject a selected backend with skipped Domain: ${child.error ?? child.stderr}\n${child.stdout}`)
+    }
+
+    for (const [label, event, fullDiagnostics, changes, results] of [
+      ['unexpected API in client-only mode', 'pull_request', 'false', { BACKEND: 'false', DOCS_ONLY: 'false', POST_MERGE_SKIP: 'false' }, { BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'skipped', BACKEND_CORE_INFRASTRUCTURE: 'skipped' }],
+      ['unexpected API in docs-only mode', 'pull_request', 'false', { BACKEND: 'false', DOCS_ONLY: 'true', POST_MERGE_SKIP: 'false' }, { BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'skipped', BACKEND_CORE_INFRASTRUCTURE: 'skipped' }],
+      ['unexpected Infrastructure during trusted skip', 'push', 'false', { BACKEND: 'true', DOCS_ONLY: 'false', POST_MERGE_SKIP: 'true' }, { BACKEND_API: 'skipped', BACKEND_CORE_DOMAIN: 'skipped', BACKEND_CORE_INFRASTRUCTURE: 'success' }],
+    ]) {
+      const env = {
+        ...process.env,
+        ...Object.fromEntries(envNames.map((name) => [name, ''])),
+        ...results,
+        CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success', BROWSER_FULL: 'success',
+        POSTGRESQL: 'success', METRICS_TOOLING: 'success', LAUNCHERS_ONLY: 'false', EVENT_NAME: event,
+        FULL_DIAGNOSTICS: fullDiagnostics, GITHUB_STEP_SUMMARY: join(directory, `${label.replaceAll(/[^a-z0-9]+/gi, '-')}.md`).replaceAll('\\', '/'),
+        ...changes,
+      }
+      const child = spawnSync(bash, ['-c', script], { encoding: 'utf8', env })
+      assert.equal(child.status, 1, `${label} must reject a successful scoped job without Domain: ${child.error ?? child.stderr}\n${child.stdout}`)
+    }
+
+    for (const [label, event, fullDiagnostics, changes] of [
+      ['docs-only', 'pull_request', 'false', { BACKEND: 'false', DOCS_ONLY: 'true', POST_MERGE_SKIP: 'false' }],
+      ['trusted post-merge skip', 'push', 'false', { BACKEND: 'true', DOCS_ONLY: 'false', POST_MERGE_SKIP: 'true' }],
+      ['client-only', 'pull_request', 'false', { BACKEND: 'false', DOCS_ONLY: 'false', POST_MERGE_SKIP: 'false' }],
+    ]) {
+      const env = {
+        ...process.env,
+        ...Object.fromEntries(envNames.map((name) => [name, ''])),
+        BACKEND_API: 'skipped', BACKEND_CORE_DOMAIN: 'skipped', BACKEND_CORE_INFRASTRUCTURE: 'skipped',
+        CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success', BROWSER_FULL: 'success',
+        POSTGRESQL: 'success', METRICS_TOOLING: 'success', LAUNCHERS_ONLY: 'false', EVENT_NAME: event,
+        FULL_DIAGNOSTICS: fullDiagnostics, GITHUB_STEP_SUMMARY: join(directory, `${label}.md`).replaceAll('\\', '/'),
+        ...changes,
+      }
+      const child = spawnSync(bash, ['-c', script], { encoding: 'utf8', env })
+      assert.equal(child.status, 0, `${label} should preserve its intentional skip: ${child.error ?? child.stderr}\n${child.stdout}`)
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('native operator proof steps cannot be optional or failure-isolated', () => {
+  const jobs = jobBodies(workflowLines())
+  const blocks = stepBlocks(jobs['script-contracts'])
+  const powershell = blocks.filter((block) => /^(?:        )shell:\s*powershell\s*$/m.test(block.lines.join('\n')))
+  assert.ok(powershell.length >= 15, `expected the native operator job to retain its complete proof family, found ${powershell.length}`)
+  for (const block of powershell) {
+    const text = block.lines.join('\n')
+    assert.doesNotMatch(text, /^        continue-on-error:\s*true\s*$/m, `${block.name} must fail the native job on error`)
+    if (block.name !== 'Verify operator evidence preservation') {
+      assert.doesNotMatch(text, /^        if:/m, `${block.name} must always run when the operator owner is selected`)
+    }
+  }
+  const aggregate = jobs.gate.join('\n')
+  assert.match(aggregate, /CONTRACTS:/, 'the aggregate must consume the native operator owner result')
+  assert.match(aggregate, /CONTRACTS[^\n]*!=\s*"success"/, 'the aggregate must reject a missing or unsuccessful native operator owner')
+})
 
 function workflowLines() {
   return readFileSync(workflowPath, 'utf8').split(/\r?\n/)

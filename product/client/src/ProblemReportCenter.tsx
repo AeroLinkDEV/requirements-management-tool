@@ -15,134 +15,620 @@ import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useLocalDraft } from "./autosave";
 import "./ProblemReportCenter.css";
 
-type Link={artifactType:string;artifactId:string;identifier?:string;relationship:string;addedBy:string;addedAt:string};
-type Revision={id:string;revision:number;eventType:string;actor:string;actorDisplayName?:string|null;detail?:string;rationale?:string;fromState?:string;toState?:string;evidenceJson?:string;eventSchemaVersion:number;snapshotSchemaVersion:number;snapshotHash:string;snapshotJson?:string;occurredAt:string};
-type HistoricalAttachment={attachmentId:string;logicalId:string;version:number;fileName:string;contentType:string;size:number;sha256:string;uploadedBy:string;uploadedAt:string};
-type ClosureCandidate={id:string;reportRevision:number;sequence:number;reportSnapshotSchemaVersion:number;state:string;manifestHash:string;verificationExecutionId:string;selectedBy:string;selectedAt:string;invalidationReason?:string;invalidatedBy?:string;invalidatedAt?:string;approvedBy?:string;approvedAt?:string;packageProvenance?:string;closurePackageHash?:string;approvalAuthority?:string};
-type ReleaseWaiver={id:string;blockerRevision:number;blockerVersion:number;rationale:string;approvedBy:string;approvalAuthority:string;signatureMeaning:string;createdAt:string;expiresAt:string;revokedAt?:string;revokedBy?:string;revocationReason?:string;active:boolean};
-type DuplicateDiagnostic={status:string;message:string;canonicalTargetId?:string;canonicalTargetIdentifier?:string;canonicalTargetTitle?:string;canonicalTargetState?:string};
-type TransitionCapability={state:string;requiresRationale:boolean};
-type Report={id:string;projectId?:string;reportNumber:string;revision:number;displayNumber:string;title:string;problem?:string;problemRich?:string;additionalInformation?:string;additionalInformationRich?:string;analysis?:string;analysisRich?:string;rootCause?:string;rootCauseRich?:string;effects?:string;effectsRich?:string;containment?:string;containmentRich?:string;correctiveAction?:string;correctiveActionRich?:string;systemAircraftImpact?:string;systemAircraftImpactRich?:string;workaroundRich?:string;impactAssessmentJson?:string;state:string;disposition?:string;dispositionRationale?:string;duplicateDiagnostic?:DuplicateDiagnostic;category?:SelectedCategory|null;workaround?:string;severity:string;priority:string;classification:string;reportedBy:string;reportedByDisplayName?:string|null;responsibleEngineerId:string;responsibleEngineerDisplayName?:string|null;targetReleaseId?:string;isReleaseBlocker:boolean;releaseBlockerVersion:number;waived?:boolean;activeReleaseWaiver?:ReleaseWaiver;releaseWaivers?:ReleaseWaiver[];createdAt?:string;updatedAt:string;version:number;historicalReadOnly?:boolean;snapshotId?:string;snapshotHash?:string;snapshotSchemaVersion?:number;historicalLegacyType?:string|null;supportingAttachments?:HistoricalAttachment[];capabilities?:{canApproveSqaClosure:boolean;canApproveReleaseWaiver:boolean;releaseWaiverAuthority?:string;ownerEligible?:boolean;ownerAuthorityException?:string;canReassignOwner?:boolean;canRecoverOwner?:boolean;canRevive?:boolean;reviveTargetState?:string;availableTransitions?:TransitionCapability[]};links?:Link[];impactAreas?:ImpactArea[];relatedReports?:RelatedReport[];approvedCorrectiveActions?:Link[];testEvidence?:Link[];closureCandidates?:ClosureCandidate[];revisions?:Revision[]};
-type Dashboard={summary:{total:number;active:number;closureAwaitingApproval:number;closed:number;releaseBlockers:number;waivedBlockers:number}};
-type Release={id:string;version:string;isReleased:boolean};
-type Props={api:string;projectId:string;releaseId:string;releases:Release[];user:AuthUser;initialReportId?:string;initialSnapshotId?:string;onSelected:(id?:string,targetBuild?:string,snapshotId?:string)=>void;onBack:()=>void;onOpenVerification:(target?:{discipline:"system"|"software";problemReportId:string})=>void;onOpenArtifact:(kind:string,id:string,identifier?:string)=>void;problemReportHref?: (report: RelatedReport)=>string|undefined};
-type ImpactValue="Unknown"|"No"|"Yes";
-type ImpactMap=Record<string,ImpactValue>;
-type Draft={title:string;problemRich:string;additionalInformationRich:string;category:string;severity:string;priority:string;impacts:ImpactMap}&Record<(typeof PROBLEM_REPORT_NARRATIVE)[number]["key"],string>;
-type QueueFilters={state:string;severity:string;priority:string;owner:string;category:string;categoryFamily:string};
+type Link = {
+  artifactType: string;
+  artifactId: string;
+  identifier?: string;
+  relationship: string;
+  addedBy: string;
+  addedAt: string;
+};
+type Revision = {
+  id: string;
+  revision: number;
+  eventType: string;
+  actor: string;
+  actorDisplayName?: string | null;
+  detail?: string;
+  rationale?: string;
+  fromState?: string;
+  toState?: string;
+  evidenceJson?: string;
+  eventSchemaVersion: number;
+  snapshotSchemaVersion: number;
+  snapshotHash: string;
+  snapshotJson?: string;
+  occurredAt: string;
+};
+type HistoricalAttachment = {
+  attachmentId: string;
+  logicalId: string;
+  version: number;
+  fileName: string;
+  contentType: string;
+  size: number;
+  sha256: string;
+  uploadedBy: string;
+  uploadedAt: string;
+};
+type ClosureCandidate = {
+  id: string;
+  reportRevision: number;
+  sequence: number;
+  reportSnapshotSchemaVersion: number;
+  state: string;
+  manifestHash: string;
+  verificationExecutionId: string;
+  selectedBy: string;
+  selectedAt: string;
+  invalidationReason?: string;
+  invalidatedBy?: string;
+  invalidatedAt?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  packageProvenance?: string;
+  closurePackageHash?: string;
+  approvalAuthority?: string;
+};
+type ReleaseWaiver = {
+  id: string;
+  blockerRevision: number;
+  blockerVersion: number;
+  rationale: string;
+  approvedBy: string;
+  approvalAuthority: string;
+  signatureMeaning: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt?: string;
+  revokedBy?: string;
+  revocationReason?: string;
+  active: boolean;
+};
+type DuplicateDiagnostic = {
+  status: string;
+  message: string;
+  canonicalTargetId?: string;
+  canonicalTargetIdentifier?: string;
+  canonicalTargetTitle?: string;
+  canonicalTargetState?: string;
+};
+type TransitionCapability = { state: string; requiresRationale: boolean };
+type Report = {
+  id: string;
+  projectId?: string;
+  reportNumber: string;
+  revision: number;
+  displayNumber: string;
+  title: string;
+  problem?: string;
+  problemRich?: string;
+  additionalInformation?: string;
+  additionalInformationRich?: string;
+  analysis?: string;
+  analysisRich?: string;
+  rootCause?: string;
+  rootCauseRich?: string;
+  effects?: string;
+  effectsRich?: string;
+  containment?: string;
+  containmentRich?: string;
+  correctiveAction?: string;
+  correctiveActionRich?: string;
+  systemAircraftImpact?: string;
+  systemAircraftImpactRich?: string;
+  workaroundRich?: string;
+  impactAssessmentJson?: string;
+  state: string;
+  disposition?: string;
+  dispositionRationale?: string;
+  duplicateDiagnostic?: DuplicateDiagnostic;
+  category?: SelectedCategory | null;
+  workaround?: string;
+  severity: string;
+  priority: string;
+  classification: string;
+  reportedBy: string;
+  reportedByDisplayName?: string | null;
+  responsibleEngineerId: string;
+  responsibleEngineerDisplayName?: string | null;
+  targetReleaseId?: string;
+  isReleaseBlocker: boolean;
+  releaseBlockerVersion: number;
+  waived?: boolean;
+  activeReleaseWaiver?: ReleaseWaiver;
+  releaseWaivers?: ReleaseWaiver[];
+  createdAt?: string;
+  updatedAt: string;
+  version: number;
+  historicalReadOnly?: boolean;
+  snapshotId?: string;
+  snapshotHash?: string;
+  snapshotSchemaVersion?: number;
+  historicalLegacyType?: string | null;
+  supportingAttachments?: HistoricalAttachment[];
+  capabilities?: {
+    canApproveSqaClosure: boolean;
+    canApproveReleaseWaiver: boolean;
+    releaseWaiverAuthority?: string;
+    ownerEligible?: boolean;
+    ownerAuthorityException?: string;
+    canReassignOwner?: boolean;
+    canRecoverOwner?: boolean;
+    canRevive?: boolean;
+    reviveTargetState?: string;
+    availableTransitions?: TransitionCapability[];
+  };
+  links?: Link[];
+  impactAreas?: ImpactArea[];
+  relatedReports?: RelatedReport[];
+  approvedCorrectiveActions?: Link[];
+  testEvidence?: Link[];
+  closureCandidates?: ClosureCandidate[];
+  revisions?: Revision[];
+};
+type Dashboard = {
+  summary: {
+    total: number;
+    active: number;
+    closureAwaitingApproval: number;
+    closed: number;
+    releaseBlockers: number;
+    waivedBlockers: number;
+  };
+};
+type Release = { id: string; version: string; isReleased: boolean };
+type Props = {
+  api: string;
+  projectId: string;
+  releaseId: string;
+  releases: Release[];
+  user: AuthUser;
+  initialReportId?: string;
+  initialSnapshotId?: string;
+  onSelected: (id?: string, targetBuild?: string, snapshotId?: string, replace?: boolean) => void;
+  onBack: () => void;
+  onOpenVerification: (target?: {
+    discipline: "system" | "software";
+    problemReportId: string;
+  }) => void;
+  onOpenArtifact: (kind: string, id: string, identifier?: string) => void;
+  problemReportHref?: (report: RelatedReport) => string | undefined;
+};
+type ImpactValue = "Unknown" | "No" | "Yes";
+type ImpactMap = Record<string, ImpactValue>;
+type Draft = {
+  title: string;
+  problemRich: string;
+  additionalInformationRich: string;
+  category: string;
+  severity: string;
+  priority: string;
+  impacts: ImpactMap;
+} & Record<(typeof PROBLEM_REPORT_NARRATIVE)[number]["key"], string>;
+type QueueFilters = {
+  state: string;
+  severity: string;
+  priority: string;
+  owner: string;
+  category: string;
+  categoryFamily: string;
+};
 
-const impactFields=[
-  ["SystemRequirements","System requirements"],["Hlr","HLR"],["Llr","LLR"],["Code","Code"],
+const impactFields = [
+  ["SystemRequirements", "System requirements"],
+  ["Hlr", "HLR"],
+  ["Llr", "LLR"],
+  ["Code", "Code"],
   // "Airworthiness" rather than "Safety", which names what is actually being judged. Answers recorded under
   // the old key were carried across by the migration that renamed it.
-  ["Tests","Tests"],["Documents","Documents"],["SystemAircraft","System / aircraft"],["Airworthiness","Airworthiness"],
+  ["Tests", "Tests"],
+  ["Documents", "Documents"],
+  ["SystemAircraft", "System / aircraft"],
+  ["Airworthiness", "Airworthiness"],
 ] as const;
 // The nine categories and their six families come from the server — see ProblemReportCategoryPicker.
-const initialImpacts=()=>Object.fromEntries(impactFields.map(([key])=>[key,"Unknown"])) as ImpactMap;
-const newDraft=():Draft=>({title:"",problemRich:emptyRichContent,additionalInformationRich:emptyRichContent,category:"",severity:"Major",priority:"High",impacts:initialImpacts(),
-  ...Object.fromEntries(PROBLEM_REPORT_NARRATIVE.map(field=>[field.key,emptyRichContent]))} as Draft);
-const lifecycle=["Draft","ReadyForSccb","Open","Implementing","Verifying","WaitingForSqaToClose","Closed","Rejected"];
-const terminalDispositions=["Rejected"];
-const queueStates=lifecycle;
-const queuePageSize=10;
-const call=async(api:string,path:string,method="GET",body?:unknown)=>{const response=await fetch(`${api}${path}`,{method,headers:body?{"Content-Type":"application/json"}:undefined,body:body?JSON.stringify(body):undefined});const data=await response.json().catch(()=>null);if(!response.ok)throw new Error(data?.error??"The controlled action could not be completed.");return data};
-const spaced=(value:string)=>value==="WaitingForSqaToClose"?"Waiting for SQA to Close":value==="ReadyForSccb"?"Ready for SCCB":value.replace(/([a-z])([A-Z])/g,"$1 $2").replace("Sqa","SQA").replace("Sccb","SCCB");
-const transitionLabel=(state:string)=>({ReadyForSccb:"Ready for SCCB",Open:"Open",Implementing:"Start implementing",Verifying:"Move to Verifying",WaitingForSqaToClose:"Waiting for SQA to Close",Closed:"Close Problem Report",Rejected:"Reject Problem Report",Draft:"Return to Draft"}[state]??`Move to ${spaced(state)}`);
-const revisionEvidence=(revision:Revision):{type?:string;category?:string;workaround?:string;disposition?:string;dispositionRationale?:string}|undefined=>{
-  if(revision.snapshotSchemaVersion<2||!revision.snapshotJson)return undefined;
-  try{return JSON.parse(revision.snapshotJson) as {type?:string;category?:string;workaround?:string;disposition?:string;dispositionRationale?:string}}catch{return undefined}
+const initialImpacts = () =>
+  Object.fromEntries(impactFields.map(([key]) => [key, "Unknown"])) as ImpactMap;
+const newDraft = (): Draft =>
+  ({
+    title: "",
+    problemRich: emptyRichContent,
+    additionalInformationRich: emptyRichContent,
+    category: "",
+    severity: "Major",
+    priority: "High",
+    impacts: initialImpacts(),
+    ...Object.fromEntries(PROBLEM_REPORT_NARRATIVE.map((field) => [field.key, emptyRichContent])),
+  }) as Draft;
+const lifecycle = [
+  "Draft",
+  "ReadyForSccb",
+  "Open",
+  "Implementing",
+  "Verifying",
+  "WaitingForSqaToClose",
+  "Closed",
+  "Rejected",
+];
+const terminalDispositions = ["Rejected"];
+const queueStates = lifecycle;
+const queuePageSize = 10;
+const call = async (api: string, path: string, method = "GET", body?: unknown) => {
+  const response = await fetch(`${api}${path}`, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(data?.error ?? "The controlled action could not be completed.");
+  return data;
 };
-const snapshotVersion=(revision:Revision):number|undefined=>{
-  if(!revision.snapshotJson)return undefined;
-  try{const value=JSON.parse(revision.snapshotJson) as {version?:unknown};return typeof value.version==="number"?value.version:undefined}catch{return undefined}
+const spaced = (value: string) =>
+  value === "WaitingForSqaToClose"
+    ? "Waiting for SQA to Close"
+    : value === "ReadyForSccb"
+      ? "Ready for SCCB"
+      : value
+          .replace(/([a-z])([A-Z])/g, "$1 $2")
+          .replace("Sqa", "SQA")
+          .replace("Sccb", "SCCB");
+const transitionLabel = (state: string) =>
+  ({
+    ReadyForSccb: "Ready for SCCB",
+    Open: "Open",
+    Implementing: "Start implementing",
+    Verifying: "Move to Verifying",
+    WaitingForSqaToClose: "Waiting for SQA to Close",
+    Closed: "Close Problem Report",
+    Rejected: "Reject Problem Report",
+    Draft: "Return to Draft",
+  })[state] ?? `Move to ${spaced(state)}`;
+const revisionEvidence = (
+  revision: Revision,
+):
+  | {
+      type?: string;
+      category?: string;
+      workaround?: string;
+      disposition?: string;
+      dispositionRationale?: string;
+    }
+  | undefined => {
+  if (revision.snapshotSchemaVersion < 2 || !revision.snapshotJson) return undefined;
+  try {
+    return JSON.parse(revision.snapshotJson) as {
+      type?: string;
+      category?: string;
+      workaround?: string;
+      disposition?: string;
+      dispositionRationale?: string;
+    };
+  } catch {
+    return undefined;
+  }
 };
-const problemReportDownload=(api:string,reportId:string,format:"docx"|"pdf",revision?:number,snapshotId?:string)=>{
-  const query=new URLSearchParams({format});
-  if(revision!==undefined)query.set("revision",String(revision));
-  if(snapshotId)query.set("snapshotId",snapshotId);
+const snapshotVersion = (revision: Revision): number | undefined => {
+  if (!revision.snapshotJson) return undefined;
+  try {
+    const value = JSON.parse(revision.snapshotJson) as { version?: unknown };
+    return typeof value.version === "number" ? value.version : undefined;
+  } catch {
+    return undefined;
+  }
+};
+const problemReportDownload = (
+  api: string,
+  reportId: string,
+  format: "docx" | "pdf",
+  revision?: number,
+  snapshotId?: string,
+) => {
+  const query = new URLSearchParams({ format });
+  if (revision !== undefined) query.set("revision", String(revision));
+  if (snapshotId) query.set("snapshotId", snapshotId);
   return `${api}/api/problem-reports/${reportId}/download?${query}`;
 };
-const problemReportHistoricalPage=(snapshotId:string)=>{const url=new URL(location.href);url.searchParams.set("snapshotId",snapshotId);return `${url.pathname}${url.search}`};
+const problemReportHistoricalPage = (snapshotId: string) => {
+  const url = new URL(location.href);
+  url.searchParams.set("snapshotId", snapshotId);
+  return `${url.pathname}${url.search}`;
+};
 
 // ConnectedArtifact lived here. Its three callers — approved change requests, closure test evidence and
 // connected artifacts — were the three separate lists ProblemReportImpactPanel replaced, and the panel
 // renders its own row next to the impact answer the artifact is evidence for.
 
-export default function ProblemReportCenter({api,projectId,releaseId,releases,user,initialReportId,initialSnapshotId,onSelected,onBack,onOpenVerification,onOpenArtifact,problemReportHref}:Props){
-  const [reports,setReports]=useState<Report[]>([]),[page,setPage]=useState(1),[reportTotal,setReportTotal]=useState(0),[totalPages,setTotalPages]=useState(0),[dashboard,setDashboard]=useState<Dashboard>(),[selected,setSelected]=useState<Report>();
-  const [search,setSearch]=useState(""),[stateFilter,setStateFilter]=useState(""),[severityFilter,setSeverityFilter]=useState(""),[priorityFilter,setPriorityFilter]=useState(""),[ownerFilter,setOwnerFilter]=useState(""),[categoryFilter,setCategoryFilter]=useState(""),[categoryFamilyFilter,setCategoryFamilyFilter]=useState("");
-  const categories=useCategoryVocabulary(api);
-  const [targetFilter,setTargetFilter]=useState(()=>new URLSearchParams(location.search).get("targetBuild")??"");
-  const refreshSequence=useRef(0);
+export default function ProblemReportCenter({
+  api,
+  projectId,
+  releaseId,
+  releases,
+  user,
+  initialReportId,
+  initialSnapshotId,
+  onSelected,
+  onBack,
+  onOpenVerification,
+  onOpenArtifact,
+  problemReportHref,
+}: Props) {
+  const [reports, setReports] = useState<Report[]>([]),
+    [page, setPage] = useState(1),
+    [reportTotal, setReportTotal] = useState(0),
+    [totalPages, setTotalPages] = useState(0),
+    [dashboard, setDashboard] = useState<Dashboard>(),
+    [selected, setSelected] = useState<Report>();
+  const [search, setSearch] = useState(""),
+    [stateFilter, setStateFilter] = useState(""),
+    [severityFilter, setSeverityFilter] = useState(""),
+    [priorityFilter, setPriorityFilter] = useState(""),
+    [ownerFilter, setOwnerFilter] = useState(""),
+    [categoryFilter, setCategoryFilter] = useState(""),
+    [categoryFamilyFilter, setCategoryFamilyFilter] = useState("");
+  const categories = useCategoryVocabulary(api);
+  const [targetFilter, setTargetFilter] = useState(
+    () => new URLSearchParams(location.search).get("targetBuild") ?? "",
+  );
+  const refreshSequence = useRef(0);
   // The reader's latest selection intent, as opposed to the render-scoped `selected` a long-running refresh
   // captured when it started. Opening a record claims it before its request goes out, and saving a new one
   // claims the created record; a refresh claims nothing — it serves the intent it observed when it began,
   // and a detail response may take the pane only if the intent is still its own record. Without this, a
   // late response for a previously selected record could silently replace the record the reader chose
   // afterwards, and a lifecycle button meant for one report would act on another (issue #793).
-  const selectedIdRef=useRef<string|undefined>(undefined);
+  const selectedIdRef = useRef<string | undefined>(undefined);
   // The record the pane is actually committed to — the last detail that was allowed to apply. A failed open
   // hands the intent back to this, so pane, address and intent can never disagree about which record is shown.
-  const appliedIdRef=useRef<string|undefined>(undefined);
-  const openSequence=useRef(0);
+  const appliedIdRef = useRef<string | undefined>(undefined);
+  const appliedSnapshotRef = useRef<string | undefined>(undefined);
+  const openSequence = useRef(0);
+  // The routed report ID is the component's initial intent. A popstate can change it without changing
+  // targetFilter, so track it explicitly and rehydrate the pane when the address names another record.
+  const routedReportIdRef = useRef<string | undefined>(initialReportId);
+  const routedSnapshotIdRef = useRef<string | undefined>(initialSnapshotId);
+  const routeRestorationRef = useRef(false);
+  const routeSnapshotRef = useRef<string | undefined>(undefined);
   // What the queue was actually asked for, as opposed to what is being typed. The dropdowns commit on
   // Apply filters; the search box commits itself a moment after typing stops.
-  const [appliedSearch,setAppliedSearch]=useState("");
-  const [appliedFilters,setAppliedFilters]=useState<QueueFilters>({state:"",severity:"",priority:"",owner:"",category:"",categoryFamily:""});
-  const [showCreate,setShowCreate]=useState(false),[showEdit,setShowEdit]=useState(false),[tab,setTab]=useState<"record"|"history">("record"),[error,setError]=useState(""),[busy,setBusy]=useState(false),[create,setCreate]=useState<Draft>(newDraft()),[note,setNote]=useState("");
-  const [createUploadsPending,setCreateUploadsPending]=useState(0);
-  const createUploadsPendingRef=useRef(0);
-  const onCreateUploadingChange=useCallback((uploading:boolean)=>{
-    createUploadsPendingRef.current=Math.max(0,createUploadsPendingRef.current+(uploading?1:-1));
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [appliedFilters, setAppliedFilters] = useState<QueueFilters>({
+    state: "",
+    severity: "",
+    priority: "",
+    owner: "",
+    category: "",
+    categoryFamily: "",
+  });
+  const [showCreate, setShowCreate] = useState(false),
+    [showEdit, setShowEdit] = useState(false),
+    [tab, setTab] = useState<"record" | "history">("record"),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false),
+    [create, setCreate] = useState<Draft>(newDraft()),
+    [note, setNote] = useState("");
+  const [createUploadsPending, setCreateUploadsPending] = useState(0);
+  const createUploadsPendingRef = useRef(0);
+  const onCreateUploadingChange = useCallback((uploading: boolean) => {
+    createUploadsPendingRef.current = Math.max(
+      0,
+      createUploadsPendingRef.current + (uploading ? 1 : -1),
+    );
     setCreateUploadsPending(createUploadsPendingRef.current);
-  },[]);
-  const [showDisposition,setShowDisposition]=useState(false),[dispositionRationale,setDispositionRationale]=useState("");
-  const [showReopen,setShowReopen]=useState(false),[reopenRationale,setReopenRationale]=useState("");
-  const [showRevive,setShowRevive]=useState(false),[reviveRationale,setReviveRationale]=useState("");
-  const [owner,setOwner]=useState({userId:"",name:""});
-  const [waiverRationale,setWaiverRationale]=useState(""),[waiverExpiry,setWaiverExpiry]=useState(()=>new Date(Date.now()+7*86400000).toISOString().slice(0,10));
-  const createDraft=useLocalDraft(`aerolink:new-problem-report:${projectId}`,create,{isEmpty:value=>!value.title.trim()&&!toPlainText(value.problemRich).trim()});
-  const noteDraft=useLocalDraft(`aerolink:problem-report-note:${projectId}:${selected?.id??"none"}`,note,{enabled:!!selected,isEmpty:value=>!value.trim()});
-  const isOwner=selected?.responsibleEngineerId===user.userName;
-  const isHistorical=selected?.historicalReadOnly===true;
-  const isFinished=isHistorical||selected?.state==="Closed"||terminalDispositions.includes(selected?.state??"");
+  }, []);
+  const [showDisposition, setShowDisposition] = useState(false),
+    [dispositionRationale, setDispositionRationale] = useState("");
+  const [showReopen, setShowReopen] = useState(false),
+    [reopenRationale, setReopenRationale] = useState("");
+  const [showRevive, setShowRevive] = useState(false),
+    [reviveRationale, setReviveRationale] = useState("");
+  const [owner, setOwner] = useState({ userId: "", name: "" });
+  const [waiverRationale, setWaiverRationale] = useState(""),
+    [waiverExpiry, setWaiverExpiry] = useState(() =>
+      new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+    );
+  const createDraft = useLocalDraft(`aerolink:new-problem-report:${projectId}`, create, {
+    isEmpty: (value) => !value.title.trim() && !toPlainText(value.problemRich).trim(),
+  });
+  const noteDraft = useLocalDraft(
+    `aerolink:problem-report-note:${projectId}:${selected?.id ?? "none"}`,
+    note,
+    { enabled: !!selected, isEmpty: (value) => !value.trim() },
+  );
+  const isOwner = selected?.responsibleEngineerId === user.userName;
+  const isHistorical = selected?.historicalReadOnly === true;
+  const isFinished =
+    isHistorical ||
+    selected?.state === "Closed" ||
+    terminalDispositions.includes(selected?.state ?? "");
 
-  const refresh=async(selectId?:string,requestedPage=page)=>{
+  const refresh = async (
+    selectId?: string,
+    requestedPage = page,
+    replaceRoute = false,
+    restoredSnapshot?: string,
+  ) => {
     // Everything this refresh will serve is fixed here, before any request goes out: the record it asks
     // for and the selection intent it observed. If the reader opens another record while the refresh is
     // in flight, the refresh's responses belong to an older decision and must not take the pane.
-    const intentAtStart=selectedIdRef.current;
-    const requested=selectId??intentAtStart??initialReportId;
-    const historicalRequested=Boolean(initialSnapshotId&&requested===initialReportId&&appliedIdRef.current===undefined);
-    const sequence=++refreshSequence.current;try{setError("");const params=new URLSearchParams({projectId,page:String(requestedPage),pageSize:String(queuePageSize)});if(appliedSearch.trim())params.set("search",appliedSearch.trim());if(appliedFilters.state)params.set("state",appliedFilters.state);if(appliedFilters.severity)params.set("severity",appliedFilters.severity);if(appliedFilters.priority)params.set("priority",appliedFilters.priority);if(appliedFilters.category)params.set("category",appliedFilters.category);if(appliedFilters.categoryFamily)params.set("categoryFamily",appliedFilters.categoryFamily);if(appliedFilters.owner.trim())params.set("owner",appliedFilters.owner.trim());const scope=new URLSearchParams({projectId});if(targetFilter==="unassigned"){params.set("targetUnassigned","true");scope.set("targetUnassigned","true")}else if(targetFilter){params.set("targetReleaseId",targetFilter);scope.set("targetReleaseId",targetFilter)}const [list,summary]=await Promise.all([call(api,`/api/problem-reports?${params}`),call(api,`/api/problem-reports/dashboard?${scope}`)]);if(sequence!==refreshSequence.current)return;setReports(list.items);setPage(list.page??requestedPage);setReportTotal(list.totalCount??list.items.length);setTotalPages(list.totalPages??(list.items.length?1:0));setDashboard(summary);let detail:Report|undefined;let fallback=false;if(requested){const candidate=await call(api,historicalRequested?`/api/problem-reports/${requested}/history/${initialSnapshotId}`:`/api/problem-reports/${requested}`) as Report;const matchesTarget=historicalRequested||!targetFilter||(targetFilter==="unassigned"?!candidate.targetReleaseId:candidate.targetReleaseId===targetFilter);if(matchesTarget)detail=candidate}if(!detail&&!historicalRequested&&list.items[0]){fallback=true;detail=await call(api,`/api/problem-reports/${list.items[0].id}`) as Report}if(sequence!==refreshSequence.current)return;
-    // A detail response that lost the selection race must not take the pane, whoever issued it: an
-    // implicit queue refresh re-asking for the previously selected record, or an explicit refresh for the
-    // record a lifecycle action just changed. If the reader opened another record while either was in
-    // flight, the reader's newer decision wins and this response is dropped — a pane that silently
-    // switched records would let a lifecycle action land on a record the reader did not select. The one
-    // exception is the queue's own fallback to its first row when the selected record cannot be served
-    // (filtered out, or nothing selected yet): that is this refresh's own decision, and it stands unless
-    // the reader decided something newer after the refresh began.
-    const superseded=detail!==undefined&&(fallback?selectedIdRef.current!==intentAtStart:selectedIdRef.current!==undefined&&selectedIdRef.current!==detail.id);if(superseded)detail=undefined;const id=detail?.id;if(detail){
-    // The address must follow the committed record whenever it changes — including when a refresh
-    // commits a record the reader claimed while an earlier open for it is still in flight — so the
-    // pane and the address can never name different records. A same-record re-fetch leaves the
-    // address alone, and a first commit on a fresh page (nothing applied before) keeps the original
-    // no-rewrite behavior for the queue's auto-selection.
-    const addressStale=appliedIdRef.current!==undefined&&appliedIdRef.current!==detail.id;setSelected(detail);selectedIdRef.current=detail.id;appliedIdRef.current=detail.id;setOwner({userId:detail.responsibleEngineerId,name:detail.responsibleEngineerId});
-    // The record being read belongs in the address, or a refresh lands on whatever happens to be first.
-    //
-    // Opening a report from the queue already did this; creating one did not, and the gap was invisible while
-    // the queue was filtered by build — the new report was usually the only row, so falling back to items[0]
-    // picked it by luck. Project-scoped, the queue holds every report in the Project and that luck is gone:
-    // a refresh after creating a report jumped to the lowest-numbered record in the database.
-    if(!detail.historicalReadOnly&&(selectId||addressStale||(requested&&requested!==id)))onSelected(id,targetFilter)}else if(selectedIdRef.current===intentAtStart){const hadRecord=appliedIdRef.current!==undefined;setSelected(undefined);selectedIdRef.current=undefined;appliedIdRef.current=undefined;if((requested&&!historicalRequested)||hadRecord)onSelected(undefined,targetFilter)}}catch(reason){
-    // A failure is the reader's problem only while the record it was loading is still the reader's
-    // intent. A refresh whose target was superseded mid-flight — an open moved the reader elsewhere
-    // while its detail request was underway — reports nothing: the pane already names the newer record.
-    if(sequence===refreshSequence.current&&(requested===undefined||selectedIdRef.current===undefined||selectedIdRef.current===requested))setError(reason instanceof Error?reason.message:"Unable to load problem reports.")}};
+    const intentAtStart = selectedIdRef.current;
+    const requested = selectId ?? intentAtStart ?? initialReportId;
+    const historicalRequested = Boolean(
+      initialSnapshotId &&
+      requested === initialReportId &&
+      (appliedIdRef.current === undefined || restoredSnapshot === initialSnapshotId),
+    );
+    const sequence = ++refreshSequence.current;
+    try {
+      setError("");
+      const params = new URLSearchParams({
+        projectId,
+        page: String(requestedPage),
+        pageSize: String(queuePageSize),
+      });
+      if (appliedSearch.trim()) params.set("search", appliedSearch.trim());
+      if (appliedFilters.state) params.set("state", appliedFilters.state);
+      if (appliedFilters.severity) params.set("severity", appliedFilters.severity);
+      if (appliedFilters.priority) params.set("priority", appliedFilters.priority);
+      if (appliedFilters.category) params.set("category", appliedFilters.category);
+      if (appliedFilters.categoryFamily)
+        params.set("categoryFamily", appliedFilters.categoryFamily);
+      if (appliedFilters.owner.trim()) params.set("owner", appliedFilters.owner.trim());
+      const scope = new URLSearchParams({ projectId });
+      if (targetFilter === "unassigned") {
+        params.set("targetUnassigned", "true");
+        scope.set("targetUnassigned", "true");
+      } else if (targetFilter) {
+        params.set("targetReleaseId", targetFilter);
+        scope.set("targetReleaseId", targetFilter);
+      }
+      const [list, summary] = await Promise.all([
+        call(api, `/api/problem-reports?${params}`),
+        call(api, `/api/problem-reports/dashboard?${scope}`),
+      ]);
+      if (sequence !== refreshSequence.current) return;
+      setReports(list.items);
+      setPage(list.page ?? requestedPage);
+      setReportTotal(list.totalCount ?? list.items.length);
+      setTotalPages(list.totalPages ?? (list.items.length ? 1 : 0));
+      setDashboard(summary);
+      let detail: Report | undefined;
+      let fallback = false;
+      if (requested) {
+        const candidate = (await call(
+          api,
+          historicalRequested
+            ? `/api/problem-reports/${requested}/history/${initialSnapshotId}`
+            : `/api/problem-reports/${requested}`,
+        )) as Report;
+        const matchesTarget =
+          historicalRequested ||
+          !targetFilter ||
+          (targetFilter === "unassigned"
+            ? !candidate.targetReleaseId
+            : candidate.targetReleaseId === targetFilter);
+        if (matchesTarget) detail = candidate;
+      }
+      if (!detail && !historicalRequested && list.items[0]) {
+        fallback = true;
+        detail = (await call(api, `/api/problem-reports/${list.items[0].id}`)) as Report;
+      }
+      if (sequence !== refreshSequence.current) return;
+      // A detail response that lost the selection race must not take the pane, whoever issued it: an
+      // implicit queue refresh re-asking for the previously selected record, or an explicit refresh for the
+      // record a lifecycle action just changed. If the reader opened another record while either was in
+      // flight, the reader's newer decision wins and this response is dropped — a pane that silently
+      // switched records would let a lifecycle action land on a record the reader did not select. The one
+      // exception is the queue's own fallback to its first row when the selected record cannot be served
+      // (filtered out, or nothing selected yet): that is this refresh's own decision, and it stands unless
+      // the reader decided something newer after the refresh began.
+      const superseded =
+        detail !== undefined &&
+        (fallback
+          ? selectedIdRef.current !== intentAtStart
+          : selectedIdRef.current !== undefined && selectedIdRef.current !== detail.id);
+      if (superseded) detail = undefined;
+      const id = detail?.id;
+      const routeAlreadyCorrect = id === initialReportId;
+      if (detail) {
+        // The address must follow the committed record whenever it changes — including when a refresh
+        // commits a record the reader claimed while an earlier open for it is still in flight — so the
+        // pane and the address can never name different records. A same-record re-fetch leaves the
+        // address alone, and a first commit on a fresh page (nothing applied before) keeps the original
+        // no-rewrite behavior for the queue's auto-selection.
+        const addressStale =
+          appliedIdRef.current !== undefined && appliedIdRef.current !== detail.id;
+        setSelected(detail);
+        selectedIdRef.current = detail.id;
+        appliedIdRef.current = detail.id;
+        appliedSnapshotRef.current = detail.snapshotId;
+        setOwner({ userId: detail.responsibleEngineerId, name: detail.responsibleEngineerId });
+        // The record being read belongs in the address, or a refresh lands on whatever happens to be first.
+        //
+        // Opening a report from the queue already did this; creating one did not, and the gap was invisible while
+        // the queue was filtered by build — the new report was usually the only row, so falling back to items[0]
+        // picked it by luck. Project-scoped, the queue holds every report in the Project and that luck is gone:
+        // a refresh after creating a report jumped to the lowest-numbered record in the database.
+        if (
+          !routeAlreadyCorrect &&
+          !detail.historicalReadOnly &&
+          (selectId || addressStale || (requested && requested !== id))
+        )
+          // An implicit queue fallback is not a reader navigation. Replace the current filter entry so one
+          // Back returns to the previous target, rather than stepping onto a duplicate entry that carries
+          // the same filter and the fallback record. Explicit opens and create/action refreshes still push,
+          // even when an action causes the changed record to fall out of the current filter and another row
+          // becomes the fallback.
+          onSelected(
+            id,
+            targetFilter,
+            undefined,
+            replaceRoute || (fallback && selectId === undefined),
+          );
+      } else if (selectedIdRef.current === intentAtStart) {
+        const hadRecord = appliedIdRef.current !== undefined;
+        setSelected(undefined);
+        selectedIdRef.current = undefined;
+        appliedIdRef.current = undefined;
+        appliedSnapshotRef.current = undefined;
+        if ((requested && !historicalRequested) || hadRecord)
+          onSelected(undefined, targetFilter, undefined, replaceRoute || selectId === undefined);
+      }
+    } catch (reason) {
+      // A failure is the reader's problem only while the record it was loading is still the reader's
+      // intent. A refresh whose target was superseded mid-flight — an open moved the reader elsewhere
+      // while its detail request was underway — reports nothing: the pane already names the newer record.
+      if (
+        sequence === refreshSequence.current &&
+        (requested === undefined ||
+          selectedIdRef.current === undefined ||
+          selectedIdRef.current === requested)
+      )
+        setError(reason instanceof Error ? reason.message : "Unable to load problem reports.");
+    }
+  };
   // oxlint-disable-next-line react-hooks/exhaustive-deps -- filters are applied deliberately with Apply filters.
-  useEffect(()=>{void refresh(undefined,page)},[api,projectId,releaseId,page,appliedSearch,appliedFilters,targetFilter]);// eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (
+      !initialReportId ||
+      (routedReportIdRef.current === initialReportId &&
+        routedSnapshotIdRef.current === initialSnapshotId)
+    )
+      return;
+    routedReportIdRef.current = initialReportId;
+    routedSnapshotIdRef.current = initialSnapshotId;
+    selectedIdRef.current = initialReportId;
+    routeRestorationRef.current = true;
+    routeSnapshotRef.current = initialSnapshotId;
+    // A different routed record is not yet committed. Clear the previous pane and applied identity before
+    // the request starts, so a failed restoration can never leave the old record actionable under the new URL.
+    if (
+      appliedIdRef.current !== initialReportId ||
+      appliedSnapshotRef.current !== initialSnapshotId
+    ) {
+      setSelected(undefined);
+      appliedIdRef.current = undefined;
+      appliedSnapshotRef.current = undefined;
+      setOwner({ userId: "", name: "" });
+    }
+  }, [initialReportId, initialSnapshotId]);
+  useEffect(() => {
+    const replaceRoute = routeRestorationRef.current;
+    const restoredSnapshot = routeSnapshotRef.current;
+    routeRestorationRef.current = false;
+    routeSnapshotRef.current = undefined;
+    void refresh(undefined, page, replaceRoute, restoredSnapshot);
+  }, [
+    api,
+    projectId,
+    releaseId,
+    page,
+    appliedSearch,
+    appliedFilters,
+    targetFilter,
+    initialReportId,
+    initialSnapshotId,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
   /**
    * The search box asks the queue itself, a moment after typing stops.
    *
@@ -150,39 +636,169 @@ export default function ProblemReportCenter({api,projectId,releaseId,releases,us
    * like a form. The wait exists so a five-character number is one request rather than five, and the
    * dropdowns keep their button because changing three of them should ask once, not three times.
    */
-  useEffect(()=>{
-    if(search.trim()===appliedSearch.trim())return
-    const timer=setTimeout(()=>{setPage(1);setAppliedSearch(search)},250)
-    return ()=>clearTimeout(timer)
-  },[search,appliedSearch]);
-  useEffect(()=>{const restore=()=>{setPage(1);setTargetFilter(new URLSearchParams(location.search).get("targetBuild")??"")};addEventListener("popstate",restore);return()=>removeEventListener("popstate",restore)},[]);
-  const changeTargetFilter=(value:string)=>{const url=new URL(location.href);if(value)url.searchParams.set("targetBuild",value);else url.searchParams.delete("targetBuild");history.pushState({},"",`${url.pathname}${url.search}`);setPage(1);setTargetFilter(value)};
-  const applyFilters=()=>{setPage(1);setAppliedFilters({state:stateFilter,severity:severityFilter,priority:priorityFilter,owner:ownerFilter,category:categoryFilter,categoryFamily:categoryFamilyFilter})};
-  const visible=useMemo(()=>reports,[reports]);
-  const open=async(id:string,snapshotId?:string)=>{const sequence=++openSequence.current;selectedIdRef.current=id;try{const detail=await call(api,snapshotId?`/api/problem-reports/${id}/history/${snapshotId}`:`/api/problem-reports/${id}`);
-    // A success may commit only if this open still owns the selection intent: a queue fallback or clear
-    // that committed while the request was in flight supersedes it. Re-committing a record another path
-    // already committed is harmless — and it re-syncs the address, which that other path may have missed.
-    if(sequence!==openSequence.current||selectedIdRef.current!==id)return;setSelected(detail);selectedIdRef.current=detail.id;appliedIdRef.current=detail.id;setOwner({userId:detail.responsibleEngineerId,name:detail.responsibleEngineerId});setTab("record");onSelected(id,targetFilter,snapshotId)}catch(reason){
-    // An open the reader has already superseded owns nothing: it must not revert the newer selection, and
-    // its failure is not the current request's error. A current failure hands the intent back to the
-    // record the pane is actually showing right now — not to whatever was applied when the open began,
-    // because a refresh may legitimately have committed a newer record since. And when that newer record
-    // is this very one, the duplicate failure is invisible: the record is already on screen.
-    if(sequence===openSequence.current&&selectedIdRef.current===id&&appliedIdRef.current!==id){selectedIdRef.current=appliedIdRef.current;setError(reason instanceof Error?reason.message:"Unable to open report.")}}};
-  const action=async(path:string,payload:Record<string,unknown>={})=>{if(!selected)return false;try{setBusy(true);await call(api,`/api/problem-reports/${selected.id}/${path}`,"POST",{expectedVersion:selected.version,...payload});setNote("");noteDraft.clear();await refresh(selected.id);return true}catch(reason){setError(reason instanceof Error?reason.message:"Controlled action failed.");return false}finally{setBusy(false)}};
+  useEffect(() => {
+    if (search.trim() === appliedSearch.trim()) return;
+    const timer = setTimeout(() => {
+      setPage(1);
+      setAppliedSearch(search);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [search, appliedSearch]);
+  useEffect(() => {
+    const restore = () => {
+      setPage(1);
+      setTargetFilter(new URLSearchParams(location.search).get("targetBuild") ?? "");
+    };
+    addEventListener("popstate", restore);
+    return () => removeEventListener("popstate", restore);
+  }, []);
+  const changeTargetFilter = (value: string) => {
+    const url = new URL(location.href);
+    if (value) url.searchParams.set("targetBuild", value);
+    else url.searchParams.delete("targetBuild");
+    history.pushState({}, "", `${url.pathname}${url.search}`);
+    setPage(1);
+    setTargetFilter(value);
+  };
+  const applyFilters = () => {
+    setPage(1);
+    setAppliedFilters({
+      state: stateFilter,
+      severity: severityFilter,
+      priority: priorityFilter,
+      owner: ownerFilter,
+      category: categoryFilter,
+      categoryFamily: categoryFamilyFilter,
+    });
+  };
+  const visible = useMemo(() => reports, [reports]);
+  const open = async (id: string, snapshotId?: string) => {
+    const sequence = ++openSequence.current;
+    selectedIdRef.current = id;
+    try {
+      const detail = await call(
+        api,
+        snapshotId
+          ? `/api/problem-reports/${id}/history/${snapshotId}`
+          : `/api/problem-reports/${id}`,
+      );
+      // A success may commit only if this open still owns the selection intent: a queue fallback or clear
+      // that committed while the request was in flight supersedes it. Re-committing a record another path
+      // already committed is harmless — and it re-syncs the address, which that other path may have missed.
+      if (sequence !== openSequence.current || selectedIdRef.current !== id) return;
+      setSelected(detail);
+      selectedIdRef.current = detail.id;
+      appliedIdRef.current = detail.id;
+      appliedSnapshotRef.current = detail.snapshotId;
+      setOwner({ userId: detail.responsibleEngineerId, name: detail.responsibleEngineerId });
+      setTab("record");
+      onSelected(id, targetFilter, snapshotId);
+    } catch (reason) {
+      // An open the reader has already superseded owns nothing: it must not revert the newer selection, and
+      // its failure is not the current request's error. A current failure hands the intent back to the
+      // record the pane is actually showing right now — not to whatever was applied when the open began,
+      // because a refresh may legitimately have committed a newer record since. And when that newer record
+      // is this very one, the duplicate failure is invisible: the record is already on screen.
+      if (
+        sequence === openSequence.current &&
+        selectedIdRef.current === id &&
+        appliedIdRef.current !== id
+      ) {
+        selectedIdRef.current = appliedIdRef.current;
+        setError(reason instanceof Error ? reason.message : "Unable to open report.");
+      }
+    }
+  };
+  const action = async (path: string, payload: Record<string, unknown> = {}) => {
+    if (!selected) return false;
+    try {
+      setBusy(true);
+      await call(api, `/api/problem-reports/${selected.id}/${path}`, "POST", {
+        expectedVersion: selected.version,
+        ...payload,
+      });
+      setNote("");
+      noteDraft.clear();
+      await refresh(selected.id);
+      return true;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Controlled action failed.");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
   /**
    * Relating and unrelating are controlled acts on both records, so they go through the dedicated
    * endpoints rather than the generic links one, and the record is reloaded afterwards — the other
    * report own panel changed too, and so may this one lifecycle if a closure candidate was pending.
    */
-  const linkRelated=async(relatedId:string)=>{if(!selected)return;try{setBusy(true);await call(api,`/api/problem-reports/${selected.id}/related`,"POST",{relatedProblemReportId:relatedId,expectedVersion:selected.version});await refresh(selected.id)}catch(reason){setError(reason instanceof Error?reason.message:"The Problem Reports could not be related.")}finally{setBusy(false)}};
-  const unlinkRelated=async(relatedId:string)=>{if(!selected)return;try{setBusy(true);await call(api,`/api/problem-reports/${selected.id}/related/${relatedId}`,"DELETE");await refresh(selected.id)}catch(reason){setError(reason instanceof Error?reason.message:"The relationship could not be removed.")}finally{setBusy(false)}};
-  const closeDisposition=()=>{setShowDisposition(false);setDispositionRationale("")};
-  const submitDisposition=async(event:FormEvent)=>{event.preventDefault();if(!dispositionRationale.trim())return;if(await action("transition",{targetState:"Rejected",rationale:dispositionRationale.trim()}))closeDisposition()};
-  const [transitionTarget,setTransitionTarget]=useState("");
-  const requestTransition=(target:string,requiresRationale:boolean)=>{if(requiresRationale){setTransitionTarget(target);setReopenRationale("");setShowReopen(true)}else void action("transition",{targetState:target})};
-  const submitReopen=async(event:FormEvent)=>{event.preventDefault();if(!reopenRationale.trim()||!transitionTarget)return;if(await action("transition",{targetState:transitionTarget,rationale:reopenRationale.trim()})){setShowReopen(false);setReopenRationale("");setTransitionTarget("")}};
+  const linkRelated = async (relatedId: string) => {
+    if (!selected) return;
+    try {
+      setBusy(true);
+      await call(api, `/api/problem-reports/${selected.id}/related`, "POST", {
+        relatedProblemReportId: relatedId,
+        expectedVersion: selected.version,
+      });
+      await refresh(selected.id);
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "The Problem Reports could not be related.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const unlinkRelated = async (relatedId: string) => {
+    if (!selected) return;
+    try {
+      setBusy(true);
+      await call(api, `/api/problem-reports/${selected.id}/related/${relatedId}`, "DELETE");
+      await refresh(selected.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The relationship could not be removed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const closeDisposition = () => {
+    setShowDisposition(false);
+    setDispositionRationale("");
+  };
+  const submitDisposition = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!dispositionRationale.trim()) return;
+    if (
+      await action("transition", {
+        targetState: "Rejected",
+        rationale: dispositionRationale.trim(),
+      })
+    )
+      closeDisposition();
+  };
+  const [transitionTarget, setTransitionTarget] = useState("");
+  const requestTransition = (target: string, requiresRationale: boolean) => {
+    if (requiresRationale) {
+      setTransitionTarget(target);
+      setReopenRationale("");
+      setShowReopen(true);
+    } else void action("transition", { targetState: target });
+  };
+  const submitReopen = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!reopenRationale.trim() || !transitionTarget) return;
+    if (
+      await action("transition", {
+        targetState: transitionTarget,
+        rationale: reopenRationale.trim(),
+      })
+    ) {
+      setShowReopen(false);
+      setReopenRationale("");
+      setTransitionTarget("");
+    }
+  };
   /**
    * Reviving a finished report is the reopen it always was, followed by the editor.
    *
@@ -191,83 +807,1308 @@ export default function ProblemReportCenter({api,projectId,releaseId,releases,us
    * would be taken against a state the server refuses to check out. If the transition fails the editor
    * never opens and the dialog keeps the rationale that was typed.
    */
-  const submitRevive=async(event:FormEvent)=>{event.preventDefault();
-    const target=selected?.capabilities?.reviveTargetState;
-    if(!reviveRationale.trim()||!target)return;
-    if(await action("transition",{targetState:target,rationale:reviveRationale.trim()})){
-      setShowRevive(false);setReviveRationale("");setShowEdit(true)}};
-  const createReport=async(event:FormEvent)=>{event.preventDefault();if(createUploadsPendingRef.current>0){setError("Wait for inline image uploads to finish before saving the Problem Report.");return}const problem=toPlainText(create.problemRich).trim();if(!create.title.trim()||!problem){setError("Title and Problem Description are required for a Draft PR.");return}try{setBusy(true);const created=await call(api,"/api/problem-reports","POST",{projectId,releaseId,title:create.title.trim(),problem,problemRich:create.problemRich,additionalInformation:toPlainText(create.additionalInformationRich),additionalInformationRich:create.additionalInformationRich,severity:create.severity,priority:create.priority,category:create.category||null,classification:"Engineering anomaly",origin:"Manual report",impactAssessmentJson:JSON.stringify(create.impacts),
-      ...Object.fromEntries(PROBLEM_REPORT_NARRATIVE.flatMap(field=>[[field.key,create[field.key]],[field.plain,toPlainText(create[field.key])]]))});setShowCreate(false);setCreate(newDraft());createDraft.clear();
+  const submitRevive = async (event: FormEvent) => {
+    event.preventDefault();
+    const target = selected?.capabilities?.reviveTargetState;
+    if (!reviveRationale.trim() || !target) return;
+    if (await action("transition", { targetState: target, rationale: reviveRationale.trim() })) {
+      setShowRevive(false);
+      setReviveRationale("");
+      setShowEdit(true);
+    }
+  };
+  const createReport = async (event: FormEvent) => {
+    event.preventDefault();
+    if (createUploadsPendingRef.current > 0) {
+      setError("Wait for inline image uploads to finish before saving the Problem Report.");
+      return;
+    }
+    const problem = toPlainText(create.problemRich).trim();
+    if (!create.title.trim() || !problem) {
+      setError("Title and Problem Description are required for a Draft PR.");
+      return;
+    }
+    try {
+      setBusy(true);
+      const created = await call(api, "/api/problem-reports", "POST", {
+        projectId,
+        releaseId,
+        title: create.title.trim(),
+        problem,
+        problemRich: create.problemRich,
+        additionalInformation: toPlainText(create.additionalInformationRich),
+        additionalInformationRich: create.additionalInformationRich,
+        severity: create.severity,
+        priority: create.priority,
+        category: create.category || null,
+        classification: "Engineering anomaly",
+        origin: "Manual report",
+        impactAssessmentJson: JSON.stringify(create.impacts),
+        ...Object.fromEntries(
+          PROBLEM_REPORT_NARRATIVE.flatMap((field) => [
+            [field.key, create[field.key]],
+            [field.plain, toPlainText(create[field.key])],
+          ]),
+        ),
+      });
+      setShowCreate(false);
+      setCreate(newDraft());
+      createDraft.clear();
       // Saving a new Problem Report is itself a decision to select it, so the created record becomes the
       // reader's selection intent before its detail is asked for.
-      selectedIdRef.current=created.id;await refresh(created.id)}catch(reason){setError(reason instanceof Error?reason.message:"Unable to create report.")}finally{setBusy(false)}};
+      selectedIdRef.current = created.id;
+      await refresh(created.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to create report.");
+    } finally {
+      setBusy(false);
+    }
+  };
   // Who holds the record right now. A Problem Report is edited under the same exclusive server lease as every
   // other controlled record, so the page has to be able to say "somebody else has this" rather than offering
   // a control whose check-in would be refused.
-  const [lock,setLock]=useState<{editable:boolean;locked:boolean;mine:boolean;holder?:string;sessionId?:string}>();
-  const readLock=useCallback(async(reportId:string)=>{try{setLock(await call(api,`/api/controlled-editing/status?artifactType=ProblemReport&artifactId=${reportId}`))}catch{setLock(undefined)}},[api]);
-  useEffect(()=>{if(selected)void readLock(selected.id);else setLock(undefined)},[readLock,selected]);
-  const openCorrectiveAction=async()=>{if(!selected)return;try{const target=await call(api,`/api/problem-reports/${selected.id}/corrective-action`);if(!target.available||!target.discipline){setError(target.reason);return}onOpenVerification({discipline:target.discipline,problemReportId:selected.id})}catch{onOpenVerification()}};
-  const latestClosureCandidate=selected?.closureCandidates?.[0];
-  const closurePackages=(selected?.closureCandidates??[]).filter(candidate=>candidate.state==="Approved"||candidate.state==="LegacyUnavailable");
-  const dispositionRevision=selected?.revisions?.find(revision=>revision.eventType==="DispositionRecorded");
-  const pageStart=reportTotal?(page-1)*queuePageSize+1:0;
-  const pageEnd=Math.min(page*queuePageSize,reportTotal);
+  const [lock, setLock] = useState<{
+    editable: boolean;
+    locked: boolean;
+    mine: boolean;
+    holder?: string;
+    sessionId?: string;
+  }>();
+  const readLock = useCallback(
+    async (reportId: string) => {
+      try {
+        setLock(
+          await call(
+            api,
+            `/api/controlled-editing/status?artifactType=ProblemReport&artifactId=${reportId}`,
+          ),
+        );
+      } catch {
+        setLock(undefined);
+      }
+    },
+    [api],
+  );
+  useEffect(() => {
+    if (selected) void readLock(selected.id);
+    else setLock(undefined);
+  }, [readLock, selected]);
+  const openCorrectiveAction = async () => {
+    if (!selected) return;
+    try {
+      const target = await call(api, `/api/problem-reports/${selected.id}/corrective-action`);
+      if (!target.available || !target.discipline) {
+        setError(target.reason);
+        return;
+      }
+      onOpenVerification({ discipline: target.discipline, problemReportId: selected.id });
+    } catch {
+      onOpenVerification();
+    }
+  };
+  const latestClosureCandidate = selected?.closureCandidates?.[0];
+  const closurePackages = (selected?.closureCandidates ?? []).filter(
+    (candidate) => candidate.state === "Approved" || candidate.state === "LegacyUnavailable",
+  );
+  const dispositionRevision = selected?.revisions?.find(
+    (revision) => revision.eventType === "DispositionRecorded",
+  );
+  const pageStart = reportTotal ? (page - 1) * queuePageSize + 1 : 0;
+  const pageEnd = Math.min(page * queuePageSize, reportTotal);
 
-  return <main className="problemReportsPage">
-    <header className="prHeader"><div><button className="back" onClick={onBack}>← Command Center</button><p className="eyebrow">ASSURANCE / PROBLEM REPORTS</p><h1>Problem Reports</h1></div><button className="primaryAction" onClick={()=>setShowCreate(true)}>+ Record problem</button></header>
-    {error&&<div className="workspaceError" role="alert">{error}<button onClick={()=>setError("")}>Dismiss</button></div>}
-    <section className="prMetrics">{[["Open work",dashboard?.summary.active??0,"blue"],["Release blockers",dashboard?.summary.releaseBlockers??0,"red"],["Waiting for SQA to Close",dashboard?.summary.closureAwaitingApproval??0,"amber"],["Closed records",dashboard?.summary.closed??0,"green"]].map(([label,value,tone])=><article className={String(tone)} key={String(label)}><span>{label}</span><b>{value}</b></article>)}</section>
-    {/* No Refresh button. The queue is not a page somebody has to remind to look — the search box asks as it
+  return (
+    <main className="problemReportsPage">
+      <header className="prHeader">
+        <div>
+          <button className="back" onClick={onBack}>
+            ← Command Center
+          </button>
+          <p className="eyebrow">ASSURANCE / PROBLEM REPORTS</p>
+          <h1>Problem Reports</h1>
+        </div>
+        <button className="primaryAction" onClick={() => setShowCreate(true)}>
+          + Record problem
+        </button>
+      </header>
+      {error && (
+        <div className="workspaceError" role="alert">
+          {error}
+          <button onClick={() => setError("")}>Dismiss</button>
+        </div>
+      )}
+      <section className="prMetrics">
+        {[
+          ["Open work", dashboard?.summary.active ?? 0, "blue"],
+          ["Release blockers", dashboard?.summary.releaseBlockers ?? 0, "red"],
+          ["Waiting for SQA to Close", dashboard?.summary.closureAwaitingApproval ?? 0, "amber"],
+          ["Closed records", dashboard?.summary.closed ?? 0, "green"],
+        ].map(([label, value, tone]) => (
+          <article className={String(tone)} key={String(label)}>
+            <span>{label}</span>
+            <b>{value}</b>
+          </article>
+        ))}
+      </section>
+      {/* No Refresh button. The queue is not a page somebody has to remind to look — the search box asks as it
         is typed into, and every other filter asks when it is applied. */}
-      <section className="prWorkspace"><aside><div className="prListHead"><div><h2>Problem Report queue</h2><small>{pageStart}–{pageEnd} of {reportTotal} matching records</small></div></div>
-      <div className="prFilters"><label>Search<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Number, title, description, root cause"/></label><label>Status<select value={stateFilter} onChange={e=>setStateFilter(e.target.value)}><option value="">All</option>{queueStates.map(value=><option key={value} value={value}>{spaced(value)}</option>)}</select></label><label>Target build<select value={targetFilter} onChange={e=>changeTargetFilter(e.target.value)}><option value="">All target builds</option>{releases.map(value=><option key={value.id} value={value.id}>{value.version}{value.isReleased?" · released":""}</option>)}<option value="unassigned">Not assigned</option></select></label><label>Category<select aria-label="Category" value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}><option value="">All</option>{categories.map(definition=><option key={definition.value} value={definition.value}>{definition.code} · {definition.label}</option>)}</select></label><label>Category family<select aria-label="Category family" value={categoryFamilyFilter} onChange={e=>setCategoryFamilyFilter(e.target.value)}><option value="">All</option>{[...new Set(categories.map(definition=>definition.family))].map(family=><option key={family}>{family}</option>)}</select></label><label>Severity<select value={severityFilter} onChange={e=>setSeverityFilter(e.target.value)}><option value="">All</option>{["Critical","High","Major","Minor","Trivial"].map(value=><option key={value}>{value}</option>)}</select></label><label>Priority<select value={priorityFilter} onChange={e=>setPriorityFilter(e.target.value)}><option value="">All</option>{["Urgent","High","Normal","Low"].map(value=><option key={value}>{value}</option>)}</select></label><label>Assigned user<input value={ownerFilter} onChange={e=>setOwnerFilter(e.target.value)} placeholder="User name"/></label><button type="button" onClick={applyFilters}>Apply filters</button></div>
-      <div className="prList">{visible.map(report=><button key={report.id} onClick={()=>void open(report.id)} className={selected?.id===report.id?"selected":""}><i className={report.severity.toLowerCase()}>{report.severity.slice(0,1)}</i><div><small>{report.displayNumber} · {spaced(report.state)}</small><b>{report.title}</b><span><PersonName userName={report.responsibleEngineerId||report.reportedBy} displayName={(report.responsibleEngineerId?report.responsibleEngineerDisplayName:report.reportedByDisplayName)??undefined}/> · {new Date(report.updatedAt).toLocaleDateString()}</span></div>{report.isReleaseBlocker&&!report.waived&&<em>BLOCKER</em>}</button>)}{!visible.length&&<div className="prEmpty"><b>{search.trim()||stateFilter||severityFilter||priorityFilter||categoryFilter||categoryFamilyFilter||ownerFilter.trim()?"No Problem Reports match these filters.":"No Problem Reports are recorded for this Project."}</b></div>}</div>
-      <nav className="prPager" aria-label="Problem Report queue pages"><button type="button" disabled={page<=1} onClick={()=>setPage(current=>Math.max(1,current-1))}>Previous</button><span>Page {page} of {Math.max(totalPages,1)}</span><button type="button" disabled={page>=Math.max(totalPages,1)} onClick={()=>setPage(current=>current+1)}>Next</button></nav>
-    </aside><section className="prDetail">{selected?<><div className="prDetailHead"><div><p>{selected.displayNumber} · {isHistorical?"HISTORICAL RECORD":"CONTROLLED RECORD"}</p><h2>{selected.title}</h2><div><span className={`prState ${selected.state.toLowerCase()}`}>{spaced(selected.state)}</span><span>{selected.severity} severity</span><span>{selected.priority} priority</span></div></div>{selected.isReleaseBlocker&&!isHistorical&&<div className="blockerFlag"><b>{selected.waived?"Controlled waiver active":"Release blocker"}</b><span>{selected.activeReleaseWaiver?`${selected.activeReleaseWaiver.rationale} · ${spaced(selected.activeReleaseWaiver.approvalAuthority)} ${selected.activeReleaseWaiver.approvedBy} · expires ${new Date(selected.activeReleaseWaiver.expiresAt).toLocaleDateString()}`:"Requires a separate independent release-waiver decision."}</span></div>}</div>
-      <nav className="prOutputActions" aria-label="Problem Report downloads"><span>{isHistorical?"Exact historical output":"Controlled output"}</span><a href={problemReportDownload(api,selected.id,"docx",isHistorical?selected.revision:undefined,isHistorical?selected.snapshotId:undefined)} target="_blank" rel="noreferrer">Download DOCX</a><a href={problemReportDownload(api,selected.id,"pdf",isHistorical?selected.revision:undefined,isHistorical?selected.snapshotId:undefined)} target="_blank" rel="noreferrer">Download PDF</a></nav>
-      <nav className="prTabs" aria-label="Problem Report sections"><button className={tab==="record"?"active":""} onClick={()=>setTab("record")}>Record</button><button className={tab==="history"?"active":""} onClick={()=>setTab("history")}>History <span>{selected.revisions?.length??0}</span></button></nav>
-        {tab==="history"?<section className="prTimeline"><div><h3>{isHistorical?"Exact historical snapshot":"Immutable lifecycle history"}</h3><span>Version {selected.version}</span></div>{(selected.releaseWaivers?.length??0)>0&&!isHistorical&&<div className="prClosurePackages"><h4>Controlled release-waiver history</h4>{selected.releaseWaivers?.map(waiver=><article key={waiver.id}><i>◇</i><div><b>{waiver.active?"Active waiver":"Historical waiver"} · revision {waiver.blockerRevision}</b><span><PersonName userName={waiver.approvedBy}/> · {spaced(waiver.approvalAuthority)} · expires {new Date(waiver.expiresAt).toLocaleString()}</span><small>{waiver.rationale}{waiver.revocationReason&&` · Revoked: ${waiver.revocationReason}`}</small></div></article>)}</div>}{closurePackages.length>0&&!isHistorical&&<div className="prClosurePackages"><h4>Controlled closure packages</h4>{closurePackages.map(candidate=><article key={candidate.id}><i>▣</i><div><b>Closure revision {candidate.reportRevision}{candidate.reportRevision<selected.revision?" · prior closure cycle":""}</b><span>{candidate.state==="LegacyUnavailable"?"Legacy closure · exact original package was not frozen":<><PersonName userName={candidate.approvedBy??""}/> · {candidate.approvalAuthority?spaced(candidate.approvalAuthority):"Authority not retained"} · {candidate.approvedAt&&new Date(candidate.approvedAt).toLocaleString()}</>}</span></div>{candidate.state==="Approved"&&candidate.closurePackageHash?<><code>{candidate.closurePackageHash.slice(0,12)}</code><a href={`${api}/api/problem-reports/${selected.id}/closure-package?candidateId=${candidate.id}`} target="_blank" rel="noreferrer">Open frozen closure package</a></>:<em>Historical evidence unavailable</em>}</article>)}</div>}{selected.revisions?.map(revision=>{const evidence=revisionEvidence(revision);const recordVersion=snapshotVersion(revision);const canDownload=revision.snapshotSchemaVersion>=1&&revision.snapshotSchemaVersion<=6;return <article key={revision.id}><i>✓</i><div><b>{spaced(revision.eventType)} · revision {revision.revision}{recordVersion===undefined?"":` · record version ${recordVersion}`}</b>{revision.fromState&&revision.toState&&<strong>{spaced(revision.fromState)} → {spaced(revision.toState)}</strong>}<span><PersonName userName={revision.actor} displayName={revision.actorDisplayName??undefined}/> · {new Date(revision.occurredAt).toLocaleString()}</span>{revision.rationale&&<p><b>Rationale:</b> {revision.rationale}</p>}{revision.detail&&revision.detail!==revision.rationale&&<p>{revision.detail}</p>}{evidence?.disposition&&<p><b>{spaced(evidence.disposition)}</b> · {evidence.dispositionRationale}</p>}{evidence?<small>Snapshot schema {revision.snapshotSchemaVersion} · Category {evidence.category??evidence.type??"Not recorded"} · Workaround {evidence.workaround||"None recorded"}</small>:<small>Legacy snapshot schema {revision.snapshotSchemaVersion} · exact fields were not recorded</small>}</div><code>{revision.snapshotHash.slice(0,12)}</code>{!isHistorical&&<a href={problemReportHistoricalPage(revision.id)} target="_blank" rel="noreferrer">Open exact record</a>}{canDownload&&<span className="prRevisionOutputs"><a href={problemReportDownload(api,selected.id,"docx",revision.revision,revision.id)} target="_blank" rel="noreferrer">DOCX · rev {String(revision.revision).padStart(2,"0")}</a><a href={problemReportDownload(api,selected.id,"pdf",revision.revision,revision.id)} target="_blank" rel="noreferrer">PDF · rev {String(revision.revision).padStart(2,"0")}</a></span>}</article>})}</section>:<>
-        <section className="prIdentity"><div><small>RAISED BY</small><b><PersonName userName={selected.reportedBy} displayName={selected.reportedByDisplayName??undefined}/></b><span>{selected.createdAt&&new Date(selected.createdAt).toLocaleString()}</span></div><div><small>ASSIGNED USER</small><b><PersonName userName={selected.responsibleEngineerId} displayName={selected.responsibleEngineerDisplayName??undefined}/></b></div><div className="prIdentityCategory"><small>CATEGORY</small>{selected.category?<CategoryTile definition={selected.category} provenance={selected.category.provenance} compact/>:<b className="prNoCategory">Not yet classified</b>}</div><div><small>TARGET BUILD</small><b>{releases.find(item=>item.id===selected.targetReleaseId)?.version??"Not assigned"}</b></div></section>
-        {selected.capabilities?.ownerAuthorityException&&<div className="prClosureInvalidated" role="alert"><b>Owner no longer authorized</b><span>{selected.capabilities.ownerAuthorityException}{selected.capabilities.canRecoverOwner?" Select an eligible accountable owner to recover this record.":" Ask a Project Engineering Lead, Engineering Manager, or Program Manager to reassign it."}</span></div>}
-        {!isFinished&&(selected.capabilities?.canReassignOwner??isOwner)&&<details className="prAdmin"><summary>Reassign or change target build</summary><div><label>Assigned user<PersonPicker api={api} projectId={projectId} value={owner.userId} name={owner.name} index={0} label="Assigned user" authority="ProblemReportOwner" onSelect={setOwner}/></label><button disabled={busy||!owner.userId||owner.userId===selected.responsibleEngineerId} onClick={()=>void action("owner",{responsibleEngineerId:owner.userId})}>Reassign</button>{isOwner&&<label>Target build<select value={selected.targetReleaseId??""} onChange={event=>void action("target-build",{targetReleaseId:event.target.value})}><option value="" disabled>Not assigned</option>{releases.map(item=><option key={item.id} value={item.id}>{item.version}{item.isReleased?" · released":""}</option>)}</select></label>}</div></details>}
-        {/* Who may edit is the server's answer, not one recomputed here. The checkout status endpoint
+      <section className="prWorkspace">
+        <aside>
+          <div className="prListHead">
+            <div>
+              <h2>Problem Report queue</h2>
+              <small>
+                {pageStart}–{pageEnd} of {reportTotal} matching records
+              </small>
+            </div>
+          </div>
+          <div className="prFilters">
+            <label>
+              Search
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Number, title, description, root cause"
+              />
+            </label>
+            <label>
+              Status
+              <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)}>
+                <option value="">All</option>
+                {queueStates.map((value) => (
+                  <option key={value} value={value}>
+                    {spaced(value)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Target build
+              <select value={targetFilter} onChange={(e) => changeTargetFilter(e.target.value)}>
+                <option value="">All target builds</option>
+                {releases.map((value) => (
+                  <option key={value.id} value={value.id}>
+                    {value.version}
+                    {value.isReleased ? " · released" : ""}
+                  </option>
+                ))}
+                <option value="unassigned">Not assigned</option>
+              </select>
+            </label>
+            <label>
+              Category
+              <select
+                aria-label="Category"
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+              >
+                <option value="">All</option>
+                {categories.map((definition) => (
+                  <option key={definition.value} value={definition.value}>
+                    {definition.code} · {definition.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Category family
+              <select
+                aria-label="Category family"
+                value={categoryFamilyFilter}
+                onChange={(e) => setCategoryFamilyFilter(e.target.value)}
+              >
+                <option value="">All</option>
+                {[...new Set(categories.map((definition) => definition.family))].map((family) => (
+                  <option key={family}>{family}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Severity
+              <select value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)}>
+                <option value="">All</option>
+                {["Critical", "High", "Major", "Minor", "Trivial"].map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Priority
+              <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}>
+                <option value="">All</option>
+                {["Urgent", "High", "Normal", "Low"].map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Assigned user
+              <input
+                value={ownerFilter}
+                onChange={(e) => setOwnerFilter(e.target.value)}
+                placeholder="User name"
+              />
+            </label>
+            <button type="button" onClick={applyFilters}>
+              Apply filters
+            </button>
+          </div>
+          <div className="prList">
+            {visible.map((report) => (
+              <button
+                key={report.id}
+                onClick={() => void open(report.id)}
+                className={selected?.id === report.id ? "selected" : ""}
+              >
+                <i className={report.severity.toLowerCase()}>{report.severity.slice(0, 1)}</i>
+                <div>
+                  <small>
+                    {report.displayNumber} · {spaced(report.state)}
+                  </small>
+                  <b>{report.title}</b>
+                  <span>
+                    <PersonName
+                      userName={report.responsibleEngineerId || report.reportedBy}
+                      displayName={
+                        (report.responsibleEngineerId
+                          ? report.responsibleEngineerDisplayName
+                          : report.reportedByDisplayName) ?? undefined
+                      }
+                    />{" "}
+                    · {new Date(report.updatedAt).toLocaleDateString()}
+                  </span>
+                </div>
+                {report.isReleaseBlocker && !report.waived && <em>BLOCKER</em>}
+              </button>
+            ))}
+            {!visible.length && (
+              <div className="prEmpty">
+                <b>
+                  {search.trim() ||
+                  stateFilter ||
+                  severityFilter ||
+                  priorityFilter ||
+                  categoryFilter ||
+                  categoryFamilyFilter ||
+                  ownerFilter.trim()
+                    ? "No Problem Reports match these filters."
+                    : "No Problem Reports are recorded for this Project."}
+                </b>
+              </div>
+            )}
+          </div>
+          <nav className="prPager" aria-label="Problem Report queue pages">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+            >
+              Previous
+            </button>
+            <span>
+              Page {page} of {Math.max(totalPages, 1)}
+            </span>
+            <button
+              type="button"
+              disabled={page >= Math.max(totalPages, 1)}
+              onClick={() => setPage((current) => current + 1)}
+            >
+              Next
+            </button>
+          </nav>
+        </aside>
+        <section className="prDetail">
+          {selected ? (
+            <>
+              <div className="prDetailHead">
+                <div>
+                  <p>
+                    {selected.displayNumber} ·{" "}
+                    {isHistorical ? "HISTORICAL RECORD" : "CONTROLLED RECORD"}
+                  </p>
+                  <h2>{selected.title}</h2>
+                  <div>
+                    <span className={`prState ${selected.state.toLowerCase()}`}>
+                      {spaced(selected.state)}
+                    </span>
+                    <span>{selected.severity} severity</span>
+                    <span>{selected.priority} priority</span>
+                  </div>
+                </div>
+                {selected.isReleaseBlocker && !isHistorical && (
+                  <div className="blockerFlag">
+                    <b>{selected.waived ? "Controlled waiver active" : "Release blocker"}</b>
+                    <span>
+                      {selected.activeReleaseWaiver
+                        ? `${selected.activeReleaseWaiver.rationale} · ${spaced(selected.activeReleaseWaiver.approvalAuthority)} ${selected.activeReleaseWaiver.approvedBy} · expires ${new Date(selected.activeReleaseWaiver.expiresAt).toLocaleDateString()}`
+                        : "Requires a separate independent release-waiver decision."}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <nav className="prOutputActions" aria-label="Problem Report downloads">
+                <span>{isHistorical ? "Exact historical output" : "Controlled output"}</span>
+                <a
+                  href={problemReportDownload(
+                    api,
+                    selected.id,
+                    "docx",
+                    isHistorical ? selected.revision : undefined,
+                    isHistorical ? selected.snapshotId : undefined,
+                  )}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Download DOCX
+                </a>
+                <a
+                  href={problemReportDownload(
+                    api,
+                    selected.id,
+                    "pdf",
+                    isHistorical ? selected.revision : undefined,
+                    isHistorical ? selected.snapshotId : undefined,
+                  )}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Download PDF
+                </a>
+              </nav>
+              <nav className="prTabs" aria-label="Problem Report sections">
+                <button
+                  className={tab === "record" ? "active" : ""}
+                  onClick={() => setTab("record")}
+                >
+                  Record
+                </button>
+                <button
+                  className={tab === "history" ? "active" : ""}
+                  onClick={() => setTab("history")}
+                >
+                  History <span>{selected.revisions?.length ?? 0}</span>
+                </button>
+              </nav>
+              {tab === "history" ? (
+                <section className="prTimeline">
+                  <div>
+                    <h3>
+                      {isHistorical ? "Exact historical snapshot" : "Immutable lifecycle history"}
+                    </h3>
+                    <span>Version {selected.version}</span>
+                  </div>
+                  {(selected.releaseWaivers?.length ?? 0) > 0 && !isHistorical && (
+                    <div className="prClosurePackages">
+                      <h4>Controlled release-waiver history</h4>
+                      {selected.releaseWaivers?.map((waiver) => (
+                        <article key={waiver.id}>
+                          <i>◇</i>
+                          <div>
+                            <b>
+                              {waiver.active ? "Active waiver" : "Historical waiver"} · revision{" "}
+                              {waiver.blockerRevision}
+                            </b>
+                            <span>
+                              <PersonName userName={waiver.approvedBy} /> ·{" "}
+                              {spaced(waiver.approvalAuthority)} · expires{" "}
+                              {new Date(waiver.expiresAt).toLocaleString()}
+                            </span>
+                            <small>
+                              {waiver.rationale}
+                              {waiver.revocationReason && ` · Revoked: ${waiver.revocationReason}`}
+                            </small>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                  {closurePackages.length > 0 && !isHistorical && (
+                    <div className="prClosurePackages">
+                      <h4>Controlled closure packages</h4>
+                      {closurePackages.map((candidate) => (
+                        <article key={candidate.id}>
+                          <i>▣</i>
+                          <div>
+                            <b>
+                              Closure revision {candidate.reportRevision}
+                              {candidate.reportRevision < selected.revision
+                                ? " · prior closure cycle"
+                                : ""}
+                            </b>
+                            <span>
+                              {candidate.state === "LegacyUnavailable" ? (
+                                "Legacy closure · exact original package was not frozen"
+                              ) : (
+                                <>
+                                  <PersonName userName={candidate.approvedBy ?? ""} /> ·{" "}
+                                  {candidate.approvalAuthority
+                                    ? spaced(candidate.approvalAuthority)
+                                    : "Authority not retained"}{" "}
+                                  ·{" "}
+                                  {candidate.approvedAt &&
+                                    new Date(candidate.approvedAt).toLocaleString()}
+                                </>
+                              )}
+                            </span>
+                          </div>
+                          {candidate.state === "Approved" && candidate.closurePackageHash ? (
+                            <>
+                              <code>{candidate.closurePackageHash.slice(0, 12)}</code>
+                              <a
+                                href={`${api}/api/problem-reports/${selected.id}/closure-package?candidateId=${candidate.id}`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Open frozen closure package
+                              </a>
+                            </>
+                          ) : (
+                            <em>Historical evidence unavailable</em>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                  {selected.revisions?.map((revision) => {
+                    const evidence = revisionEvidence(revision);
+                    const recordVersion = snapshotVersion(revision);
+                    const canDownload =
+                      revision.snapshotSchemaVersion >= 1 && revision.snapshotSchemaVersion <= 6;
+                    return (
+                      <article key={revision.id}>
+                        <i>✓</i>
+                        <div>
+                          <b>
+                            {spaced(revision.eventType)} · revision {revision.revision}
+                            {recordVersion === undefined
+                              ? ""
+                              : ` · record version ${recordVersion}`}
+                          </b>
+                          {revision.fromState && revision.toState && (
+                            <strong>
+                              {spaced(revision.fromState)} → {spaced(revision.toState)}
+                            </strong>
+                          )}
+                          <span>
+                            <PersonName
+                              userName={revision.actor}
+                              displayName={revision.actorDisplayName ?? undefined}
+                            />{" "}
+                            · {new Date(revision.occurredAt).toLocaleString()}
+                          </span>
+                          {revision.rationale && (
+                            <p>
+                              <b>Rationale:</b> {revision.rationale}
+                            </p>
+                          )}
+                          {revision.detail && revision.detail !== revision.rationale && (
+                            <p>{revision.detail}</p>
+                          )}
+                          {evidence?.disposition && (
+                            <p>
+                              <b>{spaced(evidence.disposition)}</b> ·{" "}
+                              {evidence.dispositionRationale}
+                            </p>
+                          )}
+                          {evidence ? (
+                            <small>
+                              Snapshot schema {revision.snapshotSchemaVersion} · Category{" "}
+                              {evidence.category ?? evidence.type ?? "Not recorded"} · Workaround{" "}
+                              {evidence.workaround || "None recorded"}
+                            </small>
+                          ) : (
+                            <small>
+                              Legacy snapshot schema {revision.snapshotSchemaVersion} · exact fields
+                              were not recorded
+                            </small>
+                          )}
+                        </div>
+                        <code>{revision.snapshotHash.slice(0, 12)}</code>
+                        {!isHistorical && (
+                          <a
+                            href={problemReportHistoricalPage(revision.id)}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Open exact record
+                          </a>
+                        )}
+                        {canDownload && (
+                          <span className="prRevisionOutputs">
+                            <a
+                              href={problemReportDownload(
+                                api,
+                                selected.id,
+                                "docx",
+                                revision.revision,
+                                revision.id,
+                              )}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              DOCX · rev {String(revision.revision).padStart(2, "0")}
+                            </a>
+                            <a
+                              href={problemReportDownload(
+                                api,
+                                selected.id,
+                                "pdf",
+                                revision.revision,
+                                revision.id,
+                              )}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              PDF · rev {String(revision.revision).padStart(2, "0")}
+                            </a>
+                          </span>
+                        )}
+                      </article>
+                    );
+                  })}
+                </section>
+              ) : (
+                <>
+                  <section className="prIdentity">
+                    <div>
+                      <small>RAISED BY</small>
+                      <b>
+                        <PersonName
+                          userName={selected.reportedBy}
+                          displayName={selected.reportedByDisplayName ?? undefined}
+                        />
+                      </b>
+                      <span>
+                        {selected.createdAt && new Date(selected.createdAt).toLocaleString()}
+                      </span>
+                    </div>
+                    <div>
+                      <small>ASSIGNED USER</small>
+                      <b>
+                        <PersonName
+                          userName={selected.responsibleEngineerId}
+                          displayName={selected.responsibleEngineerDisplayName ?? undefined}
+                        />
+                      </b>
+                    </div>
+                    <div className="prIdentityCategory">
+                      <small>CATEGORY</small>
+                      {selected.category ? (
+                        <CategoryTile
+                          definition={selected.category}
+                          provenance={selected.category.provenance}
+                          compact
+                        />
+                      ) : (
+                        <b className="prNoCategory">Not yet classified</b>
+                      )}
+                    </div>
+                    <div>
+                      <small>TARGET BUILD</small>
+                      <b>
+                        {releases.find((item) => item.id === selected.targetReleaseId)?.version ??
+                          "Not assigned"}
+                      </b>
+                    </div>
+                  </section>
+                  {selected.capabilities?.ownerAuthorityException && (
+                    <div className="prClosureInvalidated" role="alert">
+                      <b>Owner no longer authorized</b>
+                      <span>
+                        {selected.capabilities.ownerAuthorityException}
+                        {selected.capabilities.canRecoverOwner
+                          ? " Select an eligible accountable owner to recover this record."
+                          : " Ask a Project Engineering Lead, Engineering Manager, or Program Manager to reassign it."}
+                      </span>
+                    </div>
+                  )}
+                  {!isFinished && (selected.capabilities?.canReassignOwner ?? isOwner) && (
+                    <details className="prAdmin">
+                      <summary>Reassign or change target build</summary>
+                      <div>
+                        <label>
+                          Assigned user
+                          <PersonPicker
+                            api={api}
+                            projectId={projectId}
+                            value={owner.userId}
+                            name={owner.name}
+                            index={0}
+                            label="Assigned user"
+                            authority="ProblemReportOwner"
+                            onSelect={setOwner}
+                          />
+                        </label>
+                        <button
+                          disabled={
+                            busy || !owner.userId || owner.userId === selected.responsibleEngineerId
+                          }
+                          onClick={() =>
+                            void action("owner", { responsibleEngineerId: owner.userId })
+                          }
+                        >
+                          Reassign
+                        </button>
+                        {isOwner && (
+                          <label>
+                            Target build
+                            <select
+                              value={selected.targetReleaseId ?? ""}
+                              onChange={(event) =>
+                                void action("target-build", { targetReleaseId: event.target.value })
+                              }
+                            >
+                              <option value="" disabled>
+                                Not assigned
+                              </option>
+                              {releases.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.version}
+                                  {item.isReleased ? " · released" : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                      </div>
+                    </details>
+                  )}
+                  {/* Who may edit is the server's answer, not one recomputed here. The checkout status endpoint
             already weighs the state and the lease, so `editable` is the whole question — this used to add
             `isOwner` on top of it, which is why a report in Verifying showed nothing at all to the tester
             who found the mistake in it. A finished report offers the SQA reopen instead, and only to
             whoever the lifecycle policy says may perform it. */}
-         {!isHistorical&&lock?.editable&&(lock.locked&&!lock.mine
-          ? <p className="prCheckoutHeld"><b><PersonName userName={lock.holder??""}/> has this Problem Report checked out.</b> It is read-only until they check it in or their lease expires.</p>
-          : <button type="button" className="prEditButton" onClick={()=>setShowEdit(true)}>Check out &amp; edit</button>)}
-         {!isHistorical&&!lock?.editable&&selected.capabilities?.canRevive&&<button type="button" className="prEditButton prReviveButton" onClick={()=>setShowRevive(true)}>Revive &amp; edit</button>}
-        <section className="prNarrative"><article><small>PROBLEM DESCRIPTION</small>{selected.problemRich?<RichContentView api={api} value={selected.problemRich} empty={selected.problem}/>:<p>{selected.problem}</p>}</article><article><small>ADDITIONAL INFORMATION</small>{selected.additionalInformationRich?<RichContentView api={api} value={selected.additionalInformationRich} empty={selected.additionalInformation}/>:<p>{selected.additionalInformation||"Not yet provided."}</p>}</article><article><small>ROOT CAUSE</small>{selected.rootCauseRich?<RichContentView api={api} value={selected.rootCauseRich} empty={selected.rootCause}/>:<p>{selected.rootCause||"Not yet determined."}</p>}</article><article><small>EFFECTS</small>{selected.effectsRich?<RichContentView api={api} value={selected.effectsRich} empty={selected.effects}/>:<p>{selected.effects||"Not yet recorded."}</p>}</article><article><small>CONTAINMENT</small>{selected.containmentRich?<RichContentView api={api} value={selected.containmentRich} empty={selected.containment}/>:<p>{selected.containment||"Not yet recorded."}</p>}</article><article><small>WORKAROUND</small>{selected.workaroundRich?<RichContentView api={api} value={selected.workaroundRich} empty={selected.workaround}/>:<p>{selected.workaround||"None recorded."}</p>}</article><article><small>HUMAN CORRECTIVE-ACTION NARRATIVE</small>{selected.correctiveActionRich?<RichContentView api={api} value={selected.correctiveActionRich} empty={selected.correctiveAction}/>:<p>{selected.correctiveAction||"Not yet recorded."}</p>}</article></section>
-        {selected.disposition&&selected.disposition!=="Fixed"&&<section className="prDispositionDecision" aria-label="Controlled disposition"><div><small>CONTROLLED DISPOSITION</small><h3>{spaced(selected.disposition)}</h3><p>{selected.dispositionRationale}</p></div><div><span>{dispositionRevision?<><PersonName userName={dispositionRevision.actor} displayName={dispositionRevision.actorDisplayName??undefined}/> · {new Date(dispositionRevision.occurredAt).toLocaleString()}</>:"Recorded in controlled history"}</span>{selected.disposition==="Duplicate"&&selected.duplicateDiagnostic?.canonicalTargetIdentifier&&<><b>Canonical target {selected.duplicateDiagnostic.canonicalTargetIdentifier}</b><span>{selected.duplicateDiagnostic.canonicalTargetTitle} · {spaced(selected.duplicateDiagnostic.canonicalTargetState??"")}</span></>}</div></section>}
-         <section className="prSupportingFiles" aria-label="Problem Report supporting files">
-           <div className="prSectionHeading"><h3>Supporting files</h3><p>Files that support this record are versioned and retained separately from its narrative.</p></div>
-           {isHistorical
-             ? <div className="prHistoricalAttachments">{selected.supportingAttachments?.length
-               ? selected.supportingAttachments.map(item=><article key={item.attachmentId}><div><b>{item.fileName}</b><span>{item.contentType} · {item.size} bytes · version {item.version}</span><small>SHA-256 {item.sha256} · uploaded by {item.uploadedBy}</small></div><a href={`${api}/api/enterprise-hardening/attachments/${item.attachmentId}/download`} target="_blank" rel="noreferrer">Open / download</a></article>)
-               : <p>No supporting files were recorded in this historical snapshot.</p>}</div>
-             : <ControlledAttachments api={api} projectId={selected.projectId ?? projectId} artifactType="ProblemReport" artifactId={selected.id}
-                 editSessionId={lock?.mine ? lock.sessionId : undefined} canAttach={Boolean(lock?.editable && lock.mine && lock.sessionId)} />}
-         </section>
-         {!isHistorical&&<ProblemReportImpactPanel areas={selected.impactAreas??[]} narrative={selected.systemAircraftImpact??""} onOpen={onOpenArtifact}/>}
-         {!isHistorical&&<RelatedProblemReports api={api} projectId={projectId} reportId={selected.id} related={selected.relatedReports??[]} canEdit={!isFinished} busy={busy} onLink={linkRelated} onUnlink={unlinkRelated} onOpen={(id,snapshotId)=>void open(id,snapshotId)} hrefFor={problemReportHref}/>}
-         {!isHistorical&&<section className="prFlow"><div><h3>Lifecycle action</h3><p>{spaced(selected.state)} · controlled version {selected.version}</p></div>{noteDraft.offered&&<DraftRestore savedAt={noteDraft.offered.savedAt} description="Unsubmitted notes are available in this browser." onRestore={()=>{setNote(noteDraft.offered!.value);noteDraft.restore()}} onDiscard={noteDraft.discard}/>} {note.trim()&&<AutosaveState status={noteDraft.status} savedAt={noteDraft.savedAt} where="this browser"/>}
-          {selected.state==="Verifying"&&latestClosureCandidate?.state==="Invalidated"&&<div className="prClosureInvalidated" role="status"><b>Closure verification invalidated</b><span>{spaced(latestClosureCandidate.invalidationReason??"controlled change")} changed the reviewed closure basis. Record a new passing successor result before SQA closure.</span></div>}
-          {selected.capabilities?.availableTransitions?.map(transition=><button key={transition.state} disabled={busy} onClick={()=>requestTransition(transition.state,transition.requiresRationale)}>{transitionLabel(transition.state)}{transition.requiresRationale?" …":" →"}</button>)}
-          {selected.state==="Verifying"&&<button onClick={()=>void openCorrectiveAction()}>Select closure-supporting test result →</button>}
-          {selected.capabilities?.availableTransitions?.some(transition=>transition.state==="Rejected")&&<button className="quiet" disabled={busy} onClick={()=>setShowDisposition(true)}>Reject…</button>}
-          {selected.capabilities?.canApproveReleaseWaiver&&<details className="prAdmin"><summary>Approve independent release waiver</summary><div><label>Waiver rationale<textarea value={waiverRationale} onChange={event=>setWaiverRationale(event.target.value)} /></label><label>Expiry date<input type="date" value={waiverExpiry} onChange={event=>setWaiverExpiry(event.target.value)} /></label><button disabled={busy||!waiverRationale.trim()||!waiverExpiry} onClick={()=>void action("release-waiver",{rationale:waiverRationale,expiresAt:new Date(`${waiverExpiry}T23:59:59Z`).toISOString()})}>Approve controlled waiver</button></div></details>}
-          {selected.activeReleaseWaiver&&selected.capabilities?.releaseWaiverAuthority&&<button className="quiet" disabled={busy} onClick={()=>void action(`release-waiver/${selected.activeReleaseWaiver!.id}/revoke`,{reason:"Waiver revoked by current release authority."})}>Revoke active waiver</button>}
-          {selected.capabilities?.availableTransitions?.some(transition=>transition.state==="Draft"||transition.state==="Verifying")&&<button className="quiet" disabled={busy} onClick={()=>{const transition=selected.capabilities?.availableTransitions?.find(item=>item.state==="Draft"||item.state==="Verifying");if(transition)requestTransition(transition.state,true)}}>Move backward…</button>}
-          {isOwner&&!["Closed",...terminalDispositions].includes(selected.state)&&<button className="quiet" disabled={busy} onClick={()=>void action("blocker",{isReleaseBlocker:!selected.isReleaseBlocker,waiverRationale:""})}>{selected.isReleaseBlocker?"Clear release blocker":"Raise release blocker"}</button>}
-         </section>}
-      </>}</>:<div className="prBlank"><span>◎</span><h2>Select a Problem Report</h2></div>}</section></section>
-    {showCreate&&<div className="prModal" role="dialog" aria-label="Record a problem"><form className="prCreateWhole" onSubmit={createReport}><button type="button" className="close" aria-label="Close" onClick={()=>setShowCreate(false)}>×</button><p>NEW PROBLEM REPORT</p><h2>Save Draft PR</h2>{createDraft.offered&&<DraftRestore savedAt={createDraft.offered.savedAt} description="An unfinished Problem Report is available in this browser." onRestore={()=>{setCreate(createDraft.offered!.value);createDraft.restore()}} onDiscard={createDraft.discard}/>}<label>Title<input required value={create.title} onChange={e=>setCreate({...create,title:e.target.value})}/></label><RichContentEditor api={api} projectId={projectId} label="Problem Description" value={create.problemRich} documentLike showDocumentGuidance onUploadingChange={onCreateUploadingChange} placeholder="Describe the problem and its observed effect." onChange={value=>setCreate({...create,problemRich:value})}/><RichContentEditor api={api} projectId={projectId} label="Additional Information" value={create.additionalInformationRich} documentLike onUploadingChange={onCreateUploadingChange} onChange={value=>setCreate({...create,additionalInformationRich:value})}/>{PROBLEM_REPORT_NARRATIVE.map(field=><RichContentEditor key={field.key} api={api} projectId={projectId} label={field.label} value={create[field.key]} documentLike onUploadingChange={onCreateUploadingChange} onChange={value=>setCreate({...create,[field.key]:value})}/>)}<fieldset className="prImpactEditor"><legend>Impact matrix</legend>{impactFields.map(([key,label])=><label key={key}>{label}<select aria-label={label} value={create.impacts[key]} onChange={e=>setCreate({...create,impacts:{...create.impacts,[key]:e.target.value as ImpactValue}})}>{["Unknown","No","Yes"].map(value=><option key={value}>{value}</option>)}</select></label>)}</fieldset><label>Category<ProblemReportCategoryPicker api={api} value={create.category} required onChange={value=>setCreate({...create,category:value})}/></label><div className="prFormGrid"><label>Severity<select value={create.severity} onChange={e=>setCreate({...create,severity:e.target.value})}>{["Critical","High","Major","Minor","Trivial"].map(x=><option key={x}>{x}</option>)}</select></label><label>Priority<select value={create.priority} onChange={e=>setCreate({...create,priority:e.target.value})}>{["Urgent","High","Normal","Low"].map(x=><option key={x}>{x}</option>)}</select></label></div><div className="prCreateFoot">{createUploadsPending>0&&<span className="prDirty" role="status">Storing {createUploadsPending} inline image{createUploadsPending===1?'':'s'}…</span>}<AutosaveState status={createDraft.status} savedAt={createDraft.savedAt} where="this browser"/><button className="primaryAction" disabled={busy||createUploadsPending>0}>{createUploadsPending>0?'Waiting for image…':'Save Draft PR →'}</button></div></form></div>}
-    {showDisposition&&selected&&<div className="prModal" role="dialog" aria-label="Reject Problem Report"><form onSubmit={submitDisposition}><button type="button" className="close" aria-label="Close" onClick={closeDisposition}>×</button><p>CONTROLLED ENGINEERING DECISION</p><h2>Reject {selected.displayNumber}</h2><p>Rejection is retained in immutable lifecycle history and requires a rationale.</p><label>Rationale<textarea required value={dispositionRationale} onChange={event=>setDispositionRationale(event.target.value)} placeholder="Record why this Problem Report is rejected."/></label><button className="primaryAction" disabled={busy||!dispositionRationale.trim()}>Reject Problem Report →</button></form></div>}
-    {showReopen&&selected&&<div className="prModal" role="dialog" aria-label="Backward Problem Report transition"><form onSubmit={submitReopen}><button type="button" className="close" aria-label="Close" onClick={()=>{setShowReopen(false);setTransitionTarget("")}}>×</button><p>CONTROLLED LIFECYCLE TRANSITION</p><h2>{transitionLabel(transitionTarget)} · {selected.displayNumber}</h2><p>Backward transitions require a nonblank rationale and are retained in immutable history.</p><label>Rationale<textarea required value={reopenRationale} onChange={event=>setReopenRationale(event.target.value)} placeholder="Explain the engineering basis for this transition."/></label><button className="primaryAction" disabled={busy||!reopenRationale.trim()}>{transitionLabel(transitionTarget)} →</button></form></div>}
-    {showRevive&&selected&&<div className="prModal" role="dialog" aria-label="Revive Problem Report"><form onSubmit={submitRevive}><button type="button" className="close" aria-label="Close" onClick={()=>{setShowRevive(false);setReviveRationale("")}}>×</button><p>CONTROLLED LIFECYCLE TRANSITION</p><h2>Revive &amp; edit · {selected.displayNumber}</h2><p>This Problem Report is {spaced(selected.state)}. Reviving it returns it to <b>{spaced(selected.capabilities?.reviveTargetState??"")}</b>, creates revision {String((selected.revision??0)+1).padStart(2,"0")}, and opens the editor. Revision {String(selected.revision??0).padStart(2,"0")}, its approved closure package and its signatures are left exactly as they are.</p><label>Rationale<textarea required value={reviveRationale} onChange={event=>setReviveRationale(event.target.value)} placeholder="Explain why this finished Problem Report is being reopened."/></label><button className="primaryAction" disabled={busy||!reviveRationale.trim()}>Revive &amp; edit →</button></form></div>}
-    {showEdit&&selected&&<ControlledProblemReportEditor api={api} projectId={projectId} report={selected} impactFields={impactFields} onClose={()=>setShowEdit(false)} onCommitted={async()=>{await refresh(selected.id);await readLock(selected.id)}}/>}
-  </main>;
+                  {!isHistorical &&
+                    lock?.editable &&
+                    (lock.locked && !lock.mine ? (
+                      <p className="prCheckoutHeld">
+                        <b>
+                          <PersonName userName={lock.holder ?? ""} /> has this Problem Report
+                          checked out.
+                        </b>{" "}
+                        It is read-only until they check it in or their lease expires.
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        className="prEditButton"
+                        onClick={() => setShowEdit(true)}
+                      >
+                        Check out &amp; edit
+                      </button>
+                    ))}
+                  {!isHistorical && !lock?.editable && selected.capabilities?.canRevive && (
+                    <button
+                      type="button"
+                      className="prEditButton prReviveButton"
+                      onClick={() => setShowRevive(true)}
+                    >
+                      Revive &amp; edit
+                    </button>
+                  )}
+                  <section className="prNarrative">
+                    <article>
+                      <small>PROBLEM DESCRIPTION</small>
+                      {selected.problemRich ? (
+                        <RichContentView
+                          api={api}
+                          value={selected.problemRich}
+                          empty={selected.problem}
+                        />
+                      ) : (
+                        <p>{selected.problem}</p>
+                      )}
+                    </article>
+                    <article>
+                      <small>ADDITIONAL INFORMATION</small>
+                      {selected.additionalInformationRich ? (
+                        <RichContentView
+                          api={api}
+                          value={selected.additionalInformationRich}
+                          empty={selected.additionalInformation}
+                        />
+                      ) : (
+                        <p>{selected.additionalInformation || "Not yet provided."}</p>
+                      )}
+                    </article>
+                    <article>
+                      <small>ROOT CAUSE</small>
+                      {selected.rootCauseRich ? (
+                        <RichContentView
+                          api={api}
+                          value={selected.rootCauseRich}
+                          empty={selected.rootCause}
+                        />
+                      ) : (
+                        <p>{selected.rootCause || "Not yet determined."}</p>
+                      )}
+                    </article>
+                    <article>
+                      <small>EFFECTS</small>
+                      {selected.effectsRich ? (
+                        <RichContentView
+                          api={api}
+                          value={selected.effectsRich}
+                          empty={selected.effects}
+                        />
+                      ) : (
+                        <p>{selected.effects || "Not yet recorded."}</p>
+                      )}
+                    </article>
+                    <article>
+                      <small>CONTAINMENT</small>
+                      {selected.containmentRich ? (
+                        <RichContentView
+                          api={api}
+                          value={selected.containmentRich}
+                          empty={selected.containment}
+                        />
+                      ) : (
+                        <p>{selected.containment || "Not yet recorded."}</p>
+                      )}
+                    </article>
+                    <article>
+                      <small>WORKAROUND</small>
+                      {selected.workaroundRich ? (
+                        <RichContentView
+                          api={api}
+                          value={selected.workaroundRich}
+                          empty={selected.workaround}
+                        />
+                      ) : (
+                        <p>{selected.workaround || "None recorded."}</p>
+                      )}
+                    </article>
+                    <article>
+                      <small>HUMAN CORRECTIVE-ACTION NARRATIVE</small>
+                      {selected.correctiveActionRich ? (
+                        <RichContentView
+                          api={api}
+                          value={selected.correctiveActionRich}
+                          empty={selected.correctiveAction}
+                        />
+                      ) : (
+                        <p>{selected.correctiveAction || "Not yet recorded."}</p>
+                      )}
+                    </article>
+                  </section>
+                  {selected.disposition && selected.disposition !== "Fixed" && (
+                    <section className="prDispositionDecision" aria-label="Controlled disposition">
+                      <div>
+                        <small>CONTROLLED DISPOSITION</small>
+                        <h3>{spaced(selected.disposition)}</h3>
+                        <p>{selected.dispositionRationale}</p>
+                      </div>
+                      <div>
+                        <span>
+                          {dispositionRevision ? (
+                            <>
+                              <PersonName
+                                userName={dispositionRevision.actor}
+                                displayName={dispositionRevision.actorDisplayName ?? undefined}
+                              />{" "}
+                              · {new Date(dispositionRevision.occurredAt).toLocaleString()}
+                            </>
+                          ) : (
+                            "Recorded in controlled history"
+                          )}
+                        </span>
+                        {selected.disposition === "Duplicate" &&
+                          selected.duplicateDiagnostic?.canonicalTargetIdentifier && (
+                            <>
+                              <b>
+                                Canonical target{" "}
+                                {selected.duplicateDiagnostic.canonicalTargetIdentifier}
+                              </b>
+                              <span>
+                                {selected.duplicateDiagnostic.canonicalTargetTitle} ·{" "}
+                                {spaced(selected.duplicateDiagnostic.canonicalTargetState ?? "")}
+                              </span>
+                            </>
+                          )}
+                      </div>
+                    </section>
+                  )}
+                  <section
+                    className="prSupportingFiles"
+                    aria-label="Problem Report supporting files"
+                  >
+                    <div className="prSectionHeading">
+                      <h3>Supporting files</h3>
+                      <p>
+                        Files that support this record are versioned and retained separately from
+                        its narrative.
+                      </p>
+                    </div>
+                    {isHistorical ? (
+                      <div className="prHistoricalAttachments">
+                        {selected.supportingAttachments?.length ? (
+                          selected.supportingAttachments.map((item) => (
+                            <article key={item.attachmentId}>
+                              <div>
+                                <b>{item.fileName}</b>
+                                <span>
+                                  {item.contentType} · {item.size} bytes · version {item.version}
+                                </span>
+                                <small>
+                                  SHA-256 {item.sha256} · uploaded by {item.uploadedBy}
+                                </small>
+                              </div>
+                              <a
+                                href={`${api}/api/enterprise-hardening/attachments/${item.attachmentId}/download`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Open / download
+                              </a>
+                            </article>
+                          ))
+                        ) : (
+                          <p>No supporting files were recorded in this historical snapshot.</p>
+                        )}
+                      </div>
+                    ) : (
+                      <ControlledAttachments
+                        api={api}
+                        projectId={selected.projectId ?? projectId}
+                        artifactType="ProblemReport"
+                        artifactId={selected.id}
+                        editSessionId={lock?.mine ? lock.sessionId : undefined}
+                        canAttach={Boolean(lock?.editable && lock.mine && lock.sessionId)}
+                      />
+                    )}
+                  </section>
+                  {!isHistorical && (
+                    <ProblemReportImpactPanel
+                      areas={selected.impactAreas ?? []}
+                      narrative={selected.systemAircraftImpact ?? ""}
+                      onOpen={onOpenArtifact}
+                    />
+                  )}
+                  {!isHistorical && (
+                    <RelatedProblemReports
+                      api={api}
+                      projectId={projectId}
+                      reportId={selected.id}
+                      related={selected.relatedReports ?? []}
+                      canEdit={!isFinished}
+                      busy={busy}
+                      onLink={linkRelated}
+                      onUnlink={unlinkRelated}
+                      onOpen={(id, snapshotId) => void open(id, snapshotId)}
+                      hrefFor={problemReportHref}
+                    />
+                  )}
+                  {!isHistorical && (
+                    <section className="prFlow">
+                      <div>
+                        <h3>Lifecycle action</h3>
+                        <p>
+                          {spaced(selected.state)} · controlled version {selected.version}
+                        </p>
+                      </div>
+                      {noteDraft.offered && (
+                        <DraftRestore
+                          savedAt={noteDraft.offered.savedAt}
+                          description="Unsubmitted notes are available in this browser."
+                          onRestore={() => {
+                            setNote(noteDraft.offered!.value);
+                            noteDraft.restore();
+                          }}
+                          onDiscard={noteDraft.discard}
+                        />
+                      )}{" "}
+                      {note.trim() && (
+                        <AutosaveState
+                          status={noteDraft.status}
+                          savedAt={noteDraft.savedAt}
+                          where="this browser"
+                        />
+                      )}
+                      {selected.state === "Verifying" &&
+                        latestClosureCandidate?.state === "Invalidated" && (
+                          <div className="prClosureInvalidated" role="status">
+                            <b>Closure verification invalidated</b>
+                            <span>
+                              {spaced(
+                                latestClosureCandidate.invalidationReason ?? "controlled change",
+                              )}{" "}
+                              changed the reviewed closure basis. Record a new passing successor
+                              result before SQA closure.
+                            </span>
+                          </div>
+                        )}
+                      {selected.capabilities?.availableTransitions?.map((transition) => (
+                        <button
+                          key={transition.state}
+                          disabled={busy}
+                          onClick={() =>
+                            requestTransition(transition.state, transition.requiresRationale)
+                          }
+                        >
+                          {transitionLabel(transition.state)}
+                          {transition.requiresRationale ? " …" : " →"}
+                        </button>
+                      ))}
+                      {selected.state === "Verifying" && (
+                        <button onClick={() => void openCorrectiveAction()}>
+                          Select closure-supporting test result →
+                        </button>
+                      )}
+                      {selected.capabilities?.availableTransitions?.some(
+                        (transition) => transition.state === "Rejected",
+                      ) && (
+                        <button
+                          className="quiet"
+                          disabled={busy}
+                          onClick={() => setShowDisposition(true)}
+                        >
+                          Reject…
+                        </button>
+                      )}
+                      {selected.capabilities?.canApproveReleaseWaiver && (
+                        <details className="prAdmin">
+                          <summary>Approve independent release waiver</summary>
+                          <div>
+                            <label>
+                              Waiver rationale
+                              <textarea
+                                value={waiverRationale}
+                                onChange={(event) => setWaiverRationale(event.target.value)}
+                              />
+                            </label>
+                            <label>
+                              Expiry date
+                              <input
+                                type="date"
+                                value={waiverExpiry}
+                                onChange={(event) => setWaiverExpiry(event.target.value)}
+                              />
+                            </label>
+                            <button
+                              disabled={busy || !waiverRationale.trim() || !waiverExpiry}
+                              onClick={() =>
+                                void action("release-waiver", {
+                                  rationale: waiverRationale,
+                                  expiresAt: new Date(`${waiverExpiry}T23:59:59Z`).toISOString(),
+                                })
+                              }
+                            >
+                              Approve controlled waiver
+                            </button>
+                          </div>
+                        </details>
+                      )}
+                      {selected.activeReleaseWaiver &&
+                        selected.capabilities?.releaseWaiverAuthority && (
+                          <button
+                            className="quiet"
+                            disabled={busy}
+                            onClick={() =>
+                              void action(
+                                `release-waiver/${selected.activeReleaseWaiver!.id}/revoke`,
+                                { reason: "Waiver revoked by current release authority." },
+                              )
+                            }
+                          >
+                            Revoke active waiver
+                          </button>
+                        )}
+                      {selected.capabilities?.availableTransitions?.some(
+                        (transition) =>
+                          transition.state === "Draft" || transition.state === "Verifying",
+                      ) && (
+                        <button
+                          className="quiet"
+                          disabled={busy}
+                          onClick={() => {
+                            const transition = selected.capabilities?.availableTransitions?.find(
+                              (item) => item.state === "Draft" || item.state === "Verifying",
+                            );
+                            if (transition) requestTransition(transition.state, true);
+                          }}
+                        >
+                          Move backward…
+                        </button>
+                      )}
+                      {isOwner && !["Closed", ...terminalDispositions].includes(selected.state) && (
+                        <button
+                          className="quiet"
+                          disabled={busy}
+                          onClick={() =>
+                            void action("blocker", {
+                              isReleaseBlocker: !selected.isReleaseBlocker,
+                              waiverRationale: "",
+                            })
+                          }
+                        >
+                          {selected.isReleaseBlocker
+                            ? "Clear release blocker"
+                            : "Raise release blocker"}
+                        </button>
+                      )}
+                    </section>
+                  )}
+                </>
+              )}
+            </>
+          ) : (
+            <div className="prBlank">
+              <span>◎</span>
+              <h2>Select a Problem Report</h2>
+            </div>
+          )}
+        </section>
+      </section>
+      {showCreate && (
+        <div className="prModal" role="dialog" aria-label="Record a problem">
+          <form className="prCreateWhole" onSubmit={createReport}>
+            <button
+              type="button"
+              className="close"
+              aria-label="Close"
+              onClick={() => setShowCreate(false)}
+            >
+              ×
+            </button>
+            <p>NEW PROBLEM REPORT</p>
+            <h2>Save Draft PR</h2>
+            {createDraft.offered && (
+              <DraftRestore
+                savedAt={createDraft.offered.savedAt}
+                description="An unfinished Problem Report is available in this browser."
+                onRestore={() => {
+                  setCreate(createDraft.offered!.value);
+                  createDraft.restore();
+                }}
+                onDiscard={createDraft.discard}
+              />
+            )}
+            <label>
+              Title
+              <input
+                required
+                value={create.title}
+                onChange={(e) => setCreate({ ...create, title: e.target.value })}
+              />
+            </label>
+            <RichContentEditor
+              api={api}
+              projectId={projectId}
+              label="Problem Description"
+              value={create.problemRich}
+              documentLike
+              showDocumentGuidance
+              onUploadingChange={onCreateUploadingChange}
+              placeholder="Describe the problem and its observed effect."
+              onChange={(value) => setCreate({ ...create, problemRich: value })}
+            />
+            <RichContentEditor
+              api={api}
+              projectId={projectId}
+              label="Additional Information"
+              value={create.additionalInformationRich}
+              documentLike
+              onUploadingChange={onCreateUploadingChange}
+              onChange={(value) => setCreate({ ...create, additionalInformationRich: value })}
+            />
+            {PROBLEM_REPORT_NARRATIVE.map((field) => (
+              <RichContentEditor
+                key={field.key}
+                api={api}
+                projectId={projectId}
+                label={field.label}
+                value={create[field.key]}
+                documentLike
+                onUploadingChange={onCreateUploadingChange}
+                onChange={(value) => setCreate({ ...create, [field.key]: value })}
+              />
+            ))}
+            <fieldset className="prImpactEditor">
+              <legend>Impact matrix</legend>
+              {impactFields.map(([key, label]) => (
+                <label key={key}>
+                  {label}
+                  <select
+                    aria-label={label}
+                    value={create.impacts[key]}
+                    onChange={(e) =>
+                      setCreate({
+                        ...create,
+                        impacts: { ...create.impacts, [key]: e.target.value as ImpactValue },
+                      })
+                    }
+                  >
+                    {["Unknown", "No", "Yes"].map((value) => (
+                      <option key={value}>{value}</option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </fieldset>
+            <label>
+              Category
+              <ProblemReportCategoryPicker
+                api={api}
+                value={create.category}
+                required
+                onChange={(value) => setCreate({ ...create, category: value })}
+              />
+            </label>
+            <div className="prFormGrid">
+              <label>
+                Severity
+                <select
+                  value={create.severity}
+                  onChange={(e) => setCreate({ ...create, severity: e.target.value })}
+                >
+                  {["Critical", "High", "Major", "Minor", "Trivial"].map((x) => (
+                    <option key={x}>{x}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Priority
+                <select
+                  value={create.priority}
+                  onChange={(e) => setCreate({ ...create, priority: e.target.value })}
+                >
+                  {["Urgent", "High", "Normal", "Low"].map((x) => (
+                    <option key={x}>{x}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="prCreateFoot">
+              {createUploadsPending > 0 && (
+                <span className="prDirty" role="status">
+                  Storing {createUploadsPending} inline image{createUploadsPending === 1 ? "" : "s"}
+                  …
+                </span>
+              )}
+              <AutosaveState
+                status={createDraft.status}
+                savedAt={createDraft.savedAt}
+                where="this browser"
+              />
+              <button className="primaryAction" disabled={busy || createUploadsPending > 0}>
+                {createUploadsPending > 0 ? "Waiting for image…" : "Save Draft PR →"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {showDisposition && selected && (
+        <div className="prModal" role="dialog" aria-label="Reject Problem Report">
+          <form onSubmit={submitDisposition}>
+            <button type="button" className="close" aria-label="Close" onClick={closeDisposition}>
+              ×
+            </button>
+            <p>CONTROLLED ENGINEERING DECISION</p>
+            <h2>Reject {selected.displayNumber}</h2>
+            <p>Rejection is retained in immutable lifecycle history and requires a rationale.</p>
+            <label>
+              Rationale
+              <textarea
+                required
+                value={dispositionRationale}
+                onChange={(event) => setDispositionRationale(event.target.value)}
+                placeholder="Record why this Problem Report is rejected."
+              />
+            </label>
+            <button className="primaryAction" disabled={busy || !dispositionRationale.trim()}>
+              Reject Problem Report →
+            </button>
+          </form>
+        </div>
+      )}
+      {showReopen && selected && (
+        <div className="prModal" role="dialog" aria-label="Backward Problem Report transition">
+          <form onSubmit={submitReopen}>
+            <button
+              type="button"
+              className="close"
+              aria-label="Close"
+              onClick={() => {
+                setShowReopen(false);
+                setTransitionTarget("");
+              }}
+            >
+              ×
+            </button>
+            <p>CONTROLLED LIFECYCLE TRANSITION</p>
+            <h2>
+              {transitionLabel(transitionTarget)} · {selected.displayNumber}
+            </h2>
+            <p>
+              Backward transitions require a nonblank rationale and are retained in immutable
+              history.
+            </p>
+            <label>
+              Rationale
+              <textarea
+                required
+                value={reopenRationale}
+                onChange={(event) => setReopenRationale(event.target.value)}
+                placeholder="Explain the engineering basis for this transition."
+              />
+            </label>
+            <button className="primaryAction" disabled={busy || !reopenRationale.trim()}>
+              {transitionLabel(transitionTarget)} →
+            </button>
+          </form>
+        </div>
+      )}
+      {showRevive && selected && (
+        <div className="prModal" role="dialog" aria-label="Revive Problem Report">
+          <form onSubmit={submitRevive}>
+            <button
+              type="button"
+              className="close"
+              aria-label="Close"
+              onClick={() => {
+                setShowRevive(false);
+                setReviveRationale("");
+              }}
+            >
+              ×
+            </button>
+            <p>CONTROLLED LIFECYCLE TRANSITION</p>
+            <h2>Revive &amp; edit · {selected.displayNumber}</h2>
+            <p>
+              This Problem Report is {spaced(selected.state)}. Reviving it returns it to{" "}
+              <b>{spaced(selected.capabilities?.reviveTargetState ?? "")}</b>, creates revision{" "}
+              {String((selected.revision ?? 0) + 1).padStart(2, "0")}, and opens the editor.
+              Revision {String(selected.revision ?? 0).padStart(2, "0")}, its approved closure
+              package and its signatures are left exactly as they are.
+            </p>
+            <label>
+              Rationale
+              <textarea
+                required
+                value={reviveRationale}
+                onChange={(event) => setReviveRationale(event.target.value)}
+                placeholder="Explain why this finished Problem Report is being reopened."
+              />
+            </label>
+            <button className="primaryAction" disabled={busy || !reviveRationale.trim()}>
+              Revive &amp; edit →
+            </button>
+          </form>
+        </div>
+      )}
+      {showEdit && selected && (
+        <ControlledProblemReportEditor
+          api={api}
+          projectId={projectId}
+          report={selected}
+          impactFields={impactFields}
+          onClose={() => setShowEdit(false)}
+          onCommitted={async () => {
+            await refresh(selected.id);
+            await readLock(selected.id);
+          }}
+        />
+      )}
+    </main>
+  );
 }

@@ -2317,6 +2317,121 @@ successful when the reviewed merge candidate contains no trace of it.
 - **Authority:** The directed `trace()` projection and the view-supplied node set remain authoritative. Framing is a
   presentation operation over that set and must not discover siblings, invent edges, or alter controlled identity.
 
+### DEC-121 - Protected CI Maintenance Requires Exact Owner Approval and a Qualified Initial Installation
+
+- **Date:** 2026-09-08 UTC
+- **Status:** Accepted, with installation conditional on the qualification below.
+- **Owner authority:** The owner explicitly approved proceeding with the proposed authority-maintenance
+  installation in the Codex conversation. The scope and qualification record are maintained in
+  [issue #942](https://github.com/AeroLinkDEV/requirements-management-tool/issues/942). This records the owner's
+  instruction; it does not claim that an agent-authored GitHub comment is a native owner deployment approval.
+- **Durable decision:** Ordinary product merges retain DEC-119. A protected-main maintenance path may admit
+  changes to CI/planner/metrics only after complete native Product proof and attributable owner approval of
+  the exact PR head, composed commit/tree, protected difference, workflow/run/attempt, publishers and settings.
+  A request label is not approval. The runtime approval kernel cannot authorize its own replacement.
+- **Review boundary:** The separate main-only review environment has the owner as its sole required reviewer,
+  administrator bypass disabled and no App credential. Prevention of self-review is disabled because the owner
+  may initiate the run. This is attributable owner approval, not a claim of independent human review. Publication
+  uses the existing main-only App environment and fresh authenticated evidence; stale or changed proof refuses.
+- **One-time installation exception:** Only the initial reviewed installation in PR #960 may use a separately
+  qualified direct squash merge instead of DEC-119's ordinary queue/App authorization. Before production action,
+  rehearse the exact procedure in an isolated repository and require passing exact-candidate qualification,
+  authenticated sole-PR queue-composition evidence, current successful native Full proof and an unchanged base.
+  Independently prove that the frozen base plus reviewed head produces the recorded tested queue tree.
+- **Temporary authority:** Use a dedicated private App with Contents write, scoped to one explicitly selected
+  repository at a time and with no access to the existing Merge Authority App key. During the owner-coordinated
+  window, preserve the complete ruleset while adding an update freeze and only this App as a pull-request-only
+  bypass actor. Its bypass is not technically limited to one PR; owner custody and the single-merge procedure
+  must enforce that restriction. Use the synchronous merge endpoint with the exact reviewed head once.
+- **Restoration and refusal:** Missing proof, drift, non-successful qualification or an unexpected API response
+  aborts the procedure. Restore the exact baseline only if current settings match the expected temporary state;
+  never overwrite an unrelated policy change. Revoke temporary credentials and remove the temporary installation.
+  Verify the resulting tree, absence of standing bypass, unchanged publisher pins and post-merge acceptance.
+  An uncertain merge is not retried blindly. This exception does not permit fabricated success checks, copying
+  the existing App key, direct pushes, broader fallback permissions or force-pushing history.
+- **Limits:** GitHub's ruleset update has no conditional compare-and-swap, and its merge endpoint binds the head
+  but not the expected base/result tree. The maintenance window, pre-merge tree proof and post-operation checks
+  remain mandatory. Failure to satisfy these conditions means the installation stays blocked. The exception
+  expires after this installation; future kernel changes or rollback require a separately approved transition.
+### DEC-122 - One-Time HOME Process-Control Deployment Setup
+
+- **Date:** 2026-09-08
+- **Status:** Accepted
+- **Decision:** The first deployment of #924 may require one explicitly elevated setup invocation to adopt
+  strongly attributed legacy HOME processes and establish access across the S4U/interactive logon boundary.
+  Subsequent ordinary production launches and updates remain non-admin and preserve the initiating service
+  policy. The setup uses approved main, the existing dedicated source, and the existing canonical installation.
+- **Authority:** The owner answered **"Yes approved !"** to the explicit question authorizing a one-time
+  elevated setup after merge, with subsequent launches and updates remaining non-admin. The approval is
+  recorded on [issue #924](https://github.com/AeroLinkDEV/requirements-management-tool/issues/924#issuecomment-5585911172).
+- **Boundary:** This is a first-deployment allowance, not permission to run unmerged code against HOME data,
+  weaken ownership checks, reset/reseed the database, bypass the source gate, or require elevation for normal
+  use. Actual S4U and final HOME acceptance remain required.
+
+### DEC-123 - Permanent Repository-Scoped Maintenance Evidence Access
+
+- **Date:** 2026-09-08
+- **Status:** Accepted
+- **Decision:** Use a dedicated permanent GitHub App installed only on
+  `AeroLinkDEV/requirements-management-tool` to observe complete repository protection evidence for
+  maintenance approval. Keep its credential in the main-only `merge-authority` environment, separate
+  from the existing check-publisher App credential. Ordinary evidence reads continue to use the
+  read-only workflow token; the dedicated token is minted only for eligible maintenance verification.
+- **Authority:** The owner requested full-time access instead of repeated temporary App setup and
+  answered **"yes go"** to the dedicated repository-scoped App recommendation. Implementation and
+  qualification are tracked in [issue #982](https://github.com/AeroLinkDEV/requirements-management-tool/issues/982).
+- **Permission boundary:** GitHub requires repository Administration write permission to disclose
+  the complete ruleset bypass list; Administration read can return a successful but redacted response.
+  This is a real write-capable credential, not a GitHub-enforced read-only credential. Reviewed
+  protected-main code confines its use to fixed GitHub API GET operations for the selected repository
+  and ruleset, verifies the minted identity and repository scope through supported mechanisms, and
+  fails closed on missing or unexpected protection evidence. Candidate code must never receive the key
+  or token. Tokens remain short-lived and are revoked after use; secrets must not enter logs or artifacts.
+- **Approval boundary:** Permanent credential availability grants no standing merge bypass and does
+  not replace exact-change owner approval, native candidate qualification, or required checks. The
+  maintenance owner-review environment remains secret-free. Existing authorization-kernel installation
+  restrictions remain in force: this decision does not extend DEC-121's expired installation exception
+  or authorize a new ruleset change, force merge, or self-installation. Initial activation requires
+  independently reviewed implementation, qualification, and a separately authorized installation path.
+
+### DEC-124 - Standing Owner Delegation for CI Maintenance Approvals
+
+- **Date:** 2026-09-09 UTC
+- **Status:** Accepted
+- **Authority:** The owner stated **"I formally grant you approval for all future CI changes!"** in
+  the Codex conversation after discussing the repeated per-candidate approval prompts. The instruction
+  is transcribed in [issue #942](https://github.com/AeroLinkDEV/requirements-management-tool/issues/942#issuecomment-5593954915).
+  That agent-authored record is evidence of the delegation, not an independently posted owner review.
+- **Decision:** Codex may submit exact CI-maintenance environment approvals on the owner's behalf
+  under this standing authorization, without requesting a new conversational confirmation for each
+  digest. The delegation remains effective until the owner revokes or narrows it.
+- **Qualification:** Before each approval, retain the required code review and complete native proof
+  for the current composed candidate. Inspect the hosted packet, verify its exact digest and current
+  PR/head/base/tree/run/attempt identities, then submit `APPROVE MAINTENANCE <digest>` through the
+  existing owner-authenticated environment review. Record that Codex acted under delegated authority;
+  do not represent the action as an independent human review of that candidate.
+- **Preserved controls:** The protected publisher still authenticates each approval and recollects
+  live evidence. Stale or failed proof, missing permissions, changed publishers and kernel-path refusals
+  remain refusals. Required checks, independent review, credential isolation and the no-force-merge
+  boundary remain in force. Kernel changes still need a separately reviewed, qualified transition;
+  this delegation does not renew expired one-time bypass exceptions or let a kernel authorize itself.
+- **Supersedes:** The operational requirement in `product/docs/MERGING.md` for renewed conversational
+  confirmation before Codex submits each otherwise-qualified routine maintenance approval. DEC-121's
+  initial-installation and expired-exception boundaries, and DEC-123's credential and exact-candidate
+  constraints, remain intact. Exact per-candidate GitHub approvals and technical verification remain
+  required. This decision changes delegated operator authorization, not workflow code, GitHub reviewer
+  identity, environment policy or the ordinary product merge path.
+
+### DEC-125 - Exact Approved Upstream CRs and the Scoped FMS Historical Correction
+
+- **Date:** 2026-09-09
+- **Status:** Accepted
+- **Authority:** The owner clarified the September 9 review and authorized implementation of [issue #1006](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1006).
+- **Decision:** New upstream CR links require an exact currently Approved or SelectedForBaseline revision at the configured direct-parent level. Approved predecessor-build revisions remain eligible when applicable to the selected build, with an explicit cross-build rationale. A newer Draft does not replace an approved exact revision.
+- **Deferred:** Applicable Deferred CRs remain visible in the selector. Choosing one changes no selection and opens a popup identifying the CR and instructing the author to reassign it to the current build before linking. Reassignment does not bypass approval eligibility. The server independently refuses the deferred link.
+- **FMS exception:** The owner requested removal of Customer/Interface demonstration artifacts across all FMS builds and history, superseding #889's acceptance of retained Interface history. The audited population is eight owned synthetic Interface CR aggregates and no Customer/Interface requirements. An explicit operator correction may remove that exact dependency manifest after a verified backup and disposable-copy qualification. It must fail closed on unexpected ownership, released material, external files or dependencies; prove unrelated rows and trigger settings unchanged; and preserve a recovery receipt outside the application data.
+- **Preserved boundary:** This is not a normal controlled-record deletion workflow or permission to reset FMS, other projects, signatures or manifests for convenience. Invalid active upstream links receive attributable correction; earlier review snapshots keep their original contents and hashes. Unowned author work is left truthfully incomplete when maintenance has no authoritative replacement answer.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

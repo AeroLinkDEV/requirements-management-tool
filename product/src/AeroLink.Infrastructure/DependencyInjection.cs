@@ -19,6 +19,7 @@ public static class DependencyInjection
         services.AddScoped<ProjectLadderSealAuthority>();
         services.AddScoped<ProjectLadderUpgradeAuthority>();
         services.AddScoped<SoftwareProcedureExecutionCutoverAuthority>();
+        services.AddScoped<FrozenReviewTraceAdjacencyMigrationAuthority>();
         // These are the complete stable ladder seams. Registration is intentionally explicit: the manifest is
         // a readiness inventory, not a flag, and each entry is backed by a project-effective policy route.
         var legacyRegistrations = new[]

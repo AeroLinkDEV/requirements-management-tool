@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   compareTrustedSurfaces,
+  compareTrustedSurfacePaths,
   createGitHubRequest,
   fetchDefaultBranch,
   fetchLatestRunJobs,
@@ -15,6 +16,40 @@ import {
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const REPOSITORY = 'AeroLinkDEV/requirements-management-tool'
 const sha = (character) => character.repeat(40)
+
+test('PR readiness refuses cross-PR current queue aliases through the actual protected helper', async () => {
+  const requester = readFileSync(join(repoRoot, '.github/workflows/request-full-ci.yml'), 'utf8')
+  const embedded = requester.match(/<<'NODE_READINESS_TARGET'\r?\n([\s\S]*?)^          NODE_READINESS_TARGET$/m)
+  assert.ok(embedded, 'the guard must be defined by the protected workflow')
+  const source = embedded[1].replace(/^          /gm, '')
+  const queue = candidates => ({ data: { repository: { mergeQueue: { entries: {
+    nodes: candidates.map(oid => ({ headCommit: { oid } })), pageInfo: { hasNextPage: false },
+  } } } } })
+  const cases = [
+    { name: 'ordinary distinct PR', queue: queue([sha('b')]), pass: true },
+    { name: 'empty queue or reopened historical head', queue: queue([]), pass: true },
+    { name: 'another PRs current queue candidate', queue: queue([sha('b'), sha('a')]), pass: false },
+    { name: 'missing queue', queue: {}, pass: false },
+    { name: 'GraphQL error', queue: { ...queue([]), errors: [{ message: 'denied' }] }, pass: false },
+    { name: 'unresolved candidate', queue: queue([null]), pass: false },
+  ]
+  const paged = queue([])
+  paged.data.repository.mergeQueue.entries.pageInfo.hasNextPage = true
+  cases.push({ name: 'incomplete queue page', queue: paged, pass: false })
+  const { verifyReadinessTarget } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+  for (const item of cases) {
+    if (item.pass) assert.doesNotThrow(() => verifyReadinessTarget(sha('a'), item.queue), item.name)
+    else assert.throws(() => verifyReadinessTarget(sha('a'), item.queue), undefined, item.name)
+  }
+  // The two calls model a PR that was distinct at dispatch but aliases a queue entry after the Full wait.
+  assert.doesNotThrow(() => verifyReadinessTarget(sha('a'), queue([])))
+  assert.throws(() => verifyReadinessTarget(sha('a'), queue([sha('a')])))
+  const calls = [...requester.matchAll(/node "\$RUNNER_TEMP\/verify-readiness-target.mjs"/g)].map(match => match.index)
+  assert.equal(calls.length, 2)
+  assert.ok(calls[0] < requester.indexOf('match="$(find_product_run)"'), 'refuse before paying for Full CI')
+  assert.ok(calls[1] > requester.indexOf('- name: Publish trusted pull-request readiness'))
+  assert.ok(calls[1] < requester.indexOf('"$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/check-runs"'))
+})
 
 test('workflow run metadata is mapped directly from the exact run endpoint', async () => {
   const calls = []
@@ -148,6 +183,50 @@ test('truncated or missing Git trees fail closed', async () => {
       baseSha: sha('c'),
     }),
     /missing or ambiguous/,
+  )
+})
+
+test('maintenance mint comparison returns exact protected file paths from complete root trees', async () => {
+  const candidateRoot = sha('1')
+  const baseRoot = sha('2')
+  const unchanged = { path: '.github/workflows/ci.yml', type: 'blob', mode: '100644', sha: sha('3') }
+  const candidate = { truncated: false, sha: candidateRoot, tree: [
+    { path: '.github', type: 'tree', mode: '040000', sha: sha('4') },
+    { path: 'product', type: 'tree', mode: '040000', sha: sha('5') },
+    { path: 'product/test-planner', type: 'tree', mode: '040000', sha: sha('a') },
+    { path: 'product/ci-metrics', type: 'tree', mode: '040000', sha: sha('b') },
+    unchanged,
+    { path: 'product/ci-metrics/lib/maintenance-evidence-reader.mjs', type: 'blob', mode: '100644', sha: sha('6') },
+  ] }
+  const base = { truncated: false, sha: baseRoot, tree: [
+    { path: '.github', type: 'tree', mode: '040000', sha: sha('4') },
+    { path: 'product', type: 'tree', mode: '040000', sha: sha('5') },
+    { path: 'product/test-planner', type: 'tree', mode: '040000', sha: sha('a') },
+    { path: 'product/ci-metrics', type: 'tree', mode: '040000', sha: sha('b') },
+    unchanged,
+    { path: 'product/ci-metrics/lib/maintenance-evidence-reader.mjs', type: 'blob', mode: '100644', sha: sha('9') },
+  ] }
+  const request = async path => {
+    if (path.endsWith(`/git/commits/${sha('b')}`)) return { tree: { sha: candidateRoot } }
+    if (path.endsWith(`/git/commits/${sha('c')}`)) return { tree: { sha: baseRoot } }
+    if (path.endsWith(candidateRoot + '?recursive=1')) return candidate
+    if (path.endsWith(baseRoot + '?recursive=1')) return base
+    throw new Error('unexpected exact tree request ' + path)
+  }
+  const paths = await compareTrustedSurfacePaths({ request, repository: REPOSITORY, candidateSha: sha('b'), baseSha: sha('c') })
+  assert.ok(paths.includes('product/ci-metrics/lib/maintenance-evidence-reader.mjs'))
+  assert.ok(paths.every(path => typeof path === 'string' && path.startsWith('product/ci-metrics/')))
+})
+
+test('maintenance mint comparison refuses a recursive tree response for the wrong root SHA', async () => {
+  const request = async path => {
+    if (path.endsWith(`/git/commits/${sha('b')}`)) return { tree: { sha: sha('1') } }
+    if (path.endsWith(`/git/commits/${sha('c')}`)) return { tree: { sha: sha('2') } }
+    return { truncated: false, sha: sha('d'), tree: [] }
+  }
+  await assert.rejects(
+    compareTrustedSurfacePaths({ request, repository: REPOSITORY, candidateSha: sha('b'), baseSha: sha('c') }),
+    /response identity/,
   )
 })
 

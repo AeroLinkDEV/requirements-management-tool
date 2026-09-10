@@ -32,12 +32,12 @@ public sealed class TestChangeRequestReviewWorkflowTests
     [Fact]
     public void Review_subject_mapping_keeps_change_requests_and_test_disciplines_on_their_current_workflows()
     {
-        Assert.Equal(ReviewSubject.System, WorkflowEndpoints.SubjectOf(ChangeRequestType.System));
-        Assert.Equal(ReviewSubject.Software, WorkflowEndpoints.SubjectOf(ChangeRequestType.Software));
-        Assert.Equal(ReviewSubject.Interface, WorkflowEndpoints.SubjectOf(ChangeRequestType.Interface));
-        Assert.Equal(ReviewSubject.SystemTest, WorkflowEndpoints.SubjectOf(TestChangeReviewDiscipline.System));
-        Assert.Equal(ReviewSubject.HighLevelSoftwareCase, WorkflowEndpoints.SubjectOf(TestChangeReviewDiscipline.HighLevelSoftware));
-        Assert.Equal(ReviewSubject.LowLevelSoftwareCase, WorkflowEndpoints.SubjectOf(TestChangeReviewDiscipline.LowLevelSoftware));
+        Assert.Equal(ReviewSubject.System, WorkflowAuthorityService.SubjectOf(ChangeRequestType.System));
+        Assert.Equal(ReviewSubject.Software, WorkflowAuthorityService.SubjectOf(ChangeRequestType.Software));
+        Assert.Equal(ReviewSubject.Interface, WorkflowAuthorityService.SubjectOf(ChangeRequestType.Interface));
+        Assert.Equal(ReviewSubject.SystemTest, WorkflowAuthorityService.SubjectOf(TestChangeReviewDiscipline.System));
+        Assert.Equal(ReviewSubject.HighLevelSoftwareCase, WorkflowAuthorityService.SubjectOf(TestChangeReviewDiscipline.HighLevelSoftware));
+        Assert.Equal(ReviewSubject.LowLevelSoftwareCase, WorkflowAuthorityService.SubjectOf(TestChangeReviewDiscipline.LowLevelSoftware));
     }
 
     private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid ChangeId, Guid ReviewId, Guid ItemId,
@@ -418,7 +418,7 @@ public sealed class TestChangeRequestReviewWorkflowTests
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            var spec = await WorkflowEndpoints.ActiveSpecificationAsync(db, fixture.ProjectId,
+            var spec = await new WorkflowAuthorityService(db).ActiveSpecificationAsync(fixture.ProjectId,
                 TestChangeReviewDiscipline.System, default);
             Assert.NotNull(spec);
         }

@@ -75,6 +75,25 @@ export function parseTrx(xml) {
     })
   }
 
+  // VSTest's xUnit adapter can emit NotExecuted result rows while leaving the
+  // notExecuted counter at zero. Count those explicit rows, never infer skips
+  // from total - executed: missing/truncated output is not an intentional skip.
+  const outcomes = { Passed: 0, Failed: 0, NotExecuted: 0 }
+  for (const result of tests) {
+    if (!Object.hasOwn(outcomes, result.outcome)) {
+      throw new TrxParseError(`TRX result has an unsupported outcome "${result.outcome.slice(0, 80)}"; totals cannot be reconciled.`)
+    }
+    outcomes[result.outcome] += 1
+  }
+  if (tests.length !== totals.total || outcomes.Passed !== totals.passed ||
+      outcomes.Failed !== totals.failed || outcomes.Passed + outcomes.Failed !== totals.executed) {
+    throw new TrxParseError('TRX result rows do not reconcile with total/executed/passed/failed counters.')
+  }
+  if (totals.skipped !== 0 && totals.skipped !== outcomes.NotExecuted) {
+    throw new TrxParseError('TRX notExecuted counter contradicts the explicit NotExecuted result rows.')
+  }
+  totals.skipped = outcomes.NotExecuted
+
   return { totals, tests }
 }
 

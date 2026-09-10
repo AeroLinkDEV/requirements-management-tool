@@ -27,6 +27,10 @@ function runMetaEnv(directory, overrides) {
     CLASS_CLIENT: 'false',
     CLASS_BROWSER: 'false',
     CLASS_POSTGRESQL: 'false',
+    FULL_DIAGNOSTICS: 'true',
+    PULL_REQUEST_NUMBER: '',
+    PULL_REQUEST_BASE_SHA: '',
+    PULL_REQUEST_HEAD_SHA: '',
     ...overrides,
   }
 }
@@ -158,6 +162,8 @@ test('schedule and default-branch dispatch select the full browser lanes and ski
       assert.equal(result.status, 0, result.stderr)
       assert.ok(instances(meta).includes('browser-full-1'))
       assert.ok(instances(meta).includes('browser-full-3'))
+      assert.ok(meta.expectedJobs.find((job) => job.instance === 'gate').needs.includes('browser-full'),
+        'scheduled critical path must wait for the full browser proof')
       assert.ok(instances(meta).includes('browser-production'))
       assert.ok(!instances(meta).includes('browser-pr-1'))
       assert.ok(!instances(meta).includes('warm-chromium-cache'))
@@ -165,6 +171,38 @@ test('schedule and default-branch dispatch select the full browser lanes and ski
     } finally {
       rmSync(directory, { recursive: true, force: true })
     }
+  }
+})
+
+test('dispatch topology follows its purpose: PR readiness selects browser-pr, diagnostics select browser-full', () => {
+  const prDispatch = build({
+    ...ALL_TRUE,
+    GITHUB_EVENT_NAME: 'workflow_dispatch',
+    GITHUB_REF: 'refs/heads/feature/942',
+    PULL_REQUEST_NUMBER: '942',
+    PULL_REQUEST_BASE_SHA: 'a'.repeat(40),
+    PULL_REQUEST_HEAD_SHA: 'b'.repeat(40),
+  })
+  try {
+    assert.equal(prDispatch.result.status, 0, prDispatch.result.stderr)
+    assert.ok(prDispatch.meta.expectedJobs.some((job) => job.instance === 'browser-pr-1'))
+    assert.ok(!prDispatch.meta.expectedJobs.some((job) => job.instance === 'browser-full-1'))
+    assert.ok(prDispatch.meta.expectedJobs.find((job) => job.instance === 'gate').needs.includes('browser-pr'))
+    assert.equal(prDispatch.meta.expectedRun.pr, 942)
+    assert.equal(prDispatch.meta.expectedRun.baseSha, 'a'.repeat(40))
+    assert.equal(prDispatch.meta.expectedRun.headSha, 'b'.repeat(40))
+  } finally {
+    rmSync(prDispatch.directory, { recursive: true, force: true })
+  }
+
+  const manual = build({ ...ALL_TRUE, GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main', FULL_DIAGNOSTICS: 'false' })
+  try {
+    assert.equal(manual.result.status, 0, manual.result.stderr)
+    assert.ok(!manual.meta.expectedJobs.some((job) => job.instance === 'browser-full-1'))
+    assert.ok(manual.meta.skippedJobs.some((job) => job.instance === 'browser-full-1'))
+    assert.ok(!manual.meta.expectedJobs.find((job) => job.instance === 'gate').needs.includes('browser-full'))
+  } finally {
+    rmSync(manual.directory, { recursive: true, force: true })
   }
 })
 

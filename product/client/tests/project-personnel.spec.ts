@@ -4,15 +4,46 @@ import { apiBase, apiLogin, login, showcaseSeed } from './auth'
 /**
  * The #816 Personnel page: Project Leadership first, roster as membership, identity details per person.
  *
- * #848 seeds Project Leadership assignments into the FMS showcase, so the leadership cards are already
- * populated. Each test creates its own disposable accounts via the API and verifies the UI renders the
- * correct state and handles the interactions correctly.
+ * #848 seeds Project Leadership assignments into the FMS showcase, so the read-only contract can inspect
+ * the complete seeded surface. Mutation journeys create their own disposable workspace and accounts so
+ * leadership writes cannot change the state consumed by another test.
  */
+
+type DisposableWorkspace = {
+  program: { id: string }
+  project: { id: string }
+  release: { id: string }
+}
 
 const LEADERSHIP_POSITIONS = [
   'ProjectEngineer', 'ProgramManager', 'EngineeringManager', 'ConfigurationManager',
   'SystemEngineeringLead', 'SoftwareEngineeringLead', 'SystemTestLead', 'SoftwareTestLead',
 ]
+
+async function createDisposableWorkspace(request: import('@playwright/test').APIRequestContext, suffix: string): Promise<DisposableWorkspace> {
+  const created = await request.post(`${apiBase}/api/workspaces`, {
+    data: {
+      programName: `Personnel isolation ${suffix}`,
+      programCode: `PI${suffix}`,
+      projectName: `Personnel isolation project ${suffix}`,
+      softwareProduct: 'Personnel isolation software',
+      initialRelease: '1.0',
+      initialReleaseIsReleased: false,
+    },
+  })
+  expect(created.ok(), await created.text()).toBeTruthy()
+  return await created.json() as DisposableWorkspace
+}
+
+async function openPersonnel(page: import('@playwright/test').Page, workspace: DisposableWorkspace) {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await login(page, 'admin', { openProject: false })
+  await page.goto(`/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}/command-center`)
+  await page.getByRole('button', { name: '← Back to Software Builds' }).click()
+  await expect(page.getByRole('heading', { name: 'Software Builds', level: 1 })).toBeVisible()
+  await page.getByRole('button', { name: 'Personnel' }).click()
+  await expect(page.getByRole('heading', { name: 'Project Leadership', level: 2 })).toBeVisible()
+}
 
 /**
  * Activates an API-created account through AeroLink's mandatory first-use password rotation:
@@ -69,9 +100,9 @@ test('Project Leadership renders eight positions in stable order on the showcase
 
 test('a leader can be assigned from an eligible member and replaced with another eligible member', async ({ page, request }) => {
   test.setTimeout(180_000)
-  const showcase = await showcaseSeed(request)
   await apiLogin(request)
   const tag = Date.now().toString(36)
+  const workspace = await createDisposableWorkspace(request, `pe-${tag}`)
 
   // Create two PE base-role members via the API.
   const names: string[] = []
@@ -81,26 +112,20 @@ test('a leader can be assigned from an eligible member and replaced with another
     })
     expect(created.ok(), await created.text()).toBeTruthy()
     const userId = (await created.json()).id as string
-    const granted = await request.post(`${apiBase}/api/projects/${showcase.projectId}/personnel`, {
+    const granted = await request.post(`${apiBase}/api/projects/${workspace.project.id}/personnel`, {
       data: { userId, roles: ['ProjectEngineer'] },
     })
     expect(granted.ok(), await granted.text()).toBeTruthy()
     names.push(name)
   }
 
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await login(page, 'admin', { openProject: false })
-  await page.getByRole('link', { name: 'Open FMS Product Development' }).click()
-  await expect(page.getByRole('heading', { name: 'Software Builds', level: 1 })).toBeVisible()
-  await page.getByRole('button', { name: 'Personnel' }).click()
-  await expect(page.getByRole('heading', { name: 'Project Leadership', level: 2 })).toBeVisible()
+  await openPersonnel(page, workspace)
 
   const engineerCard = page.locator('[data-position="ProjectEngineer"]')
 
-  // The card may already have a primary (from #848 seeding) or be vacant. Either way, the first
-  // eligible assignment goes through "Assign leader" or "Replace leader" depending on the current state.
+  // This disposable workspace starts vacant, so the first eligible assignment exercises "Assign leader";
+  // retain the replacement branch so the journey still follows the UI's current-state contract.
   const hasPrimary = await engineerCard.getByRole('button', { name: 'Replace leader' }).count()
-  const action = hasPrimary ? 'Replace leader' : 'Assign leader'
   await engineerCard.getByRole('button', { name: hasPrimary ? 'Replace leader' : 'Assign leader' }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
   await page.locator('.directoryResult', { hasText: names[0] }).click()
@@ -119,9 +144,9 @@ test('a leader can be assigned from an eligible member and replaced with another
 
 test('a standing backup is named and removed, and the roster records it separately from the primary', async ({ page, request }) => {
   test.setTimeout(180_000)
-  const showcase = await showcaseSeed(request)
   await apiLogin(request)
   const tag = Date.now().toString(36)
+  const workspace = await createDisposableWorkspace(request, `sel-${tag}`)
 
   const names: string[] = []
   for (const name of ['SEL Primary', 'SEL Deputy']) {
@@ -130,23 +155,19 @@ test('a standing backup is named and removed, and the roster records it separate
     })
     expect(created.ok(), await created.text()).toBeTruthy()
     const userId = (await created.json()).id as string
-    const granted = await request.post(`${apiBase}/api/projects/${showcase.projectId}/personnel`, {
+    const granted = await request.post(`${apiBase}/api/projects/${workspace.project.id}/personnel`, {
       data: { userId, roles: ['SystemEngineer'] },
     })
     expect(granted.ok(), await granted.text()).toBeTruthy()
     names.push(name)
   }
 
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await login(page, 'admin', { openProject: false })
-  await page.getByRole('link', { name: 'Open FMS Product Development' }).click()
-  await expect(page.getByRole('heading', { name: 'Software Builds', level: 1 })).toBeVisible()
-  await page.getByRole('button', { name: 'Personnel' }).click()
-  await expect(page.getByRole('heading', { name: 'Project Leadership', level: 2 })).toBeVisible()
+  await openPersonnel(page, workspace)
 
   const leadCard = page.locator('[data-position="SystemEngineeringLead"]')
 
-  // The #848 seed may have already assigned this position. Either replace or assign.
+  // This disposable workspace starts with no leadership assignment, so the journey exercises assignment
+  // and then the separate backup lifecycle without relying on a shared seeded project.
   const hasPrimary = await leadCard.getByRole('button', { name: 'Replace leader' }).count()
   await leadCard.getByRole('button', { name: hasPrimary ? 'Replace leader' : 'Assign leader' }).click()
   await expect(page.getByRole('dialog')).toBeVisible()

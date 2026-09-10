@@ -212,6 +212,7 @@ async function main() {
     regressions,
     missing,
     fullGates,
+    scheduledRuns: workflowRuns,
     // Stated by the side that applied it, so the report cannot describe a scope it did not use.
     fullGateScope: { windowDays: FULL_GATE_WINDOW_DAYS, cap: MAX_RECORDS },
     determinacy,

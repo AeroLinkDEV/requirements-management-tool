@@ -16,7 +16,7 @@ const requesterWorkflow = readFileSync(requesterWorkflowPath, 'utf8')
 
 test('Fast phase 1 is explicitly advisory, versioned and bounded', () => {
   assert.equal(manifest.schemaVersion, 1)
-  assert.equal(manifest.id, 'aerolink-fast-ci/v1')
+  assert.equal(manifest.id, 'aerolink-fast-ci/v2')
   assert.equal(manifest.authoritative, false)
   assert.equal(manifest.targetMs, 240000)
   assert.equal(manifest.safety.persistentPostgreSql, 'forbidden')
@@ -62,10 +62,16 @@ test('Fast backend manifest names only reviewed source-controlled smoke classes'
   }
 })
 
-test('Fast client manifest stays lint/typecheck-only and Full retains heavyweight evidence', () => {
-  assert.deepEqual(manifest.client.commands, ['npm ci', 'npm run lint', 'npm run typecheck'])
+test('Fast client adds explicit isolated behavior checks and Full retains heavyweight evidence', () => {
+  assert.deepEqual(manifest.client.commands, [
+    'npm ci', 'npm run lint', 'npm run typecheck', 'npm run test:fast:routes',
+    'npm run test:fast:logic', 'npx playwright install chromium', 'npm run test:fast:isolation',
+    'npm run test:fast:rendered',
+  ])
   assert.equal(manifest.client.workingDirectory, 'product/client')
-  assert.doesNotMatch(JSON.stringify(manifest.client), /playwright|test:smoke|test:production/i)
+  assert.doesNotMatch(JSON.stringify(manifest.client), /test:smoke|test:production/i)
+  for (const command of manifest.client.commands) assert.ok(workflow.includes(`'${command}' { ${command} }`))
+  assert.match(workflow, /name: Retain Fast client discovery and failure diagnostics\s+if: always\(\)/)
 
   const fullOnly = manifest.fullOnlyEvidence.join('\n')
   for (const expected of ['complete API suite', 'complete infrastructure suite', 'PostgreSQL', 'production-browser', 'full browser']) {

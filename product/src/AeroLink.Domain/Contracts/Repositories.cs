@@ -8,8 +8,55 @@ public interface IChangeRequestRepository
 {
     Task<PagedResult<ScrListItem>> QueryAsync(ScrQuery query, CancellationToken cancellationToken);
     Task<SystemChangeRequest?> GetAsync(Guid id, CancellationToken cancellationToken);
+    Task<SystemChangeRequest?> GetAsync(Guid id, ChangeRequestLoadShape shape, CancellationToken cancellationToken);
     Task AddAsync(SystemChangeRequest scr, CancellationToken cancellationToken);
     Task SaveAsync(CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// The child graph a change-request caller deliberately purchases. The default repository overload retains the
+/// historical complete graph for compatibility; application callers should state the smallest shape that supports
+/// their operation. Review comments are a separate resource and are therefore not part of <see cref="Detail"/>.
+/// </summary>
+[Flags]
+public enum ChangeRequestLoadShape
+{
+    None = 0,
+    RequirementChanges = 1 << 0,
+    ReviewCycles = 1 << 1,
+    ReviewSteps = 1 << 2,
+    ReviewComments = 1 << 3,
+    AuditEvents = 1 << 4,
+    UpstreamLinks = 1 << 5,
+    UpstreamHistory = 1 << 6,
+
+    /// <summary>The complete response graph, including review discussion for legacy callers.</summary>
+    Complete = RequirementChanges | ReviewCycles | ReviewSteps | ReviewComments | AuditEvents
+        | UpstreamLinks | UpstreamHistory,
+
+    /// <summary>The graph serialized by the ordinary change-request detail response.</summary>
+    Detail = RequirementChanges | ReviewCycles | ReviewSteps | AuditEvents | UpstreamLinks | UpstreamHistory,
+
+    /// <summary>
+    /// The graph used by review-comment operations. Requirement changes validate revision anchors, while steps
+    /// enforce the rule that a reviewer who is still deciding sees only their own comments.
+    /// </summary>
+    ReviewDiscussion = RequirementChanges | ReviewCycles | ReviewSteps | ReviewComments,
+
+    /// <summary>
+    /// The complete graph required by a review decision. A decision publishes the actor's draft comments and may
+    /// raise verification/downstream work from the requirement and upstream children.
+    /// </summary>
+    ReviewDecision = Complete,
+
+    /// <summary>
+    /// The complete graph required when closing or restarting a review. The alias names the lifecycle boundary
+    /// so a route cannot accidentally use the read-only detail shape and lose draft publication.
+    /// </summary>
+    ReviewClosure = Complete,
+
+    /// <summary>The source graph used when creating a next revision.</summary>
+    NextRevisionSource = RequirementChanges | UpstreamLinks,
 }
 
 /// <param name="BaseNumber">

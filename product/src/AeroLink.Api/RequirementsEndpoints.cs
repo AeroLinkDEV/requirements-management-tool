@@ -440,7 +440,7 @@ public static class RequirementsEndpoints
             SystemChangeRequest scr;
             if (request.ExistingScrId is Guid existingId)
             {
-                var loadedScr = await repository.GetAsync(existingId, ct);
+                var loadedScr = await repository.GetAsync(existingId, ChangeRequestLoadShape.Detail, ct);
                 if (loadedScr is null)
                     return Results.NotFound(new { error = "The selected Draft change request was not found.", code = "change_request_not_found" });
                 scr = loadedScr;

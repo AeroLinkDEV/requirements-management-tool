@@ -68,7 +68,11 @@ public static class BaselineEndpoints
                     .Where(other => other.ProjectId == projectId && other.BaseNumber == x.BaseNumber)
                     .Max(other => other.Revision));
             var total = await source.CountAsync(ct);
-            var ordered = db.Database.IsSqlite() ? source.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision) : source.OrderByDescending(x => x.UpdatedAt).ThenBy(x => x.BaseNumber).ThenByDescending(x => x.Revision);
+            // Prefix, numeric width, then digits gives controlled-number order without integer overflow.
+            // Apply it before paging, identically on PostgreSQL and SQLite; activity never moves a row.
+            var ordered = source.OrderBy(x => x.BaseNumber.Contains("-") ? x.BaseNumber.Substring(0, x.BaseNumber.IndexOf("-")) : x.BaseNumber)
+                .ThenBy(x => x.BaseNumber.Length).ThenBy(x => x.BaseNumber)
+                .ThenByDescending(x => x.Revision).ThenBy(x => x.Id);
             var items = await ordered
                 .Skip((page - 1) * pageSize).Take(pageSize).Select(x => new { x.Id, displayNumber = x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision,
                     x.BaseNumber, x.Revision, x.Title, state = x.State.ToString(), deferredFromState = x.DeferredFromState == null ? null : x.DeferredFromState.ToString(),
@@ -190,11 +194,9 @@ public static class BaselineEndpoints
                 }
             }
             var total = await source.CountAsync(ct);
-            // SQLite can neither order nor aggregate a DateTimeOffset, so the newest-first ordering the
-            // requirements register uses is available only on PostgreSQL. Same compromise, same reason.
-            var ordered = db.Database.IsSqlite()
-                ? source.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision)
-                : source.OrderByDescending(x => x.UpdatedAt).ThenBy(x => x.BaseNumber).ThenByDescending(x => x.Revision);
+            var ordered = source.OrderBy(x => x.BaseNumber.Contains("-") ? x.BaseNumber.Substring(0, x.BaseNumber.IndexOf("-")) : x.BaseNumber)
+                .ThenBy(x => x.BaseNumber.Length).ThenBy(x => x.BaseNumber)
+                .ThenByDescending(x => x.Revision).ThenBy(x => x.Id);
             var items = await ordered.Skip((page - 1) * pageSize).Take(pageSize)
                 .Select(x => new
                 {
@@ -388,7 +390,7 @@ public static class BaselineEndpoints
         {
             var baseline = await baselines.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
-            var scr = await scrs.GetAsync(request.ChangeRequestId, ct); if (scr is null) return Results.NotFound();
+            var scr = await scrs.GetAsync(request.ChangeRequestId, ChangeRequestLoadShape.None, ct); if (scr is null) return Results.NotFound();
             try { baseline.Select(scr, http.UserAccount().UserName, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.Ok(ApiMap.Baseline(baseline)); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
@@ -461,7 +463,7 @@ public static class BaselineEndpoints
         {
             var baseline = await baselines.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
-            var scr = await scrs.GetAsync(changeRequestId, ct); if (scr is null) return Results.NotFound();
+            var scr = await scrs.GetAsync(changeRequestId, ChangeRequestLoadShape.None, ct); if (scr is null) return Results.NotFound();
             try { baseline.Remove(scr, http.UserAccount().UserName, DateTimeOffset.UtcNow); await baselines.SaveAsync(ct); return Results.NoContent(); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });

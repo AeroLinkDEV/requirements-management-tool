@@ -40,6 +40,9 @@ See [Scope and Boundaries](docs/product-definition/SCOPE_AND_BOUNDARIES.md) and 
 ## Current technology and repository shape
 
 - React + TypeScript client.
+- A typed current route owns workspace and exact-artifact selection. Workspace hydration resolves that
+  destination against authorized server workspaces; missing explicit projects/builds are unavailable rather
+  than substituted. Shared request-generation guards reject stale shell and Requirements Explorer reads.
 - ASP.NET Core / .NET application and API.
 - Entity Framework Core persistence.
 - PostgreSQL for real local/on-premises operation.
@@ -155,8 +158,10 @@ AeroLink supports governed System/HLR/LLR change requests and Test Change Reques
 
 The Digital Thread accepts a stable Change Request identity and presents the server-composed exact Change Request/provenance projection as a visual, layered node-and-edge map or equivalent accessible table for the same active investigation. Network, Inside and Artifact representations retain their own authoritative projection/context, exact identities, typed direct relationships and hop-qualified indirect context; changing representation does not change the subject. The CR inspector exposes the selected record's direct upstream/downstream relationships and labels additional connected records as hop-qualified context, and it can open the exact selected CR thread. Exact routeable identifiers use native links; unavailable targets remain explicitly non-openable. The existing baseline-exact requirement → verification → result/evidence → build path remains an explicitly named Baseline evidence report with server paging, exact revision/artifact links and relationship lifecycle controls where authorized; its PDF/DOCX exports are baseline-scoped. Proposed Introduce/Modify/Retire content remains visibly separate from materialized, effective-baseline, and evidence truth.
 
+Digital Thread reads select a bounded typed frontier or exact build membership before loading evidence. A derived, indexed frozen-review lookup preserves reverse historical reachability without scanning unrelated snapshot payloads; original snapshots and hashes remain authoritative. Oversized rooted traces fail explicitly, while build-network cuts retain the existing truncation signal. See [the read contract](product/docs/DIGITAL_THREAD_READS.md).
+
 For a non-root requirement change request, the controlled Draft also records either exact upstream change-request
-revision link(s) or an attributable no-upstream rationale before review. Same-build direct-parent linkage from the
+revision link(s) or an attributable no-upstream rationale before review, using one picker during creation and editing. New links require an exact currently Approved or SelectedForBaseline revision. Deferred candidates remain visible but selection opens reassignment guidance and creates no link. Same-build direct-parent linkage from the
 effective Project ladder is the normal path; an explicitly requested earlier-build link must target an exact signed
 predecessor-build revision and retain its cross-build rationale. Assessment-derived upstream evidence remains owned
 by its build-scoped downstream assessment, while the review snapshot freezes the exact assessment/link identity that
@@ -177,9 +182,12 @@ project-wide four-lane lifecycle board, people strip, search/build filters, laye
 filters, current-holder grouping, and canonical record links. Selecting a person replaces the current person filter
 and keeps the board visible; current-holder detail is available only through a separate explicit action. Reusable
 person avatars use repository-owned synthetic portraits where available and retain an initials fallback. People
-ordering and the local affinity nudge use only modern base project roles; Project Leadership remains separate
-metadata and Review/Approval remain frozen workflow-stage meanings. Holder identity is 0..N, including parallel
-obligations, and no write, assignment, due-date, or age-in-state behavior is implied.
+ordering is workload-first within the current build/layer/artifact-type/search scope, with a bounded local
+selection-frequency boost and stable account-identity tie-breaking; zero-work members remain accessible after
+people holding work. Person workload counts follow that roster scope, while board totals follow the displayed
+person-filtered scope. Project Leadership remains separate metadata and Review/Approval remain frozen
+workflow-stage meanings. Holder identity is 0..N, including parallel obligations, and no write, assignment,
+due-date, or age-in-state behavior is implied.
 
 ## Problem Reports
 
@@ -229,8 +237,7 @@ The FMS Product Development dataset remains the principal deterministic live dem
 - Named deterministic scenarios provide representative lifecycle, later-revision, trace-branching, assessment,
   verification/evidence, Problem Report, review/approval, leadership, avatar, and distributed-work
   coverage. Interface change-control scenarios are deliberately not seeded: the FMS ladder configures
-  `[System, HighLevel, LowLevel]`, and an older seed's Interface scenarios are closed out — withdrawn under
-  their own identity, never deleted — by the explicit showcase upgrade (#889). Fresh showcase creation is
+  `[System, HighLevel, LowLevel]`. The owner-directed #1006 operator correction removes the audited older synthetic Interface aggregates and their history after verified backup and disposable-copy qualification (DEC-125), superseding #889's earlier retained-history acceptance. Other projects and normal controlled history retain their deletion protections. Named upstream examples use the approved exact source of their baseline parent; invalid older links receive recorded correction without rewriting frozen reviews. Fresh showcase creation is
   rollback-atomic; upgrading an existing synthetic showcase is an explicit administrator action that
   requires positive target and backup confirmation and never runs during ordinary startup.
 
@@ -274,6 +281,16 @@ See [Security and Identity Model](docs/product-definition/SECURITY_AND_IDENTITY_
 
 AeroLink includes governed import/export/interchange foundations such as CSV/XLSX onboarding, ReqIF-related workflows, versioned API behavior, service identities, webhooks/integration foundations, and external-system linking. Interchange must preserve provenance and must not bypass controlled change/review merely because data arrived from another tool.
 
+The persistence write path is intentionally asynchronous and phase-ordered. `AeroLinkDbContext` retains the
+model and final EF write while state repair, complete integrity validation, and lifecycle/outbox preparation are
+cohesive internal save phases. The authoritative ordering, provider-read and transaction boundary, failure/tracked-
+state condition, retry contract, and bounded child-state lookup rule live in
+[product/docs/SAVE_BOUNDARY.md](product/docs/SAVE_BOUNDARY.md).
+
+Routine change-request reads choose an explicit child-graph load contract so detail and command paths do not
+materialize every controlled history collection; the provider-specific split-query and snapshot rules are
+authoritatively documented in [product/docs/CHANGE_REQUEST_LOADS.md](product/docs/CHANGE_REQUEST_LOADS.md).
+
 ## Operations and recovery
 
 The repository provides stable Windows root launchers for development, production-style local operation, shared/remote demo modes, backup, restore validation, diagnostics, and related operator actions.
@@ -303,6 +320,14 @@ An installation may declare its own identity (`instance.json`), which the API pu
 `/health/identity` and the client shows beside the wordmark. Canonical status is declared, never inferred
 from the hostname. `/health/identity` also carries the source SHA and launcher mode, which is what lets a
 launcher tell a matching process from a stale one — readiness alone never could.
+
+HOME production transitions preserve the prior protected-tunnel ON/OFF state under the initiating policy.
+Exact runtime reuse skips rebuild and PostgreSQL startup. A shared installation lease coordinates manual and
+scheduled controllers through fresh-process continuation; an owed origin is supplied before API startup and
+attributed to the new listener before protected-tunnel restoration. Incomplete restoration is a failed
+transition even if local service remains available. Managed process creators establish account-SID Windows
+access across S4U and interactive logons, and stops verify executable and process start identity. Legacy
+installations have an explicitly approved one-time elevated setup; ordinary subsequent operation is non-admin.
 
 Database upgrade posture is answered before a web server starts, by a maintenance mode of the application
 host that reuses the same migration authorities startup runs. A deterministic upgrade is backed up and

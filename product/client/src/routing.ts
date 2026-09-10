@@ -197,11 +197,11 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   // The register, which is a page of its own here as it is on the requirements side. Declared after the
   // `/new` routes above so raising one is not read as a package whose id happens to be "new".
   if (path === "system-verification/change-requests")
-    return { ...base, view: "testChangeRequests", discipline: "systemTest", testChangeRequestSelectionId: query.get("selection") || undefined };
+    return { ...base, view: "testChangeRequests", discipline: "systemTest", testChangeRequestSelectionId: query.get("selection") || undefined, artifactId: query.get("authoring") || undefined };
   if (path === "software-verification/hlr/change-requests")
-    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query), testChangeRequestSelectionId: query.get("selection") || undefined };
+    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("HighLevel", query), testChangeRequestSelectionId: query.get("selection") || undefined, artifactId: query.get("authoring") || undefined };
   if (path === "software-verification/llr/change-requests")
-    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query), testChangeRequestSelectionId: query.get("selection") || undefined };
+    return { ...base, view: "testChangeRequests", discipline: "softwareTest", artifactKind: verificationArtifactKind("LowLevel", query), testChangeRequestSelectionId: query.get("selection") || undefined, artifactId: query.get("authoring") || undefined };
   if (tail[0] === "system-verification" && tail[1] === "change-requests" && tail[2])
     return { ...base, view: "testChangeRequest", discipline: "systemTest", artifactKind: query.get("kind")?.toLowerCase() === "procedure" ? "Procedure" : undefined, artifactId: decoded(tail[2]), testChangeRequestProposalId: query.get("proposalId") || undefined };
   if (tail[0] === "software-verification" && tail[1] === "hlr" && tail[2] === "change-requests" && tail[3])
@@ -353,6 +353,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
       const query = new URLSearchParams();
       if (artifactKind?.toLowerCase().includes("procedure")) query.set("kind", "Procedure");
       if (selectionId) query.set("selection", selectionId);
+      if (artifactId) query.set("authoring", artifactId);
       return `${path}${query.size ? `?${query}` : ""}`;
     }
     case "testChangeRequest": {
@@ -454,8 +455,14 @@ export type ExactTraceArtifact = {
 }
 
 export function exactTraceArtifactPath(context: RouteContext, node: ExactTraceArtifact): string | undefined {
-  if (!node.id) return undefined;
+  const identifier = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+  if (!context || !node || !identifier(context.programId) || !identifier(context.projectId)
+    || !identifier(node.id) || !identifier(node.kind)
+    || (node.buildId != null && !identifier(node.buildId))
+    || (node.displayNumber != null && typeof node.displayNumber !== 'string')
+    || (node.level != null && typeof node.level !== 'string')) return undefined;
   const scoped = node.buildId ? { ...context, releaseId: node.buildId } : context;
+  if (!identifier(scoped.releaseId)) return undefined;
   const display = (node.displayNumber ?? '').toUpperCase();
 
   if (node.kind === 'ChangeRequest') {
@@ -473,7 +480,7 @@ export function exactTraceArtifactPath(context: RouteContext, node: ExactTraceAr
   }
 
   if (node.kind === 'RequirementRevision') {
-    if (!node.artifactId) return undefined;
+    if (!identifier(node.artifactId)) return undefined;
     const discipline = node.level === 'HighLevel' || node.level === 'LowLevel' ? 'software' : 'system';
     const path = routePath(scoped, 'requirements', discipline, node.artifactId);
     return `${path}&requirementRevisionId=${encodeURIComponent(node.id)}`;
@@ -482,7 +489,7 @@ export function exactTraceArtifactPath(context: RouteContext, node: ExactTraceAr
   if (node.kind === 'TestProcedure' || node.kind === 'TestCase') {
     // The artifact route without revisionId opens the mutable aggregate/latest revision. A displayed
     // controlled verification identifier is linkable only when its immutable revision identity is present.
-    if (!node.revisionId) return undefined;
+    if (!identifier(node.revisionId)) return undefined;
     return routePath(scoped, 'artifact', 'system', node.id, node.kind === 'TestProcedure' ? 'test-procedure' : 'test-case', undefined, undefined, undefined, undefined, node.revisionId);
   }
   if (node.kind === 'TestExecution') return routePath(scoped, 'artifact', 'system', node.id, 'test-execution');

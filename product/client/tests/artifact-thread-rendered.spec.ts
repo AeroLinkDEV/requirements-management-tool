@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test"
+import type { Page } from "@playwright/test"
+import { expect, renderedTest as test } from "./isolated-client-test"
 
 /**
  * Rendered behaviour of the artifact thread.

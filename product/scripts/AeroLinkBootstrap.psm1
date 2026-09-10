@@ -296,8 +296,15 @@ function Invoke-AeroLinkBootstrapReentry {
     $env:AEROLINK_BOOTSTRAP_REENTRY = '1'
     $env:AEROLINK_BOOTSTRAP_EXPECTED_SHA = $ExpectedSha
     try {
-        $child = Start-Process -FilePath $hostExecutable -ArgumentList $argumentLine -NoNewWindow -PassThru -Wait
-        return $child.ExitCode
+        Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessControl.psm1')
+        # Start-Process -Wait waits for the whole Windows process tree, including the
+        # replacement API/ngrok. Only the launcher must exit before this handoff completes.
+        $child = Start-Process -FilePath $hostExecutable -ArgumentList $argumentLine -NoNewWindow -PassThru
+        try {
+            $handle = $child.Handle
+            $child.WaitForExit()
+            return [AeroLink.ProcessAccess]::ExitCode($handle)
+        } finally { $child.Dispose() }
     }
     finally {
         Remove-Item -Path 'Env:AEROLINK_BOOTSTRAP_REENTRY', 'Env:AEROLINK_BOOTSTRAP_EXPECTED_SHA' -ErrorAction SilentlyContinue

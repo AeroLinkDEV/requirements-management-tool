@@ -603,6 +603,7 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
         "interface-scenario-retirement",
         "scenario-richness",
         "active-trace-network",
+        "approved-upstream-correction-1006",
         "workflow-holder-scenarios",
         "active-build-verification",
     ];
@@ -632,6 +633,7 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
             ("interface-scenario-retirement", RetireInterfaceScenariosAsync),
             ("scenario-richness", EnsureScenarioRichnessAsync),
             ("active-trace-network", EnsureActiveTraceScenariosAsync),
+            ("approved-upstream-correction-1006", CorrectUnapprovedUpstreamScenariosAsync),
             ("workflow-holder-scenarios", EnsureWorkflowScenariosAsync),
             // Resolve every configured workflow/authority/proposal precondition before the final
             // evidence-producing step. A rejected workflow must never promote an unreferenced file.

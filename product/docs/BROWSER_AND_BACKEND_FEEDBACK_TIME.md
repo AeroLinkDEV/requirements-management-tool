@@ -41,6 +41,49 @@ different concurrency groups; development feedback cannot cancel final Full evid
 collector remains the source for post-switch full-gates-per-merge, cancellation waste, queue/final-push-to-merge
 timing and regression data; re-measure the new cadence rather than assuming savings.
 
+## One native owner for operator execution
+
+The required Windows `script-contracts` job owns the operator and recovery script family. The planner
+suite checks that this owner still executes the complete family unconditionally; it no longer launches
+the same family a second time from the Domain job. The native PowerShell steps and their assertions
+remain intact, including backup preview, launcher, process ownership, recovery and fault cases.
+
+The operator job captures the original `product/.local` fingerprint before execution and verifies it
+in an `always()` step afterwards. Missing evidence, a changed path/content/mtime, a foreign snapshot,
+or failure to capture/verify is a job failure. The capture refuses to overwrite its baseline or write
+the snapshot into the store being protected. The layout contracts also execute inside this boundary,
+while the always-running classifier retains its documentation/layout check.
+
+This removes duplicate execution while retaining native Windows qualification. The local Full planner
+still runs its operator family under the existing evidence and process-ownership boundary; its
+Smtp4dev contract remains local-Full-only, while launcher/bootstrap and layout proofs remain owned by
+the native Windows job. Measure hosted job and critical-path results before attributing any merge-time
+saving to this change.
+
+## API-independent client feedback
+
+The advisory Fast client job runs the explicit logic and rendered-fixture files in
+`product/client/fast-client-tests.json` after static checks. Logic uses no browser or server;
+rendered fixtures use one Chromium worker and Vite, with no API or showcase setup. Neither tier retries.
+The fixture boundary rejects its `request` fixture, `page.request`, and browser-context API methods, and
+records and refuses browser API/external requests, including swallowed failures. The Full workflow still
+discovers and executes all of these tests.
+
+From `product/client`, run `npm run test:fast:routes`, `npm run test:fast:logic`, then
+`npx playwright install chromium`, `npm run test:fast:isolation`, and `npm run test:fast:rendered`. The
+isolation command runs a deliberately offending child test outside ordinary discovery and requires a
+nonzero exit even when the child swallows the API-context error; its control child must pass. The routing
+check compares actual Playwright discovery by file and title, rejects missing/duplicate/substituted
+identities, and records every remaining file as Full-only. Newly added files therefore retain integrated
+Full coverage until their dependencies and assertions are reviewed for early execution. Mixed
+integrated/fixture files must not be added to the isolated manifest merely because they mock one response.
+
+Fast retains its routing report, JSON results and available traces under a per-run artifact, including
+failed runs. This addition is intended to expose defects earlier; it does not establish a reduction in
+Full wall time. Measure hosted command time, workflow latency and first-pass results before expanding
+the subset or moving any identities out of Full. The existing local changed-area planner remains a
+broader local plan; these commands provide the same isolated client checks used by advisory CI.
+
 ## Merge-queue cutover, 2026-09-04
 
 Issue #549 moved the repository to the `AeroLinkDEV` organization and PR #911 supplied the trusted repository
@@ -141,10 +184,15 @@ the other two assemblies combined, so it gets a runner to itself and everything 
 
 Two details that are easy to get wrong, and were deliberately handled:
 
-- **Both backend jobs still build the whole solution.** `dotnet test <project>` builds only that project's
-  dependency graph, which would quietly stop proving that the tools and product projects outside it still
-  compile. The duplicated build is the price of keeping "everything compiles" true once the assemblies run
-  apart.
+- **The scoped backend jobs build their own complete project graphs.** Each API shard restores and builds
+  `AeroLink.Api.Tests.csproj`, and the Infrastructure job restores and builds
+  `AeroLink.Infrastructure.Tests.csproj`, including transitive project references, before discovery and
+  execution use `--no-build`. They do not consume binaries from another runner or use `--no-dependencies`.
+- **Whole-solution coverage remains separately owned.** The required Domain job restores and builds the
+  complete solution on Windows, including tools and projects outside the two test graphs. The PostgreSQL
+  qualification keeps its independent whole-solution Linux restore/build. A selected backend job requires
+  the Domain owner to complete; fewer projects compiled on a scoped runner is not evidence of a shorter
+  Full gate by itself.
 - **Naming assemblies individually introduces a new failure mode**: a test project that no job runs. It would
   still build, so nothing would fail — the suite would simply become invisible. `backend-core` carries a guard
   that enumerates `product/tests/*` and fails on any project not claimed by a job.

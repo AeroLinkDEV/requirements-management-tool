@@ -147,6 +147,12 @@ public sealed class TestChangeRequestRegisterApiTests
         Assert.Contains(trace.GetProperty("edges").EnumerateArray(), edge =>
             edge.GetProperty("toId").GetGuid() == seeded.TcrId
             && edge.GetProperty("fromKind").GetString() == "ChangeRequest");
+        var direct = await client.GetFromJsonAsync<JsonElement>($"/api/test-change-reviews/{seeded.TcrId}/trace?directOnly=true");
+        Assert.True(direct.GetProperty("directOnly").GetBoolean());
+        Assert.Contains(direct.GetProperty("edges").EnumerateArray(), edge =>
+            edge.GetProperty("toId").GetGuid() == seeded.TcrId && edge.GetProperty("fromKind").GetString() == "ChangeRequest");
+        Assert.All(direct.GetProperty("edges").EnumerateArray(), edge =>
+            Assert.True(edge.GetProperty("fromId").GetGuid() == seeded.TcrId || edge.GetProperty("toId").GetGuid() == seeded.TcrId));
 
         using var missing = await client.GetAsync($"/api/test-change-reviews/{Guid.NewGuid()}/trace");
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
@@ -156,6 +162,8 @@ public sealed class TestChangeRequestRegisterApiTests
         using var outsider = await SignInAsync(factory, seeded.Outsider);
         using var memberRefused = await outsider.GetAsync($"/api/test-change-reviews/{seeded.TcrId}/trace");
         Assert.Equal(HttpStatusCode.Forbidden, memberRefused.StatusCode);
+        using var directRefused = await outsider.GetAsync($"/api/test-change-reviews/{seeded.TcrId}/trace?directOnly=true");
+        Assert.Equal(HttpStatusCode.Forbidden, directRefused.StatusCode);
     }
 
     [Fact]
