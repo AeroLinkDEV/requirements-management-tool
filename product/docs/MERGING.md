@@ -227,3 +227,5 @@ cannot self-authorize through the routine maintenance path.
 
 - [Feedback time](BROWSER_AND_BACKEND_FEEDBACK_TIME.md) — **read before changing CI.** Where a pull request's
   wall clock actually goes, measured, and why shard counts are not the lever.
+
+<!-- Temporary hosted acceptance probe for #1014; close without merging. -->
