@@ -394,6 +394,47 @@ The API-packing-shadow subset additionally covers exact current/candidate covera
 class and explicitly declared collection groups, deterministic assignment, malformed/stale/missing/mixed
 evidence fallback, the eight-run adoption threshold, and the offline report's no-speedup limits.
 
+## Authenticated API observations and local benchmark (942, PR TWO)
+
+The API shards publish an attempt-scoped `api-observations-<shard>-<attempt>` artifact after every run. The
+artifact is built from the existing `dotnet test --list-tests` capture and current Bash partition, and retains
+the complete inventory, exact filter, timing markers, a sanitized `shard.trx`, and bounded runner/toolchain fields. It
+does not select tests or affect the gate. `bin/collect-api-observations.mjs` reads the fixed repository through
+authenticated, GET-only GitHub API calls, verifies workflow/run/attempt/commit/tree metadata, reads every page,
+keeps the effective `filter=latest` jobs alongside an origin ledger from `filter=all`, selects observation and
+fragment artifacts by the resolved originating attempt, and parses only the named JSON and TRX entries from each
+ZIP. Missing, expired, corrupt, cancelled, failed, duplicate, partial, or
+identity-inconsistent evidence remains in `exclusions`; it is never treated as zero or silently dropped.
+
+The resulting `aerolink-api-observations/v1` report labels GitHub metadata as authenticated, artifact claims as
+reconciled-but-unauthenticated, and performance comparability separately. It records source commit/tree,
+workflow definition blob, event role, run and attempt, job origin, runner timestamps, full test identities,
+class/case durations in milliseconds, outcomes, and inventory digest. Eight comparable observations per
+configuration remain required for a performance conclusion; collection output alone does not authorize
+duration packing or any protected skip. A recovered or rerun attempt remains useful for audited weights and
+origin accounting, but is marked separately from an ordinary first-pass performance sample. Branch dispatch
+and branch push runs are also labelled as unverified diagnostic roles rather than pooled with main validation.
+
+For a controlled experiment on Windows, use an explicit owned temp output and the same source/inventory for
+both cohorts:
+
+```powershell
+node product/ci-metrics/bin/benchmark-api-packing.mjs `
+  --source C:\path\to\source-tree `
+  --discovery C:\path\to\api-observation.json `
+  --observations C:\path\to\api-observations.json `
+  --output C:\Users\<user>\AppData\Local\Temp\aerolink-api-benchmark
+```
+
+The command verifies the source commit/tree and complete inventory, builds once per cohort, runs three shards
+for the current count plan and duration candidate, preserves every TRX under the owned output, reconciles each
+result identity exactly, and records setup/build time, shard wall time, slowest shard, runner-minutes, and
+outcomes, with no retries configured. It refuses non-Windows execution, output inside the source tree, protected
+port 54329 or connection variables, and absence of all usable duration evidence. Unknown class durations use
+the documented count fallback and remain visible in the report. The benchmark is a local diagnostic; the ordinary three-shard CI
+selector, worker counts, required checks, and merge authority are unchanged. It records source cleanliness
+before and after both cohorts and terminates only the spawned process tree when a bounded timeout fires.
+
 The API-telemetry subset (9 tests) additionally covers non-overlapping construction/host/disposal math,
 parameterized-theory ambiguity, unmatched fixture/helper factories, connection-open separation, schema
 version validation, TRX reconciliation, credential rejection, and bounded Markdown output.

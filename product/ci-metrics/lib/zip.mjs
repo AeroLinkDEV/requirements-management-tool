@@ -150,3 +150,23 @@ export function readNamedJsonFromZip(input, fileName) {
 
   throw new ZipParseError(`Artifact zip does not contain "${fileName}". JSON entries: ${describeEntries(jsonEntries)}.`)
 }
+
+/**
+ * Read one bounded text entry from an artifact upload using the same unambiguous root/nested lookup as JSON.
+ * Artifact entries are data only: callers receive bytes and decide how to parse them. No file is extracted
+ * or executed on disk.
+ */
+export function readNamedEntryFromZip(input, fileName) {
+  if (typeof fileName !== 'string' || fileName.length === 0 || fileName.length > 200 || /[\r\n]/.test(fileName)) {
+    throw new ZipParseError('Artifact entry name is invalid.')
+  }
+  const entries = listZipEntries(input).filter((entry) => entry.name === fileName || entry.name.endsWith(`/${fileName}`))
+  const root = entries.filter((entry) => entry.name === fileName)
+  const nested = entries.filter((entry) => entry.name.endsWith(`/${fileName}`))
+  if (root.length > 1 || (root.length === 0 && nested.length > 1)) {
+    throw new ZipParseError(`Artifact zip contains ambiguous entries named "${fileName}".`)
+  }
+  const selected = root[0] ?? nested[0]
+  if (!selected) throw new ZipParseError(`Artifact zip does not contain "${fileName}".`)
+  return readZipEntry(input, selected)
+}
