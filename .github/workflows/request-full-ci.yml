@@ -15,12 +15,12 @@ concurrency:
 
 jobs:
   dispatch-and-bind:
-    # This job is the trusted PR-associated branch-protection binding for final Full evidence. The required
-    # name exists only for the exact readiness label on a same-repository PR. The workflow runs from the
-    # default-branch definition, never checks out PR code, and cannot succeed until the real exact-head
-    # Product aggregate has succeeded and the live PR identity/readiness still match.
-    name: ${{ github.event.label.name == 'ready-for-full-ci' && github.event.pull_request.head.repo.full_name == github.repository && 'Report what this run validated' || 'Ignore non-readiness PR label for Full CI' }}
-    if: github.event.label.name == 'ready-for-full-ci' && github.event.pull_request.head.repo.full_name == github.repository
+    # This job is the trusted PR-associated branch-protection binding for final Full evidence. The
+    # latest label-event suite must retain the required check, including after a maintenance label. Reuse
+    # and revalidate existing evidence for an already-ready PR; only the readiness label can dispatch Full.
+    # This runs from the default branch, never checks out PR code, and still authenticates live readiness.
+    name: Report what this run validated
+    if: contains(github.event.pull_request.labels.*.name, 'ready-for-full-ci') && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 75
     environment:
@@ -31,6 +31,7 @@ jobs:
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
+      REQUEST_LABEL: ${{ github.event.label.name }}
     steps:
       - name: Install Node.js for the trusted readiness-target guard
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -170,6 +171,8 @@ jobs:
             FOUND*) read -r _ run_id _ _ <<< "$match" ;;
             PENDING) run_id="" ;;
             NONE)
+              # Unrelated labels may restore the native binding, but never create a new Full run.
+              node -e 'if (process.env.REQUEST_LABEL !== "ready-for-full-ci") { console.error("No trusted Product run exists; only the readiness label may dispatch Full."); process.exit(1) }'
               python - <<'PY' > "$RUNNER_TEMP/full-ci-dispatch.json"
           import json, os
           print(json.dumps({
@@ -325,8 +328,10 @@ jobs:
     # check suite. An API-created check on the same commit is not sufficient for merge-queue admission.
     # `always()` makes a failed or skipped dependency reach the explicit refusal below instead of turning
     # this required check into a skipped success.
-    name: ${{ github.event.label.name == 'ready-for-full-ci' && github.event.pull_request.head.repo.full_name == github.repository && 'Full Product evidence aggregate' || 'Ignore non-readiness PR label for Product evidence' }}
-    if: always() && github.event.label.name == 'ready-for-full-ci' && github.event.pull_request.head.repo.full_name == github.repository
+    # Never skip this required check or change its name for a later label event. Without an authenticated
+    # successful prerequisite it must fail, including when readiness is absent or the head is foreign.
+    name: Full Product evidence aggregate
+    if: always()
     needs: dispatch-and-bind
     runs-on: ubuntu-latest
     permissions: {}
