@@ -1,14 +1,20 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 
 const read = (relative) => readFileSync(new URL(`../../../${relative}`, import.meta.url), 'utf8')
 const requester = read('.github/workflows/request-full-ci.yml')
 const full = read('.github/workflows/ci.yml')
 const fast = read('.github/workflows/fast-pr-feedback.yml')
 const reset = read('.github/workflows/reset-full-ci-readiness.yml')
+const bash = process.platform === 'win32'
+  ? resolve(execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(), '../../../bin/bash.exe')
+  : 'bash'
 
-test('ready label requester is trusted-base, exact-label, same-repository, and dispatch-only', () => {
+test('ready label requester is trusted-base, readiness-gated, same-repository, and dispatch-only', () => {
   assert.match(requester, /pull_request_target:/)
   assert.match(requester, /types: \[labeled\]/)
   assert.match(requester, /actions: write/)
@@ -16,7 +22,7 @@ test('ready label requester is trusted-base, exact-label, same-repository, and d
   assert.match(requester, /contents: read/)
   assert.match(requester, /pull-requests: read/)
   assert.doesNotMatch(requester, /actions\/checkout|git checkout|git clone/)
-  assert.match(requester, /github\.event\.label\.name == 'ready-for-full-ci'/)
+  assert.match(requester, /contains\(github\.event\.pull_request\.labels\.\*\.name, 'ready-for-full-ci'\)/)
   assert.match(requester, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/)
   assert.match(requester, /actions\/workflows\/ci\.yml\/dispatches/)
 })
@@ -86,8 +92,8 @@ test('Product aggregate is a real PR-suite job gated by trusted exact-run verifi
   assert.notEqual(prProductStart, -1)
   const prProductJob = requester.slice(prProductStart)
   assert.match(prProductJob, /^  pr-product-aggregate:$/m)
-  assert.match(prProductJob, /name: \$\{\{ .*'Full Product evidence aggregate'.*\}\}/)
-  assert.match(prProductJob, /^    if: always\(\) && github\.event\.label\.name == 'ready-for-full-ci' && github\.event\.pull_request\.head\.repo\.full_name == github\.repository$/m)
+  assert.match(prProductJob, /^    name: Full Product evidence aggregate$/m)
+  assert.match(prProductJob, /^    if: always\(\)$/m)
   assert.match(prProductJob, /^    needs: dispatch-and-bind$/m)
   assert.match(prProductJob, /^    permissions: \{\}$/m)
   assert.match(prProductJob, /TRUSTED_REQUEST_RESULT: \$\{\{ needs\.dispatch-and-bind\.result \}\}/)
@@ -100,4 +106,47 @@ test('Product aggregate is a real PR-suite job gated by trusted exact-run verifi
       requester.indexOf('pr-product-aggregate:'),
     'the PR-associated Product job must depend on exact Product verification',
   )
+})
+
+test('an earlier refresh waits for the separate readiness dispatcher without dispatching Full', () => {
+  const noneBranch = requester.match(/            NONE\)\n([\s\S]*?)              ;;/)[1].replace(/^          /gm, '')
+  assert.match(requester, /REQUEST_LABEL: \$\{\{ github\.event\.label\.name \}\}/)
+  assert.match(requester, /group: full-ci-request-.*github\.event\.label\.name == 'ready-for-full-ci' && 'dispatch' \|\| 'refresh'/)
+  assert.match(requester, /NONE\|PENDING\) sleep 10; continue ;;/)
+  assert.match(requester, /No successful trusted Product workflow_dispatch completed/)
+  const scratch = mkdtempSync(join(tmpdir(), 'aerolink-readiness-dispatch-'))
+  try {
+    // Execute the workflow's actual branch with transport/JSON production intercepted. No network call
+    // occurs; the ready event records one dispatch and the refresh enters polling with an empty run id.
+    const script = `set -euo pipefail\nheaders=()\napi=https://invalid.example\npython() { cat >/dev/null; printf '{}'; }\ncurl() { printf 'DISPATCH\\n'; }\n${noneBranch}\n[ -z "$run_id" ]`
+    for (const label of ['authority-maintenance-requested', 'documentation', '', 'READY-FOR-FULL-CI', 'ready-for-full-ci']) {
+      const result = spawnSync(bash, ['--noprofile', '--norc', '-c', script], {
+        env: { ...process.env, REQUEST_LABEL: label, RUNNER_TEMP: scratch.replaceAll('\\', '/') },
+        encoding: 'utf8', timeout: 10_000,
+      })
+      assert.ifError(result.error)
+      assert.equal(result.status, 0, `${label}: ${result.stderr}`)
+      assert.equal(result.stdout, label === 'ready-for-full-ci' ? 'DISPATCH\n' : '', label)
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true })
+  }
+  // Already-running or completed trusted runs continue through the existing verifier, not dispatch.
+  assert.match(requester, /FOUND\*\) read -r _ run_id _ _ <<< "\$match" ;;/)
+  assert.match(requester, /PENDING\) run_id="" ;;/)
+})
+
+test('the actual required aggregate refuses every non-success prerequisite result', () => {
+  const job = requester.slice(requester.indexOf('\n  pr-product-aggregate:\n'))
+  const script = job.match(/        run: \|\n([\s\S]*)/)[1].replace(/^          /gm, '')
+  // Git Bash is already the workflow's shell on Windows; use its installed executable rather than WSL.
+  for (const result of ['success', 'failure', 'skipped', 'cancelled', '', 'in_progress']) {
+    const run = spawnSync(bash, ['--noprofile', '--norc', '-c', script], {
+      env: { ...process.env, TRUSTED_REQUEST_RESULT: result, GITHUB_STEP_SUMMARY: '/dev/null' },
+      encoding: 'utf8', timeout: 10_000,
+    })
+    assert.ifError(run.error)
+    assert.equal(run.status, result === 'success' ? 0 : 1, result)
+    if (result !== 'success') assert.match(run.stdout, /refusing PR Product authority/)
+  }
 })
