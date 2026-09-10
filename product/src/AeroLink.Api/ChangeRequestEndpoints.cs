@@ -184,7 +184,7 @@ public static class ChangeRequestEndpoints
         // Phase 2's composed trace is a server-owned read. Resolve the owning Project first, authorize it,
         // and only then ask the projection to materialize connected nodes; this prevents a forbidden root from
         // becoming a side channel for cross-Project graph data.
-        app.MapGet("/api/change-requests/{id:guid}/trace", async (Guid id, HttpContext http,
+        app.MapGet("/api/change-requests/{id:guid}/trace", async (Guid id, bool? directOnly, HttpContext http,
             AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var projectId = await db.SystemChangeRequests.AsNoTracking()
@@ -194,7 +194,7 @@ public static class ChangeRequestEndpoints
             var policy = await policyResolver.ResolveAsync(projectId.Value, ct);
             try
             {
-                var trace = await ChangeRequestTraceProjection.ForChangeRequestAsync(db, projectId.Value, id, policy, ct);
+                var trace = await ChangeRequestTraceProjection.ForChangeRequestAsync(db, projectId.Value, id, policy, ct, directOnly == true);
                 return trace is null ? Results.NotFound() : Results.Ok(trace);
             }
             catch (TraceWorkLimitException ex)

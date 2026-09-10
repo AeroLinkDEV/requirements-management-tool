@@ -82,7 +82,8 @@ public static partial class ChangeRequestTraceProjection
     }
 
     private static async Task<TraceScope> DiscoverAsync(AeroLinkDbContext db, Guid projectId,
-        Guid rootId, string rootKind, ILadderPolicy policy, TraceReadBudget budget, CancellationToken ct)
+        Guid rootId, string rootKind, ILadderPolicy policy, TraceReadBudget budget, CancellationToken ct,
+        bool directOnly = false)
     {
         var scope = new TraceScope();
         var changes = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId);
@@ -197,6 +198,10 @@ public static partial class ChangeRequestTraceProjection
                     .Where(x => x.ProjectId == projectId && req.Contains(x.RequirementRevisionId)).Select(x => x.Id), ct));
             }
             if (scope.Count > TraceReadBudget.MaximumNodes) throw new TraceWorkLimitException();
+            // The register inspector promises immediate relationships. Do not expand a neighbour's
+            // requirements, siblings or review history into the whole connected component merely to
+            // discard those extra hops in the browser. The same node/read budgets still apply.
+            if (directOnly) return scope;
         }
     }
 }

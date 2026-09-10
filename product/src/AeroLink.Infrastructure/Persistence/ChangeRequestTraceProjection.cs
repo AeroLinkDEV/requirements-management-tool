@@ -82,7 +82,8 @@ public sealed record ChangeRequestTraceProjectionResult(
     IReadOnlyList<ChangeRequestTraceEdge> Edges,
     ChangeRequestTraceState? State,
     Guid? RootArtifactId = null,
-    string? RootArtifactKind = null);
+    string? RootArtifactKind = null,
+    bool DirectOnly = false);
 
 /// <summary>
 /// The change-control network for one exact build: every change request and test change request targeting it,
@@ -142,16 +143,16 @@ public static partial class ChangeRequestTraceProjection
     /// <summary>Projects one exact CR after its caller has established Project access.</summary>
     public static async Task<ChangeRequestTraceProjectionResult?> ForChangeRequestAsync(
         AeroLinkDbContext db, Guid projectId, Guid rootChangeRequestId, ILadderPolicy policy,
-        CancellationToken ct)
+        CancellationToken ct, bool directOnly = false)
     {
-        var projection = await BuildAsync(db, projectId, rootChangeRequestId, "ChangeRequest", policy, ct);
+        var projection = await BuildAsync(db, projectId, rootChangeRequestId, "ChangeRequest", policy, ct, directOnly: directOnly);
         return projection;
     }
 
     /// <summary>Projects one exact Test Change Request root through the same composed, bounded graph.</summary>
     public static Task<ChangeRequestTraceProjectionResult?> ForTestChangeReviewAsync(
         AeroLinkDbContext db, Guid projectId, Guid rootTestChangeReviewId, ILadderPolicy policy,
-        CancellationToken ct) => BuildAsync(db, projectId, rootTestChangeReviewId, "TestChangeRequest", policy, ct);
+        CancellationToken ct, bool directOnly = false) => BuildAsync(db, projectId, rootTestChangeReviewId, "TestChangeRequest", policy, ct, directOnly: directOnly);
 
     /// <summary>
     /// Projects the whole change-control network for one exact build in a single read.
@@ -209,11 +210,12 @@ public static partial class ChangeRequestTraceProjection
 
     private static async Task<ChangeRequestTraceProjectionResult?> BuildAsync(
         AeroLinkDbContext db, Guid projectId, Guid rootId, string rootKind, ILadderPolicy policy,
-        CancellationToken ct, Guid? networkReleaseId = null, TraceScope? selectedScope = null, TraceReadBudget? readBudget = null)
+        CancellationToken ct, Guid? networkReleaseId = null, TraceScope? selectedScope = null, TraceReadBudget? readBudget = null,
+        bool directOnly = false)
     {
         var isNetwork = rootKind == NetworkRootKind;
         var budget = readBudget ?? new TraceReadBudget();
-        var scope = selectedScope ?? await DiscoverAsync(db, projectId, rootId, rootKind, policy, budget, ct);
+        var scope = selectedScope ?? await DiscoverAsync(db, projectId, rootId, rootKind, policy, budget, ct, directOnly);
         var crIds = scope.Changes.ToArray();
         var tcrIds = scope.Reviews.ToArray();
         var reqIds = scope.Requirements.ToArray();
@@ -607,7 +609,9 @@ public static partial class ChangeRequestTraceProjection
             fromSet.Add(to); toSet.Add(from);
         }
         var typedEdges = edgeBuilders.Where(x => nodes.ContainsKey((x.FromKind, x.FromId))
-                && nodes.ContainsKey((x.ToKind, x.ToId))).ToList();
+                && nodes.ContainsKey((x.ToKind, x.ToId))
+                && (!directOnly || (x.FromKind == rootKind && x.FromId == rootId)
+                    || (x.ToKind == rootKind && x.ToId == rootId))).ToList();
         foreach (var edge in typedEdges)
         {
             ct.ThrowIfCancellationRequested();
@@ -656,7 +660,7 @@ public static partial class ChangeRequestTraceProjection
         return new(projectId, rootKind == "ChangeRequest" ? rootCr : Guid.Empty,
             nodes.Where(x => visited.Contains(x.Key)).Select(x => x.Value)
                 .OrderBy(x => x.Kind).ThenBy(x => x.DisplayNumber).ThenBy(x => x.Id).ToList(), edges, state,
-            rootId, rootKind);
+            rootId, rootKind, directOnly);
     }
 
     private static async Task<IReadOnlyDictionary<Guid, ChangeRequestTraceState>> ComputeStatesAsync(

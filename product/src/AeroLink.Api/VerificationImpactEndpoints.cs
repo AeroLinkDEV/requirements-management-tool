@@ -541,7 +541,7 @@ public static class VerificationImpactEndpoints
         // The register inspector uses the same server-owned projection for a TCR entry point. The projection
         // itself owns the typed root, so every exact source claim and Case/Procedure ancestry is walked from
         // the selected TCR rather than from an arbitrary originating CR.
-        app.MapGet("/api/test-change-reviews/{id:guid}/trace", async (Guid id, HttpContext http,
+        app.MapGet("/api/test-change-reviews/{id:guid}/trace", async (Guid id, bool? directOnly, HttpContext http,
             AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             var review = await db.TestChangeReviews.AsNoTracking()
@@ -554,7 +554,7 @@ public static class VerificationImpactEndpoints
             try
             {
                 var projection = await ChangeRequestTraceProjection.ForTestChangeReviewAsync(db, review.ProjectId,
-                    id, policy, ct);
+                    id, policy, ct, directOnly == true);
                 return projection is null ? Results.NotFound() : Results.Ok(projection);
             }
             catch (TraceWorkLimitException ex)
