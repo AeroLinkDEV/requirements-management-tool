@@ -358,7 +358,7 @@ export default function DigitalThreadArtifact({
       return (
         <div className={classes}>
           {traced && hop ? (
-            <span className="dtaHop" title={`${hop} hop${hop === 1 ? "" : "s"} from the selected record`}>
+            <span className="dtaHop" title={`${hop} hop${hop === 1 ? "" : "s"} from this story's subject`}>
               {hop}
             </span>
           ) : null}

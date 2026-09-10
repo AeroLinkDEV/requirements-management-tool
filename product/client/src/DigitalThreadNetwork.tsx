@@ -347,7 +347,7 @@ export default function DigitalThreadNetwork({
       return (
         <div className={classes}>
           {traced && hop ? (
-            <span className="dtnHop" title={`${hop} hop${hop === 1 ? "" : "s"} from the selected record`}>
+            <span className="dtnHop" title={`${hop} hop${hop === 1 ? "" : "s"} from this story's subject`}>
               {hop}
             </span>
           ) : null}

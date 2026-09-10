@@ -450,7 +450,7 @@ export default function DigitalThreadInsideChange({
       const traceClass = cardWeb && !traced ? " is-untraced" : ""
       const hopBadge =
         traced && hop ? (
-          <span className="dticHop" title={`${hop} hop${hop === 1 ? "" : "s"} from the selected record`}>
+          <span className="dticHop" title={`${hop} hop${hop === 1 ? "" : "s"} from this story's subject`}>
             {hop}
           </span>
         ) : null
