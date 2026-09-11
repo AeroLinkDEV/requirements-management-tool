@@ -834,7 +834,7 @@ test.describe("the loading frame", () => {
 })
 
 test.describe("a rolled lane survives a re-render", () => {
-  test("leaving an intentional hover preview restores a manual roll", async ({ page }) => {
+  test("leaving an unselected hover removes only the temporary emphasis and keeps a manual roll", async ({ page }) => {
     await open(page, "dense")
     // The helper rolls a lane carrying covering records, so it is a lane the selection-sync routine has an
     // opinion about. A lane with nothing linked to the selection was never at risk, and rolling one of those
@@ -846,22 +846,39 @@ test.describe("a rolled lane survives a re-render", () => {
     // The roll must actually have moved something, or the rest of this asserts nothing.
     expect(rolled.some(card => card.y < 0)).toBe(true)
 
-    // DEC-126 intentionally rearranges during hover, but #906's saved camera and lane positions survive exit.
+    // #1022 supersedes DEC-126's hover rearrangement: hover displaces only out-of-view linked cards, and the
+    // reader's own lane roll must survive the emphasis ending.
     const candidate = page.locator('.dtCanvasNode:not(.is-offscreen)[aria-pressed="false"]').first()
+    const canvas = page.locator('.dtCanvas')
+    const camera = await page.locator('.dtCanvasScene').getAttribute('style')
     await candidate.hover()
-    await expect(page.getByRole('button', { name: 'Pin previewed record' })).toBeVisible()
+    await page.waitForTimeout(600)
+    await expect(page.locator('.dtCanvasHoverTarget')).toHaveCount(0)
+    await expect(page.locator('.dtCanvasScene')).toHaveAttribute('style', camera!)
     await page.mouse.move(1, 1)
-    await expect(page.getByRole('button', { name: 'Pin previewed record' })).toHaveCount(0)
+    await page.waitForTimeout(600)
     await expect.poll(async () => positionsMatch(rolled, await cardPositions(page))).toBe(true)
+    await expect(canvas).toBeVisible()
   })
 
-  test("changing the selection still syncs the lanes", async ({ page }) => {
-    // The guard above must not have bought roll persistence by disabling the selection-driven sync of §6.4.
+  test("selecting a record never moves the cards outside its thread", async ({ page }) => {
+    // #1022 supersedes §6.4's selection-time cross-lane alignment: an off-view linked card is brought to a
+    // useful height inside its own lane by a temporary per-card delta, so selecting a record must leave every
+    // card that is not part of its thread exactly where the reader left it.
     await open(page, "dense")
     await rollLane(page)
     await page.waitForTimeout(900)
     expect((await cardPositions(page)).some(card => card.y < 0)).toBe(true)
-    const framedBefore = await page.locator(".dtCanvasScene").getAttribute("style")
+    /** Positions of the cards this selection does not trace, keyed by identity. */
+    const untraced = () => page.locator(".dtCanvasNode:has(.dtaCard.is-untraced)").evaluateAll(nodes =>
+      Object.fromEntries(nodes.map(node => {
+        const [x, y] = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/
+          .exec((node as HTMLElement).style.transform)?.slice(1).map(Number) ?? [Number.NaN, Number.NaN]
+        return [(node as HTMLElement).dataset.nodeId ?? "", { x, y }]
+      })))
+    const before = await untraced()
+    const beforeX = Object.fromEntries(Object.entries(before).map(([id, position]) => [id, position.x]))
+    expect(Object.keys(before).length).toBeGreaterThan(0)
 
     // A case the roll has left in view, because a reader can only select what they can see — and because
     // syncing other lanes onto a record that is itself outside its window would align them to something
@@ -891,33 +908,22 @@ test.describe("a rolled lane survives a re-render", () => {
 
     await expect(page.locator(`.dtaCard.is-selected:has-text("${identity}")`)).toHaveCount(1)
 
-    // The outcome §6.4 promises, in its own words: the records linked to the anchor sit at the anchor's
-    // height. Asserting alignment rather than "something moved", because rolling a lane already eases the
-    // others into place, so a lane can legitimately be where it needs to be already.
-    const aligned = await page.evaluate(([anchorId, partnerId]) => {
-      const yOf = (identity: string) => {
-        const node = [...document.querySelectorAll<HTMLElement>("[data-node-id]")]
-          .find(candidate => candidate.textContent?.includes(identity))
-        if (!node) return null
-        return {
-          y: Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/.exec(node.style.transform)?.[1] ?? NaN),
-          offscreen: node.classList.contains("is-offscreen"),
-        }
-      }
-      return { anchor: yOf(anchorId), partner: yOf(partnerId) }
-    }, [identity!, partner])
-
-    expect(aligned.anchor).not.toBeNull()
-    expect(aligned.partner).not.toBeNull()
-    expect(
-      Math.abs(aligned.anchor!.y - aligned.partner!.y),
-      `${partner} should sit at ${identity}'s height: ` +
-      `anchor ${aligned.anchor!.y}, partner ${aligned.partner!.y} (offscreen: ${aligned.partner!.offscreen})`,
-    ).toBeLessThanOrEqual(4)
-
-    // And the camera reframed onto the new selection, which is the direct evidence that the persistence guard
-    // did not swallow a real selection change.
-    expect(await page.locator(".dtCanvasScene").getAttribute("style")).not.toBe(framedBefore)
+    // Every card outside the selected thread keeps its position: the selection no longer scrolls other lanes
+    // into alignment, and nothing outside the thread is displaced by the temporary reveal.
+    const after = await page.locator(".dtCanvasNode:has(.dtaCard.is-untraced)").evaluateAll(nodes =>
+      Object.fromEntries(nodes.map(node => {
+        const y = Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/.exec((node as HTMLElement).style.transform)?.[1] ?? NaN)
+        return [(node as HTMLElement).dataset.nodeId ?? "", y]
+      })))
+    // The lane that holds the selected record legitimately re-spaces its later rows when the expanded body is
+    // measured; every *other* lane's untraced cards must be untouched.
+    const selectedLaneX = await page.locator('.dtCanvasNode:has(.dtaCard.is-selected)').evaluate(node =>
+      Number(/translate\((-?[\d.]+)px/.exec((node as HTMLElement).style.transform)?.[1] ?? NaN))
+    for (const [id, position] of Object.entries(before)) {
+      const x = beforeX[id]
+      if (Number.isFinite(selectedLaneX) && Math.abs(x - selectedLaneX) <= 1) continue
+      expect(Math.abs((after[id] ?? Number.NaN) - position.y), `${id} moved when ${identity} was selected`).toBeLessThanOrEqual(2)
+    }
   })
 
   test("re-docking the panel still reframes the board", async ({ page }) => {
