@@ -641,19 +641,19 @@ export default function ControlledRequirementEditor({
                   Program-configurable schema field for a programme that wants it, but it is no longer a
                   question this form puts to somebody writing a change.
 
-                  Author, not Owner: a requirement has an author, and the change request already records who
-                  wrote it — two words for one idea invited the reader to look for a distinction that does not
-                  exist. The stored attribute key stays `owner`, because the workspace's owner filter reads it
-                  and renaming the key would silently break every saved view that uses it. */}
+                  The per-requirement Author field went the same way (#1016 S01). A requirement proposal has
+                  no author of its own: it is written inside a change request, and that change request
+                  already records who wrote it — immutably, from the authenticated session, not from a text
+                  box. Asking again here produced a second, freely typed answer to a question already
+                  answered, which no authority ever read and which could disagree with the record it sat
+                  inside.
+
+                  Deliberately left alone: `owner` remains a schema key, values already recorded under it are
+                  untouched, and the Requirements Explorer's owner filter and the saved views built on it
+                  keep working. This removes a question, not anybody's data — `attributes` is parsed from the
+                  stored `attributesJson` and `setAttribute` spreads it, so nothing here can write an empty
+                  value over a legacy one. */}
               <div className="editorMetadata classificationMetadata">
-                <label>
-                  Author
-                  <input
-                    value={String(attributes.owner || "")}
-                    onChange={(event) => setAttribute("owner", event.target.value)}
-                    placeholder="responsible.username"
-                  />
-                </label>
                 {scope === "Software" && (
                   <label className="derivedControl">
                     Classification
