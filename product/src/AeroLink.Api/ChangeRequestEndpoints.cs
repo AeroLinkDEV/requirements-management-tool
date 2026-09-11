@@ -543,7 +543,7 @@ public static class ChangeRequestEndpoints
 
         // Detection only: missing authored metadata cannot be reconstructed honestly by a backfill. Returning
         // the exact Draft proposals lets an administrator reopen each through the controlled checkout/check-in
-        // path and supply the missing values with attribution, rather than inventing an owner after the fact.
+        // path and supply the missing values with attribution, rather than inventing one after the fact.
         app.MapGet("/api/authoring/attribute-gaps", async (Guid projectId, HttpContext http,
             AeroLinkDbContext db, CancellationToken ct) =>
         {
@@ -563,7 +563,17 @@ public static class ChangeRequestEndpoints
             var gaps = rows.Select(row =>
             {
                 var keys = AttributeKeys(row.AttributesJson);
-                var missing = new[] { "criticality", "owner" }.Where(key => !keys.Contains(key)).ToArray();
+                // `owner` is no longer expected here (#1016 S01). This report exists so an administrator can
+                // reopen a proposal and supply what is missing; since the per-requirement Author input was
+                // removed there is no supported way to supply an owner, so listing it would report a gap
+                // nobody can close and imply the record is deficient when it is not. The key itself is
+                // untouched: it stays in the schema, existing values are left exactly as recorded, and the
+                // Requirements Explorer's owner filter and saved views still read it. Nothing is backfilled
+                // and no history is rewritten — only this expectation changed.
+                //
+                // `criticality` is unchanged and is still reported on its own, so a proposal that genuinely
+                // lacks it keeps its row rather than disappearing along with the owner expectation.
+                var missing = new[] { "criticality" }.Where(key => !keys.Contains(key)).ToArray();
                 return new { row.Id, displayNumber = row.changeRequestDisplayNumber, row.Title, row.AuthorId,
                     state = row.State.ToString(), row.changeId, requirement = row.requirementDisplayNumber,
                     level = row.Level.ToString(), missing,

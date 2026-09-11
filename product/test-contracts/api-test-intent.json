@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 873,
-    "cases": 970,
+    "tests": 876,
+    "cases": 973,
     "classes": 131,
-    "hostedTests": 832,
-    "hostedCases": 915,
+    "hostedTests": 835,
+    "hostedCases": 918,
     "nonHostedTests": 32,
     "nonHostedCases": 46,
     "unknownHostTests": 9,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 547,
-      "cases": 612,
+      "tests": 550,
+      "cases": 615,
       "unknownCases": 0,
       "classes": 105
     },
@@ -2625,8 +2625,25 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 189,
-        "end": 266
+        "start": 314,
+        "end": 391
+      }
+    },
+    {
+      "cls": "ChangeAuthoringInvariantApiTests",
+      "test": "A_supplied_owner_attribute_is_still_accepted_and_survives_a_save_and_reopen",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 217,
+        "end": 256
       }
     },
     {
@@ -2642,8 +2659,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 268,
-        "end": 306
+        "start": 393,
+        "end": 431
       }
     },
     {
@@ -2677,8 +2694,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 160,
-        "end": 187
+        "start": 285,
+        "end": 312
       }
     },
     {
@@ -2694,8 +2711,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 133,
-        "end": 158
+        "start": 258,
+        "end": 283
       }
     },
     {
@@ -2712,8 +2729,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 308,
-        "end": 384
+        "start": 433,
+        "end": 509
       }
     },
     {
@@ -2731,7 +2748,25 @@
       ],
       "sourceLines": {
         "start": 92,
-        "end": 131
+        "end": 134
+      }
+    },
+    {
+      "cls": "ChangeAuthoringInvariantApiTests",
+      "test": "Owner_is_no_longer_expected_and_recorded_owner_values_are_left_exactly_as_stored",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 146,
+        "end": 209
       }
     },
     {
@@ -10502,6 +10537,23 @@
       "sourceLines": {
         "start": 293,
         "end": 327
+      }
+    },
+    {
+      "cls": "RequirementFilterExactnessApiTests",
+      "test": "A_saved_view_keeps_its_owner_predicate_and_still_selects_the_same_requirements",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 261,
+        "end": 298
       }
     },
     {

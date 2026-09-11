@@ -114,7 +114,10 @@ public sealed class ChangeAuthoringInvariantApiTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var rows = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
         var row = Assert.Single(rows.EnumerateArray(), x => x.GetProperty("id").GetGuid() == changeRequestId);
-        Assert.Equal(new[] { "criticality", "owner" },
+        // `owner` was dropped from this expectation by #1016 S01: the per-requirement Author input is gone, so
+        // an owner gap is one nobody can close. The row still exists and still reports criticality — dropping
+        // the expectation must not make a genuinely incomplete proposal disappear from the report.
+        Assert.Equal(new[] { "criticality" },
             row.GetProperty("missing").EnumerateArray().Select(x => x.GetString()).ToArray());
         Assert.Equal($"scr:{changeRequestId}", row.GetProperty("reconciliation").GetString());
 
@@ -128,6 +131,128 @@ public sealed class ChangeAuthoringInvariantApiTests
         using var verificationScope = factory.Services.CreateScope();
         var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         Assert.Equal("{}", (await verificationDb.RequirementChanges.SingleAsync(x => x.ChangeRequestId == changeRequestId)).AttributesJson);
+    }
+
+    /// <summary>
+    /// #1016 S01. A requirement proposal has no author of its own — the change request records who wrote it —
+    /// so the per-requirement Author input was removed and `owner` is no longer an expected attribute.
+    ///
+    /// Two things have to hold at once, and they pull in opposite directions. An absent owner must stop being
+    /// reported, because there is no supported way left to supply one and a gap nobody can close is not a
+    /// gap. But dropping that expectation must not quietly take other gaps with it, and it must not touch a
+    /// single owner value already recorded: those were authored by somebody, under attribution, and this
+    /// change removes a question rather than anybody's answer to it.
+    /// </summary>
+    [Fact]
+    public async Task Owner_is_no_longer_expected_and_recorded_owner_values_are_left_exactly_as_stored()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var scenario = await SeedAsync(factory);
+        Guid completeId, criticalityOnlyGapId;
+        using (var seedScope = factory.Services.CreateScope())
+        {
+            var seedDb = seedScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+
+            // Criticality recorded, no owner. Under the old expectation this was a gap row; it is not one now.
+            var complete = new SystemChangeRequest("SRCR-00997", 0, scenario.ProjectId, scenario.ReleaseId,
+                "No owner recorded", "P", "A", "S", "invariant.author", DateTimeOffset.UtcNow);
+            complete.AddRequirementChange("invariant.author", "SYSR-00000997", 0, RequirementLevel.System,
+                RequirementChangeKind.Introduce, "The FMS shall record no owner.", "R", "Test",
+                DateTimeOffset.UtcNow, attributesJson: """{"criticality":"Normal"}""",
+                impactDispositionJson: "{}");
+
+            // A legacy owner, and a genuinely missing criticality. The row must survive with criticality alone.
+            var legacy = new SystemChangeRequest("SRCR-00998", 0, scenario.ProjectId, scenario.ReleaseId,
+                "Legacy owner recorded", "P", "A", "S", "invariant.author", DateTimeOffset.UtcNow);
+            legacy.AddRequirementChange("invariant.author", "SYSR-00000998", 0, RequirementLevel.System,
+                RequirementChangeKind.Introduce, "The FMS shall retain a legacy owner.", "R", "Test",
+                DateTimeOffset.UtcNow, attributesJson: """{"owner":"legacy.author"}""",
+                impactDispositionJson: "{}");
+
+            seedDb.AddRange(complete, legacy);
+            await seedDb.SaveChangesAsync();
+            completeId = complete.Id;
+            criticalityOnlyGapId = legacy.Id;
+        }
+        await SignInAsync(client);
+
+        using var response = await client.GetAsync($"/api/authoring/attribute-gaps?projectId={scenario.ProjectId}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var rows = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+
+        // No owner, and no gap: the expectation is gone, not merely reordered.
+        Assert.DoesNotContain(rows, x => x.GetProperty("id").GetGuid() == completeId);
+        Assert.DoesNotContain(rows, x => x.GetProperty("missing").EnumerateArray()
+            .Any(key => key.GetString() == "owner"));
+
+        // The other gap is still reported on its own.
+        var gap = Assert.Single(rows, x => x.GetProperty("id").GetGuid() == criticalityOnlyGapId);
+        Assert.Equal(new[] { "criticality" },
+            gap.GetProperty("missing").EnumerateArray().Select(x => x.GetString()).ToArray());
+
+        // Nothing was backfilled, blanked or rewritten. The stored JSON is byte-for-byte what was recorded.
+        using var verificationScope = factory.Services.CreateScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal("""{"criticality":"Normal"}""",
+            (await verificationDb.RequirementChanges.SingleAsync(x => x.ChangeRequestId == completeId)).AttributesJson);
+        Assert.Equal("""{"owner":"legacy.author"}""",
+            (await verificationDb.RequirementChanges.SingleAsync(x => x.ChangeRequestId == criticalityOnlyGapId)).AttributesJson);
+
+        // And the integrity checkpoint is unmoved by the change of expectation.
+        using var checkpointResponse = await client.PostAsJsonAsync(
+            "/api/enterprise-hardening/integrity-checkpoints", new { projectId = scenario.ProjectId });
+        Assert.Equal(HttpStatusCode.Created, checkpointResponse.StatusCode);
+        var checkpoint = JsonSerializer.Deserialize<JsonElement>(await checkpointResponse.Content.ReadAsStringAsync());
+        Assert.Equal("Healthy", checkpoint.GetProperty("state").GetString());
+    }
+
+    /// <summary>
+    /// #1016 S01. `owner` stops being asked for; it does not stop being accepted. A caller that still sends
+    /// one — an import, an integration, an older client — must be able to save and read it back unchanged,
+    /// because the key remains part of the System Requirement schema and the Explorer's owner filter and the
+    /// saved views built on it still read it.
+    /// </summary>
+    [Fact]
+    public async Task A_supplied_owner_attribute_is_still_accepted_and_survives_a_save_and_reopen()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var scenario = await SeedAsync(factory);
+        await SignInAsync(client);
+
+        using var created = await client.PostAsJsonAsync("/api/change-request-drafts", new
+        {
+            projectId = scenario.ProjectId, targetReleaseId = scenario.ReleaseId, type = "System",
+            title = "Owner still accepted", problem = "P", analysis = "A", solution = "S",
+            requirementChanges = new[]
+            {
+                new { level = "System", kind = "Introduce",
+                    statement = "The FMS shall keep a supplied owner attribute.",
+                    rationale = "Saved-view compatibility", verificationMethod = "Test",
+                    attributesJson = """{"criticality":"Normal","owner":"systems.author"}""",
+                    impactDispositionJson = RequirementAuthoringJson.CompleteImpactDispositions,
+                    targetSectionId = scenario.SystemSectionId }
+            }
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var draft = JsonSerializer.Deserialize<JsonElement>(await created.Content.ReadAsStringAsync());
+        var changeRequestId = draft.GetProperty("id").GetGuid();
+
+        // Reopened through the ordinary read, which is what the workspace does when the author comes back.
+        using var reopened = await client.GetAsync($"/api/change-requests/{changeRequestId}");
+        Assert.Equal(HttpStatusCode.OK, reopened.StatusCode);
+        var body = JsonSerializer.Deserialize<JsonElement>(await reopened.Content.ReadAsStringAsync());
+        var attributes = JsonSerializer.Deserialize<JsonElement>(
+            body.GetProperty("requirementChanges")[0].GetProperty("attributesJson").GetString()!);
+        Assert.Equal("systems.author", attributes.GetProperty("owner").GetString());
+        Assert.Equal("Normal", attributes.GetProperty("criticality").GetString());
+
+        // Present in the record, and therefore absent from the gap report — for criticality's sake, not owner's.
+        using var gaps = await client.GetAsync($"/api/authoring/attribute-gaps?projectId={scenario.ProjectId}");
+        var gapRows = JsonSerializer.Deserialize<JsonElement>(await gaps.Content.ReadAsStringAsync());
+        Assert.DoesNotContain(gapRows.EnumerateArray(), x => x.GetProperty("id").GetGuid() == changeRequestId);
     }
 
     [Fact]

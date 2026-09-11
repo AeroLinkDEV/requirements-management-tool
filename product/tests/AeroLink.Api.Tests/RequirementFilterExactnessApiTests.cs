@@ -245,4 +245,55 @@ public sealed class RequirementFilterExactnessApiTests
         // And a revision this baseline does not carry stays absent rather than being answered by its sibling.
         Assert.DoesNotContain(items.EnumerateArray(), x => x.GetProperty("revisionId").GetGuid() == seed.LatestRevisionId);
     }
+
+    /// <summary>
+    /// #1016 S01. The owner predicate survives a saved view, and still selects the same requirements.
+    ///
+    /// The per-requirement Author input is gone, and `owner` was dropped from the attribute-gap expectation.
+    /// What must not go with it is the compatibility the key was kept for: `owner` is a supported saved-view
+    /// query field, and a saved view is a controlled worklist somebody else opens. If the predicate were
+    /// silently dropped on the way in or out, that reader would get a wider answer than the view's author
+    /// meant, and nothing would say so.
+    ///
+    /// So this asserts the round trip and the result, not merely that a control renders: the stored contract
+    /// keeps the predicate, and applying what came back selects exactly what the direct filter selects.
+    /// </summary>
+    [Fact]
+    public async Task A_saved_view_keeps_its_owner_predicate_and_still_selects_the_same_requirements()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var projectId = await SeedAsync(factory);
+        await SignInAsync(client);
+
+        // What the predicate selects when applied directly: one requirement, and not the one whose unrelated
+        // attribute merely mentions the same person.
+        var direct = await NumbersAsync(client, projectId, "&owner=diana");
+        Assert.Equal(["SYSR-00000503"], direct);
+
+        using var created = await client.PostAsJsonAsync("/api/enterprise-requirements/views", new
+        {
+            projectId,
+            name = "Diana requirements",
+            queryJson = "{\"owner\":\"diana\"}",
+            columnsJson = "[\"identifier\",\"statement\"]",
+            isShared = false,
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+
+        // Read back the way the Explorer reads it — saved views arrive with the workspace itself — so this is
+        // the same path a later reader opening the view would take.
+        using var listed = await client.GetAsync(
+            $"/api/enterprise-requirements/workspace?projectId={projectId}&page=1&pageSize=1");
+        Assert.Equal(HttpStatusCode.OK, listed.StatusCode);
+        var workspace = JsonDocument.Parse(await listed.Content.ReadAsStringAsync()).RootElement;
+        var view = Assert.Single(workspace.GetProperty("views").EnumerateArray(),
+            x => x.GetProperty("name").GetString() == "Diana requirements");
+        var query = JsonDocument.Parse(view.GetProperty("queryJson").GetString()!).RootElement;
+        Assert.Equal("diana", query.GetProperty("owner").GetString());
+
+        // And reapplying what came back answers with the same requirements, not a wider set.
+        Assert.Equal(direct, await NumbersAsync(client, projectId,
+            $"&owner={query.GetProperty("owner").GetString()}"));
+    }
 }
