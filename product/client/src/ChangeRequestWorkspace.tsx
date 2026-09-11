@@ -1,6 +1,6 @@
 import UpstreamChangeRequestPicker, { useUpstreamCandidates } from "./UpstreamChangeRequestPicker";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { artifactAcronym, changeRequestAllocation, changeRequestState, stateLabel } from './presentation'
+import { artifactAcronym, changeRequestAllocation, changeRequestState, programRoleLabel, stateLabel } from './presentation'
 import type { FormEvent } from "react";
 import { SignatureDialog } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
@@ -1396,14 +1396,14 @@ export default function ChangeRequestWorkspace({
               {applicableWorkflow?.required && index < (applicableWorkflow.stages ?? []).length ? (() => {
                 const stage = applicableWorkflow.stages![index];
                 return <label className="configuredApproverSelect">
-                  <span className="srOnly">{stage.name} · {stage.kind ?? 'Review'} · {stage.requiredRole}</span>
-                  <select value={person.userId} aria-label={`${stage.name} · ${stage.kind ?? 'Review'} · ${stage.requiredRole}`} onChange={event => {
+                  <span className="srOnly">{stage.name} · {stage.kind ?? 'Review'} · {programRoleLabel(stage.requiredRole)}</span>
+                  <select value={person.userId} aria-label={`${stage.name} · ${stage.kind ?? 'Review'} · ${programRoleLabel(stage.requiredRole)}`} onChange={event => {
                     const selected = stage.candidates.find(candidate => candidate.userId === event.target.value);
                     setApprovers(items => items.map((item, position) => position === index
                       ? { userId: event.target.value, name: selected?.name ?? "" } : item));
                   }}>
-                    <option value="">Choose {stage.requiredRole} for {stage.name} ({stage.kind ?? 'Review'})…</option>
-                    {stage.candidates.map(candidate => <option value={candidate.userId} key={candidate.userId}>{candidate.name} · {candidate.role}</option>)}
+                    <option value="">Choose {programRoleLabel(stage.requiredRole)} for {stage.name} ({stage.kind ?? 'Review'})…</option>
+                    {stage.candidates.map(candidate => <option value={candidate.userId} key={candidate.userId}>{candidate.name} · {programRoleLabel(candidate.role)}</option>)}
                   </select>
                 </label>;
               })() : <PersonPicker

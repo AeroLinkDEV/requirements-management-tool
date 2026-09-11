@@ -41,7 +41,7 @@ test('downstream assessment actions follow authority and submit without a form-n
   await openNavigationGroup(page,'SOFTWARE ENGINEERING')
   await page.getByRole('link',{name:'Software Change Requests'}).click()
 
-  await expect(page.getByRole('heading',{name:'Downstream change assessments'})).toBeVisible()
+  await expect(page.getByRole('heading',{name:'Downstream Assessments'})).toBeVisible()
   const queue=page.locator('.downstreamQueue')
   await expect(queue.getByText('SRCR-00031.00')).toBeVisible()
   await expect(queue.getByText('HLR assessment').first()).toBeVisible()

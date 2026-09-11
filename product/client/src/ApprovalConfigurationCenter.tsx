@@ -435,8 +435,10 @@ export default function ApprovalConfigurationCenter({
                             </td>
                             <td>
                               {stage.isLegacy
+                                // The legacy branch deliberately shows the stored value unchanged: its tooltip promises
+                                // exactly that, so formatting it here would contradict the claim it makes.
                                 ? <span className="legacyAuthority" title="Recorded before the authority split; kept exactly as it was stored">{stage.required.role}</span>
-                                : stage.required.role}
+                                : label(stage.required.role)}
                             </td>
                             <td className={stage.required.blocking ? 'nobody' : undefined}>{whoCanSign(stage.required)}</td>
                           </tr>

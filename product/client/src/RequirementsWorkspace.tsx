@@ -581,11 +581,6 @@ export default function RequirementsWorkspace({
   const requirementIdentity = (item: ImpactItem) => item.revisionId
     ? { id: item.id, revisionId: item.revisionId, level: item.level ?? scope }
     : undefined;
-  const focusImpactRequirement = (item: ImpactItem) => {
-    const identity = requirementIdentity(item);
-    if (identity && onOpenRequirementRevision) onOpenRequirementRevision(identity);
-    else onOpenRequirement(item.id);
-  };
   const impactRequirementLink = (item: ImpactItem) => {
     const identity = requirementIdentity(item);
     return <ExactArtifactLink
@@ -1495,10 +1490,10 @@ export default function RequirementsWorkspace({
                   </button>
                 )) : <div className="traceEmpty"><b>No active change package</b><span>This requirement has no Draft, In Review, or Approved proposal awaiting baseline effectivity.</span></div>}
                 <h3>Upstream requirements</h3>
-                {impact?.parents.map((item) => <article className="traceRelation" key={item.id}><div className="traceRelationTarget">{impactRequirementLink(item)}<button type="button" onClick={() => focusImpactRequirement(item)}>Focus exact requirement</button></div><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
+                {impact?.parents.map((item) => <article className="traceRelation" key={item.id}><div className="traceRelationTarget">{impactRequirementLink(item)}</div><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
                 {!impact?.parents.length && <div className="traceEmpty"><span>No upstream requirement is recorded.</span></div>}
                 <h3>Downstream requirements</h3>
-                {impact?.children.map((item) => <article className="traceRelation" key={item.id}><div className="traceRelationTarget">{impactRequirementLink(item)}<button type="button" onClick={() => focusImpactRequirement(item)}>Focus exact requirement</button></div><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
+                {impact?.children.map((item) => <article className="traceRelation" key={item.id}><div className="traceRelationTarget">{impactRequirementLink(item)}</div><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
                 {!impact?.children.length && <div className="traceEmpty"><span>No downstream requirement is recorded.</span></div>}
                 <h3>Verification coverage</h3>
                 {impact?.tests.map((item) => { const unsettled = item.coverageState !== "Confirmed"; const target = { artifactId: item.id, revisionId: item.artifactRevisionId ?? item.revisionId, artifactRevisionId: item.artifactRevisionId, artifactKind: item.artifactKind, displayNumber: item.displayNumber, level: item.level }; const noun = verificationArtifactNoun(item.level).toLowerCase(); return <article className={`traceRelation${unsettled ? " attention" : ""}`} key={item.artifactRevisionId ?? item.revisionId ?? item.id}><ExactArtifactLink className="linkedArtifactText" href={verificationArtifactHref?.(target)} onOpen={verificationArtifactHref?.(target) ? () => onOpenVerification(target) : undefined} title={verificationArtifactHref?.(target) ? "Open this exact verification artifact" : undefined}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · Open {noun} →</small></ExactArtifactLink><small>{unsettled ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{unsettled && <button type="button" onClick={() => onOpenVerification(target)}>Resolve in Verification →</button>}</article>; })}
