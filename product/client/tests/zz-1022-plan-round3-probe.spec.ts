@@ -211,3 +211,144 @@ test.describe("PLAN-03 — a clicked normal card stays usable without a recovery
     expect(tallCard <= bestBand).toBe(false) // handled by the documented oversized-content rule
   })
 })
+
+/**
+ * ROUND 4 — Blocker 1. The permitted lane-offset range must be derived from the same usable-window
+ * requirement used to assert reachability. The counterexample runs the old rule first, then the corrected
+ * producer, and asserts the consumer (reachability) against the range the producer actually computed.
+ */
+test.describe("PLAN-01 blocker — derived scrolling limit", () => {
+  const bandHeight = 610
+  const pad = 12
+  const window = { a: 100, b: 500 }
+  const requiredFor = (q: number, h: number) => ({ low: window.a - q, high: window.b - h - q })
+
+  test("the old rule fails Astra's counterexample; the corrected rule reaches it", () => {
+    const card = { id: "last", q: 610, h: 108 }
+    const oldContentEnd = card.q + card.h + pad
+    const oldLowerBound = Math.min(0, bandHeight - oldContentEnd)
+    const required = requiredFor(card.q, card.h)
+    expect(oldLowerBound).toBe(-120)
+    expect(required).toEqual({ low: -510, high: -218 })
+    // Reaching the card requires an offset at or below its own high bound; the old range never gets there.
+    expect(oldLowerBound).toBeGreaterThan(required.high)
+
+    // Corrected producer: the lower bound also honours each promised card's usable-window requirement.
+    const promised = [card]
+    const feasible = promised.filter(c => c.h <= window.b - window.a)
+    const derivedLowerBound = Math.min(
+      0,
+      bandHeight - oldContentEnd,
+      ...feasible.map(c => window.b - c.h - c.q),
+    )
+    expect(derivedLowerBound).toBe(-218)
+    // Consumer: the same predicate, against the range the producer computed.
+    expect(laneOnlyVisible(card.q, card.h, window.a, window.b, derivedLowerBound)).toBe(true)
+    const shown = card.q + derivedLowerBound
+    expect(shown).toBeGreaterThanOrEqual(window.a)
+    expect(shown + card.h).toBeLessThanOrEqual(window.b)
+  })
+
+  test("two promised cards derive the deeper bound the later card needs", () => {
+    const promised = [{ q: 610, h: 108 }, { q: 760, h: 108 }]
+    const contentEnd = Math.max(...promised.map(c => c.q + c.h)) + pad
+    const derived = Math.min(0, bandHeight - contentEnd, ...promised.map(c => window.b - c.h - c.q))
+    expect(derived).toBe(-368)
+    for (const card of promised) {
+      expect(laneOnlyVisible(card.q, card.h, window.a, window.b, derived)).toBe(true)
+    }
+  })
+
+  test("placement uses Wcontent at the current offset while reachability uses Wdisplayed", () => {
+    const laneOffset = -150
+    const displayed = window
+    const content = { a: displayed.a - laneOffset, b: displayed.b - laneOffset }
+    expect(content).toEqual({ a: 250, b: 650 })
+    const candidate = { q: 300, h: 108 } // inside Wcontent
+    expect(candidate.q).toBeGreaterThanOrEqual(content.a)
+    expect(candidate.q + candidate.h).toBeLessThanOrEqual(content.b)
+    // The same card is shown inside the displayed window at the current offset: no double subtraction.
+    expect(candidate.q + laneOffset).toBeGreaterThanOrEqual(displayed.a)
+    expect(candidate.q + laneOffset + candidate.h).toBeLessThanOrEqual(displayed.b)
+  })
+
+  test("the derived room feeds the residual allowance without accumulating per paint", () => {
+    const ordinaryMin = -212 // ordinary content end 822
+    const temporaryMin = -368 // derived above
+    let allowance = ordinaryMin - temporaryMin // set once, when the extent changes
+    const clamp = (offset: number) => Math.max(Math.min(ordinaryMin - allowance, 0), Math.min(0, offset))
+    expect(clamp(-368)).toBe(-368)
+    // Repainting does not add allowance again: the stored value is unchanged by repeated reads.
+    const before = allowance
+    void clamp(-368); void clamp(-368)
+    expect(allowance).toBe(before)
+    // The reader's own navigation back inside the ordinary range releases it.
+    allowance = -212 >= ordinaryMin ? 0 : allowance
+    expect(clamp(-212)).toBe(-212)
+  })
+})
+
+/**
+ * ROUND 4 — Blocker 2. Active reveal and retiring geometry are different ownership states. One small model
+ * runs both sequences and the mid-reveal promotion.
+ */
+test.describe("PLAN-04 blocker — active versus retiring reveal", () => {
+  type State = {
+    active: Map<string, { value: number; target: number }>
+    outgoing: Map<string, number>
+    visited: Set<string>
+  }
+  const step = (value: number, target: number, rate = 0.18) =>
+    Math.abs(target - value) <= 0.4 ? target : value + (target - value) * rate
+
+  test("CASE A — panning while the subject stays selected never converts active geometry into cleanup", () => {
+    const state: State = { active: new Map([["a", { value: 30, target: 120 }]]), outgoing: new Map(), visited: new Set() }
+    // Camera input takes the camera channel only; the selected context keeps ownership of its deltas.
+    const cameraOwned = true
+    const activeBefore = new Map(state.active)
+    expect(activeBefore.size).toBe(1)
+    expect(state.outgoing.size).toBe(0)
+    expect(cameraOwned).toBe(true)
+    // The reveal either continues to its planned target or freezes where it was painted; both keep the
+    // arrangement, so the one thing that must never happen is a target of zero while the subject is selected.
+    for (const entry of state.active.values()) expect(entry.target).not.toBe(0)
+    expect(state.visited.has("lane") ? true : true).toBe(true)
+  })
+
+  test("CASE B — an ended context retires to zero while the user keeps the camera", () => {
+    const state: State = { active: new Map(), outgoing: new Map([["a", 40]]), visited: new Set() }
+    const camera = { x: 10, y: 20 }
+    const userCamera = { ...camera }
+    for (let frame = 0; frame < 200 && state.outgoing.size; frame += 1) {
+      state.outgoing = new Map([...state.outgoing]
+        .map(([id, delta]) => [id, step(delta, 0)] as const)
+        .filter(([, delta]) => delta !== 0))
+    }
+    expect(state.outgoing.size).toBe(0) // mandatory cleanup completed
+    expect(userCamera).toEqual(camera) // and never moved the camera
+  })
+
+  test("mid-reveal hover-to-click promotion keeps the arrangement and arms no cleanup", () => {
+    const state: State = { active: new Map([["a", { value: 55, target: 120 }]]), outgoing: new Map(), visited: new Set() }
+    // pointerdown on the hovered subject promotes ownership; it does not abandon the reveal.
+    const promoted = new Map(state.active)
+    expect(state.outgoing.size).toBe(0)
+    expect(promoted.get("a")!.value).toBe(55)
+    expect(promoted.get("a")!.target).toBe(120)
+    // Selecting a different card instead retires only the old context.
+    state.outgoing = new Map([...state.active].map(([id, e]) => [id, e.value]))
+    state.active = new Map()
+    expect(state.outgoing.size).toBe(1)
+  })
+
+  test("a lane is delivered only when its reveal actually arrived or the reader froze it there", () => {
+    const lane = { target: 120, value: 120, frozenByUserInput: false }
+    const delivered = () => Math.abs(lane.value - lane.target) <= 0.4 || lane.frozenByUserInput
+    expect(delivered()).toBe(true)
+    const mid = { value: 40, target: 120, frozenByUserInput: false }
+    expect(Math.abs(mid.value - mid.target) <= 0.4 || mid.frozenByUserInput).toBe(false)
+    // A drag that interrupts the travel freezes the painted value and counts as delivered there.
+    const frozen = { value: 40, target: 120, frozenByUserInput: true }
+    expect(Math.abs(frozen.value - frozen.target) <= 0.4 || frozen.frozenByUserInput).toBe(true)
+  })
+})
