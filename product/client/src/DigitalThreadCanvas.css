@@ -19,6 +19,20 @@
 .dtCanvasOffscreen button { pointer-events: auto; border: 1px solid var(--teal-700); border-radius: 5px; background: var(--surface); color: var(--teal-700); min-height: 26px; padding: 3px 7px; font: inherit; font-size: 12px; }
 .dtCanvasOffscreen button[hidden] { display: none; }
 
+/* Directional continuation: a small chevron where the traced thread continues beyond what the lane shows.
+   Deliberately not a count or a popup — #1022 asks for direction, and this is proof the link continues
+   rather than appearing broken at the boundary. Positioned by paint, never by React state. */
+.dtCanvasContinuations { position: absolute; inset: 0; z-index: 88; pointer-events: none; }
+.dtCanvasContinuation {
+  position: absolute; transform: translateX(-50%);
+  padding: 1px 7px; border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .92); border: 1px solid #9ec9c2;
+  color: var(--teal-700); font: var(--weight-bold) 11px var(--font-body);
+}
+.dtCanvasContinuation[hidden] { display: none; }
+.dtCanvasContinuation::after { content: "▼"; }
+.dtCanvasContinuation[data-dir="up"]::after { content: "▲"; }
+
 /* Controls live in the viewport rather than the transformed scene. They are real buttons, so the shared
    pointer handler sees them as nested controls and cannot turn activation into a pan, roll, or selection. */
 .dtCanvasControls {

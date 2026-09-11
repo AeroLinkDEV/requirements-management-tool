@@ -265,6 +265,9 @@ export default function DigitalThreadCanvas({
   }, [])
   const edgeLayerRef = useRef<SVGSVGElement | null>(null)
   const offscreenRefs = useRef(new Map<string, HTMLButtonElement>())
+  const continuationRefs = useRef(new Map<number, HTMLElement>())
+  /** Directional continuation per lane, from the last reveal plan. */
+  const planCues = useRef<Map<number, { up: boolean; down: boolean }>>(new Map())
   const cardRefs = useRef(new Map<string, HTMLDivElement>())
   const edgeRefs = useRef<
     {
@@ -601,6 +604,7 @@ export default function DigitalThreadCanvas({
         bandHeight: result.bandHeight,
       })
       revealTargets.current = plan.deltas
+      planCues.current = plan.cues
       /**
        * Rebase the new subject onto its retained displayed position.
        *
@@ -690,6 +694,23 @@ export default function DigitalThreadCanvas({
     // a wrapped identity cannot cover the next direct card; the same measured map is consumed by framing and
     // label obstacles below.
     const positions = positionsForNodes(nodes, geometry, offsets.current, measuredCardHeights, revealDeltas.current)
+    /**
+     * Directional continuation: a small, unobtrusive cue at the real usable boundary where traced records
+     * continue beyond what the lane currently shows. It is the honest cue where a numeric badge or a popup
+     * would be the wrong answer, and it updates with the camera rather than living in the data.
+     */
+    for (const [lane, element] of continuationRefs.current) {
+      const cue = planCues.current.get(lane)
+      const show = Boolean(cue && (cue.up || cue.down))
+      element.hidden = !show
+      if (!show || !cue) continue
+      const dir = cue.down ? "down" : "up"
+      const centre = lane * geometry.lanePitch * transform.current.zoom + transform.current.x +
+        (geometry.laneWidth * transform.current.zoom) / 2
+      element.dataset.dir = dir
+      element.style.left = `${centre}px`
+      element.style.top = `${dir === "down" ? box.y + box.height - 12 : box.y + 2}px`
+    }
     for (const node of nodes) {
       const position = positions.get(node.id) ?? nodePosition(node, geometry, offsets.current)
       const card = cardRefs.current.get(node.id)
@@ -1623,6 +1644,20 @@ export default function DigitalThreadCanvas({
         <button type="button" onClick={fitAll} title="Fit the projected board; tall lanes remain independently scrollable">Fit board</button>
       </div>
       <div className="dtCanvasPlacementNotice" role="status" aria-live="polite" hidden />
+      {/* Directional continuation cues: one per lane, positioned by paint at the usable boundary. */}
+      <div className="dtCanvasContinuations" aria-hidden="true">
+        {lanes.map((_, lane) => (
+          <span
+            key={`continuation-${lane}`}
+            className="dtCanvasContinuation"
+            hidden
+            ref={element => {
+              if (element) continuationRefs.current.set(lane, element)
+              else continuationRefs.current.delete(lane)
+            }}
+          />
+        ))}
+      </div>
       {story && <nav className="dtCanvasOffscreen" style={{ bottom: (inspectorInset?.bottom ?? 0) + 6 }} aria-label="Connected records outside view" onPointerDown={event => event.stopPropagation()}>
         {sourceNodes.filter(node => story.nodes.has(node.id)).map(({ id }) => <button key={id} type="button"
           ref={element => { if (element) offscreenRefs.current.set(id, element); else offscreenRefs.current.delete(id) }}
