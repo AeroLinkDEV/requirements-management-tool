@@ -166,6 +166,10 @@ export default function DigitalThreadCanvas({
   const frozenLanes = useRef<Set<number>>(new Set())
   /** Lanes that have already had a usable exposure in this context: their arrangement is not re-planned. */
   const visitedLanes = useRef<Set<number>>(new Set())
+  /** Lanes the camera is showing in this frame, so delivery can be told apart from usable exposure. */
+  const usableLanesRef = useRef<Set<number>>(new Set())
+  /** Node → lane, kept current for the animation loop rather than captured in its closure. */
+  const nodeLaneRef = useRef<Map<string, number>>(new Map())
   /** The emphasis subject the ownership sets belong to; a different subject starts a new context. */
   const subjectOwnership = useRef<string | null | undefined>(undefined)
   /** Effective per-lane scroll minimum for the arrangement as displayed and as it is heading. */
@@ -194,6 +198,9 @@ export default function DigitalThreadCanvas({
   // A different scope is a different navigation context: nothing temporary may survive it.
   useEffect(() => {
     frozenLanes.current = new Set()
+    deliveredLanes.current = new Set()
+    visitedLanes.current = new Set()
+    usableLanesRef.current = new Set()
     deepestMinimum.current = []
     revealSignature.current = ""
   }, [scopeKey])
@@ -499,6 +506,7 @@ export default function DigitalThreadCanvas({
     if (subjectOwnership.current !== emphasisId) {
       subjectOwnership.current = emphasisId
       frozenLanes.current = new Set()
+      deliveredLanes.current = new Set()
       visitedLanes.current = new Set()
       revealSignature.current = ""
     }
@@ -515,6 +523,18 @@ export default function DigitalThreadCanvas({
         ? contentWindow(displayedWindow, offsets.current[lane] ?? 0)
         : { top: 0, bottom: result.bandHeight })
     }
+    usableLanesRef.current = usable
+    nodeLaneRef.current = new Map(nodes.map(node => [node.id, node.lane]))
+    // A lane the camera is showing, with nothing left to deliver into it, has had its usable exposure: that
+    // includes lanes whose reveal needs no displacement at all, so delivery cannot depend on a map entry.
+    {
+      const pendingLanes = new Set<number>()
+      for (const id of revealTargets.current.keys()) {
+        const lane = nodeLaneRef.current.get(id)
+        if (lane !== undefined) pendingLanes.add(lane)
+      }
+      for (const lane of usable) if (!pendingLanes.has(lane)) visitedLanes.current.add(lane)
+    }
     const measuredSignature = nodes.map(node => `${node.id}:${Math.round(measuredCardHeights.get(node.id) ?? 0)}`).join("|")
     const windowArrival = [...usable].some(lane => !visitedLanes.current.has(lane))
     const revealKey = `${scopeKey}|${emphasisId ?? ""}|${result.tier}|${measuredSignature}|${edgesKey}|${windowArrival ? "arrival" : "stable"}`
@@ -528,10 +548,13 @@ export default function DigitalThreadCanvas({
         storyIds: story?.nodes ?? new Set<string>(),
         subjectId: emphasisId ?? null,
         windowByLane: contentWindows,
-        // Only lanes whose reveal has actually arrived (or that the reader owns) keep their arrangement. A
-        // lane that was merely *scheduled* is still incoming, so its planned targets survive a replan rather
-        // than being replaced by whatever intermediate values happen to be displayed.
-        frozenLanes: new Set([...frozenLanes.current, ...deliveredLanes.current]),
+        // Only lanes whose reveal has arrived *and been seen* (or that the reader owns) keep their
+        // arrangement. A lane prepared while still hidden has not had its first useful exposure, so it is
+        // reconciled when it arrives rather than being frozen by its earlier, unseen preparation.
+        frozenLanes: new Set([
+          ...frozenLanes.current,
+          ...[...deliveredLanes.current].filter(lane => visitedLanes.current.has(lane)),
+        ]),
         existing: revealTargets.current,
         bandHeight: result.bandHeight,
       })
@@ -911,18 +934,22 @@ export default function DigitalThreadCanvas({
        * "visited", so the next plan may not replace it with the values it happens to be passing through.
        */
       if (!moving) {
+        /**
+         * Delivery means the planned displacement arrived. Exposure means the reader could actually see the
+         * lane. They are separate: a lane prepared while hidden may be delivered without ever having been
+         * exposed, and it must still get its first useful reveal when the camera reaches it. The lane lookup
+         * is read from the current map, never from a closure captured when this callback was created.
+         */
         const byLane = new Map<number, boolean>()
         for (const [id, target] of revealTargets.current) {
-          const node = nodes.find(candidate => candidate.id === id)
-          const lane = node?.lane
+          const lane = nodeLaneRef.current.get(id)
           if (lane === undefined) continue
           byLane.set(lane, (byLane.get(lane) ?? true) && Math.abs((next.get(id) ?? 0) - target) <= 0.4)
         }
         for (const [lane, arrived] of byLane) {
-          if (arrived) {
-            deliveredLanes.current.add(lane)
-            visitedLanes.current.add(lane)
-          }
+          if (!arrived) continue
+          deliveredLanes.current.add(lane)
+          if (usableLanesRef.current.has(lane)) visitedLanes.current.add(lane)
         }
       }
       return moving
