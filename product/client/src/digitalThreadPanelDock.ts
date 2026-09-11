@@ -29,6 +29,12 @@ type FrameInset = { left?: number; right?: number; bottom?: number }
  * resolved against it at render rather than cleared by an effect, because clearing it in an effect does not
  * work: child effects run before parent effects, so the reset lands *after* the canvas has already reported
  * the shortfall in the same commit and silently undoes it.
+ *
+ * #1022 narrows that guarantee to the record the reader actually selected, and makes the recovery two-axis:
+ * a bottom dock takes height away from every lane window, while a side dock takes width. When the selected
+ * record cannot be held at the preferred dock, the panel moves to the *other axis* once — bottom to a side,
+ * a side to bottom — which is the placement that can restore the space it lost. Escalation is bounded to one
+ * step per situation, so a board that cannot satisfy either axis cannot start a dock/zoom cycle.
  */
 export function usePanelDock(
   preferred: ResolvedDock,
@@ -40,10 +46,12 @@ export function usePanelDock(
   panelRef: (element: HTMLElement | null) => void
   frameInset?: FrameInset
 } {
-  const [narrowFor, setNarrowFor] = useState<string | null>(null)
+  const [escalatedFor, setEscalatedFor] = useState<string | null>(null)
   const [panelElement, setPanelElement] = useState<HTMLElement | null>(null)
   const [measuredInset, setMeasuredInset] = useState<FrameInset | null>(null)
-  const dock: ResolvedDock = narrowFor === situation ? "bottom" : preferred
+  /** The one placement that gives back the axis the preferred dock spends. */
+  const otherAxis: ResolvedDock = preferred === "bottom" ? "right" : "bottom"
+  const dock: ResolvedDock = escalatedFor === situation ? otherAxis : preferred
 
   // The canvas and panel are siblings in each view. Measure their rendered rectangles instead of reserving a
   // guessed 300x150 box: selected cards and relationship lists can grow, and the free frame must follow them.
@@ -83,9 +91,9 @@ export function usePanelDock(
   }, [canvasHostRef, dock, panelElement])
 
   return {
-    // Bottom keeps the full width, so it is the placement that can hold a wide directed story.
     dock,
-    reportNeedsRoom: useCallback(() => setNarrowFor(situation), [situation]),
+    // Bounded: repeated reports for the same selection cannot walk through more placements.
+    reportNeedsRoom: useCallback(() => setEscalatedFor(current => current ?? situation), [situation]),
     panelRef: useCallback((element: HTMLElement | null) => setPanelElement(element), []),
     frameInset: panelElement
       ? measuredInset ?? (dock === "bottom"
