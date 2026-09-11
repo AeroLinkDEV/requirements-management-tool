@@ -1,19 +1,34 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 
 /**
- * #1016 S02. What the configured review-setup panel actually renders.
+ * #1016 S02. What the configured review-setup panel actually renders, and what it actually sends.
  *
  * The panel showed stored enum names for the authority a stage requires, hid the stage's own name and
  * purpose inside the accessible name — so a filled row read as a bare person and a role — and stated the
  * configured policy three times, once in warning styling.
+ *
+ * These mount the real `ChangeRequestWorkspace` against server-shaped payloads (`fixtures/review-setup.tsx`).
+ * That is evidence about the component and the command it emits. It is not evidence about the application's
+ * routing, and nothing here should be read as such.
  */
 
-test("a configured review row reads as a stage, an authority and a person", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto("/tests/fixtures/review-setup.html")
+type RecordedCall = { method: string; url: string; body: unknown }
+declare global {
+  interface Window {
+    __apiCalls: RecordedCall[]
+    __unexpectedMutations: RecordedCall[]
+  }
+}
 
+const openPanel = async (page: Page, scenario?: string) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`/tests/fixtures/review-setup.html${scenario ? `?scenario=${scenario}` : ""}`)
   await page.getByRole("button", { name: "Configure & Submit Review" }).click()
-  const panel = page.locator(".approverSetup")
+  return page.locator(".approverSetup")
+}
+
+test("a configured review row reads as a stage, an authority and a person", async ({ page }) => {
+  const panel = await openPanel(page)
   await expect(panel.getByRole("heading", { name: "Configure review authority" })).toBeVisible()
 
   // Readable authority, and no stored enum name anywhere in view. Both halves matter: the formatter falls
@@ -38,18 +53,12 @@ test("a configured review row reads as a stage, an authority and a person", asyn
 })
 
 test("the stage still says what it is after somebody is selected", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto("/tests/fixtures/review-setup.html")
-  await page.getByRole("button", { name: "Configure & Submit Review" }).click()
-
-  const row = page.locator(".approverSetup .approverRow").first()
+  const panel = await openPanel(page)
+  const row = panel.locator(".approverRow").first()
   const heading = row.locator(".configuredStageHeading")
   const select = row.getByRole("combobox")
 
-  // The accessible name carries the whole stage, and keyboard reaches the control.
   await expect(select).toHaveAttribute("aria-label", "Systems review · Review · System Engineer")
-  await select.focus()
-  await expect(select).toBeFocused()
 
   // A candidate's own Program role uses the person vocabulary — "System Test Engineer" — which is a
   // different question from the authority the stage requires, and the server words them differently too.
@@ -63,15 +72,127 @@ test("the stage still says what it is after somebody is selected", async ({ page
   await expect(heading).toContainText("Systems review")
   await expect(heading).toContainText("System Engineer")
 
-  // Display never becomes identity — the value is the canonical userId, not the label.
-  expect(await select.inputValue()).toBe("00000000-0000-0000-0000-0000000000u1")
+  // Display never becomes identity — the value is the canonical account username the submit endpoint
+  // resolves an approver by, not the label the reader saw.
+  expect(await select.inputValue()).toBe("dana.systems")
+})
+
+test("the row is reachable and operable from the keyboard, and keeps saying what it is", async ({ page }) => {
+  const panel = await openPanel(page)
+  const row = panel.locator(".approverRow").first()
+  const select = row.getByRole("combobox")
+
+  // Reached by tabbing, not by calling focus(). Programmatic focus proves the element can hold focus; it
+  // says nothing about whether a keyboard user can get to it, which is the part that was in doubt once the
+  // stage text moved out of the accessible name and into visible content.
+  await page.locator("body").click({ position: { x: 2, y: 2 } })
+  let reached = false
+  for (let press = 0; press < 40 && !reached; press += 1) {
+    await page.keyboard.press("Tab")
+    reached = await select.evaluate(node => node === document.activeElement)
+  }
+  expect(reached, "the first configured stage selector was not reachable by Tab").toBe(true)
+
+  // Operated by keystroke. A native select moves its selection on ArrowDown and raises change, which is the
+  // path a keyboard user actually takes; selectOption() would set the value without any of it.
+  await page.keyboard.press("ArrowDown")
+  await expect(select).not.toHaveValue("")
+  expect(await select.inputValue()).toBe("dana.systems")
+
+  // Still focused, and the stage is still legible while it is being operated.
+  await expect(select).toBeFocused()
+  await expect(row.locator(".configuredStageHeading")).toContainText("Systems review")
+})
+
+test("a stage nobody can fill stays visible and blocks submission", async ({ page }) => {
+  const panel = await openPanel(page, "unstaffed")
+  const rows = panel.locator(".approverRow")
+
+  // The unfillable stage is still a row, and still says which authority is missing. Dropping it would let
+  // the submission look complete while a required authority went unsigned.
+  const unstaffed = rows.nth(1).locator(".configuredStageHeading")
+  await expect(unstaffed).toBeVisible()
+  await expect(unstaffed).toContainText("Approval")
+  await expect(unstaffed).toContainText("System Engineering Lead")
+
+  // Nobody to choose: the placeholder is the only option, so no eligible person is invented for the row.
+  const emptySelect = rows.nth(1).getByRole("combobox")
+  await expect(emptySelect.locator("option")).toHaveCount(1)
+  expect(await emptySelect.inputValue()).toBe("")
+
+  const submit = panel.getByRole("button", { name: /Submit for Review/ })
+  await expect(submit).toBeDisabled()
+
+  // Filling the stage that *can* be filled does not make the other one satisfied.
+  await rows.nth(0).getByRole("combobox").selectOption({ label: "Dana Systems · System Engineer" })
+  await expect(submit).toBeDisabled()
+  await expect(panel.locator(".reviewerActions")).toContainText("1 reviewer selected")
+
+  // And nothing was sent. A refusal that still posts is not a refusal.
+  await submit.click({ force: true })
+  expect(await page.evaluate(() => window.__apiCalls)).toEqual([])
+})
+
+test("submitting sends canonical identities and the configured mode, not display labels", async ({ page }) => {
+  const panel = await openPanel(page)
+  const rows = panel.locator(".approverRow")
+  await rows.nth(0).getByRole("combobox").selectOption({ label: "Dana Systems · System Engineer" })
+  await rows.nth(1).getByRole("combobox").selectOption({ label: "Mira Lead · System Engineering Lead" })
+
+  const submit = panel.getByRole("button", { name: /Submit for Review/ })
+  await expect(submit).toBeEnabled()
+  await submit.click()
+
+  // The outgoing command, not the selected value. The value proves what the control holds; this proves what
+  // the component actually asked the server to do with it.
+  await expect.poll(async () => (await page.evaluate(() => window.__apiCalls)).length).toBe(1)
+  const [call] = await page.evaluate(() => window.__apiCalls)
+  expect(call.method).toBe("POST")
+  expect(call.url).toBe("/api/change-requests/00000000-0000-0000-0000-0000000000c1/submit")
+
+  const body = call.body as { approvers: { userId: string }[]; mode: string; expectedVersion: number }
+  // Canonical account usernames, in configured stage order. The submit endpoint resolves an approver by
+  // UserName, so a display label arriving here would name nobody.
+  expect(body.approvers.map(approver => approver.userId)).toEqual(["dana.systems", "mira.lead"])
+  expect(body.mode).toBe("Sequential")
+  expect(body.expectedVersion).toBe(3)
+
+  // Nothing else was written on the way.
+  expect(await page.evaluate(() => window.__unexpectedMutations)).toEqual([])
+})
+
+test("a Parallel policy is presented as parallel, and submits as parallel", async ({ page }) => {
+  const panel = await openPanel(page, "parallel")
+
+  // Neutral statement of the policy the project set, and no sequential wording anywhere: nothing about an
+  // order, a first reviewer, or one-at-a-time activation, all of which would be false here.
+  await expect(panel.locator(".reviewModePolicy")).toContainText("Parallel review mode")
+  await expect(panel).not.toContainText(/in order/i)
+  await expect(panel).not.toContainText(/one at a time/i)
+  await expect(panel).not.toContainText(/Sequential/)
+
+  // The position badge is the tell: a numbered ladder would assert an execution order the policy does not have.
+  const rows = panel.locator(".approverRow")
+  await expect(rows.nth(0).locator("> span").first()).toHaveText("•")
+  await expect(rows.nth(1).locator("> span").first()).toHaveText("•")
+  await expect(panel.locator(".reviewerActions")).toContainText("Parallel authority path")
+
+  // Stage identity is unchanged by the mode.
+  await expect(rows.nth(0).locator(".configuredStageHeading")).toContainText("Systems review")
+
+  await rows.nth(0).getByRole("combobox").selectOption({ label: "Dana Systems · System Engineer" })
+  await rows.nth(1).getByRole("combobox").selectOption({ label: "Mira Lead · System Engineering Lead" })
+  await panel.getByRole("button", { name: /Submit for Review/ }).click()
+
+  await expect.poll(async () => (await page.evaluate(() => window.__apiCalls)).length).toBe(1)
+  const [call] = await page.evaluate(() => window.__apiCalls)
+  expect((call.body as { mode: string }).mode).toBe("Parallel")
+
+  await page.screenshot({ path: "test-results/review-setup-parallel.png", fullPage: true })
 })
 
 test("routine configured policy is stated once, and not as a warning", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto("/tests/fixtures/review-setup.html")
-  await page.getByRole("button", { name: "Configure & Submit Review" }).click()
-  const panel = page.locator(".approverSetup")
+  const panel = await openPanel(page)
 
   await expect(panel.getByText(/is the active policy for this submission/)).toHaveCount(1)
 
@@ -86,11 +207,8 @@ test("routine configured policy is stated once, and not as a warning", async ({ 
 })
 
 test("a long stage name stays readable across supported widths", async ({ page }) => {
-  await page.goto("/tests/fixtures/review-setup.html")
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await page.getByRole("button", { name: "Configure & Submit Review" }).click()
-
-  const heading = page.locator(".approverSetup .approverRow").nth(1).locator(".configuredStageHeading")
+  const panel = await openPanel(page)
+  const heading = panel.locator(".approverRow").nth(1).locator(".configuredStageHeading")
   await expect(heading).toContainText("airworthiness and certification approval")
 
   // The requirement is that the name is never clipped. Whether it needs a second line depends on the width:
