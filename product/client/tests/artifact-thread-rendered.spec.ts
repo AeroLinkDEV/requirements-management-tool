@@ -557,21 +557,37 @@ test.describe("shared canvas behaviour", () => {
     expect(await cardTransforms(page)).not.toBe(before)
   })
 
-  test("selecting a record brings its linked records into their own lanes", async ({ page }) => {
+  test("selecting a record makes its linked records reachable in their own lanes", async ({ page }) => {
     await open(page, "dense")
 
-    // Ten runs and nine procedures do not all fit their lane windows at once, so a linked record can sit
-    // rolled out of view no matter where the camera is. Selecting must roll the lanes to fetch them (§6.4).
-    await page.locator('.dtaCard:has-text("HLRTP-000104.00")').click()
+    // Ten runs and nine procedures do not all fit their lane windows at once. #1022 supersedes §6.4's
+    // automatic whole-lane rolling: a linked record is brought into its own lane when there is room, and
+    // otherwise it keeps a working, truthfully labelled reveal path. Either way it must be reachable without
+    // disturbing the selection.
+    const visible = page.locator('.dtCanvasNode:not(.is-offscreen):has(.dtaCard)').first()
+    await visible.click()
     await page.waitForTimeout(700)
 
-    // Its covering case and the run it produced are both in view, in their own lanes.
-    for (const identity of ["HLRTC-000104.00", "HLRTP-000104.00"]) {
+    const selected = await page.locator('.dtCanvasNode[aria-pressed="true"]').getAttribute("data-node-id")
+    // The traced records themselves: a linked card is one the selection did not push back.
+    const identities = await page.locator(".dtCanvasNode:has(.dtaCard:not(.is-untraced))").evaluateAll(
+      (nodes, selectedId) => nodes
+        .filter(node => (node as HTMLElement).dataset.nodeId !== selectedId)
+        .map(node => node.querySelector(".dtaId")?.textContent?.trim() ?? "")
+        .filter(Boolean),
+      selected,
+    )
+    expect(identities.length).toBeGreaterThan(0)
+    for (const identity of identities.slice(0, 2)) {
       const card = page.locator(`.dtCanvasNode:has(.dtaCard:has-text("${identity}"))`).first()
-      await expect(card).not.toHaveClass(/is-offscreen/)
+      if ((await card.getAttribute("class"))?.includes("is-offscreen")) {
+        const reveal = page.getByRole("button", { name: `Show ${identity}`, exact: true })
+        await expect(reveal, `${identity} must never be silently unreachable`).toBeVisible()
+        await reveal.click()
+      }
+      await expect(card, `${identity} is still unreachable`).not.toHaveClass(/is-offscreen/)
+      await expect(page.locator('.dtCanvasNode[aria-pressed="true"]')).toHaveAttribute("data-node-id", selected!)
     }
-    // A focus-triggered lane animation must not repaint the previous selection after pointer activation.
-    await expect(page.locator('.dtCanvasNode[aria-pressed="true"]')).toHaveClass(/is-selected/)
   })
 
   test("the detail panel never comes to rest on a directly linked record", async ({ page }) => {
@@ -586,12 +602,12 @@ test.describe("shared canvas behaviour", () => {
       const panel = (await page.locator(".dtaPanel").boundingBox())!
 
       /**
-       * Every direct link the panel names must be **drawn** and clear of the panel.
+       * No direct link the panel names may be lost behind the panel or silently hidden.
        *
-       * The prototype's `checks.js` treats an absent direct link as a failure, and so does this. Skipping a
-       * link that is not currently drawn would let the guarantee be satisfied by hiding the record instead of
-       * fitting it — the same failure wearing a different face, and the one that slipped through once the
-       * canvas began fading cards outside the free frame horizontally.
+       * #1022 accepts a clearly indicated off-screen link instead of dragging the camera to fit everything, so
+       * the guarantee is now: a drawn link is never covered by the panel, and an off-screen link carries its
+       * own working reveal path — which this test exercises and re-checks. Hiding a record remains a failure
+       * in either case.
        */
       const canvas = (await page.locator(".dtCanvas").boundingBox())!
       const names = await page.locator(".dtaRel button:not(.is-far) > span > span").allInnerTexts()
@@ -599,7 +615,13 @@ test.describe("shared canvas behaviour", () => {
       for (const name of names) {
         const card = page.locator(`.dtCanvasNode:has(.dtaCard:has-text("${name}"))`).first()
         expect(await card.count(), `${name} is a direct link and must be on the board`).toBeGreaterThan(0)
-        await expect(card, `${name} is hidden rather than fitted beside the ${mode} panel`)
+        if ((await card.getAttribute("class"))?.includes("is-offscreen")) {
+          const reveal = page.getByRole("button", { name: `Show ${name}`, exact: true })
+          await expect(reveal, `${name} must never be silently hidden`).toBeVisible()
+          await reveal.click()
+          await page.waitForTimeout(150)
+        }
+        await expect(card, `${name} is unreachable beside the ${mode} panel`)
           .not.toHaveClass(/is-offscreen/)
 
         const box = (await card.boundingBox())!
@@ -961,21 +983,36 @@ test.describe("a rolled lane survives a re-render", () => {
     expect(await page.locator(".dtCanvasScene").getAttribute("style")).not.toBe(before)
   })
 
-  test("a side dock that cannot hold the direct links gives way to one that can", async ({ page }) => {
-    // The other half of the same rule, at a width where the side cannot be honoured. §6.6 outranks the dock
-    // preference: rather than a linked record vanishing to keep the panel on the right, the panel moves.
+  test("a dock that cannot hold the selected record gives way to one that can", async ({ page }) => {
+    // #1022 limits the dock's automatic recovery to the selected record itself. Every direct link no longer
+    // has to fit at once: the panel must not cover the record the reader selected, and any linked record the
+    // camera is not showing keeps its own working reveal path.
     await open(page, "hlr")
 
     await page.locator(".dtaPanelTools button:text-is('Right')").click()
     await page.waitForTimeout(700)
 
-    await expect(page.locator(".dtaPanel")).toHaveClass(/dtaPanel-bottom/)
-    // And the direct links are drawn, which is the thing the dock moved to protect.
+    const panel = (await page.locator(".dtaPanel").boundingBox())!
+    const selected = page.locator(".dtCanvasNode.is-selected")
+    await expect(selected).toBeVisible()
+    const selectedBox = (await selected.boundingBox())!
+    const clearOfPanel =
+      selectedBox.x + selectedBox.width <= panel.x + 1 ||
+      selectedBox.x >= panel.x + panel.width - 1 ||
+      selectedBox.y + selectedBox.height <= panel.y + 1 ||
+      selectedBox.y >= panel.y + panel.height - 1
+    expect(clearOfPanel, "the panel covers the selected record").toBe(true)
+
     const names = await page.locator(".dtaRel button:not(.is-far) > span > span").allInnerTexts()
     expect(names.length).toBeGreaterThan(0)
     for (const name of names) {
-      await expect(page.locator(`.dtCanvasNode:has(.dtaCard:has-text("${name}"))`).first())
-        .not.toHaveClass(/is-offscreen/)
+      const card = page.locator(`.dtCanvasNode:has(.dtaCard:has-text("${name}"))`).first()
+      if ((await card.getAttribute("class"))?.includes("is-offscreen")) {
+        await expect(page.getByRole("button", { name: `Show ${name}`, exact: true }))
+          .toBeVisible()
+      } else {
+        await expect(card).not.toHaveClass(/is-offscreen/)
+      }
     }
   })
 })
@@ -1023,10 +1060,19 @@ test.describe("a graph change still re-syncs and re-frames", () => {
     }, FAR_RUN)
 
     // Nothing the old guard looked at changed: same selection, same lanes, same per-lane counts. Only which
-    // record the selection links to. The newly linked run must nonetheless be synced into its lane window.
+    // record the selection links to. The newly linked run must nonetheless become reachable: drawn if its
+    // lane has room, otherwise through its own truthfully labelled reveal action.
     expect(after.selected).toBe(before.selected)
     expect(after.lanes).toBe(before.lanes)
-    expect(after.offscreen).toBe(false)
+    if (after.offscreen) {
+      const identity = await page.locator(`[data-node-id="${FAR_RUN}"]`).evaluate(node =>
+        node.querySelector(".dtaId")?.textContent ?? "")
+      const reveal = page.getByRole("button", { name: `Show ${identity}`, exact: true })
+      await expect(reveal, `${identity} must never be silently unreachable`).toBeVisible()
+      await reveal.click()
+      await expect(page.locator(`[data-node-id="${FAR_RUN}"]`)).not.toHaveClass(/is-offscreen/)
+      await expect(page.locator(".dtaCard.is-selected")).toHaveCount(1)
+    }
   })
 })
 
@@ -1072,10 +1118,20 @@ test.describe("a selection made before the viewport settled", () => {
     expect(after.width).toBeGreaterThan(320)
     // The selection survives the settle...
     expect(after.selected).toBe("HLRTP-000300.00")
-    // ...and its directly linked record has been rolled into its lane window, not left where it started.
-    // Without the fix this stays `is-offscreen`: the framing key was consumed while the frame was refused,
-    // and the resize path only called `fit()`, which cannot roll a lane.
-    expect(after.offscreen).toBe(false)
+    // ...and the selected record itself is framed into the real frame and clear of the docked panel. The
+    // older expectation that its linked run must also be rolled into view is superseded by #1022 — the linked
+    // record is either drawn or keeps its working reveal path (asserted below), never silently absent.
+    const selectedNode = page.locator(".dtCanvasNode.is-selected")
+    await expect(selectedNode).toBeVisible()
+    const selectedBox = (await selectedNode.boundingBox())!
+    const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
+    expect(selectedBox.x).toBeGreaterThanOrEqual(canvasBox.x - 1)
+    expect(selectedBox.x + selectedBox.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width + 1)
     expect(after.clearOfPanel).toBe(true)
+    if (after.offscreen) {
+      const identity = await page.locator(`[data-node-id="${FAR_RUN}"]`).evaluate(node =>
+        node.querySelector(".dtaId")?.textContent ?? "")
+      await expect(page.getByRole("button", { name: `Show ${identity}`, exact: true })).toBeVisible()
+    }
   })
 })
