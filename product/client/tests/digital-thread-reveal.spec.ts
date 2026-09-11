@@ -101,6 +101,17 @@ test.describe("lane-local reveal", () => {
     expect(laneReachable(card.q, card.h, window, derived)).toBe(true)
   })
 
+  test("two promised cards derive the deeper bound the later one needs, and the bound is reachable", () => {
+    const window = { top: 100, bottom: 500 }
+    const promised = [{ q: 610, h: 108 }, { q: 760, h: 108 }]
+    const contentEnd = Math.max(...promised.map(card => card.q + card.h)) + PAD
+    const derived = laneScrollMinimum({ bandHeight: BAND, contentEnd, window, promised })
+    expect(derived).toBe(-368)
+    for (const card of promised) {
+      expect(laneReachable(card.q, card.h, window, derived)).toBe(true)
+    }
+  })
+
   test("a frozen lane keeps its displayed arrangement for records still in the thread", () => {
     const nodes = lane(8)
     const existing = new Map([["n6", -260], ["n7", 90]])
