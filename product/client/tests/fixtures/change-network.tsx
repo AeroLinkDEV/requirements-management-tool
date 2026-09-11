@@ -142,6 +142,14 @@ const verificationIdentityProjection: NetworkProjection = {
         sourceDisplayNumber: "PR-00004321.00 oceanic round-robin sequencing field report",
       },
     }),
+    // Present metadata carrying nothing usable, behind a label whose prefix would route confidently if the
+    // guard let it through. It exists so the adapter-to-router composition can be shown to refuse it rather
+    // than quietly turning it back into an absent-metadata legacy response.
+    node({
+      id: "asmt-empty", kind: "TestChangeRequest", level: "Procedure", state: "Draft",
+      displayNumber: "SYSTPCR-000099.00",
+      verification: {} as NetworkNode["verification"],
+    }),
     node({
       id: "tcr-9", kind: "TestChangeRequest", level: "Procedure", state: "InReview",
       displayNumber: "SYSTPCR-000012.00",
@@ -155,6 +163,7 @@ const verificationIdentityProjection: NetworkProjection = {
   edges: [
     edge("sys-9", "ChangeRequest", "asmt-a", "TestChangeRequest", "CoveredByTestChangeRequest"),
     edge("sys-9", "ChangeRequest", "asmt-b", "TestChangeRequest", "CoveredByTestChangeRequest"),
+    edge("sys-9", "ChangeRequest", "asmt-empty", "TestChangeRequest", "CoveredByTestChangeRequest"),
     edge("sys-9", "ChangeRequest", "tcr-9", "TestChangeRequest", "CoveredByTestChangeRequest"),
   ],
   truncated: false,
