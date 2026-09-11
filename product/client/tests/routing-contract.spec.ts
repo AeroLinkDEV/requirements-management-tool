@@ -266,3 +266,48 @@ test('Coverage routes open the existing Explorer report without changing Downstr
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/system-verification/coverage'))
     .toMatchObject({ view: 'testingCoverage', discipline: 'systemTest' })
 })
+
+/**
+ * #1016 S13A. Test-change routing reads the projection's stated facts, not the identifier's prefix.
+ *
+ * `SYSTP` meant System and `LLR` meant low level, which works only while every record has a controlled
+ * number for the prefix to come from. A package raised to assess an approved change has none — its label is
+ * "Unnumbered assessment" — so a prefix reading of it found nothing and silently fell through to the
+ * software workspace. A System procedure assessment opened the wrong discipline's page.
+ *
+ * The projection states the discipline and the artifact family, so those decide. Nodes from before that
+ * metadata existed keep the prefix derivation exactly as it was.
+ */
+test('an unnumbered assessment routes by its stated discipline and family, not its label', () => {
+  const context = { programId: 'program-a', projectId: 'project-a', releaseId: 'release-a' }
+  const unnumbered = (discipline: string, artifactKind: string) => exactTraceArtifactPath(context, {
+    id: 'assessment-a', kind: 'TestChangeRequest', displayNumber: 'Unnumbered assessment',
+    level: artifactKind, verification: { discipline, artifactKind },
+  })
+
+  // The case that was wrong: nothing in "Unnumbered assessment" says System.
+  expect(unnumbered('System', 'Procedure'))
+    .toBe('/programs/program-a/projects/project-a/releases/release-a/system-verification/change-requests/assessment-a?kind=Procedure')
+  // And the software families land in their own level's branch, which the label cannot carry either.
+  expect(unnumbered('HighLevelSoftware', 'Case'))
+    .toContain('/software-verification/hlr/change-requests/assessment-a')
+  expect(unnumbered('LowLevelSoftware', 'Procedure'))
+    .toContain('/software-verification/llr/change-requests/assessment-a')
+  expect(unnumbered('LowLevelSoftware', 'Procedure')).not.toBe(unnumbered('HighLevelSoftware', 'Procedure'))
+
+  // Two unnumbered records sharing a label still address their own records.
+  expect(exactTraceArtifactPath(context, {
+    id: 'assessment-b', kind: 'TestChangeRequest', displayNumber: 'Unnumbered assessment',
+    level: 'Procedure', verification: { discipline: 'System', artifactKind: 'Procedure' },
+  })).toContain('assessment-b')
+
+  // A numbered package is unchanged, and a node carrying no verification metadata still reads its prefix.
+  const numbered = exactTraceArtifactPath(context, {
+    id: 'package-a', kind: 'TestChangeRequest', displayNumber: 'SYSTPCR-000012.00', level: 'Procedure',
+  })
+  expect(numbered).toContain('/system-verification/change-requests/package-a')
+  expect(exactTraceArtifactPath(context, {
+    id: 'package-a', kind: 'TestChangeRequest', displayNumber: 'SYSTPCR-000012.00', level: 'Procedure',
+    verification: { discipline: 'System', artifactKind: 'Procedure' },
+  })).toBe(numbered)
+})

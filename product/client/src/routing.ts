@@ -452,6 +452,16 @@ export type ExactTraceArtifact = {
   buildId?: string | null
   artifactId?: string | null
   revisionId?: string | null
+  /**
+   * The verification facts a test-change node carries, when the projection supplies them (#1016 S13A).
+   *
+   * Routing for this family used to be read out of the identifier's prefix — SYSTP means System, LLR means
+   * low level — which works only while every record has a controlled number to read. An assessment raised
+   * against an approved change has none, so its label is "Unnumbered assessment" and the prefix says nothing;
+   * derived from it, a System procedure assessment would route to the software workspace. These are the
+   * authoritative answers, and they are used in preference to the prefix whenever they are present.
+   */
+  verification?: { discipline?: string | null; artifactKind?: string | null } | null
 }
 
 export function exactTraceArtifactPath(context: RouteContext, node: ExactTraceArtifact): string | undefined {
@@ -472,10 +482,25 @@ export function exactTraceArtifactPath(context: RouteContext, node: ExactTraceAr
   }
 
   if (node.kind === 'TestChangeRequest') {
-    const isSystem = display.startsWith('SYSTP') || display.startsWith('SYSTCR');
+    // Authoritative first, prefix second. The projection states the discipline and the artifact family for a
+    // test-change node; the identifier's prefix is a reading of the same facts that only works while a
+    // controlled number exists. A record without one — an assessment raised against an approved change —
+    // has a label with no prefix to read, and deriving from it sent a System procedure to the software
+    // workspace. Nodes from before this metadata existed keep the prefix derivation unchanged.
+    const stated = node.verification;
+    const statedSystem = stated?.discipline === 'System';
+    const statedSoftware = stated?.discipline === 'HighLevelSoftware' || stated?.discipline === 'LowLevelSoftware';
+    const isSystem = statedSystem || (!statedSoftware
+      && (display.startsWith('SYSTP') || display.startsWith('SYSTCR')));
     const discipline: Discipline = isSystem ? 'systemTest' : 'softwareTest';
-    const procedure = node.level?.toLowerCase().includes('procedure') || display.startsWith('SYSTPCR-') || display.startsWith('HLRTPCR-') || display.startsWith('LLRTPCR-');
-    const level = isSystem ? (procedure ? 'Procedure' : undefined) : display.startsWith('LLR') ? (procedure ? 'LowLevelProcedure' : 'LowLevel') : (procedure ? 'HighLevelProcedure' : 'HighLevel');
+    const procedure = stated?.artifactKind === 'Procedure' || (stated?.artifactKind !== 'Case'
+      && (node.level?.toLowerCase().includes('procedure') || display.startsWith('SYSTPCR-')
+        || display.startsWith('HLRTPCR-') || display.startsWith('LLRTPCR-')));
+    const lowLevel = stated?.discipline === 'LowLevelSoftware'
+      || (stated?.discipline == null && display.startsWith('LLR'));
+    const level = isSystem ? (procedure ? 'Procedure' : undefined)
+      : lowLevel ? (procedure ? 'LowLevelProcedure' : 'LowLevel')
+        : (procedure ? 'HighLevelProcedure' : 'HighLevel');
     return routePath(scoped, 'testChangeRequest', discipline, node.id, level);
   }
 
