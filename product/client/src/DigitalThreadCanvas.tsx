@@ -170,6 +170,12 @@ export default function DigitalThreadCanvas({
   const subjectOwnership = useRef<string | null | undefined>(undefined)
   /** Effective per-lane scroll minimum for the arrangement as displayed and as it is heading. */
   const limitsRef = useRef<Map<number, number>>(new Map())
+  /** The single resolved floor every consumer uses: effective limit, allowance and deepest extent combined. */
+  const floorsRef = useRef<number[]>([])
+  /** Lanes whose planned reveal has actually arrived; only these count as delivered/visited. */
+  const deliveredLanes = useRef<Set<number>>(new Set())
+  /** Last measured card heights, so keyboard navigation uses the same geometry as paint. */
+  const measuredHeightsRef = useRef<Map<string, number>>(new Map())
   /** The deepest scroll extent this scope has needed per lane, so cleanup cannot snap the reader's lane. */
   const deepestMinimum = useRef<number[]>([])
   /** The lane windows the last plan was built against, so an unchanged view is not re-planned. */
@@ -473,13 +479,6 @@ export default function DigitalThreadCanvas({
      * the ordinary range, and dropped on a scope change. In-memory only: never persisted layout.
      */
     while (deepestMinimum.current.length < lanes.length) deepestMinimum.current.push(0)
-    const floors = result.laneMinimums.map((minimum, lane) => {
-      const effective = Math.min(minimum, limitsRef.current.get(lane) ?? minimum)
-      const deep = Math.min(deepestMinimum.current[lane] ?? effective, effective)
-      deepestMinimum.current[lane] = (offsets.current[lane] ?? 0) >= effective ? effective : deep
-      return deepestMinimum.current[lane]
-    })
-    offsets.current = clampOffsets(offsets.current, floors)
 
     /**
      * Lane-local reveal plan.
@@ -529,13 +528,14 @@ export default function DigitalThreadCanvas({
         storyIds: story?.nodes ?? new Set<string>(),
         subjectId: emphasisId ?? null,
         windowByLane: contentWindows,
-        // Visited lanes keep their arrangement; only genuinely new lanes get their first reveal.
-        frozenLanes: new Set([...frozenLanes.current, ...visitedLanes.current]),
-        existing: revealDeltas.current,
+        // Only lanes whose reveal has actually arrived (or that the reader owns) keep their arrangement. A
+        // lane that was merely *scheduled* is still incoming, so its planned targets survive a replan rather
+        // than being replaced by whatever intermediate values happen to be displayed.
+        frozenLanes: new Set([...frozenLanes.current, ...deliveredLanes.current]),
+        existing: revealTargets.current,
         bandHeight: result.bandHeight,
       })
       revealTargets.current = plan.deltas
-      for (const lane of usable) visitedLanes.current.add(lane)
       kickMotion.current()
     }
     /**
@@ -564,6 +564,23 @@ export default function DigitalThreadCanvas({
       Math.min(limits.minimum, targetLimits.get(lane)?.minimum ?? limits.minimum),
     ]))
 
+    /**
+     * One resolved floor, used by every consumer.
+     *
+     * It combines the effective limit of the displayed arrangement with the retained allowance, so paint,
+     * rollability, pointer scrolling and explicit reveal can never disagree about how far a lane may move.
+     * The rule is stated once here: a lane whose reader-owned offset is back inside the effective range
+     * releases the extra room; otherwise the deepest extent this scope has needed is kept.
+     */
+    floorsRef.current = result.laneMinimums.map((minimum, lane) => {
+      const effective = Math.min(minimum, limitsRef.current.get(lane) ?? minimum)
+      const deep = Math.min(deepestMinimum.current[lane] ?? effective, effective)
+      deepestMinimum.current[lane] = (offsets.current[lane] ?? 0) >= effective ? effective : deep
+      return deepestMinimum.current[lane]
+    })
+    offsets.current = clampOffsets(offsets.current, floorsRef.current)
+    measuredHeightsRef.current = measuredCardHeights
+
     const { geometry, bandHeight } = result
     scene.style.transform = `translate(${transform.current.x}px,${transform.current.y}px) scale(${transform.current.zoom})`
     scene.style.width = `${result.sceneWidth + trailingOverhang}px`
@@ -581,10 +598,7 @@ export default function DigitalThreadCanvas({
         band.style.height = `${bandHeight}px`
         band.style.left = `${lane * geometry.lanePitch - 14}px`
         band.style.width = `${geometry.laneWidth + 28}px`
-        band.classList.toggle(
-          "is-rollable",
-          Math.min(result.laneMinimums[lane] ?? 0, limitsRef.current.get(lane) ?? result.laneMinimums[lane] ?? 0) < -1,
-        )
+        band.classList.toggle("is-rollable", (floorsRef.current[lane] ?? 0) < -1)
       }
       const head = scene.querySelector<HTMLElement>(`[data-lane-head="${lane}"]`)
       if (head) head.style.left = `${lane * geometry.lanePitch}px`
@@ -891,6 +905,26 @@ export default function DigitalThreadCanvas({
         next.set(id, current + delta * 0.22)
       }
       revealDeltas.current = next
+      /**
+       * A lane is delivered when its planned displacements have actually arrived (or the reader froze them
+       * there). Scheduling alone must never count: an incoming reveal that is still moving is not yet
+       * "visited", so the next plan may not replace it with the values it happens to be passing through.
+       */
+      if (!moving) {
+        const byLane = new Map<number, boolean>()
+        for (const [id, target] of revealTargets.current) {
+          const node = nodes.find(candidate => candidate.id === id)
+          const lane = node?.lane
+          if (lane === undefined) continue
+          byLane.set(lane, (byLane.get(lane) ?? true) && Math.abs((next.get(id) ?? 0) - target) <= 0.4)
+        }
+        for (const [lane, arrived] of byLane) {
+          if (arrived) {
+            deliveredLanes.current.add(lane)
+            visitedLanes.current.add(lane)
+          }
+        }
+      }
       return moving
     }
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -1222,12 +1256,10 @@ export default function DigitalThreadCanvas({
         card || sceneY < -10 || sceneY > result.bandHeight + 10
           ? -1
           : laneAt(sceneX, lanes.length, result.geometry)
-      // Read the effective bound here rather than trusting a stale capture: geometry can change during a
-      // gesture, and the lane's roll range must follow the arrangement the reader can actually see.
-      const laneFloor = (target: number) => Math.min(
-        result.laneMinimums[target] ?? 0,
-        limitsRef.current.get(target) ?? result.laneMinimums[target] ?? 0,
-      )
+      // Read the resolved bound here rather than trusting a stale capture: geometry can change during a
+      // gesture, and the lane's roll range — including any retained allowance — must follow the arrangement
+      // the reader can actually see.
+      const laneFloor = (target: number) => floorsRef.current[target] ?? result.laneMinimums[target] ?? 0
       const rollable = lane >= 0 && laneFloor(lane) < -1
       const start = {
         x: event.clientX,
@@ -1355,7 +1387,7 @@ export default function DigitalThreadCanvas({
       )
       // Never past what the lane can actually roll, or the lane would scroll off its own content.
       targets.current[node.lane] = Math.max(
-        Math.min(result.laneMinimums[node.lane] ?? 0, limitsRef.current.get(node.lane) ?? result.laneMinimums[node.lane] ?? 0),
+        floorsRef.current[node.lane] ?? result.laneMinimums[node.lane] ?? 0,
         revealed,
       )
       // Setting the target is not moving the lane. The easing loop was only ever started by the pointer
@@ -1390,7 +1422,11 @@ export default function DigitalThreadCanvas({
       const result = geometryRef.current
       const ordered = result
         ? [...bucket].sort((a, b) => {
-            const positions = positionsForNodes(nodes, result.geometry, offsets.current, undefined, revealDeltas.current)
+            // The same measured heights paint used: walking an ordering built from different geometry is
+            // exactly the "focus contradicts the display" failure the plan forbids.
+            const positions = positionsForNodes(
+              nodes, result.geometry, offsets.current, measuredHeightsRef.current, revealDeltas.current,
+            )
             const ay = positions.get(a.id)?.y ?? 0
             const by = positions.get(b.id)?.y ?? 0
             return ay - by || a.row - b.row || a.id.localeCompare(b.id)

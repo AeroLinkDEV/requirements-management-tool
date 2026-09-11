@@ -342,11 +342,12 @@ export const planReveal = (input: RevealPlanInput): RevealPlan => {
       else if (cardTop >= window.bottom) cue.down = true
     }
     if (frozenLanes.has(lane)) {
-      // Reader-owned: retain exactly what is displayed. Never in the plan means "retire" only for lanes that
-      // are not frozen, so absence cannot be mistaken for an instruction to send these cards home.
+      // Reader-owned: retain exactly what is displayed — but only for records that still belong to the traced
+      // thread. A card that has left the selected thread loses its temporary contribution rather than being
+      // held in a position the current relationships no longer explain.
       for (const node of bucket) {
         const displayed = input.existing?.get(node.id)
-        if (displayed) deltas.set(node.id, displayed)
+        if (displayed && storyIds.has(node.id)) deltas.set(node.id, displayed)
       }
       continue
     }
