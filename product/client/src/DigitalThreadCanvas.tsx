@@ -22,6 +22,7 @@ import {
   MIN_ZOOM,
   nodePosition,
   planReveal,
+  contentPositionsForNodes,
   positionsForNodes,
   placeEdgeLabels,
   READABLE_SELECTION_MIN_ZOOM,
@@ -180,6 +181,10 @@ export default function DigitalThreadCanvas({
   const deliveredLanes = useRef<Set<number>>(new Set())
   /** Last measured card heights, so keyboard navigation uses the same geometry as paint. */
   const measuredHeightsRef = useRef<Map<string, number>>(new Map())
+  /** True once the reader has taken the camera: passive measurement must then leave it alone. */
+  const cameraOwned = useRef(false)
+  /** Where a newly selected record was actually being displayed when it became the subject. */
+  const retainedSubjectY = useRef<number | null>(null)
   /** The deepest scroll extent this scope has needed per lane, so cleanup cannot snap the reader's lane. */
   const deepestMinimum = useRef<number[]>([])
   /** The lane windows the last plan was built against, so an unchanged view is not re-planned. */
@@ -224,10 +229,40 @@ export default function DigitalThreadCanvas({
     previewTimer.current = null
     setHoverId(null)
     onHover?.(null)
+    // A deliberate selection is a new, legitimate framing request: the earlier takeover cancels pending
+    // automatic motion, but it must not suppress the correction this selection is allowed to make.
+    cameraOwned.current = false
     onPin?.(id)
   }, [onHover, onPin])
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const sceneRef = useRef<HTMLDivElement | null>(null)
+  /**
+   * The reader takes the camera.
+   *
+   * Automatic framing animates the scene with a CSS transition, so JavaScript holds the commanded
+   * destination while the browser shows an interpolated position. Before any manual input takes over, the
+   * currently painted transform is captured and the transition removed: taking control must not jump to a
+   * destination the reader never saw. The same takeover cancels the pending cleanup and stops passive
+   * measurements from re-landing the board.
+   */
+  const takeCameraOwnership = useCallback(() => {
+    const scene = sceneRef.current
+    if (scene) {
+      const computed = window.getComputedStyle(scene).transform
+      if (computed && computed !== "none") {
+        const matrix = new DOMMatrixReadOnly(computed)
+        if (Number.isFinite(matrix.a) && matrix.a > 0) {
+          transform.current = { x: matrix.e, y: matrix.f, zoom: matrix.a }
+        }
+      }
+      scene.classList.remove("is-easing")
+    }
+    if (easeTimer.current !== null) {
+      window.clearTimeout(easeTimer.current)
+      easeTimer.current = null
+    }
+    cameraOwned.current = true
+  }, [])
   const edgeLayerRef = useRef<SVGSVGElement | null>(null)
   const offscreenRefs = useRef(new Map<string, HTMLButtonElement>())
   const cardRefs = useRef(new Map<string, HTMLDivElement>())
@@ -504,6 +539,13 @@ export default function DigitalThreadCanvas({
      * has taken ownership of (frozen).
      */
     if (subjectOwnership.current !== emphasisId) {
+      // Preserve where a record was actually painted when it becomes the new subject. Retaining a numerical
+      // delta is not enough: measured expansion changes when the previous selection collapses and the new one
+      // expands, so the delta is rebased against the new base below.
+      retainedSubjectY.current = emphasisId
+        ? positionsForNodes(nodes, result.geometry, offsets.current, measuredCardHeights, revealDeltas.current)
+            .get(emphasisId)?.y ?? null
+        : null
       subjectOwnership.current = emphasisId
       frozenLanes.current = new Set()
       deliveredLanes.current = new Set()
@@ -559,6 +601,23 @@ export default function DigitalThreadCanvas({
         bandHeight: result.bandHeight,
       })
       revealTargets.current = plan.deltas
+      /**
+       * Rebase the new subject onto its retained displayed position.
+       *
+       * A record that was pulled into view as a linked card must not jump back to its distant ordinary row
+       * just because it is now the subject: the delta is recomputed from the new base layout (and the lane's
+       * current scroll) so the card stays where the reader last saw it.
+       */
+      if (emphasisId && retainedSubjectY.current !== null) {
+        const lane = nodeLaneRef.current.get(emphasisId)
+        const base = contentPositionsForNodes(nodes, result.geometry, measuredCardHeights).get(emphasisId)
+        if (lane !== undefined && base !== undefined) {
+          const deltaNew = retainedSubjectY.current - base - (offsets.current[lane] ?? 0)
+          if (Math.abs(deltaNew) > 0.5) revealTargets.current.set(emphasisId, deltaNew)
+          else revealTargets.current.delete(emphasisId)
+        }
+      }
+      retainedSubjectY.current = null
       kickMotion.current()
     }
     /**
@@ -1143,7 +1202,9 @@ export default function DigitalThreadCanvas({
       easeTimer.current = window.setTimeout(() => {
         sceneRef.current?.classList.remove("is-easing")
         easeTimer.current = null
-      }, 420)
+        // Keep this just past the stylesheet's transition duration: a shorter timer cuts the movement short
+        // and leaves the class-based easing inconsistent with where the board actually is.
+      }, 460)
       return true
     },
      [counts, edges, frame, nodes, onFramingNeedsRoom, paint],
@@ -1163,7 +1224,9 @@ export default function DigitalThreadCanvas({
       const signature = `${Math.round(rect.width)}x${Math.round(rect.height)}x${countsKey}`
       if (signature !== frameSignature.current) {
         frameSignature.current = signature
-        land()
+        // A passive size or count change must not re-land a board the reader has taken control of: a tray
+        // closing, a font settling or a re-measure is not a reason to move their camera.
+        if (!cameraOwned.current) land()
       }
 
       // A selection can arrive while the host frame is still unsettled — a freshly mounted panel or a preview
@@ -1242,6 +1305,7 @@ export default function DigitalThreadCanvas({
 
   const onWheel = useCallback(
     (event: React.WheelEvent<HTMLDivElement>) => {
+      takeCameraOwnership()
       const box = frame()
       const element = viewportRef.current
       if (!box || !element) return
@@ -1261,12 +1325,13 @@ export default function DigitalThreadCanvas({
       )
       paint()
     },
-    [counts, frame, paint],
+    [counts, frame, paint, takeCameraOwnership],
   )
 
   const onPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) return
+      takeCameraOwnership()
       if (previewTimer.current !== null) clearTimeout(previewTimer.current)
       previewTimer.current = null
       // A nested card action has its own click/default-action semantics. Returning before pointer capture keeps
@@ -1342,7 +1407,7 @@ export default function DigitalThreadCanvas({
       element.addEventListener("pointerup", up)
       element.addEventListener("pointercancel", up)
     },
-    [edges, lanes.length, nodes, onSelect, paint, settle],
+    [edges, lanes.length, nodes, onSelect, paint, settle, takeCameraOwnership],
   )
 
   /** Cards per lane in row order: the sequence the arrow keys walk. */
@@ -1476,6 +1541,7 @@ export default function DigitalThreadCanvas({
       if (event.key === "0") {
         fitAll()
       } else if (event.key === "+" || event.key === "=" || event.key === "-") {
+        takeCameraOwnership()
         transform.current = zoomAbout(
           transform.current,
           box.width / 2,
@@ -1491,7 +1557,7 @@ export default function DigitalThreadCanvas({
       }
       event.preventDefault()
     },
-    [counts, fitAll, frame, onSelect, paint],
+    [counts, fitAll, frame, onSelect, paint, takeCameraOwnership],
   )
 
   edgeRefs.current = []
@@ -1539,6 +1605,7 @@ export default function DigitalThreadCanvas({
         <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => {
           const box = frame()
           if (!box) return
+          takeCameraOwnership()
           transform.current = zoomAbout(transform.current, box.width / 2, box.height / 2, 0.81, minimumZoom(box, counts))
           paint()
         }}>−</button>
@@ -1546,6 +1613,7 @@ export default function DigitalThreadCanvas({
         <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => {
           const box = frame()
           if (!box) return
+          takeCameraOwnership()
           transform.current = zoomAbout(transform.current, box.width / 2, box.height / 2, 1.24, MIN_ZOOM)
           paint()
         }}>+</button>
