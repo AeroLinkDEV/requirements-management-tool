@@ -197,6 +197,25 @@ export const sourceContextLabel = (verification?: NetworkVerification | null): s
   return kind ? `Assessing ${kind} ${source}` : `Assessing ${source}`
 }
 
+/**
+ * A verification record's own controlled identity, or the truthful absence of one (#1016 S13A).
+ *
+ * A missing revision is not revision zero. Formatting `controlledRevision ?? 0` would print ".00" for a
+ * record whose revision identity was never recorded — inventing the precise part of an identifier a reader
+ * relies on. An actual zero is a real controlled revision and still reads ".00"; a missing one says so.
+ *
+ * Absence of a number is taken from `hasControlledNumber`, never from a stored revision counter, which every
+ * record has and which proves nothing about numbering.
+ */
+export const controlledIdentityLabel = (verification?: NetworkVerification | null): string => {
+  if (!verification?.hasControlledNumber || !verification.controlledNumber) return "None recorded"
+  const revision = verification.controlledRevision
+  if (typeof revision !== "number" || !Number.isInteger(revision) || revision < 0) {
+    return `${verification.controlledNumber} · revision not recorded`
+  }
+  return `${verification.controlledNumber}.${String(revision).padStart(2, "0")}`
+}
+
 /** True when a test-change node holds no controlled number, from the server's answer rather than its label. */
 export const isUnnumberedAssessment = (node: NetworkNode): boolean =>
   node.kind === "TestChangeRequest" && node.verification?.hasControlledNumber === false

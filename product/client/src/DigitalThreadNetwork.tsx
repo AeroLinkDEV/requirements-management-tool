@@ -19,6 +19,7 @@ import {
   type NetworkProjection,
   assignRows,
   badgeOf,
+  controlledIdentityLabel,
   outcomeLabel,
   sourceContextLabel,
   badgeTintFor,
@@ -616,11 +617,7 @@ export default function DigitalThreadNetwork({
                 <dl className="dtnVerificationFacts">
                   <div>
                     <dt>Controlled number</dt>
-                    <dd>
-                      {selected.verification.hasControlledNumber && selected.verification.controlledNumber
-                        ? `${selected.verification.controlledNumber}.${String(selected.verification.controlledRevision ?? 0).padStart(2, "0")}`
-                        : "None recorded"}
-                    </dd>
+                    <dd>{controlledIdentityLabel(selected.verification)}</dd>
                   </div>
                   {sourceContextLabel(selected.verification) && (
                     <div>

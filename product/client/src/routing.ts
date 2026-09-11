@@ -496,11 +496,14 @@ export function exactTraceArtifactPath(context: RouteContext, node: ExactTraceAr
     //   present but unusable — an unrecognised discipline or family. Refuse. Falling back to the prefix here
     //             would mean guessing System, HLR, Case or Procedure out of a label, which for an unnumbered
     //             record carries none of them, and a confidently wrong exact link is worse than none.
+    // Presence is a fact about the object, not about whether its fields happen to be filled in. Deciding it
+    // from the fields let `{}` and `{ discipline: null, artifactKind: null }` — both of which are the
+    // projection having answered with nothing usable — fall through to the prefix branch and be routed from a
+    // label. An older response that never carried the field is the only thing that may take that path.
     const stated = node.verification;
     const statedDiscipline = stated?.discipline ?? null;
     const statedKind = stated?.artifactKind ?? null;
-    const hasMetadata = statedDiscipline != null || statedKind != null;
-    if (hasMetadata) {
+    if (stated != null) {
       const disciplines = ['System', 'HighLevelSoftware', 'LowLevelSoftware'];
       if (!identifier(statedDiscipline) || !disciplines.includes(statedDiscipline)) return undefined;
       if (statedKind !== 'Case' && statedKind !== 'Procedure') return undefined;

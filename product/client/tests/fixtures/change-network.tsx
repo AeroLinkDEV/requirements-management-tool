@@ -177,6 +177,15 @@ const hrefFor = (node: Parameters<typeof exactCardIdentity>[0]) => {
   return identity ? exactTraceArtifactPath(routeContext, identity) : undefined
 }
 
+// The Table is the accessible representation of the same projection, and it is a prop rather than internal
+// state, so the fixture selects it the way the page does.
+const representation = new URLSearchParams(window.location.search).get("view") === "table" ? "table" : "map"
+
 createRoot(document.getElementById("root")!).render(
-  <DigitalThreadNetwork projection={chosen} buildLabel="Build 1.6" hrefFor={hrefFor} />,
+  <DigitalThreadNetwork
+    projection={chosen}
+    buildLabel="Build 1.6"
+    hrefFor={hrefFor}
+    representation={representation}
+  />,
 )

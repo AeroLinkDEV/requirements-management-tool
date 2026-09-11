@@ -346,3 +346,32 @@ test('verification metadata decides, and an unusable answer refuses rather than 
   expect(route(null, 'SYSTPCR-000012.00')).toContain('/system-verification/change-requests/assessment-a')
   expect(route(undefined, 'LLRTPCR-000012.00')).toContain('/software-verification/llr/change-requests/assessment-a')
 })
+
+/**
+ * #1016 S13A-R3-01. Presence is a fact about the metadata object, not about its fields.
+ *
+ * Deciding it from the fields let an empty object, and one whose fields are explicitly null, take the legacy
+ * prefix branch — so the projection answering with nothing usable was routed from a label instead of
+ * refusing. Only a response that never carried the field at all may take that path.
+ */
+test('empty or null-valued verification metadata is present and unusable, not absent', () => {
+  const context = { programId: 'program-a', projectId: 'project-a', releaseId: 'release-a' }
+  const route = (verification: unknown) => exactTraceArtifactPath(context, {
+    // A label whose prefix would confidently route this to the System workspace if the guard let it through.
+    id: 'assessment-a', kind: 'TestChangeRequest', displayNumber: 'SYSTPCR-000012.00', level: 'Procedure',
+    verification: verification as { discipline?: string | null; artifactKind?: string | null } | null,
+  })
+
+  // Present, and carrying nothing usable: refused, despite a prefix that would have answered.
+  expect(route({}), 'empty object').toBeUndefined()
+  expect(route({ discipline: null, artifactKind: null }), 'both fields null').toBeUndefined()
+  expect(route({ discipline: '', artifactKind: '' }), 'both fields blank').toBeUndefined()
+
+  // Absent: the compatibility path older responses were written for, unchanged.
+  expect(route(null)).toContain('/system-verification/change-requests/assessment-a')
+  expect(route(undefined)).toContain('/system-verification/change-requests/assessment-a')
+
+  // Present and valid still decides, and still overrides a contradictory prefix.
+  expect(route({ discipline: 'LowLevelSoftware', artifactKind: 'Procedure' }))
+    .toContain('/software-verification/llr/change-requests/assessment-a')
+})

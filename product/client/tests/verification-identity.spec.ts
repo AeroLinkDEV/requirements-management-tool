@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test"
 import {
   assignRows,
   badgeOf,
+  controlledIdentityLabel,
   isUnnumberedAssessment,
   laneModel,
   type NetworkNode,
@@ -237,11 +238,158 @@ test("a rendered unnumbered card links to its own discipline, through the page's
   expect(await page.locator('[data-node-id="tcr-9"] .dtnId').getAttribute("href") ?? "")
     .toContain("/system-verification/change-requests/tcr-9")
 
-  // Ordinary activation and a supported new tab reach the same exact record and scope.
+  // Supported new-tab activation reaches the declared destination.
   const opened = context.waitForEvent("page")
   await link.click({ modifiers: ["ControlOrMeta"] })
   const newTab = await opened
   await newTab.waitForURL(url => url.pathname.includes("/change-requests/asmt-a"))
   expect(new URL(newTab.url()).pathname + new URL(newTab.url()).search).toBe(href)
   await newTab.close()
+
+  // And ordinary activation reaches the same one. This is the assertion the packet previously claimed from a
+  // Ctrl-click alone, which proves only the native path: a plain click is the one an onOpen override could
+  // divert, so it has to be performed rather than inferred.
+  await link.click()
+  await expect.poll(() => new URL(page.url()).pathname + new URL(page.url()).search).toBe(href)
+
+  // What this does not establish: these are the fixture's own synthetic record ids. Reaching the address
+  // proves the adapter and the router agree on it; it says nothing about a backend resolving that record.
+})
+
+test("a missing controlled revision is reported, not rendered as .00", () => {
+  // An actual zero is a real controlled revision.
+  expect(controlledIdentityLabel({
+    hasControlledNumber: true, controlledNumber: "SYSTPCR-000012", controlledRevision: 0,
+    outcome: "ChangeRequired", artifactKind: "Procedure", discipline: "System",
+    originKind: "ChangeRequest", originReferenceId: "sys-9",
+  })).toBe("SYSTPCR-000012.00")
+
+  // A missing one is not. Printing ".00" here would invent the precise part of an identifier a reader relies
+  // on, for a record whose revision identity was never recorded.
+  for (const revision of [undefined, null]) {
+    expect(controlledIdentityLabel({
+      hasControlledNumber: true, controlledNumber: "SYSTPCR-000012",
+      controlledRevision: revision as number | undefined,
+      outcome: "ChangeRequired", artifactKind: "Procedure", discipline: "System",
+      originKind: "ChangeRequest", originReferenceId: "sys-9",
+    })).toBe("SYSTPCR-000012 · revision not recorded")
+  }
+
+  // No controlled number at all: taken from the authoritative fact, never from a revision counter.
+  expect(controlledIdentityLabel({
+    hasControlledNumber: false, controlledRevision: 3,
+    outcome: "Pending", artifactKind: "Procedure", discipline: "System",
+    originKind: "ChangeRequest", originReferenceId: "sys-9",
+  })).toBe("None recorded")
+})
+
+test("the Table carries the same source and outcome, with state kept separate", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/tests/fixtures/change-network.html?case=verification-identity&view=table")
+
+  // The accessible representation must not be the poorer one: a reader here needs the same two facts the Map
+  // shows, in the same words, from the same formatters.
+  const table = page.locator(".dtThreadTable")
+  await expect(table).toBeVisible()
+  await expect(table.locator("thead th")).toContainText(
+    ["Select", "Change", "Level", "Source", "Outcome", "State"])
+
+  // Read by column, and matched on the row's own Change cell — a change request row also names the
+  // assessments that verify it, so matching on row text selects the wrong row.
+  const cells = (rowIndex: number) => table.locator("tbody tr").nth(rowIndex).locator("td")
+  const change = (rowIndex: number) => cells(rowIndex).nth(1)
+  const source = (rowIndex: number) => cells(rowIndex).nth(3)
+  const outcome = (rowIndex: number) => cells(rowIndex).nth(4)
+  const state = (rowIndex: number) => cells(rowIndex).nth(5)
+
+  // The change request itself has no verification facts, and borrows none.
+  await expect(change(0)).toContainText("SRCR-00039.00")
+  await expect(source(0)).toHaveText("—")
+  await expect(outcome(0)).toHaveText("—")
+
+  // The pending assessment: source, outcome and lifecycle state in three separate cells.
+  await expect(change(1)).toContainText("Unnumbered assessment")
+  await expect(source(1)).toHaveText("Assessing change request SRCR-00039.00")
+  await expect(outcome(1)).toHaveText("Pending assessment")
+  await expect(state(1)).toHaveText("Draft")
+
+  // The concluded one. "No change required" is what it concluded; "Draft" is how far that has got. Both are
+  // visible, because a written conclusion is not a signed one — and its source is its own.
+  await expect(source(2)).toContainText("Assessing Problem Report PR-00004321.00")
+  await expect(outcome(2)).toHaveText("No change required")
+  await expect(state(2)).toHaveText("Draft")
+  await expect(state(2)).not.toHaveText("Approved")
+
+  // The numbered package keeps its own identity, outcome and state.
+  await expect(change(3)).toContainText("SYSTPCR-000012.00")
+  await expect(outcome(3)).toHaveText("Change required")
+  await expect(state(3)).toHaveText("In review")
+
+  // A record with no verification metadata leaves the new cells empty rather than borrowing another's.
+  await page.goto("/tests/fixtures/change-network.html?view=table")
+  const legacyRow = page.locator(".dtThreadTable tbody tr").filter({ hasText: "LLRTPCR-000009.00" }).first()
+  await expect(legacyRow.locator("td").nth(3)).toHaveText("—")
+  await expect(legacyRow.locator("td").nth(4)).toHaveText("—")
+})
+
+/**
+ * #1016 S13A. The four facts have to be reachable and readable, not merely in the DOM.
+ *
+ * The inspector's identity column is scrollable when the panel is docked to the bottom, so a capture of the
+ * unscrolled state can show the outcome clipped and the lifecycle state below the fold. That is the panel's
+ * existing behaviour rather than a defect — but "present in the DOM" is not "a reader can read it", and
+ * `toContainText` cannot tell the two apart. This exercises the interaction instead.
+ */
+test("every verification fact is reachable and readable in the docked panel", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/tests/fixtures/change-network.html?case=verification-identity")
+
+  const card = page.locator('[data-node-id="asmt-a"]')
+  await card.focus()
+  await page.keyboard.press("Enter")
+
+  const panel = page.locator(".dtnPanel")
+  const column = page.locator(".dtnPanelIdentityCol")
+  const facts = page.locator(".dtnVerificationFacts")
+  await expect(facts).toBeVisible()
+
+  // Each value, scrolled to and then measured against the column's own viewport — not the page's.
+  const readable = async (label: string) => {
+    const value = facts.locator("div").filter({ hasText: label }).locator("dd")
+    await value.scrollIntoViewIfNeeded()
+    return value.evaluate((node, columnSelector) => {
+      const box = node.getBoundingClientRect()
+      const scroller = node.closest(columnSelector as string)!.getBoundingClientRect()
+      // Fully inside its scroller, and tall enough to be a line of text rather than a clipped sliver.
+      return box.height >= 12 && box.top >= scroller.top - 1 && box.bottom <= scroller.bottom + 1
+    }, ".dtnPanelIdentityCol")
+  }
+
+  for (const dock of ["Bottom", "Right", "Auto"]) {
+    await panel.getByRole("button", { name: dock, exact: true }).click()
+    await expect(panel.getByRole("button", { name: dock, exact: true })).toHaveAttribute("aria-pressed", "true")
+
+    for (const label of ["Controlled number", "Source", "Assessment outcome", "Lifecycle state"]) {
+      expect(await readable(label), `${label} must be readable with the panel docked ${dock}`).toBe(true)
+    }
+
+    // The record's own title stays available alongside the facts.
+    await expect(page.locator(".dtnPanelIdentityCol h3")).toBeVisible()
+    // And the panel's own controls stay usable.
+    await expect(panel.getByRole("button", { name: "Close detail" })).toBeVisible()
+  }
+
+  // Reachable by keyboard alone: the column takes focus and scrolls without a pointer.
+  await panel.getByRole("button", { name: "Bottom", exact: true }).click()
+  await column.evaluate(node => { node.scrollTop = node.scrollHeight })
+  expect(await readable("Lifecycle state")).toBe(true)
+
+  // Settle the hover/framing transition before capturing, so the selected card is at its resting opacity.
+  await page.mouse.move(4, 4)
+  await page.waitForTimeout(700)
+  await expect(card).toHaveAttribute("aria-pressed", "true")
+  const opacity = await card.evaluate(node => Number(getComputedStyle(node).opacity))
+  expect(opacity, "the selected card must be readable once framing settles").toBeGreaterThan(0.85)
+
+  await page.screenshot({ path: "test-results-s13a/verification-identity-unnumbered.png", fullPage: true })
 })
