@@ -125,15 +125,115 @@ test("a trace row offers one exact navigation action, and refuses to offer one i
   await expect(unresolved).toHaveText("SYSR-000999.04")
   await expect(unresolved).toHaveAttribute("title", "This requirement revision is not available as an exact link")
 
-  // Verification coverage keeps two controls. This asserts only what the identifier *says*; where it actually
-  // goes under each way of activating it is the separate regression below, which is where the R3-01 defect
-  // lived — the href and the click handler named different destinations.
+  // Verification coverage: one navigation control, like every other row. This asserts what the identifier
+  // *says*; where it goes under each way of activating it is the separate regression below, which is where
+  // the R3-01 defect lived — the href and the click handler named different destinations.
   const testRow = inspector.locator(".traceRelation").filter({ hasText: "SYSTP-000042.01" })
   const procedureHref = await testRow.locator("a").getAttribute("href") ?? ""
   expect(procedureHref).toContain("/system-verification/procedures")
   expect(procedureHref).toContain("procedureId=procedure-artifact")
   expect(procedureHref).toContain("procedureRevisionId=66666666-7777-8888-9999-aaaaaaaaaaaa")
-  await expect(testRow.getByRole("button", { name: "Resolve in Verification →" })).toBeVisible()
+
+  // "Resolve in Verification →" is gone: it called the same function with the same argument and reached the
+  // same address as the identifier beside it, so it was a second control for one destination.
+  await expect(testRow.getByRole("button", { name: "Resolve in Verification →" })).toHaveCount(0)
+  await expect(testRow.locator("a, button")).toHaveCount(1)
+
+  // The suspect condition it sat beside is untouched, and still says so in words.
+  await expect(testRow).toHaveClass(/attention/)
+  await expect(testRow).toContainText("Suspect applicability — does not count as coverage")
+})
+
+/**
+ * #1016 S03 / R5-01. An identifier that promises an exact artifact must refuse when it cannot name one.
+ *
+ * The address builder will compose a plausible Explorer URL out of very little: no revision, no artifact id,
+ * or an unstated family that would quietly take a Procedure to a Case-shaped address. A reader following that
+ * arrives somewhere that looks right and names the wrong thing, which is worse than a value that declines to
+ * be a link. Nothing is inferred from the display number — an identifier's prefix is not evidence of its
+ * family or its level.
+ */
+test("the verification identifier refuses to link when the exact target is not established", async ({ page, request }) => {
+  test.setTimeout(240_000)
+  await apiLogin(request)
+  await login(page, "admin", { openProject: false })
+  await selectProgram(page, "Flight Management System Live Program")
+  await openNavigationGroup(page, "SYSTEMS ENGINEERING")
+  await page.getByRole("link", { name: "System Requirements Explorer" }).click()
+  await expect(page.getByRole("status", { name: /Loading controlled requirements/ })).toBeHidden()
+
+  await page.getByLabel("Search requirements").fill("SYSR-0001")
+  const rowLinks = page.getByRole("link", { name: /SYSR-0001\d\d\.\d{2}/ })
+  await expect(rowLinks.first()).toBeVisible()
+  const subject = identityOf(await rowLinks.first().getAttribute("href") ?? "")
+  const subjectNumber = (await rowLinks.first().textContent() ?? "").slice(0, 14)
+
+  const revision = "66666666-7777-8888-9999-aaaaaaaaaaaa"
+  // Each row gets its own revision, as distinct controlled artifacts would: the component keys on the
+  // revision, and sharing one would collapse two rows into one for reasons that have nothing to do with the
+  // guard under test.
+  let issued = 0
+  const revisionOf = (index: number) => `${revision.slice(0, -1)}${index}`
+  const coverage = (over: Record<string, unknown> & { id: string }) => ({
+    artifactRevisionId: revisionOf(issued), revisionId: revisionOf(issued++),
+    artifactKind: "Procedure", level: "System", title: "A verification artifact",
+    state: "Approved", coverageState: "Confirmed", ...over,
+  })
+
+  await page.route(`**/api/enterprise-requirements/${subject.artifactId}/impact**`, route => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      parents: [], children: [], baselines: [], builds: [], documents: [], activeChanges: [],
+      tests: [
+        // Supported, and the control case: a System Procedure with a complete identity.
+        coverage({ id: "sys-proc", displayNumber: "SYSTP-000001.00" }),
+        // Both supported software families, each routed by its own declared kind.
+        coverage({ id: "hlr-case", displayNumber: "HLRTC-000001.00", artifactKind: "Case", level: "HighLevel" }),
+        coverage({ id: "llr-proc", displayNumber: "LLRTP-000001.00", level: "LowLevel" }),
+        // No immutable revision. The relation is real; the exact target is not established.
+        coverage({ id: "no-revision", displayNumber: "SYSTP-000002.00", artifactRevisionId: undefined, revisionId: undefined }),
+        // No artifact identity.
+        coverage({ id: "", displayNumber: "SYSTP-000003.00" }),
+        // No declared family. "SYSTP-" is not evidence of one.
+        coverage({ id: "no-kind", displayNumber: "SYSTP-000004.00", artifactKind: undefined }),
+        // A level the Explorer does not route.
+        coverage({ id: "odd-level", displayNumber: "SYSTP-000005.00", level: "Customer" }),
+      ],
+    }),
+  }))
+
+  await page.getByLabel("Search requirements").fill(subjectNumber)
+  await page.getByRole("link", { name: subjectNumber }).first().click()
+  await page.getByRole("tab", { name: "Trace & impact" }).click()
+  const inspector = page.locator(".traceInspector")
+  const row = (identifier: string) => inspector.locator(".traceRelation").filter({ hasText: identifier })
+  await expect(row("SYSTP-000001.00")).toBeVisible({ timeout: 30_000 })
+
+  // Supported targets link, and their declared family decides the address rather than their prefix.
+  const systemHref = await row("SYSTP-000001.00").locator("a").getAttribute("href") ?? ""
+  expect(systemHref).toContain("/system-verification/procedures")
+  expect(systemHref).toContain(`procedureRevisionId=${revisionOf(0)}`)
+
+  const caseHref = await row("HLRTC-000001.00").locator("a").getAttribute("href") ?? ""
+  expect(caseHref).toContain("/software-verification/test-artifacts")
+  expect(caseHref).toContain(`caseRevisionId=${revisionOf(1)}`)
+  expect(caseHref).toContain("artifactKind=Case")
+
+  const softwareProcedureHref = await row("LLRTP-000001.00").locator("a").getAttribute("href") ?? ""
+  expect(softwareProcedureHref).toContain("/software-verification/test-artifacts")
+  expect(softwareProcedureHref).toContain(`procedureRevisionId=${revisionOf(2)}`)
+  expect(softwareProcedureHref).toContain("artifactKind=Procedure")
+
+  // Everything the guard refuses renders as a truthful unavailable identifier: no anchor, no click, and no
+  // substituted broad route.
+  for (const identifier of ["SYSTP-000002.00", "SYSTP-000003.00", "SYSTP-000004.00", "SYSTP-000005.00"]) {
+    const unresolvable = row(identifier)
+    await expect(unresolvable.locator("a"), `${identifier} must not be linkable`).toHaveCount(0)
+    await expect(unresolvable.locator("button")).toHaveCount(0)
+    await expect(unresolvable.locator("[data-exact-artifact-link='unresolved']")).toBeVisible()
+    // And it does not keep a promise it cannot honour.
+    await expect(unresolvable.locator("[title='Open this exact verification artifact']")).toHaveCount(0)
+  }
 })
 
 test("the exact trace link is operable by keyboard, opens in a new tab, and survives Back and Forward", async ({ page, request, context }) => {
@@ -224,7 +324,7 @@ test("the exact trace link is operable by keyboard, opens in a new tab, and surv
  * own selection, so the destinations are records that exist. The coverage *relation* is supplied, because the
  * seeded requirement carries none — that limit is stated rather than implied.
  */
-test("the verification identifier goes where it says by click, keyboard and new tab, and Resolve reaches the same place", async ({ page, request, context }) => {
+test("the verification identifier goes where it says by click, keyboard and new tab, and is the row's only control", async ({ page, request, context }) => {
   test.setTimeout(300_000)
   await apiLogin(request)
   await login(page, "admin", { openProject: false })
@@ -265,7 +365,7 @@ test("the verification identifier goes where it says by click, keyboard and new 
         id: procedureId, artifactRevisionId: procedureRevisionId, revisionId: procedureRevisionId,
         artifactKind: "Procedure", displayNumber: procedureNumber, title: "Controlled system test procedure",
         level: "System", state: "Approved",
-        // Suspect, so "Resolve in Verification" is offered and both controls can be compared.
+        // Suspect, so the row carries its attention state while the single navigation control is checked.
         coverageState: "Suspect",
       }],
     }),
@@ -323,16 +423,17 @@ test("the verification identifier goes where it says by click, keyboard and new 
   await newTab.close()
   expect(new URL(page.url()).pathname).toBe(subjectPath)
 
-  // (D) Resolve, recorded as it actually behaves. It reaches the same Explorer address as the identifier and
-  // carries the same exact identity — two controls, one destination. That is asserted here as the current
-  // truth rather than described as a distinct action, which is what an earlier review packet claimed on the
-  // strength of reading the two call sites instead of activating them. Whether this control should be removed
-  // or given a destination of its own is a decision about the coverage workflow, not about this link.
+  // (D) One control, and it is the one that reaches the Explorer. "Resolve in Verification →" used to sit
+  // here calling the same function with the same argument, so it arrived at this same address under a label
+  // that promised a different action. Its removal loses no entry capability: everything it opened, the
+  // identifier above opens — same path, same procedure id, same exact revision, proven in (A).
   await backToTraceTab()
-  await row.getByRole("button", { name: "Resolve in Verification →" }).click()
-  await expect.poll(() => new URL(page.url()).pathname).toBe(`${root}/system-verification/procedures`)
-  const resolved = new URL(page.url()).searchParams
-  expect(resolved.get("procedureId")).toBe(procedureId)
-  expect(resolved.get("procedureRevisionId")).toBe(procedureRevisionId)
-  expect(here(), "identifier and Resolve currently share one destination").toBe(declared)
+  await expect(row.getByRole("button", { name: "Resolve in Verification →" })).toHaveCount(0)
+  await expect(row.locator("a, button")).toHaveCount(1)
+  const reached = new URL(declared, "http://127.0.0.1").searchParams
+  expect(reached.get("procedureId")).toBe(procedureId)
+  expect(reached.get("procedureRevisionId")).toBe(procedureRevisionId)
+
+  // The suspect condition the removed button sat beside is still stated.
+  await expect(row).toContainText("Suspect applicability — does not count as coverage")
 })
