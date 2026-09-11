@@ -7,8 +7,6 @@ import {
   type CanvasNode,
   type FrameIntent,
   type LayoutResult,
-  anchorInLane,
-  arrangeStory,
   trace,
   clampOffsets,
   edgeIdentity,
@@ -23,11 +21,13 @@ import {
   minimumZoom,
   MIN_ZOOM,
   nodePosition,
+  planReveal,
   positionsForNodes,
   placeEdgeLabels,
+  READABLE_SELECTION_MIN_ZOOM,
   rescaleOffsets,
+  revealWindowForLane,
   stepTowards,
-  syncTargets,
   wheelFactor,
   zoomAbout,
 } from "./digitalThreadGeometry"
@@ -84,6 +84,12 @@ export type DigitalThreadCanvasProps = {
    */
   onFramingNeedsRoom?: () => void
   ariaLabel?: string
+  /**
+   * Stable navigation scope (view, project, build, representation and any deliberately chosen exact
+   * baseline). Deliberately not derived from nodes or edges: a refreshed payload or a re-pointed edge must
+   * not become a new arrival, and a derived fallback would silently merge or split scopes.
+   */
+  scopeKey?: string
 }
 
 /**
@@ -121,48 +127,76 @@ export default function DigitalThreadCanvas({
   landingId = null,
   onFramingNeedsRoom: requestDockRoom,
   ariaLabel = "Digital Thread canvas",
+  scopeKey = "canvas",
 }: DigitalThreadCanvasProps) {
-  const [preview, setPreview] = useState<{ id: string; rect: DOMRect } | null>(null)
-  const previewNode = preview ? sourceNodes.find(node => node.id === preview.id) : undefined
-  // A temporary preview must not permanently redock the pinned inspector. Oversized stories retain reveal
+  /**
+   * Unselected hover emphasis.
+   *
+   * Hover is a temporary, visual-only emphasis with its own lane-local reveal. It is a different thing from
+   * `pinnedId`: a selection persists until the reader clears it or selects another record, and no hover can
+   * ever replace it. The old floating duplicate target and its camera restore are gone with this split.
+   */
+  const [hoverId, setHoverId] = useState<string | null>(null)
+  const emphasisId = pinnedId ?? hoverId
+  // A temporary emphasis must not permanently redock the pinned inspector. Oversized stories retain reveal
   // actions; pinning can then request the normal persistent dock fallback.
-  const onFramingNeedsRoom = previewNode ? undefined : requestDockRoom
-  const selectedId = previewNode?.id ?? pinnedId
+  const onFramingNeedsRoom = pinnedId ? requestDockRoom : undefined
+  // Framing, expansion and the tray reservation belong to a persistent selection only. Hover emphasis is a
+  // visual treatment: it must never resize the source card or move its neighbours, so it never owns them.
+  const selectedId = pinnedId
   const frameInset = { ...inspectorInset, bottom: (inspectorInset?.bottom ?? 0) + (selectedId ? 64 : 0) }
-  const story = useMemo(() => selectedId ? trace(selectedId, edges) : null, [selectedId, edges])
-  const nodes = useMemo(() => story ? arrangeStory(sourceNodes, story.nodes) : sourceNodes, [sourceNodes, story])
+  const story = useMemo(() => emphasisId ? trace(emphasisId, edges) : null, [emphasisId, edges])
+  /**
+   * Canonical rows, never re-ordered.
+   *
+   * The previous model moved every traced record to the top of its lane (`arrangeStory`) so a story could be
+   * seen at once. #1022 supersedes that: only an out-of-view linked card is displaced, and it is displaced by
+   * a temporary lane-local delta rather than by renumbering rows other readers' layouts depend on.
+   */
+  const nodes = sourceNodes
   const tracedEdges = story?.edges ?? suppliedTracedEdges
   const frameIds = useMemo(() => story ? [...story.nodes] : suppliedFrameIds, [story, suppliedFrameIds])
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const previewSnapshot = useRef<{ transform: { x: number; y: number; zoom: number }; offsets: number[]; targets: number[]; geometry: LayoutResult | null } | null>(null)
-  const restorePreview = useRef(false)
-  const previewDrag = useRef<{ x: number; y: number; tx: number; ty: number; moved: boolean } | null>(null)
+  /** Temporary per-card displacement, in content coordinates. Keyed by node id. */
+  const revealDeltas = useRef<Map<string, number>>(new Map())
+  const revealTargets = useRef<Map<string, number>>(new Map())
+  /** Lanes the reader owns for the current context. Automatic reveal never re-plans them. */
+  const frozenLanes = useRef<Set<number>>(new Set())
+  /** The deepest scroll extent this scope has needed per lane, so cleanup cannot snap the reader's lane. */
+  const deepestMinimum = useRef<number[]>([])
+  /** The lane windows the last plan was built against, so an unchanged view is not re-planned. */
+  const revealSignature = useRef("")
   const sourceSignature = sourceNodes.map(node => `${node.id}:${node.lane}:${node.row}`).join("|")
   useEffect(() => {
     if (previewTimer.current !== null) clearTimeout(previewTimer.current)
     previewTimer.current = null
-    previewSnapshot.current = null
-    restorePreview.current = false
-    setPreview(null)
-    onHover?.(null)
-  }, [pinnedId, sourceSignature, onHover])
+    setHoverId(null)
+  }, [pinnedId, sourceSignature, scopeKey])
+  // A different scope is a different navigation context: nothing temporary may survive it.
+  useEffect(() => {
+    frozenLanes.current = new Set()
+    deepestMinimum.current = []
+    revealSignature.current = ""
+  }, [scopeKey])
   const clearPreviewTimer = () => {
     if (previewTimer.current !== null) clearTimeout(previewTimer.current)
     previewTimer.current = null
   }
-  const exitPreview = () => {
+  /**
+   * Hover emphasis ends.
+   *
+   * It removes the temporary emphasis and lets the reveal deltas return to their ordinary rows. It never
+   * restores a saved camera or lane snapshot: the reader's own navigation during the hover is theirs.
+   */
+  const exitHover = () => {
     clearPreviewTimer()
-    if (!preview) return
-    restorePreview.current = true
-    setPreview(null)
+    setHoverId(null)
     onHover?.(null)
   }
   const onSelect = useCallback((id: string | null) => {
     if (previewTimer.current !== null) clearTimeout(previewTimer.current)
     previewTimer.current = null
-    previewSnapshot.current = null
-    restorePreview.current = false
-    setPreview(null)
+    setHoverId(null)
     onHover?.(null)
     onPin?.(id)
   }, [onHover, onPin])
@@ -198,6 +232,8 @@ export default function DigitalThreadCanvas({
   const geometryRef = useRef<LayoutResult | null>(null)
   const frameSignature = useRef("")
   const animation = useRef<number | null>(null)
+  /** Starts the shared motion loop from code that runs before `settle` exists (paint plans the reveal). */
+  const kickMotion = useRef<() => void>(() => {})
   const reflowFrame = useRef<number | null>(null)
   const scrubbing = useRef(false)
   /** The framing key the selection effect last acted on, so a re-render alone cannot reset a rolled lane. */
@@ -415,7 +451,56 @@ export default function DigitalThreadCanvas({
     }
     geometryRef.current = result
     while (offsets.current.length < lanes.length) offsets.current.push(0)
-    offsets.current = clampOffsets(offsets.current, result.laneMinimums)
+    /**
+     * Allowance-aware clamp.
+     *
+     * The lane's extent shrinks the moment temporary reveal deltas are removed. Clamping to the shrunken
+     * minimum would snap a reader who scrolled into the temporarily extended range, so the deepest extent
+     * this scope has needed is remembered. It is released as soon as the reader's own offset is back inside
+     * the ordinary range, and dropped on a scope change. In-memory only: never persisted layout.
+     */
+    while (deepestMinimum.current.length < lanes.length) deepestMinimum.current.push(0)
+    const floors = result.laneMinimums.map((minimum, lane) => {
+      const deep = Math.min(deepestMinimum.current[lane] ?? minimum, minimum)
+      deepestMinimum.current[lane] = (offsets.current[lane] ?? 0) >= minimum ? minimum : deep
+      return deepestMinimum.current[lane]
+    })
+    offsets.current = clampOffsets(offsets.current, floors)
+
+    /**
+     * Lane-local reveal plan.
+     *
+     * Computed from content coordinates and the camera's usable window, and only when the situation it
+     * describes has actually changed — never on every paint, pointer move or ordinary re-render. Lanes the
+     * reader owns are excluded, and a lane the camera cannot show vertically prepares against its full band
+     * so its first arrival is useful.
+     */
+    const windowSignature = lanes.map((_, lane) => {
+      const window = revealWindowForLane(result.bandHeight, box, transform.current, offsets.current[lane] ?? 0)
+      return window ? `${lane}:${Math.round(window.top)}-${Math.round(window.bottom)}` : `${lane}:hidden`
+    }).join(",")
+    const revealKey = `${scopeKey}|${emphasisId ?? ""}|${result.tier}|${windowSignature}|${sourceSignature}`
+    if (revealKey !== revealSignature.current) {
+      revealSignature.current = revealKey
+      const windowByLane = new Map<number, { top: number; bottom: number }>()
+      for (let lane = 0; lane < lanes.length; lane += 1) {
+        const window = revealWindowForLane(result.bandHeight, box, transform.current, offsets.current[lane] ?? 0)
+        windowByLane.set(lane, window ?? { top: 0, bottom: result.bandHeight })
+      }
+      const plan = planReveal({
+        nodes,
+        geometry: result.geometry,
+        laneOffsets: offsets.current,
+        measuredHeights: measuredCardHeights,
+        storyIds: story?.nodes ?? new Set<string>(),
+        subjectId: emphasisId ?? null,
+        windowByLane,
+        frozenLanes: frozenLanes.current,
+        bandHeight: result.bandHeight,
+      })
+      revealTargets.current = plan.deltas
+      kickMotion.current()
+    }
 
     const { geometry, bandHeight } = result
     scene.style.transform = `translate(${transform.current.x}px,${transform.current.y}px) scale(${transform.current.zoom})`
@@ -443,7 +528,7 @@ export default function DigitalThreadCanvas({
     // Selected cards keep their expanded body. Read the actual rendered heights before positioning the lane so
     // a wrapped identity cannot cover the next direct card; the same measured map is consumed by framing and
     // label obstacles below.
-    const positions = positionsForNodes(nodes, geometry, offsets.current, measuredCardHeights)
+    const positions = positionsForNodes(nodes, geometry, offsets.current, measuredCardHeights, revealDeltas.current)
     for (const node of nodes) {
       const position = positions.get(node.id) ?? nodePosition(node, geometry, offsets.current)
       const card = cardRefs.current.get(node.id)
@@ -696,7 +781,7 @@ export default function DigitalThreadCanvas({
         label.style.opacity = inWindow && (traced || labelsAtRest) && position?.available === true ? "" : "0"
       }
     }
-  }, [counts, frame, lanes.length, nodes, onFramingNeedsRoom, selectedId, trailingOverhang, tracedEdges])
+  }, [counts, emphasisId, frame, lanes.length, nodes, onFramingNeedsRoom, scopeKey, selectedId, sourceSignature, story, trailingOverhang, tracedEdges])
 
   // A lane's animation can outlive the render that started it (focus is followed by selection).
   // Paint the committed selection rather than letting an older tick restore stale card visibility.
@@ -715,10 +800,40 @@ export default function DigitalThreadCanvas({
   }, [])
 
   const settle = useCallback(() => {
+    /**
+     * Step the temporary per-card displacements toward their plan.
+     *
+     * Entries whose target is zero are dropped the moment they arrive, so retiring geometry actually
+     * finishes rather than being frozen somewhere off its ordinary row — the cleanup is mandatory and does
+     * not depend on the camera channel or on any later pointer gesture.
+     */
+    const stepReveal = (snap = false): boolean => {
+      const keys = new Set([...revealDeltas.current.keys(), ...revealTargets.current.keys()])
+      const next = new Map<string, number>()
+      let moving = false
+      for (const id of keys) {
+        const current = revealDeltas.current.get(id) ?? 0
+        const target = revealTargets.current.get(id) ?? 0
+        if (snap) {
+          if (target !== 0) next.set(id, target)
+          continue
+        }
+        const delta = target - current
+        if (Math.abs(delta) <= 0.4) {
+          if (target !== 0) next.set(id, target)
+          continue
+        }
+        moving = true
+        next.set(id, current + delta * 0.22)
+      }
+      revealDeltas.current = next
+      return moving
+    }
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       if (animation.current !== null) cancelAnimationFrame(animation.current)
       animation.current = null
       offsets.current = [...targets.current]
+      stepReveal(true)
       committedPaint.current()
       return
     }
@@ -726,11 +841,13 @@ export default function DigitalThreadCanvas({
     const tick = () => {
       const stepped = stepTowards(offsets.current, targets.current)
       offsets.current = stepped.offsets
+      const revealMoving = stepReveal()
       committedPaint.current()
-      animation.current = stepped.moving || scrubbing.current ? requestAnimationFrame(tick) : null
+      animation.current = stepped.moving || revealMoving || scrubbing.current ? requestAnimationFrame(tick) : null
     }
     animation.current = requestAnimationFrame(tick)
   }, [])
+  kickMotion.current = settle
 
   /**
    * Land the board.
@@ -792,57 +909,40 @@ export default function DigitalThreadCanvas({
       }
       const result = layoutWithMeasuredCards(layout(counts, box, transform.current.zoom), nodes, cardHeights)
 
-      const synchronize = (measuredLayout: typeof result) => {
-        const rolled = clampOffsets(offsets.current, measuredLayout.laneMinimums)
-        const selectedNode = nodes.find(node => node.id === target.selectedId)
-        if (selectedNode) {
-          const position = positionsForNodes(nodes, measuredLayout.geometry, rolled, cardHeights).get(selectedNode.id)
-          if (position) {
-            const height = Math.max(measuredLayout.geometry.cardHeight, cardHeights.get(selectedNode.id) ?? 0)
-            const top = measuredLayout.geometry.pad
-            const bottom = Math.max(top, measuredLayout.bandHeight - height - top)
-            const wantedY = Math.max(top, Math.min(bottom, position.y))
-            // Ordinary lane synchronization preserves its anchor lane. Selection has to reveal the entire
-            // expanded anchor first, including native actions beneath its title, before aligning other lanes.
-            rolled[selectedNode.lane] = Math.max(measuredLayout.laneMinimums[selectedNode.lane] ?? 0,
-              Math.min(0, (rolled[selectedNode.lane] ?? 0) + wantedY - position.y))
-          }
-        }
-        return syncTargets(target.selectedId, nodes, edges, measuredLayout.geometry, rolled,
-          measuredLayout.laneMinimums, counts.length, -1, cardHeights)
-      }
+      /**
+       * Reader-owned lane positions are not overridden.
+       *
+       * Selection no longer aligns every lane onto the anchor (#880 §6.4 is superseded by #1022): an
+       * out-of-view linked record is brought to a useful height in its own lane by a temporary per-card
+       * delta, so no lane is scrolled on the reader's behalf.
+       */
+      const floors = result.laneMinimums.map((minimum, lane) =>
+        Math.min(minimum, deepestMinimum.current[lane] ?? minimum))
+      offsets.current = clampOffsets(offsets.current, floors)
+      targets.current = offsets.current.slice()
 
-      // Roll every lane to bring the selected record's directed story into its own windows, before framing
-      // (#880 §6.4: "the same routine runs on selection"). Panning the camera cannot do this job: a lane
-      // scrolls independently, so a linked record can sit outside its lane window no matter where the camera
-      // is, and framing alone would centre on a card the reader still cannot see. The offsets are applied at
-      // once rather than animated into place so the two-pass framing below measures where the cards landed.
-      const synced = synchronize(result)
-      offsets.current = [...synced]
-      targets.current = [...synced]
-
-      const fits = (transform: { x: number; y: number; zoom: number }, ids: readonly string[]): boolean => {
-        const settled = layoutWithMeasuredCards(layout(counts, box, transform.zoom), nodes, cardHeights)
-        const wanted = new Set(ids)
-        const positions = positionsForNodes(nodes, settled.geometry, offsets.current, cardHeights)
-        for (const node of nodes) {
-          if (!wanted.has(node.id)) continue
-          const { x, y } = positions.get(node.id) ?? nodePosition(node, settled.geometry, offsets.current)
-          const left = x * transform.zoom + transform.x
-          const right = left + settled.geometry.laneWidth * transform.zoom
-          const measuredHeight = Math.max(
-            settled.geometry.cardHeight,
-            node.id === target.selectedId ? selectedCardHeight ?? 0 : 0,
-            cardHeights.get(node.id) ?? 0,
-          )
-          const top = y * transform.zoom + transform.y
-          const bottom = top + measuredHeight * transform.zoom
-          // Direct cards need both an actual lane-window position and complete x/y containment. A card that is
-          // merely in the same scene but rolled out or sitting beneath the dock is not reachable evidence.
-          if (!isVisible(y, settled.geometry, settled.bandHeight)) return false
-          if (left < box.x - 1 || right > box.x + box.width + 1 || top < box.y - 1 || bottom > box.y + box.height + 1) return false
+      /**
+       * Leave a suitable view alone.
+       *
+       * Framing exists for the cases that need it. When the selected record is already wholly inside the
+       * free frame, inside its lane window and above the readable floor, the camera does not move at all.
+       */
+      const selectedNode = nodes.find(node => node.id === target.selectedId)
+      const heightOf = (id: string) => Math.max(result.geometry.cardHeight, cardHeights.get(id) ?? 0)
+      if (selectedNode) {
+        const position = positionsForNodes(nodes, result.geometry, offsets.current, cardHeights, revealDeltas.current)
+          .get(selectedNode.id)
+        if (position) {
+          const zoom = transform.current.zoom
+          const left = position.x * zoom + transform.current.x
+          const top = position.y * zoom + transform.current.y
+          const right = left + result.geometry.laneWidth * zoom
+          const bottom = top + heightOf(selectedNode.id) * zoom
+          const fullyVisible = isVisible(position.y, result.geometry, result.bandHeight) &&
+            left >= box.x - 1 && right <= box.x + box.width + 1 &&
+            top >= box.y - 1 && bottom <= box.y + box.height + 1
+          if (fullyVisible && zoom >= READABLE_SELECTION_MIN_ZOOM) return true
         }
-        return true
       }
 
       // The selected card's expanded body is measured from the rendered DOM. The old fixed allowance made a
@@ -871,12 +971,23 @@ export default function DigitalThreadCanvas({
        * canvas says so and the view re-docks. Reported rather than decided here: the canvas owns geometry,
        * the view owns where its own panel may go.
        */
-      const direct = new Set<string>([target.selectedId])
-      for (const edge of edges) {
-        if (edge.from === target.selectedId) direct.add(edge.to)
-        if (edge.to === target.selectedId) direct.add(edge.from)
+      // Direct links are no longer required to be simultaneously drawn: #1022 accepts clearly indicated
+      // off-screen links with a working reveal path, so the redock demand is limited to the selected record
+      // itself being unusable.
+      const selectedPosition = selectedNode
+        ? positionsForNodes(nodes, layoutWithMeasuredCards(layout(counts, box, next.zoom), nodes, cardHeights).geometry,
+            offsets.current, cardHeights, revealDeltas.current).get(selectedNode.id)
+        : undefined
+      if (selectedNode && selectedPosition) {
+        const zoom = next.zoom
+        const left = selectedPosition.x * zoom + next.x
+        const top = selectedPosition.y * zoom + next.y
+        const right = left + result.geometry.laneWidth * zoom
+        const bottom = top + heightOf(selectedNode.id) * zoom
+        const usable = left >= box.x - 1 && right <= box.x + box.width + 1 &&
+          top >= box.y - 1 && bottom <= box.y + box.height + 1
+        if (!usable) onFramingNeedsRoom?.()
       }
-      if (!fits(next, [...direct])) onFramingNeedsRoom?.()
 
       sceneRef.current?.classList.add("is-easing")
       transform.current = next
@@ -889,14 +1000,15 @@ export default function DigitalThreadCanvas({
         if (measured && Number.isFinite(measured)) cardHeights.set(node.id, measured)
       }
       const settledLayout = layoutWithMeasuredCards(layout(counts, box, next.zoom), nodes, cardHeights)
-      offsets.current = synchronize(settledLayout)
+      offsets.current = clampOffsets(offsets.current, settledLayout.laneMinimums.map((minimum, lane) =>
+        Math.min(minimum, deepestMinimum.current[lane] ?? minimum)))
       targets.current = offsets.current.slice()
       const settledFrame = frameNodes(target.wanted, nodes, counts, box, offsets.current, target.selectedId,
         next.zoom, true, { intent: target.intent, selectedCardHeight: cardHeights.get(target.selectedId), cardHeights })
       if (settledFrame) {
         transform.current = settledFrame
         paint()
-        if (!fits(settledFrame, [...direct])) onFramingNeedsRoom?.()
+        
       }
       if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
       easeTimer.current = window.setTimeout(() => {
@@ -974,19 +1086,6 @@ export default function DigitalThreadCanvas({
 
 
   useEffect(() => {
-    if (restorePreview.current && previewSnapshot.current) {
-      transform.current = { ...previewSnapshot.current.transform }
-      offsets.current = [...previewSnapshot.current.offsets]
-      targets.current = [...previewSnapshot.current.targets]
-      // Offsets belong to the saved density's geometry. Comparing them with preview geometry would rescale
-      // them a second time in paint(), shifting a manually rolled lane on exit.
-      geometryRef.current = previewSnapshot.current.geometry
-      previewSnapshot.current = null
-      restorePreview.current = false
-      framedFor.current = framing?.key ?? null
-      paint()
-      return
-    }
     if (!framing) {
       framedFor.current = null
       return
@@ -1074,41 +1173,28 @@ export default function DigitalThreadCanvas({
         if (!start.moved) return
         if (rollable) {
           scrubbing.current = true
+          // The reader now owns this lane for the current context: the reveal never re-plans it, so scrolling
+          // through the revealed cards cannot be undone by the next paint.
+          frozenLanes.current.add(lane)
           offsets.current[lane] = Math.max(
             result.laneMinimums[lane] ?? 0,
             Math.min(0, start.offset + dy / transform.current.zoom),
           )
           targets.current[lane] = offsets.current[lane]
-          const anchor = anchorInLane(
-            nodes,
-            lane,
-            result.geometry,
-            offsets.current,
-            result.bandHeight,
-          )
-          if (anchor) {
-            const measuredHeights = new Map<string, number>()
-            for (const candidate of nodes) {
-              const card = cardRefs.current.get(candidate.id)
-              const height = card?.offsetHeight || card?.scrollHeight
-              if (height && Number.isFinite(height)) measuredHeights.set(candidate.id, height)
-            }
-            targets.current = syncTargets(
-              anchor.id,
-              nodes,
-              edges,
-              result.geometry,
-              offsets.current,
-              result.laneMinimums,
-              lanes.length,
-              lane,
-              measuredHeights,
-            )
-          }
+          // Deliberate lane scrolling no longer drags other lanes into alignment: #1022 keeps the reader's
+          // camera and every other lane exactly where they are.
           settle()
           return
         }
         transform.current = { ...transform.current, x: start.tx + dx, y: start.ty + dy }
+        // A deliberate vertical or diagonal camera move is exploration too: the thread's cards in the lanes
+        // the reader can see stay where they are instead of being re-homed on the next horizontal move.
+        if (Math.abs(dy) > 8) {
+          for (const id of revealDeltas.current.keys()) {
+            const node = nodes.find(candidate => candidate.id === id)
+            if (node) frozenLanes.current.add(node.lane)
+          }
+        }
         paint()
       }
       const up = (upEvent: PointerEvent) => {
@@ -1177,13 +1263,15 @@ export default function DigitalThreadCanvas({
     (node: CanvasNode) => {
       const result = geometryRef.current
       if (!result) return
+      // Explicitly revealing a record is deliberate navigation: the reader owns that lane from here on.
+      frozenLanes.current.add(node.lane)
       const measuredHeights = new Map<string, number>()
       for (const candidate of nodes) {
         const card = cardRefs.current.get(candidate.id)
         const height = card?.offsetHeight || card?.scrollHeight
         if (height && Number.isFinite(height)) measuredHeights.set(candidate.id, height)
       }
-      const measuredPosition = positionsForNodes(nodes, result.geometry, offsets.current, measuredHeights).get(node.id)
+      const measuredPosition = positionsForNodes(nodes, result.geometry, offsets.current, measuredHeights, revealDeltas.current).get(node.id)
       const revealed = offsetToReveal(
         node.row,
         result.geometry,
@@ -1280,7 +1368,7 @@ export default function DigitalThreadCanvas({
       tabIndex={0}
       onWheel={onWheel}
       onPointerDown={onPointerDown}
-      onPointerLeave={exitPreview}
+      onPointerLeave={exitHover}
       onFocusCapture={event => {
         if (!nestedControl(event.target)) return
         // Native focus remains native; only prevent the transformed wrapper from becoming its scroll owner.
@@ -1291,33 +1379,6 @@ export default function DigitalThreadCanvas({
         if (!(event.target as HTMLElement).closest("[data-node-id]")) fitAll()
       }}
     >
-      {preview && previewNode && <div className="dtCanvasHoverTarget" role="button" tabIndex={-1}
-        aria-label="Pin previewed record" style={{ position: "fixed", left: preview.rect.left, top: preview.rect.top, width: preview.rect.width, height: preview.rect.height }}
-        onPointerDown={event => {
-          event.stopPropagation()
-          if (event.button !== 0 || nestedControl(event.target)) return
-          previewDrag.current = { x: event.clientX, y: event.clientY, tx: transform.current.x, ty: transform.current.y, moved: false }
-          event.currentTarget.setPointerCapture(event.pointerId)
-        }}
-        onPointerMove={event => {
-          const drag = previewDrag.current
-          if (!drag) return
-          const dx = event.clientX - drag.x, dy = event.clientY - drag.y
-          if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true
-          if (drag.moved) { transform.current = { ...transform.current, x: drag.tx + dx, y: drag.ty + dy }; paint() }
-        }}
-        onPointerUp={event => {
-          const drag = previewDrag.current
-          previewDrag.current = null
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
-          if (drag && !drag.moved) onSelect(preview.id)
-        }}
-        onPointerCancel={() => { previewDrag.current = null; exitPreview() }}
-        onKeyDown={event => { if (!nestedControl(event.target) && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onSelect(preview.id) } }}
-        onPointerLeave={() => { if (!previewDrag.current) exitPreview() }}>
-        <div>{renderCard(previewNode)}</div>
-        <span>Click to pin story</span>
-      </div>}
       <div
         className="dtCanvasControls"
         role="toolbar"
@@ -1451,16 +1512,22 @@ export default function DigitalThreadCanvas({
                 else cardRefs.current.delete(node.id)
               }}
               onPointerEnter={event => {
-                if (event.pointerType !== "mouse" || event.buttons || preview || node.id === pinnedId) return
+                // Once something is selected, no hover may replace or preview another thread — not even
+                // after the dwell. The guard is on the persistent selection, not on the current emphasis.
+                if (event.pointerType !== "mouse" || event.buttons || pinnedId || node.id === hoverId) return
                 clearPreviewTimer()
-                const rect = event.currentTarget.getBoundingClientRect()
                 previewTimer.current = setTimeout(() => {
-                  previewSnapshot.current = { transform: { ...transform.current }, offsets: [...offsets.current], targets: [...targets.current], geometry: geometryRef.current }
-                  setPreview({ id: node.id, rect })
+                  setHoverId(node.id)
                   onHover?.(node.id)
                 }, 300)
               }}
-              onPointerLeave={clearPreviewTimer}
+              onPointerLeave={() => {
+                clearPreviewTimer()
+                // Leaving the card under the pointer ends only the temporary emphasis. It never touches the
+                // camera, a persistent selection, or the reader's lane positions.
+                setHoverId(current => (current === node.id ? null : current))
+                onHover?.(null)
+              }}
             >
               {renderCard(node)}
             </div>

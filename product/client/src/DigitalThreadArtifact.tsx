@@ -334,7 +334,11 @@ export default function DigitalThreadArtifact({
     [selectedId, tableIdentity, tableRelations, web],
   )
 
-  const cardWeb = useMemo(() => hoveredId ? trace(hoveredId, model.edges) : web, [hoveredId, model.edges, web])
+  // Persistent selection wins: hovering another card while a record is selected must not preview it (#1022).
+  const cardWeb = useMemo(
+    () => (hoveredId && !selectedId ? trace(hoveredId, model.edges) : web),
+    [hoveredId, model.edges, selectedId, web],
+  )
   const renderCard = useCallback(
     (canvasNode: CanvasNode) => {
       const node = byId.get(canvasNode.id)
@@ -559,6 +563,7 @@ export default function DigitalThreadArtifact({
             selectedId={selectedId}
             onSelect={setSelectedId}
             onHover={setHoveredId}
+            scopeKey={`artifact|${initialSelectedId ?? ""}`}
             frameInset={frameInset}
             tracedEdges={web?.edges}
             frameIds={framedForSelection}

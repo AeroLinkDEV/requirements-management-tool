@@ -291,6 +291,8 @@ export interface RevealPlanInput {
   windowByLane: ReadonlyMap<number, RevealWindow>
   /** Lanes the reader owns for this context: never re-planned automatically. */
   frozenLanes: ReadonlySet<number>
+  /** Current displayed displacements, when the caller wants content positions to include them. */
+  deltas?: ReadonlyMap<string, number>
   /** The displayed-lane band the window was derived from, needed for truthful continuation cues. */
   bandHeight: number
 }
@@ -308,7 +310,7 @@ export interface RevealPlan {
  * positive lane offset, which the reader's scroll cannot supply).
  */
 export const planReveal = (input: RevealPlanInput): RevealPlan => {
-  const { nodes, geometry, laneOffsets, measuredHeights, storyIds, subjectId, windowByLane, frozenLanes, bandHeight } = input
+  const { nodes, geometry, measuredHeights, storyIds, subjectId, windowByLane, frozenLanes, bandHeight } = input
   const deltas = new Map<string, number>()
   const cues = new Map<number, { up: boolean; down: boolean }>()
   const heights = (id: string) => measuredHeights?.get(id) ?? geometry.cardHeight
@@ -321,7 +323,6 @@ export const planReveal = (input: RevealPlanInput): RevealPlan => {
   }
   for (const [lane, bucket] of lanes) {
     bucket.sort((a, b) => a.row - b.row || a.id.localeCompare(b.id))
-    const offset = laneOffsets[lane] ?? 0
     const window = windowByLane.get(lane) ?? { top: 0, bottom: bandHeight }
     const cue = { up: false, down: false }
     cues.set(lane, cue)

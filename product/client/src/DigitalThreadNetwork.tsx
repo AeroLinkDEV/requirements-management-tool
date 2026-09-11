@@ -327,7 +327,12 @@ export default function DigitalThreadNetwork({
     [byId, canvasNodes, matchesFilters],
   )
 
-  const cardWeb = useMemo(() => hoveredId ? trace(hoveredId, canvasEdges) : web, [hoveredId, canvasEdges, web])
+  // A persistent selection owns the thread. Hover emphasis exists only while nothing is selected, so the
+  // pointer crossing another card can never preview or replace the selected story (#1022 / supersedes #1016 S10).
+  const cardWeb = useMemo(
+    () => (hoveredId && !selectedId ? trace(hoveredId, canvasEdges) : web),
+    [hoveredId, canvasEdges, selectedId, web],
+  )
   const renderCard = useCallback(
     (canvasNode: CanvasNode) => {
       const node = byId.get(canvasNode.id)
@@ -488,6 +493,7 @@ export default function DigitalThreadNetwork({
             selectedId={selectedId}
             onSelect={setSelectedId}
             onHover={setHoveredId}
+            scopeKey={`network|${buildLabel ?? ""}|${focalId ?? ""}`}
             frameInset={frameInset}
             frameIds={selectedId ? [...(web?.nodes ?? [])] : undefined}
             framingIntent="landing"

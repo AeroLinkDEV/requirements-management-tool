@@ -1,14 +1,21 @@
 import { expect, test, type Page } from "@playwright/test"
 
-test("keyboard activation pins a hovered subject rather than clearing it", async ({ page }) => {
+/**
+ * #1022 supersedes the floating preview target. Hover is now a stationary emphasis: it must not move the
+ * camera, and activation selects the record the reader is actually pointing at.
+ */
+test("hover emphasis is stationary and keyboard activation selects the exact subject", async ({ page }) => {
   await page.goto('/tests/fixtures/change-network.html?case=hover')
   const root = page.locator('[data-node-id="pr-5"]')
   await root.focus()
+  const scene = page.locator('.dtCanvasScene')
+  const before = await scene.getAttribute('style')
   await root.hover()
-  await expect(page.getByRole('button', { name: 'Pin previewed record' })).toBeVisible()
+  await page.waitForTimeout(600) // past the hover dwell, and past the old camera ease
+  await expect(scene).toHaveAttribute('style', before!)
+  await expect(page.locator('.dtCanvasHoverTarget')).toHaveCount(0)
   await page.keyboard.press('Enter')
   await expect(root).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByRole('button', { name: 'Pin previewed record' })).toHaveCount(0)
 })
 
 test("touch pins the same complete story without relying on hover", async ({ browser, baseURL }) => {
@@ -19,8 +26,17 @@ test("touch pins the same complete story without relying on hover", async ({ bro
     const root = page.locator('[data-node-id="pr-5"]')
     await root.tap()
     await expect(root).toHaveAttribute('aria-pressed', 'true')
-    await expect(page.locator('[data-node-id="case-34"]')).not.toHaveClass(/is-offscreen/)
-    await expect(page.getByRole('button', { name: 'Pin previewed record' })).toHaveCount(0)
+    // #1022 accepts clearly indicated off-screen links. The endpoint is either drawn, or it keeps its
+    // truthfully labelled reveal action, and using that action must not disturb the selection.
+    const endpoint = page.locator('[data-node-id="case-34"]')
+    if ((await endpoint.getAttribute('class'))?.includes('is-offscreen')) {
+      const reveal = page.getByRole('button', { name: 'Show HLRTCCR-000034', exact: true })
+      await expect(reveal).toBeVisible()
+      await reveal.click()
+      await expect(endpoint).not.toHaveClass(/is-offscreen/)
+      await expect(root).toHaveAttribute('aria-pressed', 'true')
+    }
+    await expect(page.locator('.dtCanvasHoverTarget')).toHaveCount(0)
   } finally { await context.close() }
 })
 
@@ -41,49 +57,55 @@ test("a dense story keeps individual records and offers a working offscreen reve
   await expect(root).toHaveAttribute('aria-pressed', 'true')
 })
 
-test("hover retrieves a two-hop case change, preserves its pointer target and restores the overview", async ({ page }, testInfo) => {
+test("hover reveals a two-hop endpoint without moving the camera, and selection cannot be replaced by hover", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto("/tests/fixtures/change-network.html?case=hover")
   const root = page.locator('[data-node-id="pr-5"]')
   const endpoint = page.locator('[data-node-id="case-34"]')
   await expect(root).toBeVisible()
   await expect(endpoint).toHaveClass(/is-offscreen/)
-  const snapshot = () => page.locator('.dtCanvasScene, .dtCanvasNode').evaluateAll(elements => elements.map(element => element.getAttribute('style')))
-  const before = await snapshot()
+  const scene = page.locator('.dtCanvasScene')
+  const camera = await scene.getAttribute('style')
+  const rootBox = (await root.boundingBox())!
   await root.hover()
-  const target = page.getByRole('button', { name: 'Pin previewed record' })
-  await expect(target).toBeVisible()
-  await expect(endpoint).not.toHaveClass(/is-offscreen/)
-  await expect(page.locator('[data-node-id="hlr-127"]')).not.toHaveClass(/is-offscreen/)
-  await expect(root).toHaveAttribute('aria-pressed', 'false')
-  await page.mouse.wheel(0, 140)
+  await page.waitForTimeout(700)
+  // Nothing about the camera or the source card changes on hover. A linked record in a lane the camera does
+  // not show yet stays honestly off-screen (with its reveal action) instead of dragging the view to it.
+  await expect(scene).toHaveAttribute('style', camera!)
+  const movedSource = (await root.boundingBox())!
+  expect(Math.abs(movedSource.y - rootBox.y)).toBeLessThanOrEqual(1)
+  expect(Math.abs(movedSource.x - rootBox.x)).toBeLessThanOrEqual(1)
+  // Leaving without selecting returns the temporary arrangement and still keeps the camera.
   await page.mouse.move(2, 2)
-  await expect(target).toHaveCount(0)
-  await expect.poll(snapshot).toEqual(before)
-  await root.hover()
-  await expect(target).toBeVisible()
-  const dragTarget = (await target.boundingBox())!
-  await page.mouse.down()
-  await page.mouse.move(dragTarget.x + dragTarget.width / 2 + 20, dragTarget.y + dragTarget.height / 2 + 15)
-  await page.mouse.up()
-  await expect(root).toHaveAttribute('aria-pressed', 'false')
-  await page.mouse.move(2, 2)
-  await expect.poll(snapshot).toEqual(before)
-  await root.hover()
-  await expect(target).toBeVisible()
-  await target.click()
+  await expect.poll(async () => (await scene.getAttribute('style'))).toBe(camera)
+  // A direct click on the real card selects it; there is no duplicate target to click through.
+  await root.click()
   await page.mouse.move(2, 2)
   await expect(root).toHaveAttribute('aria-pressed', 'true')
-  await expect(endpoint).not.toHaveClass(/is-offscreen/)
+  // The selected story may genuinely reach a lane the camera is not showing; that is the accepted contract, so
+  // the endpoint is either drawn or carries its honest reveal action — never silently missing.
+  if ((await endpoint.getAttribute('class'))?.includes('is-offscreen')) {
+    await expect(page.getByRole('button', { name: 'Show HLRTCCR-000034', exact: true })).toBeVisible()
+  } else {
+    await expect(endpoint).not.toHaveClass(/is-offscreen/)
+  }
   await expect(page.locator('.dtCanvasLaneHead').filter({ hasText: 'TEST CASE CHANGES' })).toBeVisible()
   await expect(page.locator('.dtCanvasLaneHead').filter({ hasText: 'TEST PROCEDURE CHANGES' })).toBeVisible()
   await testInfo.attach('pinned-two-hop-story', { body: await page.screenshot(), contentType: 'image/png' })
-  const pinned = await snapshot()
-  await endpoint.hover()
-  await expect(target).toBeVisible()
+  // While something is selected, pointing at another card must not preview it: the selected subject and the
+  // camera stay exactly as they were, even after the old dwell interval.
+  const selectedCamera = await scene.getAttribute('style')
+  const canvasSubject = () => page.locator('.dtCanvasNode.is-selected').getAttribute('data-node-id')
+  // A card the pointer can actually reach. The off-screen endpoint is deliberately not hoverable: it is faded
+  // and takes no pointer events until the reader brings its lane into view.
+  const other = page.locator('.dtCanvasNode:not(.is-offscreen)').nth(4)
+  await other.hover()
+  await page.waitForTimeout(700)
+  await expect(canvasSubject()).resolves.toBe('pr-5')
   await expect(root).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('.dtCanvasHoverTarget')).toHaveCount(0)
   await page.mouse.move(2, 2)
-  await expect.poll(snapshot).toEqual(pinned)
+  await expect(scene).toHaveAttribute('style', selectedCamera!)
 })
 
 /**
