@@ -165,6 +165,38 @@ export const offLadderLevels = (
     .sort((a, b) => a.level.localeCompare(b.level))
 }
 
+/**
+ * How a verification record's recorded outcome reads (#1016 S13A).
+ *
+ * The outcome and the lifecycle state answer different questions — what the assessment concluded, and how far
+ * that conclusion has got — and one must never be derived from the other. A recorded no-change conclusion in
+ * Draft is not an approved no-change conclusion, so both are shown, separately, in the caller's own layout.
+ */
+export const outcomeLabel = (outcome?: string | null): string | undefined => {
+  if (outcome === "Pending") return "Pending assessment"
+  if (outcome === "ChangeRequired") return "Change required"
+  if (outcome === "NoChangeRequired") return "No change required"
+  return undefined
+}
+
+/**
+ * The record a verification package was raised from, labelled as source context rather than as its identity.
+ *
+ * Interpreted by the origin discriminator, not by reading the source number's prefix: a Case-change origin
+ * and a Case-assessment origin are different kinds of reference and neither is automatically a Case package.
+ */
+export const sourceContextLabel = (verification?: NetworkVerification | null): string | undefined => {
+  const source = verification?.sourceDisplayNumber
+  if (!source) return undefined
+  const kind = verification?.originKind === "ProblemReport" ? "Problem Report"
+    : verification?.originKind === "ChangeRequest" ? "change request"
+      : verification?.originKind === "CaseChange" ? "case change"
+        : verification?.originKind === "CaseAssessment" ? "case assessment"
+          : verification?.originKind === "CaseReview" ? "case review"
+            : undefined
+  return kind ? `Assessing ${kind} ${source}` : `Assessing ${source}`
+}
+
 /** True when a test-change node holds no controlled number, from the server's answer rather than its label. */
 export const isUnnumberedAssessment = (node: NetworkNode): boolean =>
   node.kind === "TestChangeRequest" && node.verification?.hasControlledNumber === false

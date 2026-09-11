@@ -311,3 +311,38 @@ test('an unnumbered assessment routes by its stated discipline and family, not i
     verification: { discipline: 'System', artifactKind: 'Procedure' },
   })).toBe(numbered)
 })
+
+/**
+ * #1016 S13A-02. Absent metadata and unusable metadata are different answers.
+ *
+ * Absent means an older response that never carried the field, and the prefix derivation it was written for
+ * still applies. Present-but-unusable means the projection answered and the answer names no supported
+ * destination — and falling back to the prefix there would mean guessing System, HLR, Case or Procedure out
+ * of a label that, for an unnumbered record, carries none of them. A confidently wrong exact link is worse
+ * than no link.
+ */
+test('verification metadata decides, and an unusable answer refuses rather than guessing', () => {
+  const context = { programId: 'program-a', projectId: 'project-a', releaseId: 'release-a' }
+  const route = (verification: unknown, displayNumber = 'Unnumbered assessment') =>
+    exactTraceArtifactPath(context, {
+      id: 'assessment-a', kind: 'TestChangeRequest', displayNumber, level: 'Procedure',
+      verification: verification as { discipline?: string | null; artifactKind?: string | null } | null,
+    })
+
+  // Present and valid: it decides, and a contradictory label does not get a vote. The prefix here says
+  // software; the record says System.
+  expect(route({ discipline: 'System', artifactKind: 'Procedure' }, 'HLRTPCR-000001.00'))
+    .toContain('/system-verification/change-requests/assessment-a')
+
+  // Present but unusable — refused, not guessed.
+  expect(route({ discipline: 'System' }), 'no artifact kind').toBeUndefined()
+  expect(route({ artifactKind: 'Procedure' }), 'no discipline').toBeUndefined()
+  expect(route({ discipline: 'Interplanetary', artifactKind: 'Procedure' }), 'unknown discipline').toBeUndefined()
+  expect(route({ discipline: 'System', artifactKind: 'Diagram' }), 'unknown family').toBeUndefined()
+  // The System ladder verifies by procedure; a System Case names no supported destination.
+  expect(route({ discipline: 'System', artifactKind: 'Case' }), 'System Case').toBeUndefined()
+
+  // Absent: unchanged compatibility for a response from before the field existed.
+  expect(route(null, 'SYSTPCR-000012.00')).toContain('/system-verification/change-requests/assessment-a')
+  expect(route(undefined, 'LLRTPCR-000012.00')).toContain('/software-verification/llr/change-requests/assessment-a')
+})

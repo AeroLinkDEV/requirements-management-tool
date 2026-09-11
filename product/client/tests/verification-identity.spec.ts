@@ -138,3 +138,110 @@ test("the rendered board shows both assessments, neither as a bare revision nor 
   const badges = await page.locator(".dtnBadge").allTextContents()
   expect(badges.filter(badge => badge === "TCR")).toHaveLength(1)
 })
+
+test("an unnumbered card shows its source as context, and the inspector separates every fact", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/tests/fixtures/change-network.html?case=verification-identity")
+
+  // The card: source context in the secondary line, labelled as what it is assessing, and never appended to
+  // the identifier above it.
+  // Addressed by stable id, not by label — which is the point: both assessments carry the same label, and
+  // selecting one must never be ambiguous with the other.
+  const cards = page.locator(".dtCanvasNode")
+  const assessment = page.locator('[data-node-id="asmt-a"]')
+  await expect(assessment).toBeVisible()
+  await expect(assessment.locator(".dtnSource")).toContainText("Assessing change request SRCR-00039.00")
+  await expect(assessment.locator(".dtnId")).toHaveText("Unnumbered assessment")
+
+  // Nothing spills out of its card — the failure an earlier version of this label caused.
+  const spills = await page.evaluate(() => {
+    const out: string[] = []
+    for (const card of document.querySelectorAll(".dtCanvasScene .dtnCard")) {
+      const box = card.getBoundingClientRect()
+      for (const child of card.querySelectorAll(".dtnId, .dtnPill, .dtnSource")) {
+        const inner = child.getBoundingClientRect()
+        if (!inner.width) continue
+        if (Math.max(box.left - inner.left, inner.right - box.right) > 1) out.push(child.textContent ?? "")
+      }
+    }
+    return out
+  })
+  expect(spills, "card content must stay inside its card").toEqual([])
+
+  // The inspector: four facts, separately labelled, none derived from another.
+  // Activated by keyboard, as the canvas's own specs do: selecting a card reframes the scene, so a pointer
+  // click on a sibling afterwards races the pan. Focus and Enter select without depending on where the
+  // canvas has moved to.
+  const select = async (id: string) => {
+    const card = page.locator(`[data-node-id="${id}"]`)
+    await card.focus()
+    await page.keyboard.press("Enter")
+    await expect(card).toHaveAttribute("aria-pressed", "true")
+  }
+  await select("asmt-a")
+  const facts = page.locator(".dtnVerificationFacts")
+  await expect(facts).toBeVisible()
+  await expect(facts).toContainText("Controlled number")
+  await expect(facts).toContainText("None recorded")
+  await expect(facts).toContainText("Assessing change request SRCR-00039.00")
+  await expect(facts).toContainText("Pending assessment")
+
+  // A recorded no-change conclusion in Draft must not read as approved evidence. Both facts, side by side.
+  await select("asmt-b")
+  await expect(facts).toContainText("No change required")
+  await expect(facts).toContainText("Draft")
+  await expect(facts).not.toContainText("Approved")
+
+  // Selecting the second record shows that record's own source, not the previous selection's.
+  await expect(facts).toContainText("Problem Report PR-00004321.00")
+  await expect(facts).not.toContainText("SRCR-00039.00")
+
+  // The numbered package keeps its controlled identity in the same panel.
+  await expect(cards.filter({ hasText: "Unnumbered assessment" })).toHaveCount(2)
+  await select("tcr-9")
+  await expect(facts).toContainText("SYSTPCR-000012.00")
+  await expect(facts).toContainText("Change required")
+
+  await page.screenshot({ path: "test-results-s13a/verification-identity-inspector.png", fullPage: true })
+})
+
+/**
+ * #1016 S13A-01. The rendered link, through the page's own adapter and the production router.
+ *
+ * `DigitalThreadPage` rebuilds an identity with `exactCardIdentity` before handing it to
+ * `exactTraceArtifactPath`, and that rebuild dropped the verification facts — so the router fell back to
+ * reading the identifier's prefix even though the node had stated its discipline, and an unnumbered System
+ * assessment addressed the software workspace. Asserting the href a rendered card actually carries is the
+ * only way to catch that: a direct call to the router passes either way.
+ */
+test("a rendered unnumbered card links to its own discipline, through the page's adapter", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/tests/fixtures/change-network.html?case=verification-identity")
+
+  const link = page.locator('[data-node-id="asmt-a"] .dtnId')
+  await expect(link).toBeVisible()
+  const href = await link.getAttribute("href") ?? ""
+
+  // The System assessment addresses the System workspace, and carries its own id and full scope.
+  expect(href).toContain("/system-verification/change-requests/asmt-a")
+  expect(href).not.toContain("/software-verification/")
+  expect(href).toContain("/programs/program-a/projects/")
+  expect(href).toContain("kind=Procedure")
+
+  // Its same-label sibling addresses its own record, not this one.
+  const sibling = await page.locator('[data-node-id="asmt-b"] .dtnId').getAttribute("href") ?? ""
+  expect(sibling).toContain("asmt-b")
+  expect(sibling).not.toBe(href)
+
+  // The numbered package is unchanged.
+  expect(await page.locator('[data-node-id="tcr-9"] .dtnId').getAttribute("href") ?? "")
+    .toContain("/system-verification/change-requests/tcr-9")
+
+  // Ordinary activation and a supported new tab reach the same exact record and scope.
+  const opened = context.waitForEvent("page")
+  await link.click({ modifiers: ["ControlOrMeta"] })
+  const newTab = await opened
+  await newTab.waitForURL(url => url.pathname.includes("/change-requests/asmt-a"))
+  expect(new URL(newTab.url()).pathname + new URL(newTab.url()).search).toBe(href)
+  await newTab.close()
+})

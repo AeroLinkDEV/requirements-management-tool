@@ -487,19 +487,40 @@ export function exactTraceArtifactPath(context: RouteContext, node: ExactTraceAr
     // controlled number exists. A record without one — an assessment raised against an approved change —
     // has a label with no prefix to read, and deriving from it sent a System procedure to the software
     // workspace. Nodes from before this metadata existed keep the prefix derivation unchanged.
+    // Three cases, deliberately distinct.
+    //
+    //   absent  — an older response that never carried the field. Keep the prefix derivation exactly as it
+    //             was, so nothing that worked before changes.
+    //   valid   — the projection has answered. Its answer decides, and a display prefix that disagrees does
+    //             not get to override it; the prefix is a reading of these same facts, not a second source.
+    //   present but unusable — an unrecognised discipline or family. Refuse. Falling back to the prefix here
+    //             would mean guessing System, HLR, Case or Procedure out of a label, which for an unnumbered
+    //             record carries none of them, and a confidently wrong exact link is worse than none.
     const stated = node.verification;
-    const statedSystem = stated?.discipline === 'System';
-    const statedSoftware = stated?.discipline === 'HighLevelSoftware' || stated?.discipline === 'LowLevelSoftware';
-    const isSystem = statedSystem || (!statedSoftware
-      && (display.startsWith('SYSTP') || display.startsWith('SYSTCR')));
+    const statedDiscipline = stated?.discipline ?? null;
+    const statedKind = stated?.artifactKind ?? null;
+    const hasMetadata = statedDiscipline != null || statedKind != null;
+    if (hasMetadata) {
+      const disciplines = ['System', 'HighLevelSoftware', 'LowLevelSoftware'];
+      if (!identifier(statedDiscipline) || !disciplines.includes(statedDiscipline)) return undefined;
+      if (statedKind !== 'Case' && statedKind !== 'Procedure') return undefined;
+      const isSystemStated = statedDiscipline === 'System';
+      // The System ladder verifies by procedure; a System Case has no supported destination.
+      if (isSystemStated && statedKind !== 'Procedure') return undefined;
+      const procedureStated = statedKind === 'Procedure';
+      const level = isSystemStated ? 'Procedure'
+        : statedDiscipline === 'LowLevelSoftware'
+          ? (procedureStated ? 'LowLevelProcedure' : 'LowLevel')
+          : (procedureStated ? 'HighLevelProcedure' : 'HighLevel');
+      return routePath(scoped, 'testChangeRequest', isSystemStated ? 'systemTest' : 'softwareTest',
+        node.id, level);
+    }
+    const isSystem = display.startsWith('SYSTP') || display.startsWith('SYSTCR');
     const discipline: Discipline = isSystem ? 'systemTest' : 'softwareTest';
-    const procedure = stated?.artifactKind === 'Procedure' || (stated?.artifactKind !== 'Case'
-      && (node.level?.toLowerCase().includes('procedure') || display.startsWith('SYSTPCR-')
-        || display.startsWith('HLRTPCR-') || display.startsWith('LLRTPCR-')));
-    const lowLevel = stated?.discipline === 'LowLevelSoftware'
-      || (stated?.discipline == null && display.startsWith('LLR'));
+    const procedure = node.level?.toLowerCase().includes('procedure') || display.startsWith('SYSTPCR-')
+      || display.startsWith('HLRTPCR-') || display.startsWith('LLRTPCR-');
     const level = isSystem ? (procedure ? 'Procedure' : undefined)
-      : lowLevel ? (procedure ? 'LowLevelProcedure' : 'LowLevel')
+      : display.startsWith('LLR') ? (procedure ? 'LowLevelProcedure' : 'LowLevel')
         : (procedure ? 'HighLevelProcedure' : 'HighLevel');
     return routePath(scoped, 'testChangeRequest', discipline, node.id, level);
   }

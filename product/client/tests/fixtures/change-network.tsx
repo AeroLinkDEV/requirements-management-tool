@@ -16,6 +16,8 @@ import { createRoot } from "react-dom/client"
 // the 16px default, which would measure type the product never renders.
 import "../../src/index.css"
 import DigitalThreadNetwork from "../../src/DigitalThreadNetwork"
+import { exactCardIdentity } from "../../src/DigitalThreadPage"
+import { exactTraceArtifactPath } from "../../src/routing"
 import type { NetworkEdge, NetworkNode, NetworkProjection } from "../../src/changeNetworkPresentation"
 
 const node = (over: Partial<NetworkNode> & { id: string; kind: string; displayNumber: string }): NetworkNode => ({
@@ -135,8 +137,9 @@ const verificationIdentityProjection: NetworkProjection = {
       displayNumber: "Unnumbered assessment",
       verification: {
         hasControlledNumber: false, outcome: "NoChangeRequired", artifactKind: "Procedure",
-        discipline: "System", originKind: "ChangeRequest", originReferenceId: "sys-9",
-        sourceDisplayNumber: "SRCR-00039.00",
+        discipline: "System", originKind: "ProblemReport", originReferenceId: "pr-9",
+        // Deliberately long: the card truncates rather than spilling, and the inspector shows it whole.
+        sourceDisplayNumber: "PR-00004321.00 oceanic round-robin sequencing field report",
       },
     }),
     node({
@@ -159,6 +162,21 @@ const verificationIdentityProjection: NetworkProjection = {
 }
 const chosen = scenario === "dense" ? denseProjection : scenario === "hover" ? hoverProjection : scenario === "server" ? serverChainProjection : scenario === "verification-identity" ? verificationIdentityProjection : projection
 
+/**
+ * #1016 S13A. The real adapter and the real router, wired exactly as the page wires them.
+ *
+ * `DigitalThreadPage` builds an identity from the node with `exactCardIdentity` and hands it to
+ * `exactTraceArtifactPath`. That rebuild used to drop the verification facts, so the router fell back to
+ * reading the identifier's prefix even though the node stated its discipline — and an unnumbered System
+ * assessment addressed the software workspace. Composing them here means the rendered href is the one the
+ * page produces, not one this fixture computes for itself.
+ */
+const routeContext = { programId: "program-a", projectId: projection.projectId, releaseId: projection.releaseId }
+const hrefFor = (node: Parameters<typeof exactCardIdentity>[0]) => {
+  const identity = exactCardIdentity(node)
+  return identity ? exactTraceArtifactPath(routeContext, identity) : undefined
+}
+
 createRoot(document.getElementById("root")!).render(
-  <DigitalThreadNetwork projection={chosen} buildLabel="Build 1.6" />,
+  <DigitalThreadNetwork projection={chosen} buildLabel="Build 1.6" hrefFor={hrefFor} />,
 )

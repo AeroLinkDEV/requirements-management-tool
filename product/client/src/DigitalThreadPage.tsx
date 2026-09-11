@@ -115,6 +115,7 @@ const EXACT_KIND: Record<string, string> = {
 export const exactCardIdentity = (node: {
   id: string; kind: string; displayNumber?: string | null; level?: string | null
   artifactId?: string | null; buildId?: string | null
+  verification?: { discipline?: string | null; artifactKind?: string | null } | null
 }): ExactTraceArtifact | undefined => {
   const kind = EXACT_KIND[node.kind]
   if (!kind) return undefined
@@ -130,6 +131,13 @@ export const exactCardIdentity = (node: {
     buildId: node.buildId ?? null,
     artifactId: node.artifactId ?? null,
     revisionId: byAggregate ? node.id : null,
+    // Carried through, not reconstructed away (#1016 S13A). A test-change node states its discipline and
+    // artifact family, and the router prefers those to reading the identifier's prefix — which says nothing
+    // at all for a record with no controlled number. Rebuilding the identity without them quietly put the
+    // router back on the prefix branch, so an unnumbered System assessment addressed the software workspace.
+    // Passed through only when the node actually has it; nothing is invented for other families or for
+    // responses from before the field existed.
+    verification: node.verification ?? null,
   }
 }
 
@@ -605,7 +613,7 @@ export default function DigitalThreadPage({
    * kind into the route of another.
    */
   const cardHref = useCallback(
-    (node: { id: string; kind: string; displayNumber?: string | null; level?: string | null; artifactId?: string | null; buildId?: string | null }) => {
+    (node: { id: string; kind: string; displayNumber?: string | null; level?: string | null; artifactId?: string | null; buildId?: string | null; verification?: { discipline?: string | null; artifactKind?: string | null } | null }) => {
       const identity = exactCardIdentity(node)
       return identity ? traceArtifactHref?.(identity) : undefined
     },
