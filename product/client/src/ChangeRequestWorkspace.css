@@ -1078,6 +1078,42 @@ html .reviseAction:disabled { cursor: not-allowed; opacity: .5; }
   background: #f9fbfc;
 }
 
+/* A configured row now names its stage above the person filling it, so the label stacks instead of sitting
+   on one line. The row aligns to the top for the same reason: with two lines in the middle column, centring
+   left the position badge and the row controls floating against the heading they belong to. The heading
+   wraps rather than shrinking, so a long stage name or a long authority stays readable at the widths this
+   panel supports — which is the entire point of showing it. */
+.approverRow:has(.configuredStageHeading) {
+  align-items: start;
+}
+
+.configuredApproverSelect {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.configuredStageHeading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: baseline;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.configuredStageHeading b {
+  color: #21374b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.configuredStageHeading > span {
+  color: #5a7183;
+  font-size: 11px;
+}
+
 .approverRow > span {
   display: grid;
   place-items: center;

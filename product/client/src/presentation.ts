@@ -388,6 +388,19 @@ export const officialBuildName = (version: string) => {
  * These are stored as enum names — `TestLead`, `SoftwareQualityAnalyst` — and every surface that showed
  * somebody's authority showed them exactly like that. A membership list is read by people deciding who to
  * ask for something, and `SoftwareQualityAnalyst` is a database value wearing a job title's clothes.
+ *
+ * This is deliberately **not** the same vocabulary as `authorityRoleLabels`, and the difference is not an
+ * accident to be tidied away. The server keeps the same split: a person's held Program role reads
+ * "Software Quality Analyst" (`AssuranceAuthorityPolicy`, `IdentityRecords`, `ApiSupport`), while the
+ * authority a review stage requires reads "Software Quality Assurance" (`ReviewWorkflow`,
+ * `ApprovalConfigurationEndpoints`, `WorkflowEndpoints`). Who somebody is and what a stage demands of them
+ * are two facts, and collapsing them into one word would make the client disagree with the alerts the
+ * server generates.
+ *
+ * What *was* wrong is coverage: this map knew sixteen names against the authority map's twenty-one, and
+ * both fall back to returning the key unchanged — so a name only the other one carried rendered as a raw
+ * enum while looking exactly like a name that had been formatted correctly. The five it was missing are
+ * added below rather than by borrowing the other vocabulary wholesale.
  */
 const programRoleLabels: Record<string, string> = {
   Engineer: 'Engineer',
@@ -406,6 +419,13 @@ const programRoleLabels: Record<string, string> = {
   EngineeringManager: 'Engineering Manager',
   SoftwareQualityAnalyst: 'Software Quality Analyst',
   Airworthiness: 'Airworthiness',
+  // Present in the authority vocabulary and in ProgramRole, absent here until #1016 S02 — so a person
+  // holding one of these had their role rendered as a stored enum name.
+  SystemTestEngineer: 'System Test Engineer',
+  SoftwareTestEngineer: 'Software Test Engineer',
+  ProjectEngineer: 'Project Engineer',
+  SystemTestLead: 'System Test Lead',
+  SoftwareTestLead: 'Software Test Lead',
 }
 
 export const programRoleLabel = (role: string) => programRoleLabels[role] ?? role
