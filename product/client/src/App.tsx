@@ -610,11 +610,37 @@ function App() {
   // Opening a verification artifact named on a requirement's trace lands in the shared Explorer, which is where
   // the Case or Procedure is read. It used to land on the coverage page, because that page carried the library;
   // that library moved, and a link into a surface that no longer exists is worse than no link.
-  const openVerificationProcedure=(artifact?:{artifactId?:string;procedureId?:string;revisionId?:string;displayNumber?:string;level?:string;artifactKind?:string})=>{
+  type VerificationArtifactTarget = {artifactId?:string;procedureId?:string;revisionId?:string;displayNumber?:string;level?:string;artifactKind?:string};
+  /**
+   * The one address for opening an exact verification artifact, used by the link that shows it and by the
+   * callback that navigates to it (#1016 S03).
+   *
+   * They were two expressions of the same intent and they disagreed: the trace row's identifier advertised an
+   * artifact-record href while an ordinary click on it ran this callback to the Explorer instead, so where a
+   * reader arrived depended on how they clicked. Deriving both from one function is what stops that coming
+   * back — a link cannot advertise one destination and perform another when there is only one to compute.
+   */
+  const verificationProcedurePath=(artifact?:VerificationArtifactTarget)=>{
+    if(!context)return undefined;
+    const area:Discipline=artifact?.level==="System"?"systemTest":"softwareTest";
+    const kind = artifact?.artifactKind === "Procedure" ? "Procedure" : artifact?.artifactKind === "Case" ? "Case" : undefined;
+    const path=routePath(context,"procedureExplorer",area,undefined,artifact?.level);
+    const params=new URLSearchParams();
+    const prefix=area==="systemTest"?"procedure":kind === "Procedure" ? "procedure" : "case";
+    if(artifact?.displayNumber)params.set(prefix,artifact.displayNumber);
+    const artifactId=artifact?.artifactId ?? artifact?.procedureId;
+    if(artifactId)params.set(`${prefix}Id`,artifactId);
+    if(artifact?.revisionId)params.set(`${prefix}RevisionId`,artifact.revisionId);
+    if(area === "softwareTest" && artifact?.level)params.set("artifactLevel", artifact.level);
+    if(area === "softwareTest" && kind)params.set("artifactKind", kind);
+    return `${path}${params.size?`?${params}`:""}`;
+  };
+  const openVerificationProcedure=(artifact?:VerificationArtifactTarget)=>{
     const area:Discipline=artifact?.level==="System"?"systemTest":"softwareTest";
     const kind = artifact?.artifactKind === "Procedure" ? "Procedure" : artifact?.artifactKind === "Case" ? "Case" : undefined;
     updateRoute("view", "procedureExplorer");updateRoute("discipline", area);updateRoute("artifactId", "");updateRoute("artifactKind", kind ?? artifact?.level ?? "");updateRoute("artifactRevisionId", "");updateRoute("requirementRevisionId", "");
-    if(context){const path=routePath(context,"procedureExplorer",area,undefined,artifact?.level);const params=new URLSearchParams();const prefix=area==="systemTest"?"procedure":kind === "Procedure" ? "procedure" : "case";if(artifact?.displayNumber)params.set(prefix,artifact.displayNumber);const artifactId=artifact?.artifactId ?? artifact?.procedureId;if(artifactId)params.set(`${prefix}Id`,artifactId);if(artifact?.revisionId)params.set(`${prefix}RevisionId`,artifact.revisionId);if(area === "softwareTest" && artifact?.level)params.set("artifactLevel", artifact.level);if(area === "softwareTest" && kind)params.set("artifactKind", kind);writeHistory("pushState", `${path}${params.size?`?${params}`:""}`)}
+    const path=verificationProcedurePath(artifact);
+    if(path)writeHistory("pushState", path);
   };
   // The inverse of the procedure deep link: a procedure trace names an exact requirement revision, and the
   // Requirements Explorer must open that exact revision rather than whichever revision is newest now.
@@ -924,16 +950,16 @@ function App() {
         }) : undefined}
         onCloseRequirement={() => navigate("requirements", discipline, undefined, undefined, true)}
          onOpenTraceability={(artifactId) => navigate("lifecycle", discipline, artifactId, artifactId ? "requirement" : undefined)}
-         verificationArtifactHref={artifact => {
-           const kind = artifact.artifactKind === "Case" ? "TestCase" : artifact.artifactKind === "Procedure" ? "TestProcedure" : undefined;
-           return context && kind ? exactTraceArtifactPath(context, {
-             id: artifact.artifactId,
-             kind,
-             revisionId: artifact.artifactRevisionId ?? artifact.revisionId,
-             displayNumber: artifact.displayNumber,
-             level: artifact.level,
-           }) : undefined;
-         }}
+         // The same address the click performs. This used to build an artifact-record path while the click
+         // ran openVerificationProcedure to the Explorer, so the identifier advertised one destination and
+         // delivered another depending on how it was activated. Both now come from one function.
+         verificationArtifactHref={artifact => verificationProcedurePath({
+           artifactId: artifact.artifactId,
+           revisionId: artifact.artifactRevisionId ?? artifact.revisionId,
+           displayNumber: artifact.displayNumber,
+           level: artifact.level,
+           artifactKind: artifact.artifactKind,
+         })}
          onOpenVerification={openVerificationProcedure}
       />
     );

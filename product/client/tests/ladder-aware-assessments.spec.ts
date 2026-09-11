@@ -213,9 +213,11 @@ test('an applicable HLR queue distinguishes loading and a successful empty resul
   await page.goto(buildPath(showcase, 'software/change-requests?level=HLR'), { waitUntil: 'domcontentloaded' })
   const queue = page.locator('.downstreamQueue')
   await expect(queue).toHaveAttribute('data-queue-state', 'loading')
-  await expect(queue).toContainText('Approved upstream changes waiting for an explicit HLR engineering conclusion.')
+  // #1016 S04. The description no longer claims every row is waiting for a conclusion — the queue holds
+  // superseded and completed rows too — and 'Downstream Assessments' is now the term throughout.
+  await expect(queue).toContainText('Approved upstream changes and their HLR engineering conclusions, pending and recorded.')
   await expect(queue).toHaveAttribute('data-queue-state', 'empty')
-  await expect(queue).toContainText('No HLR downstream assessments are currently recorded.')
+  await expect(queue).toContainText('No HLR Downstream Assessments are currently recorded.')
   expect(assessmentRequests).toBe(1)
 })
 

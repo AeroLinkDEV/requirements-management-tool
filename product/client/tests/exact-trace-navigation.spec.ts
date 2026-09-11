@@ -125,13 +125,14 @@ test("a trace row offers one exact navigation action, and refuses to offer one i
   await expect(unresolved).toHaveText("SYSR-000999.04")
   await expect(unresolved).toHaveAttribute("title", "This requirement revision is not available as an exact link")
 
-  // Verification coverage keeps two controls, and they declare two destinations. This asserts only what the
-  // identifier *says*. That it also goes there under every way of activating it is the separate regression
-  // below, which is where the R3-01 defect actually lived: the href and the click handler disagreed.
+  // Verification coverage keeps two controls. This asserts only what the identifier *says*; where it actually
+  // goes under each way of activating it is the separate regression below, which is where the R3-01 defect
+  // lived — the href and the click handler named different destinations.
   const testRow = inspector.locator(".traceRelation").filter({ hasText: "SYSTP-000042.01" })
   const procedureHref = await testRow.locator("a").getAttribute("href") ?? ""
-  expect(procedureHref).toContain("/artifacts/test-procedure/procedure-artifact")
-  expect(procedureHref).toContain("revisionId=66666666-7777-8888-9999-aaaaaaaaaaaa")
+  expect(procedureHref).toContain("/system-verification/procedures")
+  expect(procedureHref).toContain("procedureId=procedure-artifact")
+  expect(procedureHref).toContain("procedureRevisionId=66666666-7777-8888-9999-aaaaaaaaaaaa")
   await expect(testRow.getByRole("button", { name: "Resolve in Verification →" })).toBeVisible()
 })
 
@@ -223,7 +224,7 @@ test("the exact trace link is operable by keyboard, opens in a new tab, and surv
  * own selection, so the destinations are records that exist. The coverage *relation* is supplied, because the
  * seeded requirement carries none — that limit is stated rather than implied.
  */
-test("the verification identifier goes where it says, by click, keyboard and new tab — and Resolve does not", async ({ page, request, context }) => {
+test("the verification identifier goes where it says by click, keyboard and new tab, and Resolve reaches the same place", async ({ page, request, context }) => {
   test.setTimeout(300_000)
   await apiLogin(request)
   await login(page, "admin", { openProject: false })
@@ -277,21 +278,30 @@ test("the verification identifier goes where it says, by click, keyboard and new
   const identifier = row.locator("a")
   await expect(identifier).toBeVisible({ timeout: 30_000 })
 
-  const declared = `${root}/artifacts/test-procedure/${procedureId}?revisionId=${procedureRevisionId}`
+  // The declared destination is the Procedure Explorer, deep-linked to this exact procedure revision. That
+  // is where a procedure is read, and `software-builds.spec.ts` has asserted this link lands there since the
+  // procedure library moved. The defect was never which destination was right — it was that the href named
+  // one and an ordinary click performed another.
+  const declared = `${root}/system-verification/procedures`
+    + `?procedure=${encodeURIComponent(procedureNumber)}`
+    + `&procedureId=${procedureId}&procedureRevisionId=${procedureRevisionId}`
   expect(await identifier.getAttribute("href")).toBe(declared)
   const subjectUrl = page.url()
   const here = () => new URL(page.url()).pathname + new URL(page.url()).search
   // Back returns to the requirement, but the inspector reopens on its default tab. Re-selecting Trace is
   // part of getting back to the row, not part of what is being proved.
+  // Compared by path, not by the whole address: returning here re-establishes the requirement's own exact
+  // revision in the query, which is correct and is not what this test is about.
+  const subjectPath = new URL(subjectUrl).pathname
   const backToTraceTab = async () => {
     await page.goBack()
-    await expect.poll(() => page.url()).toBe(subjectUrl)
+    await expect.poll(() => new URL(page.url()).pathname).toBe(subjectPath)
     if (!(await identifier.count())) await page.getByRole("tab", { name: "Trace & impact" }).click()
     await expect(identifier).toBeVisible()
   }
 
-  // (A) Ordinary click. This is the assertion that fails on the old wiring: with `onOpen` present the link
-  // suppressed its own navigation and landed on /system-verification/procedures instead.
+  // (A) Ordinary click. On the old wiring the href named an artifact-record address while this click went to
+  // the Explorer, so the two disagreed; the assertion holds only once both come from one function.
   await identifier.click()
   await expect.poll(here).toBe(declared)
   await expect(page.locator("body")).toContainText(procedureNumber)
@@ -308,17 +318,21 @@ test("the verification identifier goes where it says, by click, keyboard and new
   const opened = context.waitForEvent("page")
   await identifier.click({ modifiers: ["ControlOrMeta"] })
   const newTab = await opened
-  await newTab.waitForURL(url => url.pathname.includes("/artifacts/test-procedure/"))
+  await newTab.waitForURL(url => url.pathname.endsWith("/system-verification/procedures"))
   expect(new URL(newTab.url()).pathname + new URL(newTab.url()).search).toBe(declared)
   await newTab.close()
-  expect(page.url()).toBe(subjectUrl)
+  expect(new URL(page.url()).pathname).toBe(subjectPath)
 
-  // (D) Resolve is the other destination, and still is: the Verification (Procedure) Explorer, deep-linked to
-  // this exact procedure revision. Not the artifact record, and not a guess — the identity travels with it.
+  // (D) Resolve, recorded as it actually behaves. It reaches the same Explorer address as the identifier and
+  // carries the same exact identity — two controls, one destination. That is asserted here as the current
+  // truth rather than described as a distinct action, which is what an earlier review packet claimed on the
+  // strength of reading the two call sites instead of activating them. Whether this control should be removed
+  // or given a destination of its own is a decision about the coverage workflow, not about this link.
+  await backToTraceTab()
   await row.getByRole("button", { name: "Resolve in Verification →" }).click()
   await expect.poll(() => new URL(page.url()).pathname).toBe(`${root}/system-verification/procedures`)
   const resolved = new URL(page.url()).searchParams
   expect(resolved.get("procedureId")).toBe(procedureId)
   expect(resolved.get("procedureRevisionId")).toBe(procedureRevisionId)
-  expect(here()).not.toBe(declared)
+  expect(here(), "identifier and Resolve currently share one destination").toBe(declared)
 })

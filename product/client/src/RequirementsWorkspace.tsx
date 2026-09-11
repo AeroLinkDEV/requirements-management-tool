@@ -1496,18 +1496,18 @@ export default function RequirementsWorkspace({
                 {impact?.children.map((item) => <article className="traceRelation" key={item.id}><div className="traceRelationTarget">{impactRequirementLink(item)}</div><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
                 {!impact?.children.length && <div className="traceEmpty"><span>No downstream requirement is recorded.</span></div>}
                 <h3>Verification coverage</h3>
-                {/* The identifier carries no `onOpen`, deliberately.
-                    It used to, and the callback went somewhere its own href did not. `ExactArtifactLink`
-                    suppresses the native navigation on an ordinary primary click whenever `onOpen` is
-                    supplied, so the row had two destinations for one control: a plain click reached the
-                    Verification Explorer by way of `openVerificationProcedure`, while Ctrl-click,
-                    middle-click and copy-link followed the exact artifact-record href. The same identifier
-                    took a reader to two different places depending on how they clicked it, and the one a
-                    plain click reached was not the one the link said it would.
-                    Without the override the anchor is simply an anchor: one declared destination, honoured
-                    by pointer, keyboard and new tab alike. "Resolve in Verification" keeps the callback,
-                    because settling a suspect applicability genuinely is the other destination. */}
-                {impact?.tests.map((item) => { const unsettled = item.coverageState !== "Confirmed"; const target = { artifactId: item.id, revisionId: item.artifactRevisionId ?? item.revisionId, artifactRevisionId: item.artifactRevisionId, artifactKind: item.artifactKind, displayNumber: item.displayNumber, level: item.level }; const noun = verificationArtifactNoun(item.level).toLowerCase(); return <article className={`traceRelation${unsettled ? " attention" : ""}`} key={item.artifactRevisionId ?? item.revisionId ?? item.id}><ExactArtifactLink className="linkedArtifactText" href={verificationArtifactHref?.(target)} title={verificationArtifactHref?.(target) ? "Open this exact verification artifact" : undefined}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · Open {noun} →</small></ExactArtifactLink><small>{unsettled ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{unsettled && <button type="button" onClick={() => onOpenVerification(target)}>Resolve in Verification →</button>}</article>; })}
+                {/* The identifier's href and its click now come from one function in App (#1016 S03).
+                    They used to disagree: `ExactArtifactLink` suppresses native navigation when `onOpen` is
+                    supplied, so an ordinary click ran `openVerificationProcedure` to the Procedure Explorer
+                    while Ctrl-click, middle-click and copy-link followed an artifact-record href. One
+                    identifier, two destinations, chosen by how a reader happened to click.
+                    The Explorer is the intended destination — `software-builds.spec.ts` has asserted that
+                    since the procedure library moved there — so the href was corrected to it rather than the
+                    click being corrected away from it.
+                    That leaves "Resolve in Verification" pointing at the same address as the identifier.
+                    It is reported rather than resolved here: removing a control or giving it a different
+                    destination is a decision about the coverage workflow, not about this link. */}
+                {impact?.tests.map((item) => { const unsettled = item.coverageState !== "Confirmed"; const target = { artifactId: item.id, revisionId: item.artifactRevisionId ?? item.revisionId, artifactRevisionId: item.artifactRevisionId, artifactKind: item.artifactKind, displayNumber: item.displayNumber, level: item.level }; const noun = verificationArtifactNoun(item.level).toLowerCase(); return <article className={`traceRelation${unsettled ? " attention" : ""}`} key={item.artifactRevisionId ?? item.revisionId ?? item.id}><ExactArtifactLink className="linkedArtifactText" href={verificationArtifactHref?.(target)} onOpen={verificationArtifactHref?.(target) ? () => onOpenVerification(target) : undefined} title={verificationArtifactHref?.(target) ? "Open this exact verification artifact" : undefined}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · Open {noun} →</small></ExactArtifactLink><small>{unsettled ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small>{unsettled && <button type="button" onClick={() => onOpenVerification(target)}>Resolve in Verification →</button>}</article>; })}
                 {!impact?.tests.length && <div className="traceEmpty attention"><span>No verification artifact currently covers this revision.</span></div>}
               </div>
             )}
