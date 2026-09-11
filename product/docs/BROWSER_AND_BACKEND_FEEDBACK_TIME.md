@@ -683,15 +683,22 @@ underlying study: CG942-A-1, CG942-B-1, CG942-B2-1 and CG942-D-1, with a final m
 
 ### Where the underlying evidence lives
 
-The delivered changes below carry their own accepted acceptance records on their pull requests and issues.
-The investigation that produced the observations in this section, its independent reviews, and the adopted
-disposition record are recorded on
-[#942](https://github.com/AeroLinkDEV/requirements-management-tool/issues/942).
+Delivery-specific records are identified by the pull-request links below.
+[#942](https://github.com/AeroLinkDEV/requirements-management-tool/issues/942) is the issue-level history
+for this review.
+
+OWNER-942-SCOPE-01 was adopted through Sean's forwarded instruction. Adoption is distinct from publication:
+at this local documentation-preparation stage, the owner-decision comment is **prepared, not posted**.
+Recording the adopted decision on #942 is a separately authorized closeout step, not a new scope decision.
+This section does not assert that the full owner record or every independent review has already been
+published on GitHub.
 
 The raw run captures, observation ledger, failed-run classification extract and reviewer method addendum
 behind the figures in this section were prepared as a local evidence packet and have **no public reference**.
-Where a statement below depends on them, the necessary qualification is stated inline rather than delegated
-to a link.
+Independent review reproduced the supplied ledger arithmetic and specified artifact consistency checks;
+it did not independently authenticate the completeness and provenance of every underlying execution capture.
+Where a statement below depends on that packet, its necessary qualification is stated inline rather than
+delegated to a link.
 
 ### What was delivered under the review
 
@@ -701,14 +708,14 @@ own measurement boundary and are not hosted whole-gate results.
 
 | Delivery | What it did |
 |---|---|
-| #946 | Evidence and count reconciliation; scheduled browser completion required in the scheduled gate |
-| #947 | Refreshed browser scheduling weights from recent queue evidence, with a provenance record |
-| #949 | Isolated client behaviour checks in the advisory Fast lane |
-| #951, #953 | Native operator-contract deduplication; backend test-project graph builds |
-| #952, #1013 | Targeted persistence and lifecycle-seed scan reductions |
-| #962, #1009 | Advisory API-packing report, authenticated observation collector and controlled benchmark — advisory, not wired into ordinary CI |
-| #1010 | Standalone queue-to-main evidence reuse evaluator — shadow only, no skip authority |
-| #1012 | Retained browser API logging — **diagnostics, not a demonstrated reliability fix** |
+| [#946](https://github.com/AeroLinkDEV/requirements-management-tool/pull/946) | Evidence and count reconciliation; scheduled browser completion required in the scheduled gate |
+| [#947](https://github.com/AeroLinkDEV/requirements-management-tool/pull/947) | Refreshed browser scheduling weights from recent queue evidence, with a provenance record |
+| [#949](https://github.com/AeroLinkDEV/requirements-management-tool/pull/949) | Isolated client behaviour checks in the advisory Fast lane |
+| [#951](https://github.com/AeroLinkDEV/requirements-management-tool/pull/951), [#953](https://github.com/AeroLinkDEV/requirements-management-tool/pull/953) | Native operator-contract deduplication; backend test-project graph builds |
+| [#952](https://github.com/AeroLinkDEV/requirements-management-tool/pull/952), [#1013](https://github.com/AeroLinkDEV/requirements-management-tool/pull/1013) | Targeted persistence and lifecycle-seed scan reductions |
+| [#962](https://github.com/AeroLinkDEV/requirements-management-tool/pull/962), [#1009](https://github.com/AeroLinkDEV/requirements-management-tool/pull/1009) | Advisory API-packing report, authenticated observation collector and controlled benchmark — advisory, not wired into ordinary CI |
+| [#1010](https://github.com/AeroLinkDEV/requirements-management-tool/pull/1010) | Standalone queue-to-main evidence reuse evaluator — shadow only, no skip authority |
+| [#1012](https://github.com/AeroLinkDEV/requirements-management-tool/pull/1012) | Retained browser API logging — **diagnostics, not a demonstrated reliability fix** |
 
 The earlier sections of this document remain the detailed record for the sharding, packing and cadence work
 that preceded them.
@@ -826,10 +833,10 @@ performance regression can never recur.
 
 ### Adopted dispositions (OWNER-942-SCOPE-01)
 
-A **condensed summary** of the adopted decisions, not a verbatim quotation; the full text is the owner
-decision record on #942. Labels are deliberate: **AMENDED FOR CLOSEOUT**, **DEFERRED**, **RETAINED**,
-**NOT PURSUED** and **UNEXERCISED** are not "passed". The decision identifiers D1–D7c are mapped to their
-findings so every adopted decision is accounted for.
+A **condensed summary** of OWNER-942-SCOPE-01 as adopted through Sean's forwarded instruction, not a
+verbatim quotation or a claim that the full decision has already been posted to #942. Labels are deliberate:
+**AMENDED FOR CLOSEOUT**, **DEFERRED**, **RETAINED**, **NOT PURSUED** and **UNEXERCISED** are not "passed".
+The decision identifiers D1–D7c are mapped to their findings so every adopted decision is accounted for.
 
 | Item | Decision | Disposition |
 |---|---|---|
@@ -841,7 +848,6 @@ findings so every adopted decision is accounted for.
 | **F8** recurrence control | D2 | **RETAINED** as the next planned engineering follow-on, in all three parts: an absolute critical-path budget, a long-window comparison, and automated suite-size counters. |
 | **F9** browser selection | D5 | **RETAIN BROAD COVERAGE.** No selection change. An owner decision under uncertainty, not experimental disproof of every narrower policy. |
 | **F10** changed-area-weighted backend Fast | D7c | **RETAINED** as lower-priority, separately scoped design/qualification work. Full remains merge authority; the Fast budget evidence remains unresolved. |
-
 | **This reconciliation** | D6 | Local documentation preparation authorized; **publication and integration require their separately authorized stage**. |
 
 Retained obligations are recorded under their existing identifiers. **Creating a child issue does not complete
