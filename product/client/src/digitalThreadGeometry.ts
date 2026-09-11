@@ -255,19 +255,17 @@ export const contentPositionsForNodes = (
   return new Map([...displayed].map(([id, position]) => [id, position.y]))
 }
 
-/** The lane area the camera actually shows, in content coordinates, or null when the band is off screen. */
+/** A lane's usable area. In content coordinates for placement, in displayed coordinates for scroll limits. */
 export interface RevealWindow {
-  /** Top of the usable area, in content coordinates. */
   top: number
-  /** Bottom of the usable area, in content coordinates. */
   bottom: number
 }
 
-export const revealWindowForLane = (
+/** The lane area the camera actually shows, in displayed-lane coordinates; null when the band is off screen. */
+export const displayedWindowForLane = (
   bandHeight: number,
   frame: CanvasFrame,
   transform: { y: number; zoom: number },
-  laneOffset: number,
 ): RevealWindow | null => {
   const zoom = transform.zoom || 1
   const sceneTop = (frame.y - transform.y) / zoom
@@ -275,10 +273,14 @@ export const revealWindowForLane = (
   const a = Math.max(0, sceneTop)
   const b = Math.min(bandHeight, sceneBottom)
   if (b - a < 1) return null
-  // Displayed-lane coordinates become content coordinates by removing the deliberate lane scroll. The
-  // reachability predicate solves for that offset and therefore works in displayed coordinates instead.
-  return { top: a - laneOffset, bottom: b - laneOffset }
+  return { top: a, bottom: b }
 }
+
+/** The same window expressed in content coordinates, for deciding where a card can be placed. */
+export const contentWindow = (displayed: RevealWindow, laneOffset: number): RevealWindow => ({
+  top: displayed.top - laneOffset,
+  bottom: displayed.bottom - laneOffset,
+})
 
 export interface RevealPlanInput {
   nodes: readonly CanvasNode[]
@@ -291,8 +293,13 @@ export interface RevealPlanInput {
   windowByLane: ReadonlyMap<number, RevealWindow>
   /** Lanes the reader owns for this context: never re-planned automatically. */
   frozenLanes: ReadonlySet<number>
-  /** Current displayed displacements, when the caller wants content positions to include them. */
-  deltas?: ReadonlyMap<string, number>
+  /**
+   * Displacements already displayed for this context.
+   *
+   * Reader-owned lanes are never re-planned, so their entries are returned unchanged: a lane that is frozen
+   * must keep its active arrangement rather than animate home because it is absent from a new plan.
+   */
+  existing?: ReadonlyMap<string, number>
   /** The displayed-lane band the window was derived from, needed for truthful continuation cues. */
   bandHeight: number
 }
@@ -314,7 +321,7 @@ export const planReveal = (input: RevealPlanInput): RevealPlan => {
   const deltas = new Map<string, number>()
   const cues = new Map<number, { up: boolean; down: boolean }>()
   const heights = (id: string) => measuredHeights?.get(id) ?? geometry.cardHeight
-  const content = contentPositionsForNodes(nodes, geometry, measuredHeights, input.deltas)
+  const content = contentPositionsForNodes(nodes, geometry, measuredHeights)
   const lanes = new Map<number, CanvasNode[]>()
   for (const node of nodes) {
     const bucket = lanes.get(node.lane)
@@ -334,7 +341,15 @@ export const planReveal = (input: RevealPlanInput): RevealPlan => {
       if (cardTop + heights(node.id) <= window.top) cue.up = true
       else if (cardTop >= window.bottom) cue.down = true
     }
-    if (frozenLanes.has(lane)) continue
+    if (frozenLanes.has(lane)) {
+      // Reader-owned: retain exactly what is displayed. Never in the plan means "retire" only for lanes that
+      // are not frozen, so absence cannot be mistaken for an instruction to send these cards home.
+      for (const node of bucket) {
+        const displayed = input.existing?.get(node.id)
+        if (displayed) deltas.set(node.id, displayed)
+      }
+      continue
+    }
 
     const eligible = bucket.filter(node => {
       if (node.id === subjectId || !storyIds.has(node.id)) return false
@@ -418,6 +433,57 @@ export const laneScrollMinimum = (input: {
     .filter(card => card.h <= height)
     .map(card => window.bottom - card.h - card.q)
   return Math.min(0, bandHeight - contentEnd, ...tail)
+}
+
+/**
+ * One effective geometry for the displayed arrangement.
+ *
+ * The lane's extent is measured in content coordinates from the cards as they are actually displayed —
+ * ordinary position plus temporary displacement — and its scroll minimum also honours the usable-window
+ * requirement of every card the reader can legitimately reach by scrolling. Paint, rollability, pointer
+ * scrolling, explicit reveal and framing all consume this result rather than deriving their own bounds.
+ */
+export const effectiveLaneLimits = (input: {
+  nodes: readonly CanvasNode[]
+  geometry: CanvasGeometry
+  bandHeight: number
+  measuredHeights?: ReadonlyMap<string, number>
+  deltas: ReadonlyMap<string, number>
+  /** Usable window per lane in displayed-lane coordinates; absent when the lane is vertically off screen. */
+  displayedWindowByLane: ReadonlyMap<number, RevealWindow>
+}): Map<number, { contentEnd: number; minimum: number }> => {
+  const { nodes, geometry, bandHeight, measuredHeights, deltas, displayedWindowByLane } = input
+  const content = contentPositionsForNodes(nodes, geometry, measuredHeights)
+  const heightOf = (id: string) => measuredHeights?.get(id) ?? geometry.cardHeight
+  const byLane = new Map<number, CanvasNode[]>()
+  for (const node of nodes) {
+    const bucket = byLane.get(node.lane)
+    if (bucket) bucket.push(node)
+    else byLane.set(node.lane, [node])
+  }
+  const limits = new Map<number, { contentEnd: number; minimum: number }>()
+  for (const [lane, bucket] of byLane) {
+    const effectiveTop = (node: CanvasNode) => (content.get(node.id) ?? 0) + (deltas.get(node.id) ?? 0)
+    const contentEnd = Math.max(
+      geometry.pad,
+      ...bucket.map(node => effectiveTop(node) + heightOf(node.id) + geometry.pad),
+    )
+    const window = displayedWindowByLane.get(lane)
+    const minimum = window
+      ? laneScrollMinimum({
+          bandHeight,
+          contentEnd,
+          window,
+          // Only cards that are not above the window can be reached by scrolling; an oversized or
+          // above-window card keeps its truthful partial/Show treatment instead of stretching the bound.
+          promised: bucket
+            .filter(node => effectiveTop(node) >= window.top - 0.5 && heightOf(node.id) <= window.bottom - window.top)
+            .map(node => ({ q: effectiveTop(node), h: heightOf(node.id) })),
+        })
+      : Math.min(0, bandHeight - contentEnd)
+    limits.set(lane, { contentEnd, minimum })
+  }
+  return limits
 }
 
 /** Use spare viewport room for measured cards before requiring a lane to roll. */

@@ -846,6 +846,19 @@ test.describe("a rolled lane survives a re-render", () => {
     // The roll must actually have moved something, or the rest of this asserts nothing.
     expect(rolled.some(card => card.y < 0)).toBe(true)
 
+    // This must be an UNSELECTED hover: the fixture selects its focal record on arrival, so clear it first and
+    // prove the empty state, otherwise the selected-state guard would block the hover and the test would be
+    // asserting selection stability under a different name.
+    await page.keyboard.press("Escape")
+    await page.waitForTimeout(300)
+    await expect(page.locator(".dtaCard.is-selected")).toHaveCount(0)
+    await expect(page.locator('.dtCanvasNode[aria-pressed="true"]')).toHaveCount(0)
+    // Clearing the focal selection legitimately retires that thread's temporary displacements, so the
+    // comparison baseline is the board as it stands *now* — after the clear, before the hover.
+    await page.waitForTimeout(600)
+    const cleared = await cardPositions(page)
+    expect(cleared.some(card => card.y < 0)).toBe(true)
+
     // #1022 supersedes DEC-126's hover rearrangement: hover displaces only out-of-view linked cards, and the
     // reader's own lane roll must survive the emphasis ending.
     const candidate = page.locator('.dtCanvasNode:not(.is-offscreen)[aria-pressed="false"]').first()
@@ -853,11 +866,13 @@ test.describe("a rolled lane survives a re-render", () => {
     const camera = await page.locator('.dtCanvasScene').getAttribute('style')
     await candidate.hover()
     await page.waitForTimeout(600)
+    // The emphasis actually began: something is now traced (fewer pushed-back cards than the resting board).
+    await expect(page.locator(".dtaCard.is-untraced").first()).toBeVisible()
     await expect(page.locator('.dtCanvasHoverTarget')).toHaveCount(0)
     await expect(page.locator('.dtCanvasScene')).toHaveAttribute('style', camera!)
     await page.mouse.move(1, 1)
     await page.waitForTimeout(600)
-    await expect.poll(async () => positionsMatch(rolled, await cardPositions(page))).toBe(true)
+    await expect.poll(async () => positionsMatch(cleared, await cardPositions(page))).toBe(true)
     await expect(canvas).toBeVisible()
   })
 

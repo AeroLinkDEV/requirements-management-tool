@@ -26,7 +26,9 @@ import {
   placeEdgeLabels,
   READABLE_SELECTION_MIN_ZOOM,
   rescaleOffsets,
-  revealWindowForLane,
+  contentWindow,
+  displayedWindowForLane,
+  effectiveLaneLimits,
   stepTowards,
   wheelFactor,
   zoomAbout,
@@ -162,11 +164,22 @@ export default function DigitalThreadCanvas({
   const revealTargets = useRef<Map<string, number>>(new Map())
   /** Lanes the reader owns for the current context. Automatic reveal never re-plans them. */
   const frozenLanes = useRef<Set<number>>(new Set())
+  /** Lanes that have already had a usable exposure in this context: their arrangement is not re-planned. */
+  const visitedLanes = useRef<Set<number>>(new Set())
+  /** The emphasis subject the ownership sets belong to; a different subject starts a new context. */
+  const subjectOwnership = useRef<string | null | undefined>(undefined)
+  /** Effective per-lane scroll minimum for the arrangement as displayed and as it is heading. */
+  const limitsRef = useRef<Map<number, number>>(new Map())
   /** The deepest scroll extent this scope has needed per lane, so cleanup cannot snap the reader's lane. */
   const deepestMinimum = useRef<number[]>([])
   /** The lane windows the last plan was built against, so an unchanged view is not re-planned. */
   const revealSignature = useRef("")
   const sourceSignature = sourceNodes.map(node => `${node.id}:${node.lane}:${node.row}`).join("|")
+  /** Traced relationships are a real planning input: a re-pointed edge must not leave a stale arrangement. */
+  const edgesKey = useMemo(
+    () => edges.map(edge => `${edge.from}>${edge.to}:${edge.label}`).join("|"),
+    [edges],
+  )
   useEffect(() => {
     if (previewTimer.current !== null) clearTimeout(previewTimer.current)
     previewTimer.current = null
@@ -461,8 +474,9 @@ export default function DigitalThreadCanvas({
      */
     while (deepestMinimum.current.length < lanes.length) deepestMinimum.current.push(0)
     const floors = result.laneMinimums.map((minimum, lane) => {
-      const deep = Math.min(deepestMinimum.current[lane] ?? minimum, minimum)
-      deepestMinimum.current[lane] = (offsets.current[lane] ?? 0) >= minimum ? minimum : deep
+      const effective = Math.min(minimum, limitsRef.current.get(lane) ?? minimum)
+      const deep = Math.min(deepestMinimum.current[lane] ?? effective, effective)
+      deepestMinimum.current[lane] = (offsets.current[lane] ?? 0) >= effective ? effective : deep
       return deepestMinimum.current[lane]
     })
     offsets.current = clampOffsets(offsets.current, floors)
@@ -475,18 +489,38 @@ export default function DigitalThreadCanvas({
      * reader owns are excluded, and a lane the camera cannot show vertically prepares against its full band
      * so its first arrival is useful.
      */
-    const windowSignature = lanes.map((_, lane) => {
-      const window = revealWindowForLane(result.bandHeight, box, transform.current, offsets.current[lane] ?? 0)
-      return window ? `${lane}:${Math.round(window.top)}-${Math.round(window.bottom)}` : `${lane}:hidden`
-    }).join(",")
-    const revealKey = `${scopeKey}|${emphasisId ?? ""}|${result.tier}|${windowSignature}|${sourceSignature}`
+    /**
+     * First useful exposure.
+     *
+     * The plan is recomputed when the subject changes, when the traced relationships or measured heights
+     * change, when the tier changes, or when an *unvisited* lane becomes usable — never for ordinary lane or
+     * vertical camera movement, and never for a lane the reader has already had in front of them (visited) or
+     * has taken ownership of (frozen).
+     */
+    if (subjectOwnership.current !== emphasisId) {
+      subjectOwnership.current = emphasisId
+      frozenLanes.current = new Set()
+      visitedLanes.current = new Set()
+      revealSignature.current = ""
+    }
+    const displayedWindow = displayedWindowForLane(result.bandHeight, box, transform.current)
+    const usable = new Set<number>()
+    for (let lane = 0; lane < lanes.length; lane += 1) {
+      const laneLeft = lane * result.geometry.lanePitch * transform.current.zoom + transform.current.x
+      const laneRight = laneLeft + result.geometry.laneWidth * transform.current.zoom
+      if (displayedWindow && laneRight > box.x && laneLeft < box.x + box.width) usable.add(lane)
+    }
+    const contentWindows = new Map<number, { top: number; bottom: number }>()
+    for (let lane = 0; lane < lanes.length; lane += 1) {
+      contentWindows.set(lane, displayedWindow
+        ? contentWindow(displayedWindow, offsets.current[lane] ?? 0)
+        : { top: 0, bottom: result.bandHeight })
+    }
+    const measuredSignature = nodes.map(node => `${node.id}:${Math.round(measuredCardHeights.get(node.id) ?? 0)}`).join("|")
+    const windowArrival = [...usable].some(lane => !visitedLanes.current.has(lane))
+    const revealKey = `${scopeKey}|${emphasisId ?? ""}|${result.tier}|${measuredSignature}|${edgesKey}|${windowArrival ? "arrival" : "stable"}`
     if (revealKey !== revealSignature.current) {
       revealSignature.current = revealKey
-      const windowByLane = new Map<number, { top: number; bottom: number }>()
-      for (let lane = 0; lane < lanes.length; lane += 1) {
-        const window = revealWindowForLane(result.bandHeight, box, transform.current, offsets.current[lane] ?? 0)
-        windowByLane.set(lane, window ?? { top: 0, bottom: result.bandHeight })
-      }
       const plan = planReveal({
         nodes,
         geometry: result.geometry,
@@ -494,13 +528,41 @@ export default function DigitalThreadCanvas({
         measuredHeights: measuredCardHeights,
         storyIds: story?.nodes ?? new Set<string>(),
         subjectId: emphasisId ?? null,
-        windowByLane,
-        frozenLanes: frozenLanes.current,
+        windowByLane: contentWindows,
+        // Visited lanes keep their arrangement; only genuinely new lanes get their first reveal.
+        frozenLanes: new Set([...frozenLanes.current, ...visitedLanes.current]),
+        existing: revealDeltas.current,
         bandHeight: result.bandHeight,
       })
       revealTargets.current = plan.deltas
+      for (const lane of usable) visitedLanes.current.add(lane)
       kickMotion.current()
     }
+    /**
+     * Effective limits for the arrangement as displayed and as it is heading.
+     *
+     * Union of both, so the range stays open while temporary geometry is still moving and a reader who
+     * scrolled into the extended range is never clamped back by a return that has not finished.
+     */
+    const limitsFor = (deltas: ReadonlyMap<string, number>) => effectiveLaneLimits({
+      nodes,
+      geometry: result.geometry,
+      bandHeight: result.bandHeight,
+      measuredHeights: measuredCardHeights,
+      deltas,
+      // The predicate solves for a lane offset, so it takes the window in displayed coordinates while the
+      // cards' effective tops stay in content coordinates.
+      displayedWindowByLane: new Map(lanes.map((_, lane) => [
+        lane,
+        displayedWindow ?? { top: 0, bottom: result.bandHeight },
+      ])),
+    })
+    const currentLimits = limitsFor(revealDeltas.current)
+    const targetLimits = limitsFor(revealTargets.current)
+    limitsRef.current = new Map([...currentLimits].map(([lane, limits]) => [
+      lane,
+      Math.min(limits.minimum, targetLimits.get(lane)?.minimum ?? limits.minimum),
+    ]))
 
     const { geometry, bandHeight } = result
     scene.style.transform = `translate(${transform.current.x}px,${transform.current.y}px) scale(${transform.current.zoom})`
@@ -519,7 +581,10 @@ export default function DigitalThreadCanvas({
         band.style.height = `${bandHeight}px`
         band.style.left = `${lane * geometry.lanePitch - 14}px`
         band.style.width = `${geometry.laneWidth + 28}px`
-        band.classList.toggle("is-rollable", (result.laneMinimums[lane] ?? 0) < -1)
+        band.classList.toggle(
+          "is-rollable",
+          Math.min(result.laneMinimums[lane] ?? 0, limitsRef.current.get(lane) ?? result.laneMinimums[lane] ?? 0) < -1,
+        )
       }
       const head = scene.querySelector<HTMLElement>(`[data-lane-head="${lane}"]`)
       if (head) head.style.left = `${lane * geometry.lanePitch}px`
@@ -719,7 +784,6 @@ export default function DigitalThreadCanvas({
     // A completely occupied frame is a layout shortfall, not permission to paint a colliding midpoint. Ask the
     // owning view to re-dock its inspector, using the same measured-room recovery as direct cards; the current
     // placement remains explicitly marked exhausted until that repaint supplies a real free slot.
-    if ([...labelPositions.values()].some(position => position.exhausted)) onFramingNeedsRoom?.()
     const placementNotice = viewportRef.current?.querySelector<HTMLElement>(".dtCanvasPlacementNotice")
     if (placementNotice) {
       const unavailable = [...labelPositions.values()].some(position => !position.available)
@@ -892,7 +956,11 @@ export default function DigitalThreadCanvas({
    * lane, and no state change was pending to make the effect run again.
    */
   const applyFraming = useCallback(
-    (target: { selectedId: string; wanted: string[]; intent: FrameIntent; key: string } | null): boolean => {
+    (
+      target: { selectedId: string; wanted: string[]; intent: FrameIntent; key: string } | null,
+      /** An explicit Fit is a reader command: it must never be swallowed by the automatic suitability rule. */
+      explicit = false,
+    ): boolean => {
       if (!target) return false
       const box = frame()
       if (!box || !geometryRef.current) return false
@@ -941,7 +1009,7 @@ export default function DigitalThreadCanvas({
           const fullyVisible = isVisible(position.y, result.geometry, result.bandHeight) &&
             left >= box.x - 1 && right <= box.x + box.width + 1 &&
             top >= box.y - 1 && bottom <= box.y + box.height + 1
-          if (fullyVisible && zoom >= READABLE_SELECTION_MIN_ZOOM) return true
+          if (!explicit && fullyVisible && zoom >= READABLE_SELECTION_MIN_ZOOM) return true
         }
       }
 
@@ -1154,7 +1222,13 @@ export default function DigitalThreadCanvas({
         card || sceneY < -10 || sceneY > result.bandHeight + 10
           ? -1
           : laneAt(sceneX, lanes.length, result.geometry)
-      const rollable = lane >= 0 && (result.laneMinimums[lane] ?? 0) < -1
+      // Read the effective bound here rather than trusting a stale capture: geometry can change during a
+      // gesture, and the lane's roll range must follow the arrangement the reader can actually see.
+      const laneFloor = (target: number) => Math.min(
+        result.laneMinimums[target] ?? 0,
+        limitsRef.current.get(target) ?? result.laneMinimums[target] ?? 0,
+      )
+      const rollable = lane >= 0 && laneFloor(lane) < -1
       const start = {
         x: event.clientX,
         y: event.clientY,
@@ -1177,7 +1251,7 @@ export default function DigitalThreadCanvas({
           // through the revealed cards cannot be undone by the next paint.
           frozenLanes.current.add(lane)
           offsets.current[lane] = Math.max(
-            result.laneMinimums[lane] ?? 0,
+            laneFloor(lane),
             Math.min(0, start.offset + dy / transform.current.zoom),
           )
           targets.current[lane] = offsets.current[lane]
@@ -1280,7 +1354,10 @@ export default function DigitalThreadCanvas({
         measuredPosition?.y,
       )
       // Never past what the lane can actually roll, or the lane would scroll off its own content.
-      targets.current[node.lane] = Math.max(result.laneMinimums[node.lane] ?? 0, revealed)
+      targets.current[node.lane] = Math.max(
+        Math.min(result.laneMinimums[node.lane] ?? 0, limitsRef.current.get(node.lane) ?? result.laneMinimums[node.lane] ?? 0),
+        revealed,
+      )
       // Setting the target is not moving the lane. The easing loop was only ever started by the pointer
       // scrub, so keyboard navigation set a target nothing consumed — rolling appeared to work only while
       // the card it moved to happened to need no roll at all.
@@ -1308,14 +1385,25 @@ export default function DigitalThreadCanvas({
     (node: CanvasNode, delta: number) => {
       const bucket = byLane.get(node.lane)
       if (!bucket?.length) return
-      const index = bucket.findIndex((candidate: CanvasNode) => candidate.id === node.id)
-      const next = bucket[Math.min(bucket.length - 1, Math.max(0, index + delta))]
+      // Arrow keys walk the arrangement the reader can see, not the canonical row order: a temporarily
+      // displaced card sits where it is painted, and moving focus through a different order would jump.
+      const result = geometryRef.current
+      const ordered = result
+        ? [...bucket].sort((a, b) => {
+            const positions = positionsForNodes(nodes, result.geometry, offsets.current, undefined, revealDeltas.current)
+            const ay = positions.get(a.id)?.y ?? 0
+            const by = positions.get(b.id)?.y ?? 0
+            return ay - by || a.row - b.row || a.id.localeCompare(b.id)
+          })
+        : bucket
+      const index = ordered.findIndex((candidate: CanvasNode) => candidate.id === node.id)
+      const next = ordered[Math.min(ordered.length - 1, Math.max(0, index + delta))]
       if (!next || next.id === node.id) return
       setRoving(current => ({ ...current, [node.lane]: next.id }))
       reveal(next)
       cardRefs.current.get(next.id)?.focus({ preventScroll: true })
     },
-    [byLane, reveal],
+    [byLane, nodes, reveal],
   )
 
   const onKeyDown = useCallback(
@@ -1348,7 +1436,7 @@ export default function DigitalThreadCanvas({
   const fitSelection = () => {
     if (!framing) return
     const target = { ...framing, intent: "selection" as FrameIntent, key: `${framing.key}|fit-selection` }
-    if (applyFraming(target)) framedFor.current = framing.key
+    if (applyFraming(target, true)) framedFor.current = framing.key
   }
 
   const fitStory = () => {
@@ -1356,7 +1444,7 @@ export default function DigitalThreadCanvas({
     const target = { ...framing, intent: "story" as FrameIntent, key: `${framing.key}|fit-story` }
     // The manual camera choice satisfies this selection's pending automatic framing too. Recording the
     // synthetic action key instead would replay the landing on the next hover/render.
-    if (applyFraming(target)) framedFor.current = framing.key
+    if (applyFraming(target, true)) framedFor.current = framing.key
   }
 
   return (
@@ -1505,7 +1593,9 @@ export default function DigitalThreadCanvas({
                 if (event.key !== "Enter" && event.key !== " ") return
                 event.preventDefault()
                 event.stopPropagation()
-                onSelect?.(pinnedId === node.id ? null : node.id)
+                // Activating a record selects it. Selecting the already-selected card is not an undocumented
+                // toggle-off: clearing is the reader's explicit clear action (Escape or an empty-canvas click).
+                onSelect?.(node.id)
               }}
               ref={element => {
                 if (element) cardRefs.current.set(node.id, element)

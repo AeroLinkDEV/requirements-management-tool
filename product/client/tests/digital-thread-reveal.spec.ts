@@ -43,15 +43,18 @@ test.describe("lane-local reveal", () => {
     for (const id of ["n2", "n3", "n4", "n5", "n6", "n8"]) expect(plan.deltas.has(id)).toBe(false)
   })
 
-  test("a partially visible card is never displaced during hover", () => {
+  test("a partially visible linked card is never displaced during hover", () => {
     const nodes = lane(8)
-    const top = contentTop(nodes, "n2") + 40
+    // n3 spans 426-534; this window starts at 466, so n3 is genuinely clipped by the window edge.
+    const top = contentTop(nodes, "n3") + 40
     const window: RevealWindow = { top, bottom: top + 300 }
+    expect(contentTop(nodes, "n3")).toBeLessThan(top)
+    expect(contentTop(nodes, "n3") + GEOMETRY.cardHeight).toBeGreaterThan(top)
     const plan = planReveal({
       nodes, geometry: GEOMETRY, laneOffsets: [0], storyIds: new Set(["n3", "n7"]),
-      subjectId: "n3", windowByLane: new Map([[0, window]]), frozenLanes: new Set(), bandHeight: BAND,
+      subjectId: "n0", windowByLane: new Map([[0, window]]), frozenLanes: new Set(), bandHeight: BAND,
     })
-    // n3 starts 40 units above the window top: it is partially visible and must not move.
+    // It intersects the usable window, so it is on screen and must not be displaced; n7, wholly below, moves.
     expect(plan.deltas.has("n3")).toBe(false)
     expect(plan.deltas.has("n7")).toBe(true)
   })
@@ -98,15 +101,29 @@ test.describe("lane-local reveal", () => {
     expect(laneReachable(card.q, card.h, window, derived)).toBe(true)
   })
 
-  test("a frozen lane is never re-planned but still reports its direction cue", () => {
+  test("a frozen lane keeps its displayed arrangement instead of retiring it", () => {
     const nodes = lane(8)
+    const existing = new Map([["n6", -260], ["n7", 90]])
     const plan = planReveal({
       nodes, geometry: GEOMETRY, laneOffsets: [0], storyIds: new Set(["n6"]),
       subjectId: null, windowByLane: new Map([[0, { top: 0, bottom: 400 }]]),
-      frozenLanes: new Set([0]), bandHeight: BAND,
+      frozenLanes: new Set([0]), existing, bandHeight: BAND,
     })
-    expect(plan.deltas.size).toBe(0)
+    // Reader-owned geometry is returned unchanged, not dropped into an implicit return-to-ordinary.
+    expect(plan.deltas.get("n6")).toBe(-260)
+    expect(plan.deltas.get("n7")).toBe(90)
     expect(plan.cues.get(0)?.down).toBe(true)
+  })
+
+  test("a lane that is not frozen retires displacements whose ownership ended", () => {
+    const nodes = lane(8)
+    const plan = planReveal({
+      nodes, geometry: GEOMETRY, laneOffsets: [0], storyIds: new Set(["n0"]),
+      subjectId: "n0", windowByLane: new Map([[0, { top: 0, bottom: 400 }]]),
+      frozenLanes: new Set(), existing: new Map([["n7", 120]]), bandHeight: BAND,
+    })
+    // n7 is no longer part of the story, so no target is emitted for it and the controller retires it to zero.
+    expect(plan.deltas.has("n7")).toBe(false)
   })
 
   test("planning is idempotent and never mutates canonical rows", () => {
