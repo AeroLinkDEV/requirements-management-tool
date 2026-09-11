@@ -751,6 +751,11 @@ export const frameNodes = (
     selectedCardHeight?: number
     /** Actual rendered heights for direct story cards, keyed by governed node identity. */
     cardHeights?: ReadonlyMap<string, number>
+    /**
+     * Temporary per-card displacements, so framing measures the arrangement the reader can see rather than
+     * the ordinary rows paint is no longer drawing.
+     */
+    deltas?: ReadonlyMap<string, number>
   } = {},
 ): { x: number; y: number; zoom: number } | null => {
   const wanted = new Set(ids)
@@ -769,14 +774,18 @@ export const frameNodes = (
     result: LayoutResult,
     onlyDrawn = true,
   ): { x: number; y: number; width: number; height: number } | null => {
-    const positions = positionsForNodes(nodes, result.geometry, offsets, options.cardHeights)
+    const positions = positionsForNodes(nodes, result.geometry, offsets, options.cardHeights, options.deltas)
     let x0 = Infinity
     let y0 = Infinity
     let x1 = -Infinity
     let y1 = -Infinity
     for (const node of nodes) {
       if (!wanted.has(node.id)) continue
-      const { x, y } = positions.get(node.id) ?? nodePosition(node, result.geometry, offsets)
+      const fallback = nodePosition(node, result.geometry, offsets)
+      const { x, y } = positions.get(node.id) ?? {
+        x: fallback.x,
+        y: fallback.y + (options.deltas?.get(node.id) ?? 0),
+      }
       if (onlyDrawn && node.id !== selectedId && !isVisible(y, result.geometry, result.bandHeight)) continue
       x0 = Math.min(x0, x)
       x1 = Math.max(x1, x + result.geometry.laneWidth)

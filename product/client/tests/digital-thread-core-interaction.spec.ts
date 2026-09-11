@@ -142,3 +142,46 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
   const cleared = await yOfLane()
   expect(Math.abs(cleared - scrolled), "the lane snapped after clear").toBeLessThanOrEqual(4)
 })
+
+const transformOf = async (scene: import("@playwright/test").Locator) =>
+  /transform:[^;]*/.exec((await scene.getAttribute("style")) ?? "")?.[0] ?? ""
+
+test("Inside a change: hover is stationary and a selected record owns its thread", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/tests/fixtures/inside-change.html?case=requirement")
+  await expect(page.locator(".dtCanvas")).toBeVisible()
+  await page.waitForTimeout(800)
+  const scene = page.locator(".dtCanvasScene")
+  const camera = await transformOf(scene)
+  const card = page.locator(".dtCanvasNode:not(.is-offscreen)").first()
+  await card.hover()
+  await page.waitForTimeout(650)
+  expect(await transformOf(scene)).toBe(camera)
+  await expect(page.locator(".dtCanvasHoverTarget")).toHaveCount(0)
+  await card.click()
+  await expect(card).toHaveAttribute("aria-pressed", "true")
+  const other = page.locator(".dtCanvasNode:not(.is-offscreen)").nth(3)
+  await other.hover()
+  await page.waitForTimeout(650)
+  await expect(card).toHaveAttribute("aria-pressed", "true")
+})
+
+test("Artifact thread: hover is stationary once the arrival selection is cleared", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/tests/fixtures/artifact-thread.html?case=hlr")
+  await expect(page.locator(".dtCanvas")).toBeVisible()
+  await page.waitForTimeout(800)
+  // The view selects its focal record on arrival; the hover contract under test is the unselected one.
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(400)
+  const scene = page.locator(".dtCanvasScene")
+  const camera = await transformOf(scene)
+  const card = page.locator(".dtCanvasNode:not(.is-offscreen)").first()
+  await card.hover()
+  await page.waitForTimeout(650)
+  expect(await transformOf(scene)).toBe(camera)
+  await expect(page.locator(".dtCanvasHoverTarget")).toHaveCount(0)
+  await page.mouse.move(2, 2)
+  await page.waitForTimeout(400)
+  expect(await transformOf(scene)).toBe(camera)
+})

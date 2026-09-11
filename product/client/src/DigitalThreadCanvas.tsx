@@ -1166,7 +1166,7 @@ export default function DigitalThreadCanvas({
         target.selectedId,
         1.12,
         true,
-        { intent: target.intent, selectedCardHeight, cardHeights },
+        { intent: target.intent, selectedCardHeight, cardHeights, deltas: revealTargets.current },
       )
       if (!next) return false
 
@@ -1213,7 +1213,12 @@ export default function DigitalThreadCanvas({
         Math.min(minimum, deepestMinimum.current[lane] ?? minimum)))
       targets.current = offsets.current.slice()
       const settledFrame = frameNodes(target.wanted, nodes, counts, box, offsets.current, target.selectedId,
-        next.zoom, true, { intent: target.intent, selectedCardHeight: cardHeights.get(target.selectedId), cardHeights })
+        next.zoom, true, {
+          intent: target.intent,
+          selectedCardHeight: cardHeights.get(target.selectedId),
+          cardHeights,
+          deltas: revealTargets.current,
+        })
       if (settledFrame) {
         transform.current = settledFrame
         paint()
