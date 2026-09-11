@@ -614,7 +614,10 @@ export default function ControlledRequirementEditor({
             <summary>
               <span>
                 <b>Supporting content and classification</b>
-                <small>Formatted context, controlled references, and the responsible author</small>
+                {/* #1016 S01. The Author control this promised is gone — a requirement proposal has no author
+                    of its own — and a summary that still advertises it sends a reader looking for a field
+                    that is not there. */}
+                <small>Formatted context, controlled references, and classification</small>
               </span>
               <em>Show / hide</em>
             </summary>

@@ -1,19 +1,20 @@
 import { expect, test } from '@playwright/test'
 import type { APIRequestContext } from '@playwright/test'
-import { apiBase, login } from './auth'
+import { apiBase, login, openNavigationGroup, selectProgram } from './auth'
 
 /**
  * #1016 S01. A requirement proposal has no author of its own.
  *
  * It is written inside a change request, and the change request already records who wrote it — immutably,
  * from the authenticated session. The proposal form asked the question a second time, in a free-text box, and
- * stored the answer under the legacy `owner` attribute. Nothing read it, nothing validated it, and it could
- * disagree with the record it sat inside.
+ * stored the answer under the legacy `owner` attribute, where it could disagree with the record it sat
+ * inside. The standalone per-artifact Author question is redundant, and is no longer asked.
  *
- * The control is gone. The key is not: `owner` stays in the System Requirement schema, values already
- * recorded under it are untouched, and the Requirements Explorer's owner filter and the saved views built on
- * it keep working. That distinction — removing a question is not removing anybody's answer — is what these
- * journeys exist to hold, so each one uses its own disposable workspace and nothing shared is written.
+ * The key is not redundant, and stays: `owner` remains part of the System Requirement schema and is still
+ * accepted from a caller that sends it, values already recorded under it are untouched, and the Requirements
+ * Explorer's owner filter and the saved views built on it still read it. That distinction — removing a
+ * question is not removing anybody's answer — is what these journeys hold, so each one uses its own
+ * disposable workspace and nothing shared is written.
  */
 
 type Workspace = { program: { id: string }; project: { id: string; name: string }; release: { id: string } }
@@ -101,6 +102,12 @@ test('the proposal form no longer asks for an author, and the change request sti
   // Nothing else was taken with it: the classification block the field sat in is still there and still works.
   await expect(page.locator('.classificationMetadata')).toHaveCount(1)
   await expect(page.locator('.classificationMetadata input')).toHaveCount(0)
+
+  // And the section summary stops advertising the field. A description that still promises an author sends a
+  // reader looking for a control that is not there, which is the removal surviving under different wording.
+  const summary = page.locator('.supportingDetails summary')
+  await expect(summary).toContainText('Formatted context, controlled references, and classification')
+  await expect(summary).not.toContainText('responsible author')
 })
 
 test('an authored owner survives a controlled checkout, edit and check-in untouched', async ({ page }) => {
@@ -148,7 +155,7 @@ test('an authored owner survives a controlled checkout, edit and check-in untouc
     'owner is no longer an expected attribute, so no row may report it missing').toBe(false)
 })
 
-test('the Requirements Explorer owner filter still reads the stored attribute', async ({ page }) => {
+test('the Requirements Explorer still presents the owner filter control', async ({ page }) => {
   test.setTimeout(180_000)
   await login(page, 'admin', { openProject: false })
   const suffix = Date.now().toString(36)
@@ -158,8 +165,14 @@ test('the Requirements Explorer owner filter still reads the stored attribute', 
   await legacyDraftAsync(page.request, projectId, workspace.release.id, sectionId)
   const root = `/programs/${workspace.program.id}/projects/${projectId}/releases/${workspace.release.id}`
 
-  // Saved-view compatibility is the reason the key stays. The control that wrote it is gone; the control that
-  // reads it is not, and a saved view built on it must keep resolving.
+  // Presentation only, and named accordingly. This proves the filter control and its chip survive the
+  // removal of the Author input — it does **not** prove the filter selects anything, because a Draft proposal
+  // is not yet a controlled requirement the Explorer can return.
+  //
+  // What the filter actually selects, and that a saved view keeps its owner predicate and still selects the
+  // same requirements, is proven where the records exist:
+  // `RequirementFilterExactnessApiTests.An_owner_matches_the_owner_field_and_not_an_unrelated_attribute_that_mentions_them`
+  // and `…A_saved_view_keeps_its_owner_predicate_and_still_selects_the_same_requirements`.
   await page.goto(`${root}/systems/requirements`)
   await expect(page.getByRole('heading', { name: 'System Requirements Explorer' })).toBeVisible({ timeout: 30_000 })
   // The owner filter lives behind Advanced, which is where it has always lived.
@@ -168,4 +181,56 @@ test('the Requirements Explorer owner filter still reads the stored attribute', 
   await expect(owner).toHaveCount(1)
   await owner.fill('legacy.author')
   await expect(page.getByText('Owner: legacy.author')).toBeVisible()
+})
+
+/**
+ * #1016 S01. A controlled verification artifact's authorship belongs to its revisions, not to its header.
+ *
+ * The Procedure Explorer's Trace & impact header carried "Written by <person>" for the selected revision.
+ * Standing at the top of an inspector that also lists earlier revisions, one name reads as the authorship of
+ * everything on the screen — including revisions somebody else wrote. The History tab already states
+ * authorship against the revision it belongs to, which is the surface where the question has an exact answer.
+ *
+ * So the routine header no longer individually attributes, and everything that carries real provenance is
+ * checked to be still there: the recorded timestamp, the History attribution, and the producing change.
+ */
+test('the procedure trace header drops individual authorship while History keeps it', async ({ page }) => {
+  test.setTimeout(240_000)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
+  await page.getByRole('link', { name: 'System Requirements Explorer' }).click()
+  await expect(page.getByRole('status', { name: /Loading controlled requirements/ })).toBeHidden()
+  const root = new URL(page.url()).pathname.split('/').slice(0, 7).join('/')
+
+  await page.goto(`${root}/system-verification/procedures`)
+  const procedure = page.getByRole('button', { name: /SYSTP-\d+\.\d{2}/ }).first()
+  await expect(procedure).toBeVisible({ timeout: 30_000 })
+  await procedure.click()
+
+  const inspector = page.locator('.procedureInspector, .requirementInspector').first()
+  await inspector.getByRole('tab', { name: 'Trace & impact' }).click()
+  const identity = page.locator('.traceRevisionIdentity')
+  await expect(identity).toBeVisible({ timeout: 30_000 })
+
+  // The routine header does not individually attribute.
+  await expect(identity).not.toContainText('Written by')
+  // The recorded timestamp is kept — when it was recorded is still a useful fact here.
+  await expect(identity).toContainText('Recorded')
+
+  // Producing-change provenance is untouched: a revision still says what raised it.
+  const provenance = page.locator('.traceProvenance')
+  if (await provenance.count()) {
+    await expect(provenance.first()).toContainText(/Produced by|Related controlled impact/)
+  }
+
+  // History still answers the authorship question, against the revision it belongs to.
+  await inspector.getByRole('tab', { name: 'History' }).click()
+  const revisions = page.locator('.revisionList li')
+  await expect(revisions.first()).toBeVisible({ timeout: 30_000 })
+  await expect(revisions.first()).toContainText('written by')
+
+  // The operational Owner field is an assignment, not an authorship duplicate, and stays.
+  await inspector.getByRole('tab', { name: 'Overview' }).click()
+  await expect(page.getByText('Owner', { exact: true })).toBeVisible()
 })

@@ -1242,7 +1242,13 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                     <b>{trace.displayNumber}</b>
                     <span>{trace.title}</span>
                     <span>{stateLabel(trace.state)} · {trace.level} · revision {trace.revisionId}</span>
-                    <small>Written by <PersonName userName={trace.authorId} /> · {new Date(trace.createdAt).toLocaleString()}</small>
+                    {/* #1016 S01. No individual "Written by" in the routine header. A controlled artifact's
+                        authorship is a fact about each revision, and the History tab already states it
+                        against the revision it belongs to. One name at the top of the inspector invited a
+                        reader to take it as the authorship of everything on the screen, including revisions
+                        somebody else wrote. The recorded timestamp stays, `authorId` is untouched in the
+                        payload and the contract, and the producing change is still named below. */}
+                    <small>Recorded {new Date(trace.createdAt).toLocaleString()}</small>
                   </div>
                   {trace.titleNote && <p className="inspectorNote warn">{trace.titleNote}</p>}
                   {trace.provenance.length > 0 && (
