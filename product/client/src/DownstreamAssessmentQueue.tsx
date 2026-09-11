@@ -119,12 +119,14 @@ export default function DownstreamAssessmentQueue({api,projectId,releaseId,targe
     if(await act(decision.assessmentId,decision.kind,body)){setDecision(undefined);setRationale('')}}
   const downward=impacts.flatMap(impact=>impact.derivedRequirements)
   const level=levelName(targetLevel)
-  const headingCopy=`Approved upstream changes waiting for an explicit ${level} engineering conclusion.`
-  if(loading||completedLoadKey!==loadKey)return <section className="downstreamQueue" aria-labelledby="downstream-title" data-queue-state="loading"><header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream change assessments</h2><p>{headingCopy}</p></div></header><p className="downstreamHelp">Loading {level} assessments…</p></section>
-  if(loadError)return <section className="downstreamQueue" aria-labelledby="downstream-title" data-queue-state="error"><header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream change assessments</h2><p>{headingCopy}</p></div></header><div className="workspaceError" role="alert">{loadError}</div><button type="button" onClick={()=>void load()}>Retry loading assessments</button></section>
-  if(!rows.length)return <section className="downstreamQueue" aria-labelledby="downstream-title" data-queue-state="empty"><header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream change assessments</h2><p>{headingCopy}</p></div></header><p className="downstreamHelp">No {level} downstream assessments are currently recorded.</p></section>
+  // Both pending and concluded assessments appear here, so the description cannot say every row is
+  // waiting for a conclusion: a superseded or completed row is already dispositioned.
+  const headingCopy=`Approved upstream changes and their ${level} engineering conclusions, pending and recorded.`
+  if(loading||completedLoadKey!==loadKey)return <section className="downstreamQueue" aria-labelledby="downstream-title" data-queue-state="loading"><header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream Assessments</h2><p>{headingCopy}</p></div></header><p className="downstreamHelp">Loading {level} assessments…</p></section>
+  if(loadError)return <section className="downstreamQueue" aria-labelledby="downstream-title" data-queue-state="error"><header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream Assessments</h2><p>{headingCopy}</p></div></header><div className="workspaceError" role="alert">{loadError}</div><button type="button" onClick={()=>void load()}>Retry loading assessments</button></section>
+  if(!rows.length)return <section className="downstreamQueue" aria-labelledby="downstream-title" data-queue-state="empty"><header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream Assessments</h2><p>{headingCopy}</p></div></header><p className="downstreamHelp">No {level} Downstream Assessments are currently recorded.</p></section>
   return <section className="downstreamQueue" aria-labelledby="downstream-title" data-queue-state="rows">
-    <header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream change assessments</h2><p>{headingCopy}</p></div></header>{error&&<div className="workspaceError" role="alert">{error}</div>}
+    <header><div><p className="eyebrow">CONSUMING ENGINEERING</p><h2 id="downstream-title">Downstream Assessments</h2><p>{headingCopy}</p></div></header>{error&&<div className="workspaceError" role="alert">{error}</div>}
     {rows.map(row=><article className={`downstreamAssessment ${row.state.toLowerCase()}`} data-state={row.state} key={row.id}>
       {/* Identifying text, not a control. The number, the title and the level chip used to be one large
           button opening the same drawer as the button on the right, so a row carried two ways to do one

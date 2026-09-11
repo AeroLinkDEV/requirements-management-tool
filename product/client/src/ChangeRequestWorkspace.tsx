@@ -1,6 +1,7 @@
 import UpstreamChangeRequestPicker, { useUpstreamCandidates } from "./UpstreamChangeRequestPicker";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { artifactAcronym, changeRequestAllocation, changeRequestState, stateLabel } from './presentation'
+import { artifactAcronym, changeRequestAllocation, changeRequestState, programRoleLabel, stateLabel } from './presentation'
+import { authorityLabel } from './workflowAuthorities'
 import type { FormEvent } from "react";
 import { SignatureDialog } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
@@ -1366,7 +1367,10 @@ export default function ChangeRequestWorkspace({
             <h2>Configure review authority</h2>
             <p>Select only the people who have decision authority for this exact controlled snapshot.</p>
             <div><b>{scr.displayNumber}</b><span>{requirements.length} requirement proposal{requirements.length === 1 ? "" : "s"} ready for review</span></div>
-            {applicableWorkflow?.required && <p><b>{applicableWorkflow.name} v{applicableWorkflow.version}</b> is the active policy for this submission. Its configured rows are the minimum; extra active Program participants may be added.</p>}
+            {/* One statement of the configured policy, not three. It also no longer says the rows are required
+                "in order" unconditionally: that is true of a Sequential policy and false of a Parallel one,
+                where every configured signer activates together. The mode is stated once, below. */}
+            {applicableWorkflow?.required && <p><b>{applicableWorkflow.name} v{applicableWorkflow.version}</b> is the active policy for this submission. Its configured rows are the minimum and remain part of this review cycle; extra active Program participants may be added.</p>}
           </div>
           {applicableWorkflow?.required ? (
             <div className="reviewModePolicy" role="status">
@@ -1396,14 +1400,22 @@ export default function ChangeRequestWorkspace({
               {applicableWorkflow?.required && index < (applicableWorkflow.stages ?? []).length ? (() => {
                 const stage = applicableWorkflow.stages![index];
                 return <label className="configuredApproverSelect">
-                  <span className="srOnly">{stage.name} · {stage.kind ?? 'Review'} · {stage.requiredRole}</span>
-                  <select value={person.userId} aria-label={`${stage.name} · ${stage.kind ?? 'Review'} · ${stage.requiredRole}`} onChange={event => {
+                  {/* Visible, and it stays visible. The stage's name, whether it reviews or approves, and the
+                      authority it needs used to live only in the screen-reader span, the accessible name and
+                      the empty placeholder — so the moment somebody was chosen the row read as a bare person
+                      and a role, and what the row was *for* was gone. A sighted reader had to reopen the
+                      select to find out which stage they had just filled. */}
+                  <span className="configuredStageHeading">
+                    <b>{stage.name}</b>
+                    <span>{stage.kind ?? 'Review'} · {authorityLabel(stage.requiredRole)}</span>
+                  </span>
+                  <select value={person.userId} aria-label={`${stage.name} · ${stage.kind ?? 'Review'} · ${authorityLabel(stage.requiredRole)}`} onChange={event => {
                     const selected = stage.candidates.find(candidate => candidate.userId === event.target.value);
                     setApprovers(items => items.map((item, position) => position === index
                       ? { userId: event.target.value, name: selected?.name ?? "" } : item));
                   }}>
-                    <option value="">Choose {stage.requiredRole} for {stage.name} ({stage.kind ?? 'Review'})…</option>
-                    {stage.candidates.map(candidate => <option value={candidate.userId} key={candidate.userId}>{candidate.name} · {candidate.role}</option>)}
+                    <option value="">Choose {authorityLabel(stage.requiredRole)} for {stage.name} ({stage.kind ?? 'Review'})…</option>
+                    {stage.candidates.map(candidate => <option value={candidate.userId} key={candidate.userId}>{candidate.name} · {programRoleLabel(candidate.role)}</option>)}
                   </select>
                 </label>;
               })() : <PersonPicker
@@ -1436,12 +1448,11 @@ export default function ChangeRequestWorkspace({
               review; the picker is filtered to them.
             </div>
           )}
-          {applicableWorkflow?.required && (
-            <div className="reviewerWarning">
-              <b>{applicableWorkflow.name} v{applicableWorkflow.version}</b> requires the configured rows above in order.
-              Additional distinct active Program participants are allowed and remain part of this review cycle.
-            </div>
-          )}
+          {/* The configured-policy sentence that stood here said the same thing the intro above already says —
+              the configured rows are the minimum, extra participants are allowed — and said it in warning
+              styling. Normal policy that is working correctly is not a condition needing attention, and a
+              panel where the ordinary state is amber teaches people to read past the amber. The genuine
+              warnings above it stay: a duplicate reviewer, and no configured workflow for the discipline. */}
           <div className="snapshotNote">
             <b>Snapshot protection</b>
             <p>Submission freezes the exact content hash. Each activated reviewer receives a My Work deep link and must re-authenticate to sign.</p>

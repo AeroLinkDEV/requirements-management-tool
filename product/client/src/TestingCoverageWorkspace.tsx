@@ -696,7 +696,10 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
           {/* Named for the question, not for the artefact one answer to it produces. Approved changes arrive
               here to be assessed; a test change request is what an assessment raises when it finds work. */}
           <h2>Downstream Assessments</h2>
-            <p>Approved upstream changes waiting for an explicit {assessmentName(discipline, artifactKind)} conclusion.</p>
+            {/* #1016 S04. This collection holds undecided rows and dispositioned ones together — recorded
+                conclusions and superseded history are rendered below — so it cannot describe every row as
+                waiting for one. The discipline's own assessment vocabulary is unchanged. */}
+            <p>Approved upstream changes and their {assessmentName(discipline, artifactKind)} conclusions, pending and recorded.</p>
           </div>
         </header>
         {!visibleMine.length && (

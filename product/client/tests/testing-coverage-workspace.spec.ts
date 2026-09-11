@@ -50,6 +50,13 @@ test('the page lists the change requests controlling test work, and nothing else
   const packages = page.locator('.downstreamAssessment').filter({ hasText: /SYSTPCR-/ })
   await expect(packages.first()).toContainText(/SYSTPCR-\d{6}\.\d{2}/, { timeout: 30_000 })
 
+  // #1016 S04. The description has to be true of the collection beneath it, and this one is mixed: the
+  // numbered package above has already concluded that test work is required, so a blanket "waiting for a
+  // conclusion" is disproved on the same screen it appears on.
+  await expect(page.getByText(/Approved upstream changes and their .+ conclusions, pending and recorded\./))
+    .toBeVisible()
+  await expect(page.locator('body')).not.toContainText('waiting for an explicit')
+
   // What is no longer here, because it moved rather than being duplicated. A second procedure list, or a
   // second coverage report, would be a second answer to the same question and the two would drift.
   await expect(page.locator('.procedureLibrary')).toHaveCount(0)

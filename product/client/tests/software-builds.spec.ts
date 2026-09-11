@@ -99,7 +99,12 @@ test('released Build 1.5 is a durable read-only workspace and exits explicitly',
   // procedure is read. It used to open a record dialog on the coverage page, which carried a procedure
   // library; the library moved and the link followed it rather than being left pointing at nothing.
   const exactProcedure = page.getByRole('link', { name: /SYSTP-000001\.00.*Open procedure/ })
-  await expect(exactProcedure).toHaveAttribute('href', /revisionId=[0-9a-f-]{36}$/)
+  // #1016 S03. This href used to name an artifact-record address while the click below went to the Explorer,
+  // so the link advertised one destination and performed another depending on how a reader activated it.
+  // The click is the documented behaviour — the comment above and App's own openVerificationProcedure both
+  // say the Explorer is where a procedure is read — so the href was corrected to agree with it rather than
+  // the click being corrected away from it. Still exact: the immutable revision identity travels in it.
+  await expect(exactProcedure).toHaveAttribute('href', /procedureRevisionId=[0-9a-f-]{36}$/)
   await exactProcedure.click()
   await expect(page.getByRole('heading', { name: 'Test Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
   const inspector = page.locator('.requirementInspector')
