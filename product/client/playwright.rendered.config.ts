@@ -19,7 +19,14 @@ export default defineConfig({
     ['json', { outputFile: 'test-results/fast/rendered.json' }],
     ['html', { open: 'never', outputFolder: 'playwright-report/fast' }],
   ],
-  use: { baseURL, trace: 'retain-on-failure', screenshot: 'only-on-failure' },
+  use: {
+    baseURL,
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    // Motion evidence is captured on request (AEROLINK_1022_VIDEO=1) so a reviewer can watch the automatic
+    // click-time framing and its interruption without paying the recording cost on every run.
+    video: process.env.AEROLINK_1022_VIDEO ? 'on' : 'off',
+  },
   projects: [{ name: 'rendered', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
     command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`,

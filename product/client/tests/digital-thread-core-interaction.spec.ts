@@ -14,6 +14,19 @@ const open = async (page: import("@playwright/test").Page, scenario: string) => 
   await page.waitForTimeout(700)
 }
 
+/**
+ * Comparable evidence capture.
+ *
+ * Opt-in through `AEROLINK_1022_EVIDENCE`, so the same retained spec that proves the behaviour can also write
+ * the screenshots a reviewer needs, with the fixture, viewport and code revision all implied by the run. No
+ * evidence is written during ordinary qualification.
+ */
+const shoot = async (page: import("@playwright/test").Page, name: string) => {
+  const directory = process.env.AEROLINK_1022_EVIDENCE
+  if (!directory) return
+  await page.screenshot({ path: `${directory}/${name}.png` })
+}
+
 test("hover emphasises without moving the camera or the source card", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await open(page, "hover")
@@ -24,6 +37,7 @@ test("hover emphasises without moving the camera or the source card", async ({ p
   await root.hover()
   await page.waitForTimeout(650)
   await expect(scene).toHaveAttribute("style", camera!)
+  await shoot(page, "network-hover-stationary")
   const after = (await root.boundingBox())!
   expect(Math.abs(after.x - box.x)).toBeLessThanOrEqual(1)
   expect(Math.abs(after.y - box.y)).toBeLessThanOrEqual(1)
@@ -50,6 +64,7 @@ test("the real card is the click target and selection is persistent", async ({ p
   const root = page.locator('[data-node-id="pr-5"]')
   await root.click()
   await expect(root).toHaveAttribute("aria-pressed", "true")
+  await shoot(page, "network-selected")
   await expect(page.locator(".dtCanvasHoverTarget")).toHaveCount(0)
   // Pointing at another reachable card, and waiting past the old dwell, must not replace the thread.
   const other = page.locator('.dtCanvasNode:not(.is-offscreen)').nth(4)
@@ -131,6 +146,7 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
   await page.mouse.up()
   await page.waitForTimeout(300)
   const scrolled = await yOfLane()
+  await shoot(page, "network-lane-scrolled-into-temporary-range")
   expect(Math.abs(scrolled - before), "the lane did not scroll").toBeGreaterThan(20)
   // Scrolling a lane is not a camera move.
   expect(await transformOf()).toBe(cameraBefore)
@@ -158,8 +174,10 @@ test("Inside a change: hover is stationary and a selected record owns its thread
   await page.waitForTimeout(650)
   expect(await transformOf(scene)).toBe(camera)
   await expect(page.locator(".dtCanvasHoverTarget")).toHaveCount(0)
+  await shoot(page, "inside-hover-stationary")
   await card.click()
   await expect(card).toHaveAttribute("aria-pressed", "true")
+  await shoot(page, "inside-selected")
   const other = page.locator(".dtCanvasNode:not(.is-offscreen)").nth(3)
   await other.hover()
   await page.waitForTimeout(650)
@@ -181,6 +199,7 @@ test("Artifact thread: hover is stationary once the arrival selection is cleared
   await page.waitForTimeout(650)
   expect(await transformOf(scene)).toBe(camera)
   await expect(page.locator(".dtCanvasHoverTarget")).toHaveCount(0)
+  await shoot(page, "artifact-hover-stationary")
   await page.mouse.move(2, 2)
   await page.waitForTimeout(400)
   expect(await transformOf(scene)).toBe(camera)
