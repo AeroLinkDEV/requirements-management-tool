@@ -69,6 +69,8 @@ export type DigitalThreadNetworkProps = {
   onOpenChange?: (node: NetworkNode) => void
   buildLabel?: string
   representation?: ThreadRepresentation
+  /** Stable project/build/baseline navigation identity supplied by the page; never a display label. */
+  scopeKey?: string
 }
 
 type NetworkTableRow = DigitalThreadTableRow & { node: NetworkNode }
@@ -92,6 +94,7 @@ export default function DigitalThreadNetwork({
   onOpenChange,
   buildLabel,
   representation = "map",
+  scopeKey,
 }: DigitalThreadNetworkProps) {
   const [uncontrolledSelectedId, setUncontrolledSelectedId] = useState<string | null>(null)
   const selectedId = selectedIdProp === undefined ? uncontrolledSelectedId : selectedIdProp
@@ -493,7 +496,7 @@ export default function DigitalThreadNetwork({
             selectedId={selectedId}
             onSelect={setSelectedId}
             onHover={setHoveredId}
-            scopeKey={`network|${buildLabel ?? ""}|${focalId ?? ""}`}
+            scopeKey={scopeKey ?? `network|${focalId ?? ""}`}
             frameInset={frameInset}
             frameIds={selectedId ? [...(web?.nodes ?? [])] : undefined}
             framingIntent="landing"

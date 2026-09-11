@@ -84,6 +84,8 @@ export type DigitalThreadInsideChangeProps = {
   onOpenChange?: (node: NetworkNode) => void
   onBackToNetwork?: () => void
   representation?: ThreadRepresentation
+  /** Stable project/build/baseline navigation identity supplied by the page. */
+  scopeKey?: string
 }
 
 type Card =
@@ -130,6 +132,7 @@ export default function DigitalThreadInsideChange({
   onOpenChange,
   onBackToNetwork,
   representation = "map",
+  scopeKey,
 }: DigitalThreadInsideChangeProps) {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all")
   const [selectedId, setSelectedId] = useState<string | null>(opened.id)
@@ -943,7 +946,7 @@ export default function DigitalThreadInsideChange({
             selectedId={selectedId}
             onSelect={handleSelect}
             onHover={setHoveredId}
-            scopeKey={`inside|${opened.id}`}
+            scopeKey={scopeKey ?? `inside|${opened.id}`}
             tracedEdges={web?.edges}
             frameInset={frameInset}
             frameIds={selectedId ? [...(web?.nodes ?? [])] : undefined}

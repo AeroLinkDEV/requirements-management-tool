@@ -60,6 +60,8 @@ export type DigitalThreadArtifactProps = {
   /** Selection to start on. Defaults to the thread's own focal artifact. */
   initialSelectedId?: string | null
   representation?: ThreadRepresentation
+  /** Stable project/build/baseline navigation identity supplied by the page. */
+  scopeKey?: string
 }
 
 type ArtifactTableRow = DigitalThreadTableRow & { node: ArtifactThreadNode }
@@ -92,6 +94,7 @@ export default function DigitalThreadArtifact({
   onOpenChange,
   initialSelectedId,
   representation = "map",
+  scopeKey,
 }: DigitalThreadArtifactProps) {
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
@@ -563,7 +566,7 @@ export default function DigitalThreadArtifact({
             selectedId={selectedId}
             onSelect={setSelectedId}
             onHover={setHoveredId}
-            scopeKey={`artifact|${initialSelectedId ?? ""}`}
+            scopeKey={scopeKey ?? `artifact|${initialSelectedId ?? ""}`}
             frameInset={frameInset}
             tracedEdges={web?.edges}
             frameIds={framedForSelection}
