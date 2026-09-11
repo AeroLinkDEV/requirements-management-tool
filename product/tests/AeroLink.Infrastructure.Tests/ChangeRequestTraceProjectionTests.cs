@@ -764,7 +764,7 @@ public sealed class ChangeRequestTraceProjectionTests
         Assert.NotNull(result);
 
         var pendingNode = Assert.Single(result!.Nodes, x => x.Id == pending.Id);
-        Assert.Equal($"Test procedure assessment of {root.DisplayNumber}", pendingNode.DisplayNumber);
+        Assert.Equal("Unnumbered assessment", pendingNode.DisplayNumber);
         Assert.DoesNotContain(result.Nodes, x => x.DisplayNumber.StartsWith("."));
 
         // Stated, not inferred. A consumer asking "is this controlled?" reads this, not the label's prefix.
@@ -827,7 +827,7 @@ public sealed class ChangeRequestTraceProjectionTests
             fixture.Db, fixture.Project.Id, fromReport.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
         Assert.NotNull(result);
         var node = Assert.Single(result!.Nodes, x => x.Id == fromReport.Id);
-        Assert.Equal($"Test procedure assessment of {report.DisplayNumber}", node.DisplayNumber);
+        Assert.Equal("Unnumbered assessment", node.DisplayNumber);
         Assert.Equal(nameof(TestChangeReviewOriginKind.ProblemReport), node.Verification!.OriginKind);
         Assert.Equal(report.Id, node.Verification.OriginReferenceId);
         Assert.Equal(report.DisplayNumber, node.Verification.SourceDisplayNumber);

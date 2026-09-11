@@ -23,7 +23,7 @@ const assessment = (over: Partial<NetworkNode> = {}): NetworkNode => ({
   id: "asmt-a",
   kind: "TestChangeRequest",
   level: "Procedure",
-  displayNumber: "Test procedure assessment of SRCR-00039.00",
+  displayNumber: "Unnumbered assessment",
   verification: {
     hasControlledNumber: false,
     outcome: "Pending",
@@ -77,12 +77,14 @@ test("a node that carries no verification metadata is treated as controlled, not
 
 test("the source number is carried as context and never becomes the record's own identity", () => {
   const node = assessment()
-  // Present, and separately labelled.
+  // Present, and in a field of its own.
   expect(node.verification?.sourceDisplayNumber).toBe("SRCR-00039.00")
-  // The label mentions the source, which is the point — but it is not the source's number standing alone
-  // where this record's own number belongs.
-  expect(node.displayNumber).not.toBe("SRCR-00039.00")
-  expect(node.displayNumber).toContain("SRCR-00039.00")
+  // The source travels separately, not inside the identifier. Two reasons, both real: a source number
+  // standing where this record's own number belongs gets read as its identity, and a card's identifier row
+  // is narrow — an earlier draft of this correction put the source in the label and it spilled out of six
+  // cards on the board, which the landing legibility journey caught.
+  expect(node.displayNumber).not.toContain("SRCR-00039.00")
+  expect(node.displayNumber).toBe("Unnumbered assessment")
   // And no controlled number is invented for it.
   expect(node.verification?.controlledNumber ?? null).toBeNull()
   expect(node.verification?.controlledRevision ?? null).toBeNull()
@@ -125,7 +127,7 @@ test("the rendered board shows both assessments, neither as a bare revision nor 
   await expect(page.locator(".dtnId", { hasText: /^\.\d{2}$/ })).toHaveCount(0)
 
   // Both assessments are drawn, and both say what they are.
-  const assessments = page.locator(".dtnId", { hasText: "Test procedure assessment of SRCR-00039.00" })
+  const assessments = page.locator(".dtnId", { hasText: "Unnumbered assessment" })
   await expect(assessments).toHaveCount(2)
 
   // The controlled package is still shown by its number.

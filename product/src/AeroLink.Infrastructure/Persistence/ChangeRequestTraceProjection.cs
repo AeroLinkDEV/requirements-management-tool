@@ -929,20 +929,18 @@ public static partial class ChangeRequestTraceProjection
     /// appearance of an assessment raised against an approved change before anybody concluded that
     /// verification work was needed.
     ///
-    /// So an unnumbered package is labelled as what it is, with the record it was raised from named as
-    /// context rather than borrowed as identity: "Test procedure assessment of SRCR-00143.00" says whose
-    /// assessment this is without letting SRCR-00143.00 stand where this record's own number would go. No
-    /// number is invented, none is allocated, and the caller still has
-    /// <see cref="ChangeRequestTraceVerification.HasControlledNumber"/> rather than having to read this
-    /// sentence to find out.
+    /// So an unnumbered package is labelled as what it is. The record it was raised from travels in
+    /// <see cref="ChangeRequestTraceVerification.SourceDisplayNumber"/>, separately labelled, rather than
+    /// inside this one — partly because a source number standing where this record's own number belongs
+    /// would be read as its identity, and partly because a card's identifier row is narrow and a sentence
+    /// put there spills out of it. The label stays short for the same reason the Artifact Thread's
+    /// "Unnumbered record" does. No number is invented and none is allocated; a caller asking whether one
+    /// exists reads <see cref="ChangeRequestTraceVerification.HasControlledNumber"/>.
     /// </summary>
-    private static string VerificationLabel(ReviewRow row)
-    {
-        if (!string.IsNullOrWhiteSpace(row.BaseNumber)) return $"{row.BaseNumber}.{row.Revision:D2}";
-        var family = row.ArtifactKind == VerificationArtifactKind.Procedure ? "Test procedure" : "Test case";
-        var source = SourceDisplay(row);
-        return source is null ? $"{family} assessment" : $"{family} assessment of {source}";
-    }
+    private static string VerificationLabel(ReviewRow row) =>
+        string.IsNullOrWhiteSpace(row.BaseNumber)
+            ? "Unnumbered assessment"
+            : $"{row.BaseNumber}.{row.Revision:D2}";
 
     private static IReadOnlyList<Guid> ParseSourceIds(string json)
     {

@@ -124,7 +124,7 @@ const verificationIdentityProjection: NetworkProjection = {
     node({ id: "sys-9", kind: "ChangeRequest", displayNumber: "SRCR-00039.00", level: "System", state: "Approved" }),
     node({
       id: "asmt-a", kind: "TestChangeRequest", level: "Procedure", state: "Draft",
-      displayNumber: "Test procedure assessment of SRCR-00039.00",
+      displayNumber: "Unnumbered assessment",
       verification: {
         hasControlledNumber: false, outcome: "Pending", artifactKind: "Procedure", discipline: "System",
         originKind: "ChangeRequest", originReferenceId: "sys-9", sourceDisplayNumber: "SRCR-00039.00",
@@ -132,7 +132,7 @@ const verificationIdentityProjection: NetworkProjection = {
     }),
     node({
       id: "asmt-b", kind: "TestChangeRequest", level: "Procedure", state: "Draft",
-      displayNumber: "Test procedure assessment of SRCR-00039.00",
+      displayNumber: "Unnumbered assessment",
       verification: {
         hasControlledNumber: false, outcome: "NoChangeRequired", artifactKind: "Procedure",
         discipline: "System", originKind: "ChangeRequest", originReferenceId: "sys-9",
