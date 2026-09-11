@@ -213,6 +213,7 @@ export const positionsForNodes = (
   geometry: CanvasGeometry,
   offsets: readonly number[],
   measuredHeights?: ReadonlyMap<string, number>,
+  deltas?: ReadonlyMap<string, number>,
 ): Map<string, { x: number; y: number }> => {
   const result = new Map<string, { x: number; y: number }>()
   const byLane = new Map<number, CanvasNode[]>()
@@ -226,13 +227,196 @@ export const positionsForNodes = (
     let extra = 0
     for (const node of bucket) {
       const base = nodePosition(node, geometry, offsets)
-      result.set(node.id, { x: base.x, y: base.y + extra })
+      // A temporary reveal displacement is part of the reader's displayed arrangement, so every consumer of
+      // this helper — paint, edges, labels, hit testing, keyboard reveal — must see the same number.
+      result.set(node.id, { x: base.x, y: base.y + extra + (deltas?.get(node.id) ?? 0) })
       const measured = measuredHeights?.get(node.id) ?? geometry.cardHeight
       const excess = Math.max(0, measured - geometry.rowPitch)
       extra += excess + (excess > 0 ? MEASURED_CARD_GAP : 0)
     }
   }
   return result
+}
+
+/**
+ * Content coordinates: where a card sits before the reader's deliberate lane scroll.
+ *
+ * `positionsForNodes` returns displayed coordinates, which include the lane offset. The reveal plan must not
+ * confuse the two: the extent that bounds scrolling cannot be computed from positions that already contain
+ * the scroll, or scrolling would change the bounds that permit it.
+ */
+export const contentPositionsForNodes = (
+  nodes: readonly CanvasNode[],
+  geometry: CanvasGeometry,
+  measuredHeights?: ReadonlyMap<string, number>,
+  deltas?: ReadonlyMap<string, number>,
+): Map<string, number> => {
+  const displayed = positionsForNodes(nodes, geometry, [], measuredHeights, deltas)
+  return new Map([...displayed].map(([id, position]) => [id, position.y]))
+}
+
+/** The lane area the camera actually shows, in content coordinates, or null when the band is off screen. */
+export interface RevealWindow {
+  /** Top of the usable area, in content coordinates. */
+  top: number
+  /** Bottom of the usable area, in content coordinates. */
+  bottom: number
+}
+
+export const revealWindowForLane = (
+  bandHeight: number,
+  frame: CanvasFrame,
+  transform: { y: number; zoom: number },
+  laneOffset: number,
+): RevealWindow | null => {
+  const zoom = transform.zoom || 1
+  const sceneTop = (frame.y - transform.y) / zoom
+  const sceneBottom = (frame.y + frame.height - transform.y) / zoom
+  const a = Math.max(0, sceneTop)
+  const b = Math.min(bandHeight, sceneBottom)
+  if (b - a < 1) return null
+  // Displayed-lane coordinates become content coordinates by removing the deliberate lane scroll. The
+  // reachability predicate solves for that offset and therefore works in displayed coordinates instead.
+  return { top: a - laneOffset, bottom: b - laneOffset }
+}
+
+export interface RevealPlanInput {
+  nodes: readonly CanvasNode[]
+  geometry: CanvasGeometry
+  laneOffsets: readonly number[]
+  measuredHeights?: ReadonlyMap<string, number>
+  storyIds: ReadonlySet<string>
+  subjectId: string | null
+  /** Usable window per lane in content coordinates; a hidden lane has no entry. */
+  windowByLane: ReadonlyMap<number, RevealWindow>
+  /** Lanes the reader owns for this context: never re-planned automatically. */
+  frozenLanes: ReadonlySet<number>
+  /** The displayed-lane band the window was derived from, needed for truthful continuation cues. */
+  bandHeight: number
+}
+
+export interface RevealPlan {
+  /** Temporary displacement per card, in content coordinates. */
+  deltas: Map<string, number>
+  /** Direction of traced cards that are not fully visible, per lane. */
+  cues: Map<number, { up: boolean; down: boolean }>
+}
+
+/**
+ * Lane-local reveal: bring eligible linked cards into the usable window, or directly below it, without
+ * moving any card that stays put and without ever placing a card above the window (that would need a
+ * positive lane offset, which the reader's scroll cannot supply).
+ */
+export const planReveal = (input: RevealPlanInput): RevealPlan => {
+  const { nodes, geometry, laneOffsets, measuredHeights, storyIds, subjectId, windowByLane, frozenLanes, bandHeight } = input
+  const deltas = new Map<string, number>()
+  const cues = new Map<number, { up: boolean; down: boolean }>()
+  const heights = (id: string) => measuredHeights?.get(id) ?? geometry.cardHeight
+  const content = contentPositionsForNodes(nodes, geometry, measuredHeights, input.deltas)
+  const lanes = new Map<number, CanvasNode[]>()
+  for (const node of nodes) {
+    const bucket = lanes.get(node.lane)
+    if (bucket) bucket.push(node)
+    else lanes.set(node.lane, [node])
+  }
+  for (const [lane, bucket] of lanes) {
+    bucket.sort((a, b) => a.row - b.row || a.id.localeCompare(b.id))
+    const offset = laneOffsets[lane] ?? 0
+    const window = windowByLane.get(lane) ?? { top: 0, bottom: bandHeight }
+    const cue = { up: false, down: false }
+    cues.set(lane, cue)
+    for (const node of bucket) {
+      if (!storyIds.has(node.id)) continue
+      // The window arrives in content coordinates, so cues are decided there too: a card above the window
+      // would need a positive offset and is reachable only by moving the camera, which the cue says plainly.
+      const cardTop = content.get(node.id) ?? 0
+      if (cardTop + heights(node.id) <= window.top) cue.up = true
+      else if (cardTop >= window.bottom) cue.down = true
+    }
+    if (frozenLanes.has(lane)) continue
+
+    const eligible = bucket.filter(node => {
+      if (node.id === subjectId || !storyIds.has(node.id)) return false
+      const cardTop = content.get(node.id) ?? 0
+      // Only a card with no measured intersection with the window is eligible: partially visible cards stay.
+      return cardTop + heights(node.id) <= window.top || cardTop >= window.bottom
+    })
+    if (!eligible.length) continue
+
+    const stationary = bucket.filter(node => !eligible.includes(node) )
+    const blocks = stationary.map(node => ({
+      start: content.get(node.id) ?? 0,
+      end: (content.get(node.id) ?? 0) + heights(node.id),
+    }))
+    const gap = MEASURED_CARD_GAP
+    const contentEnd = Math.max(geometry.pad, ...bucket.map(node => (content.get(node.id) ?? 0) + heights(node.id) + geometry.pad))
+    const spans: { start: number; end: number }[] = []
+    let cursor = 0
+    for (const block of [...blocks].sort((a, b) => a.start - b.start)) {
+      if (block.start - gap > cursor) spans.push({ start: cursor, end: block.start - gap })
+      cursor = Math.max(cursor, block.end + gap)
+    }
+    if (contentEnd > cursor) spans.push({ start: cursor, end: contentEnd })
+
+    // Split at the window so a placed card is fully inside it or fully below it, and drop the part above it.
+    const top = window.top
+    const bottom = window.bottom
+    const candidates = spans.flatMap(span => {
+      const parts: { start: number; end: number }[] = []
+      const insideTop = Math.max(span.start, top)
+      const insideBottom = Math.min(span.end, bottom)
+      if (insideBottom > insideTop) parts.push({ start: insideTop, end: insideBottom })
+      if (span.end > Math.max(bottom, span.start)) parts.push({ start: Math.max(bottom, span.start), end: span.end })
+      return parts.filter(part => part.end - part.start >= 1)
+    })
+    const anchor = (top + bottom) / 2
+    candidates.sort((a, b) =>
+      Math.abs((a.start + a.end) / 2 - anchor) - Math.abs((b.start + b.end) / 2 - anchor) || a.start - b.start)
+
+    const queue = [...eligible]
+    let tail = Math.max(contentEnd, ...candidates.map(c => c.end))
+    for (const span of candidates) {
+      let at = span.start
+      while (queue.length) {
+        const next = queue[0]
+        const height = heights(next.id)
+        if (span.end - at < height) break
+        deltas.set(next.id, at - (content.get(next.id) ?? 0))
+        if (at >= bottom) cue.down = true
+        at += height + gap
+        queue.shift()
+      }
+    }
+    for (const next of queue) {
+      deltas.set(next.id, tail - (content.get(next.id) ?? 0))
+      cue.down = true
+      tail += heights(next.id) + gap
+    }
+  }
+  return { deltas, cues }
+}
+
+/**
+ * The lane's permitted scroll range for the *complete displayed arrangement*.
+ *
+ * `contentEnd` is measured in content coordinates. A card that is promised to be fully reachable by lane
+ * scrolling also constrains the lower bound: it needs an offset at or below `b - h - q` to fit inside the
+ * usable window, so a bound derived only from the band would strand it below the window.
+ */
+export const laneScrollMinimum = (input: {
+  bandHeight: number
+  contentEnd: number
+  /** The usable window in DISPLAYED-lane coordinates (what the camera shows). */
+  window: { top: number; bottom: number }
+  /** Promised cards: `q` is the content-coordinate top, `h` the measured height. */
+  promised: readonly { q: number; h: number }[]
+}): number => {
+  const { bandHeight, contentEnd, window, promised } = input
+  const height = window.bottom - window.top
+  const tail = promised
+    .filter(card => card.h <= height)
+    .map(card => window.bottom - card.h - card.q)
+  return Math.min(0, bandHeight - contentEnd, ...tail)
 }
 
 /** Use spare viewport room for measured cards before requiring a lane to roll. */

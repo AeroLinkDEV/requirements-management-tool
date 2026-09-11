@@ -2,7 +2,8 @@
   "schemaVersion": 1,
   "logic": [
     "artifact-thread-contract.spec.ts",
-    "digital-thread-canvas-geometry.spec.ts"
+    "digital-thread-canvas-geometry.spec.ts",
+    "digital-thread-reveal.spec.ts"
   ],
   "rendered": [
     "artifact-thread-rendered.spec.ts"
