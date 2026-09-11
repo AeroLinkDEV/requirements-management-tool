@@ -7,6 +7,25 @@
  */
 
 /** One exact node of the server projection, as returned by /api/change-requests/network. */
+/**
+ * The verification-identity facts a test-change node carries, when it is one.
+ *
+ * `displayNumber` above is a label for a reader. Whether this record holds a governed number is
+ * `hasControlledNumber`, stated by the server rather than inferred from the label's prefix or wording — a
+ * prefix match cannot tell a controlled request from an assessment whose label happens to mention one.
+ */
+export type NetworkVerification = {
+  hasControlledNumber: boolean
+  controlledNumber?: string | null
+  controlledRevision?: number | null
+  outcome: string
+  artifactKind: string
+  discipline: string
+  originKind: string
+  originReferenceId: string
+  sourceDisplayNumber?: string | null
+}
+
 export type NetworkNode = {
   id: string
   kind: string
@@ -19,6 +38,8 @@ export type NetworkNode = {
   revision?: number | null
   level?: string | null
   artifactId?: string | null
+  /** Present on TestChangeRequest nodes only. */
+  verification?: NetworkVerification | null
 }
 
 export type NetworkEdge = {
@@ -144,10 +165,17 @@ export const offLadderLevels = (
     .sort((a, b) => a.level.localeCompare(b.level))
 }
 
+/** True when a test-change node holds no controlled number, from the server's answer rather than its label. */
+export const isUnnumberedAssessment = (node: NetworkNode): boolean =>
+  node.kind === "TestChangeRequest" && node.verification?.hasControlledNumber === false
+
 /** The short square badge on a card. Says the level, which the identifier alone does not reliably carry. */
 export const badgeOf = (node: NetworkNode): string => {
   if (node.kind === "ProblemReport") return "PR"
-  if (node.kind === "TestChangeRequest") return "TCR"
+  // An assessment raised against an approved change is not a controlled test change request and must not
+  // wear its badge: a reader scanning for TCRs would count work that has not been raised. The node kind,
+  // its edges and its id are unchanged — this is the badge only.
+  if (node.kind === "TestChangeRequest") return isUnnumberedAssessment(node) ? "ASMT" : "TCR"
   switch (node.level) {
     case "HighLevel":
       return "HLR"
@@ -272,7 +300,9 @@ export const assignRows = (
   for (const bucket of perLane.values()) {
     bucket
       .slice()
-      .sort((a, b) => a.displayNumber.localeCompare(b.displayNumber))
+      // Labels are no longer unique: two assessments raised from one source share a label by design. The
+      // stable id is the tie-breaker, so the board keeps a deterministic order and neither row is dropped.
+      .sort((a, b) => a.displayNumber.localeCompare(b.displayNumber) || a.id.localeCompare(b.id))
       .forEach((node, index) => rows.set(node.id, index))
   }
   return rows

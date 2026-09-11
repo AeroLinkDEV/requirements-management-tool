@@ -589,7 +589,8 @@ export default function DigitalThreadNetwork({
               const rows = Array.from(set ?? [])
                 .map(id => ({ node: byId.get(id), hop: web?.hops.get(id) ?? 1 }))
                 .filter((row): row is { node: NetworkNode; hop: number } => Boolean(row.node))
-                .sort((a, b) => a.hop - b.hop || a.node.displayNumber.localeCompare(b.node.displayNumber))
+                .sort((a, b) => a.hop - b.hop || a.node.displayNumber.localeCompare(b.node.displayNumber)
+                  || a.node.id.localeCompare(b.node.id))
               const relationFor = (id: string) => {
                 // The edge between the listed record and the selection — not merely any edge touching
                 // the listed record, which could name a relationship it has with a third record.

@@ -9,6 +9,30 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
 
+/// <summary>
+/// The verification-identity facts a test-change node carries, kept apart from its readable label.
+///
+/// A package's own controlled number and the thing it was raised from are two different facts, and a reader
+/// who confuses them misattributes the record. <see cref="ChangeRequestTraceNode.DisplayNumber"/> is a label
+/// for a human; whether a governed number exists is <see cref="HasControlledNumber"/>, and it is stated here
+/// rather than left to be inferred from the label's prefix or wording. Absent is a real answer: a package
+/// raised to assess an approved change is deliberately unnumbered until an assessment concludes that
+/// verification work is required, so "no controlled number" is an ordinary current state and not a fault.
+///
+/// "No controlled number" is not "no identity". The record keeps its own stable
+/// <see cref="ChangeRequestTraceNode.Id"/> for selection, keys, relationships and exact navigation.
+/// </summary>
+public sealed record ChangeRequestTraceVerification(
+    bool HasControlledNumber,
+    string? ControlledNumber,
+    int? ControlledRevision,
+    string Outcome,
+    string ArtifactKind,
+    string Discipline,
+    string OriginKind,
+    Guid OriginReferenceId,
+    string? SourceDisplayNumber);
+
 /// <summary>One exact node in the server-owned change-request trace projection.</summary>
 public sealed record ChangeRequestTraceNode(
     Guid Id,
@@ -22,7 +46,9 @@ public sealed record ChangeRequestTraceNode(
     int? Revision,
     string? Level,
     Guid? ArtifactId = null,
-    IReadOnlyList<Guid>? BaselineMembershipIds = null);
+    IReadOnlyList<Guid>? BaselineMembershipIds = null,
+    /// <summary>Present only on TestChangeRequest nodes; null everywhere else.</summary>
+    ChangeRequestTraceVerification? Verification = null);
 
 /// <summary>One provenance fact carried by a composed trace edge.</summary>
 public sealed record ChangeRequestTraceProvenance(
@@ -386,9 +412,31 @@ public static partial class ChangeRequestTraceProjection
         // Existing TCR source identities, including immutable package source snapshots, are all read in one
         // batch. Source snapshots are parsed only after the query; JSON is evidence, never a new relationship store.
         var reviewRows = await db.TestChangeReviews.AsNoTracking().Where(x => x.ProjectId == projectId && tcrIds.Contains(x.Id))
-            .Select(x => new { x.Id, x.ReleaseId, x.BaseNumber, x.Revision, x.Title, x.State, x.ArtifactKind,
-                x.ChangeRequestId, x.OriginKind, x.OriginReferenceId })
+            // The source-number columns join this one set-based read rather than arriving through a
+            // per-card follow-up: a node that cannot say what it was raised from has nothing truthful to
+            // show when it has no controlled number of its own.
+            .Select(x => new ReviewRow(x.Id, x.ReleaseId, x.BaseNumber, x.Revision, x.Title, x.State,
+                x.ArtifactKind, x.ChangeRequestId, x.OriginKind, x.OriginReferenceId,
+                x.Outcome, x.Discipline, x.SourceChangeRequestNumber, x.SourceProblemReportNumber,
+                x.SourceCaseOriginNumber))
             .ReadTraceAsync(budget, ct);
+
+        // Every test-change node is built here, by all five construction paths, so one rule about identity
+        // cannot drift into five. The other node families keep `Display` unchanged; only this family can hold
+        // an absent controlled number, so only this family needed a different answer for one.
+        ChangeRequestTraceNode VerificationNode(ReviewRow row) => new(
+            row.Id, "TestChangeRequest", VerificationLabel(row), row.Title, row.State.ToString(),
+            projectId, row.ReleaseId, releases.GetValueOrDefault(row.ReleaseId), row.Revision,
+            row.ArtifactKind.ToString(), Verification: new(
+                HasControlledNumber: !string.IsNullOrWhiteSpace(row.BaseNumber),
+                ControlledNumber: string.IsNullOrWhiteSpace(row.BaseNumber) ? null : row.BaseNumber,
+                ControlledRevision: string.IsNullOrWhiteSpace(row.BaseNumber) ? null : row.Revision,
+                Outcome: row.Outcome.ToString(),
+                ArtifactKind: row.ArtifactKind.ToString(),
+                Discipline: row.Discipline.ToString(),
+                OriginKind: row.OriginKind.ToString(),
+                OriginReferenceId: row.OriginReferenceId,
+                SourceDisplayNumber: SourceDisplay(row)));
         var reviewIds = reviewRows.Select(x => x.Id).ToHashSet();
         var claims = await db.TestChangeRequestClaims.AsNoTracking()
             .Where(x => reviewIds.Contains(x.TestChangeReviewId))
@@ -398,16 +446,11 @@ public static partial class ChangeRequestTraceProjection
         if (rootKind == "TestChangeRequest" && !tcrById.ContainsKey(rootId)) return null;
         if (isNetwork)
             foreach (var review in reviewRows)
-                nodes[("TestChangeRequest", review.Id)] = new(review.Id, "TestChangeRequest",
-                    Display(review.BaseNumber, review.Revision), review.Title, review.State.ToString(), projectId,
-                    review.ReleaseId, releases.GetValueOrDefault(review.ReleaseId), review.Revision, review.ArtifactKind.ToString());
+                nodes[("TestChangeRequest", review.Id)] = VerificationNode(review);
         if (rootKind == "TestChangeRequest")
         {
             var rootTcr = tcrById[rootId];
-            nodes[("TestChangeRequest", rootTcr.Id)] = new(rootTcr.Id, "TestChangeRequest",
-                Display(rootTcr.BaseNumber, rootTcr.Revision), rootTcr.Title, rootTcr.State.ToString(), projectId,
-                rootTcr.ReleaseId, releases.GetValueOrDefault(rootTcr.ReleaseId), rootTcr.Revision,
-                rootTcr.ArtifactKind.ToString());
+            nodes[("TestChangeRequest", rootTcr.Id)] = VerificationNode(rootTcr);
         }
         var tcrEdgeKeys = new HashSet<(Guid, Guid, string)>();
         void AddTcrSource(Guid crId, Guid tcrId, string kind, Guid? sourceId = null, Guid? procedureRevisionId = null)
@@ -417,10 +460,7 @@ public static partial class ChangeRequestTraceProjection
             if (!tcrEdgeKeys.Add(key)) return;
             if (!nodes.ContainsKey(("TestChangeRequest", tcrId)))
             {
-                var tcr = tcrById[tcrId];
-                nodes[("TestChangeRequest", tcr.Id)] = new(tcr.Id, "TestChangeRequest",
-                    Display(tcr.BaseNumber, tcr.Revision), tcr.Title, tcr.State.ToString(), projectId,
-                    tcr.ReleaseId, releases.GetValueOrDefault(tcr.ReleaseId), tcr.Revision, tcr.ArtifactKind.ToString());
+                nodes[("TestChangeRequest", tcrId)] = VerificationNode(tcrById[tcrId]);
             }
             var edge = new EdgeBuilder(crId, "ChangeRequest", tcrId, "TestChangeRequest", "CoveredByTestChangeRequest");
             edge.Provenance.Add(new(kind, sourceId ?? tcrId, ProcedureRevisionId: procedureRevisionId));
@@ -461,17 +501,9 @@ public static partial class ChangeRequestTraceProjection
             var caseTcr = pair.caseTcr!.Value;
             if (!tcrById.ContainsKey(caseTcr)) continue;
             if (!nodes.ContainsKey(("TestChangeRequest", caseTcr)) && tcrById.TryGetValue(caseTcr, out var caseReview))
-                nodes[("TestChangeRequest", caseTcr)] = new(caseReview.Id, "TestChangeRequest",
-                    Display(caseReview.BaseNumber, caseReview.Revision), caseReview.Title,
-                    caseReview.State.ToString(), projectId, caseReview.ReleaseId,
-                    releases.GetValueOrDefault(caseReview.ReleaseId), caseReview.Revision,
-                    caseReview.ArtifactKind.ToString());
+                nodes[("TestChangeRequest", caseTcr)] = VerificationNode(caseReview);
             if (!nodes.ContainsKey(("TestChangeRequest", procedureTcr.Id)))
-                nodes[("TestChangeRequest", procedureTcr.Id)] = new(procedureTcr.Id, "TestChangeRequest",
-                    Display(procedureTcr.BaseNumber, procedureTcr.Revision), procedureTcr.Title,
-                    procedureTcr.State.ToString(), projectId, procedureTcr.ReleaseId,
-                    releases.GetValueOrDefault(procedureTcr.ReleaseId), procedureTcr.Revision,
-                    procedureTcr.ArtifactKind.ToString());
+                nodes[("TestChangeRequest", procedureTcr.Id)] = VerificationNode(procedureTcr);
             var edge = new EdgeBuilder(caseTcr, "TestChangeRequest", procedureTcr.Id, "TestChangeRequest",
                 "CaseToProcedureOrigin");
             edge.Provenance.Add(new($"Case{procedureTcr.OriginKind.ToString()[4..]}Origin", procedureTcr.OriginReferenceId));
@@ -857,8 +889,60 @@ public static partial class ChangeRequestTraceProjection
         : type == ChangeRequestType.Interface ? RequirementLevel.Interface
         : type == ChangeRequestType.Software ? softwareLevel : null;
 
+    /// <summary>
+    /// The generic identifier formatter, for the families whose number is required at construction.
+    ///
+    /// `SystemChangeRequest`, `Requirement` and `ProblemReport` all validate a number in their constructors,
+    /// so the empty branch is not their normal state. It stays exactly as it was: this correction is about
+    /// verification packages, whose number is assigned later and conditionally, and those no longer come
+    /// through here — see <see cref="VerificationLabel"/>.
+    /// </summary>
     private static string Display(string baseNumber, int revision) =>
         string.IsNullOrWhiteSpace(baseNumber) ? $".{revision:D2}" : $"{baseNumber}.{revision:D2}";
+
+    /// <summary>The columns a test-change node is built from, named so one builder can serve every path.</summary>
+    private sealed record ReviewRow(
+        Guid Id, Guid ReleaseId, string BaseNumber, int Revision, string Title, TestChangeReviewState State,
+        VerificationArtifactKind ArtifactKind, Guid? ChangeRequestId, TestChangeReviewOriginKind OriginKind,
+        Guid OriginReferenceId, TestChangeReviewOutcome Outcome, TestChangeReviewDiscipline Discipline,
+        string SourceChangeRequestNumber, string SourceProblemReportNumber, string SourceCaseOriginNumber);
+
+    /// <summary>What the package was raised from, interpreted by its own origin discriminator.</summary>
+    private static string? SourceDisplay(ReviewRow row)
+    {
+        var value = row.OriginKind switch
+        {
+            TestChangeReviewOriginKind.ChangeRequest => row.SourceChangeRequestNumber,
+            TestChangeReviewOriginKind.ProblemReport => row.SourceProblemReportNumber,
+            TestChangeReviewOriginKind.CaseChange or TestChangeReviewOriginKind.CaseAssessment
+                or TestChangeReviewOriginKind.CaseReview => row.SourceCaseOriginNumber,
+            _ => "",
+        };
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    /// <summary>
+    /// The readable label for a test-change node, which is not the same thing as its controlled number.
+    ///
+    /// A package with a number is shown by it. A package without one used to be rendered as `.00` — a
+    /// revision suffix attached to nothing, which reads as a corrupt identifier and is in fact the ordinary
+    /// appearance of an assessment raised against an approved change before anybody concluded that
+    /// verification work was needed.
+    ///
+    /// So an unnumbered package is labelled as what it is, with the record it was raised from named as
+    /// context rather than borrowed as identity: "Test procedure assessment of SRCR-00143.00" says whose
+    /// assessment this is without letting SRCR-00143.00 stand where this record's own number would go. No
+    /// number is invented, none is allocated, and the caller still has
+    /// <see cref="ChangeRequestTraceVerification.HasControlledNumber"/> rather than having to read this
+    /// sentence to find out.
+    /// </summary>
+    private static string VerificationLabel(ReviewRow row)
+    {
+        if (!string.IsNullOrWhiteSpace(row.BaseNumber)) return $"{row.BaseNumber}.{row.Revision:D2}";
+        var family = row.ArtifactKind == VerificationArtifactKind.Procedure ? "Test procedure" : "Test case";
+        var source = SourceDisplay(row);
+        return source is null ? $"{family} assessment" : $"{family} assessment of {source}";
+    }
 
     private static IReadOnlyList<Guid> ParseSourceIds(string json)
     {

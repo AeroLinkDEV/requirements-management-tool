@@ -108,7 +108,56 @@ const hoverProjection: NetworkProjection = {
 const denseProjection = { ...hoverProjection, edges: [...hoverProjection.edges,
   ...Array.from({ length: 18 }, (_, index) => edge("hlr-127", "ChangeRequest", `case-${index}`, "TestChangeRequest", "CoveredByTestChangeRequest")),
 ] }
-const chosen = scenario === "dense" ? denseProjection : scenario === "hover" ? hoverProjection : scenario === "server" ? serverChainProjection : projection
+/**
+ * #1016 S13A. Verification packages with and without a controlled number, side by side.
+ *
+ * The two unnumbered rows are raised from the same approved change and therefore carry the same label by
+ * design: that is what makes them the case worth drawing. They must remain two cards, in a stable order,
+ * neither dropped nor merged, and neither wearing the badge of a controlled test change request.
+ *
+ * The identities here are the fixture's own. Nothing in this file reproduces the original observation.
+ */
+const verificationIdentityProjection: NetworkProjection = {
+  projectId: projection.projectId,
+  releaseId: projection.releaseId,
+  nodes: [
+    node({ id: "sys-9", kind: "ChangeRequest", displayNumber: "SRCR-00039.00", level: "System", state: "Approved" }),
+    node({
+      id: "asmt-a", kind: "TestChangeRequest", level: "Procedure", state: "Draft",
+      displayNumber: "Test procedure assessment of SRCR-00039.00",
+      verification: {
+        hasControlledNumber: false, outcome: "Pending", artifactKind: "Procedure", discipline: "System",
+        originKind: "ChangeRequest", originReferenceId: "sys-9", sourceDisplayNumber: "SRCR-00039.00",
+      },
+    }),
+    node({
+      id: "asmt-b", kind: "TestChangeRequest", level: "Procedure", state: "Draft",
+      displayNumber: "Test procedure assessment of SRCR-00039.00",
+      verification: {
+        hasControlledNumber: false, outcome: "NoChangeRequired", artifactKind: "Procedure",
+        discipline: "System", originKind: "ChangeRequest", originReferenceId: "sys-9",
+        sourceDisplayNumber: "SRCR-00039.00",
+      },
+    }),
+    node({
+      id: "tcr-9", kind: "TestChangeRequest", level: "Procedure", state: "InReview",
+      displayNumber: "SYSTPCR-000012.00",
+      verification: {
+        hasControlledNumber: true, controlledNumber: "SYSTPCR-000012", controlledRevision: 0,
+        outcome: "ChangeRequired", artifactKind: "Procedure", discipline: "System",
+        originKind: "ChangeRequest", originReferenceId: "sys-9", sourceDisplayNumber: "SRCR-00039.00",
+      },
+    }),
+  ],
+  edges: [
+    edge("sys-9", "ChangeRequest", "asmt-a", "TestChangeRequest", "CoveredByTestChangeRequest"),
+    edge("sys-9", "ChangeRequest", "asmt-b", "TestChangeRequest", "CoveredByTestChangeRequest"),
+    edge("sys-9", "ChangeRequest", "tcr-9", "TestChangeRequest", "CoveredByTestChangeRequest"),
+  ],
+  truncated: false,
+  orderedLevels: ["System"],
+}
+const chosen = scenario === "dense" ? denseProjection : scenario === "hover" ? hoverProjection : scenario === "server" ? serverChainProjection : scenario === "verification-identity" ? verificationIdentityProjection : projection
 
 createRoot(document.getElementById("root")!).render(
   <DigitalThreadNetwork projection={chosen} buildLabel="Build 1.6" />,
