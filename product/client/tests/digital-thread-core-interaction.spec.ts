@@ -798,3 +798,47 @@ test("clicking during an incoming reveal keeps the arrangement and selects that 
   expect(Math.abs(Number(after![1]) - Number(before![1])), "the click-time pan was not bounded")
     .toBeLessThanOrEqual(400)
 })
+
+/**
+ * A new selection made while the previous thread is still retiring.
+ *
+ * The old subject's temporary geometry is on its way out; the new subject must take over cleanly — exactly one
+ * selected record, no interference from the retirement, and no stale callback restoring the previous camera or
+ * subject afterwards.
+ */
+test("a new selection during cleanup replaces the old subject cleanly", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page, "dense")
+  const root = page.locator('[data-node-id="pr-5"]')
+  await root.click()
+  await expect(root).toHaveAttribute("aria-pressed", "true")
+  await page.waitForTimeout(900)
+
+  // A different, reachable card to become the new subject.
+  // Clear, then select the new subject immediately — before the retirement has finished.
+  await page.keyboard.press("Escape")
+  await expect(page.locator('.dtCanvasNode[aria-pressed="true"]')).toHaveCount(0)
+  /**
+   * Resolve the target *after* the clear, and take its id and box together.
+   *
+   * Capturing the id before the clear and the box after it pointed at two different elements: clearing changes
+   * which cards are off-screen, so a positional locator re-resolves and the click lands on a neighbour.
+   */
+  const other = page.locator('.dtCanvasNode:not(.is-offscreen):has(.dtnCard)').nth(3)
+  const otherId = await other.getAttribute("data-node-id")
+  expect(otherId).toBeTruthy()
+  const box = (await other.boundingBox())!
+  await page.mouse.click(box.x + 6, box.y + 6)
+  await page.waitForTimeout(900)
+
+  const pressed = page.locator('.dtCanvasNode[aria-pressed="true"]')
+  const selected = page.locator(".dtCanvasNode.is-selected")
+  await expect(pressed).toHaveCount(1)
+  await expect(selected).toHaveCount(1)
+  await expect(pressed).toHaveAttribute("data-node-id", otherId!)
+  await expect(root).not.toHaveAttribute("aria-pressed", "true")
+  // The retirement did not quietly restore the old subject after the new one arrived.
+  await page.waitForTimeout(800)
+  await expect(pressed).toHaveCount(1)
+  await expect(pressed).toHaveAttribute("data-node-id", otherId!)
+})
