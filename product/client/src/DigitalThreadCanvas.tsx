@@ -1468,17 +1468,21 @@ export default function DigitalThreadCanvas({
             Math.min(0, start.offset + dy / transform.current.zoom),
           )
           targets.current[lane] = offsets.current[lane]
-          console.log("SCRUB_SET", JSON.stringify({
-            lane, startOffset: Number(start.offset.toFixed(1)), dy: Number(dy.toFixed(1)),
-            assigned: Number(offsets.current[lane].toFixed(1)), floor: Number(laneFloor(lane).toFixed(1)),
-          }))
+          if ((window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG) {
+            console.log("SCRUB_SET", JSON.stringify({
+              lane, startOffset: Number(start.offset.toFixed(1)), dy: Number(dy.toFixed(1)),
+              assigned: Number(offsets.current[lane].toFixed(1)), floor: Number(laneFloor(lane).toFixed(1)),
+            }))
+          }
           // Deliberate lane scrolling no longer drags other lanes into alignment: #1022 keeps the reader's
           // camera and every other lane exactly where they are.
           settle()
           return
         }
         transform.current = { ...transform.current, x: start.tx + dx, y: start.ty + dy }
-        console.log("PAN_SET", JSON.stringify({ dx: Number(dx.toFixed(1)), dy: Number(dy.toFixed(1)) }))
+        if ((window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG) {
+          console.log("PAN_SET", JSON.stringify({ dx: Number(dx.toFixed(1)), dy: Number(dy.toFixed(1)) }))
+        }
         // A deliberate vertical or diagonal camera move is exploration too — but only for lanes the reader can
         // actually see. A lane prepared while horizontally hidden keeps its right to a first useful reveal;
         // freezing it here would deny that without the reader ever having looked at it.
