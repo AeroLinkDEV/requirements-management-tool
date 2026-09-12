@@ -1062,7 +1062,7 @@ public static class ProblemReportEndpoints
         IReadOnlyDictionary<string, string>? currentNames = null, Guid? snapshotId = null)
     {
         var liveNames = currentNames ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        return new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, snapshotId, x.Title, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), category = CategoryResponse(x), x.Classification, x.ReportedBy, reportedByDisplayName = liveNames.Current(x.ReportedBy), x.ResponsibleEngineerId, responsibleEngineerDisplayName = liveNames.Current(x.ResponsibleEngineerId), x.TargetReleaseId, x.IsReleaseBlocker, waived, x.UpdatedAt, x.Version };
+        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, snapshotId, x.Title, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), category = CategoryResponse(x), x.Classification, x.ReportedBy, reportedByDisplayName = liveNames.Current(x.ReportedBy), x.ResponsibleEngineerId, responsibleEngineerDisplayName = liveNames.Current(x.ResponsibleEngineerId), x.TargetReleaseId, x.IsReleaseBlocker, waived, x.UpdatedAt, x.Version };
     }
 
     /// <summary>

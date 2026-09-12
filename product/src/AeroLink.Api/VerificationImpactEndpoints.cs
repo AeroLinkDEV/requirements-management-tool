@@ -282,12 +282,32 @@ public static class VerificationImpactEndpoints
                 .Select(x => x.OriginReferenceId).Distinct().ToList();
             var caseChanges = await db.Set<TestProcedureChange>().AsNoTracking()
                 .Where(x => caseChangeIds.Contains(x.Id))
-                .ToDictionaryAsync(x => x.Id, x => (Identity: x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, x.Title), ct);
+                .ToDictionaryAsync(x => x.Id, x => (Identity: x.BaseNumber + "." + (x.Revision < 10 ? "0" : "") + x.Revision, x.Title, x.TestChangeReviewId), ct);
             var assessmentIds = reviews.Where(x => x.OriginKind == TestChangeReviewOriginKind.CaseAssessment)
                 .Select(x => x.OriginReferenceId).Distinct().ToList();
             var assessments = await db.VerificationImpactItems.AsNoTracking()
                 .Where(x => assessmentIds.Contains(x.Id))
-                .ToDictionaryAsync(x => x.Id, x => (x.SubjectDisplayNumber, $"{x.Outcome} · {x.ResolutionRationale}"), ct);
+                .ToDictionaryAsync(x => x.Id, x => (x.SubjectDisplayNumber, $"{x.Outcome} · {x.ResolutionRationale}", x.TestChangeReviewId), ct);
+            var sourceReviewIds = caseChanges.Values.Select(x => x.TestChangeReviewId)
+                .Concat(assessments.Values.Select(x => x.TestChangeReviewId)).Distinct().ToList();
+            var sourceReviews = await db.TestChangeReviews.AsNoTracking()
+                .Where(x => sourceReviewIds.Contains(x.Id) && x.ProjectId == release.ProjectId)
+                .ToDictionaryAsync(x => x.Id, x => x.DisplayNumber, ct);
+            object[] InheritedSources(TestChangeReview review)
+            {
+                var sources = new List<object>();
+                if (review.ChangeRequestId is { } sourceId)
+                    sources.Add(new { id = sourceId, kind = "ChangeRequest", displayNumber = review.SourceChangeRequestNumber });
+                sources.AddRange(review.AdditionalSources.Select(x => (object)new
+                    { id = x.ChangeRequestId, kind = "ChangeRequest", displayNumber = x.ChangeRequestNumber }));
+                var parentId = review.OriginKind == TestChangeReviewOriginKind.CaseChange
+                    ? caseChanges.GetValueOrDefault(review.OriginReferenceId).TestChangeReviewId
+                    : review.OriginKind == TestChangeReviewOriginKind.CaseAssessment
+                        ? assessments.GetValueOrDefault(review.OriginReferenceId).TestChangeReviewId : Guid.Empty;
+                if (sourceReviews.TryGetValue(parentId, out var parentNumber))
+                    sources.Add(new { id = parentId, kind = "TestChangeRequest", displayNumber = parentNumber });
+                return sources.ToArray();
+            }
             var originReports = reportDirectory.ToDictionary(x => x.Key,
                 x => (x.Value.DisplayNumber, x.Value.Title));
             var originChanges = caseChanges.ToDictionary(x => x.Key,
@@ -304,6 +324,7 @@ public static class VerificationImpactEndpoints
                     review.ProjectId,
                     review.ReleaseId,
                     review.ChangeRequestId,
+                    inheritedProblemReportSources = InheritedSources(review),
                     discipline = review.Discipline.ToString(),
                     artifactKey = review.ArtifactKey.ToString(),
                     artifactKind = review.ArtifactKind.ToString(),
@@ -1854,7 +1875,7 @@ public static class VerificationImpactEndpoints
             if (artifactKey.Kind == VerificationArtifactKind.Procedure
                 && artifactKey.Discipline != VerificationDiscipline.System)
             {
-                if (changeRequestIds.Length != 0 || namedProblemReports.Length != 0
+                if (changeRequestIds.Length != 0
                     || caseChangeIds.Length + caseAssessmentIds.Length != 1)
                     return Results.BadRequest(new
                     {
@@ -1942,10 +1963,8 @@ public static class VerificationImpactEndpoints
             // The first change the caller names is the package's base; the rest are folded in. The database
             // row order is not the caller's order, so it is restored explicitly rather than trusted.
             changes = changeRequestIds.Select(id => changes.Single(x => x.Id == id)).ToList();
-            var problemReportError = artifactKey.Kind == VerificationArtifactKind.Procedure
-                && artifactKey.Discipline != VerificationDiscipline.System
-                ? null
-                : await problemReports.ValidateSelectionAsync(release.ProjectId, releaseId, request.ProblemReportIds, ct);
+            var problemReportError = await problemReports.ValidateSelectionAsync(
+                release.ProjectId, releaseId, request.ProblemReportIds, ct);
             if (problemReportError is not null) return Results.BadRequest(new { error = problemReportError });
 
             // Already covered, by the package it was raised from or by one it was folded into. The check names
@@ -2206,6 +2225,8 @@ public static class VerificationImpactEndpoints
                                          {
                                              sourceKind = TestChangeReviewOriginKind.CaseChange.ToString(),
                                              sourceId = change.Id,
+                                             problemReportSourceId = review.Id,
+                                             problemReportSourceDisplayNumber = review.DisplayNumber,
                                              displayNumber = change.BaseNumber + "." + (change.Revision < 10 ? "0" : "") + change.Revision,
                                              title = change.Title,
                                              state = review.State.ToString(),
@@ -2232,6 +2253,8 @@ public static class VerificationImpactEndpoints
                                              {
                                                  sourceKind = TestChangeReviewOriginKind.CaseAssessment.ToString(),
                                                  sourceId = item.Id,
+                                                 problemReportSourceId = review.Id,
+                                                 problemReportSourceDisplayNumber = review.DisplayNumber,
                                                  displayNumber = item.SubjectDisplayNumber,
                                                  title = review.Title,
                                                  state = item.State.ToString(),

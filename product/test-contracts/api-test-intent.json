@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 880,
-    "cases": 980,
+    "tests": 881,
+    "cases": 981,
     "classes": 131,
-    "hostedTests": 839,
-    "hostedCases": 925,
+    "hostedTests": 840,
+    "hostedCases": 926,
     "nonHostedTests": 32,
     "nonHostedCases": 46,
     "unknownHostTests": 9,
@@ -61,10 +61,10 @@
     "startup-config": {
       "label": "Startup, hosting and configuration",
       "level": "API (must stay hosted)",
-      "tests": 7,
-      "cases": 7,
+      "tests": 8,
+      "cases": 8,
       "unknownCases": 0,
-      "classes": 5
+      "classes": 6
     },
     "rule-matrix": {
       "label": "Business-rule matrix over data variations",
@@ -9112,8 +9112,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 446,
-        "end": 497
+        "start": 519,
+        "end": 570
       }
     },
     {
@@ -9130,8 +9130,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 254,
-        "end": 444
+        "start": 327,
+        "end": 517
+      }
+    },
+    {
+      "cls": "ProcedureTestChangeControlApiTests",
+      "test": "Procedure_inherited_reports_are_explicit_build_scoped_links_and_keep_the_exact_case_origin",
+      "kind": "Fact",
+      "intent": "startup-config",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 26,
+        "end": 97
       }
     },
     {
@@ -9148,8 +9166,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 52,
-        "end": 211
+        "start": 125,
+        "end": 284
       }
     },
     {
@@ -9166,8 +9184,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 213,
-        "end": 252
+        "start": 286,
+        "end": 325
       }
     },
     {
@@ -9184,8 +9202,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 499,
-        "end": 564
+        "start": 572,
+        "end": 637
       }
     },
     {
@@ -9201,8 +9219,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 34,
-        "end": 50
+        "start": 107,
+        "end": 123
       }
     },
     {

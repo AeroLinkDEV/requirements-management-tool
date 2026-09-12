@@ -21,11 +21,11 @@ tokens that supplied host evidence.
 ## Result
 
 <!-- BEGIN GENERATED API TEST INTENT SUMMARY -->
-**880 test methods, 980 known invocations, 131 classes.** This source-exact forecast supports planning only;
+**881 test methods, 981 known invocations, 131 classes.** This source-exact forecast supports planning only;
 it is not migration or rollout authority. All current theories use explicit `InlineData`,
 so every case count is known.
 The inventory does not infer host use from a whole class:
-**839 methods / 925 cases have direct host evidence**,
+**840 methods / 926 cases have direct host evidence**,
 **32 methods / 46 cases are explicitly non-hosted**, and
 **9 methods / 9 cases remain unknown** because their class contains a host fixture or factory but
 the method body does not show the host operation.
@@ -37,11 +37,11 @@ the method body does not show the host operation.
 | Authentication / authorization wiring | 94 | 98 | 55 | API (must stay hosted) |
 | In-process logic with no HTTP and no client | 37 | 37 | 14 | Domain or Infrastructure (migration candidate) |
 | Filesystem / evidence-root behaviour | 19 | 19 | 10 | API or Infrastructure (must stay hosted) |
-| Startup, hosting and configuration | 7 | 7 | 5 | API (must stay hosted) |
+| Startup, hosting and configuration | 8 | 8 | 6 | API (must stay hosted) |
 | Business-rule matrix over data variations | 2 | 16 | 2 | Domain (migration candidate) |
 
 The machine-readable artifact records **16 explicitly hosted candidate methods / 16 cases** and **5 unknown candidate methods / 5 cases**.
-The known hosted candidate share is **16 of 925 cases (1.7%)**,
+The known hosted candidate share is **16 of 926 cases (1.7%)**,
 but that is not a safe ceiling while unknown invocations remain. The static criterion-7 result is therefore
 **unresolved**; it does not close #566 and does not justify closing #563.
 <!-- END GENERATED API TEST INTENT SUMMARY -->

@@ -36,7 +36,7 @@ public sealed record ApprovedProcedureSelection(Guid ProcedureId, Guid RevisionI
 /// as soon as the engineering decision is settled, rather than discovering the work when the release is
 /// already being assembled.
 /// </summary>
-public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemReportLinkService? problemReports = null,
+public sealed class VerificationImpactService(AeroLinkDbContext db,
     ILadderPolicy? policy = null, IProjectLadderPolicyResolver? policyResolver = null)
 {
     private readonly ILadderPolicy fallbackPolicy = policy ?? LegacyLadderPolicy.Instance;
@@ -95,8 +95,8 @@ public sealed class VerificationImpactService(AeroLinkDbContext db, ProblemRepor
                 review = new TestChangeReview(request.ProjectId, request.TargetReleaseId, request.Id,
                     discipline, request.DisplayNumber, now);
                 db.TestChangeReviews.Add(review);
-                await (problemReports ?? new ProblemReportLinkService(db)).PropagateToTestChangeRequestAsync(
-                    request.Id, review.Id, actionActor ?? request.AuthorId, now, ct);
+                // The source CR provides inherited PR context. A test author explicitly accepts
+                // direct VerificationForProblem links; approval must not silently copy them here.
                 reviews.Add(discipline, review);
                 foreach (var historical in priorReviews.Where(x => x.Discipline == discipline))
                 {

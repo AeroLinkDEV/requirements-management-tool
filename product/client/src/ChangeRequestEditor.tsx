@@ -19,6 +19,7 @@ import { apiRequest, operationError, recordClientOperationFailure } from "./apiC
 import { LadderCapability, ladderAllows } from "./projectLadder";
 import type { ProjectLadderProjection } from "./projectLadder";
 import ProblemReportPicker from "./ProblemReportPicker";
+import InheritedProblemReports from './InheritedProblemReports';
 import "./ChangeRequestEditor.css";
 import "./ChangeRequestEditorEnhancements.css";
 
@@ -523,6 +524,9 @@ export default function ChangeRequestEditor({
             legend={`PRs driving this ${abbreviation} (optional)`} />
           <UpstreamChangeRequestPicker candidates={upstreamPicker} links={upstreamLinks} onChange={setUpstreamLinks}
             noUpstreamRationale={noUpstreamRationale} onNoUpstreamRationale={setNoUpstreamRationale} currentBuild={releaseVersion} />
+          <InheritedProblemReports api={api} projectId={projectId} releaseId={releaseId}
+            sources={upstreamLinks.map(link => ({ id: link.upstreamChangeRequestId, kind: 'ChangeRequest', displayNumber: upstreamPicker.known[link.upstreamChangeRequestId]?.displayNumber ?? link.upstreamChangeRequestId }))}
+            selected={problemReportIds} onChange={setProblemReportIds} />
         </section>
 
         <section className="editorCard authoringStage" id="requirement-changes">

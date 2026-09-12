@@ -23,6 +23,79 @@ namespace AeroLink.Api.Tests;
 /// </summary>
 public sealed class ProcedureTestChangeControlApiTests
 {
+    [Fact]
+    public async Task Procedure_inherited_reports_are_explicit_build_scoped_links_and_keep_the_exact_case_origin()
+    {
+        using var factory = new AeroLinkApiFactory(testLadderPolicy: ProcedureEnabledTestPolicy.Create());
+        using var client = factory.CreateClient();
+        var fixture = await SeedCaseSourcesAsync(factory, await SeedAsync(factory));
+        Guid reportId, parentId, outsideId;
+        var now = DateTimeOffset.UtcNow;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            parentId = await db.Set<TestProcedureChange>().Where(x => x.Id == fixture.HlrCaseChangeId)
+                .Select(x => x.TestChangeReviewId).SingleAsync();
+            var report = new ProblemReport(fixture.ProjectId, "PR-07251", "Inherited Case anomaly", "Observed anomaly", "", "case.author", now,
+                targetReleaseId: fixture.ReleaseId);
+            var outside = new ProblemReport(fixture.ProjectId, "PR-07252", "Outside build", "Observed elsewhere", "", "case.author", now);
+            var foreignProgram = new ProgramRecord("Unrelated inherited context", $"UP{Guid.NewGuid():N}"[..12]);
+            var foreignProject = new ProjectRecord(foreignProgram.Id, "Other product", "Other project");
+            var foreign = new ProblemReport(foreignProject.Id, "PR-07253", "Private anomaly", "Other project", "", "other.author", now);
+            reportId = report.Id; outsideId = outside.Id;
+            db.AddRange(report, outside, foreignProgram, foreignProject, foreign,
+                new ProblemReportLink(report.Id, "Release", fixture.ReleaseId, ProblemReportRelationshipPolicy.BuildScope, "case.author", now),
+                new ProblemReportLink(report.Id, "TestChangeRequest", parentId, ProblemReportRelationshipPolicy.VerificationForProblem, "case.author", now),
+                // Legacy inconsistent relationship fixture: the linked-source read must still enforce report access.
+                new ProblemReportLink(foreign.Id, "TestChangeRequest", parentId, ProblemReportRelationshipPolicy.VerificationForProblem, "legacy", now));
+            await db.SaveChangesAsync();
+        }
+        await LoginAsync(client, "procedure.author");
+        var inherited = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/linked/TestChangeRequest/{parentId}");
+        var visibleReport = Assert.Single(inherited.EnumerateArray());
+        Assert.Equal(reportId, visibleReport.GetProperty("id").GetGuid());
+        Assert.Equal(fixture.ProjectId, visibleReport.GetProperty("projectId").GetGuid());
+        var sources = await client.GetFromJsonAsync<JsonElement>($"/api/releases/{fixture.ReleaseId}/test-change-request-sources?discipline=HighLevelSoftware&artifactKind=Procedure");
+        var source = Assert.Single(sources.EnumerateArray(), x => x.GetProperty("sourceId").GetGuid() == fixture.HlrCaseChangeId);
+        Assert.Equal(parentId, source.GetProperty("problemReportSourceId").GetGuid());
+        using (var refused = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests", new
+        {
+            discipline = "HighLevelSoftware", artifactKind = "Procedure", caseChangeIds = new[] { fixture.HlrCaseChangeId },
+            problemReportIds = new[] { outsideId }, title = "Refuse outside build"
+        })) Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        var package = await CreateProcedurePackageAsync(client, fixture.ReleaseId, "HighLevelSoftware", fixture.HlrCaseChangeId, "Explicit inherited context");
+        var id = package.GetProperty("id").GetGuid();
+        Assert.Empty(package.GetProperty("problemReports").EnumerateArray());
+        Assert.Equal(parentId, Assert.Single(package.GetProperty("inheritedProblemReportSources").EnumerateArray()).GetProperty("id").GetGuid());
+        using (var linked = await client.PostAsJsonAsync($"/api/test-change-reviews/{id}/problem-reports", new
+        {
+            problemReportIds = new[] { reportId, reportId }, expectedVersion = package.GetProperty("version").GetInt64()
+        })) Assert.Equal(HttpStatusCode.OK, linked.StatusCode);
+        var register = await client.GetFromJsonAsync<JsonElement>($"/api/releases/{fixture.ReleaseId}/test-change-reviews");
+        var reopened = Assert.Single(register.GetProperty("items").EnumerateArray(), x => x.GetProperty("id").GetGuid() == id);
+        Assert.Equal(fixture.HlrCaseChangeId, reopened.GetProperty("originReferenceId").GetGuid());
+        Assert.Single(reopened.GetProperty("problemReports").EnumerateArray());
+        using (var stale = await client.PostAsJsonAsync($"/api/test-change-reviews/{id}/problem-reports", new
+        {
+            problemReportIds = new[] { reportId }, expectedVersion = package.GetProperty("version").GetInt64()
+        })) Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        using (var retried = await client.PostAsJsonAsync($"/api/test-change-reviews/{id}/problem-reports", new
+        {
+            problemReportIds = new[] { reportId }, expectedVersion = reopened.GetProperty("version").GetInt64()
+        })) Assert.Equal(HttpStatusCode.OK, retried.StatusCode);
+        using var verificationScope = factory.Services.CreateScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var direct = Assert.Single(await verificationDb.ProblemReportLinks.AsNoTracking().Where(x => x.ArtifactType == "TestChangeRequest" && x.ArtifactId == id).ToListAsync());
+        Assert.Equal("procedure.author", direct.AddedBy);
+        Assert.True(direct.AddedAt >= now);
+        Assert.Equal(ProblemReportRelationshipPolicy.VerificationForProblem, direct.Relationship);
+        // Creation is the same explicit command, and PRs supplement rather than replace the Case origin.
+        var llr = await CreateProcedurePackageAsync(client, fixture.ReleaseId, "LowLevelSoftware", fixture.LlrCaseChangeId,
+            "Create with accepted PR", [reportId]);
+        Assert.Single(llr.GetProperty("problemReports").EnumerateArray());
+        Assert.Equal(fixture.LlrCaseChangeId, llr.GetProperty("originReferenceId").GetGuid());
+    }
+
     private sealed record Fixture(Guid ProjectId, Guid ReleaseId, Guid HlrCaseChangeId, Guid LlrCaseChangeId);
     private sealed record ExplorerFixture(Guid ProjectId, Guid ReleaseId, Guid ArtifactId, Guid RevisionId,
         Guid LaterRevisionId, Guid RequirementRevisionId, Guid RetainedRequirementRevisionId, Guid ReviewId,
@@ -846,13 +919,14 @@ public sealed class ProcedureTestChangeControlApiTests
     }
 
     private static async Task<JsonElement> CreateProcedurePackageAsync(HttpClient client, Guid releaseId,
-        string discipline, Guid sourceChangeId, string title)
+        string discipline, Guid sourceChangeId, string title, Guid[]? problemReportIds = null)
     {
         using var response = await client.PostAsJsonAsync($"/api/releases/{releaseId}/test-change-requests", new
         {
             discipline,
             artifactKind = "Procedure",
             caseChangeIds = new[] { sourceChangeId },
+            problemReportIds,
             title,
         });
         var body = await response.Content.ReadAsStringAsync();
