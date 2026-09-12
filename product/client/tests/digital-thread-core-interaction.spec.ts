@@ -1148,3 +1148,37 @@ test("clearing during motion stops the camera where the reader saw it", async ({
   expect(Math.abs(after.y - atClear.y)).toBeLessThanOrEqual(4)
   expect(Math.abs(after.zoom - atClear.zoom)).toBeLessThanOrEqual(0.02)
 })
+
+/**
+ * Arrow navigation still walks the lane it is in.
+ *
+ * The reveal changed the order the canvas walks (displayed position rather than canonical row), so this is the
+ * regression the change could plausibly cause: Down must move focus to another card **in the same lane**, and
+ * that card must be reachable by eye.
+ */
+test("Arrow Down moves focus within the same lane and keeps it visible", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page, "hover")
+  // One tab stop per lane; the first lane holds a single card, so the second stop (the high-level lane with many
+  // cards) is the one where Down has somewhere to go.
+  const first = page.locator('.dtCanvasNode:not(.is-offscreen)[tabindex="0"]').nth(1)
+  await first.focus()
+  const before = await page.evaluate(() => {
+    const active = document.activeElement as HTMLElement | null
+    const x = Number(/translate\((-?[\d.]+)px/.exec(active?.style.transform ?? "")?.[1] ?? NaN)
+    const y = Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/.exec(active?.style.transform ?? "")?.[1] ?? NaN)
+    return { id: active?.dataset.nodeId ?? null, x, y }
+  })
+  await page.keyboard.press("ArrowDown")
+  await page.waitForTimeout(300)
+  const after = await page.evaluate(() => {
+    const active = document.activeElement as HTMLElement | null
+    const x = Number(/translate\((-?[\d.]+)px/.exec(active?.style.transform ?? "")?.[1] ?? NaN)
+    const y = Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/.exec(active?.style.transform ?? "")?.[1] ?? NaN)
+    return { id: active?.dataset.nodeId ?? null, x, y, offscreen: active?.classList.contains("is-offscreen") ?? false }
+  })
+  expect(after.id, "Arrow Down did not move focus").not.toBe(before.id)
+  expect(Math.abs(after.x - before.x), "Arrow Down left the lane").toBeLessThanOrEqual(1)
+  expect(after.y, "Arrow Down did not move down the lane").toBeGreaterThan(before.y)
+  expect(after.offscreen, "focus landed on a card the reader cannot see").toBe(false)
+})
