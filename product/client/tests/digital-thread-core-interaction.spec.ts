@@ -618,7 +618,7 @@ for (const view of [
   await shoot(page, `${view.name.toLowerCase()}-true-unselected-hover`)
 })
 
-test("same-tier rendered growth repairs only colliding temporary geometry and converges", async ({ page }) => {
+for (const promoted of [false, true]) test(`same-tier rendered ${promoted ? "promoted-subject" : "linked"} growth repairs only colliding temporary geometry and converges`, async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 700 })
   await page.goto("/tests/fixtures/digital-thread-contract.html?case=growth")
   const linked = page.locator('[data-node-id="link"]')
@@ -630,7 +630,7 @@ test("same-tier rendered growth repairs only colliding temporary geometry and co
   await page.waitForTimeout(600)
   const revealed = (await linked.boundingBox())!
   expect(before.y - revealed.y).toBeGreaterThan(100)
-  await subject.click({ position: { x: 6, y: 6 } })
+  await (promoted ? linked : subject).click({ position: { x: 6, y: 6 } })
   await page.waitForTimeout(900)
   const residents = page.locator('[data-node-id^="resident-"]')
   const residentBefore = await residents.evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().y))

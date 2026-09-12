@@ -358,7 +358,7 @@ export const planReveal = (input: RevealPlanInput): RevealPlan => {
           top + height + MEASURED_CARD_GAP <= block.start || top >= block.end + MEASURED_CARD_GAP)
         const candidates = [oldTop, 0, ...blocks.flatMap(block => [block.start - height - MEASURED_CARD_GAP, block.end + MEASURED_CARD_GAP])]
           .filter(safe).sort((a, b) => Math.abs(a - oldTop) - Math.abs(b - oldTop) || a - b)
-        const top = node.id === subjectId ? oldTop : candidates[0] ?? oldTop
+        const top = candidates[0] ?? oldTop
         deltas.set(node.id, top - base)
         blocks.push({ start: top, end: top + height })
       }
@@ -431,6 +431,23 @@ export const planReveal = (input: RevealPlanInput): RevealPlan => {
       cue.down = true
       tail += heights(next.id) + gap
     }
+  }
+  // Promotion retains its effective position even in a lane being planned for its first exposure. Measured
+  // growth can invalidate that position: preserve it only while it clears the final positions of neighbours.
+  const subject = nodes.find(node => node.id === subjectId)
+  if (subject && input.existing?.has(subject.id) && !deltas.has(subject.id)) {
+    const base = content.get(subject.id) ?? 0
+    const oldTop = base + input.existing.get(subject.id)!
+    const height = heights(subject.id)
+    const blocks = (lanes.get(subject.lane) ?? []).filter(node => node.id !== subject.id).map(node => {
+      const start = (content.get(node.id) ?? 0) + (deltas.get(node.id) ?? 0)
+      return { start, end: start + heights(node.id) }
+    })
+    const safe = (top: number) => top >= 0 && blocks.every(block =>
+      top + height + MEASURED_CARD_GAP <= block.start || top >= block.end + MEASURED_CARD_GAP)
+    const top = [oldTop, 0, ...blocks.flatMap(block => [block.start - height - MEASURED_CARD_GAP, block.end + MEASURED_CARD_GAP])]
+      .filter(safe).sort((a, b) => Math.abs(a - oldTop) - Math.abs(b - oldTop) || a - b)[0] ?? oldTop
+    deltas.set(subject.id, top - base)
   }
   return { deltas, cues }
 }

@@ -28,7 +28,7 @@ const laneReachable = (q: number, h: number, window: { top: number; bottom: numb
   Math.max(L, window.top - q) <= Math.min(0, window.bottom - h - q)
 
 test.describe("lane-local reveal", () => {
-  test("same-tier growth reconciles a retained reveal collision without moving residents", () => {
+  for (const promoted of [false, true]) test(`same-tier growth reconciles a retained ${promoted ? "selected" : "linked"} collision without moving residents`, () => {
     const nodes: CanvasNode[] = [
       { id: "subject", lane: 0, row: 0 },
       { id: "resident-0", lane: 1, row: 0 },
@@ -42,6 +42,7 @@ test.describe("lane-local reveal", () => {
     }
     const first = planReveal({ ...input, frozenLanes: new Set<number>() })
     expect(first.deltas.get("linked")).toBe(-992)
+    if (promoted) input.subjectId = "linked"
     const measuredHeights = new Map([["linked", 200]])
     const grown = planReveal({ ...input, measuredHeights, existing: first.deltas, frozenLanes: new Set([1]) })
     const positions = contentPositionsForNodes(nodes, GEOMETRY, measuredHeights, grown.deltas)

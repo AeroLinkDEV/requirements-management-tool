@@ -11,7 +11,6 @@ import {
   clampOffsets,
   edgeIdentity,
   edgePath,
-  offsetToReveal,
   fitTransform,
   frameNodes,
   isVisible,
@@ -668,7 +667,6 @@ export default function DigitalThreadCanvas({
         bandHeight: result.bandHeight,
       })
       revealTargets.current = plan.deltas
-      if (emphasisId && retained.has(emphasisId)) revealTargets.current.set(emphasisId, retained.get(emphasisId)!)
       planCues.current = plan.cues
       /**
        * Rebase the new subject onto its retained displayed position.
@@ -681,7 +679,7 @@ export default function DigitalThreadCanvas({
         const lane = nodeLaneRef.current.get(emphasisId)
         const base = contentPositionsForNodes(nodes, result.geometry, measuredCardHeights).get(emphasisId)
         if (lane !== undefined && base !== undefined) {
-          const deltaNew = retainedSubjectY.current - base - (offsets.current[lane] ?? 0)
+          const deltaNew = plan.deltas.get(emphasisId) ?? retainedSubjectY.current - base - (offsets.current[lane] ?? 0)
           if (Math.abs(deltaNew) > 0.5) revealTargets.current.set(emphasisId, deltaNew)
           else revealTargets.current.delete(emphasisId)
         }
@@ -849,7 +847,7 @@ export default function DigitalThreadCanvas({
       }
       card.classList.toggle(
         "is-offscreen",
-        (!isVisible(position.y, geometry, bandHeight) || !inFrame) && selectedId !== node.id,
+        !fullyVisible && selectedId !== node.id,
       )
       const offscreen = card.classList.contains("is-offscreen")
       // Descendant links/buttons are real native actions, but an offscreen card must not remain a hidden tab
@@ -884,8 +882,11 @@ export default function DigitalThreadCanvas({
         if (!position) return false
         const left = position.x * transform.current.zoom + transform.current.x
         const right = left + geometry.laneWidth * transform.current.zoom
+        const top = position.y * transform.current.zoom + transform.current.y
+        const bottom = top + (cardRefs.current.get(candidate.id)?.offsetHeight || geometry.cardHeight) * transform.current.zoom
         return isVisible(position.y, geometry, bandHeight)
           && left >= box.x - 1 && right <= box.x + box.width + 1
+          && top >= box.y - 1 && bottom <= box.y + box.height + 1
       })
       const remembered = rovingRef.current[lane]
       const stop =
@@ -1010,6 +1011,7 @@ export default function DigitalThreadCanvas({
     if (placementNotice) {
       const unavailable = [...labelPositions.values()].some(position => !position.available)
       placementNotice.hidden = !unavailable
+      placementNotice.style.bottom = `${Math.max(68, (viewportRef.current?.clientHeight ?? 0) - box.y - box.height + 4)}px`
       placementNotice.textContent = unavailable
         ? "A relation label cannot fit without covering other content. Enlarge the canvas to show it on its connector."
         : ""
@@ -1067,7 +1069,7 @@ export default function DigitalThreadCanvas({
         label.style.opacity = inWindow && (traced || labelsAtRest) && position?.available === true ? "" : "0"
       }
     }
-  }, [counts, emphasisId, frame, lanes.length, nodes, onFramingNeedsRoom, scopeKey, selectedId, sourceSignature, story, trailingOverhang, tracedEdges])
+  }, [counts, edgesKey, emphasisId, frame, lanes, nodes, scopeKey, selectedId, sourceSignature, story, trailingOverhang, tracedEdges])
 
   // A lane's animation can outlive the render that started it (focus is followed by selection).
   // Paint the committed selection rather than letting an older tick restore stale card visibility.
@@ -1702,6 +1704,7 @@ export default function DigitalThreadCanvas({
    */
   const reveal = useCallback(
     (node: CanvasNode) => {
+      takeCameraOwnership()
       const result = geometryRef.current
       if (!result) return
       // Explicitly revealing a record is deliberate navigation: the reader owns that lane from here on.
@@ -1713,38 +1716,32 @@ export default function DigitalThreadCanvas({
         if (height && Number.isFinite(height)) measuredHeights.set(candidate.id, height)
       }
       const measuredPosition = positionsForNodes(nodes, result.geometry, offsets.current, measuredHeights, revealDeltas.current).get(node.id)
-      const revealed = offsetToReveal(
-        node.row,
-        result.geometry,
-        result.bandHeight,
-        offsets.current[node.lane] ?? 0,
-        measuredPosition?.y,
-      )
-      // Never past what the lane can actually roll, or the lane would scroll off its own content.
-      targets.current[node.lane] = Math.max(
-        floorsRef.current[node.lane] ?? result.laneMinimums[node.lane] ?? 0,
-        revealed,
-      )
-      // Setting the target is not moving the lane. The easing loop was only ever started by the pointer
-      // scrub, so keyboard navigation set a target nothing consumed — rolling appeared to work only while
-      // the card it moved to happened to need no roll at all.
-      settle()
-
       const box = frame()
       // `.dtCanvas` is a transformed viewport, never a native document scrollport. Some browsers still retain a
       // programmatic scroll offset after focusing an offscreen descendant; clear that stale offset before the
       // camera correction below so keyboard reveal cannot leave a blank scene.
       viewportRef.current?.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior })
       if (!box) return
-      const { x } = measuredPosition ?? nodePosition(node, result.geometry, offsets.current)
+      const { x, y } = measuredPosition ?? nodePosition(node, result.geometry, offsets.current)
       const left = x * transform.current.zoom + transform.current.x
       const right = left + result.geometry.laneWidth * transform.current.zoom
       const margin = 16
       if (left < box.x + margin) transform.current.x += box.x + margin - left
       else if (right > box.x + box.width - margin) transform.current.x -= right - (box.x + box.width - margin)
+      const top = y * transform.current.zoom + transform.current.y
+      const bottom = top + (measuredHeights.get(node.id) ?? result.geometry.cardHeight) * transform.current.zoom
+      const shift = top < box.y + margin ? box.y + margin - top
+        : bottom > box.y + box.height - margin ? box.y + box.height - margin - bottom : 0
+      const previous = offsets.current[node.lane] ?? 0
+      const next = Math.min(0, Math.max(floorsRef.current[node.lane] ?? 0, previous + shift / transform.current.zoom))
+      offsets.current[node.lane] = next
+      targets.current[node.lane] = next
+      // Focus must arrive visibly in the same transaction. Use lane space first; any remainder needs camera
+      // travel (for example a record above the lane's zero offset), using the real toolbar/tray free frame.
+      transform.current.y += shift - (next - previous) * transform.current.zoom
       paint()
     },
-    [frame, nodes, paint, settle],
+    [frame, nodes, paint, takeCameraOwnership],
   )
 
   /** Arrow navigation within a lane, revealing the card it moves to. */
