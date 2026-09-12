@@ -185,6 +185,8 @@ export default function DigitalThreadCanvas({
   const measuredHeightsRef = useRef<Map<string, number>>(new Map())
   /** True once the reader has taken the camera: passive measurement must then leave it alone. */
   const cameraOwned = useRef(false)
+  /** The landing routine, so the scope-change effect can start a fresh navigation context. */
+  const landRef = useRef<() => void>(() => {})
   /** Where a newly selected record was actually being displayed when it became the subject. */
   const retainedSubjectY = useRef<number | null>(null)
   /**
@@ -218,6 +220,20 @@ export default function DigitalThreadCanvas({
     usableLanesRef.current = new Set()
     deepestMinimum.current = []
     revealSignature.current = ""
+    /**
+     * A genuine scope change is a new navigation context.
+     *
+     * Delivery/ownership bookkeeping is not enough on its own: the reader's lane scroll, the camera and any
+     * temporary displacements belonged to the previous scope's data and must not be inherited by a different
+     * project/build/baseline. An equivalent refresh *inside* a scope keeps all of them, which is the distinction
+     * the retained test checks from both sides.
+     */
+    offsets.current = []
+    targets.current = []
+    revealDeltas.current = new Map()
+    revealTargets.current = new Map()
+    cameraOwned.current = false
+    landRef.current()
   }, [scopeKey])
   const clearPreviewTimer = () => {
     if (previewTimer.current !== null) clearTimeout(previewTimer.current)
@@ -1139,6 +1155,7 @@ export default function DigitalThreadCanvas({
     transform.current = fitTransform(box, counts)
     paint()
   }, [counts, frame, paint])
+  landRef.current = land
 
   const fitAll = useCallback(() => {
     const box = frame()

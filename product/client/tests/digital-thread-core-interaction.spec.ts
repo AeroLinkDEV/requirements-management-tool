@@ -1239,3 +1239,65 @@ test("a density change after manual exploration leaves no overlapping cards", as
   expect(collisions, `cards overlap after the density change: ${collisions.join(", ")}`).toEqual([])
   await expect(root).toHaveAttribute("aria-pressed", "true")
 })
+
+/**
+ * Scope is identity, content is not.
+ *
+ * The fixture mounts the same content under two navigation scopes plus a content-only refresh. A genuine scope
+ * change must start a new navigation context (the reader's lane position is not carried into a different
+ * project/build), while an equivalent refresh inside the same scope must keep it. Reloading the page could
+ * demonstrate neither, because it resets everything regardless.
+ */
+test("a scope change resets navigation while a same-scope refresh keeps it", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/tests/fixtures/change-network.html?case=scope")
+  await expect(page.locator(".dtCanvas")).toBeVisible()
+  await page.waitForTimeout(800)
+
+  const root = page.locator('[data-node-id="pr-5"]')
+  await root.click()
+  await expect(root).toHaveAttribute("aria-pressed", "true")
+  await page.waitForTimeout(600)
+
+  // Scroll the first lane by hand so the reader has a position worth preserving or discarding.
+  const band = page.locator(".dtCanvasBand.is-rollable").first()
+  const bandBox = (await band.boundingBox())!
+  // The probe must live in the lane being scrolled: the first card in the document belongs to lane 0, which this
+  // gesture does not touch, so measuring it would report zero movement no matter what the scope did.
+  const probeId = await page.evaluate(bandRect => {
+    const inside = [...document.querySelectorAll<HTMLElement>(".dtCanvasNode")].find(node => {
+      const rect = node.getBoundingClientRect()
+      return rect.left >= bandRect.x - 2 && rect.right <= bandRect.x + bandRect.width + 2 &&
+        rect.top > bandRect.y + 4 && rect.bottom < bandRect.y + bandRect.height - 4
+    })
+    return inside?.dataset.nodeId ?? null
+  }, { x: bandBox.x, y: bandBox.y, width: bandBox.width, height: bandBox.height })
+  expect(probeId, "no card belongs to the lane being scrolled").toBeTruthy()
+  const probe = page.locator(`[data-node-id="${probeId}"]`)
+  await page.mouse.move(bandBox.x + 4, bandBox.y + bandBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(bandBox.x + 4, bandBox.y + bandBox.height / 2 - 200)
+  await page.mouse.up()
+  await page.waitForTimeout(400)
+
+  const laneY = async () => Number(
+    /translate\([^,]+,\s*(-?[\d.]+)px\)/.exec((await probe.getAttribute("style")) ?? "")?.[1] ?? NaN,
+  )
+  const explored = await laneY()
+
+  // Same scope, equivalent content: the reader's position survives.
+  await page.locator("#content-refresh").click()
+  await page.waitForTimeout(500)
+  expect(
+    Math.abs((await laneY()) - explored),
+    "a same-scope content refresh discarded the reader's position",
+  ).toBeLessThanOrEqual(4)
+
+  // Genuine scope change: a new navigation context, so the previous scope's position is not inherited.
+  await page.locator("#scope-flip").click()
+  await page.waitForTimeout(900)
+  expect(
+    Math.abs((await laneY()) - explored),
+    "a scope change inherited the previous scope's navigation state",
+  ).toBeGreaterThan(4)
+})

@@ -11,6 +11,7 @@
  * rather than counted as off-ladder.
  */
 import { createRoot } from "react-dom/client"
+import { useMemo, useState } from "react"
 // The product stylesheet, because the card typography is written against its tokens. Without it every
 // `font: var(--weight-strong) 8.5px …` shorthand is invalid at computed-value time and silently falls back to
 // the 16px default, which would measure type the product never renders.
@@ -131,9 +132,41 @@ const revealProjection: NetworkProjection = {
 const chosen = scenario === "dense" ? denseProjection
   : scenario === "hover" ? hoverProjection
   : scenario === "reveal" ? revealProjection
+  : scenario === "scope" ? hoverProjection
   : scenario === "server" ? serverChainProjection
   : projection
 
+/**
+ * Scope harness (test-only): the same content under two navigation scopes, plus a content-only re-render.
+ *
+ * #1022 requires a genuine scope change to start a new navigation context while an equivalent refresh inside
+ * the same scope keeps the reader's position. Neither can be exercised by reloading the page, which would reset
+ * everything regardless, so the fixture flips the canvas's `scopeKey` prop in place.
+ */
+function ScopeHarness({ projection: data }: { projection: NetworkProjection }) {
+  const [scope, setScope] = useState("scope-a")
+  const [generation, setGeneration] = useState(0)
+  const refreshed = useMemo(
+    () => ({ ...data, nodes: data.nodes.map(node => ({ ...node })) }),
+    [data, generation],
+  )
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <button id="scope-flip" type="button" onClick={() => setScope(current => current === "scope-a" ? "scope-b" : "scope-a")}>
+        flip scope
+      </button>
+      <button id="content-refresh" type="button" onClick={() => setGeneration(value => value + 1)}>
+        refresh content
+      </button>
+      <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+        <DigitalThreadNetwork projection={refreshed} buildLabel="Build 1.6" scopeKey={`network|${scope}`} />
+      </div>
+    </div>
+  )
+}
+
 createRoot(document.getElementById("root")!).render(
-  <DigitalThreadNetwork projection={chosen} buildLabel="Build 1.6" />,
+  scenario === "scope"
+    ? <ScopeHarness projection={chosen} />
+    : <DigitalThreadNetwork projection={chosen} buildLabel="Build 1.6" />,
 )
