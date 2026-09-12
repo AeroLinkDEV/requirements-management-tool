@@ -324,3 +324,67 @@ test("a hidden lane's linked endpoint arrives at a useful height when the reader
   // Selection survives the exploration.
   await expect(root).toHaveAttribute("aria-pressed", "true")
 })
+
+test("manual vertical exploration survives horizontal away and back", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page, "dense")
+  const root = page.locator('[data-node-id="pr-5"]')
+  await root.click()
+  await expect(root).toHaveAttribute("aria-pressed", "true")
+  await page.waitForTimeout(900)
+
+  const band = page.locator(".dtCanvasBand.is-rollable").first()
+  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
+  const bandBox = (await band.boundingBox())!
+  const grabX = bandBox.x + 4
+  const top = Math.max(bandBox.y, canvasBox.y) + 12
+  const bottom = Math.min(bandBox.y + bandBox.height, canvasBox.y + canvasBox.height) - 12
+  const probeId = await page.evaluate(bandRect => {
+    const nodes = [...document.querySelectorAll<HTMLElement>(".dtCanvasNode")]
+      .filter(node => node.querySelector(".dtnCard"))
+    const inside = nodes.find(node => {
+      const rect = node.getBoundingClientRect()
+      return rect.left >= bandRect.x - 2 && rect.right <= bandRect.x + bandRect.width + 2 &&
+        rect.top > bandRect.y + 4 && rect.bottom < bandRect.y + bandRect.height - 4
+    })
+    return inside?.dataset.nodeId ?? null
+  }, { x: bandBox.x, y: bandBox.y, width: bandBox.width, height: bandBox.height })
+  expect(probeId, "no card belongs to the band being rolled").toBeTruthy()
+  const probe = page.locator(`[data-node-id="${probeId}"]`)
+  const yOf = async () => Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/
+    .exec((await probe.getAttribute("style")) ?? "")?.[1] ?? NaN)
+  const cameraNow = async () => {
+    const value = /transform:[^;]*/.exec((await page.locator(".dtCanvasScene").getAttribute("style")) ?? "")?.[0] ?? ""
+    const [, x, y, zoom] = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)\s*scale\(([\d.]+)\)/.exec(value) ?? []
+    return { x: Number(x), y: Number(y), zoom: Number(zoom) }
+  }
+
+  // The reader scrolls this lane deliberately.
+  const beforeScroll = await yOf()
+  await page.mouse.move(grabX, (top + bottom) / 2)
+  await page.mouse.down()
+  await page.mouse.move(grabX, (top + bottom) / 2 - 160)
+  await page.mouse.up()
+  await page.waitForTimeout(400)
+  const scrolled = await yOf()
+  expect(scrolled - beforeScroll, "the lane did not scroll").toBeLessThan(-30)
+
+  // Away and back, purely horizontally, on the background.
+  const gutter = { x: canvasBox.x + 24, y: canvasBox.y + canvasBox.height - 30 }
+  const cameraBefore = await cameraNow()
+  for (const dx of [-420, 420]) {
+    await page.mouse.move(gutter.x, gutter.y)
+    await page.mouse.down()
+    await page.mouse.move(gutter.x + dx, gutter.y)
+    await page.mouse.up()
+    await page.waitForTimeout(500)
+  }
+
+  // The camera comes back to where the reader left it, and the lane keeps the position they put it in.
+  const cameraAfter = await cameraNow()
+  expect(Math.abs(cameraAfter.x - cameraBefore.x)).toBeLessThanOrEqual(2)
+  expect(Math.abs(cameraAfter.y - cameraBefore.y)).toBeLessThanOrEqual(2)
+  expect(Math.abs(cameraAfter.zoom - cameraBefore.zoom)).toBeLessThanOrEqual(0.01)
+  expect(Math.abs((await yOf()) - scrolled), "the manual lane position was not retained").toBeLessThanOrEqual(4)
+  await expect(root).toHaveAttribute("aria-pressed", "true")
+})
