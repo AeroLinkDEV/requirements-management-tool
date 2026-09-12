@@ -1,0 +1,107 @@
+{
+  "head": "7956ad1c7a58be4532edf35cefabb0c70abe9b33",
+  "geometry": {
+    "laneWidth": 236,
+    "lanePitch": 296,
+    "rowPitch": 138,
+    "cardHeight": 108,
+    "anchor": 54,
+    "pad": 12
+  },
+  "nodes": [
+    {
+      "id": "subject",
+      "lane": 0,
+      "row": 0
+    },
+    {
+      "id": "resident0",
+      "lane": 1,
+      "row": 0
+    },
+    {
+      "id": "resident2",
+      "lane": 1,
+      "row": 2
+    },
+    {
+      "id": "linked",
+      "lane": 1,
+      "row": 8
+    }
+  ],
+  "first": [
+    [
+      "linked",
+      -992
+    ]
+  ],
+  "before": [
+    [
+      "subject",
+      {
+        "x": 0,
+        "y": 12
+      }
+    ],
+    [
+      "resident0",
+      {
+        "x": 296,
+        "y": 12
+      }
+    ],
+    [
+      "resident2",
+      {
+        "x": 296,
+        "y": 288
+      }
+    ],
+    [
+      "linked",
+      {
+        "x": 296,
+        "y": 124
+      }
+    ]
+  ],
+  "retained": [
+    [
+      "linked",
+      -992
+    ]
+  ],
+  "after": [
+    [
+      "subject",
+      {
+        "x": 0,
+        "y": 12
+      }
+    ],
+    [
+      "resident0",
+      {
+        "x": 296,
+        "y": 12
+      }
+    ],
+    [
+      "resident2",
+      {
+        "x": 296,
+        "y": 288
+      }
+    ],
+    [
+      "linked",
+      {
+        "x": 296,
+        "y": 124
+      }
+    ]
+  ],
+  "grownHeight": 200,
+  "overlap": 36
+}

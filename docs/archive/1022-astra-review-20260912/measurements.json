@@ -1,0 +1,508 @@
+[
+  {
+    "name": "network",
+    "selected": {
+      "selected": [
+        "pr-5"
+      ],
+      "active": "<div class=\"dtCanvasNode is-selected\" data-node-id=\"pr-5\" tabindex=\"0\" role=\"button\" aria-pressed=\"true\" style=\"transform: translate(0px, 12px); width: 236px;\"><div class=\"dtnCard ",
+      "headings": [
+        {
+          "text": "SELECTED RECORD",
+          "font": "9px",
+          "box": {
+            "x": 33,
+            "y": 567,
+            "width": 286,
+            "height": 12,
+            "top": 567,
+            "right": 319,
+            "bottom": 579,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "font": "9px",
+          "box": {
+            "x": 337,
+            "y": 570,
+            "width": 57.078125,
+            "height": 12,
+            "top": 570,
+            "right": 394.078125,
+            "bottom": 582,
+            "left": 337
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "font": "9px",
+          "box": {
+            "x": 793,
+            "y": 570,
+            "width": 76.609375,
+            "height": 12,
+            "top": 570,
+            "right": 869.609375,
+            "bottom": 582,
+            "left": 793
+          }
+        }
+      ],
+      "panels": [
+        {
+          "classes": "dtnPanel dtnPanel-bottom",
+          "box": {
+            "x": 16,
+            "y": 552,
+            "width": 1408,
+            "height": 150,
+            "top": 552,
+            "right": 1424,
+            "bottom": 702,
+            "left": 16
+          }
+        }
+      ],
+      "tools": [
+        {
+          "text": "BottomRightAuto×",
+          "box": {
+            "x": 1233.5625,
+            "y": 567,
+            "width": 173.4375,
+            "height": 24,
+            "top": 567,
+            "right": 1407,
+            "bottom": 591,
+            "left": 1233.5625
+          }
+        }
+      ],
+      "scene": {
+        "classes": "dtCanvasScene",
+        "transform": "matrix(1.05, 0, 0, 1.05, 129.9, 125)"
+      }
+    },
+    "bareEscape": {
+      "selected": [],
+      "active": "<div class=\"dtCanvasNode\" data-node-id=\"pr-5\" tabindex=\"0\" role=\"button\" aria-pressed=\"false\" style=\"transform: translate(0px, 12px); width: 236px;\"><div class=\"dtnCard\"><div class",
+      "headings": [],
+      "panels": [],
+      "tools": [],
+      "scene": {
+        "classes": "dtCanvasScene",
+        "transform": "matrix(1.05, 0, 0, 1.05, 129.9, 125)"
+      }
+    },
+    "focusedEscape": {
+      "selected": [],
+      "active": "<div class=\"dtCanvas\" role=\"group\" aria-label=\"Change network for this build\" tabindex=\"0\"><div class=\"dtCanvasControls\" role=\"toolbar\" aria-label=\"Canvas framing controls\"><button",
+      "headings": [],
+      "panels": [],
+      "tools": [],
+      "scene": {
+        "classes": "dtCanvasScene",
+        "transform": "matrix(1.05, 0, 0, 1.05, 129.9, 125)"
+      }
+    },
+    "trueHover": {
+      "selected": [],
+      "active": "<div class=\"dtCanvas\" role=\"group\" aria-label=\"Change network for this build\" tabindex=\"0\"><div class=\"dtCanvasControls\" role=\"toolbar\" aria-label=\"Canvas framing controls\"><button",
+      "headings": [],
+      "panels": [],
+      "tools": [],
+      "scene": {
+        "classes": "dtCanvasScene",
+        "transform": "matrix(1.05, 0, 0, 1.05, 129.9, 125)"
+      }
+    }
+  },
+  {
+    "name": "inside",
+    "selected": {
+      "selected": [
+        "cr-1"
+      ],
+      "active": "<body>\n    <!--\n      Test-only mount for DigitalThreadInsideChange.\n\n      This exists so rendered behaviour — card classes, trace fade, hop badges, structured verification\n      ",
+      "headings": [
+        {
+          "text": "SELECTED RECORD",
+          "font": "9px",
+          "box": {
+            "x": 33,
+            "y": 567,
+            "width": 286,
+            "height": 12,
+            "top": 567,
+            "right": 319,
+            "bottom": 579,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "font": "9px",
+          "box": {
+            "x": 337,
+            "y": 567,
+            "width": 526,
+            "height": 12,
+            "top": 567,
+            "right": 863,
+            "bottom": 579,
+            "left": 337
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "font": "9px",
+          "box": {
+            "x": 881,
+            "y": 599,
+            "width": 526,
+            "height": 12,
+            "top": 599,
+            "right": 1407,
+            "bottom": 611,
+            "left": 881
+          }
+        }
+      ],
+      "panels": [
+        {
+          "classes": "dticPanel dticPanel-bottom",
+          "box": {
+            "x": 16,
+            "y": 552,
+            "width": 1408,
+            "height": 150,
+            "top": 552,
+            "right": 1424,
+            "bottom": 702,
+            "left": 16
+          }
+        }
+      ],
+      "tools": [
+        {
+          "text": "BottomRightAuto×",
+          "box": {
+            "x": 1194.9375,
+            "y": 567,
+            "width": 212.0625,
+            "height": 26,
+            "top": 567,
+            "right": 1407,
+            "bottom": 593,
+            "left": 1194.9375
+          }
+        }
+      ],
+      "scene": {
+        "classes": "dtCanvasScene",
+        "transform": "matrix(0.974648, 0, 0, 0.974648, 28, 145.672)"
+      }
+    },
+    "bareEscape": {
+      "selected": [
+        "cr-1"
+      ],
+      "active": "<body>\n    <!--\n      Test-only mount for DigitalThreadInsideChange.\n\n      This exists so rendered behaviour — card classes, trace fade, hop badges, structured verification\n      ",
+      "headings": [
+        {
+          "text": "SELECTED RECORD",
+          "font": "9px",
+          "box": {
+            "x": 33,
+            "y": 567,
+            "width": 286,
+            "height": 12,
+            "top": 567,
+            "right": 319,
+            "bottom": 579,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "font": "9px",
+          "box": {
+            "x": 337,
+            "y": 567,
+            "width": 526,
+            "height": 12,
+            "top": 567,
+            "right": 863,
+            "bottom": 579,
+            "left": 337
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "font": "9px",
+          "box": {
+            "x": 881,
+            "y": 599,
+            "width": 526,
+            "height": 12,
+            "top": 599,
+            "right": 1407,
+            "bottom": 611,
+            "left": 881
+          }
+        }
+      ],
+      "panels": [
+        {
+          "classes": "dticPanel dticPanel-bottom",
+          "box": {
+            "x": 16,
+            "y": 552,
+            "width": 1408,
+            "height": 150,
+            "top": 552,
+            "right": 1424,
+            "bottom": 702,
+            "left": 16
+          }
+        }
+      ],
+      "tools": [
+        {
+          "text": "BottomRightAuto×",
+          "box": {
+            "x": 1194.9375,
+            "y": 567,
+            "width": 212.0625,
+            "height": 26,
+            "top": 567,
+            "right": 1407,
+            "bottom": 593,
+            "left": 1194.9375
+          }
+        }
+      ],
+      "scene": {
+        "classes": "dtCanvasScene",
+        "transform": "matrix(0.974648, 0, 0, 0.974648, 28, 145.672)"
+      }
+    },
+    "focusedEscape": {
+      "selected": [],
+      "active": "<div class=\"dtCanvas\" role=\"group\" aria-label=\"Inside SRCR-00100.00\" tabindex=\"0\"><div class=\"dtCanvasControls\" role=\"toolbar\" aria-label=\"Canvas framing controls\"><button type=\"bu",
+      "headings": [],
+      "panels": [],
+      "tools": [],
+      "scene": {
+        "classes": "dtCanvasScene",
+        "transform": "matrix(0.974648, 0, 0, 0.974648, 28, 145.672)"
+      }
+    },
+    "trueHover": {
+      "selected": [],
+      "active": "<div class=\"dtCanvas\" role=\"group\" aria-label=\"Inside SRCR-00100.00\" tabindex=\"0\"><div class=\"dtCanvasControls\" role=\"toolbar\" aria-label=\"Canvas framing controls\"><button type=\"bu",
+      "headings": [],
+      "panels": [],
+      "tools": [],
+      "scene": {
+        "classes": "dtCanvasScene",
+        "transform": "matrix(0.974648, 0, 0, 0.974648, 28, 145.672)"
+      }
+    }
+  },
+  {
+    "name": "artifact",
+    "selected": {
+      "selected": [
+        "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+      ],
+      "active": "<body>\n    <!--\n      Test-only mount for DigitalThreadArtifact.\n\n      This exists so rendered behaviour — lane geometry, the suspect treatment, evidence identity, an\n      execut",
+      "headings": [
+        {
+          "text": "FOCAL RECORD",
+          "font": "9px",
+          "box": {
+            "x": 33,
+            "y": 567,
+            "width": 286,
+            "height": 12,
+            "top": 567,
+            "right": 319,
+            "bottom": 579,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "font": "9px",
+          "box": {
+            "x": 337,
+            "y": 570,
+            "width": 57.078125,
+            "height": 12,
+            "top": 570,
+            "right": 394.078125,
+            "bottom": 582,
+            "left": 337
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "font": "9px",
+          "box": {
+            "x": 793,
+            "y": 570,
+            "width": 76.609375,
+            "height": 12,
+            "top": 570,
+            "right": 869.609375,
+            "bottom": 582,
+            "left": 793
+          }
+        }
+      ],
+      "panels": [
+        {
+          "classes": "dtaPanel dtaPanel-bottom",
+          "box": {
+            "x": 16,
+            "y": 552,
+            "width": 1408,
+            "height": 150,
+            "top": 552,
+            "right": 1424,
+            "bottom": 702,
+            "left": 16
+          }
+        }
+      ],
+      "tools": [
+        {
+          "text": "BottomRightAuto×",
+          "box": {
+            "x": 1233.5625,
+            "y": 567,
+            "width": 173.4375,
+            "height": 24,
+            "top": 567,
+            "right": 1407,
+            "bottom": 591,
+            "left": 1233.5625
+          }
+        }
+      ],
+      "scene": {
+        "classes": "dtCanvasScene",
+        "transform": "matrix(0.86, 0, 0, 0.86, 12, 125.22)"
+      }
+    },
+    "bareEscape": {
+      "selected": [
+        "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+      ],
+      "active": "<body>\n    <!--\n      Test-only mount for DigitalThreadArtifact.\n\n      This exists so rendered behaviour — lane geometry, the suspect treatment, evidence identity, an\n      execut",
+      "headings": [
+        {
+          "text": "FOCAL RECORD",
+          "font": "9px",
+          "box": {
+            "x": 33,
+            "y": 567,
+            "width": 286,
+            "height": 12,
+            "top": 567,
+            "right": 319,
+            "bottom": 579,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "font": "9px",
+          "box": {
+            "x": 337,
+            "y": 570,
+            "width": 57.078125,
+            "height": 12,
+            "top": 570,
+            "right": 394.078125,
+            "bottom": 582,
+            "left": 337
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "font": "9px",
+          "box": {
+            "x": 793,
+            "y": 570,
+            "width": 76.609375,
+            "height": 12,
+            "top": 570,
+            "right": 869.609375,
+            "bottom": 582,
+            "left": 793
+          }
+        }
+      ],
+      "panels": [
+        {
+          "classes": "dtaPanel dtaPanel-bottom",
+          "box": {
+            "x": 16,
+            "y": 552,
+            "width": 1408,
+            "height": 150,
+            "top": 552,
+            "right": 1424,
+            "bottom": 702,
+            "left": 16
+          }
+        }
+      ],
+      "tools": [
+        {
+          "text": "BottomRightAuto×",
+          "box": {
+            "x": 1233.5625,
+            "y": 567,
+            "width": 173.4375,
+            "height": 24,
+            "top": 567,
+            "right": 1407,
+            "bottom": 591,
+            "left": 1233.5625
+          }
+        }
+      ],
+      "scene": {
+        "classes": "dtCanvasScene",
+        "transform": "matrix(0.86, 0, 0, 0.86, 12, 125.22)"
+      }
+    },
+    "focusedEscape": {
+      "selected": [],
+      "active": "<div class=\"dtCanvas\" role=\"group\" aria-label=\"Artifact thread for HLR-000075.02\" tabindex=\"0\"><div class=\"dtCanvasControls\" role=\"toolbar\" aria-label=\"Canvas framing controls\"><bu",
+      "headings": [],
+      "panels": [],
+      "tools": [],
+      "scene": {
+        "classes": "dtCanvasScene",
+        "transform": "matrix(0.86, 0, 0, 0.86, 12, 125.22)"
+      }
+    },
+    "trueHover": {
+      "selected": [],
+      "active": "<div class=\"dtCanvas\" role=\"group\" aria-label=\"Artifact thread for HLR-000075.02\" tabindex=\"0\"><div class=\"dtCanvasControls\" role=\"toolbar\" aria-label=\"Canvas framing controls\"><bu",
+      "headings": [],
+      "panels": [],
+      "tools": [],
+      "scene": {
+        "classes": "dtCanvasScene",
+        "transform": "matrix(0.86, 0, 0, 0.86, 12, 125.22)"
+      }
+    }
+  }
+]
