@@ -1,4 +1,5 @@
 import { expect, logicTest as test } from "./isolated-client-test"
+import { artifactTraceGroups, parseInspectorThread } from '../src/artifactTraceInspectorModel'
 import {
   ARTIFACT_THREAD_LANES,
   artifactThreadFocalNode,
@@ -71,6 +72,24 @@ const parsed = (overrides: Record<string, unknown> = {}) => {
   if (!result.ok) throw new Error(`expected a valid thread, got: ${result.reason}`)
   return result.thread
 }
+
+test('inspector groups preserve direct direction, upstream causes and hop-qualified execution context', () => {
+  const groups = artifactTraceGroups(parsed())
+  expect(groups.incoming.map(edge => edge.fromId)).toEqual([CHANGE_REQUEST])
+  expect(groups.outgoing.map(edge => edge.toId)).toEqual([CASE_REVISION])
+  expect(groups.outgoing[0].isSuspect).toBe(true)
+  expect(groups.upstream.indirect.map(node => node.id)).toEqual([PROBLEM_REPORT])
+  expect(groups.downstream.indirect.map(node => node.id)).toEqual([PROCEDURE_REVISION, EXECUTION, BUILD])
+  expect(groups.downstream.distance.get(EXECUTION)).toBe(3)
+  // The TCR feeding a downstream Procedure is not an upstream cause of the focal requirement.
+  expect(groups.upstream.distance.has(TEST_CHANGE_REQUEST)).toBe(false)
+})
+
+test('inspector refuses an internally valid graph for another focal revision and malformed payloads', () => {
+  expect(parseInspectorThread(response(), CASE_REVISION).ok).toBe(false)
+  expect(parseInspectorThread({ nodes: [] }, SYSTEM_REVISION).ok).toBe(false)
+  expect(parseInspectorThread(response(), SYSTEM_REVISION).ok).toBe(true)
+})
 
 test("a production-shaped response carrying every supported kind is accepted", () => {
   const thread = parsed()

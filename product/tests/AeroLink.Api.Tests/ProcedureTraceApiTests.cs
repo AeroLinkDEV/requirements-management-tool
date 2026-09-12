@@ -7,6 +7,10 @@ using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
+using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Releases;
+using AeroLink.Domain.Traceability;
+using Microsoft.EntityFrameworkCore;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -259,6 +263,17 @@ public sealed class ProcedureTraceApiTests
         // never be presented as a requirement this build's procedure verifies.
         Assert.DoesNotContain("SYSR-000004.00", byDisplay.Keys);
 
+        var thread = body.GetProperty("thread");
+        Assert.Equal(fixture.Revision01Id, thread.GetProperty("focalId").GetGuid());
+        var nodes = thread.GetProperty("nodes").EnumerateArray().ToList();
+        Assert.Contains(nodes, x => x.GetProperty("id").GetGuid() == fixture.Requirement3RevisionId);
+        Assert.DoesNotContain(nodes, x => x.GetProperty("id").GetGuid() == fixture.Requirement4RevisionId);
+        Assert.DoesNotContain(nodes, x => x.GetProperty("id").GetGuid() == fixture.Revision02Id);
+        Assert.Contains(thread.GetProperty("edges").EnumerateArray(), x =>
+            x.GetProperty("fromId").GetGuid() == fixture.Requirement3RevisionId
+            && x.GetProperty("toId").GetGuid() == fixture.Revision01Id
+            && x.GetProperty("isSuspect").GetBoolean());
+
         var provenance = body.GetProperty("provenance").EnumerateArray().ToList();
         Assert.Contains(provenance, x => x.GetProperty("package").GetString() == "SYSTPCR-000001.00"
             && x.GetProperty("changeRequest").GetString() == "SRCR-03151.00");
@@ -266,6 +281,127 @@ public sealed class ProcedureTraceApiTests
         Assert.True(body.GetProperty("build").GetProperty("isExactManifest").GetBoolean());
         Assert.Equal(fixture.Baseline16Id, body.GetProperty("build").GetProperty("effectiveBaselineId").GetGuid());
         Assert.Equal(fixture.Baseline16Id, body.GetProperty("build").GetProperty("requirementBaselineId").GetGuid());
+    }
+
+    [Fact]
+    public async Task A_live_suspect_requirement_relationship_remains_visible_once_in_the_inspector()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var link = new RequirementTraceLink(fixture.ProjectId, fixture.Requirement2RevisionId, fixture.Requirement1RevisionId,
+                RequirementTraceType.DerivedFrom, "Recorded engineering derivation.", DateTimeOffset.UtcNow);
+            db.Add(link);
+            await db.SaveChangesAsync();
+            var lifecycle = ExactLinkSuspectLifecycle.Raise(fixture.ProjectId, ExactLinkKind.RequirementTrace,
+                link.Id, ExactLinkLifecycleCauseKind.InternalRequirementRevision, fixture.Requirement1RevisionId, null,
+                "trace.engineer", "Reassess this exact derivation.", DateTimeOffset.UtcNow);
+            db.Entry(link).Property(x => x.ExactLinkSuspectLifecycleId).CurrentValue = lifecycle.Id;
+            db.Add(lifecycle);
+            db.ExactLinkSuspectEvents.AddRange(lifecycle.Events);
+            await db.SaveChangesAsync();
+        }
+        await LoginAsync(client, "trace.engineer");
+        var body = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/enterprise-requirements/{fixture.Requirement2Id}/impact?releaseId={fixture.Release16Id}&revisionId={fixture.Requirement2RevisionId}");
+        var parent = Assert.Single(body.GetProperty("parents").EnumerateArray());
+        Assert.Equal(fixture.Requirement1RevisionId, parent.GetProperty("revisionId").GetGuid());
+        Assert.True(parent.GetProperty("isSuspect").GetBoolean());
+        Assert.Single(body.GetProperty("thread").GetProperty("edges").EnumerateArray(), edge =>
+            edge.GetProperty("fromId").GetGuid() == fixture.Requirement1RevisionId
+            && edge.GetProperty("toId").GetGuid() == fixture.Requirement2RevisionId
+            && edge.GetProperty("isSuspect").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData(TestProcedureLevel.HighLevel, true)]
+    [InlineData(TestProcedureLevel.LowLevel, true)]
+    [InlineData(TestProcedureLevel.HighLevel, false)]
+    [InlineData(TestProcedureLevel.LowLevel, false)]
+    public async Task Software_inspectors_keep_the_profile_specific_path_to_execution_and_evidence(TestProcedureLevel level, bool fullProfile)
+    {
+        var policy = fullProfile ? ProcedureEnabledTestPolicy.Create() : LegacyLadderPolicy.Instance;
+        using var factory = new AeroLinkApiFactory(testLadderPolicy: policy);
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        Guid caseId, caseRevisionId, executableId, executableRevisionId, executionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var prefix = level == TestProcedureLevel.HighLevel ? "HLR" : "LLR";
+            var testCase = new TestProcedure(fixture.ProjectId, $"{prefix}TC-009001", "Exact source Case", "trace.engineer", now, level, policy, VerificationArtifactKind.Case);
+            var caseRevision = new TestProcedureRevision(testCase.Id, 0, "Source Case", "Setup", "Steps", "Expected",
+                TestProcedureState.Approved, "trace.engineer", now, effectiveBaselineId: fixture.Baseline16Id,
+                parentKind: VerificationProcedureParentKind.Derived, derivedRationale: "Independent exact profile fixture.");
+            db.AddRange(testCase, caseRevision);
+            caseId = executableId = testCase.Id;
+            caseRevisionId = executableRevisionId = caseRevision.Id;
+            if (fullProfile)
+            {
+                var procedure = new TestProcedure(fixture.ProjectId, $"{prefix}TP-009001", "Implementing Procedure", "trace.engineer", now, level, policy, VerificationArtifactKind.Procedure, VerificationProcedureParentKind.Allocated);
+                var revision = new TestProcedureRevision(procedure.Id, 0, "Implement Case", "Setup", "Steps", "Expected",
+                    TestProcedureState.Draft, "trace.engineer", now,
+                    environmentSetup: "Fixture rig", testData: "Controlled input", orderedSteps: "Execute", expectedObservations: "Pass",
+                    cleanup: "Restore", toolingAutomation: "Fixture recorder",
+                    parentKind: VerificationProcedureParentKind.Allocated);
+                db.AddRange(procedure, revision, new TestCaseProcedureLink(caseRevision.Id, revision.Id));
+                await db.SaveChangesAsync();
+                db.Entry(revision).Property(x => x.State).CurrentValue = TestProcedureState.Approved;
+                await db.SaveChangesAsync();
+                executableId = procedure.Id; executableRevisionId = revision.Id;
+            }
+            db.Add(new BaselineTestProcedureSelection(fixture.Baseline16Id, executableId, executableRevisionId));
+            var build = new SoftwareBuild(fixture.ProjectId, fixture.Release16Id, fixture.Baseline16Id, "TRACE-1.6", "Exact trace build", "cm", now);
+            var execution = new TestExecution(fixture.ProjectId, executableRevisionId, build.Id, null, TestOutcome.Pass,
+                "trace.engineer", "Fixture rig", "Recorded passing execution.", "evidence/trace.json", now, now, fixture.Release16Id);
+            var file = new EvidenceRecord(fixture.ProjectId, "trace-result.json", "application/json", 20, new string('a', 64), "evidence/trace.json", "trace.engineer", now);
+            db.AddRange(build, execution, file, new TestExecutionEvidence(execution.Id, file.Id));
+            await db.SaveChangesAsync();
+            executionId = execution.Id;
+        }
+        await LoginAsync(client, "trace.engineer");
+        var caseTrace = await client.GetFromJsonAsync<JsonElement>($"/api/test-cases/{caseId}/trace?releaseId={fixture.Release16Id}&revisionId={caseRevisionId}");
+        var thread = caseTrace.GetProperty("thread");
+        Assert.Equal(caseRevisionId, thread.GetProperty("focalId").GetGuid());
+        var executionNode = Assert.Single(thread.GetProperty("nodes").EnumerateArray(), node => node.GetProperty("id").GetGuid() == executionId);
+        Assert.Equal("trace-result.json", Assert.Single(executionNode.GetProperty("evidence").EnumerateArray()).GetProperty("fileName").GetString());
+        if (fullProfile)
+        {
+            Assert.Contains(thread.GetProperty("edges").EnumerateArray(), edge => edge.GetProperty("fromId").GetGuid() == caseRevisionId && edge.GetProperty("toId").GetGuid() == executableRevisionId);
+            var procedureTrace = await client.GetFromJsonAsync<JsonElement>($"/api/test-procedures/{executableId}/trace?releaseId={fixture.Release16Id}&revisionId={executableRevisionId}");
+            Assert.Equal(caseRevisionId, Assert.Single(procedureTrace.GetProperty("caseParents").EnumerateArray()).GetProperty("caseRevisionId").GetGuid());
+        }
+        else Assert.DoesNotContain(thread.GetProperty("nodes").EnumerateArray(), node => node.GetProperty("kind").GetString() == "Procedure");
+    }
+
+    [Fact]
+    public async Task Requirement_inspector_uses_the_selected_revision_and_refuses_unavailable_scope()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory);
+        await LoginAsync(client, "trace.engineer");
+        var url = $"/api/enterprise-requirements/{fixture.Requirement1Id}/impact";
+        var body = await client.GetFromJsonAsync<JsonElement>(
+            $"{url}?releaseId={fixture.Release16Id}&revisionId={fixture.Requirement1RevisionId}");
+        Assert.Equal(fixture.Requirement1RevisionId, body.GetProperty("requirementRevisionId").GetGuid());
+        var thread = body.GetProperty("thread");
+        Assert.Equal(fixture.Requirement1RevisionId, thread.GetProperty("focalId").GetGuid());
+        Assert.Contains(thread.GetProperty("nodes").EnumerateArray(), x =>
+            x.GetProperty("id").GetGuid() == fixture.Revision01Id);
+        Assert.DoesNotContain(thread.GetProperty("nodes").EnumerateArray(), x =>
+            x.GetProperty("id").GetGuid() == fixture.Revision02Id);
+        using var foreignRevision = await client.GetAsync(
+            $"{url}?releaseId={fixture.Release16Id}&revisionId={fixture.Requirement2RevisionId}");
+        Assert.Equal(HttpStatusCode.NotFound, foreignRevision.StatusCode);
+        using var absentRevision = await client.GetAsync($"{url}?revisionId={Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.NotFound, absentRevision.StatusCode);
+        using var absentBuild = await client.GetAsync($"{url}?releaseId={Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.NotFound, absentBuild.StatusCode);
     }
 
     [Fact]

@@ -853,9 +853,21 @@ public static class VerificationEndpoints
                 };
             }).OrderBy(x => x.displayNumber).ToList();
 
+            // Share the existing exact, build-scoped thread authority for downstream Case -> Procedure ->
+            // execution/evidence context. The legacy trace rows remain explicit family-specific facts.
+            // A missing baseline/thread is unavailable, never an empty claim of complete traceability.
+            var inspectorTrace = requirementBaselineId is Guid traceBaselineId
+                ? await InspectorTraceProjection.ReadAsync(db, procedure.ProjectId, traceBaselineId, releaseId,
+                    procedure.ArtifactKind == VerificationArtifactKind.Case
+                        ? ArtifactThreadFocalKind.Case : ArtifactThreadFocalKind.Procedure,
+                    selectedRevisionIdValue, policyResolver, ct)
+                : new InspectorTrace(null, 0);
+
             return Results.Ok(new
             {
                 artifactId = procedure.Id,
+                thread = inspectorTrace.Thread,
+                traceExcludedRecords = inspectorTrace.ExcludedRecords,
                 procedureId = procedure.Id, // compatibility alias for the pre-Case contract
                 artifactKind = procedure.ArtifactKind.ToString(),
                 procedure.BaseNumber,

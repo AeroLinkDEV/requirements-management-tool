@@ -17,7 +17,10 @@ import {
 import { targetsFor } from "./presentation";
 import { LadderCapability, ladderAllows, ladderHasAny } from "./projectLadder";
 import type { ProjectLadderProjection } from "./projectLadder";
-import ExactArtifactLink from "./ExactArtifactLink";
+import { TraceInspector, TraceGroup, TraceRelation } from './TraceInspector';
+import { ArtifactTraceRelations } from './artifactTraceInspector';
+import type { ArtifactThreadNode } from './artifactThreadContract';
+import { parseInspectorThread } from './artifactTraceInspectorModel';
 import "./RequirementsWorkspace.css";
 
 type Field = {
@@ -152,6 +155,9 @@ type ImpactItem = {
   coverageState?: "Confirmed" | "Suspect";
 };
 type Impact = {
+  requirementRevisionId: string;
+  thread?: unknown;
+  traceExcludedRecords?: number;
   parents: ImpactItem[];
   children: ImpactItem[];
   tests: ImpactItem[];
@@ -222,6 +228,8 @@ type Props = {
   onOpenRequirementRevision?: (requirement: { id: string; revisionId: string; level: string }) => void;
   onCloseRequirement: () => void;
   onOpenTraceability: (artifactId?: string) => void;
+  traceArtifactHref?: (node: ArtifactThreadNode) => string | undefined;
+  digitalThreadHref?: (revisionId: string) => string | undefined;
   verificationArtifactHref?: (artifact: { artifactId: string; procedureId?: string; revisionId?: string; artifactRevisionId?: string; artifactKind?: string; displayNumber?: string; level?: string }) => string | undefined;
   onOpenVerification: (artifact?: { artifactId: string; procedureId?: string; revisionId?: string; artifactRevisionId?: string; artifactKind?: string; displayNumber?: string; level?: string }) => void;
 };
@@ -252,8 +260,9 @@ export default function RequirementsWorkspace({
   onOpenRequirementRevision,
   onCloseRequirement,
   onOpenTraceability,
+  traceArtifactHref,
+  digitalThreadHref,
   verificationArtifactHref,
-  onOpenVerification,
 }: Props) {
   const appliedInitialView = useRef(false);
   const autoSelected = useRef(false);
@@ -291,7 +300,8 @@ export default function RequirementsWorkspace({
     [mode, setMode] = useState<"table" | "document">("table"),
     [selected, setSelected] = useState<Requirement>(),
     [detail, setDetail] = useState<Detail>(),
-    [impact, setImpact] = useState<Impact>(),
+    [loadedImpact, setImpact] = useState<Impact>(),
+    [impactError, setImpactError] = useState<string>(),
     [comments, setComments] = useState<Comment[]>([]),
     [deepLinkMissing, setDeepLinkMissing] = useState(false),
     [inspectorTab, setInspectorTab] = useState<
@@ -307,6 +317,7 @@ export default function RequirementsWorkspace({
     [proposalLoading, setProposalLoading] = useState(false),
     [proposalSaving, setProposalSaving] = useState(false),
     [proposalError, setProposalError] = useState("");
+  const impact = loadedImpact?.requirementRevisionId === selected?.revisionId ? loadedImpact : undefined;
   useEffect(() => {
     autoSelected.current = false;
     setLevel(scope);
@@ -445,7 +456,8 @@ export default function RequirementsWorkspace({
   };
   const open = useCallback(async (item: Requirement) => {
     setDeepLinkMissing(false);
-    setSelected(item);
+    // Reopening the same row is a fresh read intent, including its exact trace.
+    setSelected({ ...item });
     setInspectorTab("details");
     // Issuing an intent for this requirement retires every pending fetch of the same streams — including
     // this requirement's own earlier in-flight comment read, which a successful addComment would otherwise
@@ -454,17 +466,14 @@ export default function RequirementsWorkspace({
     const commentRequest = ++commentIntent.current;
     detailTarget.current = item.id;
     commentTarget.current = item.id;
-    const [a, b, c] = await Promise.all([
+    const [a, b] = await Promise.all([
       fetch(`${api}/api/enterprise-requirements/${item.id}${release?.id ? `?releaseId=${release.id}` : ""}`),
       fetch(`${api}/api/enterprise-requirements/${item.id}/comments`),
-      fetch(`${api}/api/enterprise-requirements/${item.id}/impact${release?.id ? `?releaseId=${release.id}` : ""}`),
     ]);
     if (a.ok && detailRequest === detailIntent.current && detailTarget.current === item.id)
       setDetail(await a.json());
     if (b.ok && commentRequest === commentIntent.current && commentTarget.current === item.id)
       setComments(await b.json());
-    if (c.ok && detailRequest === detailIntent.current && detailTarget.current === item.id)
-      setImpact(await c.json());
   }, [api, release?.id]);
   useEffect(() => {
     if (
@@ -487,12 +496,11 @@ export default function RequirementsWorkspace({
     detailTarget.current = initialArtifactId;
     commentTarget.current = initialArtifactId;
     (async () => {
-      const [detailResponse, commentsResponse, impactResponse] = await Promise.all([
+      const [detailResponse, commentsResponse] = await Promise.all([
         fetch(`${api}/api/enterprise-requirements/${initialArtifactId}${release?.id ? `?releaseId=${release.id}` : ""}`),
         fetch(
           `${api}/api/enterprise-requirements/${initialArtifactId}/comments`,
         ),
-        fetch(`${api}/api/enterprise-requirements/${initialArtifactId}/impact${release?.id ? `?releaseId=${release.id}` : ""}`),
       ]);
       if (!detailResponse.ok)
       {
@@ -551,18 +559,28 @@ export default function RequirementsWorkspace({
         commentTarget.current === initialArtifactId
       )
         setComments(await commentsResponse.json());
-      if (
-        impactResponse.ok &&
-        !cancelled &&
-        detailRequest === detailIntent.current &&
-        detailTarget.current === initialArtifactId
-      )
-        setImpact(await impactResponse.json());
     })();
     return () => {
       cancelled = true;
     };
   }, [api, initialArtifactId, initialRevisionId, release?.id, selected?.id]);
+  useEffect(() => {
+    setImpact(undefined);
+    setImpactError(undefined);
+    if (!selected) return;
+    const controller = new AbortController();
+    const query = new URLSearchParams({ revisionId: selected.revisionId });
+    if (release?.id) query.set('releaseId', release.id);
+    fetch(`${api}/api/enterprise-requirements/${selected.id}/impact?${query}`, { signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error('The trace for this exact requirement revision is unavailable in the selected scope.');
+        const value = await response.json();
+        if (value.requirementRevisionId !== selected.revisionId)
+          throw new Error('The trace response does not identify the selected requirement revision.');
+        if (!controller.signal.aborted) setImpact(value);
+      }).catch(error => { if (!controller.signal.aborted) setImpactError(error.message); });
+    return () => controller.abort();
+  }, [api, selected, release?.id]);
   const clearFilters = () => {
     setSearch("");
     setLevel(scope);
@@ -577,17 +595,6 @@ export default function RequirementsWorkspace({
     setSpecificationId("");
     setSectionId("");
     setPage(1);
-  };
-  const requirementIdentity = (item: ImpactItem) => item.revisionId
-    ? { id: item.id, revisionId: item.revisionId, level: item.level ?? scope }
-    : undefined;
-  const impactRequirementLink = (item: ImpactItem) => {
-    const identity = requirementIdentity(item);
-    return <ExactArtifactLink
-      href={identity ? requirementRevisionHref?.(identity) : undefined}
-      onOpen={identity && onOpenRequirementRevision ? () => onOpenRequirementRevision(identity) : undefined}
-      title={identity ? "Open this exact requirement revision" : "This requirement revision is not available as an exact link"}
-    >{item.displayNumber}</ExactArtifactLink>;
   };
   const rowRequirementHref = (item: Requirement) => requirementRevisionHref?.({
     id: item.id,
@@ -874,6 +881,7 @@ export default function RequirementsWorkspace({
     setProposalError("");
     requestAnimationFrame(() => proposalTrigger.current?.focus());
   };
+  const impactThread = impact?.thread ? parseInspectorThread(impact.thread, selected?.revisionId ?? '') : undefined;
   return (
     <main className="reqWorkspace">
       <ControlledArtifactExplorerHeader
@@ -1466,55 +1474,37 @@ export default function RequirementsWorkspace({
               </div>
             )}
             {inspectorTab === "trace" && (
-              <div className="inspectorBody traceInspector">
-                <div className="traceSummary">
-                  <article><b>{impact?.parents.length ?? 0}</b><span>upstream</span></article>
-                  <article><b>{impact?.children.length ?? 0}</b><span>downstream</span></article>
-                  {/* coverageState, not the raw isSuspect flag: a link to a procedure that is being
-                      rewritten is not confirmed coverage, and counting it here contradicted the row the
-                      reader clicked to get in. */}
-                  <article><b>{impact?.tests.filter((item) => item.coverageState === "Confirmed").length ?? 0}</b><span>confirmed tests</span></article>
-                </div>
-                {/* #880 §4.4 opens the thread on the exact revision the reader is looking at, so the address
-                    that leaves here names that revision. `/traceability/{artifactId}` still resolves, for the
-                    links written before the thread was rooted on an exact revision. */}
-                <button className="openDigitalThread" onClick={() => onOpenTraceability(selected?.revisionId ?? selected?.id)}>
-                  Open complete Digital Thread →
-                </button>
-                <h3>Active controlled changes</h3>
-                {impact?.activeChanges.length ? impact.activeChanges.map((item) => (
-                  <button className="activeChangeCard" key={item.id} onClick={() => onOpenScr(item.id)}>
-                    <span><b>{item.displayNumber}</b><i>{stateLabel(item.state)}</i></span>
-                    <p>{item.title}</p>
+              <TraceInspector loading={!impact && !impactError} error={impactError}
+                summary={impact ? [{ label: 'upstream', count: impact.parents.length }, { label: 'downstream', count: impact.children.length }, { label: 'confirmed tests', count: impact.tests.filter(item => item.coverageState === 'Confirmed').length }] : undefined}
+                digitalThreadHref={selected?.revisionId ? digitalThreadHref?.(selected.revisionId) : undefined}
+                onOpenThread={() => onOpenTraceability(selected?.revisionId)}>
+                <TraceGroup title="Active controlled changes" count={impact?.activeChanges.length ?? 0}
+                  empty="This requirement has no Draft, In Review, or Approved proposal awaiting baseline effectivity.">
+                  {impact?.activeChanges.map(item => <button className="activeChangeCard" key={item.id} onClick={() => onOpenScr(item.id)}>
+                    <span><b>{item.displayNumber}</b><i>{stateLabel(item.state)}</i></span><p>{item.title}</p>
                     <small>{item.kind} · proposed revision {item.proposedRevision}</small>
-                  </button>
-                )) : <div className="traceEmpty"><b>No active change package</b><span>This requirement has no Draft, In Review, or Approved proposal awaiting baseline effectivity.</span></div>}
-                <h3>Upstream requirements</h3>
-                {impact?.parents.map((item) => <article className="traceRelation" key={item.id}><div className="traceRelationTarget">{impactRequirementLink(item)}</div><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
-                {!impact?.parents.length && <div className="traceEmpty"><span>No upstream requirement is recorded.</span></div>}
-                <h3>Downstream requirements</h3>
-                {impact?.children.map((item) => <article className="traceRelation" key={item.id}><div className="traceRelationTarget">{impactRequirementLink(item)}</div><p>{item.statement}</p><small>{item.type} · {item.level}</small></article>)}
-                {!impact?.children.length && <div className="traceEmpty"><span>No downstream requirement is recorded.</span></div>}
-                <h3>Verification coverage</h3>
-                {/* One navigation control per row, and its href and its click are one address (#1016 S03).
-                    They used to disagree: `ExactArtifactLink` suppresses native navigation when `onOpen` is
-                    supplied, so an ordinary click ran `openVerificationProcedure` to the Procedure Explorer
-                    while Ctrl-click, middle-click and copy-link followed an artifact-record href. One
-                    identifier, two destinations, chosen by how a reader happened to click. The Explorer is
-                    the intended destination — `software-builds.spec.ts` has asserted that since the procedure
-                    library moved there — so the href was corrected to it, and both now come from one
-                    function behind one exact-target guard.
-
-                    "Resolve in Verification →" is gone. It called the same function with the same argument
-                    and arrived at the same address as the identifier beside it, so it was a second control
-                    for one destination wearing the label of a separate action. What it actually offered was
-                    the Explorer, which the identifier already opens, and where the resolution controls live.
-                    The suspect condition it sat next to is untouched and still says so in words: the row
-                    still distinguishes suspect applicability from confirmed, and still says a suspect link
-                    does not count as coverage. */}
-                {impact?.tests.map((item) => { const unsettled = item.coverageState !== "Confirmed"; const target = { artifactId: item.id, revisionId: item.artifactRevisionId ?? item.revisionId, artifactRevisionId: item.artifactRevisionId, artifactKind: item.artifactKind, displayNumber: item.displayNumber, level: item.level }; const noun = verificationArtifactNoun(item.level).toLowerCase(); return <article className={`traceRelation${unsettled ? " attention" : ""}`} key={item.artifactRevisionId ?? item.revisionId ?? item.id}><ExactArtifactLink className="linkedArtifactText" href={verificationArtifactHref?.(target)} onOpen={verificationArtifactHref?.(target) ? () => onOpenVerification(target) : undefined} title={verificationArtifactHref?.(target) ? "Open this exact verification artifact" : undefined}><b>{item.displayNumber}</b><p>{item.title}</p><small>{item.level} · {stateLabel(item.state)} · Open {noun} →</small></ExactArtifactLink><small>{unsettled ? "Suspect applicability — does not count as coverage" : "Confirmed applicability"}</small></article>; })}
-                {!impact?.tests.length && <div className="traceEmpty attention"><span>No verification artifact currently covers this revision.</span></div>}
-              </div>
+                  </button>)}
+                </TraceGroup>
+                {([['Upstream requirements', impact?.parents ?? []], ['Downstream requirements', impact?.children ?? []]] as const).map(([title, items]) =>
+                  <TraceGroup key={title} title={title} count={items.length} empty={`No ${title.toLowerCase()} are recorded.`}>
+                    {items.map(item => <TraceRelation key={item.revisionId ?? item.id} label={item.displayNumber ?? "Unnumbered record"}
+                      href={item.revisionId ? requirementRevisionHref?.({ id: item.id, revisionId: item.revisionId, level: item.level ?? scope }) : undefined}
+                      linkTitle={item.revisionId ? 'Open this exact requirement revision' : 'This requirement revision is not available as an exact link'}
+                      title={item.statement} detail={`${item.type} · ${item.level}${item.isSuspect ? ' · Suspect relationship' : ''}`} attention={item.isSuspect} />)}
+                  </TraceGroup>)}
+                <TraceGroup title="Verification coverage" count={impact?.tests.length ?? 0} empty="No verification artifact currently covers this revision.">
+                  {impact?.tests.map(item => <TraceRelation key={item.artifactRevisionId ?? item.revisionId ?? item.id} label={item.displayNumber ?? "Unnumbered record"}
+                    href={verificationArtifactHref?.({ artifactId: item.id, revisionId: item.artifactRevisionId ?? item.revisionId, artifactRevisionId: item.artifactRevisionId, artifactKind: item.artifactKind, displayNumber: item.displayNumber, level: item.level })}
+                    title={item.title} detail={`${item.level} · ${stateLabel(item.state)}`} attention={item.coverageState !== 'Confirmed'}>
+                    <small>{item.coverageState === 'Confirmed' ? 'Confirmed applicability' : 'Suspect applicability — does not count as coverage'}</small>
+                  </TraceRelation>)}
+                </TraceGroup>
+                {impactThread?.ok ? <ArtifactTraceRelations thread={impactThread.thread} omitDirectKinds={['Requirement', 'Case', 'Procedure']} excludedRecords={impact?.traceExcludedRecords} hrefFor={node => {
+                  if ((node.kind === 'Case' || node.kind === 'Procedure') && node.artifactId)
+                    return verificationArtifactHref?.({ artifactId: node.artifactId, revisionId: node.id, artifactKind: node.kind, level: node.level ?? undefined, displayNumber: node.displayNumber ?? undefined });
+                  return traceArtifactHref?.(node);
+                }} /> : <p className="inspectorNote warn">{impactThread && !impactThread.ok ? impactThread.reason : 'The complete trace is unavailable in this exact build scope. No relationships have been inferred.'}</p>}
+              </TraceInspector>
             )}
             {inspectorTab === "history" && (
               <div className="inspectorBody">

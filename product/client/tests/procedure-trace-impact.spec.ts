@@ -40,7 +40,7 @@ test('Trace & impact lists the exact requirements and opens the exact requiremen
   await expect(rows.first()).toContainText('Confirmed')
   await expect(rows.first()).toContainText(/Revision [0-9a-f-]{36}/)
 
-  await rows.first().getByRole('button', { name: /Open requirement/ }).click()
+  await rows.first().getByRole('link', { name: /^(SYSR|HLR)-/ }).click()
   await expect(page).toHaveURL(
     /\/requirements\/[0-9a-f-]{36}\?discipline=system&requirementRevisionId=[0-9a-f-]{36}/,
     { timeout: 30_000 })
@@ -116,6 +116,7 @@ test('zero coverage stays explicit and truthful in Trace & impact', async ({ pag
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
+          artifactId: procedureId,
           procedureId,
           baseNumber: 'SYSTP-000001',
           title: 'Verify System FMS behavior group 001',
@@ -170,7 +171,7 @@ test('a software HLR trace navigates to the exact software requirement revision'
   const rows = inspector.locator('.traceRequirement')
   await expect(rows.first()).toBeVisible({ timeout: 30_000 })
 
-  await rows.first().getByRole('button', { name: /Open requirement/ }).click()
+  await rows.first().getByRole('link', { name: /^(SYSR|HLR)-/ }).click()
   // The shared Software Requirements Explorer opens the exact software requirement revision; the HLR level
   // is carried by the route and the revision identity, never substituted.
   await expect(page).toHaveURL(
@@ -209,7 +210,7 @@ test('an exact requirement deep link fails closed instead of substituting the la
   expect(revisionIds[0]).toMatch(/^[0-9a-f-]{36}$/)
   expect(revisionIds[1]).toMatch(/^[0-9a-f-]{36}$/)
 
-  await rows.first().getByRole('button', { name: /Open requirement/ }).click()
+  await rows.first().getByRole('link', { name: /^(SYSR|HLR)-/ }).click()
   await expect(page).toHaveURL(
     /\/requirements\/[0-9a-f-]{36}\?discipline=system&requirementRevisionId=[0-9a-f-]{36}/,
     { timeout: 30_000 })

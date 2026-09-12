@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 877,
-    "cases": 974,
+    "tests": 880,
+    "cases": 980,
     "classes": 131,
-    "hostedTests": 836,
-    "hostedCases": 919,
+    "hostedTests": 839,
+    "hostedCases": 925,
     "nonHostedTests": 32,
     "nonHostedCases": 46,
     "unknownHostTests": 9,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 551,
-      "cases": 616,
+      "tests": 554,
+      "cases": 622,
       "unknownCases": 0,
       "classes": 105
     },
@@ -9207,6 +9207,24 @@
     },
     {
       "cls": "ProcedureTraceApiTests",
+      "test": "A_live_suspect_requirement_relationship_remains_visible_once_in_the_inspector",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 286,
+        "end": 317
+      }
+    },
+    {
+      "cls": "ProcedureTraceApiTests",
       "test": "Cross_build_revision_access_follows_the_exact_manifest",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -9218,8 +9236,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 304,
-        "end": 321
+        "start": 440,
+        "end": 457
       }
     },
     {
@@ -9235,8 +9253,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 271,
-        "end": 302
+        "start": 407,
+        "end": 438
       }
     },
     {
@@ -9252,8 +9270,43 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 353,
-        "end": 383
+        "start": 489,
+        "end": 519
+      }
+    },
+    {
+      "cls": "ProcedureTraceApiTests",
+      "test": "Requirement_inspector_uses_the_selected_revision_and_refuses_unavailable_scope",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 381,
+        "end": 405
+      }
+    },
+    {
+      "cls": "ProcedureTraceApiTests",
+      "test": "Software_inspectors_keep_the_profile_specific_path_to_execution_and_evidence",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 4,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 319,
+        "end": 379
       }
     },
     {
@@ -9269,8 +9322,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 340,
-        "end": 351
+        "start": 476,
+        "end": 487
       }
     },
     {
@@ -9286,8 +9339,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 223,
-        "end": 269
+        "start": 227,
+        "end": 284
       }
     },
     {
@@ -9303,8 +9356,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 323,
-        "end": 338
+        "start": 459,
+        "end": 474
       }
     },
     {
