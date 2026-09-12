@@ -184,7 +184,7 @@ public sealed class ProblemReportLinkServiceTests
     }
 
     [Fact]
-    public async Task A_build_scoped_pr_flows_from_proposed_change_to_tcr_and_approved_corrective_action()
+    public async Task A_build_scoped_pr_requires_explicit_tcr_acceptance_after_source_approval()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-pr-links-{Guid.NewGuid():N}.db");
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
@@ -228,7 +228,7 @@ public sealed class ProblemReportLinkServiceTests
             scr.SubmitForReview("software.engineer", [new("reviewer", "Reviewer")], now);
             await db.SaveChangesAsync();
             scr.ApproveActiveStage("reviewer", now);
-            await new VerificationImpactService(db, service).RaiseForApprovedChangeRequestAsync(
+            await new VerificationImpactService(db).RaiseForApprovedChangeRequestAsync(
                 scr, now, default, "reviewer");
             await service.RecordApprovedCorrectiveActionsAsync(scr, "reviewer", now, default);
             await db.SaveChangesAsync();
@@ -240,9 +240,17 @@ public sealed class ProblemReportLinkServiceTests
                 && x.ArtifactId == scr.Id && x.Relationship == "ProposedCorrectiveAction");
             Assert.Contains(links, x => x.ArtifactType == "ChangeRequest"
                 && x.ArtifactId == scr.Id && x.Relationship == "ApprovedCorrectiveAction");
-            Assert.Contains(links, x => x.ArtifactType == "TestChangeRequest"
-                && x.ArtifactId == tcr.Id && x.Relationship == "VerificationForProblem"
-                && x.AddedBy == "reviewer");
+            Assert.DoesNotContain(links, x => x.ArtifactType == "TestChangeRequest" && x.ArtifactId == tcr.Id);
+            await service.LinkTestChangeRequestAsync(tcr.Id, [report.Id], "test.author", now.AddMinutes(1), default);
+            await db.SaveChangesAsync();
+            var accepted = await db.ProblemReportLinks.SingleAsync(x => x.ArtifactType == "TestChangeRequest" && x.ArtifactId == tcr.Id);
+            Assert.Equal("VerificationForProblem", accepted.Relationship);
+            Assert.Equal("test.author", accepted.AddedBy);
+            Assert.Equal(now.AddMinutes(1), accepted.AddedAt);
+            // Subsequent source refresh/approval is not a command to rewrite the accepted link.
+            await new VerificationImpactService(db).RaiseForApprovedChangeRequestAsync(scr, now.AddMinutes(2), default);
+            await db.SaveChangesAsync();
+            Assert.Equal(accepted.Id, (await db.ProblemReportLinks.SingleAsync(x => x.ArtifactType == "TestChangeRequest" && x.ArtifactId == tcr.Id)).Id);
         }
         finally
         {

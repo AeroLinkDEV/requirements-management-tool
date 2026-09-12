@@ -33,6 +33,7 @@ import { RichCaseField, RichContentView } from "./RichContent";
 import { useDebouncedSave } from "./autosave";
 import { emptyRichContent, fromPlainText, toPlainText } from "./richContentModel";
 import ProblemReportPicker from "./ProblemReportPicker";
+import InheritedProblemReports from './InheritedProblemReports';
 import "./ChangeRequestWorkspace.css";
 import "./ReviewMode.css";
 
@@ -1295,6 +1296,12 @@ export default function ChangeRequestWorkspace({
                 noUpstreamRationale={draft.noUpstreamRationale ?? null}
                 onNoUpstreamRationale={value => setDraft(current => ({ ...current, noUpstreamRationale: value }))}
                 currentBuild={targetRelease?.version ?? scr.targetReleaseId} stored={scr.upstream ?? []} />
+              <InheritedProblemReports api={api} projectId={scr.projectId} releaseId={scr.targetReleaseId}
+                sources={[
+                  ...(draft.upstreamLinks ?? []).map(link => ({ id: link.upstreamChangeRequestId, kind: 'ChangeRequest' as const, displayNumber: upstreamPicker.known[link.upstreamChangeRequestId]?.displayNumber ?? scr.upstream?.find(item => item.upstreamChangeRequestId === link.upstreamChangeRequestId)?.upstreamDisplayNumber ?? link.upstreamChangeRequestId })),
+                  ...(upstreamPicker.data?.derivedEdges ?? []).map(edge => ({ id: edge.upstreamChangeRequestId, kind: 'ChangeRequest' as const, displayNumber: edge.upstreamDisplayNumber })),
+                ]}
+                selected={problemReportIds} onChange={setProblemReportIds} />
             </section>
           </section>
 

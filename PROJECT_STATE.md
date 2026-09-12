@@ -216,6 +216,8 @@ The #765 improvement programme delivered a substantially richer Problem Report w
 
 Problem Reports can drive governed change work; requirements changes do not manufacture a Problem Report merely because a change exists.
 
+Upstream change requests and exact Case origins provide inherited Problem Report context for downstream authoring. Authors explicitly select direct links under the existing project/build and review-version rules; source approval does not automatically copy those links into a new verification assessment. Refreshing source context does not change independently accepted links or frozen review history. Software Procedure packages retain their exact Case origin when secondary Problem Reports are explicitly linked.
+
 ## Baselines, builds, and release control
 
 AeroLink separates several facts that must not collapse into one:

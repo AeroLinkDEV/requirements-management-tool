@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 131,
-    "tests": 880,
-    "knownCases": 980,
+    "tests": 881,
+    "knownCases": 981,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -14,9 +14,9 @@
       "unknownCaseTests": 0
     },
     "fresh-host": {
-      "classes": 48,
-      "tests": 300,
-      "knownCases": 332,
+      "classes": 49,
+      "tests": 307,
+      "knownCases": 339,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -26,9 +26,9 @@
       "unknownCaseTests": 0
     },
     "reusable-host": {
-      "classes": 50,
-      "tests": 320,
-      "knownCases": 358,
+      "classes": 49,
+      "tests": 314,
+      "knownCases": 352,
       "unknownCaseTests": 0
     }
   },
@@ -556,6 +556,19 @@
         "auth-policy",
         "ef-translation",
         "http-boundary"
+      ]
+    },
+    {
+      "cls": "ProcedureTestChangeControlApiTests",
+      "tests": 7,
+      "knownCases": 7,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Owns host-scoped state (startup-config); sharing would leak it between tests.",
+      "intents": [
+        "ef-translation",
+        "http-boundary",
+        "startup-config"
       ]
     },
     {
@@ -1240,18 +1253,6 @@
     },
     {
       "cls": "ProblemReportImpactEvidenceApiTests",
-      "tests": 6,
-      "knownCases": 6,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ProcedureTestChangeControlApiTests",
       "tests": 6,
       "knownCases": 6,
       "unknownCaseTests": 0,

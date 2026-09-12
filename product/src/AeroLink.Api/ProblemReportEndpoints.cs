@@ -313,8 +313,23 @@ public static class ProblemReportEndpoints
     private static async Task<IResult> LinkedAsync(string artifactType, Guid artifactId, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         var canonicalType = CanonicalLinkType(artifactType);
+        Guid? sourceProjectId = canonicalType switch
+        {
+            "ChangeRequest" => await db.SystemChangeRequests.AsNoTracking().Where(x => x.Id == artifactId)
+                .Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct),
+            "TestChangeRequest" => await db.TestChangeReviews.AsNoTracking().Where(x => x.Id == artifactId)
+                .Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct),
+            _ => null
+        };
+        if (canonicalType is "ChangeRequest" or "TestChangeRequest")
+        {
+            if (sourceProjectId is null) return Results.NotFound();
+            if (!await http.HasProjectAccessAsync(db, sourceProjectId.Value, ct)) return Results.Forbid();
+        }
         var links = await db.ProblemReportLinks.AsNoTracking().Where(x => x.ArtifactType == canonicalType && x.ArtifactId == artifactId).ToListAsync(ct);
-        var ids = links.Select(x => x.ProblemReportId).Distinct().ToList(); var reports = await db.ProblemReports.AsNoTracking().Where(x => ids.Contains(x.Id)).ToListAsync(ct);
+        var ids = links.Select(x => x.ProblemReportId).Distinct().ToList();
+        var reports = await db.ProblemReports.AsNoTracking()
+            .Where(x => ids.Contains(x.Id) && (sourceProjectId == null || x.ProjectId == sourceProjectId)).ToListAsync(ct);
         var permitted = new List<ProblemReport>(); foreach (var report in reports) if (await http.HasProjectAccessAsync(db, report.ProjectId, ct)) permitted.Add(report);
         var snapshotIds = await CurrentSnapshotIdsAsync(permitted, db, ct);
         return Results.Ok(permitted.Select(x => Summary(x,
@@ -1062,7 +1077,7 @@ public static class ProblemReportEndpoints
         IReadOnlyDictionary<string, string>? currentNames = null, Guid? snapshotId = null)
     {
         var liveNames = currentNames ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        return new { x.Id, x.ReportNumber, x.Revision, x.DisplayNumber, snapshotId, x.Title, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), category = CategoryResponse(x), x.Classification, x.ReportedBy, reportedByDisplayName = liveNames.Current(x.ReportedBy), x.ResponsibleEngineerId, responsibleEngineerDisplayName = liveNames.Current(x.ResponsibleEngineerId), x.TargetReleaseId, x.IsReleaseBlocker, waived, x.UpdatedAt, x.Version };
+        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, snapshotId, x.Title, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), severity = x.Severity.ToString(), priority = x.Priority.ToString(), category = CategoryResponse(x), x.Classification, x.ReportedBy, reportedByDisplayName = liveNames.Current(x.ReportedBy), x.ResponsibleEngineerId, responsibleEngineerDisplayName = liveNames.Current(x.ResponsibleEngineerId), x.TargetReleaseId, x.IsReleaseBlocker, waived, x.UpdatedAt, x.Version };
     }
 
     /// <summary>

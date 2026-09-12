@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PersonName } from './People'
 import PersonPicker from './PersonPicker'
 import ProblemReportPicker, { type ProblemReportOption } from './ProblemReportPicker'
+import InheritedProblemReports, { type ProblemReportSource } from './InheritedProblemReports'
 import TestChangeRequestRegisterPage from './TestChangeRequestRegisterPage'
 import TestChangeRequestWorkspace from './TestChangeRequestWorkspace'
 import type { AuthUser } from './IdentityCenter'
@@ -56,6 +57,7 @@ type TestChangeRequest = {
   totalItems: number
   resolvedItems: number
   coveredChangeRequests: ChangeRequestCover[]
+  inheritedProblemReportSources?: ProblemReportSource[]
   problemReports?: ProblemReportOption[]
   capabilities: { canAssign: boolean; canDecide: boolean; canSubmit: boolean; canApprove: boolean; canReturn: boolean }
   reviewCycle?: {
@@ -1088,6 +1090,11 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
           <form onSubmit={event => { event.preventDefault(); void linkReports(linkingProblemReports) }}>
             <p className="eyebrow">CONTROLLED TRACEABILITY</p>
             <h2>Link PRs to {linkingProblemReports.displayNumber}</h2>
+            <InheritedProblemReports api={api} projectId={projectId} releaseId={releaseId}
+              sources={linkingProblemReports.inheritedProblemReportSources ?? linkingProblemReports.coveredChangeRequests.map(source =>
+                ({ id: source.id, kind: 'ChangeRequest' as const, displayNumber: source.number }))}
+              selected={problemReportIds} locked={(linkingProblemReports.problemReports ?? []).map(report => report.id)}
+              onChange={setProblemReportIds} />
             <ProblemReportPicker api={api} projectId={projectId} scope="target-build" releaseId={releaseId}
               selected={problemReportIds} locked={(linkingProblemReports.problemReports ?? []).map(report => report.id)}
               onChange={setProblemReportIds} legend="PRs verified by this TCR" />
