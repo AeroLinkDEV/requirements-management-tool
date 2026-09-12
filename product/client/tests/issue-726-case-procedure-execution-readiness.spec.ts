@@ -469,7 +469,7 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
   const exactCaseParent = page.getByRole('region', { name: 'Upstream context', exact: true })
     .getByRole('link', { name: exactCase.displayNumber, exact: true })
   await expect(exactCaseParent).toBeVisible()
-  await expect(exactCaseParent).toHaveAttribute('href', new RegExp(`procedureRevisionId=${caseRevisionId}(?:&|$)`))
+  await expect(exactCaseParent).toHaveAttribute('href', new RegExp(`revisionId=${caseRevisionId}(?:&|$)`))
   await page.goto(`${root}/software-verification/hlr/results`)
   await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
   await page.getByLabel('Find an approved procedure').fill(`${label} sequencing procedure`)
