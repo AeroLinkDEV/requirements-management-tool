@@ -27,6 +27,54 @@ const shoot = async (page: import("@playwright/test").Page, name: string) => {
   await page.screenshot({ path: `${directory}/${name}.png` })
 }
 
+test("a tall partially visible card stays painted and its native tail action becomes reachable by rolling", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/tests/fixtures/digital-thread-contract.html?case=tall")
+  const card = page.locator('[data-node-id="link"]')
+  const action = card.getByRole("button", { name: "Native tail action" })
+  await expect(card).toBeVisible()
+  await page.waitForTimeout(700)
+  const frame = await usableFrame(page)
+  const rect = (await card.boundingBox())!
+  expect(rect.y).toBeLessThan(frame.bottom)
+  expect(rect.y + rect.height).toBeGreaterThan(frame.bottom)
+  await expect(card).not.toHaveClass(/is-offscreen/)
+  await expect(action).toHaveAttribute("tabindex", "-1")
+  const x = rect.x + rect.width / 2
+  const y = Math.max(frame.top + 20, rect.y + 20)
+  expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-node-id]')?.getAttribute('data-node-id'), { x, y })).toBe("link")
+  await shoot(page, "tall-card-partial-visible")
+  const band = (await page.locator('[data-band="1"]').boundingBox())!
+  // The canvas wheel zooms. Rolling uses the lane's exposed strip, clear of the card's own hit target.
+  for (let i = 0; i < 4; i++) {
+    await page.mouse.move(band.x + 5, frame.bottom - 20)
+    await page.mouse.down()
+    await page.mouse.move(band.x + 5, frame.top + 40, { steps: 8 })
+    await page.mouse.up()
+  }
+  await expect.poll(async () => action.getAttribute("tabindex")).not.toBe("-1")
+  await expect(card).not.toHaveClass(/is-offscreen/)
+  await action.click()
+  await expect(card.getByRole("button", { name: "Action activated" })).toBeVisible()
+  await expect(page.locator('.dtCanvasNode[aria-pressed="true"]')).toHaveCount(0)
+  await shoot(page, "tall-card-native-tail-reached")
+})
+
+test("StrictMode arrival clears easing and keeps a revealed Artifact card pointer accessible", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/tests/fixtures/artifact-thread.html?case=hlr&strict=1")
+  const scene = page.locator(".dtCanvasScene")
+  await expect(page.locator(".dtaPanel")).toBeVisible()
+  await expect(scene).not.toHaveClass(/is-easing/)
+  await page.locator('.dtaRel button:has-text("SRCR-00039.00")').first().click()
+  await expect(scene).not.toHaveClass(/is-easing/)
+  const card = page.locator('.dtaCard:has-text("SRCR-00039.00")')
+  await card.click()
+  await expect(card).toHaveClass(/is-selected/)
+  await card.getByRole("button", { name: "Open this change" }).click()
+  await shoot(page, "strictmode-native-action")
+})
+
 /**
  * Pan the background, deliberately.
  *

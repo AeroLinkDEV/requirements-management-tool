@@ -386,7 +386,7 @@
 .dticPanel-left { left: 16px; top: 112px; bottom: 22px; right: auto; width: 300px; height: auto; overflow: auto; }
 
 .dticPanelContent { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 8px; overflow: auto; }
-.dticPanel-bottom .dticPanelContent { display: grid; grid-template-columns: 250px minmax(0, 1fr) minmax(0, 1fr) 200px; gap: 18px; align-items: start; overflow: hidden; }
+.dticPanel-bottom .dticPanelContent { display: grid; grid-template-columns: 250px minmax(0, 1fr) minmax(0, 1fr) max(200px, 18em); gap: 18px; align-items: start; overflow: hidden; }
 .dticPanelIdentityCol { min-width: 0; overflow-y: auto; }
 .dticPanel-bottom .dticPanelIdentityCol { max-height: 100%; overflow-wrap: anywhere; }
 

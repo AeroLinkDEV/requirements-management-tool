@@ -468,9 +468,7 @@ export const laneScrollMinimum = (input: {
   promised: readonly { q: number; h: number }[]
 }): number => {
   const { bandHeight, contentEnd, window, promised } = input
-  const height = window.bottom - window.top
   const tail = promised
-    .filter(card => card.h <= height)
     .map(card => window.bottom - card.h - card.q)
   return Math.min(0, bandHeight - contentEnd, ...tail)
 }
@@ -514,10 +512,10 @@ export const effectiveLaneLimits = (input: {
           bandHeight,
           contentEnd,
           window,
-          // Only cards that are not above the window can be reached by scrolling; an oversized or
-          // above-window card keeps its truthful partial/Show treatment instead of stretching the bound.
+          // A tall card cannot fit all at once, but its tail still needs to reach the usable boundary.
+          // Cards starting above this window do not demand additional downward exploration.
           promised: bucket
-            .filter(node => effectiveTop(node) >= window.top - 0.5 && heightOf(node.id) <= window.bottom - window.top)
+            .filter(node => effectiveTop(node) >= window.top - 0.5)
             .map(node => ({ q: effectiveTop(node), h: heightOf(node.id) })),
         })
       : Math.min(0, bandHeight - contentEnd)

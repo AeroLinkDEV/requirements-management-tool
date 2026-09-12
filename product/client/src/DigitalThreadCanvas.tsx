@@ -815,16 +815,20 @@ export default function DigitalThreadCanvas({
       if (!card) continue
       card.style.transform = `translate(${position.x}px,${position.y}px)`
       card.style.width = `${geometry.laneWidth}px`
-      // Reachability uses the displayed free frame, including toolbar and inspector reserves. Partially
-      // covered unselected cards keep their geometry and an explicit reveal path before accepting focus.
+      // Paint the exposed part of a card; complete containment is a navigation/focus constraint, not a
+      // visibility test. In particular a long card must remain readable through manual lane exploration.
       const left = position.x * display.zoom + display.x
       const right = left + geometry.laneWidth * display.zoom
-      // Wholly inside, not merely overlapping: a card straddling the panel edge is still a card the panel is
-      // covering, and §6.6 admits no partial version of that.
+      // A partially exposed card retains its position and an explicit route to the rest of its content.
       const inFrame = left >= box.x - 1 && right <= box.x + box.width + 1
       const top = position.y * display.zoom + display.y
       const bottom = top + (card.offsetHeight || geometry.cardHeight) * display.zoom
       const fullyVisible = inFrame && top >= box.y - 1 && bottom <= box.y + box.height + 1 && isVisible(position.y, geometry, bandHeight)
+      const visibleTop = Math.max(box.y, selectedId === node.id ? box.y : display.y)
+      const visibleBottom = Math.min(box.y + box.height,
+        selectedId === node.id ? box.y + box.height : display.y + bandHeight * display.zoom)
+      const anyVisible = right > box.x && left < box.x + box.width && bottom > visibleTop && top < visibleBottom
+      card.style.clipPath = `inset(${Math.max(0, visibleTop - top) / display.zoom}px ${Math.max(0, right - box.x - box.width) / display.zoom}px ${Math.max(0, bottom - visibleBottom) / display.zoom}px ${Math.max(0, box.x - left) / display.zoom}px)`
       const indicator = offscreenRefs.current.get(node.id)
       if (indicator) {
         const filtered = Boolean(card.querySelector(".is-filtered"))
@@ -834,13 +838,17 @@ export default function DigitalThreadCanvas({
       }
       card.classList.toggle(
         "is-offscreen",
-        !fullyVisible && selectedId !== node.id,
+        !anyVisible && selectedId !== node.id,
       )
       const offscreen = card.classList.contains("is-offscreen")
-      // Descendant links/buttons are real native actions, but an offscreen card must not remain a hidden tab
-      // target. Remember each authored tabindex and restore it when lane rolling reveals the card again.
+      const viewport = viewportRef.current!.getBoundingClientRect()
+      // Native controls require their own usable rectangle. An exposed card edge must not restore Tab to
+      // a link underneath the toolbar or inspector. Preserve the authored tabindex as exploration reveals it.
       card.querySelectorAll<HTMLElement>("a,button,input,select,textarea,summary,[role='link']").forEach(control => {
-        if (offscreen) {
+        const rect = control.getBoundingClientRect()
+        const usable = rect.left >= viewport.left + box.x - 1 && rect.right <= viewport.left + box.x + box.width + 1
+          && rect.top >= viewport.top + visibleTop - 1 && rect.bottom <= viewport.top + visibleBottom + 1
+        if (offscreen || !usable) {
           if (control.dataset.dtOriginalTabIndex === undefined) {
             control.dataset.dtOriginalTabIndex = control.getAttribute("tabindex") ?? ""
           }
@@ -1203,7 +1211,7 @@ export default function DigitalThreadCanvas({
       target: { selectedId: string; wanted: string[]; intent: FrameIntent; key: string } | null,
       /** An explicit Fit is a reader command: it must never be swallowed by the automatic suitability rule. */
       explicit = false,
-      /** Automatic selection framing takes #1022's half-speed trial; dock/inset re-frames stay snappy. */
+      /** Explicit Fit can use the shorter transition; automatic selection uses the slower path. */
       slow = false,
     ): boolean => {
       if (!target) return false
@@ -1310,16 +1318,6 @@ export default function DigitalThreadCanvas({
       )
       if (!next) return false
 
-      /**
-       * The selection and every direct link must actually be drawn, wholly inside the free area.
-       *
-       * §6.6 is a guarantee, not a preference, and it survived the Option-A ruling untouched. Hiding a linked
-       * record that will not fit satisfies "not underneath the panel" only by making it not present, which is
-       * the same failure wearing a different face. When the free area this dock leaves cannot hold the selected
-       * record and its direct links at the readable floor, the panel has to move rather than the record disappear — so the
-       * canvas says so and the view re-docks. Reported rather than decided here: the canvas owns geometry,
-       * the view owns where its own panel may go.
-       */
       // Direct links are no longer required to be simultaneously drawn: #1022 accepts clearly indicated
       // off-screen links with a working reveal path, so the redock demand is limited to the selected record
       // itself being unusable.
@@ -1363,7 +1361,6 @@ export default function DigitalThreadCanvas({
       if (settledFrame) {
         transform.current = settledFrame
         paint()
-
       }
       if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
       easeTimer.current = window.setTimeout(() => {
@@ -1465,7 +1462,10 @@ export default function DigitalThreadCanvas({
     () => () => {
       activeGesture.current?.()
       if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
+      easeTimer.current = null
+      sceneRef.current?.classList.remove("is-easing", "is-motion-slow")
       if (previewTimer.current !== null) clearTimeout(previewTimer.current)
+      previewTimer.current = null
     },
     [],
   )
@@ -1473,6 +1473,8 @@ export default function DigitalThreadCanvas({
   useEffect(
     () => () => {
       if (animation.current !== null) cancelAnimationFrame(animation.current)
+      // StrictMode replays effects on the same instance. A canceled handle must not block the next tick.
+      animation.current = null
     },
     [],
   )

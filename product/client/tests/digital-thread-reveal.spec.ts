@@ -20,6 +20,14 @@ import {
 const GEOMETRY = geometryFor(2)
 const BAND = 610
 const PAD = GEOMETRY.pad
+
+test("manual scrolling can expose the tail of a card taller than the usable window", () => {
+  const card = { q: 12, h: 902 }
+  const window = { top: 0, bottom: 205 }
+  const minimum = laneScrollMinimum({ bandHeight: 245, contentEnd: 926, window, promised: [card] })
+  expect(card.q + card.h + minimum).toBeLessThanOrEqual(window.bottom)
+  expect(minimum).toBeLessThan(245 - 926)
+})
 const lane = (count: number, laneIndex = 0): CanvasNode[] =>
   Array.from({ length: count }, (_, row) => ({ id: `n${row}`, lane: laneIndex, row }))
 const contentTop = (nodes: CanvasNode[], id: string) => contentPositionsForNodes(nodes, GEOMETRY).get(id)!

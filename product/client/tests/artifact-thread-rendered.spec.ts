@@ -615,7 +615,11 @@ test.describe("shared canvas behaviour", () => {
       for (const name of names) {
         const card = page.locator(`.dtCanvasNode:has(.dtaCard:has-text("${name}"))`).first()
         expect(await card.count(), `${name} is a direct link and must be on the board`).toBeGreaterThan(0)
-        if ((await card.getAttribute("class"))?.includes("is-offscreen")) {
+        const before = (await card.boundingBox())!
+        const intersectsPanel = before.x < panel.x + panel.width && before.x + before.width > panel.x
+          && before.y < panel.y + panel.height && before.y + before.height > panel.y
+        if ((await card.getAttribute("class"))?.includes("is-offscreen") || intersectsPanel ||
+          before.x < canvas.x || before.x + before.width > canvas.x + canvas.width) {
           const reveal = page.getByRole("button", { name: `Show ${name}`, exact: true })
           await expect(reveal, `${name} must never be silently hidden`).toBeVisible()
           await reveal.click()

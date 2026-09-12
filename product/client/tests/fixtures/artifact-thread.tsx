@@ -11,7 +11,7 @@
  *
  * The scenario is chosen by `?case=` so one fixture serves every rendered assertion.
  */
-import { useState } from "react"
+import { StrictMode, Fragment, useState } from "react"
 import { createRoot } from "react-dom/client"
 // The product stylesheet, because the card typography is written against its tokens. Without it every
 // `font: var(--weight-strong) 11.5px …` shorthand is invalid at computed-value time and silently falls back to
@@ -485,8 +485,9 @@ function Unsettled() {
 // as an unknown scenario and fell back to the populated thread — so both states silently rendered a full board.
 const response = scenario in responses ? responses[scenario] : responses.hlr
 
+const Lifecycle = new URLSearchParams(location.search).has("strict") ? StrictMode : Fragment
 createRoot(document.getElementById("root")!).render(
-  scenario === "relink" ? (
+  <Lifecycle>{scenario === "relink" ? (
     <Relink />
   ) : scenario === "unsettled" ? (
     <Unsettled />
@@ -497,5 +498,5 @@ createRoot(document.getElementById("root")!).render(
       loading={scenario === "loading"}
       error={scenario === "error" ? "The server did not answer in time." : null}
     />
-  ),
+  )}</Lifecycle>,
 )

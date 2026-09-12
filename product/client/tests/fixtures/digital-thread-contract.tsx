@@ -26,7 +26,9 @@ function Harness() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [grown, setGrown] = useState(false)
   const [mounted, setMounted] = useState(true)
+  const [activated, setActivated] = useState(false)
   const growth = new URLSearchParams(location.search).get("case") === "growth"
+  const tall = new URLSearchParams(location.search).get("case") === "tall"
   const growthNodes = [
     { id: "subj", lane: 0, row: 1 },
     { id: "resident-0", lane: 1, row: 0 },
@@ -40,8 +42,8 @@ function Harness() {
         <button onClick={() => setMounted(value => !value)}>Toggle canvas</button>
       </div>}
       {mounted && <DigitalThreadCanvas
-        lanes={growth ? ["Subject", "Linked"] : lanes}
-        nodes={growth ? growthNodes : nodes}
+        lanes={growth || tall ? ["Subject", "Linked"] : lanes}
+        nodes={tall ? [{ id: "subj", lane: 0, row: 0 }, { id: "link", lane: 1, row: 0 }] : growth ? growthNodes : nodes}
         edges={edges}
         scopeKey="contract|hidden-lane"
         selectedId={selectedId}
@@ -49,9 +51,10 @@ function Harness() {
         renderCard={node => (
           <div
             className={`probeCard probe-${node.id}`}
-            style={{ height: growth ? (node.id === "link" && grown ? 200 : 106) : "100%", boxSizing: "border-box", padding: 8, border: "1px solid #cbd6df", borderRadius: 6, background: "#fff" }}
+            style={{ height: tall && node.id === "link" ? 900 : growth ? (node.id === "link" && grown ? 200 : 106) : "100%", boxSizing: "border-box", padding: 8, border: "1px solid #cbd6df", borderRadius: 6, background: "#fff", display: "flex", flexDirection: "column", justifyContent: "space-between" }}
           >
             <strong>{node.id}</strong>
+            {tall && node.id === "link" && <button onClick={() => setActivated(true)}>{activated ? "Action activated" : "Native tail action"}</button>}
           </div>
         )}
       />}

@@ -223,8 +223,8 @@
 
 /* Programmatic moves ease; pointer-driven pan and zoom never do, because easing a drag feels like lag.
    #1022 asks for roughly half the speed on automatic *selection* framing — twice the duration for the same
-   travel — so a click reads as movement rather than a jump. Dock and inset re-frames keep the snappier timing:
-   they accompany the reader's own dock action, where a slow settle reads as lag. Manual input interrupts either
+   travel — so a click reads as movement rather than a jump. Explicit Fit commands use the shorter timing.
+   Manual input interrupts either
    immediately, and reduced motion disables both. */
 .dtCanvasScene.is-easing { transition: transform .4s cubic-bezier(.22, .61, .36, 1); }
 .dtCanvasScene.is-easing.is-motion-slow { transition-duration: .8s; }
