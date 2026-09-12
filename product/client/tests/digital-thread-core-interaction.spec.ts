@@ -1182,3 +1182,60 @@ test("Arrow Down moves focus within the same lane and keeps it visible", async (
   expect(after.y, "Arrow Down did not move down the lane").toBeGreaterThan(before.y)
   expect(after.offscreen, "focus landed on a card the reader cannot see").toBe(false)
 })
+
+/**
+ * A density change after the reader has been working in a lane.
+ *
+ * Changing tier changes every measured card height and the lane's extent at once, which is exactly when a
+ * retained temporary arrangement could leave cards on top of each other. The check is the rendered one: no two
+ * drawn cards in the same lane may overlap, and the selection survives.
+ */
+test("a density change after manual exploration leaves no overlapping cards", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page, "dense")
+  const root = page.locator('[data-node-id="pr-5"]')
+  await root.click()
+  await expect(root).toHaveAttribute("aria-pressed", "true")
+  await page.waitForTimeout(600)
+
+  // Explore a lane by hand so it is reader-owned, then change density underneath that arrangement.
+  const { x: gutterX, y: gutterY } = await gutterPoint(page)
+  const band = page.locator(".dtCanvasBand.is-rollable").first()
+  const bandBox = (await band.boundingBox())!
+  await page.mouse.move(bandBox.x + 4, bandBox.y + bandBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(bandBox.x + 4, bandBox.y + bandBox.height / 2 - 200)
+  await page.mouse.up()
+  await page.waitForTimeout(300)
+  void gutterX
+  void gutterY
+
+  const tierBefore = await page.locator(".dtCanvasScene").getAttribute("data-tier")
+  await page.getByRole("button", { name: "Zoom out", exact: true }).click()
+  await page.getByRole("button", { name: "Zoom out", exact: true }).click()
+  await page.waitForTimeout(700)
+  const tierAfter = await page.locator(".dtCanvasScene").getAttribute("data-tier")
+  expect(tierAfter, "the density tier did not change, so nothing was reconciled").not.toBe(tierBefore)
+
+  const collisions = await page.locator(".dtCanvasNode:not(.is-offscreen)").evaluateAll(nodes => {
+    const byLane = new Map<number, { id: string; top: number; bottom: number }[]>()
+    nodes.forEach(node => {
+      const element = node as HTMLElement
+      const rect = element.getBoundingClientRect()
+      const lane = Math.round(rect.left)
+      byLane.set(lane, [...(byLane.get(lane) ?? []), { id: element.dataset.nodeId ?? "", top: rect.top, bottom: rect.bottom }])
+    })
+    const overlaps: string[] = []
+    for (const cards of byLane.values()) {
+      const sorted = [...cards].sort((a, b) => a.top - b.top)
+      for (let index = 1; index < sorted.length; index += 1) {
+        if (sorted[index].top < sorted[index - 1].bottom - 1) {
+          overlaps.push(`${sorted[index - 1].id}/${sorted[index].id}`)
+        }
+      }
+    }
+    return overlaps
+  })
+  expect(collisions, `cards overlap after the density change: ${collisions.join(", ")}`).toEqual([])
+  await expect(root).toHaveAttribute("aria-pressed", "true")
+})
