@@ -1399,6 +1399,10 @@ export default function DigitalThreadCanvas({
       const element = viewportRef.current
       if (!box || !element) return
       event.preventDefault()
+      // Keep the canvas as the keyboard focus after a canvas press, so Escape/E fit still reach its handler.
+      // preventDefault above stops the browser's own focus behaviour, and losing that silently broke
+      // Escape-to-clear after a lane drag.
+      if (!element.contains(document.activeElement)) element.focus({ preventScroll: true })
       if (event.shiftKey) {
         transform.current = { ...transform.current, x: transform.current.x - event.deltaY }
         paint()
@@ -1429,6 +1433,12 @@ export default function DigitalThreadCanvas({
       const element = viewportRef.current
       const result = geometryRef.current
       if (!element || !result) return
+      /**
+       * Native drags are stopped by `onDragStart` on the viewport, not by cancelling the pointer press.
+       * Calling preventDefault here suppressed the browser's own focus and click semantics, which silently broke
+       * Escape-to-clear; blocking the drag itself is the narrow fix (the pointercancel it caused is measured in
+       * the gesture trace, not assumed).
+       */
       const card = (event.target as HTMLElement).closest<HTMLElement>("[data-node-id]")
       const rect = element.getBoundingClientRect()
       const sceneX = (event.clientX - rect.left - transform.current.x) / transform.current.zoom
@@ -1450,7 +1460,14 @@ export default function DigitalThreadCanvas({
         offset: lane >= 0 ? (offsets.current[lane] ?? 0) : 0,
         moved: false,
       }
-      element.setPointerCapture(event.pointerId)
+      /**
+       * Window listeners replace pointer capture.
+       *
+       * Capture was swallowing later gestures: measured on a plain page, Playwright delivers ten pointermoves and
+       * a pointerup for every drag, but after the canvas had captured once, later drags arrived as a single move
+       * with no pointerup at all — the reader's second lane drag moved one step and never ended. Listening on the
+       * window (as the reference prototype does) keeps the gesture alive without capture.
+       */
       element.classList.add(card ? "is-idle" : rollable ? "is-rolling" : "is-panning")
 
       const move = (moveEvent: PointerEvent) => {
@@ -1702,6 +1719,12 @@ export default function DigitalThreadCanvas({
       onWheel={onWheel}
       onPointerDown={onPointerDown}
       onPointerLeave={exitHover}
+      /**
+       * A native text or image drag started from a card cancels the pointer a few moves into a gesture, which
+       * reduced later lane drags to a single step and never delivered a pointerup (measured in the gesture
+       * trace). Blocking the drag itself fixes that without touching focus, clicks or nested controls.
+       */
+      onDragStart={event => event.preventDefault()}
       onFocusCapture={event => {
         if (!nestedControl(event.target)) return
         // Native focus remains native; only prevent the transformed wrapper from becoming its scroll owner.

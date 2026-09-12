@@ -323,7 +323,7 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
   await page.evaluate(() => {
     const state = window as unknown as { __gestures?: { moves: number; downs: number; ups: number }[] }
     state.__gestures = []
-    window.addEventListener("pointerdown", () => state.__gestures!.push({ moves: 0, downs: 1, ups: 0 }), true)
+    window.addEventListener("pointerdown", () => state.__gestures!.push({ moves: 0, downs: 1, ups: 0, cancels: 0 }), true)
     window.addEventListener("pointermove", () => {
       const current = state.__gestures![state.__gestures!.length - 1]
       if (current) current.moves += 1
@@ -331,6 +331,10 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
     window.addEventListener("pointerup", () => {
       const current = state.__gestures![state.__gestures!.length - 1]
       if (current) current.ups += 1
+    }, true)
+    window.addEventListener("pointercancel", () => {
+      const current = state.__gestures![state.__gestures!.length - 1]
+      if (current) (current as { cancels?: number }).cancels = ((current as { cancels?: number }).cancels ?? 0) + 1
     }, true)
   })
   for (let attempt = 0; attempt < 8; attempt += 1) {

@@ -3,6 +3,10 @@
    Tokens come from index.css — nothing here invents a colour or a radius. */
 
 .dtCanvas {
+  /* The canvas owns pointer gestures: a native text/image drag starting from a card cancels the pointer and
+     silently reduces a lane drag to its first step. Nested controls keep their own behaviour. */
+  user-select: none;
+  -webkit-user-drag: none;
   position: relative;
   overflow: clip;
   cursor: grab;
