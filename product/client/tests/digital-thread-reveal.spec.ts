@@ -112,6 +112,38 @@ test.describe("lane-local reveal", () => {
     }
   })
 
+  /**
+   * Available-space reveal below a short lane's ordinary content.
+   *
+   * A short lane can sit entirely above the current viewing height while the usable window below it is empty.
+   * The planner must search the window itself, not only the lane's previous content extent: otherwise it
+   * reports "no room" and drops the card just below its ordinary end — still outside the window — while
+   * hundreds of usable units sit unused. Detailed geometry: pitch 138, card height 108, pad 12.
+   */
+  test("a linked card is placed inside the usable window even when that space is beyond the lane's content", () => {
+    const nodes: CanvasNode[] = [
+      { id: "subject", lane: 0, row: 3 },
+      { id: "link-1", lane: 1, row: 0 },
+    ]
+    // The camera shows only the lower part of the band: displayed-lane window [300, 610] at lane offset 0.
+    const window: RevealWindow = { top: 300, bottom: 610 }
+    const plan = planReveal({
+      nodes,
+      geometry: GEOMETRY,
+      laneOffsets: [0, 0],
+      storyIds: new Set(["subject", "link-1"]),
+      subjectId: "subject",
+      windowByLane: new Map([[0, { top: 0, bottom: BAND }], [1, window]]),
+      frozenLanes: new Set(),
+      bandHeight: BAND,
+    })
+    const placed = 12 + (plan.deltas.get("link-1") ?? 0)
+    expect(plan.deltas.has("link-1"), "the linked card received no placement").toBe(true)
+    // It must land wholly inside the usable window, not merely below the lane's ordinary end.
+    expect(placed).toBeGreaterThanOrEqual(window.top)
+    expect(placed + GEOMETRY.cardHeight).toBeLessThanOrEqual(window.bottom)
+  })
+
   test("a frozen lane keeps its displayed arrangement for records still in the thread", () => {
     const nodes = lane(8)
     const existing = new Map([["n6", -260], ["n7", 90]])

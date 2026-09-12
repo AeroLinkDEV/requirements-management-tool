@@ -367,13 +367,22 @@ export const planReveal = (input: RevealPlanInput): RevealPlan => {
     }))
     const gap = MEASURED_CARD_GAP
     const contentEnd = Math.max(geometry.pad, ...bucket.map(node => (content.get(node.id) ?? 0) + heights(node.id) + geometry.pad))
+    /**
+     * The search region must include the usable window itself, not only the lane's existing content.
+     *
+     * A short lane can sit entirely above the current viewing height with empty usable space below it; the
+     * card belongs in that space. Bounding the search by the previous content end reported "no room" and
+     * dropped the card just past its ordinary end — still outside the window — while hundreds of usable units
+     * sat unused. Nothing here changes the camera, the lanes or canonical rows.
+     */
+    const searchEnd = Math.max(contentEnd, window.bottom + geometry.cardHeight)
     const spans: { start: number; end: number }[] = []
     let cursor = 0
     for (const block of [...blocks].sort((a, b) => a.start - b.start)) {
       if (block.start - gap > cursor) spans.push({ start: cursor, end: block.start - gap })
       cursor = Math.max(cursor, block.end + gap)
     }
-    if (contentEnd > cursor) spans.push({ start: cursor, end: contentEnd })
+    if (searchEnd > cursor) spans.push({ start: cursor, end: searchEnd })
 
     // Split at the window so a placed card is fully inside it or fully below it, and drop the part above it.
     const top = window.top

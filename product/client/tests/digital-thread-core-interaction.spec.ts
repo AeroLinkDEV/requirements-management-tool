@@ -215,15 +215,20 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
    * assertion accidentally pass. Had clearing clamped the lane back to its ordinary bound, this drag would do
    * nothing or jump instead.
    */
-  const measuredZoom = Number(
-    /scale\(([\d.]+)\)/.exec((await page.locator(".dtCanvasScene").getAttribute("style")) ?? "")?.[1] ?? 0,
-  )
-  const expected = 40 / (measuredZoom || 1)
+  const zoomText = /scale\(([\d.]+)\)/.exec(
+    (await page.locator(".dtCanvasScene").getAttribute("style")) ?? "",
+  )?.[1]
+  const measuredZoom = Number(zoomText)
+  // A failed measurement must fail the precondition: substituting a plausible zoom would invent the result.
+  expect(Number.isFinite(measuredZoom) && measuredZoom > 0, `could not measure the zoom (read "${zoomText}")`)
+    .toBe(true)
+  // The drag is downward by 40 px, so the lane must follow by exactly +40/zoom in its own coordinates.
+  const expected = 40 / measuredZoom
+  const actual = afterSmallDrag - cleared
   expect(
-    Math.abs(afterSmallDrag - cleared),
-    `the retained range did not accept the next drag (moved ${afterSmallDrag - cleared}, expected about ${expected})`,
-  ).toBeGreaterThan(expected * 0.6)
-  expect(Math.abs(afterSmallDrag - cleared)).toBeLessThan(expected * 1.4)
+    Math.abs(actual - expected),
+    `the retained range did not follow the drag: expected +${expected.toFixed(1)}, measured ${actual.toFixed(1)}`,
+  ).toBeLessThanOrEqual(6)
   expect(await transformOf()).toBe(cameraBefore)
 })
 
