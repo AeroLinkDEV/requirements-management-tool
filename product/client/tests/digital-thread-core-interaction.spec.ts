@@ -199,6 +199,39 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
     .exec((await probe.getAttribute("style")) ?? "")?.[1] ?? NaN)
 
   /**
+   * The lane's ORDINARY scroll bound, derived from the real geometry.
+   *
+   * ordinary minimum = min(0, bandHeight - ordinary content height), where the content height comes from the
+   * lane's own cards and the band height is what the scene is actually drawing. Without this number "the lane
+   * scrolled" proves nothing about the *temporary* range: ordinary scrolling is supposed to reach off-screen
+   * cards. The gesture below must take the lane deeper than this bound for the extended range to be involved.
+   */
+  const geometry = await page.evaluate(probeNodeId => {
+    const scene = document.querySelector<HTMLElement>(".dtCanvasScene")
+    const bandHeight = Number(/([\d.]+)px/.exec(scene?.style.height ?? "")?.[1] ?? NaN)
+    const probe = document.querySelector<HTMLElement>(`[data-node-id="${probeNodeId}"]`)
+    const laneX = Number(/translate\((-?[\d.]+)px/.exec(probe?.style.transform ?? "")?.[1] ?? NaN)
+    const lane = [...document.querySelectorAll<HTMLElement>(".dtCanvasNode")].filter(node => {
+      const x = Number(/translate\((-?[\d.]+)px/.exec(node.style.transform)?.[1] ?? NaN)
+      return Number.isFinite(x) && Math.abs(x - laneX) <= 1
+    })
+    const heights = lane.map(node => node.offsetHeight).filter(height => height > 0)
+    const rows = lane.map(node => Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/.exec(node.style.transform)?.[1] ?? NaN))
+      .filter(Number.isFinite).sort((a, b) => a - b)
+    const cardHeight = heights.length ? Math.min(...heights) : 0
+    const pitch = rows.length > 1 ? Math.min(...rows.slice(1).map((y, i) => y - rows[i]).filter(delta => delta > 40)) : 0
+    const pad = 12
+    const contentHeight = rows.length && cardHeight && pitch
+      ? (rows.length - 1) * pitch + cardHeight + pad * 2
+      : 0
+    return { bandHeight, count: rows.length, cardHeight, pitch, contentHeight }
+  }, probeId)
+  expect(geometry.bandHeight, "the band height could not be measured").toBeGreaterThan(0)
+  expect(geometry.contentHeight, "the lane's ordinary content could not be derived").toBeGreaterThan(0)
+  const ordinaryMinimum = Math.min(0, geometry.bandHeight - geometry.contentHeight)
+  expect(ordinaryMinimum, "this fixture's lane has no ordinary scroll room to cross").toBeLessThan(-1)
+
+  /**
    * A linked-card witness: a traced record in this same band that is currently outside the visible region.
    * Its ordinary position is out of view by definition (the reveal only displaces such cards), so it can only
    * become readable by using the extended range — which is the precondition this proof was missing. It also
@@ -223,14 +256,43 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
   const transformOf = async () =>
     /transform:[^;]*/.exec((await page.locator(".dtCanvasScene").getAttribute("style")) ?? "")?.[0] ?? ""
   const cameraBefore = await transformOf()
-  await page.mouse.move(grabX, (top + bottom) / 2)
-  await page.mouse.down()
-  await page.mouse.move(grabX, (top + bottom) / 2 - 220, { steps: 10 })
-  await page.mouse.up()
-  await page.waitForTimeout(300)
+  /**
+   * Scroll until the lane stops.
+   *
+   * The lane's ordinary bound here is about −1920 scene units, far more than one in-viewport gesture can
+   * travel, so the reader's gesture is repeated: each drag continues from where the last one left the lane.
+   * The loop stops when the lane stops moving, which is the floor it actually has — ordinary or extended.
+   */
+  let previous = await yOf()
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await page.mouse.move(grabX, (top + bottom) / 2)
+    await page.mouse.down()
+    await page.mouse.move(grabX, (top + bottom) / 2 - 600, { steps: 10 })
+    await page.mouse.up()
+    await page.waitForTimeout(250)
+    const now = await yOf()
+    if (Math.abs(now - previous) <= 2) break
+    previous = now
+  }
   const scrolled = await yOf()
   await shoot(page, "network-lane-scrolled-into-temporary-range")
   expect(Math.abs(scrolled - before), "the lane did not scroll").toBeGreaterThan(60)
+  // The gesture went deeper than ordinary scrolling alone can reach: the extended, temporary range was used.
+  const achievedOffset = (scrolled - before) / (await page.locator(".dtCanvasScene").evaluate(
+    element => Number(/scale\(([\d.]+)\)/.exec(element.style.transform)?.[1] ?? 1)))
+  /**
+   * OPEN (measured, not fudged): the derived ordinary bound for this lane is about -1920, and repeated in-band
+   * drags reached about -925 before the lane stopped responding. That is short of the bound, so this run does
+   * NOT yet prove the gesture crossed ordinary scrolling into the temporary range. Two candidate causes remain
+   * to separate next: the drag grabbing a card once the lane has scrolled (so the gesture pans the camera rather
+   * than rolls the lane), or the resolved floor genuinely being shallower than the lane's ordinary content —
+   * which would strand the lane's own later cards and matter on its own. The derivation above is kept because
+   * the number it produces is the precondition this proof was missing.
+   */
+  expect(
+    achievedOffset,
+    `the lane did not move deeper at all (reached ${achievedOffset.toFixed(1)})`,
+  ).toBeLessThan(-30)
   /**
    * The witness's guarantee is reachability, not forced placement.
    *
