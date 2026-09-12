@@ -227,8 +227,17 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
   /**
    * Baseline immediately before clearing. The witness branch may have used the explicit Show action, which
    * rolls the lane on purpose — that is the reader's navigation and must be preserved, so it belongs in the
-   * baseline rather than being mistaken for a snap.
+   * baseline rather than being mistaken for a snap. The roll is *eased*, so the baseline waits for the lane to
+   * come to rest first: sampling mid-animation measured the tail of the reader's own gesture, which is how the
+   * earlier "33–40 unit cleanup movement" reading arose.
    */
+  const probeAtRest = async () => {
+    const first = await yOf()
+    await page.waitForTimeout(250)
+    const second = await yOf()
+    return Math.abs(second - first) <= 1
+  }
+  await expect.poll(probeAtRest, { timeout: 15_000 }).toBe(true)
   const beforeClear = await yOf()
 
   // Clearing is explicit, and the selection really is gone.
@@ -262,19 +271,14 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
     .toBeLessThanOrEqual(2)
   expect(await transformOf()).toBe(cameraBefore)
   /**
-   * OPEN DEFECT (reported, not accepted): clearing still moves this lane.
-   *
-   * Measured two ways: +33 units when the probe shared the selected subject's lane (partly the expanded body
-   * collapsing, which is legitimate), and -40.3 units with the probe deliberately taken from a lane that is
-   * not the subject's — so the effect is not merely that collapse. A negative movement deepens the lane, which
-   * a clamp cannot do, so the cause is unresolved: it is not a simple floor clamp and not the subject's
-   * re-spacing alone. This assertion guards the severe form (a large snap) while the residual is recorded
-   * here and in the issue work log. It is not claimed as "no snap".
+   * With the lane at rest before the clear, cleanup must leave it where it was. The earlier larger readings
+   * were measurements taken during the reader's own eased roll, not cleanup movement; this assertion is the
+   * one that actually tests the no-snap property.
    */
   expect(
     Math.abs(cleared - beforeClear),
     `the lane moved after clear by ${(cleared - beforeClear).toFixed(1)} units`,
-  ).toBeLessThanOrEqual(60)
+  ).toBeLessThanOrEqual(4)
 
   /**
    * The next small input follows the reader, not the ordinary limit. Had clearing clamped the lane back to
