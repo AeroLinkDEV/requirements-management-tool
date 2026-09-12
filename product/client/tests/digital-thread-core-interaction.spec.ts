@@ -75,6 +75,26 @@ test("StrictMode arrival clears easing and keeps a revealed Artifact card pointe
   await shoot(page, "strictmode-native-action")
 })
 
+test("continuation affordances stay beside the inspector in every dock", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/tests/fixtures/artifact-thread.html?case=hlr&long=1")
+  await expect(page.locator(".dtaPanel")).toBeVisible()
+  for (const mode of ["Bottom", "Right", "Auto"]) {
+    await page.locator(".dtaPanelTools").getByRole("button", { name: mode, exact: true }).click()
+    await expect(page.locator(".dtCanvasScene")).not.toHaveClass(/is-easing/)
+    const panel = (await page.locator(".dtaPanel").boundingBox())!
+    for (const affordance of await page.locator(".dtCanvasPlacementNotice:visible, .dtCanvasOffscreen:visible").all()) {
+      const r = (await affordance.boundingBox())!
+      expect(r.x >= panel.x + panel.width || r.x + r.width <= panel.x ||
+        r.y >= panel.y + panel.height || r.y + r.height <= panel.y, `${mode} inspector content remains unobscured`).toBe(true)
+    }
+    const strip = (await page.locator(".dtCanvasOffscreen").boundingBox())!
+    expect(strip.width).toBeLessThanOrEqual(320)
+    expect(strip.height).toBeLessThanOrEqual(42)
+    await shoot(page, `affordances-${mode.toLowerCase()}`)
+  }
+})
+
 /**
  * Pan the background, deliberately.
  *

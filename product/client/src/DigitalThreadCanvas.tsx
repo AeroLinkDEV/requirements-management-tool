@@ -1013,6 +1013,8 @@ export default function DigitalThreadCanvas({
     if (placementNotice) {
       const unavailable = [...labelPositions.values()].some(position => !position.available)
       placementNotice.hidden = !unavailable
+      placementNotice.style.left = `${box.x + 12}px`
+      placementNotice.style.right = `${(viewportRef.current?.clientWidth ?? 0) - box.x - box.width + 12}px`
       placementNotice.style.bottom = `${Math.max(68, (viewportRef.current?.clientHeight ?? 0) - box.y - box.height + 4)}px`
       placementNotice.textContent = unavailable
         ? "A relation label cannot fit without covering other content. Enlarge the canvas to show it on its connector."
@@ -1848,7 +1850,10 @@ export default function DigitalThreadCanvas({
           />
         )))}
       </div>
-      {story && <nav className="dtCanvasOffscreen" style={{ bottom: (inspectorInset?.bottom ?? 0) + 6 }} aria-label="Connected records outside view" onPointerDown={event => event.stopPropagation()}>
+      {story && <nav className="dtCanvasOffscreen" style={{ bottom: (inspectorInset?.bottom ?? 0) + 6,
+        left: (inspectorInset?.left ?? 0) + 12,
+        maxWidth: `min(320px, calc(100% - ${(inspectorInset?.left ?? 0) + (inspectorInset?.right ?? 0) + 24}px))`,
+      }} aria-label="Connected records outside view" onPointerDown={event => event.stopPropagation()}>
         {sourceNodes.filter(node => story.nodes.has(node.id)).map(({ id }) => <button key={id} type="button"
           ref={element => { if (element) offscreenRefs.current.set(id, element); else offscreenRefs.current.delete(id) }}
           onClick={() => { const node = nodes.find(candidate => candidate.id === id); if (node) reveal(node) }}>
