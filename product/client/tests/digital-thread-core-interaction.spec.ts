@@ -387,15 +387,7 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
   expect(
     achievedOffset,
     `the lane did not move deeper at all (reached ${achievedOffset.toFixed(1)})`,
-  ).toBeLessThan(-30)
-  /**
-   * The strict form — `achievedOffset < ordinaryMinimum` — is NOT asserted here yet, because the gesture cannot
-   * reach that bound while the per-gesture delivery defect below persists. Recorded state: derived ordinary
-   * bound -1920, achieved -925, and the gesture trace shows the first drag delivering 10 moves with 1 pointerup
-   * while every later drag delivers 1 move and NO pointerup at all. Whether that second-gesture behaviour is in
-   * the canvas or in the automation harness is not yet established; it is the next thing to determine, and the
-   * crossing proof stays open until it is.
-   */
+  ).toBeLessThan(ordinaryMinimum)
   /**
    * The witness's guarantee is reachability, not forced placement.
    *
