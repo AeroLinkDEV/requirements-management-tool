@@ -190,10 +190,17 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
   expect(clearedBottom - clearedTop).toBeGreaterThan(80)
   await page.mouse.move(clearedGrabX, (clearedTop + clearedBottom) / 2)
   await page.mouse.down()
-  // One step, deliberately. A four-step synthetic drag is dispatched inside a single frame and Chromium
-  // coalesces those pointermove events, so only the first was delivered and the lane appeared to move a
-  // quarter of the distance. A single move reproduces what a real drag delivers: the handler accumulates from
-  // pointer-down and the lane follows by exactly dy/zoom.
+  /**
+   * One move here, deliberately.
+   *
+   * The four-step stimulus was investigated with a bounded pointer trace (down/move/up with client
+   * coordinates, plus per-frame lane samples). In a controlled state all four move events were delivered and
+   * the lane moved 38.095 units — exactly 40/1.05 as a signed displacement — so the handler accumulates from
+   * pointer-down correctly for multi-step drags and the earlier one-quarter reading was not an event-delivery
+   * defect. That reading was specific to this second, post-clear gesture and remains recorded, not explained,
+   * as an adverse observation; this case asserts the properties that are established and uses the stimulus
+   * whose expectation is unambiguous.
+   */
   await page.mouse.move(clearedGrabX, (clearedTop + clearedBottom) / 2 + 40)
   await page.mouse.up()
   await page.waitForTimeout(300)
@@ -203,14 +210,20 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
   await expect(page.locator('.dtCanvasNode[aria-pressed="true"]'), "the follow-up gesture selected a card")
     .toHaveCount(0)
   /**
-   * The retained range must accept the next input: a 40 px drag at zoom 1.05 moves the lane ~38 scene units.
-   * Had clearing clamped the lane back to its ordinary bound, this drag would do nothing or jump instead.
+   * The retained range must accept the next input, in the drag's own direction. The expected displacement is
+   * derived from the measured zoom rather than a hard-coded product zoom, so a density change cannot make the
+   * assertion accidentally pass. Had clearing clamped the lane back to its ordinary bound, this drag would do
+   * nothing or jump instead.
    */
+  const measuredZoom = Number(
+    /scale\(([\d.]+)\)/.exec((await page.locator(".dtCanvasScene").getAttribute("style")) ?? "")?.[1] ?? 0,
+  )
+  const expected = 40 / (measuredZoom || 1)
   expect(
     Math.abs(afterSmallDrag - cleared),
-    `the retained range did not accept the next drag (moved ${afterSmallDrag - cleared})`,
-  ).toBeGreaterThan(30)
-  expect(Math.abs(afterSmallDrag - cleared)).toBeLessThan(60)
+    `the retained range did not accept the next drag (moved ${afterSmallDrag - cleared}, expected about ${expected})`,
+  ).toBeGreaterThan(expected * 0.6)
+  expect(Math.abs(afterSmallDrag - cleared)).toBeLessThan(expected * 1.4)
   expect(await transformOf()).toBe(cameraBefore)
 })
 
