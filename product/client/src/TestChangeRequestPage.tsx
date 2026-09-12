@@ -615,7 +615,7 @@ export default function TestChangeRequestPage({
         />
 
         <section className="workspaceCard">
-          <div className="workspaceTitle"><div><h2>Raised from</h2><p>What concluded that this test work was required</p></div></div>
+          <div className="workspaceTitle"><div><h2>Raised from</h2><p>{hasControlledNumber ? 'What concluded that this test work was required' : 'The exact source that raised this assessment'}</p></div></div>
           {item.originKind
             ? <p className="sourceRecord"><b>{item.originDisplayLabel || verificationOriginLabel(item.originKind)}</b>{' '}
                 <strong>{item.originDisplayIdentity || item.sourceChangeRequestNumber || item.originReferenceId}</strong>{' '}
@@ -656,7 +656,7 @@ export default function TestChangeRequestPage({
               {signature.isSuperseded && signature.supersession?.migration && <small>Migration: {signature.supersession.migration}{signature.supersession.newArtifactIdentity ? ` · replacement identity ${signature.supersession.newArtifactIdentity}` : ''}{signature.supersession.newContentHash ? ` · replacement hash ${signature.supersession.newContentHash.slice(0, 12)}…` : ''}</small>}
               <code>{signature.contentHash}</code>
             </article>)}</div>
-            : <p className="workspaceEmpty">No signatures are recorded for this test change request.</p>}
+            : <p className="workspaceEmpty">No signatures are recorded for this {hasControlledNumber ? 'test change request' : 'assessment'}.</p>}
         </section>
       </div>
 
@@ -671,7 +671,7 @@ export default function TestChangeRequestPage({
             { label: 'Updated', value: item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : '—' },
           ]}
         >
-          {editable && isAuthor && !(item.artifactChanges ?? item.procedureChanges ?? []).length && <div className="railReadiness"><b>Draft needs authoring</b><span>Complete the {artifactNoun.toLowerCase()} proposals.</span><button type="button" disabled={busy} onClick={beginEdit}>Complete Draft readiness</button></div>}
+          {hasControlledNumber && editable && isAuthor && !(item.artifactChanges ?? item.procedureChanges ?? []).length && <div className="railReadiness"><b>Draft needs authoring</b><span>Complete the {artifactNoun.toLowerCase()} proposals.</span><button type="button" disabled={busy} onClick={beginEdit}>Complete Draft readiness</button></div>}
         </ControlledStatusCard>
         <ReviewCycleCard cycle={item.reviewCycle} />
       </aside>
