@@ -700,11 +700,15 @@ test("a drag takes over an automatic camera move from the displayed position", a
   const travelled = afterDrag.x - atPress.x
 
   /**
-   * OPEN DEFECT (reported, not accepted): interrupting an eased automatic move currently yields roughly HALF
-   * the gesture's travel — measured 100.6 px for a 200 px drag — which is the same fractional signature as the
-   * earlier unexplained post-clear drag observation. The takeover does not yet reproduce the reader's full
-   * gesture from the painted position. This assertion guards against a runaway (the camera travelling to the
-   * commanded destination) while the fractional shortfall is recorded here and in the issue work log.
+   * The gesture is applied in full from the frozen position.
+   *
+   * Resolution of the earlier "half travel" reading (100.6 px for a 200 px drag): it was a measurement fault,
+   * not a product defect. The camera was sampled before the asynchronous gap spent locating the gutter, while
+   * the retained ease was still running — so the sample predated the freeze and the difference mixed the
+   * ease's own advance with the gesture. Sampling at the press (above) and measuring travel from there gives
+   * the true property, which passes strictly. The press check above guards the severe failure — a jump toward
+   * the commanded destination — because a frame-exact "no movement at the press" is not measurable from
+   * Playwright while the ease is live.
    */
   expect(
     Math.abs(travelled - 200),
