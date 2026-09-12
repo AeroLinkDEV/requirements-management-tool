@@ -266,3 +266,112 @@ test('Coverage routes open the existing Explorer report without changing Downstr
   expect(parseRoute('/programs/program-a/projects/project-a/releases/release-a/system-verification/coverage'))
     .toMatchObject({ view: 'testingCoverage', discipline: 'systemTest' })
 })
+
+/**
+ * #1016 S13A. Test-change routing reads the projection's stated facts, not the identifier's prefix.
+ *
+ * `SYSTP` meant System and `LLR` meant low level, which works only while every record has a controlled
+ * number for the prefix to come from. A package raised to assess an approved change has none — its label is
+ * "Unnumbered assessment" — so a prefix reading of it found nothing and silently fell through to the
+ * software workspace. A System procedure assessment opened the wrong discipline's page.
+ *
+ * The projection states the discipline and the artifact family, so those decide. Nodes from before that
+ * metadata existed keep the prefix derivation exactly as it was.
+ */
+test('an unnumbered assessment routes by its stated discipline and family, not its label', () => {
+  const context = { programId: 'program-a', projectId: 'project-a', releaseId: 'release-a' }
+  const unnumbered = (discipline: string, artifactKind: string) => exactTraceArtifactPath(context, {
+    id: 'assessment-a', kind: 'TestChangeRequest', displayNumber: 'Unnumbered assessment',
+    level: artifactKind, verification: { discipline, artifactKind },
+  })
+
+  // The case that was wrong: nothing in "Unnumbered assessment" says System.
+  expect(unnumbered('System', 'Procedure'))
+    .toBe('/programs/program-a/projects/project-a/releases/release-a/system-verification/change-requests/assessment-a?kind=Procedure')
+  // And the software families land in their own level's branch, which the label cannot carry either.
+  expect(unnumbered('HighLevelSoftware', 'Case'))
+    .toContain('/software-verification/hlr/change-requests/assessment-a')
+  expect(unnumbered('LowLevelSoftware', 'Procedure'))
+    .toContain('/software-verification/llr/change-requests/assessment-a')
+  expect(unnumbered('LowLevelSoftware', 'Procedure')).not.toBe(unnumbered('HighLevelSoftware', 'Procedure'))
+
+  // Two unnumbered records sharing a label still address their own records.
+  expect(exactTraceArtifactPath(context, {
+    id: 'assessment-b', kind: 'TestChangeRequest', displayNumber: 'Unnumbered assessment',
+    level: 'Procedure', verification: { discipline: 'System', artifactKind: 'Procedure' },
+  })).toContain('assessment-b')
+
+  // A numbered package is unchanged, and a node carrying no verification metadata still reads its prefix.
+  const numbered = exactTraceArtifactPath(context, {
+    id: 'package-a', kind: 'TestChangeRequest', displayNumber: 'SYSTPCR-000012.00', level: 'Procedure',
+  })
+  expect(numbered).toContain('/system-verification/change-requests/package-a')
+  expect(exactTraceArtifactPath(context, {
+    id: 'package-a', kind: 'TestChangeRequest', displayNumber: 'SYSTPCR-000012.00', level: 'Procedure',
+    verification: { discipline: 'System', artifactKind: 'Procedure' },
+  })).toBe(numbered)
+})
+
+/**
+ * #1016 S13A-02. Absent metadata and unusable metadata are different answers.
+ *
+ * Absent means an older response that never carried the field, and the prefix derivation it was written for
+ * still applies. Present-but-unusable means the projection answered and the answer names no supported
+ * destination — and falling back to the prefix there would mean guessing System, HLR, Case or Procedure out
+ * of a label that, for an unnumbered record, carries none of them. A confidently wrong exact link is worse
+ * than no link.
+ */
+test('verification metadata decides, and an unusable answer refuses rather than guessing', () => {
+  const context = { programId: 'program-a', projectId: 'project-a', releaseId: 'release-a' }
+  const route = (verification: unknown, displayNumber = 'Unnumbered assessment') =>
+    exactTraceArtifactPath(context, {
+      id: 'assessment-a', kind: 'TestChangeRequest', displayNumber, level: 'Procedure',
+      verification: verification as { discipline?: string | null; artifactKind?: string | null } | null,
+    })
+
+  // Present and valid: it decides, and a contradictory label does not get a vote. The prefix here says
+  // software; the record says System.
+  expect(route({ discipline: 'System', artifactKind: 'Procedure' }, 'HLRTPCR-000001.00'))
+    .toContain('/system-verification/change-requests/assessment-a')
+
+  // Present but unusable — refused, not guessed.
+  expect(route({ discipline: 'System' }), 'no artifact kind').toBeUndefined()
+  expect(route({ artifactKind: 'Procedure' }), 'no discipline').toBeUndefined()
+  expect(route({ discipline: 'Interplanetary', artifactKind: 'Procedure' }), 'unknown discipline').toBeUndefined()
+  expect(route({ discipline: 'System', artifactKind: 'Diagram' }), 'unknown family').toBeUndefined()
+  // The System ladder verifies by procedure; a System Case names no supported destination.
+  expect(route({ discipline: 'System', artifactKind: 'Case' }), 'System Case').toBeUndefined()
+
+  // Absent: unchanged compatibility for a response from before the field existed.
+  expect(route(null, 'SYSTPCR-000012.00')).toContain('/system-verification/change-requests/assessment-a')
+  expect(route(undefined, 'LLRTPCR-000012.00')).toContain('/software-verification/llr/change-requests/assessment-a')
+})
+
+/**
+ * #1016 S13A-R3-01. Presence is a fact about the metadata object, not about its fields.
+ *
+ * Deciding it from the fields let an empty object, and one whose fields are explicitly null, take the legacy
+ * prefix branch — so the projection answering with nothing usable was routed from a label instead of
+ * refusing. Only a response that never carried the field at all may take that path.
+ */
+test('empty or null-valued verification metadata is present and unusable, not absent', () => {
+  const context = { programId: 'program-a', projectId: 'project-a', releaseId: 'release-a' }
+  const route = (verification: unknown) => exactTraceArtifactPath(context, {
+    // A label whose prefix would confidently route this to the System workspace if the guard let it through.
+    id: 'assessment-a', kind: 'TestChangeRequest', displayNumber: 'SYSTPCR-000012.00', level: 'Procedure',
+    verification: verification as { discipline?: string | null; artifactKind?: string | null } | null,
+  })
+
+  // Present, and carrying nothing usable: refused, despite a prefix that would have answered.
+  expect(route({}), 'empty object').toBeUndefined()
+  expect(route({ discipline: null, artifactKind: null }), 'both fields null').toBeUndefined()
+  expect(route({ discipline: '', artifactKind: '' }), 'both fields blank').toBeUndefined()
+
+  // Absent: the compatibility path older responses were written for, unchanged.
+  expect(route(null)).toContain('/system-verification/change-requests/assessment-a')
+  expect(route(undefined)).toContain('/system-verification/change-requests/assessment-a')
+
+  // Present and valid still decides, and still overrides a contradictory prefix.
+  expect(route({ discipline: 'LowLevelSoftware', artifactKind: 'Procedure' }))
+    .toContain('/software-verification/llr/change-requests/assessment-a')
+})

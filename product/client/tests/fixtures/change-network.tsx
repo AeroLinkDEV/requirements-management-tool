@@ -16,6 +16,8 @@ import { createRoot } from "react-dom/client"
 // the 16px default, which would measure type the product never renders.
 import "../../src/index.css"
 import DigitalThreadNetwork from "../../src/DigitalThreadNetwork"
+import { exactCardIdentity } from "../../src/DigitalThreadPage"
+import { exactTraceArtifactPath } from "../../src/routing"
 import type { NetworkEdge, NetworkNode, NetworkProjection } from "../../src/changeNetworkPresentation"
 
 const node = (over: Partial<NetworkNode> & { id: string; kind: string; displayNumber: string }): NetworkNode => ({
@@ -108,8 +110,91 @@ const hoverProjection: NetworkProjection = {
 const denseProjection = { ...hoverProjection, edges: [...hoverProjection.edges,
   ...Array.from({ length: 18 }, (_, index) => edge("hlr-127", "ChangeRequest", `case-${index}`, "TestChangeRequest", "CoveredByTestChangeRequest")),
 ] }
-const chosen = scenario === "dense" ? denseProjection : scenario === "hover" ? hoverProjection : scenario === "server" ? serverChainProjection : projection
+/**
+ * #1016 S13A. Verification packages with and without a controlled number, side by side.
+ *
+ * The two unnumbered rows are raised from the same approved change and therefore carry the same label by
+ * design: that is what makes them the case worth drawing. They must remain two cards, in a stable order,
+ * neither dropped nor merged, and neither wearing the badge of a controlled test change request.
+ *
+ * The identities here are the fixture's own. Nothing in this file reproduces the original observation.
+ */
+const verificationIdentityProjection: NetworkProjection = {
+  projectId: projection.projectId,
+  releaseId: projection.releaseId,
+  nodes: [
+    node({ id: "sys-9", kind: "ChangeRequest", displayNumber: "SRCR-00039.00", level: "System", state: "Approved" }),
+    node({
+      id: "asmt-a", kind: "TestChangeRequest", level: "Procedure", state: "Draft",
+      displayNumber: "Unnumbered assessment",
+      verification: {
+        hasControlledNumber: false, outcome: "Pending", artifactKind: "Procedure", discipline: "System",
+        originKind: "ChangeRequest", originReferenceId: "sys-9", sourceDisplayNumber: "SRCR-00039.00",
+      },
+    }),
+    node({
+      id: "asmt-b", kind: "TestChangeRequest", level: "Procedure", state: "Draft",
+      displayNumber: "Unnumbered assessment",
+      verification: {
+        hasControlledNumber: false, outcome: "NoChangeRequired", artifactKind: "Procedure",
+        discipline: "System", originKind: "ProblemReport", originReferenceId: "pr-9",
+        // Deliberately long: the card truncates rather than spilling, and the inspector shows it whole.
+        sourceDisplayNumber: "PR-00004321.00 oceanic round-robin sequencing field report",
+      },
+    }),
+    // Present metadata carrying nothing usable, behind a label whose prefix would route confidently if the
+    // guard let it through. It exists so the adapter-to-router composition can be shown to refuse it rather
+    // than quietly turning it back into an absent-metadata legacy response.
+    node({
+      id: "asmt-empty", kind: "TestChangeRequest", level: "Procedure", state: "Draft",
+      displayNumber: "SYSTPCR-000099.00",
+      verification: {} as NetworkNode["verification"],
+    }),
+    node({
+      id: "tcr-9", kind: "TestChangeRequest", level: "Procedure", state: "InReview",
+      displayNumber: "SYSTPCR-000012.00",
+      verification: {
+        hasControlledNumber: true, controlledNumber: "SYSTPCR-000012", controlledRevision: 0,
+        outcome: "ChangeRequired", artifactKind: "Procedure", discipline: "System",
+        originKind: "ChangeRequest", originReferenceId: "sys-9", sourceDisplayNumber: "SRCR-00039.00",
+      },
+    }),
+  ],
+  edges: [
+    edge("sys-9", "ChangeRequest", "asmt-a", "TestChangeRequest", "CoveredByTestChangeRequest"),
+    edge("sys-9", "ChangeRequest", "asmt-b", "TestChangeRequest", "CoveredByTestChangeRequest"),
+    edge("sys-9", "ChangeRequest", "asmt-empty", "TestChangeRequest", "CoveredByTestChangeRequest"),
+    edge("sys-9", "ChangeRequest", "tcr-9", "TestChangeRequest", "CoveredByTestChangeRequest"),
+  ],
+  truncated: false,
+  orderedLevels: ["System"],
+}
+const chosen = scenario === "dense" ? denseProjection : scenario === "hover" ? hoverProjection : scenario === "server" ? serverChainProjection : scenario === "verification-identity" ? verificationIdentityProjection : projection
+
+/**
+ * #1016 S13A. The real adapter and the real router, wired exactly as the page wires them.
+ *
+ * `DigitalThreadPage` builds an identity from the node with `exactCardIdentity` and hands it to
+ * `exactTraceArtifactPath`. That rebuild used to drop the verification facts, so the router fell back to
+ * reading the identifier's prefix even though the node stated its discipline — and an unnumbered System
+ * assessment addressed the software workspace. Composing them here means the rendered href is the one the
+ * page produces, not one this fixture computes for itself.
+ */
+const routeContext = { programId: "program-a", projectId: projection.projectId, releaseId: projection.releaseId }
+const hrefFor = (node: Parameters<typeof exactCardIdentity>[0]) => {
+  const identity = exactCardIdentity(node)
+  return identity ? exactTraceArtifactPath(routeContext, identity) : undefined
+}
+
+// The Table is the accessible representation of the same projection, and it is a prop rather than internal
+// state, so the fixture selects it the way the page does.
+const representation = new URLSearchParams(window.location.search).get("view") === "table" ? "table" : "map"
 
 createRoot(document.getElementById("root")!).render(
-  <DigitalThreadNetwork projection={chosen} buildLabel="Build 1.6" />,
+  <DigitalThreadNetwork
+    projection={chosen}
+    buildLabel="Build 1.6"
+    hrefFor={hrefFor}
+    representation={representation}
+  />,
 )

@@ -7,6 +7,25 @@
  */
 
 /** One exact node of the server projection, as returned by /api/change-requests/network. */
+/**
+ * The verification-identity facts a test-change node carries, when it is one.
+ *
+ * `displayNumber` above is a label for a reader. Whether this record holds a governed number is
+ * `hasControlledNumber`, stated by the server rather than inferred from the label's prefix or wording — a
+ * prefix match cannot tell a controlled request from an assessment whose label happens to mention one.
+ */
+export type NetworkVerification = {
+  hasControlledNumber: boolean
+  controlledNumber?: string | null
+  controlledRevision?: number | null
+  outcome: string
+  artifactKind: string
+  discipline: string
+  originKind: string
+  originReferenceId: string
+  sourceDisplayNumber?: string | null
+}
+
 export type NetworkNode = {
   id: string
   kind: string
@@ -19,6 +38,8 @@ export type NetworkNode = {
   revision?: number | null
   level?: string | null
   artifactId?: string | null
+  /** Present on TestChangeRequest nodes only. */
+  verification?: NetworkVerification | null
 }
 
 export type NetworkEdge = {
@@ -144,10 +165,68 @@ export const offLadderLevels = (
     .sort((a, b) => a.level.localeCompare(b.level))
 }
 
+/**
+ * How a verification record's recorded outcome reads (#1016 S13A).
+ *
+ * The outcome and the lifecycle state answer different questions — what the assessment concluded, and how far
+ * that conclusion has got — and one must never be derived from the other. A recorded no-change conclusion in
+ * Draft is not an approved no-change conclusion, so both are shown, separately, in the caller's own layout.
+ */
+export const outcomeLabel = (outcome?: string | null): string | undefined => {
+  if (outcome === "Pending") return "Pending assessment"
+  if (outcome === "ChangeRequired") return "Change required"
+  if (outcome === "NoChangeRequired") return "No change required"
+  return undefined
+}
+
+/**
+ * The record a verification package was raised from, labelled as source context rather than as its identity.
+ *
+ * Interpreted by the origin discriminator, not by reading the source number's prefix: a Case-change origin
+ * and a Case-assessment origin are different kinds of reference and neither is automatically a Case package.
+ */
+export const sourceContextLabel = (verification?: NetworkVerification | null): string | undefined => {
+  const source = verification?.sourceDisplayNumber
+  if (!source) return undefined
+  const kind = verification?.originKind === "ProblemReport" ? "Problem Report"
+    : verification?.originKind === "ChangeRequest" ? "change request"
+      : verification?.originKind === "CaseChange" ? "case change"
+        : verification?.originKind === "CaseAssessment" ? "case assessment"
+          : verification?.originKind === "CaseReview" ? "case review"
+            : undefined
+  return kind ? `Assessing ${kind} ${source}` : `Assessing ${source}`
+}
+
+/**
+ * A verification record's own controlled identity, or the truthful absence of one (#1016 S13A).
+ *
+ * A missing revision is not revision zero. Formatting `controlledRevision ?? 0` would print ".00" for a
+ * record whose revision identity was never recorded — inventing the precise part of an identifier a reader
+ * relies on. An actual zero is a real controlled revision and still reads ".00"; a missing one says so.
+ *
+ * Absence of a number is taken from `hasControlledNumber`, never from a stored revision counter, which every
+ * record has and which proves nothing about numbering.
+ */
+export const controlledIdentityLabel = (verification?: NetworkVerification | null): string => {
+  if (!verification?.hasControlledNumber || !verification.controlledNumber) return "None recorded"
+  const revision = verification.controlledRevision
+  if (typeof revision !== "number" || !Number.isInteger(revision) || revision < 0) {
+    return `${verification.controlledNumber} · revision not recorded`
+  }
+  return `${verification.controlledNumber}.${String(revision).padStart(2, "0")}`
+}
+
+/** True when a test-change node holds no controlled number, from the server's answer rather than its label. */
+export const isUnnumberedAssessment = (node: NetworkNode): boolean =>
+  node.kind === "TestChangeRequest" && node.verification?.hasControlledNumber === false
+
 /** The short square badge on a card. Says the level, which the identifier alone does not reliably carry. */
 export const badgeOf = (node: NetworkNode): string => {
   if (node.kind === "ProblemReport") return "PR"
-  if (node.kind === "TestChangeRequest") return "TCR"
+  // An assessment raised against an approved change is not a controlled test change request and must not
+  // wear its badge: a reader scanning for TCRs would count work that has not been raised. The node kind,
+  // its edges and its id are unchanged — this is the badge only.
+  if (node.kind === "TestChangeRequest") return isUnnumberedAssessment(node) ? "ASMT" : "TCR"
   switch (node.level) {
     case "HighLevel":
       return "HLR"
@@ -272,7 +351,9 @@ export const assignRows = (
   for (const bucket of perLane.values()) {
     bucket
       .slice()
-      .sort((a, b) => a.displayNumber.localeCompare(b.displayNumber))
+      // Labels are no longer unique: two assessments raised from one source share a label by design. The
+      // stable id is the tie-breaker, so the board keeps a deterministic order and neither row is dropped.
+      .sort((a, b) => a.displayNumber.localeCompare(b.displayNumber) || a.id.localeCompare(b.id))
       .forEach((node, index) => rows.set(node.id, index))
   }
   return rows

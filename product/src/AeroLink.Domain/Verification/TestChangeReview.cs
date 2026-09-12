@@ -237,7 +237,15 @@ public sealed class TestChangeReview
     };
     public TestChangeReviewDiscipline Discipline { get; private set; }
     public string SourceChangeRequestNumber { get; private set; } = "";
-    /// <summary>Its controlled number — SYSTPCR, HLRTCCR or LLRTCCR — empty only for rows raised before it had one.</summary>
+    /// <summary>
+    /// Its controlled number — SYSTPCR, HLRTCCR or LLRTCCR — empty until the package earns one.
+    ///
+    /// Empty is an ordinary current state, not only a historical one. A package raised to assess an approved
+    /// change is created deliberately unnumbered (see VerificationImpactService), because numbering every
+    /// approved change gave it a controlled test change request before anybody had looked at whether it
+    /// touched a procedure at all. <see cref="AssignControlledNumber"/> is what turns an assessment that
+    /// found work into a numbered request.
+    /// </summary>
     public string BaseNumber { get; private set; } = "";
     /// <summary>Advances when an approved package is reopened for further test work against the same change.</summary>
     public int Revision { get; private set; }

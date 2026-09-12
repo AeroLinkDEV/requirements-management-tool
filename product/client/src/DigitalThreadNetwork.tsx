@@ -19,6 +19,9 @@ import {
   type NetworkProjection,
   assignRows,
   badgeOf,
+  controlledIdentityLabel,
+  outcomeLabel,
+  sourceContextLabel,
   badgeTintFor,
   groupOf,
   isSuspectEdge,
@@ -256,6 +259,19 @@ export default function DigitalThreadNetwork({
         ),
       },
       { key: "level", label: "Level", render: row => row.node.level ?? "Unclassified" },
+      // #1016 S13A. The Table must not be the less informative view: a reader here needs the same two facts
+      // the Map shows — what the record was raised from, and what its assessment concluded — in the same
+      // words, from the same formatters.
+      {
+        key: "source",
+        label: "Source",
+        render: row => sourceContextLabel(row.node.verification) ?? "—",
+      },
+      {
+        key: "outcome",
+        label: "Outcome",
+        render: row => outcomeLabel(row.node.verification?.outcome) ?? "—",
+      },
       { key: "state", label: "State", render: row => stateLabel(row.node.state ?? undefined) },
       { key: "upstream", label: "Upstream", render: row => tableRelations(row.node, "upstream") },
       { key: "downstream", label: "Downstream", render: row => tableRelations(row.node, "downstream") },
@@ -367,6 +383,13 @@ export default function DigitalThreadNetwork({
           </div>
           <div className="dtnMeta" data-density="meta">
             <span>{node.buildVersion ? `Build ${node.buildVersion}` : "No target build"}</span>
+            {/* #1016 S13A. A record with no controlled number of its own is identified by what it was raised
+                from, so that has to be visible — but as source context in the secondary line, never appended
+                to the identifier above, where it would be read as this record's own number. The full value
+                is in the inspector; this line is where the reader already looks for build context. */}
+            {sourceContextLabel(node.verification) && (
+              <span className="dtnSource">{sourceContextLabel(node.verification)}</span>
+            )}
           </div>
 
           {/* The selected card expands in place (#880 §6.5), showing only rows it actually has. A record with
@@ -581,6 +604,39 @@ export default function DigitalThreadNetwork({
                   {stateLabel(selected.state ?? undefined)}
                 </span>
               </div>
+              {/* #1016 S13A. Four facts a reader must not have to infer from one another, so they are stated
+                  separately and labelled.
+
+                  "Assessment outcome: No change required" beside state "Draft" has to read as a conclusion
+                  that has been written and not yet approved. Collapsing them — or deriving one from the
+                  other — is how a draft conclusion gets taken for signed evidence.
+
+                  The absence of a controlled number is stated from the metadata that says so, never from a
+                  revision counter, which every record has and which proves nothing about numbering. */}
+              {selected.verification && (
+                <dl className="dtnVerificationFacts">
+                  <div>
+                    <dt>Controlled number</dt>
+                    <dd>{controlledIdentityLabel(selected.verification)}</dd>
+                  </div>
+                  {sourceContextLabel(selected.verification) && (
+                    <div>
+                      <dt>Source</dt>
+                      <dd>{sourceContextLabel(selected.verification)}</dd>
+                    </div>
+                  )}
+                  {outcomeLabel(selected.verification.outcome) && (
+                    <div>
+                      <dt>Assessment outcome</dt>
+                      <dd>{outcomeLabel(selected.verification.outcome)}</dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt>Lifecycle state</dt>
+                    <dd>{stateLabel(selected.state ?? undefined)}</dd>
+                  </div>
+                </dl>
+              )}
               <h3>{selected.title}</h3>
             </div>
             {(["up", "down"] as const).map(direction => {
@@ -589,7 +645,8 @@ export default function DigitalThreadNetwork({
               const rows = Array.from(set ?? [])
                 .map(id => ({ node: byId.get(id), hop: web?.hops.get(id) ?? 1 }))
                 .filter((row): row is { node: NetworkNode; hop: number } => Boolean(row.node))
-                .sort((a, b) => a.hop - b.hop || a.node.displayNumber.localeCompare(b.node.displayNumber))
+                .sort((a, b) => a.hop - b.hop || a.node.displayNumber.localeCompare(b.node.displayNumber)
+                  || a.node.id.localeCompare(b.node.id))
               const relationFor = (id: string) => {
                 // The edge between the listed record and the selection — not merely any edge touching
                 // the listed record, which could name a relationship it has with a third record.
