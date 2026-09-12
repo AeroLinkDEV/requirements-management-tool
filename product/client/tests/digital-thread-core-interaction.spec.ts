@@ -808,14 +808,12 @@ test("clicking a relocated linked card keeps it where the reader saw it", async 
  * it was painted when the gesture began, not from where the automatic move was heading.
  */
 /**
- * BLOCKED on a real defect found by this test: while an automatic move is running, a background pan updates the
- * model (`modelX` advanced by the full 200 px) but the DOM keeps the old transform, so the reader sees nothing
- * move. Measured state: inline `translate(175.211px, …)` before and after a pan whose model reached 375.2. The
- * assertions below are the exact behaviour required; the test is marked `fixme` so the suite reports the gap
- * instead of passing on a weaker claim, and flipping it back to `test` once the paint path is corrected proves
- * the fix against these same numbers.
+ * Resolution note: an earlier version of this test reported "the pan is applied to the model but never painted"
+ * because its matrix parser skipped one group too few, reading the scale as x and the translate x as y. The
+ * instrumented run showed the truth — inline style `translate(397.095px, …)` after the pan, and samples moving
+ * 175.213 -> 375.213, exactly the 200 px gesture. The product was correct; the measurement was not.
  */
-test.fixme("a drag takes over an automatic camera move from the displayed position", async ({ page }) => {
+test("a drag takes over an automatic camera move from the displayed position", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await open(page, "dense")
   const root = page.locator('[data-node-id="pr-5"]')
@@ -833,7 +831,9 @@ test.fixme("a drag takes over an automatic camera move from the displayed positi
   const displayed = async () => {
     const matrix = await page.locator(".dtCanvasScene").evaluate(element =>
       window.getComputedStyle(element).transform)
-    const [, a, , , e, f] = /matrix\(([-\d.]+),\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\)/
+    // matrix(a, b, c, d, e, f): the translate lives in e/f and the scale in a/d. Skipping one group too few here
+    // reported the scale as x and the real x as y, which made a correct 200 px pan look like no movement at all.
+    const [, a, , , , e, f] = /matrix\(([-\d.]+),\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\)/
       .exec(matrix) ?? []
     return { zoom: Number(a), x: Number(e), y: Number(f) }
   }
@@ -848,8 +848,9 @@ test.fixme("a drag takes over an automatic camera move from the displayed positi
   await page.evaluate(() => { (window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG = true })
   page.on("console", message => {
     const text = message.text()
-    if (text.startsWith("PAN_SET") || text.startsWith("SCRUB_SET")) console.log("PAGE", text)
+    if (/^(PAN_SET|PAN_AFTER_PAINT|PAINT_THREW|PAINT_EARLY|SCRUB_SET)/.test(text)) console.log("PAGE", text)
   })
+  page.on("pageerror", error => console.log("PAGEERROR", error.message))
 
   await page.getByRole("button", { name: "Fit entire story" }).click()
 
@@ -880,6 +881,9 @@ test.fixme("a drag takes over an automatic camera move from the displayed positi
   await page.mouse.up()
   await page.waitForTimeout(200)
   const afterDrag = await displayed()
+  if (process.env.AEROLINK_1022_DIAG) {
+    console.log("TAKEOVER_SAMPLES", JSON.stringify({ atPress, duringHold, afterDrag }))
+  }
 
   // And the reader's gesture is then applied in full from that frozen position.
   const travelled = afterDrag.x - atPress.x

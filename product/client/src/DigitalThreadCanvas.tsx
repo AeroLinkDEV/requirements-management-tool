@@ -506,7 +506,16 @@ export default function DigitalThreadCanvas({
   const paint = useCallback(() => {
     const box = frame()
     const scene = sceneRef.current
-    if (!box || !scene) return
+    if (!box || !scene) {
+      if ((window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG) {
+        console.log("PAINT_EARLY", JSON.stringify({
+          box: box ?? null,
+          scene: Boolean(scene),
+          viewportRect: viewportRef.current?.getBoundingClientRect().width ?? null,
+        }))
+      }
+      return
+    }
 
     const rawResult = layout(counts, box, transform.current.zoom)
     // Measure at the destination density. A restored camera can change the tier; measuring the previous
@@ -1504,6 +1513,8 @@ export default function DigitalThreadCanvas({
             startTx: Number(start.tx.toFixed(1)),
             modelX: Number(transform.current.x.toFixed(1)),
             inlineStyle: (sceneRef.current?.style.transform ?? "").slice(0, 60),
+            sceneConnected: sceneRef.current?.isConnected ?? null,
+            viewportConnected: viewportRef.current?.isConnected ?? null,
           }))
         }
         // A deliberate vertical or diagonal camera move is exploration too — but only for lanes the reader can
@@ -1511,6 +1522,12 @@ export default function DigitalThreadCanvas({
         // freezing it here would deny that without the reader ever having looked at it.
         if (Math.abs(dy) > 8) for (const lane of usableLanesRef.current) frozenLanes.current.add(lane)
         paint()
+        if ((window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG) {
+          console.log("PAN_AFTER_PAINT", JSON.stringify({
+            modelX: Number(transform.current.x.toFixed(1)),
+            inlineStyle: (sceneRef.current?.style.transform ?? "").slice(0, 60),
+          }))
+        }
       }
       const up = (upEvent: PointerEvent) => {
         element.classList.remove("is-panning", "is-rolling", "is-idle")
