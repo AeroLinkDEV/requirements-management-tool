@@ -1301,3 +1301,60 @@ test("a scope change resets navigation while a same-scope refresh keeps it", asy
     "a scope change inherited the previous scope's navigation state",
   ).toBeGreaterThan(4)
 })
+
+/**
+ * The positive first-exposure case: a hidden lane whose endpoint is far below the window while usable space
+ * above it is empty.
+ *
+ * This is the branch the dense fixtures cannot produce — with contiguous rows a lane's window is full whenever
+ * the lane is longer than the window. The contract fixture spaces its rows deliberately (allowed by `CanvasNode`,
+ * not emitted by any production adapter), so the reveal has real room to use. The reader pans to the lane and
+ * the endpoint must be readable there without a second vertical action or a Show click, with the camera moved
+ * only by their own gesture.
+ */
+test("a hidden lane's endpoint arrives at a useful height on first exposure", async ({ page }) => {
+  // The fixture is six lanes wide; at its legible landing zoom the right-most lane starts outside the viewport,
+  // which is what makes this a first-exposure case rather than a same-view reveal.
+  await page.setViewportSize({ width: 1100, height: 900 })
+  await page.goto("/tests/fixtures/digital-thread-contract.html")
+  await expect(page.locator(".dtCanvas")).toBeVisible()
+  await page.waitForTimeout(700)
+
+  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
+  const linked = page.locator('[data-node-id="link"]')
+  const subject = page.locator('[data-node-id="subj"]')
+  const scene = page.locator(".dtCanvasScene")
+  const usableTop = canvasBox.y + 40
+  const usableBottom = canvasBox.y + canvasBox.height - 40
+
+  const startBox = await linked.boundingBox()
+  const startsOutside = !startBox || startBox.y + startBox.height <= usableTop || startBox.y >= usableBottom ||
+    (await linked.getAttribute("class"))?.includes("is-offscreen") === true
+  expect(startsOutside, "the contract fixture did not start with the endpoint out of view").toBe(true)
+
+  // The wide board lands centred, so the subject's own lane can start off-screen left; the reader pans to it
+  // first (their navigation), which is also what keeps this test honest about who moves the camera.
+  await panBackground(page, 700)
+
+  /**
+   * Select first, then pan.
+   *
+   * Moving the pointer to pan ends a hover, which retires the temporary arrangement — so this is the selected
+   * exploration case the contract describes, not the hover case: the selection owns the reveal while the reader
+   * pans to a lane the camera was not showing.
+   */
+  await subject.click({ position: { x: 6, y: 6 } })
+  await expect(subject).toHaveAttribute("aria-pressed", "true")
+  await page.waitForTimeout(700)
+
+  // The reader pans to the lane. The endpoint must be readable where it arrives.
+  await panBackground(page, -900)
+  await expect(linked, "the endpoint was not readable on first exposure").not.toHaveClass(/is-offscreen/)
+  const arrived = (await linked.boundingBox())!
+  expect(arrived.y).toBeGreaterThanOrEqual(usableTop - 1)
+  expect(arrived.y + arrived.height).toBeLessThanOrEqual(usableBottom + 1)
+  expect(arrived.x).toBeGreaterThanOrEqual(canvasBox.x - 1)
+  expect(arrived.x + arrived.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width + 1)
+  // No Show click was needed: the explicit-action strip is not the path this proof uses.
+  await expect(page.getByRole("button", { name: "Show link", exact: true })).toHaveCount(0)
+})
