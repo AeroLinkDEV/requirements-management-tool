@@ -14,8 +14,8 @@ const fixture = (scenario: string) => `/tests/fixtures/inside-change.html?case=$
 test("a System change labels mixed downstream verification without claiming its source discipline", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1600, height: 1000 })
   await page.goto(fixture("mixed-verification"))
-  await expect(page.getByText("VERIFICATION ARTIFACTS", { exact: true })).toBeVisible()
-  await expect(page.getByText("SYSTEM PROCEDURES", { exact: true })).toHaveCount(0)
+  await expect(page.locator(".dtCanvasLaneHead").filter({ hasText: /^VERIFICATION ARTIFACTS\s*2$/ })).toBeVisible()
+  await expect(page.locator(".dtCanvasLaneHead").filter({ hasText: /SYSTEM PROCEDURES/ })).toHaveCount(0)
   const caseCard = page.locator('.dticTrace:has-text("HLRTC-000150.00")')
   await expect(caseCard).toContainText("TC")
   await expect(caseCard).toContainText("exact historical title was not recorded")
