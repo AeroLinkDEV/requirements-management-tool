@@ -619,7 +619,9 @@ for (const view of [
 })
 
 for (const promoted of [false, true]) test(`same-tier rendered ${promoted ? "promoted-subject" : "linked"} growth repairs only colliding temporary geometry and converges`, async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 700 })
+  // The authored canvas remains 700px high. Keep its 720px fixture root inside the document viewport so a
+  // normal click on the external text-size control cannot scroll the document and contaminate screen y.
+  await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto("/tests/fixtures/digital-thread-contract.html?case=growth")
   const linked = page.locator('[data-node-id="link"]')
   const subject = page.locator('[data-node-id="subj"]')
@@ -638,10 +640,12 @@ for (const promoted of [false, true]) test(`same-tier rendered ${promoted ? "pro
   const camera = await transformOf(page.locator(".dtCanvasScene"))
   const height = (await linked.boundingBox())!.height
   const beforeGrowth = (await linked.boundingBox())!
+  expect(await page.evaluate(() => window.scrollY)).toBe(0)
   await page.getByRole("button", { name: "Change text size" }).click()
   await expect.poll(async () => (await linked.boundingBox())!.height).toBeGreaterThan(height + 50)
   await page.waitForTimeout(700)
   const grown = (await linked.boundingBox())!
+  expect(await page.evaluate(() => window.scrollY)).toBe(0)
   const residentBoxes = await residents.evaluateAll(nodes => nodes.map(node => {
     const rect = node.getBoundingClientRect()
     return { top: rect.top, bottom: rect.bottom }
@@ -657,7 +661,7 @@ for (const promoted of [false, true]) test(`same-tier rendered ${promoted ? "pro
   expect(await transformOf(page.locator(".dtCanvasScene"))).toBe(camera)
   await page.waitForTimeout(600)
   expect(Math.abs((await linked.boundingBox())!.y - grown.y)).toBeLessThan(1)
-  await shoot(page, "same-tier-growth-reconciled")
+  await shoot(page, `same-tier-${promoted ? "promoted" : "linked"}-growth-reconciled`)
 })
 
 test("a hidden lane's linked endpoint arrives at a useful height when the reader pans to it", async ({ page }) => {
