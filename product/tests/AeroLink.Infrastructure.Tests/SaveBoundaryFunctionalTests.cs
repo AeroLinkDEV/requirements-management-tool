@@ -80,7 +80,8 @@ public sealed class SaveBoundaryFunctionalTests
             .ToListAsync();
         Assert.Equal(501, saved.Count);
         Assert.True(OriginalIdsArePreserved(originalIds, saved.Select(x => x.Id)));
-        Assert.All(saved, change => Assert.Equal(1, change.Revision));
+        // Rebasing onto approved .01 proposes .02; the child identities and bounded reads stay unchanged.
+        Assert.All(saved, change => Assert.Equal(2, change.Revision));
     }
 
     [Fact]
@@ -277,7 +278,7 @@ public sealed class SaveBoundaryPostgresQualificationTests
                 .Where(x => x.ChangeRequestId == requestId).ToListAsync();
             Assert.Equal(501, saved.Count);
             Assert.True(originalIds.SetEquals(saved.Select(x => x.Id)));
-            Assert.All(saved, x => Assert.Equal(1, x.Revision));
+            Assert.All(saved, x => Assert.Equal(2, x.Revision));
         }
         finally
         {

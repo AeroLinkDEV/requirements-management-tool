@@ -46,7 +46,7 @@ public sealed class RebaseRequirementChangeTests(SharedApiHost host) : IClassFix
         await using var scope = host.Factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var change = await db.RequirementChanges.AsNoTracking().SingleAsync(x => x.Id == world.MyChangeId);
-        Assert.Equal(4, change.Revision);
+        Assert.Equal(5, change.Revision);
         Assert.Equal("The system shall reload within 1.0 seconds.", change.Statement);
     }
 
@@ -66,7 +66,7 @@ public sealed class RebaseRequirementChangeTests(SharedApiHost host) : IClassFix
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var scr = await db.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == world.MineId);
         Assert.Equal(ChangeRequestState.Draft, scr.State);
-        Assert.Equal(4, scr.RequirementChanges.Single().Revision);
+        Assert.Equal(5, scr.RequirementChanges.Single().Revision);
     }
 
     /// <summary>
