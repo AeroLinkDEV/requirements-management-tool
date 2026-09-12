@@ -716,3 +716,38 @@ test("a drag takes over an automatic camera move from the displayed position", a
   expect(Math.abs(settled.x - afterDrag.x)).toBeLessThanOrEqual(4)
   expect(Math.abs(settled.zoom - afterDrag.zoom)).toBeLessThanOrEqual(0.02)
 })
+
+/**
+ * Reduced motion changes the journey, not the destination.
+ *
+ * With the preference set, the same selection must produce the same final geometry — the linked card inside
+ * the usable window — while the board's transform is not being transitioned at all.
+ */
+test("reduced motion reaches the same arrangement without animating", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/tests/fixtures/change-network.html?case=reveal")
+  await expect(page.locator(".dtCanvas")).toBeVisible()
+  await page.waitForTimeout(800)
+  await panBackground(page, 0, -420)
+
+  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
+  const usableTop = canvasBox.y + 40
+  const linked = page.locator('[data-node-id="pr-5"]')
+  const startBox = await linked.boundingBox()
+  const startsOutside = !startBox || startBox.y + startBox.height <= usableTop ||
+    (await linked.getAttribute("class"))?.includes("is-offscreen") === true
+  expect(startsOutside, "the reduced-motion case did not start with the card out of view").toBe(true)
+
+  // The stylesheet must not transition the scene under this preference.
+  const transition = await page.locator(".dtCanvasScene").evaluate(element =>
+    window.getComputedStyle(element).transitionDuration)
+  expect(transition === "0s" || transition === "0s, 0s").toBe(true)
+
+  await page.locator('[data-node-id="hlr-127"]').click({ position: { x: 6, y: 6 } })
+  await expect(linked, "reduced motion did not reach the same arrangement")
+    .not.toHaveClass(/is-offscreen/)
+  const after = (await linked.boundingBox())!
+  expect(after.y).toBeGreaterThanOrEqual(usableTop - 1)
+  expect(after.y + after.height).toBeLessThanOrEqual(canvasBox.y + canvasBox.height - 40 + 1)
+})
