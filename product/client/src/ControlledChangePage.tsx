@@ -26,8 +26,8 @@ export function ControlledChangePage({
   state: string
   stateCode?: string
   version: number
-  docxHref: string
-  pdfHref: string
+  docxHref?: string
+  pdfHref?: string
   error?: string
   saved?: string
   children: ReactNode
@@ -43,11 +43,11 @@ export function ControlledChangePage({
       <div className="headerState">
         <span className={`stateBadge ${(stateCode ?? state).toLowerCase()}`} data-state={stateCode ?? state}>{allocation} · {state}</span>
         <small>Record version {version}</small>
-        <div className="scrPublicationTools">
+        {docxHref && pdfHref && <div className="scrPublicationTools">
           <span>Professional controlled publication</span>
           <a href={docxHref}>Download DOCX</a>
           <a href={pdfHref}>Download PDF</a>
-        </div>
+        </div>}
       </div>
     </header>
     {error && <div className="workspaceError" role="alert">{error}</div>}

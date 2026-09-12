@@ -57,6 +57,7 @@ type Package = {
   analysisRich?: string
   solutionRich?: string
   state: string
+  outcome?: string
   deferredFromState?: string | null
   deferralReason?: string
   authorId: string
@@ -464,6 +465,12 @@ export default function TestChangeRequestPage({
     targetRelease: releases.find(x => x.id === item.releaseId),
     superseded: item.state === 'Superseded',
   }
+  const hasControlledNumber = Boolean(item.baseNumber?.trim())
+  const identityLabel = hasControlledNumber ? item.displayNumber : 'Unnumbered assessment'
+  const assessmentOutcome = item.state === 'Superseded' ? 'Superseded assessment'
+    : item.outcome === 'Pending' ? 'Pending assessment'
+      : item.outcome === 'NoChangeRequired' ? 'No change required'
+        : item.outcome === 'ChangeRequired' ? 'Change required; number not assigned' : 'Assessment outcome unavailable'
   const canAuthor = Boolean(item.capabilities?.canProposeArtifactChange
     || item.capabilities?.canWithdrawArtifactChange || item.capabilities?.canProposeProcedureChange
     || item.capabilities?.canWithdrawProcedureChange || item.capabilities?.canRevise)
@@ -504,15 +511,16 @@ export default function TestChangeRequestPage({
       ? disciplineLabel(discipline) + ' Procedure Change Requests'
       : `${disciplineLabel(discipline)} Test Change Requests`}
     onBack={onBack}
-    eyebrow={`TEST CHANGE CONTROL / ${item.displayNumber}`}
-    title={item.title || 'Not written up yet'}
-    description={`Revision-controlled change case, ${artifactWord} proposals, and review authority.`}
+    eyebrow={`${hasControlledNumber ? 'TEST CHANGE CONTROL' : 'VERIFICATION ASSESSMENT'} / ${identityLabel}`}
+    title={item.title || (hasControlledNumber ? 'Not written up yet' : `${disciplineLabel(discipline)} ${artifactWord} assessment`)}
+    description={hasControlledNumber ? `Revision-controlled change case, ${artifactWord} proposals, and review authority.`
+      : 'This assessment has no controlled Test Change Request number. Its driving source is identified separately below.'}
     allocation={changeRequestAllocation(facts)}
-    state={changeRequestState(facts)}
+    state={hasControlledNumber ? changeRequestState(facts) : assessmentOutcome}
     stateCode={item.state}
     version={item.version}
-    docxHref={`${api}/api/test-change-reviews/${item.id}/download?format=docx`}
-    pdfHref={`${api}/api/test-change-reviews/${item.id}/download?format=pdf`}
+    docxHref={hasControlledNumber ? `${api}/api/test-change-reviews/${item.id}/download?format=docx` : undefined}
+    pdfHref={hasControlledNumber ? `${api}/api/test-change-reviews/${item.id}/download?format=pdf` : undefined}
     error={error}
     saved={saved}
   >
@@ -654,12 +662,12 @@ export default function TestChangeRequestPage({
 
       <aside className="reviewRail">
         <ControlledStatusCard
-          displayNumber={item.displayNumber}
+          displayNumber={identityLabel}
           fields={[
             { label: 'Allocation', value: changeRequestAllocation(facts), data: { name: 'allocation', value: item.state === 'Deferred' ? 'Deferred' : 'Build' } },
-            { label: 'State', value: changeRequestState(facts), data: { name: 'state', value: item.state } },
+            { label: 'State', value: hasControlledNumber ? changeRequestState(facts) : assessmentOutcome, data: { name: 'state', value: item.state } },
             { label: 'Author', value: item.authorId ? <PersonName userName={item.authorId} withRole /> : 'Raised by assessment' },
-            { label: 'Revision', value: item.revision },
+            hasControlledNumber ? { label: 'Revision', value: item.revision } : { label: 'Controlled number', value: 'Not assigned' },
             { label: 'Updated', value: item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : '—' },
           ]}
         >
