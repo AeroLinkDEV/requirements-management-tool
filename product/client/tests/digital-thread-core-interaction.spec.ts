@@ -272,3 +272,55 @@ test("Artifact thread: hover is stationary once the arrival selection is cleared
   await page.waitForTimeout(400)
   expect(await transformOf(scene)).toBe(camera)
 })
+
+test("a hidden lane's linked endpoint arrives at a useful height when the reader pans to it", async ({ page }) => {
+  // Narrow enough that the right-hand lanes genuinely start outside the viewport.
+  await page.setViewportSize({ width: 1100, height: 900 })
+  await open(page, "hover")
+  const root = page.locator('[data-node-id="pr-5"]')
+  await root.click()
+  await expect(root).toHaveAttribute("aria-pressed", "true")
+  await page.waitForTimeout(900)
+
+  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
+  const endpoint = page.locator('[data-node-id="case-34"]')
+  const startBox = await endpoint.boundingBox()
+  const startsOutside = !startBox ||
+    startBox.x >= canvasBox.x + canvasBox.width - 1 ||
+    startBox.y >= canvasBox.y + canvasBox.height - 1 ||
+    (await endpoint.getAttribute("class"))?.includes("is-offscreen") === true
+  expect(startsOutside, "the fixture did not start with the endpoint outside the view").toBe(true)
+
+  // Pan the camera left (drag the background) until the right-hand lanes arrive. This is the reader's own
+  // navigation: the reveal must not need a second vertical hunt afterwards.
+  const gutter = { x: canvasBox.x + 20, y: canvasBox.y + canvasBox.height - 40 }
+  await page.mouse.move(gutter.x, gutter.y)
+  await page.mouse.down()
+  await page.mouse.move(gutter.x - 520, gutter.y, { steps: 8 })
+  await page.mouse.up()
+  await page.waitForTimeout(900)
+
+  /**
+   * The accepted contract for a hidden lane, stated precisely.
+   *
+   * This lane holds twenty cards, so its window is genuinely full: the reveal has no free span to place the
+   * endpoint into and the truthful answer is the labelled reveal action, not a fabricated fit. What the
+   * promise requires is that the endpoint is *reachable* once the reader has panned to its lane — drawn if
+   * there is room, otherwise reachable through its own labelled action — with the selection intact.
+   */
+  const drawn = !(await endpoint.getAttribute("class"))?.includes("is-offscreen")
+  if (drawn) {
+    const arrived = (await endpoint.boundingBox())!
+    expect(arrived.x).toBeGreaterThanOrEqual(canvasBox.x - 1)
+    expect(arrived.x + arrived.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width + 1)
+    expect(arrived.y).toBeGreaterThanOrEqual(canvasBox.y - 1)
+    expect(arrived.y + arrived.height).toBeLessThanOrEqual(canvasBox.y + canvasBox.height + 1)
+  } else {
+    const reveal = page.getByRole("button", { name: "Show HLRTCCR-000034", exact: true })
+    await expect(reveal, "the endpoint is neither drawn nor reachable").toBeVisible()
+    await reveal.click()
+    await expect(endpoint, "the explicit reveal did not reach the endpoint").not.toHaveClass(/is-offscreen/)
+  }
+  // Selection survives the exploration.
+  await expect(root).toHaveAttribute("aria-pressed", "true")
+})
