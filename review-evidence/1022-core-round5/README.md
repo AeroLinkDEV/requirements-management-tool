@@ -1,20 +1,23 @@
-# #1022 CORE_INTERACTION evidence package — Round 5 draft
+# #1022 CORE_INTERACTION evidence — tested revision 5f3642ca
 
-**Tested revision:** `0f19aed86fddd2d2ec826d779909358a09b1f999`
-branch `deepseek/1022-digital-thread-interaction` (clean worktree at capture time)
+**Tested code revision:** `5f3642ca28e90e4ad51b2210c59f29b47c08fc05`
+branch `deepseek/1022-digital-thread-interaction`
+
+This folder is a **temporary review artifact** on the feature branch; it is removed before any merge. Files are
+published here because the worker environment cannot upload binaries to review conversations.
 
 **Command that produced everything here** (run in `product/client`, isolated worktree):
 
 ```
-$env:AEROLINK_1022_EVIDENCE="...\round5-shots"; $env:AEROLINK_1022_VIDEO="1"
+$env:AEROLINK_1022_EVIDENCE="<dir>"; $env:AEROLINK_1022_VIDEO="1"
 npx playwright test --config=playwright.rendered.config.ts digital-thread-core-interaction.spec.ts
-# -> 9 passed (26.5s)
+# -> 15 passed (47.1s)
 ```
 
-Capture environment: Windows, headless Chromium via Playwright, fixture-backed Vite dev server on a private
-port, viewport set per test (1280×900 or 1100×900 or 1440×1000), no browser zoom, default text settings.
+Environment: Windows, headless Chromium (Playwright), fixture-backed Vite dev server on a private port,
+viewport per test (1280×900 / 1100×900 / 1440×1000), no browser zoom, default text settings.
 
-## Screenshots (`round5-shots/`)
+## Screenshots — `screenshots/`
 
 | File | Scenario | Test |
 |---|---|---|
@@ -25,28 +28,36 @@ port, viewport set per test (1280×900 or 1100×900 or 1440×1000), no browser z
 | `inside-selected.png` | Inside a change — selected record | Inside hover is stationary |
 | `artifact-hover-stationary.png` | Artifact thread — pointer on a card after the arrival selection is cleared | Artifact hover is stationary |
 
-## Recordings (`round5-video/`)
+## Clips — `clips/` (one per core test; filenames are Playwright's truncated test titles)
 
-One WebM per test, named after the Playwright test title:
-
-- `…camera-or-the-source-card…` — hover stability, Change network
-- `…without-a-camera-restore…` — hover exit, Change network
-- `…and-selection-is-persistent…` — click selects; hovering another card cannot replace it
-- `…its-explicit-reveal-action…` — dense thread reachability
-- `…clear-does-not-snap-it-back…` — extended range → clear → cleanup → next drag
-- `…record-owns-its-thread…` — Inside a change hover/selection
-- `…arrival-selection-is-cleared…` — Artifact thread hover
-- `…when-the-reader-pans-to-it…` — hidden-lane endpoint reachability
-- `…horizontal-away-and-back…` — manual lane position retained across panning
+| File | Test it records |
+|---|---|
+| `digital-thread-core-intera-b9734-e-camera-or-the-source-card-rendered.webm` | hover is stationary: camera and source card do not move |
+| `digital-thread-core-intera-8c7a5-nd-without-a-camera-restore-rendered.webm` | hover exit: no popup, no camera restore |
+| `digital-thread-core-intera-3c22b-and-selection-is-persistent-rendered.webm` | the real card selects; hovering another card cannot replace it |
+| `digital-thread-core-intera-1768a--its-explicit-reveal-action-rendered.webm` | dense thread: every record reachable (no-room fallback branch) |
+| `digital-thread-core-intera-1bc39-clear-does-not-snap-it-back-rendered.webm` | extended range → clear → cleanup → next drag |
+| `digital-thread-core-intera-02a97-cted-record-owns-its-thread-rendered.webm` | Inside a change: stationary hover, persistent selection |
+| `digital-thread-core-intera-26826-rrival-selection-is-cleared-rendered.webm` | Artifact thread: stationary hover after clearing |
+| `digital-thread-core-intera-fd06b--when-the-reader-pans-to-it-rendered.webm` | hidden lane: endpoint reachable after panning |
+| `digital-thread-core-intera-f074a-es-horizontal-away-and-back-rendered.webm` | manual vertical exploration survives horizontal away/back |
+| `digital-thread-core-intera-f0bee-e-without-moving-the-camera-rendered.webm` | available space: automatic reveal without camera movement |
+| `digital-thread-core-intera-aad5a--it-where-the-reader-saw-it-rendered.webm` | a relocated card keeps its position when it becomes the subject |
+| `digital-thread-core-intera-e8723-from-the-displayed-position-rendered.webm` | a drag takes over an automatic camera move |
+| `digital-thread-core-intera-65b86-rangement-without-animating-rendered.webm` | reduced motion: same arrangement, no transition |
+| `digital-thread-core-intera-aa262-nt-and-selects-that-subject-rendered.webm` | hover→click promotion during an incoming reveal |
+| `digital-thread-core-intera-fda8e-ces-the-old-subject-cleanly-rendered.webm` | new selection during cleanup replaces the old subject |
 
 ## Limits
 
-These are fixture-backed captures from the real shared canvas, not production or owner acceptance.
-The screenshots show static states; the WebM clips show the gestures. Motion timing (A18) is not yet tuned.
-Earlier captures at `ab2130dd` are stale and kept only as history.
+- Fixture-backed captures from the real shared canvas — not production, and not owner visual acceptance.
+- Screenshots are static states; the clips are the gestures. Motion timing (A18) is deliberately untuned.
+- A filename is not proof of its scenario; the assertions in `tests/digital-thread-core-interaction.spec.ts`
+  at the tested revision are.
+- Captures at earlier revisions are superseded and are not kept here, so nothing can be mistaken for evidence
+  about a later change.
 
-## Not yet covered by this package
+## Not covered by this package
 
-Relocated-subject and collapse/expansion regressions; same-subject promotion during incoming motion; new
-selection during cleanup; interruption at start/middle/end including pointer-down-hold and nested actions;
-reduced-motion equivalence; measured two-axis dock fit; A17 tray readability; A18 final timing.
+Owner visual acceptance; final tray typography/spacing (A17); final easing tuning (A18); the full hosted journey
+suite; and the planner-selected local smoke journeys, which have not been run yet.
