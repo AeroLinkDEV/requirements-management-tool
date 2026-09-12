@@ -27,6 +27,29 @@ const shoot = async (page: import("@playwright/test").Page, name: string) => {
   await page.screenshot({ path: `${directory}/${name}.png` })
 }
 
+/**
+ * Pan the background, deliberately.
+ *
+ * Dragging near the canvas edge lands on the offscreen action strip or a lane band, so the gesture either does
+ * nothing or rolls a lane — a "pan" that moves the camera by zero and makes a return assertion pass vacuously.
+ * This picks a real gutter: just left of the first lane band, vertically between the toolbar and the strip.
+ */
+const panBackground = async (
+  page: import("@playwright/test").Page,
+  dx: number,
+  dy = 0,
+) => {
+  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
+  const bandBox = (await page.locator(".dtCanvasBand").first().boundingBox())!
+  const gutterX = Math.max(canvasBox.x + 3, bandBox.x - 10)
+  const y = canvasBox.y + canvasBox.height / 2
+  await page.mouse.move(gutterX, y)
+  await page.mouse.down()
+  await page.mouse.move(gutterX + dx, y + dy)
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+}
+
 test("hover emphasises without moving the camera or the source card", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await open(page, "hover")
@@ -296,14 +319,13 @@ test("a hidden lane's linked endpoint arrives at a useful height when the reader
     (await endpoint.getAttribute("class"))?.includes("is-offscreen") === true
   expect(startsOutside, "the fixture did not start with the endpoint outside the view").toBe(true)
 
-  // Pan the camera left (drag the background) until the right-hand lanes arrive. This is the reader's own
-  // navigation: the reveal must not need a second vertical hunt afterwards.
-  const gutter = { x: canvasBox.x + 20, y: canvasBox.y + canvasBox.height - 40 }
-  await page.mouse.move(gutter.x, gutter.y)
-  await page.mouse.down()
-  await page.mouse.move(gutter.x - 520, gutter.y, { steps: 8 })
-  await page.mouse.up()
-  await page.waitForTimeout(900)
+  // Pan the camera left until the right-hand lanes arrive. This is the reader's own navigation: the reveal
+  // must not need a second vertical hunt afterwards. The pan is asserted to have actually moved the camera,
+  // or the "arrival" assertions below would be measuring a board that never went anywhere.
+  const scene = page.locator(".dtCanvasScene")
+  const cameraBeforePan = await transformOf(scene)
+  await panBackground(page, -1000)
+  expect(await transformOf(scene), "the pan did not move the camera").not.toBe(cameraBeforePan)
 
   /**
    * The accepted contract for a hidden lane, stated precisely.
@@ -375,15 +397,22 @@ test("manual vertical exploration survives horizontal away and back", async ({ p
   expect(scrolled - beforeScroll, "the lane did not scroll").toBeLessThan(-30)
 
   // Away and back, purely horizontally, on the background.
-  const gutter = { x: canvasBox.x + 24, y: canvasBox.y + canvasBox.height - 30 }
   const cameraBefore = await cameraNow()
-  for (const dx of [-420, 420]) {
-    await page.mouse.move(gutter.x, gutter.y)
-    await page.mouse.down()
-    await page.mouse.move(gutter.x + dx, gutter.y)
-    await page.mouse.up()
-    await page.waitForTimeout(500)
-  }
+  await panBackground(page, -1000)
+  /**
+   * The outward gesture must actually do something, or the return assertion would pass vacuously: matching
+   * a camera that never moved proves nothing. Assert the camera moved and the lane really left the view.
+   */
+  const cameraAway = await cameraNow()
+  expect(Math.abs(cameraAway.x - cameraBefore.x), "the outward pan did not move the camera")
+    .toBeGreaterThan(100)
+  const awayBox = await probe.boundingBox()
+  const laneOutside = !awayBox ||
+    awayBox.x + awayBox.width <= canvasBox.x ||
+    awayBox.x >= canvasBox.x + canvasBox.width
+  expect(laneOutside, "the outward pan did not take the lane outside the usable region").toBe(true)
+
+  await panBackground(page, 1000)
 
   // The camera comes back to where the reader left it, and the lane keeps the position they put it in.
   const cameraAfter = await cameraNow()
