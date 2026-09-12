@@ -153,7 +153,14 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
     // so its movement is the lane's movement and nothing else.
     const nodes = [...document.querySelectorAll<HTMLElement>(".dtCanvasNode")]
       .filter(node => node.querySelector(".dtnCard.is-untraced"))
+    // Exclude the selected subject's own lane: when the selection clears, that card's expanded body collapses
+    // and legitimately re-spaces the rows after it. That is layout, not lane movement, and mixing the two is
+    // what produced the earlier "33-unit clamp" reading.
+    const subjectX = Number(/translate\((-?[\d.]+)px/.exec(
+      document.querySelector<HTMLElement>(".dtCanvasNode.is-selected")?.style.transform ?? "")?.[1] ?? NaN)
     const inside = nodes.find(node => {
+      const x = Number(/translate\((-?[\d.]+)px/.exec(node.style.transform)?.[1] ?? NaN)
+      if (Number.isFinite(subjectX) && Math.abs(x - subjectX) <= 1) return false
       const rect = node.getBoundingClientRect()
       return rect.left >= bandRect.x - 2 && rect.right <= bandRect.x + bandRect.width + 2 &&
         rect.top > bandRect.y + 4 && rect.bottom < bandRect.y + bandRect.height - 4
@@ -255,15 +262,18 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
     .toBeLessThanOrEqual(2)
   expect(await transformOf()).toBe(cameraBefore)
   /**
-   * OPEN DEFECT (reported, not accepted): with this lane's revealed cards returning to their ordinary rows,
-   * clearing moves the lane by roughly 33 scene units — the effective floor rises and the retained allowance
-   * does not fully hold the deeper offset. That is a cleanup-induced clamp, exactly the class the allowance
-   * exists to prevent: small, but not zero. This guards the severe form (a large snap) and the residual is
-   * recorded here and in the issue work log as unresolved. It is not claimed as "no snap".
+   * OPEN DEFECT (reported, not accepted): clearing still moves this lane.
+   *
+   * Measured two ways: +33 units when the probe shared the selected subject's lane (partly the expanded body
+   * collapsing, which is legitimate), and -40.3 units with the probe deliberately taken from a lane that is
+   * not the subject's — so the effect is not merely that collapse. A negative movement deepens the lane, which
+   * a clamp cannot do, so the cause is unresolved: it is not a simple floor clamp and not the subject's
+   * re-spacing alone. This assertion guards the severe form (a large snap) while the residual is recorded
+   * here and in the issue work log. It is not claimed as "no snap".
    */
   expect(
     Math.abs(cleared - beforeClear),
-    `the lane snapped after clear by ${(cleared - beforeClear).toFixed(1)} units`,
+    `the lane moved after clear by ${(cleared - beforeClear).toFixed(1)} units`,
   ).toBeLessThanOrEqual(60)
 
   /**
