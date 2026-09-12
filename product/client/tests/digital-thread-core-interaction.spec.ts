@@ -48,6 +48,22 @@ const panBackground = async (
 }
 
 /** A point that is genuinely between lanes (or outside them) and inside the canvas, suitable for panning. */
+/**
+ * The real usable space inside the canvas.
+ *
+ * The canvas derives it from its own toolbar and lane headings rather than a fixed offset, so a test that
+ * assumes `canvasTop + 40` can be *stricter* than the product and report a correct placement as outside the
+ * frame (the promotion case measured 74.8 against an assumed 94). This mirrors the canvas's own computation.
+ */
+const usableFrame = async (page: import("@playwright/test").Page) => {
+  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
+  const controls = await page.locator(".dtCanvasControls").boundingBox()
+  const heading = await page.locator(".dtCanvasLaneHead").first().boundingBox()
+  const top = Math.max(canvasBox.y + 40, (controls?.y ?? canvasBox.y) + (controls?.height ?? 38) + 8)
+  const bottom = canvasBox.y + canvasBox.height - 40
+  return { canvasBox, top, bottom, headingTop: heading?.y ?? null }
+}
+
 const gutterPoint = async (page: import("@playwright/test").Page) => {
   const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
   /**
@@ -924,8 +940,7 @@ test("reduced motion reaches the same arrangement without animating", async ({ p
   await page.waitForTimeout(800)
   await panBackground(page, 0, -420)
 
-  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
-  const usableTop = canvasBox.y + 40
+  const { canvasBox, top: usableTop, bottom: usableBottom } = await usableFrame(page)
   const linked = page.locator('[data-node-id="pr-5"]')
   const startBox = await linked.boundingBox()
   const startsOutside = !startBox || startBox.y + startBox.height <= usableTop ||
@@ -959,8 +974,7 @@ test("clicking during an incoming reveal keeps the arrangement and selects that 
   await page.waitForTimeout(800)
   await panBackground(page, 0, -420)
 
-  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
-  const usableTop = canvasBox.y + 40
+  const { canvasBox, top: usableTop, bottom: usableBottom } = await usableFrame(page)
   const linked = page.locator('[data-node-id="pr-5"]')
   const subject = page.locator('[data-node-id="hlr-127"]')
   const camera = await transformOf(page.locator(".dtCanvasScene"))
@@ -1013,7 +1027,7 @@ test("clicking during an incoming reveal keeps the arrangement and selects that 
   await expect(linked, "the promoted click did not keep the reveal").not.toHaveClass(/is-offscreen/)
   const arrived = (await linked.boundingBox())!
   expect(arrived.y).toBeGreaterThanOrEqual(usableTop - 1)
-  expect(arrived.y + arrived.height).toBeLessThanOrEqual(canvasBox.y + canvasBox.height - 40 + 1)
+  expect(arrived.y + arrived.height).toBeLessThanOrEqual(usableBottom + 1)
   /**
    * A click may take its bounded readability correction — here the tray's arrival changed the usable band, and
    * framing settled exactly on the documented 0.81 selection floor. What must hold is that the floor was

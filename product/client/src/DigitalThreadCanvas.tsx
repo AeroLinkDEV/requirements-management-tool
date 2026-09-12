@@ -620,21 +620,29 @@ export default function DigitalThreadCanvas({
       }
       for (const lane of usable) if (!pendingLanes.has(lane)) visitedLanes.current.add(lane)
     }
-    const measuredSignature = nodes.map(node => `${node.id}:${Math.round(measuredCardHeights.get(node.id) ?? 0)}`).join("|")
     /**
-     * A genuine relationship or measured-geometry change reconciles lanes the reader has merely *seen*; it does
-     * not take away lanes they deliberately own. Without this the freeze set (delivered ∩ visited) would carry
-     * a stale arrangement through an edge repoint or a size change, which is exactly the case that must not be
-     * frozen by navigation protection.
+     * A changed relationship set, tier or **usable window** reconciles lanes the reader has merely *seen*; it
+     * never takes away lanes they deliberately own.
+     *
+     * The window belongs in this invalidation because a placement is only valid for the window it was computed
+     * against: opening the tray moves the camera even when the band height is unchanged, and a retained
+     * placement then sits just outside the visible area (measured at ~19 px above it in the promotion journey).
+     * Per-card measured heights are deliberately *not* part of it — sub-pixel wobble there re-planned the board
+     * on nearly every paint and left a selected card's own action button never still enough to click, which the
+     * page-level artifact journey caught. Height-driven reconciliation is carried by the tier in this key.
      */
-    const contentKey = `${edgesKey}|${measuredSignature}`
+    const windowKey = [...contentWindows]
+      .map(([lane, window]) => `${lane}:${Math.round(window.top / 8)}-${Math.round(window.bottom / 8)}`)
+      .join(",")
+    const contentKey = `${edgesKey}|${result.tier}|${windowKey}`
     if (contentSignature.current !== contentKey) {
       contentSignature.current = contentKey
+      deliveredLanes.current = new Set()
       visitedLanes.current = new Set()
       revealSignature.current = ""
     }
     const windowArrival = [...usable].some(lane => !visitedLanes.current.has(lane))
-    const revealKey = `${scopeKey}|${emphasisId ?? ""}|${result.tier}|${measuredSignature}|${edgesKey}|${windowArrival ? "arrival" : "stable"}`
+    const revealKey = `${scopeKey}|${emphasisId ?? ""}|${result.tier}|${windowKey}|${edgesKey}|${windowArrival ? "arrival" : "stable"}`
     if (revealKey !== revealSignature.current) {
       revealSignature.current = revealKey
       const plan = planReveal({
