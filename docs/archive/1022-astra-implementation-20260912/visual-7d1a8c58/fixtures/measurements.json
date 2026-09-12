@@ -1,0 +1,4232 @@
+[
+  {
+    "name": "network-1280-Bottom",
+    "view": "network",
+    "width": 1280,
+    "dock": "Bottom",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1248,
+        "height": 150,
+        "top": 552,
+        "right": 1264,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1055.65625,
+        "y": 567,
+        "width": 191.34375,
+        "height": 24,
+        "top": 567,
+        "right": 1247,
+        "bottom": 591,
+        "left": 1055.65625
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 16.1875,
+            "top": 567,
+            "right": 283,
+            "bottom": 583.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 567,
+            "right": 371.359375,
+            "bottom": 583.1875,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 674,
+            "y": 567,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 567,
+            "right": 768.9375,
+            "bottom": 583.1875,
+            "left": 674
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "network-1280-Right",
+    "view": "network",
+    "width": 1280,
+    "dock": "Right",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-right",
+      "rect": {
+        "x": 964,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1264,
+        "bottom": 698,
+        "left": 964
+      },
+      "tools": {
+        "x": 981,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 1247,
+        "bottom": 151,
+        "left": 981
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 981,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 1247,
+            "bottom": 171.1875,
+            "left": 981
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 981,
+            "y": 233.375,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 233.375,
+            "right": 1051.359375,
+            "bottom": 249.5625,
+            "left": 981
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 981,
+            "y": 288.359375,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 288.359375,
+            "right": 1075.9375,
+            "bottom": 304.546875,
+            "left": 981
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "network-1280-Auto",
+    "view": "network",
+    "width": 1280,
+    "dock": "Auto",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 299,
+        "bottom": 151,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 299,
+            "bottom": 171.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 233.375,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 233.375,
+            "right": 103.359375,
+            "bottom": 249.5625,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 288.359375,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 288.359375,
+            "right": 127.9375,
+            "bottom": 304.546875,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "inside-1280-Bottom",
+    "view": "inside",
+    "width": 1280,
+    "dock": "Bottom",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dticPanel dticPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1248,
+        "height": 150,
+        "top": 552,
+        "right": 1264,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1055.65625,
+        "y": 567,
+        "width": 191.34375,
+        "height": 24,
+        "top": 567,
+        "right": 1247,
+        "bottom": 591,
+        "left": 1055.65625
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 16.1875,
+            "top": 567,
+            "right": 283,
+            "bottom": 583.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 320,
+            "height": 16.1875,
+            "top": 567,
+            "right": 621,
+            "bottom": 583.1875,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 639,
+            "y": 567,
+            "width": 320,
+            "height": 16.1875,
+            "top": 567,
+            "right": 959,
+            "bottom": 583.1875,
+            "left": 639
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "inside-1280-Right",
+    "view": "inside",
+    "width": 1280,
+    "dock": "Right",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dticPanel dticPanel-right",
+      "rect": {
+        "x": 964,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1264,
+        "bottom": 698,
+        "left": 964
+      },
+      "tools": {
+        "x": 981,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 1247,
+        "bottom": 151,
+        "left": 981
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 981,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 1247,
+            "bottom": 171.1875,
+            "left": 981
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 981,
+            "y": 244.1875,
+            "width": 266,
+            "height": 16.1875,
+            "top": 244.1875,
+            "right": 1247,
+            "bottom": 260.375,
+            "left": 981
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 981,
+            "y": 291.171875,
+            "width": 266,
+            "height": 16.1875,
+            "top": 291.171875,
+            "right": 1247,
+            "bottom": 307.359375,
+            "left": 981
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "inside-1280-Auto",
+    "view": "inside",
+    "width": 1280,
+    "dock": "Auto",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dticPanel dticPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 299,
+        "bottom": 151,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 299,
+            "bottom": 171.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 244.1875,
+            "width": 266,
+            "height": 16.1875,
+            "top": 244.1875,
+            "right": 299,
+            "bottom": 260.375,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 291.171875,
+            "width": 266,
+            "height": 16.1875,
+            "top": 291.171875,
+            "right": 299,
+            "bottom": 307.359375,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "artifact-1280-Bottom",
+    "view": "artifact",
+    "width": 1280,
+    "dock": "Bottom",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1248,
+        "height": 150,
+        "top": 552,
+        "right": 1264,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1055.65625,
+        "y": 567,
+        "width": 191.34375,
+        "height": 24,
+        "top": 567,
+        "right": 1247,
+        "bottom": 591,
+        "left": 1055.65625
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 16.1875,
+            "top": 567,
+            "right": 283,
+            "bottom": 583.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 567,
+            "right": 371.359375,
+            "bottom": 583.1875,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 674,
+            "y": 567,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 567,
+            "right": 768.9375,
+            "bottom": 583.1875,
+            "left": 674
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "artifact-1280-Right",
+    "view": "artifact",
+    "width": 1280,
+    "dock": "Right",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-right",
+      "rect": {
+        "x": 964,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1264,
+        "bottom": 698,
+        "left": 964
+      },
+      "tools": {
+        "x": 981,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 1247,
+        "bottom": 151,
+        "left": 981
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 12,
+          "rect": {
+            "x": 981,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 1247,
+            "bottom": 171.1875,
+            "left": 981
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 981,
+            "y": 256.5625,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 256.5625,
+            "right": 1051.359375,
+            "bottom": 272.75,
+            "left": 981
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 981,
+            "y": 407.75,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 407.75,
+            "right": 1075.9375,
+            "bottom": 423.9375,
+            "left": 981
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "artifact-1280-Auto",
+    "view": "artifact",
+    "width": 1280,
+    "dock": "Auto",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 299,
+        "bottom": 151,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 299,
+            "bottom": 171.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 256.5625,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 256.5625,
+            "right": 103.359375,
+            "bottom": 272.75,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 407.75,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 407.75,
+            "right": 127.9375,
+            "bottom": 423.9375,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "network-1440-Bottom",
+    "view": "network",
+    "width": 1440,
+    "dock": "Bottom",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1408,
+        "height": 150,
+        "top": 552,
+        "right": 1424,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1215.65625,
+        "y": 567,
+        "width": 191.34375,
+        "height": 24,
+        "top": 567,
+        "right": 1407,
+        "bottom": 591,
+        "left": 1215.65625
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 16.1875,
+            "top": 567,
+            "right": 283,
+            "bottom": 583.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 567,
+            "right": 371.359375,
+            "bottom": 583.1875,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 754,
+            "y": 567,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 567,
+            "right": 848.9375,
+            "bottom": 583.1875,
+            "left": 754
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "network-1440-Right",
+    "view": "network",
+    "width": 1440,
+    "dock": "Right",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-right",
+      "rect": {
+        "x": 1124,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1424,
+        "bottom": 698,
+        "left": 1124
+      },
+      "tools": {
+        "x": 1141,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 1407,
+        "bottom": 151,
+        "left": 1141
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 1141,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 1407,
+            "bottom": 171.1875,
+            "left": 1141
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 1141,
+            "y": 233.375,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 233.375,
+            "right": 1211.359375,
+            "bottom": 249.5625,
+            "left": 1141
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 1141,
+            "y": 288.359375,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 288.359375,
+            "right": 1235.9375,
+            "bottom": 304.546875,
+            "left": 1141
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "network-1440-Auto",
+    "view": "network",
+    "width": 1440,
+    "dock": "Auto",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 299,
+        "bottom": 151,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 299,
+            "bottom": 171.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 233.375,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 233.375,
+            "right": 103.359375,
+            "bottom": 249.5625,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 288.359375,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 288.359375,
+            "right": 127.9375,
+            "bottom": 304.546875,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "network-explored",
+    "before": "matrix(1.05, 0, 0, 1.05, 340, 125)",
+    "after": "matrix(1.05, 0, 0, 1.05, 160, 125)",
+    "selected": "pr-5"
+  },
+  {
+    "name": "inside-1440-Bottom",
+    "view": "inside",
+    "width": 1440,
+    "dock": "Bottom",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dticPanel dticPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1408,
+        "height": 150,
+        "top": 552,
+        "right": 1424,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1215.65625,
+        "y": 567,
+        "width": 191.34375,
+        "height": 24,
+        "top": 567,
+        "right": 1407,
+        "bottom": 591,
+        "left": 1215.65625
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 16.1875,
+            "top": 567,
+            "right": 283,
+            "bottom": 583.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 400,
+            "height": 16.1875,
+            "top": 567,
+            "right": 701,
+            "bottom": 583.1875,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 719,
+            "y": 567,
+            "width": 400,
+            "height": 16.1875,
+            "top": 567,
+            "right": 1119,
+            "bottom": 583.1875,
+            "left": 719
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "inside-1440-Right",
+    "view": "inside",
+    "width": 1440,
+    "dock": "Right",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dticPanel dticPanel-right",
+      "rect": {
+        "x": 1124,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1424,
+        "bottom": 698,
+        "left": 1124
+      },
+      "tools": {
+        "x": 1141,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 1407,
+        "bottom": 151,
+        "left": 1141
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 1141,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 1407,
+            "bottom": 171.1875,
+            "left": 1141
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 1141,
+            "y": 244.1875,
+            "width": 266,
+            "height": 16.1875,
+            "top": 244.1875,
+            "right": 1407,
+            "bottom": 260.375,
+            "left": 1141
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 1141,
+            "y": 291.171875,
+            "width": 266,
+            "height": 16.1875,
+            "top": 291.171875,
+            "right": 1407,
+            "bottom": 307.359375,
+            "left": 1141
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "inside-1440-Auto",
+    "view": "inside",
+    "width": 1440,
+    "dock": "Auto",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dticPanel dticPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 299,
+        "bottom": 151,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 299,
+            "bottom": 171.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 244.1875,
+            "width": 266,
+            "height": 16.1875,
+            "top": 244.1875,
+            "right": 299,
+            "bottom": 260.375,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 291.171875,
+            "width": 266,
+            "height": 16.1875,
+            "top": 291.171875,
+            "right": 299,
+            "bottom": 307.359375,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "inside-explored",
+    "before": "matrix(0.974648, 0, 0, 0.974648, 340, 145.672)",
+    "after": "matrix(0.974648, 0, 0, 0.974648, 160, 145.672)",
+    "selected": "cr-1"
+  },
+  {
+    "name": "artifact-1440-Bottom",
+    "view": "artifact",
+    "width": 1440,
+    "dock": "Bottom",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1408,
+        "height": 150,
+        "top": 552,
+        "right": 1424,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1215.65625,
+        "y": 567,
+        "width": 191.34375,
+        "height": 24,
+        "top": 567,
+        "right": 1407,
+        "bottom": 591,
+        "left": 1215.65625
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 16.1875,
+            "top": 567,
+            "right": 283,
+            "bottom": 583.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 567,
+            "right": 371.359375,
+            "bottom": 583.1875,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 754,
+            "y": 567,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 567,
+            "right": 848.9375,
+            "bottom": 583.1875,
+            "left": 754
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "artifact-1440-Right",
+    "view": "artifact",
+    "width": 1440,
+    "dock": "Right",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-right",
+      "rect": {
+        "x": 1124,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1424,
+        "bottom": 698,
+        "left": 1124
+      },
+      "tools": {
+        "x": 1141,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 1407,
+        "bottom": 151,
+        "left": 1141
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 12,
+          "rect": {
+            "x": 1141,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 1407,
+            "bottom": 171.1875,
+            "left": 1141
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 1141,
+            "y": 256.5625,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 256.5625,
+            "right": 1211.359375,
+            "bottom": 272.75,
+            "left": 1141
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 1141,
+            "y": 407.75,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 407.75,
+            "right": 1235.9375,
+            "bottom": 423.9375,
+            "left": 1141
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "artifact-1440-Auto",
+    "view": "artifact",
+    "width": 1440,
+    "dock": "Auto",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 299,
+        "bottom": 151,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 299,
+            "bottom": 171.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 256.5625,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 256.5625,
+            "right": 103.359375,
+            "bottom": 272.75,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 407.75,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 407.75,
+            "right": 127.9375,
+            "bottom": 423.9375,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "artifact-explored",
+    "before": "matrix(0.86, 0, 0, 0.86, -17.88, 160.76)",
+    "after": "matrix(0.86, 0, 0, 0.86, -197.88, 160.76)",
+    "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+  },
+  {
+    "name": "network-1920-Bottom",
+    "view": "network",
+    "width": 1920,
+    "dock": "Bottom",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1888,
+        "height": 150,
+        "top": 552,
+        "right": 1904,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1695.65625,
+        "y": 567,
+        "width": 191.34375,
+        "height": 24,
+        "top": 567,
+        "right": 1887,
+        "bottom": 591,
+        "left": 1695.65625
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 16.1875,
+            "top": 567,
+            "right": 283,
+            "bottom": 583.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 567,
+            "right": 371.359375,
+            "bottom": 583.1875,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 994,
+            "y": 567,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 567,
+            "right": 1088.9375,
+            "bottom": 583.1875,
+            "left": 994
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "network-1920-Right",
+    "view": "network",
+    "width": 1920,
+    "dock": "Right",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-right",
+      "rect": {
+        "x": 1604,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1904,
+        "bottom": 698,
+        "left": 1604
+      },
+      "tools": {
+        "x": 1621,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 1887,
+        "bottom": 151,
+        "left": 1621
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 1621,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 1887,
+            "bottom": 171.1875,
+            "left": 1621
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 1621,
+            "y": 233.375,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 233.375,
+            "right": 1691.359375,
+            "bottom": 249.5625,
+            "left": 1621
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 1621,
+            "y": 288.359375,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 288.359375,
+            "right": 1715.9375,
+            "bottom": 304.546875,
+            "left": 1621
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "network-1920-Auto",
+    "view": "network",
+    "width": 1920,
+    "dock": "Auto",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 299,
+        "bottom": 151,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 299,
+            "bottom": 171.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 233.375,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 233.375,
+            "right": 103.359375,
+            "bottom": 249.5625,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 288.359375,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 288.359375,
+            "right": 127.9375,
+            "bottom": 304.546875,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "inside-1920-Bottom",
+    "view": "inside",
+    "width": 1920,
+    "dock": "Bottom",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dticPanel dticPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1888,
+        "height": 150,
+        "top": 552,
+        "right": 1904,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1695.65625,
+        "y": 567,
+        "width": 191.34375,
+        "height": 24,
+        "top": 567,
+        "right": 1887,
+        "bottom": 591,
+        "left": 1695.65625
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 16.1875,
+            "top": 567,
+            "right": 283,
+            "bottom": 583.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 640,
+            "height": 16.1875,
+            "top": 567,
+            "right": 941,
+            "bottom": 583.1875,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 959,
+            "y": 567,
+            "width": 640,
+            "height": 16.1875,
+            "top": 567,
+            "right": 1599,
+            "bottom": 583.1875,
+            "left": 959
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "inside-1920-Right",
+    "view": "inside",
+    "width": 1920,
+    "dock": "Right",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dticPanel dticPanel-right",
+      "rect": {
+        "x": 1604,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1904,
+        "bottom": 698,
+        "left": 1604
+      },
+      "tools": {
+        "x": 1621,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 1887,
+        "bottom": 151,
+        "left": 1621
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 1621,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 1887,
+            "bottom": 171.1875,
+            "left": 1621
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 1621,
+            "y": 244.1875,
+            "width": 266,
+            "height": 16.1875,
+            "top": 244.1875,
+            "right": 1887,
+            "bottom": 260.375,
+            "left": 1621
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 1621,
+            "y": 291.171875,
+            "width": 266,
+            "height": 16.1875,
+            "top": 291.171875,
+            "right": 1887,
+            "bottom": 307.359375,
+            "left": 1621
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "inside-1920-Auto",
+    "view": "inside",
+    "width": 1920,
+    "dock": "Auto",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dticPanel dticPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 299,
+        "bottom": 151,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 299,
+            "bottom": 171.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 244.1875,
+            "width": 266,
+            "height": 16.1875,
+            "top": 244.1875,
+            "right": 299,
+            "bottom": 260.375,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 291.171875,
+            "width": 266,
+            "height": 16.1875,
+            "top": 291.171875,
+            "right": 299,
+            "bottom": 307.359375,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "artifact-1920-Bottom",
+    "view": "artifact",
+    "width": 1920,
+    "dock": "Bottom",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1888,
+        "height": 150,
+        "top": 552,
+        "right": 1904,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1695.65625,
+        "y": 567,
+        "width": 191.34375,
+        "height": 24,
+        "top": 567,
+        "right": 1887,
+        "bottom": 591,
+        "left": 1695.65625
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 16.1875,
+            "top": 567,
+            "right": 283,
+            "bottom": 583.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 567,
+            "right": 371.359375,
+            "bottom": 583.1875,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 994,
+            "y": 567,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 567,
+            "right": 1088.9375,
+            "bottom": 583.1875,
+            "left": 994
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "artifact-1920-Right",
+    "view": "artifact",
+    "width": 1920,
+    "dock": "Right",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-right",
+      "rect": {
+        "x": 1604,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1904,
+        "bottom": 698,
+        "left": 1604
+      },
+      "tools": {
+        "x": 1621,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 1887,
+        "bottom": 151,
+        "left": 1621
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 12,
+          "rect": {
+            "x": 1621,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 1887,
+            "bottom": 171.1875,
+            "left": 1621
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 1621,
+            "y": 256.5625,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 256.5625,
+            "right": 1691.359375,
+            "bottom": 272.75,
+            "left": 1621
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 1621,
+            "y": 407.75,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 407.75,
+            "right": 1715.9375,
+            "bottom": 423.9375,
+            "left": 1621
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "artifact-1920-Auto",
+    "view": "artifact",
+    "width": 1920,
+    "dock": "Auto",
+    "stress": false,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 24,
+        "top": 127,
+        "right": 299,
+        "bottom": 151,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 155,
+            "width": 266,
+            "height": 16.1875,
+            "top": 155,
+            "right": 299,
+            "bottom": 171.1875,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 256.5625,
+            "width": 70.359375,
+            "height": 16.1875,
+            "top": 256.5625,
+            "right": 103.359375,
+            "bottom": 272.75,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 12,
+          "rect": {
+            "x": 33,
+            "y": 407.75,
+            "width": 94.9375,
+            "height": 16.1875,
+            "top": 407.75,
+            "right": 127.9375,
+            "bottom": 423.9375,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "network-1280-Bottom-long-text125",
+    "view": "network",
+    "width": 1280,
+    "dock": "Bottom",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1248,
+        "height": 150,
+        "top": 552,
+        "right": 1264,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1028.828125,
+        "y": 567,
+        "width": 218.171875,
+        "height": 26,
+        "top": 567,
+        "right": 1247,
+        "bottom": 593,
+        "left": 1028.828125
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 20.25,
+            "top": 567,
+            "right": 283,
+            "bottom": 587.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 567,
+            "right": 388.9375,
+            "bottom": 587.25,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 674,
+            "y": 567,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 567,
+            "right": 792.671875,
+            "bottom": 587.25,
+            "left": 674
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "network-1280-Right-long-text125",
+    "view": "network",
+    "width": 1280,
+    "dock": "Right",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-right",
+      "rect": {
+        "x": 964,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1264,
+        "bottom": 698,
+        "left": 964
+      },
+      "tools": {
+        "x": 981,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 1247,
+        "bottom": 153,
+        "left": 981
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 981,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 1247,
+            "bottom": 177.25,
+            "left": 981
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 981,
+            "y": 566.5,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 566.5,
+            "right": 1068.9375,
+            "bottom": 586.75,
+            "left": 981
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 981,
+            "y": 629.75,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 629.75,
+            "right": 1099.671875,
+            "bottom": 650,
+            "left": 981
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "network-1280-Auto-long-text125",
+    "view": "network",
+    "width": 1280,
+    "dock": "Auto",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 299,
+        "bottom": 153,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 299,
+            "bottom": 177.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 566.5,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 566.5,
+            "right": 120.9375,
+            "bottom": 586.75,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 629.75,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 629.75,
+            "right": 151.671875,
+            "bottom": 650,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "inside-1280-Bottom-long-text125",
+    "view": "inside",
+    "width": 1280,
+    "dock": "Bottom",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dticPanel dticPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1248,
+        "height": 150,
+        "top": 552,
+        "right": 1264,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1028.828125,
+        "y": 567,
+        "width": 218.171875,
+        "height": 26,
+        "top": 567,
+        "right": 1247,
+        "bottom": 593,
+        "left": 1028.828125
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 20.25,
+            "top": 567,
+            "right": 283,
+            "bottom": 587.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 286.25,
+            "height": 20.25,
+            "top": 567,
+            "right": 587.25,
+            "bottom": 587.25,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 605.25,
+            "y": 567,
+            "width": 286.25,
+            "height": 20.25,
+            "top": 567,
+            "right": 891.5,
+            "bottom": 587.25,
+            "left": 605.25
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "inside-1280-Right-long-text125",
+    "view": "inside",
+    "width": 1280,
+    "dock": "Right",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dticPanel dticPanel-right",
+      "rect": {
+        "x": 964,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1264,
+        "bottom": 698,
+        "left": 964
+      },
+      "tools": {
+        "x": 981,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 1247,
+        "bottom": 153,
+        "left": 981
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 981,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 1247,
+            "bottom": 177.25,
+            "left": 981
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 981,
+            "y": 262.25,
+            "width": 266,
+            "height": 20.25,
+            "top": 262.25,
+            "right": 1247,
+            "bottom": 282.5,
+            "left": 981
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 981,
+            "y": 317.5,
+            "width": 266,
+            "height": 20.25,
+            "top": 317.5,
+            "right": 1247,
+            "bottom": 337.75,
+            "left": 981
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "inside-1280-Auto-long-text125",
+    "view": "inside",
+    "width": 1280,
+    "dock": "Auto",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dticPanel dticPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 299,
+        "bottom": 153,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 299,
+            "bottom": 177.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 262.25,
+            "width": 266,
+            "height": 20.25,
+            "top": 262.25,
+            "right": 299,
+            "bottom": 282.5,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 317.5,
+            "width": 266,
+            "height": 20.25,
+            "top": 317.5,
+            "right": 299,
+            "bottom": 337.75,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "artifact-1280-Bottom-long-text125",
+    "view": "artifact",
+    "width": 1280,
+    "dock": "Bottom",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1248,
+        "height": 150,
+        "top": 552,
+        "right": 1264,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1028.828125,
+        "y": 567,
+        "width": 218.171875,
+        "height": 26,
+        "top": 567,
+        "right": 1247,
+        "bottom": 593,
+        "left": 1028.828125
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 20.25,
+            "top": 567,
+            "right": 283,
+            "bottom": 587.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 567,
+            "right": 388.9375,
+            "bottom": 587.25,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 674,
+            "y": 567,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 567,
+            "right": 792.671875,
+            "bottom": 587.25,
+            "left": 674
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "artifact-1280-Right-long-text125",
+    "view": "artifact",
+    "width": 1280,
+    "dock": "Right",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-right",
+      "rect": {
+        "x": 964,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1264,
+        "bottom": 698,
+        "left": 964
+      },
+      "tools": {
+        "x": 981,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 1247,
+        "bottom": 153,
+        "left": 981
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 15,
+          "rect": {
+            "x": 981,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 1247,
+            "bottom": 177.25,
+            "left": 981
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 981,
+            "y": 301.5,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 301.5,
+            "right": 1068.9375,
+            "bottom": 321.75,
+            "left": 981
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 981,
+            "y": 480.75,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 480.75,
+            "right": 1099.671875,
+            "bottom": 501,
+            "left": 981
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "artifact-1280-Auto-long-text125",
+    "view": "artifact",
+    "width": 1280,
+    "dock": "Auto",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 299,
+        "bottom": 153,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 299,
+            "bottom": 177.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 301.5,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 301.5,
+            "right": 120.9375,
+            "bottom": 321.75,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 480.75,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 480.75,
+            "right": 151.671875,
+            "bottom": 501,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "network-1440-Bottom-long-text125",
+    "view": "network",
+    "width": 1440,
+    "dock": "Bottom",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1408,
+        "height": 150,
+        "top": 552,
+        "right": 1424,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1188.828125,
+        "y": 567,
+        "width": 218.171875,
+        "height": 26,
+        "top": 567,
+        "right": 1407,
+        "bottom": 593,
+        "left": 1188.828125
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 20.25,
+            "top": 567,
+            "right": 283,
+            "bottom": 587.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 567,
+            "right": 388.9375,
+            "bottom": 587.25,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 754,
+            "y": 567,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 567,
+            "right": 872.671875,
+            "bottom": 587.25,
+            "left": 754
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "network-1440-Right-long-text125",
+    "view": "network",
+    "width": 1440,
+    "dock": "Right",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-right",
+      "rect": {
+        "x": 1124,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1424,
+        "bottom": 698,
+        "left": 1124
+      },
+      "tools": {
+        "x": 1141,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 1407,
+        "bottom": 153,
+        "left": 1141
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 1141,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 1407,
+            "bottom": 177.25,
+            "left": 1141
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 1141,
+            "y": 566.5,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 566.5,
+            "right": 1228.9375,
+            "bottom": 586.75,
+            "left": 1141
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 1141,
+            "y": 629.75,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 629.75,
+            "right": 1259.671875,
+            "bottom": 650,
+            "left": 1141
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "network-1440-Auto-long-text125",
+    "view": "network",
+    "width": 1440,
+    "dock": "Auto",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 299,
+        "bottom": 153,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 299,
+            "bottom": 177.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 566.5,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 566.5,
+            "right": 120.9375,
+            "bottom": 586.75,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 629.75,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 629.75,
+            "right": 151.671875,
+            "bottom": 650,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "inside-1440-Bottom-long-text125",
+    "view": "inside",
+    "width": 1440,
+    "dock": "Bottom",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dticPanel dticPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1408,
+        "height": 150,
+        "top": 552,
+        "right": 1424,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1188.828125,
+        "y": 567,
+        "width": 218.171875,
+        "height": 26,
+        "top": 567,
+        "right": 1407,
+        "bottom": 593,
+        "left": 1188.828125
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 20.25,
+            "top": 567,
+            "right": 283,
+            "bottom": 587.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 366.25,
+            "height": 20.25,
+            "top": 567,
+            "right": 667.25,
+            "bottom": 587.25,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 685.25,
+            "y": 567,
+            "width": 366.25,
+            "height": 20.25,
+            "top": 567,
+            "right": 1051.5,
+            "bottom": 587.25,
+            "left": 685.25
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "inside-1440-Right-long-text125",
+    "view": "inside",
+    "width": 1440,
+    "dock": "Right",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dticPanel dticPanel-right",
+      "rect": {
+        "x": 1124,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1424,
+        "bottom": 698,
+        "left": 1124
+      },
+      "tools": {
+        "x": 1141,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 1407,
+        "bottom": 153,
+        "left": 1141
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 1141,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 1407,
+            "bottom": 177.25,
+            "left": 1141
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 1141,
+            "y": 262.25,
+            "width": 266,
+            "height": 20.25,
+            "top": 262.25,
+            "right": 1407,
+            "bottom": 282.5,
+            "left": 1141
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 1141,
+            "y": 317.5,
+            "width": 266,
+            "height": 20.25,
+            "top": 317.5,
+            "right": 1407,
+            "bottom": 337.75,
+            "left": 1141
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "inside-1440-Auto-long-text125",
+    "view": "inside",
+    "width": 1440,
+    "dock": "Auto",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dticPanel dticPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 299,
+        "bottom": 153,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 299,
+            "bottom": 177.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 262.25,
+            "width": 266,
+            "height": 20.25,
+            "top": 262.25,
+            "right": 299,
+            "bottom": 282.5,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 317.5,
+            "width": 266,
+            "height": 20.25,
+            "top": 317.5,
+            "right": 299,
+            "bottom": 337.75,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "artifact-1440-Bottom-long-text125",
+    "view": "artifact",
+    "width": 1440,
+    "dock": "Bottom",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1408,
+        "height": 150,
+        "top": 552,
+        "right": 1424,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1188.828125,
+        "y": 567,
+        "width": 218.171875,
+        "height": 26,
+        "top": 567,
+        "right": 1407,
+        "bottom": 593,
+        "left": 1188.828125
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 20.25,
+            "top": 567,
+            "right": 283,
+            "bottom": 587.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 567,
+            "right": 388.9375,
+            "bottom": 587.25,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 754,
+            "y": 567,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 567,
+            "right": 872.671875,
+            "bottom": 587.25,
+            "left": 754
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "artifact-1440-Right-long-text125",
+    "view": "artifact",
+    "width": 1440,
+    "dock": "Right",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-right",
+      "rect": {
+        "x": 1124,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1424,
+        "bottom": 698,
+        "left": 1124
+      },
+      "tools": {
+        "x": 1141,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 1407,
+        "bottom": 153,
+        "left": 1141
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 15,
+          "rect": {
+            "x": 1141,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 1407,
+            "bottom": 177.25,
+            "left": 1141
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 1141,
+            "y": 301.5,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 301.5,
+            "right": 1228.9375,
+            "bottom": 321.75,
+            "left": 1141
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 1141,
+            "y": 480.75,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 480.75,
+            "right": 1259.671875,
+            "bottom": 501,
+            "left": 1141
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "artifact-1440-Auto-long-text125",
+    "view": "artifact",
+    "width": 1440,
+    "dock": "Auto",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 299,
+        "bottom": 153,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 299,
+            "bottom": 177.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 301.5,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 301.5,
+            "right": 120.9375,
+            "bottom": 321.75,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 480.75,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 480.75,
+            "right": 151.671875,
+            "bottom": 501,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "network-1920-Bottom-long-text125",
+    "view": "network",
+    "width": 1920,
+    "dock": "Bottom",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1888,
+        "height": 150,
+        "top": 552,
+        "right": 1904,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1668.828125,
+        "y": 567,
+        "width": 218.171875,
+        "height": 26,
+        "top": 567,
+        "right": 1887,
+        "bottom": 593,
+        "left": 1668.828125
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 20.25,
+            "top": 567,
+            "right": 283,
+            "bottom": 587.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 567,
+            "right": 388.9375,
+            "bottom": 587.25,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 994,
+            "y": 567,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 567,
+            "right": 1112.671875,
+            "bottom": 587.25,
+            "left": 994
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "network-1920-Right-long-text125",
+    "view": "network",
+    "width": 1920,
+    "dock": "Right",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-right",
+      "rect": {
+        "x": 1604,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1904,
+        "bottom": 698,
+        "left": 1604
+      },
+      "tools": {
+        "x": 1621,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 1887,
+        "bottom": 153,
+        "left": 1621
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 1621,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 1887,
+            "bottom": 177.25,
+            "left": 1621
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 1621,
+            "y": 566.5,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 566.5,
+            "right": 1708.9375,
+            "bottom": 586.75,
+            "left": 1621
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 1621,
+            "y": 629.75,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 629.75,
+            "right": 1739.671875,
+            "bottom": 650,
+            "left": 1621
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "network-1920-Auto-long-text125",
+    "view": "network",
+    "width": 1920,
+    "dock": "Auto",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtnPanel dtnPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 299,
+        "bottom": 153,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 299,
+            "bottom": 177.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 566.5,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 566.5,
+            "right": 120.9375,
+            "bottom": 586.75,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 629.75,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 629.75,
+            "right": 151.671875,
+            "bottom": 650,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "pr-5"
+    }
+  },
+  {
+    "name": "inside-1920-Bottom-long-text125",
+    "view": "inside",
+    "width": 1920,
+    "dock": "Bottom",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dticPanel dticPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1888,
+        "height": 150,
+        "top": 552,
+        "right": 1904,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1668.828125,
+        "y": 567,
+        "width": 218.171875,
+        "height": 26,
+        "top": 567,
+        "right": 1887,
+        "bottom": 593,
+        "left": 1668.828125
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 20.25,
+            "top": 567,
+            "right": 283,
+            "bottom": 587.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 606.25,
+            "height": 20.25,
+            "top": 567,
+            "right": 907.25,
+            "bottom": 587.25,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 925.25,
+            "y": 567,
+            "width": 606.25,
+            "height": 20.25,
+            "top": 567,
+            "right": 1531.5,
+            "bottom": 587.25,
+            "left": 925.25
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "inside-1920-Right-long-text125",
+    "view": "inside",
+    "width": 1920,
+    "dock": "Right",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dticPanel dticPanel-right",
+      "rect": {
+        "x": 1604,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1904,
+        "bottom": 698,
+        "left": 1604
+      },
+      "tools": {
+        "x": 1621,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 1887,
+        "bottom": 153,
+        "left": 1621
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 1621,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 1887,
+            "bottom": 177.25,
+            "left": 1621
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 1621,
+            "y": 262.25,
+            "width": 266,
+            "height": 20.25,
+            "top": 262.25,
+            "right": 1887,
+            "bottom": 282.5,
+            "left": 1621
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 1621,
+            "y": 317.5,
+            "width": 266,
+            "height": 20.25,
+            "top": 317.5,
+            "right": 1887,
+            "bottom": 337.75,
+            "left": 1621
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "inside-1920-Auto-long-text125",
+    "view": "inside",
+    "width": 1920,
+    "dock": "Auto",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dticPanel dticPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 299,
+        "bottom": 153,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "SELECTED RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 299,
+            "bottom": 177.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 262.25,
+            "width": 266,
+            "height": 20.25,
+            "top": 262.25,
+            "right": 299,
+            "bottom": 282.5,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 317.5,
+            "width": 266,
+            "height": 20.25,
+            "top": 317.5,
+            "right": 299,
+            "bottom": 337.75,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "cr-1"
+    }
+  },
+  {
+    "name": "artifact-1920-Bottom-long-text125",
+    "view": "artifact",
+    "width": 1920,
+    "dock": "Bottom",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-bottom",
+      "rect": {
+        "x": 16,
+        "y": 552,
+        "width": 1888,
+        "height": 150,
+        "top": 552,
+        "right": 1904,
+        "bottom": 702,
+        "left": 16
+      },
+      "tools": {
+        "x": 1668.828125,
+        "y": 567,
+        "width": 218.171875,
+        "height": 26,
+        "top": 567,
+        "right": 1887,
+        "bottom": 593,
+        "left": 1668.828125
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 567,
+            "width": 250,
+            "height": 20.25,
+            "top": 567,
+            "right": 283,
+            "bottom": 587.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 301,
+            "y": 567,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 567,
+            "right": 388.9375,
+            "bottom": 587.25,
+            "left": 301
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 994,
+            "y": 567,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 567,
+            "right": 1112.671875,
+            "bottom": 587.25,
+            "left": 994
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "artifact-1920-Right-long-text125",
+    "view": "artifact",
+    "width": 1920,
+    "dock": "Right",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-right",
+      "rect": {
+        "x": 1604,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 1904,
+        "bottom": 698,
+        "left": 1604
+      },
+      "tools": {
+        "x": 1621,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 1887,
+        "bottom": 153,
+        "left": 1621
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 15,
+          "rect": {
+            "x": 1621,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 1887,
+            "bottom": 177.25,
+            "left": 1621
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 1621,
+            "y": 301.5,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 301.5,
+            "right": 1708.9375,
+            "bottom": 321.75,
+            "left": 1621
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 1621,
+            "y": 480.75,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 480.75,
+            "right": 1739.671875,
+            "bottom": 501,
+            "left": 1621
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  },
+  {
+    "name": "artifact-1920-Auto-long-text125",
+    "view": "artifact",
+    "width": 1920,
+    "dock": "Auto",
+    "stress": true,
+    "source": "7d1a8c58e01166391f5ea4cd1f59997813d58ab4",
+    "kind": "real adapter fixture long data plus synthetic125percent text-only stress",
+    "metrics": {
+      "class": "dtaPanel dtaPanel-left",
+      "rect": {
+        "x": 16,
+        "y": 112,
+        "width": 300,
+        "height": 586,
+        "top": 112,
+        "right": 316,
+        "bottom": 698,
+        "left": 16
+      },
+      "tools": {
+        "x": 33,
+        "y": 127,
+        "width": 266,
+        "height": 26,
+        "top": 127,
+        "right": 299,
+        "bottom": 153,
+        "left": 33
+      },
+      "labels": [
+        {
+          "text": "FOCAL RECORD",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 157,
+            "width": 266,
+            "height": 20.25,
+            "top": 157,
+            "right": 299,
+            "bottom": 177.25,
+            "left": 33
+          }
+        },
+        {
+          "text": "UPSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 301.5,
+            "width": 87.9375,
+            "height": 20.25,
+            "top": 301.5,
+            "right": 120.9375,
+            "bottom": 321.75,
+            "left": 33
+          }
+        },
+        {
+          "text": "DOWNSTREAM",
+          "size": 15,
+          "rect": {
+            "x": 33,
+            "y": 480.75,
+            "width": 118.671875,
+            "height": 20.25,
+            "top": 480.75,
+            "right": 151.671875,
+            "bottom": 501,
+            "left": 33
+          }
+        }
+      ],
+      "overlaps": [],
+      "selected": "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+    }
+  }
+]

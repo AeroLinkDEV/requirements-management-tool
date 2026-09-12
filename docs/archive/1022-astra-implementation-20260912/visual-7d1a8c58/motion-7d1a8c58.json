@@ -1,0 +1,1621 @@
+{
+  "config": {
+    "argv": [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Sean Project\\RMT-1022-astra-implementation\\product\\client\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "--config=playwright.rendered.config.ts",
+      "digital-thread-core-interaction.spec.ts",
+      "--output=C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results",
+      "--reporter=list,json"
+    ],
+    "configFile": "C:\\Sean Project\\RMT-1022-astra-implementation\\product\\client\\playwright.rendered.config.ts",
+    "rootDir": "C:/Sean Project/RMT-1022-astra-implementation/product/client/tests",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/seanm/AppData/Local/Temp/astra-1022-implementation-20260912/motion-7d1a8c58-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "rendered",
+        "name": "rendered",
+        "testDir": "C:/Sean Project/RMT-1022-astra-implementation/product/client/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "artifact-thread-rendered.spec.ts",
+          "digital-thread-core-interaction.spec.ts"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 1,
+    "webServer": {
+      "command": "npm run dev -- --host 127.0.0.1 --port 5209 --strictPort",
+      "url": "http://127.0.0.1:5209",
+      "reuseExistingServer": false,
+      "timeout": 60000
+    }
+  },
+  "suites": [
+    {
+      "title": "digital-thread-core-interaction.spec.ts",
+      "file": "digital-thread-core-interaction.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "a tall partially visible card stays painted and its native tail action becomes reachable by rolling",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1993,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:16:25.087Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-00e3e-ecomes-reachable-by-rolling-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-810371a2be57ad5de32c",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 30,
+          "column": 1
+        },
+        {
+          "title": "StrictMode arrival clears easing and keeps a revealed Artifact card pointer accessible",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1755,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:16:27.167Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-7ed55-act-card-pointer-accessible-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-c7e8ae4e9c14c98d657d",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 63,
+          "column": 1
+        },
+        {
+          "title": "continuation affordances stay beside the inspector in every dock",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1925,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:16:28.930Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-2b590-the-inspector-in-every-dock-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-31e70ceaa251bcf675f7",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 78,
+          "column": 1
+        },
+        {
+          "title": "hover emphasises without moving the camera or the source card",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1996,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:16:30.862Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-b9734-e-camera-or-the-source-card-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-26089ca089b55b746b13",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 171,
+          "column": 1
+        },
+        {
+          "title": "hover emphasis ends without a popup and without a camera restore",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2628,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:16:32.866Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-8c7a5-nd-without-a-camera-restore-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-ca18393348b16f2e2011",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 188,
+          "column": 1
+        },
+        {
+          "title": "the real card is the click target and selection is persistent",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2077,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:16:35.505Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-3c22b-and-selection-is-persistent-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-b6d2840bc23f9a8597f9",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 202,
+          "column": 1
+        },
+        {
+          "title": "a dense thread keeps every record reachable through its explicit reveal action",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1444,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:16:37.591Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-1768a--its-explicit-reveal-action-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7e0b48ece9551631f762",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 218,
+          "column": 1
+        },
+        {
+          "title": "a revealed lane can be scrolled into its temporary range and clear does not snap it back",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 7016,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:16:39.044Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-1bc39-clear-does-not-snap-it-back-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-3fe7184f89e6a84769cc",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 243,
+          "column": 1
+        },
+        {
+          "title": "Inside a change: selected hover is inert and a selected record owns its thread",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2969,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:16:46.067Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-e6f60-cted-record-owns-its-thread-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-b74fa1ee615d1493c160",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 562,
+          "column": 1
+        },
+        {
+          "title": "Artifact thread: selected hover leaves the arrival selection unchanged",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2562,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:16:49.045Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-1f474-arrival-selection-unchanged-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-422c95c1b67d5c24b9ba",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 584,
+          "column": 1
+        },
+        {
+          "title": "Network: quiet to unselected hover after 0 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2216,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:16:51.614Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-59dc0-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7198f59fb758eafce0e4",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Inside: quiet to unselected hover after 0 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2179,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:16:53.837Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-0cb31-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e9eafda3f963f3d1a09a",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Artifact: quiet to unselected hover after 0 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2239,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:16:56.025Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-fd88a-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-9b45ac4bfbe63b633934",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Network: quiet to unselected hover after 1 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2283,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:16:58.273Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-dc042-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-0f9ece0645312d8ac5e6",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Inside: quiet to unselected hover after 1 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2763,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:00.563Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-ed4be-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-8d88301f46987e45b582",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Artifact: quiet to unselected hover after 1 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2223,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:03.333Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-8efed-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-5c49e54bb3881e08ea21",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Network: quiet to unselected hover after 3 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2408,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:05.563Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-08907-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-b885dc221d252fb9b729",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Inside: quiet to unselected hover after 3 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2311,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:07.978Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-d9e75-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-26681f01c0533849aec9",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Artifact: quiet to unselected hover after 3 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2321,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:10.297Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-ce5d0-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-ed0db2a2082854fcae6a",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "same-tier rendered linked growth repairs only colliding temporary geometry and converges",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4180,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:12.627Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-66bf2-rary-geometry-and-converges-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-c98ef4d140d3dc0d1d0a",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 637,
+          "column": 39
+        },
+        {
+          "title": "same-tier rendered promoted-subject growth repairs only colliding temporary geometry and converges",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4411,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:16.815Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-fb530-rary-geometry-and-converges-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-18c5c36bf34f3bf1a53d",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 637,
+          "column": 39
+        },
+        {
+          "title": "a hidden lane's linked endpoint arrives at a useful height when the reader pans to it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2953,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:21.235Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-fd06b--when-the-reader-pans-to-it-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-07d46c6929a93e30caae",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 683,
+          "column": 1
+        },
+        {
+          "title": "manual vertical exploration survives horizontal away and back",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4083,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:24.196Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-f074a-es-horizontal-away-and-back-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-25f456f1b564f58891e8",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 734,
+          "column": 1
+        },
+        {
+          "title": "a linked card is revealed automatically into available space without moving the camera",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3525,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:28.289Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-f0bee-e-without-moving-the-camera-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e5bca653c820c293554a",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 812,
+          "column": 1
+        },
+        {
+          "title": "clicking a relocated linked card keeps it where the reader saw it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4047,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:31.822Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-aad5a--it-where-the-reader-saw-it-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-df2bdcb39a75c4f6dae7",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 871,
+          "column": 1
+        },
+        {
+          "title": "a drag takes over an automatic camera move from the displayed position",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3380,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:35.877Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-e8723-from-the-displayed-position-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-98e8c81c01a3f799f935",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 925,
+          "column": 1
+        },
+        {
+          "title": "reduced motion reaches the same arrangement without animating",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1948,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:39.264Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-65b86-rangement-without-animating-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-5bc587c7227c59f101fa",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1019,
+          "column": 1
+        },
+        {
+          "title": "clicking during an incoming reveal keeps the arrangement and selects that subject",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3400,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:41.220Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-aa262-nt-and-selects-that-subject-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7db58906581161f0995c",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1054,
+          "column": 1
+        },
+        {
+          "title": "a new selection during cleanup replaces the old subject cleanly",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4440,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:44.628Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-fda8e-ces-the-old-subject-cleanly-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7cc0d8268ad9f54fb4a5",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1143,
+          "column": 1
+        },
+        {
+          "title": "clearing during motion stops the camera where the reader saw it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2157,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:49.075Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-1c67a-era-where-the-reader-saw-it-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e465a44bb89bc79a368d",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1228,
+          "column": 1
+        },
+        {
+          "title": "Arrow Down moves focus within the same lane and keeps it visible",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1605,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:51.240Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-e8220-e-lane-and-keeps-it-visible-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e5eeebf043fa9ab0d1c2",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1262,
+          "column": 1
+        },
+        {
+          "title": "a density change after manual exploration leaves no overlapping cards",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3271,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:52.855Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-050e4-leaves-no-overlapping-cards-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e62ff13c22f8939ac35c",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1296,
+          "column": 1
+        },
+        {
+          "title": "a scope change resets navigation while a same-scope refresh keeps it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4098,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:17:56.137Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-1fbef-same-scope-refresh-keeps-it-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-58ddd770df534bce6dcc",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1354,
+          "column": 1
+        },
+        {
+          "title": "a hidden lane's endpoint arrives at a useful height on first exposure",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2983,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:18:00.243Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-3464a-ul-height-on-first-exposure-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-8a27a418fd3622b76ec6",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1418,
+          "column": 1
+        },
+        {
+          "title": "four-direction continuation follows the usable boundary during selected exploration",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4653,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:18:03.234Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-bf024-during-selected-exploration-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-9f1f3a5e812ec9c88c52",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1464,
+          "column": 1
+        },
+        {
+          "title": "pointer identity, cancellation and unmount clean up the active gesture",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2356,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:18:07.895Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-9cbb0-clean-up-the-active-gesture-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-cb8412a5f2a2b0c46de3",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1500,
+          "column": 1
+        },
+        {
+          "title": "actual click framing interpolates all matrix axes with coherent edges and hit targets",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3164,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:18:10.258Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "displayed-click-matrices",
+                      "contentType": "application/json",
+                      "body": "WwogIHsKICAgICJ0IjogMC4wOTk5OTk5OTQwMzk1MzU1MiwKICAgICJheGVzIjogWwogICAgICAwLjU4LAogICAgICAwLAogICAgICAwLAogICAgICAwLjU4LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiBmYWxzZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IG51bGwKICB9LAogIHsKICAgICJ0IjogMTQuMjAwMDAwMDE3ODgxMzkzLAogICAgImF4ZXMiOiBbCiAgICAgIDAuNTgsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNTgsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IGZhbHNlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogbnVsbAogIH0sCiAgewogICAgInQiOiAyOC41OTk5OTk5OTQwMzk1MzYsCiAgICAiYXhlcyI6IFsKICAgICAgMC41OCwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC41OCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogZmFsc2UsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiBudWxsCiAgfSwKICB7CiAgICAidCI6IDEzMi40MDAwMDAwMDU5NjA0NiwKICAgICJheGVzIjogWwogICAgICAwLjU4LAogICAgICAwLAogICAgICAwLAogICAgICAwLjU4LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE1OTY1Njg2NjMyMTcxMTI4CiAgfSwKICB7CiAgICAidCI6IDEzOS41OTk5OTk5OTQwMzk1NCwKICAgICJheGVzIjogWwogICAgICAwLjU4LAogICAgICAwLAogICAgICAwLAogICAgICAwLjU4LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE1OTY1Njg2NjMyMTcxMTI4CiAgfSwKICB7CiAgICAidCI6IDE1NC4zMDAwMDAwMTE5MjA5MywKICAgICJheGVzIjogWwogICAgICAwLjU4LAogICAgICAwLAogICAgICAwLAogICAgICAwLjU4LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE1OTY1Njg2NjMyMTcxMTI4CiAgfSwKICB7CiAgICAidCI6IDE3MS40MDAwMDAwMDU5NjA0NiwKICAgICJheGVzIjogWwogICAgICAwLjU5MzIwOSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC41OTMyMDksCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTU4NjQ4MjA2OTc0MDIxMzgKICB9LAogIHsKICAgICJ0IjogMTkzLjUsCiAgICAiYXhlcyI6IFsKICAgICAgMC42MTk0ODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNjE5NDgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE2NjYyODk4NTczMjU4NjQ0CiAgfSwKICB7CiAgICAidCI6IDIwOS4yMDAwMDAwMTc4ODE0LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNjMyMjcsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNjMyMjcsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTY5ODcwMjkxNzExMDQ5NQogIH0sCiAgewogICAgInQiOiAyMzIuOTAwMDAwMDA1OTYwNDYsCiAgICAiYXhlcyI6IFsKICAgICAgMC42NDQ3MDcsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNjQ0NzA3LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE3MzU3Njk0MDI3ODUwODEyCiAgfSwKICB7CiAgICAidCI6IDI1MC40MDAwMDAwMDU5NjA0NiwKICAgICJheGVzIjogWwogICAgICAwLjY1NjYzOCwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC42NTY2MzgsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTc4OTgzMjY4MTUzODQyOAogIH0sCiAgewogICAgInQiOiAyNjIuMDk5OTk5OTk0MDM5NTQsCiAgICAiYXhlcyI6IFsKICAgICAgMC42NjgxMzcsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNjY4MTM3LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE4MDM1MTQ4MjExNzY1NzcyCiAgfSwKICB7CiAgICAidCI6IDI3NS4zMDAwMDAwMTE5MjA5MywKICAgICJheGVzIjogWwogICAgICAwLjY3OTAxNSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC42NzkwMTUsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTgxOTIxNjI1MzEyNDk3NzgKICB9LAogIHsKICAgICJ0IjogMjkxLjQwMDAwMDAwNTk2MDQ2LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNjg5MzY0LAogICAgICAwLAogICAgICAwLAogICAgICAwLjY4OTM2NCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAxODcxNDA1MDkyMjg4MTE0MgogIH0sCiAgewogICAgInQiOiAzMDguNSwKICAgICJheGVzIjogWwogICAgICAwLjY5OTA5OSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC42OTkwOTksCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTg4MDU3Mjk3ODUwNzE4OQogIH0sCiAgewogICAgInQiOiAzMjUuMzAwMDAwMDExOTIwOTMsCiAgICAiYXhlcyI6IFsKICAgICAgMC43MDgxNjIsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzA4MTYyLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE5MTU1ODgxNjIyMDU0OTQ5CiAgfSwKICB7CiAgICAidCI6IDM0MS45MDAwMDAwMDU5NjA0NiwKICAgICJheGVzIjogWwogICAgICAwLjcxNjY3LAogICAgICAwLAogICAgICAwLAogICAgICAwLjcxNjY3LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE5MzMyNTUyOTUwNTcyNzkKICB9LAogIHsKICAgICJ0IjogMzU5LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzI0NTg2LAogICAgICAwLAogICAgICAwLAogICAgICAwLjcyNDU4NiwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAxOTQ1ODY4MTMzMTM0MzU0MQogIH0sCiAgewogICAgInQiOiAzNzUuNSwKICAgICJheGVzIjogWwogICAgICAwLjczMTg5LAogICAgICAwLAogICAgICAwLAogICAgICAwLjczMTg5LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE5Njk1OTE2Mjk0MDQwMjE3CiAgfSwKICB7CiAgICAidCI6IDM5Mi4wOTk5OTk5OTQwMzk1NCwKICAgICJheGVzIjogWwogICAgICAwLjczODcwMSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43Mzg3MDEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjAwNDUwMjI4MzczOTM4NDQKICB9LAogIHsKICAgICJ0IjogNDA4LjgwMDAwMDAxMTkyMDkzLAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzQ1MDA0LAogICAgICAwLAogICAgICAwLAogICAgICAwLjc0NTAwNCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMDEwODY1MDQxMTk5ODQ5NwogIH0sCiAgewogICAgInQiOiA0MjUuMjAwMDAwMDE3ODgxNCwKICAgICJheGVzIjogWwogICAgICAwLjc1MDc5NywKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43NTA3OTcsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjAxMjA0MTcxMjMwNTI5MDMKICB9LAogIHsKICAgICJ0IjogNDQyLjIwMDAwMDAxNzg4MTQsCiAgICAiYXhlcyI6IFsKICAgICAgMC43NTYxODMsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzU2MTgzLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIwMjM2ODQyODQzODE0ODg0CiAgfSwKICB7CiAgICAidCI6IDQ1OC44MDAwMDAwMTE5MjA5MywKICAgICJheGVzIjogWwogICAgICAwLjc2MTE1NiwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43NjExNTYsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjA1OTcyNTk1ODk4NjI5MTUKICB9LAogIHsKICAgICJ0IjogNDc1LjcwMDAwMDAxNzg4MTQsCiAgICAiYXhlcyI6IFsKICAgICAgMC43NjU3MTksCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzY1NzE5LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIwOTQwNjg3Mjk2MDQ3MTQ1CiAgfSwKICB7CiAgICAidCI6IDQ5MS44MDAwMDAwMTE5MjA5MywKICAgICJheGVzIjogWwogICAgICAwLjc2OTk1NiwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43Njk5NTYsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjA3MjU3NTMwNDczNzI1NjQKICB9LAogIHsKICAgICJ0IjogNTA4LjUsCiAgICAiYXhlcyI6IFsKICAgICAgMC43NzM4NCwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43NzM4NCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMDg5MTE1MTkwODEzMTE4CiAgfSwKICB7CiAgICAidCI6IDUyNC44MDAwMDAwMTE5MjA5LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzc3NDQzLAogICAgICAwLAogICAgICAwLAogICAgICAwLjc3NzQ0MywKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMDc5NzQ0MTUzNjYxNTIyNAogIH0sCiAgewogICAgInQiOiA1NDMuNzAwMDAwMDE3ODgxNCwKICAgICJheGVzIjogWwogICAgICAwLjc4MDc2MiwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43ODA3NjIsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjEwNjgwMjM5MjAwNjU1NwogIH0sCiAgewogICAgInQiOiA1NTguMjAwMDAwMDE3ODgxNCwKICAgICJheGVzIjogWwogICAgICAwLjc4MzgwMSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43ODM4MDEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjA5NTkxMTAxMzQ5ODE1MwogIH0sCiAgewogICAgInQiOiA1NzQuNzAwMDAwMDE3ODgxNCwKICAgICJheGVzIjogWwogICAgICAwLjc4NjYxNCwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43ODY2MTQsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjEwMzcyMzg1MjY1NjAwMwogIH0sCiAgewogICAgInQiOiA1OTIuNSwKICAgICJheGVzIjogWwogICAgICAwLjc4OTE5OSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43ODkxOTksCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjEwMjQ1OTUyNzM1MDIyCiAgfSwKICB7CiAgICAidCI6IDYwOC4wOTk5OTk5OTQwMzk1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzkxNTU4LAogICAgICAwLAogICAgICAwLAogICAgICAwLjc5MTU1OCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTUwNDE2OTk3ODkyNTM0NwogIH0sCiAgewogICAgInQiOiA2MjUuNSwKICAgICJheGVzIjogWwogICAgICAwLjc5Mzc0NywKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43OTM3NDcsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjEyMTE0NDYzMDIyMzE3MDcKICB9LAogIHsKICAgICJ0IjogNjQyLjIwMDAwMDAxNzg4MTQsCiAgICAiYXhlcyI6IFsKICAgICAgMC43OTU3MjYsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzk1NzI2LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxNDU0Mjg2MDkzMTAzMjkKICB9LAogIHsKICAgICJ0IjogNjU4LjgwMDAwMDAxMTkyMDksCiAgICAiYXhlcyI6IFsKICAgICAgMC43OTc1NDUsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzk3NTQ1LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxMjM1MDQ3NzI4Mzk2MjQKICB9LAogIHsKICAgICJ0IjogNjc1LjUsCiAgICAiYXhlcyI6IFsKICAgICAgMC43OTkxOTMsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzk5MTkzLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxNTc3NDQ1Mjc2MDc5NzQzCiAgfSwKICB7CiAgICAidCI6IDY5MS45MDAwMDAwMDU5NjA1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODAwNjkxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwMDY5MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTQ2OTk2NDg4MzYzNTg0CiAgfSwKICB7CiAgICAidCI6IDcwOC43MDAwMDAwMTc4ODE0LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODAyMDU2LAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwMjA1NiwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTYyMzU0OTc2MzQ4OTc5CiAgfSwKICB7CiAgICAidCI6IDcyNS44MDAwMDAwMTE5MjA5LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODAzMjk0LAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwMzI5NCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTYzNjYyNjcyMjczODU4MwogIH0sCiAgewogICAgInQiOiA3NDEuNSwKICAgICJheGVzIjogWwogICAgICAwLjgwNDM5MiwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDQzOTIsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE3OTM3NTQ0NDg4MjIyNTYKICB9LAogIHsKICAgICJ0IjogNzU4LjUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MDUzNzMsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODA1MzczLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxOTI4NjQ5ODcxOTM4NDMzCiAgfSwKICB7CiAgICAidCI6IDc3NC44MDAwMDAwMTE5MjA5LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODA2MjQ4LAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwNjI0OCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTY2MzcyOTMyNTQ5NjIwNgogIH0sCiAgewogICAgInQiOiA3OTEuNzAwMDAwMDE3ODgxNCwKICAgICJheGVzIjogWwogICAgICAwLjgwNzAxMywKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDcwMTMsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE2NDk3NTY3NTQ0MTM4MwogIH0sCiAgewogICAgInQiOiA4MDguOTAwMDAwMDA1OTYwNSwKICAgICJheGVzIjogWwogICAgICAwLjgwNzY4MywKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDc2ODMsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE3MTY2NjU3NTEyMjc5OTMKICB9LAogIHsKICAgICJ0IjogODI0LjU5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MDgyNjEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODA4MjYxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxNzczOTUzNTYxNzA1NjQKICB9LAogIHsKICAgICJ0IjogODQxLjUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MDg3NDIsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODA4NzQyLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxNjk4NzExMDI2Mzc0NDQKICB9LAogIHsKICAgICJ0IjogODU4LjA5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MDkxNDIsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODA5MTQyLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODgxMTMyOTI4NDU2MjgKICB9LAogIHsKICAgICJ0IjogODc0LjgwMDAwMDAxMTkyMDksCiAgICAiYXhlcyI6IFsKICAgICAgMC44MDk0NTksCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODA5NDU5LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxNjc1MDg4ODY3MTQxMzEyCiAgfSwKICB7CiAgICAidCI6IDg5MS45MDAwMDAwMDU5NjA1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODA5NywKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDk3LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxNzc5MzIxODM4MjY2Njk2CiAgfSwKICB7CiAgICAidCI6IDkwOC4zMDAwMDAwMTE5MjA5LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODA5ODY5LAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwOTg2OSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTY5OTIzMzY3Mzc1NzU5CiAgfSwKICB7CiAgICAidCI6IDkyNC45MDAwMDAwMDU5NjA1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODA5OTY4LAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwOTk2OCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTU0MjE2MDg4NTcwMTM4CiAgfSwKICB7CiAgICAidCI6IDk0Mi4zMDAwMDAwMTE5MjA5LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogOTU4LjkwMDAwMDAwNTk2MDUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiA5NzQuOTAwMDAwMDA1OTYwNSwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDk5MS45MDAwMDAwMDU5NjA1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTAwOC4yMDAwMDAwMTc4ODE0LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTAyNi4zMDAwMDAwMTE5MjEsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMDQxLjUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMDU5LjU5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMDc0LjgwMDAwMDAxMTkyMSwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDEwOTEuOTAwMDAwMDA1OTYwNSwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDExMDgsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMTI2LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTE0MS4wOTk5OTk5OTQwMzk1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTE1OC43MDAwMDAwMTc4ODE0LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTE3NC45MDAwMDAwMDU5NjA1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTE5MS4wOTk5OTk5OTQwMzk1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTIwOC44MDAwMDAwMTE5MjEsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMjI1LjA5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMjQyLjA5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMjU4LjQwMDAwMDAwNTk2MDUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMjc0LjkwMDAwMDAwNTk2MDUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMjkxLjQwMDAwMDAwNTk2MDUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMzA5LjUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0KXQ=="
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-427c3-erent-edges-and-hit-targets-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-9e1bb77ad1c998d9ef3d",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1531,
+          "column": 1
+        },
+        {
+          "title": "manual input interrupts real click framing from its displayed position",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3095,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:18:13.429Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "click-motion-takeover",
+                      "contentType": "application/json",
+                      "body": "ewogICJwcmVzc2VkIjogWwogICAgMC43MDgxNTcsCiAgICAwLAogICAgMCwKICAgIDAuNzA4MTU3LAogICAgMzE0LjA0LAogICAgMTk4LjE4NgogIF0sCiAgImhlbGQiOiBbCiAgICAwLjcwODE1NywKICAgIDAsCiAgICAwLAogICAgMC43MDgxNTcsCiAgICAzMTQuMDQsCiAgICAxOTguMTg2CiAgXSwKICAicmVsZWFzZWQiOiBbCiAgICAwLjcwODE1NywKICAgIDAsCiAgICAwLAogICAgMC43MDgxNTcsCiAgICAxNjQuMDQsCiAgICAxOTguMTg2CiAgXSwKICAiZGVsYXllZCI6IFsKICAgIDAuNzA4MTU3LAogICAgMCwKICAgIDAsCiAgICAwLjcwODE1NywKICAgIDE2NC4wNCwKICAgIDE5OC4xODYKICBdCn0="
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\motion-7d1a8c58-results\\digital-thread-core-intera-8f7a2-from-its-displayed-position-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7edc6f1b57b8d4a30010",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1585,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-12T21:16:23.777Z",
+    "duration": 113279.44,
+    "expected": 38,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

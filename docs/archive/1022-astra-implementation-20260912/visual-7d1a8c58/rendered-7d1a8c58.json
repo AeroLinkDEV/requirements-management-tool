@@ -1,0 +1,3081 @@
+{
+  "config": {
+    "argv": [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Sean Project\\RMT-1022-astra-implementation\\product\\client\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "--config=playwright.rendered.config.ts",
+      "digital-thread-core-interaction.spec.ts",
+      "artifact-thread-rendered.spec.ts",
+      "--output=C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-7d1a8c58-results",
+      "--reporter=list,json"
+    ],
+    "configFile": "C:\\Sean Project\\RMT-1022-astra-implementation\\product\\client\\playwright.rendered.config.ts",
+    "rootDir": "C:/Sean Project/RMT-1022-astra-implementation/product/client/tests",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/seanm/AppData/Local/Temp/astra-1022-implementation-20260912/rendered-7d1a8c58-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "rendered",
+        "name": "rendered",
+        "testDir": "C:/Sean Project/RMT-1022-astra-implementation/product/client/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "artifact-thread-rendered.spec.ts",
+          "digital-thread-core-interaction.spec.ts"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 1,
+    "webServer": {
+      "command": "npm run dev -- --host 127.0.0.1 --port 5209 --strictPort",
+      "url": "http://127.0.0.1:5209",
+      "reuseExistingServer": false,
+      "timeout": 60000
+    }
+  },
+  "suites": [
+    {
+      "title": "artifact-thread-rendered.spec.ts",
+      "file": "artifact-thread-rendered.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "the six-lane model on screen",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 106,
+          "column": 6,
+          "specs": [
+            {
+              "title": "a fully populated thread draws all six lanes, result and build sharing the last",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1329,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:10:49.254Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-e21d308933cb1ad7890d",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 107,
+              "column": 3
+            },
+            {
+              "title": "every lane is present and reachable when the thread first opens",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1886,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:10:50.685Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-cf5343bd3f2ae090861c",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 133,
+              "column": 3
+            },
+            {
+              "title": "an explicit Fit shows the whole board, which automatic landing no longer has to",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2007,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:10:52.586Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-4959b9d361a0d02201b2",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 157,
+              "column": 3
+            },
+            {
+              "title": "a System chain drops the Test Case lane rather than showing it empty",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1238,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:10:54.605Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-1bc665e3bada7d7766e3",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 174,
+              "column": 3
+            },
+            {
+              "title": "an edge inside the final lane is drawn beside it, not across it",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1241,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:10:55.856Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-55717562ee0d7d189bba",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 188,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "exact identity",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 216,
+          "column": 6,
+          "specs": [
+            {
+              "title": "the focal artifact is the one selected, expanded and named",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1343,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:10:57.106Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-c4b1ebbdcc283011bcb1",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 217,
+              "column": 3
+            },
+            {
+              "title": "each supported focal kind opens its own thread on its own record",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 5455,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:10:58.458Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-075706a00ac9048f815e",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 229,
+              "column": 3
+            },
+            {
+              "title": "an execution's card carries no invented identifier",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1227,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:03.924Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-19fcf69e17e1c74bb2e8",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 245,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "evidence",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 262,
+          "column": 6,
+          "specs": [
+            {
+              "title": "the identity and the whole hash survive into what the reader sees",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1206,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:05.161Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-b6895a1c9a5db74ef3b7",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 263,
+              "column": 3
+            },
+            {
+              "title": "evidence is a fact on the result, not a lane of its own",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1175,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:06.376Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-89455bc44995d41dfd46",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 279,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "suspectness",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 288,
+          "column": 6,
+          "specs": [
+            {
+              "title": "a server-stated suspect link looks different from a settled one, and says so",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1233,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:07.561Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-2948d7ffe012a8c2133f",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 289,
+              "column": 3
+            },
+            {
+              "title": "the expanded card explains the suspect link rather than leaving the colour to carry it",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1246,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:08.802Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-4d4a81b8896f0eece268",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 313,
+              "column": 3
+            },
+            {
+              "title": "the Suspect chip selects endpoints of a suspect relationship",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1289,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:10.056Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-ad2883431ef840634da6",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 321,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "the trace the server returned",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 331,
+          "column": 6,
+          "specs": [
+            {
+              "title": "the whole directed web highlights, and untraced records recede rather than disappear",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1228,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:11.353Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-f87feebe5beaa1475577",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 332,
+              "column": 3
+            },
+            {
+              "title": "the trace does not walk sideways into a record that merely shares a procedure",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1255,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:12.591Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-20c74f505558212a6758",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 341,
+              "column": 3
+            },
+            {
+              "title": "the panel lists every hop, with the relation word on the direct ones",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1245,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:13.855Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-fe1f96a2c9b8734356e3",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 355,
+              "column": 3
+            },
+            {
+              "title": "a panel row re-centres the board on that record",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1747,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:15.108Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-34389b0350fb1bfba44f",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 371,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "the branching hierarchy story (#925 F5/V5)",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 380,
+          "column": 6,
+          "specs": [
+            {
+              "title": "System above, two LLR children with their verification below, sibling kept out",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1319,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:16.862Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-81dd91e36662815c8ed0",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 383,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "states the canvas must tell apart",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 426,
+          "column": 6,
+          "specs": [
+            {
+              "title": "a malformed response draws nothing at all, and says why",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1101,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:18.190Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-9818d7c64c269ed68e10",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 427,
+              "column": 3
+            },
+            {
+              "title": "a transport failure is a different state from a malformed one",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1060,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:19.298Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-e62da451102fd22e664c",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 441,
+              "column": 3
+            },
+            {
+              "title": "an unconnected artifact renders as a normal card, not as empty containers",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1148,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:20.364Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-62b362a893dd9a4a5569",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 450,
+              "column": 3
+            },
+            {
+              "title": "a level with no verification discipline states the reason and invents nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1196,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:21.521Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-1187b45e217338e3e29d",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 461,
+              "column": 3
+            },
+            {
+              "title": "a filter that empties a lane leaves the lane in place and says so",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1506,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:22.724Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-350ab8e8f879abeca72a",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 475,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "shared canvas behaviour",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 486,
+          "column": 6,
+          "specs": [
+            {
+              "title": "the board zooms, changes density tier and refits",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2556,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:24.238Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-e00f1760779fc4baec1f",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 487,
+              "column": 3
+            },
+            {
+              "title": "a density tier drops card content instead of shrinking it",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1671,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:26.802Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-14a484af5580fdbc92cc",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 532,
+              "column": 3
+            },
+            {
+              "title": "dragging a lane band rolls that lane",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2114,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:28.482Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-75f14aaae1ac13009b66",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 548,
+              "column": 3
+            },
+            {
+              "title": "selecting a record makes its linked records reachable in their own lanes",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2175,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:30.605Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-0d29edb65179ee50d514",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 560,
+              "column": 3
+            },
+            {
+              "title": "the detail panel never comes to rest on a directly linked record",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4449,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:32.788Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-9731e7b47faf49fb9012",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 593,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "keyboard access",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 647,
+          "column": 6,
+          "specs": [
+            {
+              "title": "tabbing across lanes never rests focus on a card the canvas has hidden",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2090,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:37.244Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-01036d564b2ea5d943ab",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 658,
+              "column": 3
+            },
+            {
+              "title": "cards are reachable and activate, and each lane holds one tab stop",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1651,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:39.342Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-62ee57192ee46f53d5e6",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 687,
+              "column": 3
+            },
+            {
+              "title": "arrow keys move within a lane and the lane rolls to keep the focused card visible",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1961,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:41.000Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-76329c9137409f048fe7",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 702,
+              "column": 3
+            },
+            {
+              "title": "the traced web is announced, not only drawn",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1220,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:42.968Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-cf02aae2b6785eb016af",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 718,
+              "column": 3
+            },
+            {
+              "title": "the canvas keeps its group role and names the artifact the thread is about",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1192,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:44.197Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-c596bdc3808972bbbb15",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 729,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "suspect meaning survives the density tiers",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 742,
+          "column": 6,
+          "specs": [
+            {
+              "title": "the suspect word is visible at the tier a six-lane thread lands on",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1225,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:45.397Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-d77dda34d3981a5d57d9",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 743,
+              "column": 3
+            },
+            {
+              "title": "the suspect word survives the compact tier the reader zooms out to",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1622,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:46.629Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-f29ee2ad450cf5938f94",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 766,
+              "column": 3
+            },
+            {
+              "title": "it stays visible at the detailed tier too",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1648,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:48.258Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-d0d815c4accaee56d332",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 778,
+              "column": 3
+            },
+            {
+              "title": "it is still visible at the dense tier, to a sighted reader",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2077,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:49.916Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-21a2bf1f1ec50edb839c",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 790,
+              "column": 3
+            },
+            {
+              "title": "the suspect word is never inside a density-gated container",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1207,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:52.002Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-fdd587cace9aac3fea52",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 826,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "the loading frame",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 839,
+          "column": 6,
+          "specs": [
+            {
+              "title": "lane bands and headers are up before any card arrives",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1091,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:53.219Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-5fdb758e3dd93c331e91",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 840,
+              "column": 3
+            },
+            {
+              "title": "a refused response replaces the frame rather than leaving a skeleton up",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1056,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:54.321Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-89987a3514472637a2d7",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 854,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "a rolled lane survives a re-render",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 862,
+          "column": 6,
+          "specs": [
+            {
+              "title": "leaving an unselected hover removes only the temporary emphasis and keeps a manual roll",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 5438,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:11:55.385Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-26a7c2bcb69cd799f8cd",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 863,
+              "column": 3
+            },
+            {
+              "title": "selecting a record never moves the cards outside its thread",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4156,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:12:00.831Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-8ab86f0f923275bbafb3",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 905,
+              "column": 3
+            },
+            {
+              "title": "re-docking the panel still reframes the board",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1994,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:12:04.994Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-852cc212a8d635d04afe",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 970,
+              "column": 3
+            },
+            {
+              "title": "a dock that cannot hold the selected record gives way to one that can",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2045,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:12:06.996Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-a5a90a834d87957b5963",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 990,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "a graph change still re-syncs and re-frames",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 1032,
+          "column": 6,
+          "specs": [
+            {
+              "title": "re-pointing the selected record's link brings the new record into view",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2534,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:12:09.049Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-1ebbceae9c6208327272",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 1035,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "a selection made before the viewport settled",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 1091,
+          "column": 6,
+          "specs": [
+            {
+              "title": "is synchronised and framed once a real frame arrives",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2784,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-12T21:12:11.593Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-c0b7d4b59fa1812828a4",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 1094,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "digital-thread-core-interaction.spec.ts",
+      "file": "digital-thread-core-interaction.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "a tall partially visible card stays painted and its native tail action becomes reachable by rolling",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1875,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:14.419Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-810371a2be57ad5de32c",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 30,
+          "column": 1
+        },
+        {
+          "title": "StrictMode arrival clears easing and keeps a revealed Artifact card pointer accessible",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1666,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:16.301Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-c7e8ae4e9c14c98d657d",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 63,
+          "column": 1
+        },
+        {
+          "title": "continuation affordances stay beside the inspector in every dock",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1819,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:17.975Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-31e70ceaa251bcf675f7",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 78,
+          "column": 1
+        },
+        {
+          "title": "hover emphasises without moving the camera or the source card",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2006,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:19.801Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-26089ca089b55b746b13",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 171,
+          "column": 1
+        },
+        {
+          "title": "hover emphasis ends without a popup and without a camera restore",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2553,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:21.817Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-ca18393348b16f2e2011",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 188,
+          "column": 1
+        },
+        {
+          "title": "the real card is the click target and selection is persistent",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2115,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:24.378Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-b6d2840bc23f9a8597f9",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 202,
+          "column": 1
+        },
+        {
+          "title": "a dense thread keeps every record reachable through its explicit reveal action",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1442,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:26.500Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7e0b48ece9551631f762",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 218,
+          "column": 1
+        },
+        {
+          "title": "a revealed lane can be scrolled into its temporary range and clear does not snap it back",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6783,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:27.950Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-3fe7184f89e6a84769cc",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 243,
+          "column": 1
+        },
+        {
+          "title": "Inside a change: selected hover is inert and a selected record owns its thread",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2853,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:34.740Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-b74fa1ee615d1493c160",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 562,
+          "column": 1
+        },
+        {
+          "title": "Artifact thread: selected hover leaves the arrival selection unchanged",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2552,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:37.602Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-422c95c1b67d5c24b9ba",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 584,
+          "column": 1
+        },
+        {
+          "title": "Network: quiet to unselected hover after 0 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2127,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:40.162Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7198f59fb758eafce0e4",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Inside: quiet to unselected hover after 0 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2184,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:42.296Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e9eafda3f963f3d1a09a",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Artifact: quiet to unselected hover after 0 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2152,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:44.487Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-9b45ac4bfbe63b633934",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Network: quiet to unselected hover after 1 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2231,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:46.648Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-0f9ece0645312d8ac5e6",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Inside: quiet to unselected hover after 1 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2171,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:48.886Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-8d88301f46987e45b582",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Artifact: quiet to unselected hover after 1 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2144,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:51.063Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-5c49e54bb3881e08ea21",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Network: quiet to unselected hover after 3 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2291,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:53.214Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-b885dc221d252fb9b729",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Inside: quiet to unselected hover after 3 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2234,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:55.513Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-26681f01c0533849aec9",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "Artifact: quiet to unselected hover after 3 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2280,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:12:57.754Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-ed0db2a2082854fcae6a",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 607,
+          "column": 4
+        },
+        {
+          "title": "same-tier rendered linked growth repairs only colliding temporary geometry and converges",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4148,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:00.042Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-c98ef4d140d3dc0d1d0a",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 637,
+          "column": 39
+        },
+        {
+          "title": "same-tier rendered promoted-subject growth repairs only colliding temporary geometry and converges",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4340,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:04.198Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-18c5c36bf34f3bf1a53d",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 637,
+          "column": 39
+        },
+        {
+          "title": "a hidden lane's linked endpoint arrives at a useful height when the reader pans to it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2888,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:08.546Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-07d46c6929a93e30caae",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 683,
+          "column": 1
+        },
+        {
+          "title": "manual vertical exploration survives horizontal away and back",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4019,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:11.442Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-25f456f1b564f58891e8",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 734,
+          "column": 1
+        },
+        {
+          "title": "a linked card is revealed automatically into available space without moving the camera",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3519,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:15.470Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e5bca653c820c293554a",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 812,
+          "column": 1
+        },
+        {
+          "title": "clicking a relocated linked card keeps it where the reader saw it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4068,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:18.997Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-df2bdcb39a75c4f6dae7",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 871,
+          "column": 1
+        },
+        {
+          "title": "a drag takes over an automatic camera move from the displayed position",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3322,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:23.073Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-98e8c81c01a3f799f935",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 925,
+          "column": 1
+        },
+        {
+          "title": "reduced motion reaches the same arrangement without animating",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2014,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:26.404Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-5bc587c7227c59f101fa",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1019,
+          "column": 1
+        },
+        {
+          "title": "clicking during an incoming reveal keeps the arrangement and selects that subject",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3319,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:28.430Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7db58906581161f0995c",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1054,
+          "column": 1
+        },
+        {
+          "title": "a new selection during cleanup replaces the old subject cleanly",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4450,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:31.757Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7cc0d8268ad9f54fb4a5",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1143,
+          "column": 1
+        },
+        {
+          "title": "clearing during motion stops the camera where the reader saw it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2153,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:36.216Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e465a44bb89bc79a368d",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1228,
+          "column": 1
+        },
+        {
+          "title": "Arrow Down moves focus within the same lane and keeps it visible",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1575,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:38.380Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e5eeebf043fa9ab0d1c2",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1262,
+          "column": 1
+        },
+        {
+          "title": "a density change after manual exploration leaves no overlapping cards",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3223,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:39.962Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e62ff13c22f8939ac35c",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1296,
+          "column": 1
+        },
+        {
+          "title": "a scope change resets navigation while a same-scope refresh keeps it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4045,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:43.193Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-58ddd770df534bce6dcc",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1354,
+          "column": 1
+        },
+        {
+          "title": "a hidden lane's endpoint arrives at a useful height on first exposure",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2996,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:47.249Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-8a27a418fd3622b76ec6",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1418,
+          "column": 1
+        },
+        {
+          "title": "four-direction continuation follows the usable boundary during selected exploration",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4606,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:50.257Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-9f1f3a5e812ec9c88c52",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1464,
+          "column": 1
+        },
+        {
+          "title": "pointer identity, cancellation and unmount clean up the active gesture",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2386,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:54.872Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-cb8412a5f2a2b0c46de3",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1500,
+          "column": 1
+        },
+        {
+          "title": "actual click framing interpolates all matrix axes with coherent edges and hit targets",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3147,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:13:57.266Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "displayed-click-matrices",
+                      "contentType": "application/json",
+                      "body": "WwogIHsKICAgICJ0IjogMC4wOTk5OTk5OTQwMzk1MzU1MiwKICAgICJheGVzIjogWwogICAgICAwLjU4LAogICAgICAwLAogICAgICAwLAogICAgICAwLjU4LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiBmYWxzZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IG51bGwKICB9LAogIHsKICAgICJ0IjogMTIuMzAwMDAwMDExOTIwOTI5LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNTgsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNTgsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IGZhbHNlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogbnVsbAogIH0sCiAgewogICAgInQiOiAyNS41OTk5OTk5OTQwMzk1MzYsCiAgICAiYXhlcyI6IFsKICAgICAgMC41OCwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC41OCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogZmFsc2UsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiBudWxsCiAgfSwKICB7CiAgICAidCI6IDQxLjgwMDAwMDAxMTkyMDkzLAogICAgImF4ZXMiOiBbCiAgICAgIDAuNTgsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNTgsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IGZhbHNlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogbnVsbAogIH0sCiAgewogICAgInQiOiAxMzMuMjAwMDAwMDE3ODgxNCwKICAgICJheGVzIjogWwogICAgICAwLjU4LAogICAgICAwLAogICAgICAwLAogICAgICAwLjU4LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE1OTY1Njg2NjMyMTcxMTI4CiAgfSwKICB7CiAgICAidCI6IDE0MC40MDAwMDAwMDU5NjA0NiwKICAgICJheGVzIjogWwogICAgICAwLjU4LAogICAgICAwLAogICAgICAwLAogICAgICAwLjU4LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE1OTY1Njg2NjMyMTcxMTI4CiAgfSwKICB7CiAgICAidCI6IDE2MS41LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNTkzMjQ4LAogICAgICAwLAogICAgICAwLAogICAgICAwLjU5MzI0OCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAxNjIxNzUzNjIyNTQ0MDE5OQogIH0sCiAgewogICAgInQiOiAxNzguODAwMDAwMDExOTIwOTMsCiAgICAiYXhlcyI6IFsKICAgICAgMC42MDY0NjgsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNjA2NDY4LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE2MTkzMjcyNDEyMDEwNjI5CiAgfSwKICB7CiAgICAidCI6IDE5Mi4zMDAwMDAwMTE5MjA5MywKICAgICJheGVzIjogWwogICAgICAwLjYxOTUxOSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC42MTk1MTksCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTY2NTMxOTIxNzk3NzQxMjMKICB9LAogIHsKICAgICJ0IjogMjA4LjgwMDAwMDAxMTkyMDkzLAogICAgImF4ZXMiOiBbCiAgICAgIDAuNjMyMzA3LAogICAgICAwLAogICAgICAwLAogICAgICAwLjYzMjMwNywKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAxNzA3NjI0MjQxMTM0OTA4NQogIH0sCiAgewogICAgInQiOiAyMjUuMzAwMDAwMDExOTIwOTMsCiAgICAiYXhlcyI6IFsKICAgICAgMC42NDQ2NjksCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNjQ0NjY5LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE3NDAzMTc5MjU5NjQ1MTg1CiAgfSwKICB7CiAgICAidCI6IDI0Mi44MDAwMDAwMTE5MjA5MywKICAgICJheGVzIjogWwogICAgICAwLjY1NjYwMiwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC42NTY2MDIsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTc1NzU0OTU0NjgyMzYxMTMKICB9LAogIHsKICAgICJ0IjogMjU5LjgwMDAwMDAxMTkyMDkzLAogICAgImF4ZXMiOiBbCiAgICAgIDAuNjY4MTcsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNjY4MTcsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTc4NzM5MDk1ODcyNTE1NDYKICB9LAogIHsKICAgICJ0IjogMjc1LjgwMDAwMDAxMTkyMDkzLAogICAgImF4ZXMiOiBbCiAgICAgIDAuNjc5MDQ2LAogICAgICAwLAogICAgICAwLAogICAgICAwLjY3OTA0NiwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAxODU0MTA5NDcyMzkwMDY0MgogIH0sCiAgewogICAgInQiOiAyOTIuMzAwMDAwMDExOTIwOTMsCiAgICAiYXhlcyI6IFsKICAgICAgMC42ODkzOTQsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNjg5Mzk0LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE4NjUwNDcwODIxMDU3NzUyCiAgfSwKICB7CiAgICAidCI6IDMxOS4wOTk5OTk5OTQwMzk1NCwKICAgICJheGVzIjogWwogICAgICAwLjY5OTA3LAogICAgICAwLAogICAgICAwLAogICAgICAwLjY5OTA3LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE4NzU2MDc4NzE3Mzg3OTM2CiAgfSwKICB7CiAgICAidCI6IDMzMiwKICAgICJheGVzIjogWwogICAgICAwLjcwODE4OCwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43MDgxODgsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTkxODI4MDQyNzUwMzMwNQogIH0sCiAgewogICAgInQiOiAzNDIuNDAwMDAwMDA1OTYwNDYsCiAgICAiYXhlcyI6IFsKICAgICAgMC43MTY2OTQsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzE2Njk0LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE5MjUyMTM5MDg5NzU4MjAyCiAgfSwKICB7CiAgICAidCI6IDM1OC43MDAwMDAwMTc4ODE0LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzI0NTYyLAogICAgICAwLAogICAgICAwLAogICAgICAwLjcyNDU2MiwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAxOTQzMzAxOTc5MDU0MDEzCiAgfSwKICB7CiAgICAidCI6IDM4Ny40MDAwMDAwMDU5NjA0NiwKICAgICJheGVzIjogWwogICAgICAwLjczMTg2OSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43MzE4NjksCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTk0NjUyNTk3MTY3NTMyOAogIH0sCiAgewogICAgInQiOiA0MDkuNTk5OTk5OTk0MDM5NTQsCiAgICAiYXhlcyI6IFsKICAgICAgMC43NDQ5ODUsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzQ0OTg1LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIwMzY5MjE5NTcyNTU3OTk1CiAgfSwKICB7CiAgICAidCI6IDQyNS41OTk5OTk5OTQwMzk1NCwKICAgICJheGVzIjogWwogICAgICAwLjc1MDgxMywKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43NTA4MTMsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjAxOTIzODU3MDI1NTc2NgogIH0sCiAgewogICAgInQiOiA0NDMuMzAwMDAwMDExOTIwOTMsCiAgICAiYXhlcyI6IFsKICAgICAgMC43NTYxNjcsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzU2MTY3LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIwMzU2ODE4ODc3NzU4MDg3CiAgfSwKICB7CiAgICAidCI6IDQ1OC43MDAwMDAwMTc4ODE0LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzYxMTcsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzYxMTcsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjA2NzUxMjI4MjM5NDU0NTgKICB9LAogIHsKICAgICJ0IjogNDc0LjgwMDAwMDAxMTkyMDkzLAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzY1NzMyLAogICAgICAwLAogICAgICAwLAogICAgICAwLjc2NTczMiwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMDk1NDE0ODYyMTk2Nzc2CiAgfSwKICB7CiAgICAidCI6IDQ5MS43MDAwMDAwMTc4ODE0LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzY5OTQzLAogICAgICAwLAogICAgICAwLAogICAgICAwLjc2OTk0MywKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMDg5NzA4MDU2NTMwNTI2CiAgfSwKICB7CiAgICAidCI6IDUwOC41LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzczODUxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjc3Mzg1MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMDc5MDEyMDk1MzUwNjYzCiAgfSwKICB7CiAgICAidCI6IDUyNS41OTk5OTk5OTQwMzk1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzc3NDUzLAogICAgICAwLAogICAgICAwLAogICAgICAwLjc3NzQ1MywKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTEwMDUwNTk5NzUzNzc2NgogIH0sCiAgewogICAgInQiOiA1NDEuNTk5OTk5OTk0MDM5NSwKICAgICJheGVzIjogWwogICAgICAwLjc4MDc1MywKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43ODA3NTMsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjA5NDI1OTI1MzYyNDM4NjUKICB9LAogIHsKICAgICJ0IjogNTU4LjMwMDAwMDAxMTkyMDksCiAgICAiYXhlcyI6IFsKICAgICAgMC43ODM4MDksCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzgzODA5LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxMDIwMTM5NjEwMDcyODc0CiAgfSwKICB7CiAgICAidCI6IDU3NC44MDAwMDAwMTE5MjA5LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzg2NjA1LAogICAgICAwLAogICAgICAwLAogICAgICAwLjc4NjYwNSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMDk5NzY3NjM1MzQzMTQxNgogIH0sCiAgewogICAgInQiOiA1OTIuMjAwMDAwMDE3ODgxNCwKICAgICJheGVzIjogWwogICAgICAwLjc4OTIwNiwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43ODkyMDYsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjExNTU5MjEzMTMwMzg1NgogIH0sCiAgewogICAgInQiOiA2MDguMzAwMDAwMDExOTIwOSwKICAgICJheGVzIjogWwogICAgICAwLjc5MTU2NSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43OTE1NjUsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjEyOTQ1NDE0MDAwMzg3MjUKICB9LAogIHsKICAgICJ0IjogNjI1LjUsCiAgICAiYXhlcyI6IFsKICAgICAgMC43OTM3NCwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43OTM3NCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTU5MTU1MjE5MTQ2NjY5CiAgfSwKICB7CiAgICAidCI6IDY0My44MDAwMDAwMTE5MjA5LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzk1NzIsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzk1NzIsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE1NjQ5OTUwMzgyNjEyNgogIH0sCiAgewogICAgInQiOiA2NTguNSwKICAgICJheGVzIjogWwogICAgICAwLjc5NzU1LAogICAgICAwLAogICAgICAwLAogICAgICAwLjc5NzU1LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxNTQyNzQ1NzMzNDI3MTgKICB9LAogIHsKICAgICJ0IjogNjc2LjU5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC43OTkxOTcsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzk5MTk3LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxNTUxMzQ0NDI4ODcxNzQ0CiAgfSwKICB7CiAgICAidCI6IDY5MS43MDAwMDAwMTc4ODE0LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODAwNjk1LAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwMDY5NSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTI2NjIzMDk2MDQ2Mzg3MgogIH0sCiAgewogICAgInQiOiA3MDkuMDk5OTk5OTk0MDM5NSwKICAgICJheGVzIjogWwogICAgICAwLjgwMjA2LAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwMjA2LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODUyNTM0MzI1MTQ4NTU0CiAgfSwKICB7CiAgICAidCI6IDcyNS45MDAwMDAwMDU5NjA1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODAzMjksCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODAzMjksCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE3MjcxMjk0Nzc1NDAwNzUKICB9LAogIHsKICAgICJ0IjogNzQyLjIwMDAwMDAxNzg4MTQsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MDQzODksCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODA0Mzg5LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxNzU2NzE0NDk4OTA2MTUKICB9LAogIHsKICAgICJ0IjogNzU4LjA5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MDUzNzYsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODA1Mzc2LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxNzg4MDU2NzQ0NzUzNzAzCiAgfSwKICB7CiAgICAidCI6IDc4MS4zMDAwMDAwMTE5MjA5LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODA2MjUxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwNjI1MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjg0NDY3NzAzMDMxMwogIH0sCiAgewogICAgInQiOiA3OTYuNSwKICAgICJheGVzIjogWwogICAgICAwLjgwNzAxOSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDcwMTksCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4ODAwMDI0Mjc2Nzg4NDYKICB9LAogIHsKICAgICJ0IjogODE2LjcwMDAwMDAxNzg4MTQsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MDc2ODUsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODA3Njg1LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxOTgwMTY4MDM4NDUzNDg1CiAgfSwKICB7CiAgICAidCI6IDgzMy4wOTk5OTk5OTQwMzk1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODA4MjU2LAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwODI1NiwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTc5Mjg5ODY0MTAyNDI5NAogIH0sCiAgewogICAgInQiOiA4NDUuNDAwMDAwMDA1OTYwNSwKICAgICJheGVzIjogWwogICAgICAwLjgwODc0MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDg3NDEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE2MTk5OTc1ODQxMzkxMwogIH0sCiAgewogICAgInQiOiA4NTkuNTk5OTk5OTk0MDM5NSwKICAgICJheGVzIjogWwogICAgICAwLjgwOTE0MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDkxNDEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MTY3MzEwMjA4NjI3OQogIH0sCiAgewogICAgInQiOiA4NzYuNTk5OTk5OTk0MDM5NSwKICAgICJheGVzIjogWwogICAgICAwLjgwOTQ2LAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwOTQ2LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxNzI1MTc5MjQwMDkyOTg0CiAgfSwKICB7CiAgICAidCI6IDg5Mi43MDAwMDAwMTc4ODE0LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODA5NywKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDk3LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxNTA5OTI0ODk1MzI2NTUKICB9LAogIHsKICAgICJ0IjogOTA4LjIwMDAwMDAxNzg4MTQsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MDk4NjksCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODA5ODY5LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODc2ODY2NzUwMjg5OTkKICB9LAogIHsKICAgICJ0IjogOTI2LjA5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MDk5NjgsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODA5OTY4LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxNzA1NDgyNDI3NTkxOTYKICB9LAogIHsKICAgICJ0IjogOTQxLjgwMDAwMDAxMTkyMDksCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiA5NTkuNTk5OTk5OTk0MDM5NSwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDk3NS40MDAwMDAwMDU5NjA1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogOTkyLjU5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMDA5LjU5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMDI0LjkwMDAwMDAwNTk2MDUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMDQyLAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTA1OC41LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTA3NC41OTk5OTk5OTQwMzk1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTA5Mi4zMDAwMDAwMTE5MjEsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMTA5LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTEyNiwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDExNDEuNTk5OTk5OTk0MDM5NSwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDExNTgsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMTc1LjgwMDAwMDAxMTkyMSwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDExOTIsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMjA4LjA5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMjI1LjMwMDAwMDAxMTkyMSwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDEyNDEuOTAwMDAwMDA1OTYwNSwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDEyNTgsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMjc1LjcwMDAwMDAxNzg4MTQsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMjkyLjIwMDAwMDAxNzg4MTQsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMzA4LjMwMDAwMDAxMTkyMSwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfQpd"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-9e1bb77ad1c998d9ef3d",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1531,
+          "column": 1
+        },
+        {
+          "title": "manual input interrupts real click framing from its displayed position",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3034,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-12T21:14:00.422Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "click-motion-takeover",
+                      "contentType": "application/json",
+                      "body": "ewogICJwcmVzc2VkIjogWwogICAgMC42ODkzNTksCiAgICAwLAogICAgMCwKICAgIDAuNjg5MzU5LAogICAgMzE0LjA0LAogICAgMTk4LjE4NgogIF0sCiAgImhlbGQiOiBbCiAgICAwLjY4OTM1OSwKICAgIDAsCiAgICAwLAogICAgMC42ODkzNTksCiAgICAzMTQuMDQsCiAgICAxOTguMTg2CiAgXSwKICAicmVsZWFzZWQiOiBbCiAgICAwLjY4OTM1OSwKICAgIDAsCiAgICAwLAogICAgMC42ODkzNTksCiAgICAxNjQuMDQsCiAgICAxOTguMTg2CiAgXSwKICAiZGVsYXllZCI6IFsKICAgIDAuNjg5MzU5LAogICAgMCwKICAgIDAsCiAgICAwLjY4OTM1OSwKICAgIDE2NC4wNCwKICAgIDE5OC4xODYKICBdCn0="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7edc6f1b57b8d4a30010",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1585,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-12T21:10:47.774Z",
+    "duration": 196400.194,
+    "expected": 84,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}
