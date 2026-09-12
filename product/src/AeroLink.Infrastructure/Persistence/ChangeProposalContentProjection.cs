@@ -181,9 +181,10 @@ public static class ChangeProposalContentProjection
         var changes = scr.RequirementChanges.OrderBy(x => x.DisplayNumber, StringComparer.Ordinal).ToList();
 
         // The base revisions every Modify and Retire in this change request points at, resolved in one pass.
-        // A proposal names its target as (base number, revision); the pair is the exact superseded revision,
-        // already pinned by authoring and moved deliberately by a rebase, so no build lookup is needed or
-        // wanted — the record is more precise than the build would be.
+        // Revision is the proposed RESULT revision (authoring records current + 1), not the revision
+        // being changed. Resolve its exact immediate predecessor. Never substitute today's latest revision
+        // or the proposed result itself: either can belong to a different controlled change. If that exact
+        // predecessor is absent, retain the unresolved-reference state rather than guessing across a gap.
         var baseNumbers = changes
             .Where(x => x.Kind != RequirementChangeKind.Introduce && !string.IsNullOrWhiteSpace(x.BaseNumber))
             .Select(x => x.BaseNumber)
@@ -267,7 +268,7 @@ public static class ChangeProposalContentProjection
         {
             BaseRevision? resolved = null;
             if (change.Kind != RequirementChangeKind.Introduce && !string.IsNullOrWhiteSpace(change.BaseNumber))
-                byBase.TryGetValue((change.BaseNumber, change.Revision), out resolved);
+                byBase.TryGetValue((change.BaseNumber, change.Revision - 1), out resolved);
 
             // Only a Modify shows a before/after. A Retire resolves its base revision all the same, because
             // what allocates below the thing being retired is exactly the cascade the view draws dashed.
