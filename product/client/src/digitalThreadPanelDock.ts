@@ -65,9 +65,31 @@ export function usePanelDock(
     if (!canvasRect || !panelRect || canvasRect.width < 1 || canvasRect.height < 1) {
       return current === "bottom" ? "right" : "bottom"
     }
+    /**
+     * Feasibility first: does the record the reader selected actually fit in each candidate arrangement?
+     *
+     * A bottom panel spends height, a side panel spends width, and the selected card has measured dimensions of
+     * its own. Two selections with very different space needs must not get the same answer merely because the
+     * panel and canvas happen to measure the same. Proportional cost is only used to rank candidates when
+     * neither is sufficient, so the recovery is still bounded and truthful for genuinely oversized content.
+     */
+    const card = canvas?.querySelector<HTMLElement>(".dtCanvasNode.is-selected")
+    const cardRect = card?.getBoundingClientRect()
+    const margin = 24
+    const fitsBottom = cardRect
+      ? cardRect.height + margin <= canvasRect.height - panelRect.height &&
+        cardRect.width + margin <= canvasRect.width
+      : false
+    const fitsSide = cardRect
+      ? cardRect.height + margin <= canvasRect.height &&
+        cardRect.width + margin <= canvasRect.width - panelRect.width
+      : false
+    if (fitsBottom && !fitsSide) return "bottom"
+    if (fitsSide && !fitsBottom) return "right"
+    if (fitsBottom && fitsSide) return current
+    // Neither fits: take the arrangement that leaves more proportional room, still one bounded step.
     const heightCost = panelRect.height / canvasRect.height
     const widthCost = panelRect.width / canvasRect.width
-    // Staying on the current axis costs that axis; moving costs the other one. Keep the cheaper loss.
     if (current === "bottom") return heightCost <= widthCost ? "bottom" : "right"
     return widthCost <= heightCost ? current : "bottom"
   }, [canvasHostRef, panelElement])
