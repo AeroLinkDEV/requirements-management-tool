@@ -194,6 +194,10 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
   await page.mouse.up()
   await page.waitForTimeout(300)
   const afterSmallDrag = await yOf()
+  // If the gutter grab landed on a card instead of the band, the "drag" selected a record and the lane did
+  // not move at all — which is a test-gesture fault, not a product one, and this tells the two apart.
+  await expect(page.locator('.dtCanvasNode[aria-pressed="true"]'), "the follow-up gesture selected a card")
+    .toHaveCount(0)
   /**
    * OPEN DEFECT (reported, not asserted green): this probe currently measures ~9.5 units of movement for a
    * 40 px drag at zoom 1.05 (the drag implies ~38), so the post-clear next-drag behaviour is not yet proven.
