@@ -15,6 +15,7 @@ import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
 import { coverageExplorerPath, exactTraceArtifactPath, problemReportSnapshotPath, projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectSlugOf, routePath } from "./routing";
 import type { Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, ThreadView, View } from "./routing";
 import type { ThreadFocalKind } from "./DigitalThreadPage";
+import { artifactTraceIdentity } from './artifactTraceInspectorModel';
 import { usePasswordVisibilityControls } from "./PasswordVisibility";
 import {
   AdministrationCenter,
@@ -981,6 +982,8 @@ function App() {
         }) : undefined}
         onCloseRequirement={() => navigate("requirements", discipline, undefined, undefined, true)}
          onOpenTraceability={(artifactId) => navigate("lifecycle", discipline, artifactId, artifactId ? "requirement" : undefined)}
+         traceArtifactHref={node => { const identity = artifactTraceIdentity(node); return context && identity ? exactTraceArtifactPath(context, identity) : undefined }}
+         digitalThreadHref={revisionId => context ? routePath(context, 'lifecycle', discipline, revisionId, 'requirement') : undefined}
          // The same address the click performs, and only when the target is genuinely exact. This used to
          // build an artifact-record path while the click ran openVerificationProcedure to the Explorer, so
          // the identifier advertised one destination and delivered another depending on how it was
@@ -1017,6 +1020,8 @@ function App() {
          onBack={() => navigate("dashboard")}
         onOpenRequirementRevision={openRequirementRevision}
         onOpenTestChangeRequest={openTestChangeRequestFromArtifact}
+        traceArtifactHref={node => { const identity = artifactTraceIdentity(node); return context && identity ? exactTraceArtifactPath(context, identity) : undefined }}
+        digitalThreadHref={(revisionId, kind) => context ? routePath(context, 'lifecycle', discipline, revisionId, kind) : undefined}
       />
     );
   // Downstream assessments and the register are one change-control workspace. Historical coverage URLs still

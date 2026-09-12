@@ -98,7 +98,7 @@ test('released Build 1.5 is a durable read-only workspace and exits explicitly',
   // Opening a procedure named on a requirement's trace lands in the Test Procedure Explorer, which is where a
   // procedure is read. It used to open a record dialog on the coverage page, which carried a procedure
   // library; the library moved and the link followed it rather than being left pointing at nothing.
-  const exactProcedure = page.getByRole('link', { name: /SYSTP-000001\.00.*Open procedure/ })
+  const exactProcedure = page.getByRole('region', { name: 'Verification coverage' }).getByRole('link', { name: 'SYSTP-000001.00', exact: true })
   // #1016 S03. This href used to name an artifact-record address while the click below went to the Explorer,
   // so the link advertised one destination and performed another depending on how a reader activated it.
   // The click is the documented behaviour — the comment above and App's own openVerificationProcedure both

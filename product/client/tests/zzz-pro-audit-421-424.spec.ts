@@ -81,7 +81,7 @@ test('predecessor and successor keep exact titles and folded provenance through 
     }
     if (url.pathname.endsWith('/trace')) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-        procedureId, baseNumber: 'SYSTP-42499', title: selected.title,
+        artifactId: procedureId, procedureId, baseNumber: 'SYSTP-42499', title: selected.title,
         titleIsExact: true, titleIsLegacy: false, titleNote: null,
         level: 'System', revisionId: selected.id, displayNumber: selected.displayNumber,
         revision: selected.revision, state: 'Approved', authorId: 'test.author',

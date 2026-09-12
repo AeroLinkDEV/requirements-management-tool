@@ -38,7 +38,7 @@ test("opening the Digital Thread from a requirement focuses that requirement and
   await row.click();
 
   await page.getByRole("tab", { name: /Trace/ }).click();
-  await page.getByRole("button", { name: /Open complete Digital Thread/ }).click();
+  await page.getByRole("link", { name: /Open complete Digital Thread/ }).click();
 
   // A requirement opens the artifact thread, landing on that exact revision selected and expanded — as
   // though the reader had clicked the card themselves.
