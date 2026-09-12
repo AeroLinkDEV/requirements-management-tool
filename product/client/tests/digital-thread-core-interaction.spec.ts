@@ -40,8 +40,27 @@ const panBackground = async (
   dy = 0,
 ) => {
   const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
-  const bandBox = (await page.locator(".dtCanvasBand").first().boundingBox())!
-  const gutterX = Math.max(canvasBox.x + 3, bandBox.x - 10)
+  /**
+   * A real gutter between two lanes, chosen from bands that are on screen *now*.
+   *
+   * Band-relative coordinates go stale as soon as the board is panned, and a point that is no longer a gutter
+   * either rolls a lane or falls outside the canvas — which is how a "pan" can silently move nothing.
+   */
+  const rects = await page.locator(".dtCanvasBand").evaluateAll(elements => elements.map(element => {
+    const rect = element.getBoundingClientRect()
+    return { x: rect.x, width: rect.width }
+  }))
+  let gutterX: number | null = null
+  for (let index = 0; index + 1 < rects.length; index += 1) {
+    const left = rects[index].x + rects[index].width
+    const right = rects[index + 1].x
+    const midpoint = left + (right - left) / 2
+    if (right - left > 8 && midpoint > canvasBox.x + 4 && midpoint < canvasBox.x + canvasBox.width - 4) {
+      gutterX = midpoint
+      break
+    }
+  }
+  if (gutterX === null) gutterX = canvasBox.x + canvasBox.width / 2
   const y = canvasBox.y + canvasBox.height / 2
   await page.mouse.move(gutterX, y)
   await page.mouse.down()
@@ -562,4 +581,51 @@ test("a linked card is revealed automatically into available space without movin
     (await linked.getAttribute("class"))?.includes("is-offscreen") === true
   expect(backOutside, "hover exit did not retire the temporary placement").toBe(true)
   expect(await transformOf(scene)).toBe(camera)
+})
+
+/**
+ * Selecting a record the reveal had just relocated.
+ *
+ * Retaining the numerical displacement is not enough: when a relocated card becomes the subject, the previous
+ * selection collapses and this one expands, so the base layout it was measured against changes. The card must
+ * stay where the reader last saw it rather than snapping back to its distant ordinary row.
+ */
+test("clicking a relocated linked card keeps it where the reader saw it", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/tests/fixtures/change-network.html?case=reveal")
+  await expect(page.locator(".dtCanvas")).toBeVisible()
+  await page.waitForTimeout(800)
+
+  // Same arrangement as the available-space test: pan down so the short lane's card starts above the window.
+  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
+  await panBackground(page, 0, -420)
+
+  const root = page.locator('[data-node-id="pr-5"]')
+  const subject = page.locator('[data-node-id="hlr-127"]')
+  // Same precondition as the available-space test: the card must be outside the *usable* region, whether or not
+  // the canvas also classes it as fully off-screen.
+  const usableTop = canvasBox.y + 40
+  const startBox = await root.boundingBox()
+  const startsOutside = !startBox || startBox.y + startBox.height <= usableTop ||
+    (await root.getAttribute("class"))?.includes("is-offscreen") === true
+  expect(startsOutside, "the fixture no longer starts with the linked card out of view").toBe(true)
+  await subject.click({ position: { x: 6, y: 6 } })
+  await expect(subject).toHaveAttribute("aria-pressed", "true")
+  await page.waitForTimeout(1000)
+  await expect(root, "the reveal did not relocate the linked card into view")
+    .not.toHaveClass(/is-offscreen/)
+
+  const yOfTarget = async () => Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/
+    .exec((await root.getAttribute("style")) ?? "")?.[1] ?? NaN)
+  const seenAt = await yOfTarget()
+  // Click the card body rather than an inner identifier link, so this is a card selection.
+  await root.click({ position: { x: 6, y: 6 } })
+  await expect(root).toHaveAttribute("aria-pressed", "true")
+  await page.waitForTimeout(1000)
+  const nowAt = await yOfTarget()
+  expect(
+    Math.abs(nowAt - seenAt),
+    `the relocated card moved from ${seenAt.toFixed(1)} to ${nowAt.toFixed(1)} when it became the subject`,
+  ).toBeLessThanOrEqual(8)
+  expect(canvasBox.width).toBeGreaterThan(0)
 })
