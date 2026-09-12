@@ -60,4 +60,17 @@ viewport per test (1280×900 / 1100×900 / 1440×1000), no browser zoom, default
 ## Not covered by this package
 
 Owner visual acceptance; final tray typography/spacing (A17); final easing tuning (A18); the full hosted journey
-suite; and the planner-selected local smoke journeys, which have not been run yet.
+suite.
+
+## Chronology (kept current, not rewritten)
+
+| Revision | What it is |
+|---|---|
+| `5f3642ca` | **tested code revision for every capture in this folder** |
+| `8c1f7a9b` | evidence-publishing commit (this folder's first publication) |
+| `665d11c3` | later corrective commits: dock cost comparison corrected and Escape-clear now freezes the camera |
+
+The planner-selected local smoke journeys were run **after** this folder was first published: `npm run test:smoke`
+-> 5 passed (3.2m), application-smoke + showcase-usability against the real API, at an unchanged code revision.
+Captures here predate `665d11c3`; they are historical for `5f3642ca` and will be refreshed for the Round 6
+submission rather than reused as if they described the later head.
