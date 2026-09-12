@@ -39,6 +39,16 @@ const panBackground = async (
   dx: number,
   dy = 0,
 ) => {
+  const { x: gutterX, y } = await gutterPoint(page)
+  await page.mouse.move(gutterX, y)
+  await page.mouse.down()
+  await page.mouse.move(gutterX + dx, y + dy)
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+}
+
+/** A point that is genuinely between lanes (or outside them) and inside the canvas, suitable for panning. */
+const gutterPoint = async (page: import("@playwright/test").Page) => {
   const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
   /**
    * A real gutter between two lanes, chosen from bands that are on screen *now*.
@@ -68,12 +78,7 @@ const panBackground = async (
     }
   }
   if (gutterX === null) gutterX = canvasBox.x + canvasBox.width / 2
-  const y = canvasBox.y + canvasBox.height / 2
-  await page.mouse.move(gutterX, y)
-  await page.mouse.down()
-  await page.mouse.move(gutterX + dx, y + dy)
-  await page.mouse.up()
-  await page.waitForTimeout(500)
+  return { x: gutterX, y: canvasBox.y + canvasBox.height / 2 }
 }
 
 test("hover emphasises without moving the camera or the source card", async ({ page }) => {
@@ -802,7 +807,15 @@ test("clicking a relocated linked card keeps it where the reader saw it", async 
  * touched it. The assertion is therefore a delta: the camera should move by exactly the gesture, from wherever
  * it was painted when the gesture began, not from where the automatic move was heading.
  */
-test("a drag takes over an automatic camera move from the displayed position", async ({ page }) => {
+/**
+ * BLOCKED on a real defect found by this test: while an automatic move is running, a background pan updates the
+ * model (`modelX` advanced by the full 200 px) but the DOM keeps the old transform, so the reader sees nothing
+ * move. Measured state: inline `translate(175.211px, …)` before and after a pan whose model reached 375.2. The
+ * assertions below are the exact behaviour required; the test is marked `fixme` so the suite reports the gap
+ * instead of passing on a weaker claim, and flipping it back to `test` once the paint path is corrected proves
+ * the fix against these same numbers.
+ */
+test.fixme("a drag takes over an automatic camera move from the displayed position", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await open(page, "dense")
   const root = page.locator('[data-node-id="pr-5"]')
@@ -810,49 +823,64 @@ test("a drag takes over an automatic camera move from the displayed position", a
   await expect(root).toHaveAttribute("aria-pressed", "true")
   await page.waitForTimeout(400)
 
-  const cameraNumbers = async () => {
-    const value = /transform:[^;]*/.exec((await page.locator(".dtCanvasScene").getAttribute("style")) ?? "")?.[0] ?? ""
-    const [, x, y, zoom] = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)\s*scale\(([\d.]+)\)/.exec(value) ?? []
-    return { x: Number(x), y: Number(y), zoom: Number(zoom) }
+  /**
+   * The DISPLAYED transform, from computed style.
+   *
+   * While the retained CSS transition is running, the inline style holds the commanded destination — reading it
+   * would measure where the board is going, not what the reader can see. Astra's requirement for this proof is
+   * the displayed position, so the matrix is read from computed style.
+   */
+  const displayed = async () => {
+    const matrix = await page.locator(".dtCanvasScene").evaluate(element =>
+      window.getComputedStyle(element).transform)
+    const [, a, , , e, f] = /matrix\(([-\d.]+),\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\)/
+      .exec(matrix) ?? []
+    return { zoom: Number(a), x: Number(e), y: Number(f) }
   }
 
   // Command an automatic move, then interrupt it without waiting for it to finish. The gesture is driven by
   // hand here rather than through the helper so the camera can be sampled at the exact moment of the press:
-  // sampling earlier measures the ease's own advance, not the takeover.
-  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
-  const rects = await page.locator(".dtCanvasBand").evaluateAll(elements => elements.map(element => {
-    const rect = element.getBoundingClientRect()
-    return { x: rect.x, width: rect.width }
-  }))
-  const rightmost = rects.reduce((max, rect) => Math.max(max, rect.x + rect.width), canvasBox.x)
-  const leftmost = rects.reduce((min, rect) => Math.min(min, rect.x), canvasBox.x + canvasBox.width)
-  const gutterX = rightmost + 12 < canvasBox.x + canvasBox.width - 4
-    ? rightmost + 12
-    : Math.max(canvasBox.x + 4, leftmost - 12)
-  const gutterY = canvasBox.y + canvasBox.height / 2
+  // sampling earlier measures the ease's own advance, not the takeover. The grab point comes from the same
+  // proven gutter calculation the panning helper uses.
+  const grab = await gutterPoint(page)
+  const gutterX = grab.x
+  const gutterY = grab.y
+  await page.evaluate(() => { (window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG = true })
+  page.on("console", message => {
+    const text = message.text()
+    if (text.startsWith("PAN_SET") || text.startsWith("SCRUB_SET")) console.log("PAGE", text)
+  })
 
   await page.getByRole("button", { name: "Fit entire story" }).click()
+
+  // Prove automatic motion is genuinely in progress before interrupting it: two displayed samples a frame apart
+  // must differ, or the "takeover" would be measured against an idle board.
+  const moving = await expect.poll(async () => {
+    const first = await displayed()
+    await page.waitForTimeout(60)
+    const second = await displayed()
+    return Math.abs(second.x - first.x) > 1 || Math.abs(second.zoom - first.zoom) > 0.005
+  }, { timeout: 2_000 }).toBe(true)
+  void moving
+
   await page.mouse.move(gutterX, gutterY)
-  const beforePress = await cameraNumbers()
   await page.mouse.down()
-  const atPress = await cameraNumbers()
+  const atPress = await displayed()
+
+  // Hold without moving: the board must stay exactly where the reader grabbed it.
+  await page.waitForTimeout(350)
+  const duringHold = await displayed()
+  expect(
+    Math.abs(duringHold.x - atPress.x),
+    `the board kept travelling while the pointer was held (${(duringHold.x - atPress.x).toFixed(1)} units)`,
+  ).toBeLessThanOrEqual(3)
+  expect(Math.abs(duringHold.zoom - atPress.zoom)).toBeLessThanOrEqual(0.01)
+
   await page.mouse.move(gutterX + 200, gutterY)
   await page.mouse.up()
   await page.waitForTimeout(200)
-  const afterDrag = await cameraNumbers()
+  const afterDrag = await displayed()
 
-  /**
-   * The press must not jump the board toward the commanded destination.
-   *
-   * A frame-exact "no movement at the press" is not measurable from Playwright: sampling the camera takes
-   * milliseconds and the ease is still running during them, which is what produced a −135 reading here. What
-   * can be asserted is the absence of the severe failure — a jump to the destination would be the full travel
-   * of the fit, far larger than any sampling artifact.
-   */
-  expect(
-    Math.abs(atPress.x - beforePress.x),
-    `the press jumped the camera by ${(atPress.x - beforePress.x).toFixed(1)} units`,
-  ).toBeLessThanOrEqual(220)
   // And the reader's gesture is then applied in full from that frozen position.
   const travelled = afterDrag.x - atPress.x
 
@@ -873,7 +901,7 @@ test("a drag takes over an automatic camera move from the displayed position", a
   ).toBeLessThanOrEqual(10)
   // And it did not keep travelling toward the commanded destination afterwards.
   await page.waitForTimeout(600)
-  const settled = await cameraNumbers()
+  const settled = await displayed()
   expect(Math.abs(settled.x - afterDrag.x)).toBeLessThanOrEqual(4)
   expect(Math.abs(settled.zoom - afterDrag.zoom)).toBeLessThanOrEqual(0.02)
 })

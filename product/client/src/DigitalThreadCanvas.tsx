@@ -1498,7 +1498,13 @@ export default function DigitalThreadCanvas({
         }
         transform.current = { ...transform.current, x: start.tx + dx, y: start.ty + dy }
         if ((window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG) {
-          console.log("PAN_SET", JSON.stringify({ dx: Number(dx.toFixed(1)), dy: Number(dy.toFixed(1)) }))
+          console.log("PAN_SET", JSON.stringify({
+            dx: Number(dx.toFixed(1)),
+            dy: Number(dy.toFixed(1)),
+            startTx: Number(start.tx.toFixed(1)),
+            modelX: Number(transform.current.x.toFixed(1)),
+            inlineStyle: (sceneRef.current?.style.transform ?? "").slice(0, 60),
+          }))
         }
         // A deliberate vertical or diagonal camera move is exploration too — but only for lanes the reader can
         // actually see. A lane prepared while horizontally hidden keeps its right to a first useful reveal;
