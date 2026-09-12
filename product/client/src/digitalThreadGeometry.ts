@@ -291,7 +291,7 @@ export interface RevealPlanInput {
   subjectId: string | null
   /** Usable window per lane in content coordinates; a hidden lane has no entry. */
   windowByLane: ReadonlyMap<number, RevealWindow>
-  /** Lanes the reader owns for this context: never re-planned automatically. */
+  /** Retain these lanes' valid placements; only real collisions may require a local repair. */
   frozenLanes: ReadonlySet<number>
   /**
    * Displacements already displayed for this context.
@@ -342,12 +342,25 @@ export const planReveal = (input: RevealPlanInput): RevealPlan => {
       else if (cardTop >= window.bottom) cue.down = true
     }
     if (frozenLanes.has(lane)) {
-      // Reader-owned: retain exactly what is displayed — but only for records that still belong to the traced
-      // thread. A card that has left the selected thread loses its temporary contribution rather than being
-      // held in a position the current relationships no longer explain.
-      for (const node of bucket) {
-        const displayed = input.existing?.get(node.id)
-        if (displayed && storyIds.has(node.id)) deltas.set(node.id, displayed)
+      const retained = bucket.filter(node => input.existing?.has(node.id) && storyIds.has(node.id))
+      const blocks = bucket.filter(node => !retained.includes(node)).map(node => ({
+        start: content.get(node.id) ?? 0,
+        end: (content.get(node.id) ?? 0) + heights(node.id),
+      }))
+      // Validity is independent of visibility: preserve a reader-panned offscreen placement. If measured
+      // growth creates a collision, move only that temporary card to the nearest safe content position.
+      for (const node of retained.sort((a, b) => Number(b.id === subjectId) - Number(a.id === subjectId) ||
+        ((content.get(a.id) ?? 0) + input.existing!.get(a.id)!) - ((content.get(b.id) ?? 0) + input.existing!.get(b.id)!))) {
+        const base = content.get(node.id) ?? 0
+        const oldTop = base + input.existing!.get(node.id)!
+        const height = heights(node.id)
+        const safe = (top: number) => top >= 0 && blocks.every(block =>
+          top + height + MEASURED_CARD_GAP <= block.start || top >= block.end + MEASURED_CARD_GAP)
+        const candidates = [oldTop, 0, ...blocks.flatMap(block => [block.start - height - MEASURED_CARD_GAP, block.end + MEASURED_CARD_GAP])]
+          .filter(safe).sort((a, b) => Math.abs(a - oldTop) - Math.abs(b - oldTop) || a - b)
+        const top = node.id === subjectId ? oldTop : candidates[0] ?? oldTop
+        deltas.set(node.id, top - base)
+        blocks.push({ start: top, end: top + height })
       }
       continue
     }

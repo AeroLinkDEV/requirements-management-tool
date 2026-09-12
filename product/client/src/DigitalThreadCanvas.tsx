@@ -20,6 +20,7 @@ import {
   layoutWithMeasuredCards,
   minimumZoom,
   MIN_ZOOM,
+  LANDING_MIN_ZOOM,
   nodePosition,
   planReveal,
   contentPositionsForNodes,
@@ -175,6 +176,8 @@ export default function DigitalThreadCanvas({
   const subjectOwnership = useRef<string | null | undefined>(undefined)
   /** Relationship + measured-geometry signature of the last plan, so genuine content changes reconcile. */
   const contentSignature = useRef("")
+  const constraintSignature = useRef("")
+  const reframeReveal = useRef(false)
   /** Effective per-lane scroll minimum for the arrangement as displayed and as it is heading. */
   const limitsRef = useRef<Map<number, number>>(new Map())
   /** The single resolved floor every consumer uses: effective limit, allowance and deepest extent combined. */
@@ -185,6 +188,7 @@ export default function DigitalThreadCanvas({
   const measuredHeightsRef = useRef<Map<string, number>>(new Map())
   /** True once the reader has taken the camera: passive measurement must then leave it alone. */
   const cameraOwned = useRef(false)
+  const activeGesture = useRef<(() => void) | null>(null)
   /** The landing routine, so the scope-change effect can start a fresh navigation context. */
   const landRef = useRef<() => void>(() => {})
   /** Where a newly selected record was actually being displayed when it became the subject. */
@@ -214,6 +218,7 @@ export default function DigitalThreadCanvas({
   }, [pinnedId, sourceSignature, scopeKey])
   // A different scope is a different navigation context: nothing temporary may survive it.
   useEffect(() => {
+    activeGesture.current?.()
     frozenLanes.current = new Set()
     deliveredLanes.current = new Set()
     visitedLanes.current = new Set()
@@ -288,6 +293,7 @@ export default function DigitalThreadCanvas({
         }
       }
       scene.classList.remove("is-easing")
+      scene.classList.remove("is-motion-slow")
     }
     if (easeTimer.current !== null) {
       window.clearTimeout(easeTimer.current)
@@ -549,6 +555,10 @@ export default function DigitalThreadCanvas({
       if (height && Number.isFinite(height)) measuredCardHeights.set(node.id, height)
     }
     const result = layoutWithMeasuredCards(rawResult, nodes, measuredCardHeights)
+    // A tray reduces screen space, not the content the user has panned to. Keep the lane's painted band
+    // through that current viewing height so a valid reveal is not reset into an invisible band above it.
+    result.bandHeight = Math.max(result.bandHeight,
+      (box.y + box.height - transform.current.y) / transform.current.zoom)
     const previous = geometryRef.current
     if (previous && previous.tier !== result.tier) {
       offsets.current = rescaleOffsets(offsets.current, previous, result)
@@ -610,41 +620,35 @@ export default function DigitalThreadCanvas({
     }
     usableLanesRef.current = usable
     nodeLaneRef.current = new Map(nodes.map(node => [node.id, node.lane]))
-    // A lane the camera is showing, with nothing left to deliver into it, has had its usable exposure: that
-    // includes lanes whose reveal needs no displacement at all, so delivery cannot depend on a map entry.
-    {
-      const pendingLanes = new Set<number>()
-      for (const id of revealTargets.current.keys()) {
-        const lane = nodeLaneRef.current.get(id)
-        if (lane !== undefined) pendingLanes.add(lane)
-      }
-      for (const lane of usable) if (!pendingLanes.has(lane)) visitedLanes.current.add(lane)
-    }
-    /**
-     * A changed relationship set, tier or **usable window** reconciles lanes the reader has merely *seen*; it
-     * never takes away lanes they deliberately own.
-     *
-     * The window belongs in this invalidation because a placement is only valid for the window it was computed
-     * against: opening the tray moves the camera even when the band height is unchanged, and a retained
-     * placement then sits just outside the visible area (measured at ~19 px above it in the promotion journey).
-     * Per-card measured heights are deliberately *not* part of it — sub-pixel wobble there re-planned the board
-     * on nearly every paint and left a selected card's own action button never still enough to click, which the
-     * page-level artifact journey caught. Height-driven reconciliation is carried by the tier in this key.
-     */
-    const windowKey = [...contentWindows]
-      .map(([lane, window]) => `${lane}:${Math.round(window.top / 8)}-${Math.round(window.bottom / 8)}`)
-      .join(",")
-    const contentKey = `${edgesKey}|${result.tier}|${windowKey}`
+    // offsetHeight is an integer border-box measurement. Camera and lane offsets are deliberately absent:
+    // ordinary navigation cannot reset delivery, while same-tier wrapping must reconcile real collisions.
+    const contentKey = `${sourceSignature}|${edgesKey}|${result.tier}|${[...measuredCardHeights].map(([id, height]) => `${id}:${height}`).join(",")}`
     if (contentSignature.current !== contentKey) {
+      const oldBase = previous && contentPositionsForNodes(nodes, previous.geometry, measuredHeightsRef.current)
+      const newBase = contentPositionsForNodes(nodes, result.geometry, measuredCardHeights)
+      if (oldBase) for (const id of revealTargets.current.keys()) {
+        const shift = (oldBase.get(id) ?? 0) - (newBase.get(id) ?? 0)
+        revealTargets.current.set(id, revealTargets.current.get(id)! + shift)
+        if (revealDeltas.current.has(id)) revealDeltas.current.set(id, revealDeltas.current.get(id)! + shift)
+      }
       contentSignature.current = contentKey
-      deliveredLanes.current = new Set()
-      visitedLanes.current = new Set()
       revealSignature.current = ""
     }
-    const windowArrival = [...usable].some(lane => !visitedLanes.current.has(lane))
-    const revealKey = `${scopeKey}|${emphasisId ?? ""}|${result.tier}|${windowKey}|${edgesKey}|${windowArrival ? "arrival" : "stable"}`
-    if (revealKey !== revealSignature.current) {
+    const constraints = `${box.x}:${box.y}:${box.width}:${box.height}`
+    const constraintsChanged = constraintSignature.current !== constraints || reframeReveal.current
+    constraintSignature.current = constraints
+    reframeReveal.current = false
+    const arriving = [...usable].filter(lane => !visitedLanes.current.has(lane))
+    const revealKey = `${scopeKey}|${emphasisId ?? ""}|${contentKey}|${constraints}|${arriving.join(",")}`
+    if (revealKey !== revealSignature.current || constraintsChanged) {
       revealSignature.current = revealKey
+      const retained = new Map(revealTargets.current)
+      if (emphasisId && retainedSubjectY.current !== null) {
+        const lane = nodeLaneRef.current.get(emphasisId)
+        const base = contentPositionsForNodes(nodes, result.geometry, measuredCardHeights).get(emphasisId)
+        if (lane !== undefined && base !== undefined) retained.set(emphasisId,
+          retainedSubjectY.current - base - (offsets.current[lane] ?? 0))
+      }
       const plan = planReveal({
         nodes,
         geometry: result.geometry,
@@ -658,12 +662,13 @@ export default function DigitalThreadCanvas({
         // reconciled when it arrives rather than being frozen by its earlier, unseen preparation.
         frozenLanes: new Set([
           ...frozenLanes.current,
-          ...[...deliveredLanes.current].filter(lane => visitedLanes.current.has(lane)),
+          ...[...visitedLanes.current].filter(() => !constraintsChanged),
         ]),
-        existing: revealTargets.current,
+        existing: retained,
         bandHeight: result.bandHeight,
       })
       revealTargets.current = plan.deltas
+      if (emphasisId && retained.has(emphasisId)) revealTargets.current.set(emphasisId, retained.get(emphasisId)!)
       planCues.current = plan.cues
       /**
        * Rebase the new subject onto its retained displayed position.
@@ -683,6 +688,12 @@ export default function DigitalThreadCanvas({
       }
       retainedSubjectY.current = null
       kickMotion.current()
+    }
+    // Exposure is recorded after preparing this subject, never before its first plan.
+    for (const lane of usable) {
+      const pending = [...revealTargets.current].some(([id, target]) =>
+        nodeLaneRef.current.get(id) === lane && Math.abs(target - (revealDeltas.current.get(id) ?? 0)) > .5)
+      if (!pending) visitedLanes.current.add(lane)
     }
     /**
      * Effective limits for the arrangement as displayed and as it is heading.
@@ -1202,6 +1213,7 @@ export default function DigitalThreadCanvas({
       if (!target) return false
       const box = frame()
       if (!box || !geometryRef.current) return false
+      paint()
 
       // Read every requested card's actual layout height before choosing a camera. Wrapped identifiers and
       // state pills can make a direct card taller than its nominal tier height; the measured border box keeps
@@ -1235,6 +1247,40 @@ export default function DigitalThreadCanvas({
        */
       const selectedNode = nodes.find(node => node.id === target.selectedId)
       const heightOf = (id: string) => Math.max(result.geometry.cardHeight, cardHeights.get(id) ?? 0)
+      if (!explicit && selectedNode) {
+        // Automatic selection contains the selected card, never fits the entire traced graph. Keep its
+        // displayed anchor and apply only the minimum readable correction; linked overflow remains navigable.
+        const floor = target.intent === "landing" ? LANDING_MIN_ZOOM : READABLE_SELECTION_MIN_ZOOM
+        const height = heightOf(selectedNode.id)
+        const zoom = Math.max(floor, Math.min(transform.current.zoom,
+          (box.height - 24) / height, (box.width - 24) / result.geometry.laneWidth))
+        const actual = layoutWithMeasuredCards(layout(counts, box, zoom), nodes, cardHeights)
+        const position = positionsForNodes(nodes, actual.geometry, offsets.current, cardHeights, revealTargets.current).get(selectedNode.id)!
+        const contain = (value: number, start: number, size: number, low: number, length: number) => {
+          const first = start * zoom + value
+          const last = first + size * zoom
+          return first < low + 12 ? value + low + 12 - first
+            : last > low + length - 12 ? value - (last - low - length + 12) : value
+        }
+        const next = {
+          zoom,
+          x: contain(transform.current.x, position.x, actual.geometry.laneWidth, box.x, box.width),
+          y: contain(transform.current.y, position.y, height, box.y, box.height),
+        }
+        if (height * zoom > box.height - 24 || actual.geometry.laneWidth * zoom > box.width - 24) onFramingNeedsRoom?.()
+        if (Math.abs(next.x - transform.current.x) < .5 && Math.abs(next.y - transform.current.y) < .5 &&
+          Math.abs(next.zoom - transform.current.zoom) < .001) return true
+        sceneRef.current?.classList.add("is-easing", "is-motion-slow")
+        transform.current = next
+        reframeReveal.current = true
+        paint()
+        if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
+        easeTimer.current = window.setTimeout(() => {
+          sceneRef.current?.classList.remove("is-easing", "is-motion-slow")
+          easeTimer.current = null
+        }, 860)
+        return true
+      }
       if (selectedNode) {
         const position = positionsForNodes(nodes, result.geometry, offsets.current, cardHeights, revealDeltas.current)
           .get(selectedNode.id)
@@ -1379,7 +1425,8 @@ export default function DigitalThreadCanvas({
     observer?.observe(element)
     cardRefs.current.forEach(card => observer?.observe(card))
     const fonts = document.fonts
-    const onFontEvent = () => schedulePaint()
+    let disposed = false
+    const onFontEvent = () => { if (!disposed) schedulePaint() }
     fonts?.addEventListener("loadingdone", onFontEvent)
     fonts?.addEventListener("loadingerror", onFontEvent)
     // A font can finish between the initial measure and listener registration. The ready promise covers that
@@ -1387,6 +1434,7 @@ export default function DigitalThreadCanvas({
     void fonts?.ready.then(onFontEvent, onFontEvent)
     window.addEventListener("resize", measure)
     return () => {
+      disposed = true
       timers.forEach(window.clearTimeout)
       observer?.disconnect()
       if (reflowFrame.current !== null) {
@@ -1419,6 +1467,7 @@ export default function DigitalThreadCanvas({
 
   useEffect(
     () => () => {
+      activeGesture.current?.()
       if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
       if (previewTimer.current !== null) clearTimeout(previewTimer.current)
     },
@@ -1463,7 +1512,7 @@ export default function DigitalThreadCanvas({
 
   const onPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0) return
+      if (event.button !== 0 || activeGesture.current) return
       takeCameraOwnership()
       if (previewTimer.current !== null) clearTimeout(previewTimer.current)
       previewTimer.current = null
@@ -1511,6 +1560,7 @@ export default function DigitalThreadCanvas({
       element.classList.add(card ? "is-idle" : rollable ? "is-rolling" : "is-panning")
 
       const move = (moveEvent: PointerEvent) => {
+        if (moveEvent.pointerId !== event.pointerId) return
         const dx = moveEvent.clientX - start.x
         const dy = moveEvent.clientY - start.y
         if (!start.moved && Math.abs(dx) + Math.abs(dy) > 4) start.moved = true
@@ -1561,6 +1611,7 @@ export default function DigitalThreadCanvas({
         }
       }
       const up = (upEvent: PointerEvent) => {
+        if (upEvent.pointerId !== event.pointerId) return
         element.classList.remove("is-panning", "is-rolling", "is-idle")
         /**
          * Release the capture this gesture took.
@@ -1576,6 +1627,7 @@ export default function DigitalThreadCanvas({
         window.removeEventListener("pointermove", move)
         window.removeEventListener("pointerup", up)
         window.removeEventListener("pointercancel", up)
+        activeGesture.current = null
       }
       /**
        * Window listeners, not element listeners.
@@ -1589,6 +1641,14 @@ export default function DigitalThreadCanvas({
       window.addEventListener("pointermove", move)
       window.addEventListener("pointerup", up)
       window.addEventListener("pointercancel", up)
+      activeGesture.current = () => {
+        window.removeEventListener("pointermove", move)
+        window.removeEventListener("pointerup", up)
+        window.removeEventListener("pointercancel", up)
+        element.classList.remove("is-panning", "is-rolling", "is-idle")
+        scrubbing.current = false
+        activeGesture.current = null
+      }
     },
     [edges, lanes.length, nodes, onSelect, paint, settle, takeCameraOwnership],
   )

@@ -24,11 +24,24 @@ const edges: CanvasEdge[] = [{ from: "subj", to: "link", label: "verified by" }]
 
 function Harness() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [grown, setGrown] = useState(false)
+  const [mounted, setMounted] = useState(true)
+  const growth = new URLSearchParams(location.search).get("case") === "growth"
+  const growthNodes = [
+    { id: "subj", lane: 0, row: 1 },
+    { id: "resident-0", lane: 1, row: 0 },
+    { id: "resident-2", lane: 1, row: 2 },
+    { id: "link", lane: 1, row: 8 },
+  ]
   return (
     <div style={{ height: "100%" }}>
-      <DigitalThreadCanvas
-        lanes={lanes}
-        nodes={nodes}
+      {growth && <div style={{ position: "absolute", right: 10, top: 5, zIndex: 200 }}>
+        <button onClick={() => setGrown(value => !value)}>Change text size</button>
+        <button onClick={() => setMounted(value => !value)}>Toggle canvas</button>
+      </div>}
+      {mounted && <DigitalThreadCanvas
+        lanes={growth ? ["Subject", "Linked"] : lanes}
+        nodes={growth ? growthNodes : nodes}
         edges={edges}
         scopeKey="contract|hidden-lane"
         selectedId={selectedId}
@@ -36,12 +49,12 @@ function Harness() {
         renderCard={node => (
           <div
             className={`probeCard probe-${node.id}`}
-            style={{ height: "100%", boxSizing: "border-box", padding: 8, border: "1px solid #cbd6df", borderRadius: 6, background: "#fff" }}
+            style={{ height: growth ? (node.id === "link" && grown ? 200 : 106) : "100%", boxSizing: "border-box", padding: 8, border: "1px solid #cbd6df", borderRadius: 6, background: "#fff" }}
           >
             <strong>{node.id}</strong>
           </div>
         )}
-      />
+      />}
     </div>
   )
 }

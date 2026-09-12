@@ -183,15 +183,15 @@ test.describe("lane-local reveal", () => {
 
   test("a frozen lane keeps its displayed arrangement for records still in the thread", () => {
     const nodes = lane(8)
-    const existing = new Map([["n6", -260], ["n7", 90]])
+    const existing = new Map([["n6", 276], ["n7", 276]])
     const plan = planReveal({
       nodes, geometry: GEOMETRY, laneOffsets: [0], storyIds: new Set(["n6", "n7"]),
       subjectId: null, windowByLane: new Map([[0, { top: 0, bottom: 400 }]]),
       frozenLanes: new Set([0]), existing, bandHeight: BAND,
     })
     // Reader-owned geometry is returned unchanged, not dropped into an implicit return-to-ordinary.
-    expect(plan.deltas.get("n6")).toBe(-260)
-    expect(plan.deltas.get("n7")).toBe(90)
+    expect(plan.deltas.get("n6")).toBe(276)
+    expect(plan.deltas.get("n7")).toBe(276)
     expect(plan.cues.get(0)?.down).toBe(true)
   })
 
@@ -200,9 +200,9 @@ test.describe("lane-local reveal", () => {
     const plan = planReveal({
       nodes, geometry: GEOMETRY, laneOffsets: [0], storyIds: new Set(["n6"]),
       subjectId: null, windowByLane: new Map([[0, { top: 0, bottom: 400 }]]),
-      frozenLanes: new Set([0]), existing: new Map([["n6", -260], ["n7", 90]]), bandHeight: BAND,
+      frozenLanes: new Set([0]), existing: new Map([["n6", 276], ["n7", 276]]), bandHeight: BAND,
     })
-    expect(plan.deltas.get("n6")).toBe(-260)
+    expect(plan.deltas.get("n6")).toBe(276)
     expect(plan.deltas.has("n7")).toBe(false)
   })
 

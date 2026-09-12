@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useLayoutEffect, useState } from "react"
 import type { RefObject } from "react"
 
 /** Where a detail panel sits. `auto` picks the side with less linked content; the rest are explicit. */
@@ -61,37 +61,40 @@ export function usePanelDock(
   const chooseRecovery = useCallback((current: ResolvedDock): ResolvedDock => {
     const canvas = canvasHostRef?.current?.querySelector<HTMLElement>(".dtCanvas")
     const canvasRect = canvas?.getBoundingClientRect()
-    const panelRect = panelElement?.getBoundingClientRect()
-    if (!canvasRect || !panelRect || canvasRect.width < 1 || canvasRect.height < 1) {
+    if (!canvasRect || !panelElement || canvasRect.width < 1 || canvasRect.height < 1) {
       return current === "bottom" ? "right" : "bottom"
     }
-    /**
-     * Feasibility first: does the record the reader selected actually fit in each candidate arrangement?
-     *
-     * A bottom panel spends height, a side panel spends width, and the selected card has measured dimensions of
-     * its own. Two selections with very different space needs must not get the same answer merely because the
-     * panel and canvas happen to measure the same. Proportional cost is only used to rank candidates when
-     * neither is sufficient, so the recovery is still bounded and truthful for genuinely oversized content.
-     */
-    const card = canvas?.querySelector<HTMLElement>(".dtCanvasNode.is-selected")
-    const cardRect = card?.getBoundingClientRect()
-    const margin = 24
-    const fitsBottom = cardRect
-      ? cardRect.height + margin <= canvasRect.height - panelRect.height &&
-        cardRect.width + margin <= canvasRect.width
-      : false
-    const fitsSide = cardRect
-      ? cardRect.height + margin <= canvasRect.height &&
-        cardRect.width + margin <= canvasRect.width - panelRect.width
-      : false
-    if (fitsBottom && !fitsSide) return "bottom"
-    if (fitsSide && !fitsBottom) return "right"
-    if (fitsBottom && fitsSide) return current
-    // Neither fits: take the arrangement that leaves more proportional room, still one bounded step.
-    const heightCost = panelRect.height / canvasRect.height
-    const widthCost = panelRect.width / canvasRect.width
-    if (current === "bottom") return heightCost <= widthCost ? "bottom" : "right"
-    return widthCost <= heightCost ? current : "bottom"
+    const cardRect = canvas?.querySelector<HTMLElement>(".dtCanvasNode.is-selected")?.getBoundingClientRect()
+    if (!cardRect) return current
+    const toolbar = canvas?.querySelector<HTMLElement>(".dtCanvasControls")?.getBoundingClientRect()
+    const heading = canvas?.querySelector<HTMLElement>(".dtCanvasLaneHead")
+    const headingOffset = heading ? Math.max(0, -parseFloat(getComputedStyle(heading).top) || 0) : 0
+    const top = Math.max(40, Math.ceil((toolbar?.bottom ?? canvasRect.top + 38) - canvasRect.top + headingOffset + 8))
+    // Each candidate is measured with its own CSS in the same containing block. The inert, invisible clone
+    // exists only during this synchronous measurement, and is removed before a frame can be displayed.
+    const measureCandidate = (candidate: ResolvedDock) => {
+      const probe = panelElement.cloneNode(true) as HTMLElement
+      probe.className = probe.className.replace(/Panel-(bottom|left|right)/g, `Panel-${candidate}`)
+      probe.inert = true
+      probe.setAttribute("aria-hidden", "true")
+      probe.style.visibility = "hidden"
+      probe.style.pointerEvents = "none"
+      probe.removeAttribute("id")
+      probe.querySelectorAll("[id]").forEach(node => node.removeAttribute("id"))
+      panelElement.parentElement!.appendChild(probe)
+      try {
+        const rect = probe.getBoundingClientRect()
+        const width = canvasRect.width - (candidate === "bottom" ? 0 : candidate === "left"
+          ? rect.right - canvasRect.left + 12 : canvasRect.right - rect.left + 12)
+        const height = canvasRect.height - top - 64 - (candidate === "bottom" ? canvasRect.bottom - rect.top + 12 : 0)
+        return { fits: cardRect.width + 24 <= width && cardRect.height + 24 <= height,
+          room: Math.min(width / cardRect.width, height / cardRect.height) }
+      } finally { probe.remove() }
+    }
+    const opposite = current === "bottom" ? "right" : "bottom"
+    const own = measureCandidate(current)
+    const other = measureCandidate(opposite)
+    return own.fits ? current : other.fits || other.room > own.room ? opposite : current
   }, [canvasHostRef, panelElement])
 
   /** The one placement, measured once per situation: repeated reports cannot walk through more placements. */
@@ -99,7 +102,7 @@ export function usePanelDock(
 
   // The canvas and panel are siblings in each view. Measure their rendered rectangles instead of reserving a
   // guessed 300x150 box: selected cards and relationship lists can grow, and the free frame must follow them.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!panelElement || !canvasHostRef) {
       setMeasuredInset(null)
       return undefined

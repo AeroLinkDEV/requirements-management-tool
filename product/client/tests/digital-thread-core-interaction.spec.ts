@@ -60,7 +60,8 @@ const usableFrame = async (page: import("@playwright/test").Page) => {
   const headingOffset = await page.locator(".dtCanvasLaneHead").first().evaluate(element =>
     Math.max(0, -parseFloat(getComputedStyle(element).top)))
   const top = Math.max(canvasBox.y + 40, (controls?.y ?? canvasBox.y) + (controls?.height ?? 38) + headingOffset + 8)
-  const panel = await page.locator(".dtnPanel-bottom, .dticPanel-bottom, .dtaPanel-bottom").boundingBox()
+  const panelLocator = page.locator(".dtnPanel-bottom, .dticPanel-bottom, .dtaPanel-bottom")
+  const panel = await panelLocator.count() ? await panelLocator.boundingBox() : null
   const selected = await page.locator(".dtCanvasNode.is-selected").count() > 0
   const bottom = (panel ? panel.y - 12 : canvasBox.y + canvasBox.height) - (selected ? 64 : 0)
   return { canvasBox, top, bottom }
@@ -546,7 +547,7 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
 const transformOf = async (scene: import("@playwright/test").Locator) =>
   /transform:[^;]*/.exec((await scene.getAttribute("style")) ?? "")?.[0] ?? ""
 
-test("Inside a change: hover is stationary and a selected record owns its thread", async ({ page }) => {
+test("Inside a change: selected hover is inert and a selected record owns its thread", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto("/tests/fixtures/inside-change.html?case=requirement")
   await expect(page.locator(".dtCanvas")).toBeVisible()
@@ -568,14 +569,12 @@ test("Inside a change: hover is stationary and a selected record owns its thread
   await expect(card).toHaveAttribute("aria-pressed", "true")
 })
 
-test("Artifact thread: hover is stationary once the arrival selection is cleared", async ({ page }) => {
+test("Artifact thread: selected hover leaves the arrival selection unchanged", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto("/tests/fixtures/artifact-thread.html?case=hlr")
   await expect(page.locator(".dtCanvas")).toBeVisible()
   await page.waitForTimeout(800)
-  // The view selects its focal record on arrival; the hover contract under test is the unselected one.
-  await page.keyboard.press("Escape")
-  await page.waitForTimeout(400)
+  await expect(page.locator(".dtCanvasNode.is-selected")).toHaveCount(1)
   const scene = page.locator(".dtCanvasScene")
   const camera = await transformOf(scene)
   const card = page.locator(".dtCanvasNode:not(.is-offscreen)").first()
@@ -587,6 +586,78 @@ test("Artifact thread: hover is stationary once the arrival selection is cleared
   await page.mouse.move(2, 2)
   await page.waitForTimeout(400)
   expect(await transformOf(scene)).toBe(camera)
+})
+
+for (const view of [
+  { name: "Inside", path: "inside-change.html?case=requirement", panel: ".dticPanel" },
+  { name: "Artifact", path: "artifact-thread.html?case=hlr", panel: ".dtaPanel" },
+]) test(`${view.name}: quiet to unselected hover changes emphasis without camera movement`, async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`/tests/fixtures/${view.path}`)
+  await expect(page.locator(view.panel)).toBeVisible()
+  await page.locator(".dtCanvas").focus()
+  await page.keyboard.press("Escape")
+  await expect(page.locator(".dtCanvasNode.is-selected")).toHaveCount(0)
+  await expect(page.locator(view.panel)).toHaveCount(0)
+  await page.waitForTimeout(450)
+  const camera = await transformOf(page.locator(".dtCanvasScene"))
+  const card = page.locator(".dtCanvasNode:not(.is-offscreen)").first()
+  const before = (await card.boundingBox())!
+  await shoot(page, `${view.name.toLowerCase()}-quiet`)
+  await card.hover()
+  await expect(page.locator(".dtCanvasEdges path.is-traced").first()).toBeAttached()
+  for (let index = 0; index < 8; index += 1) {
+    expect(await transformOf(page.locator(".dtCanvasScene"))).toBe(camera)
+    const now = (await card.boundingBox())!
+    expect(Math.abs(now.y - before.y)).toBeLessThan(1)
+    expect(Math.abs(now.x - before.x)).toBeLessThan(1)
+    await page.waitForTimeout(50)
+  }
+  await expect(page.locator(".dtCanvasNode.is-selected")).toHaveCount(0)
+  await expect(page.locator(view.panel)).toHaveCount(0)
+  await shoot(page, `${view.name.toLowerCase()}-true-unselected-hover`)
+})
+
+test("same-tier rendered growth repairs only colliding temporary geometry and converges", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 700 })
+  await page.goto("/tests/fixtures/digital-thread-contract.html?case=growth")
+  const linked = page.locator('[data-node-id="link"]')
+  const subject = page.locator('[data-node-id="subj"]')
+  await expect(subject).toBeVisible()
+  await page.waitForTimeout(700)
+  const before = (await linked.boundingBox())!
+  await subject.hover()
+  await page.waitForTimeout(600)
+  const revealed = (await linked.boundingBox())!
+  expect(before.y - revealed.y).toBeGreaterThan(100)
+  await subject.click({ position: { x: 6, y: 6 } })
+  await page.waitForTimeout(900)
+  const residents = page.locator('[data-node-id^="resident-"]')
+  const residentBefore = await residents.evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().y))
+  const tier = await page.locator(".dtCanvasScene").getAttribute("data-tier")
+  const camera = await transformOf(page.locator(".dtCanvasScene"))
+  const height = (await linked.boundingBox())!.height
+  const beforeGrowth = (await linked.boundingBox())!
+  await page.getByRole("button", { name: "Change text size" }).click()
+  await expect.poll(async () => (await linked.boundingBox())!.height).toBeGreaterThan(height + 50)
+  await page.waitForTimeout(700)
+  const grown = (await linked.boundingBox())!
+  const residentBoxes = await residents.evaluateAll(nodes => nodes.map(node => {
+    const rect = node.getBoundingClientRect()
+    return { top: rect.top, bottom: rect.bottom }
+  }))
+  expect(residentBoxes.some(box => beforeGrowth.y < box.bottom && beforeGrowth.y + grown.height > box.top),
+    "growth must create a collision at the retained position, otherwise this does not exercise reconciliation").toBe(true)
+  for (const resident of await residents.all()) {
+    const box = (await resident.boundingBox())!
+    expect(grown.y + grown.height <= box.y || grown.y >= box.y + box.height).toBe(true)
+  }
+  expect(await residents.evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().y))).toEqual(residentBefore)
+  expect(await page.locator(".dtCanvasScene").getAttribute("data-tier")).toBe(tier)
+  expect(await transformOf(page.locator(".dtCanvasScene"))).toBe(camera)
+  await page.waitForTimeout(600)
+  expect(Math.abs((await linked.boundingBox())!.y - grown.y)).toBeLessThan(1)
+  await shoot(page, "same-tier-growth-reconciled")
 })
 
 test("a hidden lane's linked endpoint arrives at a useful height when the reader pans to it", async ({ page }) => {
@@ -878,7 +949,7 @@ test("a drag takes over an automatic camera move from the displayed position", a
     const first = await displayed()
     await page.waitForTimeout(60)
     const second = await displayed()
-    return Math.abs(second.x - first.x) > 1 || Math.abs(second.zoom - first.zoom) > 0.005
+    return Math.abs(second.x - first.x) > 1 || Math.abs(second.y - first.y) > 1 || Math.abs(second.zoom - first.zoom) > 0.005
   }, { timeout: 2_000 }).toBe(true)
   void moving
 
@@ -894,6 +965,7 @@ test("a drag takes over an automatic camera move from the displayed position", a
     `the board kept travelling while the pointer was held (${(duringHold.x - atPress.x).toFixed(1)} units)`,
   ).toBeLessThanOrEqual(3)
   expect(Math.abs(duringHold.zoom - atPress.zoom)).toBeLessThanOrEqual(0.01)
+  expect(Math.abs(duringHold.y - atPress.y)).toBeLessThanOrEqual(3)
 
   await page.mouse.move(gutterX + 200, gutterY)
   await page.mouse.up()
@@ -1378,4 +1450,35 @@ test("a hidden lane's endpoint arrives at a useful height on first exposure", as
   expect(arrived.x + arrived.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width + 1)
   // No Show click was needed: the explicit-action strip is not the path this proof uses.
   await expect(page.getByRole("button", { name: "Show link", exact: true })).toHaveCount(0)
+})
+
+test("pointer identity, cancellation and unmount clean up the active gesture", async ({ page }) => {
+  await page.goto("/tests/fixtures/digital-thread-contract.html?case=growth")
+  const subject = page.locator('[data-node-id="subj"]')
+  await expect(subject).toBeVisible()
+  await subject.click({ position: { x: 6, y: 6 } })
+  await expect(subject).toHaveAttribute("aria-pressed", "true")
+  await page.waitForTimeout(900)
+  const canvas = page.locator(".dtCanvas")
+  const before = await transformOf(page.locator(".dtCanvasScene"))
+  await canvas.dispatchEvent("pointerdown", { pointerId: 41, button: 0, clientX: 20, clientY: 300 })
+  await canvas.dispatchEvent("pointermove", { pointerId: 42, clientX: 150, clientY: 400 })
+  await canvas.dispatchEvent("pointerup", { pointerId: 42, clientX: 150, clientY: 400 })
+  expect(await transformOf(page.locator(".dtCanvasScene"))).toBe(before)
+  await expect(subject).toHaveAttribute("aria-pressed", "true")
+  await canvas.dispatchEvent("pointercancel", { pointerId: 41 })
+  await expect(subject).toHaveAttribute("aria-pressed", "true")
+  await expect(canvas).not.toHaveClass(/is-panning|is-rolling|is-idle/)
+  await canvas.dispatchEvent("pointerdown", { pointerId: 43, button: 0, clientX: 20, clientY: 300 })
+  await page.getByRole("button", { name: "Toggle canvas" }).dispatchEvent("click")
+  await expect(canvas).toHaveCount(0)
+  await page.evaluate(() => {
+    window.dispatchEvent(new PointerEvent("pointermove", { pointerId: 43, clientX: 250, clientY: 350 }))
+    window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 43, clientX: 250, clientY: 350 }))
+  })
+  await page.getByRole("button", { name: "Toggle canvas" }).click()
+  await expect(subject).toHaveAttribute("aria-pressed", "true")
+  // The stale pointer-up did not manufacture a clear after unmount.
+  await page.waitForTimeout(900)
+  await expect(subject).toHaveAttribute("aria-pressed", "true")
 })
