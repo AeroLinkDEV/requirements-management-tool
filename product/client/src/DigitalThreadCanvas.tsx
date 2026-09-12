@@ -104,7 +104,6 @@ const nestedControl = (target: EventTarget | null): boolean => {
   return Boolean(element?.closest("a,button,input,select,textarea,summary,[role='link'],[role='checkbox'],[role='radio']"))
 }
 
-
 /**
  * The canvas shell: lanes of cards that pan, zoom, change density with zoom, roll independently, and follow
  * one another's links.
@@ -303,8 +302,6 @@ export default function DigitalThreadCanvas({
   const edgeLayerRef = useRef<SVGSVGElement | null>(null)
   const offscreenRefs = useRef(new Map<string, HTMLButtonElement>())
   const continuationRefs = useRef(new Map<string, HTMLElement>())
-  /** Directional continuation per lane, from the last reveal plan. */
-  const planCues = useRef<Map<number, { up: boolean; down: boolean }>>(new Map())
   const cardRefs = useRef(new Map<string, HTMLDivElement>())
   const edgeRefs = useRef<
     {
@@ -528,13 +525,6 @@ export default function DigitalThreadCanvas({
     const box = frame()
     const scene = sceneRef.current
     if (!box || !scene) {
-      if ((window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG) {
-        console.log("PAINT_EARLY", JSON.stringify({
-          box: box ?? null,
-          scene: Boolean(scene),
-          viewportRect: viewportRef.current?.getBoundingClientRect().width ?? null,
-        }))
-      }
       return
     }
 
@@ -667,7 +657,6 @@ export default function DigitalThreadCanvas({
         bandHeight: result.bandHeight,
       })
       revealTargets.current = plan.deltas
-      planCues.current = plan.cues
       /**
        * Rebase the new subject onto its retained displayed position.
        *
@@ -734,23 +723,21 @@ export default function DigitalThreadCanvas({
       return deepestMinimum.current[lane]
     })
     offsets.current = clampOffsets(offsets.current, floorsRef.current)
-    if ((window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG && scrubbing.current) {
-      console.log("PAINT_CLAMP", JSON.stringify({
-        offsets: offsets.current.map(value => Number(value.toFixed(1))),
-        floors: floorsRef.current.map(value => Number(value.toFixed(1))),
-      }))
-    }
     measuredHeightsRef.current = measuredCardHeights
 
     const { geometry, bandHeight } = result
     scene.style.transform = `translate(${transform.current.x}px,${transform.current.y}px) scale(${transform.current.zoom})`
+    // Clipping and reachability follow the displayed camera during CSS easing. This value is never written
+    // back as the commanded transform or used to invalidate the reveal plan.
+    const matrix = scene.classList.contains("is-easing") ? new DOMMatrixReadOnly(getComputedStyle(scene).transform) : null
+    const display = matrix && matrix.a > 0 ? { x: matrix.e, y: matrix.f, zoom: matrix.a } : transform.current
     scene.style.width = `${result.sceneWidth + trailingOverhang}px`
     scene.style.height = `${bandHeight}px`
     scene.dataset.tier = String(result.tier)
-    scene.dataset.zoom = String(Math.round(transform.current.zoom * 100))
+    scene.dataset.zoom = String(Math.round(display.zoom * 100))
     if (zoomReadoutRef.current) {
       const tierLabel = result.tier === 2 ? "Detailed" : result.tier === 1 ? "Compact" : "Dense"
-      zoomReadoutRef.current.textContent = `${Math.round(transform.current.zoom * 100)}% · ${tierLabel}`
+      zoomReadoutRef.current.textContent = `${Math.round(display.zoom * 100)}% · ${tierLabel}`
     }
 
     for (let lane = 0; lane < lanes.length; lane += 1) {
@@ -784,34 +771,42 @@ export default function DigitalThreadCanvas({
      * thread continues rather than being drawn off-screen.
      */
     {
-      const zoom = transform.current.zoom || 1
-      const windowTop = Math.max(0, (box.y - transform.current.y) / zoom)
-      const windowBottom = Math.min(bandHeight, (box.y + box.height - transform.current.y) / zoom)
+      const zoom = display.zoom || 1
+      const windowTop = Math.max(0, (box.y - display.y) / zoom)
+      const windowBottom = Math.min(bandHeight, (box.y + box.height - display.y) / zoom)
       const above = new Set<number>()
       const below = new Set<number>()
+      const leftLanes = new Set<number>()
+      const rightLanes = new Set<number>()
       for (const node of nodes) {
         if (!story?.nodes.has(node.id)) continue
         const position = positions.get(node.id)
         if (!position) continue
         const height = measuredCardHeights.get(node.id) ?? geometry.cardHeight
-        if (position.y + height <= windowTop) above.add(node.lane)
-        else if (position.y >= windowBottom) below.add(node.lane)
+        if (position.y < windowTop) above.add(node.lane)
+        if (position.y + height > windowBottom) below.add(node.lane)
+        if (position.x * zoom + display.x < box.x) leftLanes.add(node.lane)
+        if ((position.x + geometry.laneWidth) * zoom + display.x > box.x + box.width) rightLanes.add(node.lane)
       }
       for (const [key, element] of continuationRefs.current) {
         const separator = key.lastIndexOf(":")
         const lane = Number(key.slice(0, separator))
         const direction = key.slice(separator + 1)
-        const show = direction === "up" ? above.has(lane) : below.has(lane)
+        const horizontal = direction === "left" || direction === "right"
+        const show = direction === "up" ? above.has(lane) : direction === "down" ? below.has(lane)
+          : direction === "left" ? lane === Math.max(...leftLanes) : lane === Math.min(...rightLanes)
         element.hidden = !show
         if (!show) continue
-        const laneLeft = lane * geometry.lanePitch * zoom + transform.current.x
+        const halfWidth = element.offsetWidth / 2
+        const cueHeight = element.offsetHeight
+        const laneLeft = lane * geometry.lanePitch * zoom + display.x
         const laneRight = laneLeft + geometry.laneWidth * zoom
         const centre = Math.min(
-          Math.max((laneLeft + laneRight) / 2, box.x + 12),
-          box.x + box.width - 12,
+          Math.max((laneLeft + laneRight) / 2, box.x + halfWidth + 2),
+          box.x + box.width - halfWidth - 2,
         )
-        element.style.left = `${centre}px`
-        element.style.top = `${direction === "down" ? box.y + box.height - 12 : box.y + 2}px`
+        element.style.left = `${horizontal ? direction === "left" ? box.x + halfWidth + 2 : box.x + box.width - halfWidth - 2 : centre}px`
+        element.style.top = `${horizontal ? box.y + (box.height - cueHeight) / 2 : direction === "down" ? box.y + box.height - cueHeight - 2 : box.y + 2}px`
       }
     }
     for (const node of nodes) {
@@ -820,23 +815,15 @@ export default function DigitalThreadCanvas({
       if (!card) continue
       card.style.transform = `translate(${position.x}px,${position.y}px)`
       card.style.width = `${geometry.laneWidth}px`
-      /**
-       * A card is drawn while it is inside its lane's window *and* inside the area the board actually has.
-       *
-       * The horizontal half of this is new, and it is the same rule rather than a second one. `box` already
-       * excludes whatever a docked detail panel is covering, so a card outside it horizontally is a card the
-       * reader cannot use — and leaving it drawn is precisely the §6.6 failure of a linked record sitting
-       * underneath the panel. Since the §10.1 landing floor forbids zooming out to make a wide web fit beside
-       * the panel, some cards genuinely cannot be brought into that area, and the honest treatment is the one
-       * a rolled-out card already gets: faded, not tabbable, not pretending to be readable.
-       */
-      const left = position.x * transform.current.zoom + transform.current.x
-      const right = left + geometry.laneWidth * transform.current.zoom
+      // Reachability uses the displayed free frame, including toolbar and inspector reserves. Partially
+      // covered unselected cards keep their geometry and an explicit reveal path before accepting focus.
+      const left = position.x * display.zoom + display.x
+      const right = left + geometry.laneWidth * display.zoom
       // Wholly inside, not merely overlapping: a card straddling the panel edge is still a card the panel is
       // covering, and §6.6 admits no partial version of that.
       const inFrame = left >= box.x - 1 && right <= box.x + box.width + 1
-      const top = position.y * transform.current.zoom + transform.current.y
-      const bottom = top + (card.offsetHeight || geometry.cardHeight) * transform.current.zoom
+      const top = position.y * display.zoom + display.y
+      const bottom = top + (card.offsetHeight || geometry.cardHeight) * display.zoom
       const fullyVisible = inFrame && top >= box.y - 1 && bottom <= box.y + box.height + 1 && isVisible(position.y, geometry, bandHeight)
       const indicator = offscreenRefs.current.get(node.id)
       if (indicator) {
@@ -880,10 +867,10 @@ export default function DigitalThreadCanvas({
       const drawn = bucket.filter(candidate => {
         const position = positions.get(candidate.id)
         if (!position) return false
-        const left = position.x * transform.current.zoom + transform.current.x
-        const right = left + geometry.laneWidth * transform.current.zoom
-        const top = position.y * transform.current.zoom + transform.current.y
-        const bottom = top + (cardRefs.current.get(candidate.id)?.offsetHeight || geometry.cardHeight) * transform.current.zoom
+        const left = position.x * display.zoom + display.x
+        const right = left + geometry.laneWidth * display.zoom
+        const top = position.y * display.zoom + display.y
+        const bottom = top + (cardRefs.current.get(candidate.id)?.offsetHeight || geometry.cardHeight) * display.zoom
         return isVisible(position.y, geometry, bandHeight)
           && left >= box.x - 1 && right <= box.x + box.width + 1
           && top >= box.y - 1 && bottom <= box.y + box.height + 1
@@ -927,8 +914,8 @@ export default function DigitalThreadCanvas({
         height: Math.max(geometry.cardHeight, card.offsetHeight || card.scrollHeight),
       }]
     })
-    const labelsAtRest = transform.current.zoom > 1.05
-    const currentZoom = transform.current.zoom || 1
+    const labelsAtRest = display.zoom > 1.05
+    const currentZoom = display.zoom || 1
     const shownEdge = (entry: (typeof edgeRefs.current)[number]): boolean => {
       if (!entry.label) return false
       const from = positions.get(entry.edge.from)
@@ -940,7 +927,7 @@ export default function DigitalThreadCanvas({
         return y > -20 && y < bandHeight + 20
       }
       const inHorizontalWindow = (position: { x: number; y: number }) => {
-        const left = position.x * currentZoom + transform.current.x
+        const left = position.x * currentZoom + display.x
         const right = left + geometry.laneWidth * currentZoom
         return right > box.x - 20 && left < box.x + box.width + 20
       }
@@ -980,8 +967,8 @@ export default function DigitalThreadCanvas({
     const toSceneRect = (rect: DOMRect): CanvasRect | null => {
       if (!viewportRect) return null
       return {
-        x: (rect.left - viewportRect.left - transform.current.x) / zoom,
-        y: (rect.top - viewportRect.top - transform.current.y) / zoom,
+        x: (rect.left - viewportRect.left - display.x) / zoom,
+        y: (rect.top - viewportRect.top - display.y) / zoom,
         width: rect.width / zoom,
         height: rect.height / zoom,
       }
@@ -990,10 +977,17 @@ export default function DigitalThreadCanvas({
     // that same coordinate space before collision testing; mixing viewport pixels with scene units lets labels
     // appear clear in one pan position and land over a card in another.
     const sceneFrame: CanvasRect = {
-      x: (box.x - transform.current.x) / zoom,
-      y: (box.y - transform.current.y) / zoom,
+      x: (box.x - display.x) / zoom,
+      y: (box.y - display.y) / zoom,
       width: box.width / zoom,
       height: box.height / zoom,
+    }
+    if (svg) {
+      const left = sceneFrame.x + 26
+      const top = sceneFrame.y + 56
+      const right = left + sceneFrame.width
+      const bottom = top + sceneFrame.height
+      svg.style.clipPath = `polygon(${left}px ${top}px, ${right}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px)`
     }
     const domObstacles = [
       ...Array.from(scene.querySelectorAll<HTMLElement>(".dtCanvasLaneHead")),
@@ -1155,7 +1149,7 @@ export default function DigitalThreadCanvas({
       offsets.current = stepped.offsets
       const revealMoving = stepReveal()
       committedPaint.current()
-      animation.current = stepped.moving || revealMoving || scrubbing.current ? requestAnimationFrame(tick) : null
+      animation.current = stepped.moving || revealMoving || scrubbing.current || easeTimer.current !== null ? requestAnimationFrame(tick) : null
     }
     animation.current = requestAnimationFrame(tick)
   }, [])
@@ -1281,6 +1275,7 @@ export default function DigitalThreadCanvas({
           sceneRef.current?.classList.remove("is-easing", "is-motion-slow")
           easeTimer.current = null
         }, 860)
+        kickMotion.current()
         return true
       }
       if (selectedNode) {
@@ -1368,7 +1363,7 @@ export default function DigitalThreadCanvas({
       if (settledFrame) {
         transform.current = settledFrame
         paint()
-        
+
       }
       if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
       easeTimer.current = window.setTimeout(() => {
@@ -1378,6 +1373,7 @@ export default function DigitalThreadCanvas({
         // Keep this just past the stylesheet's transition duration: a shorter timer cuts the movement short
         // and leaves the class-based easing inconsistent with where the board actually is.
       }, slow ? 860 : 460)
+      kickMotion.current()
       return true
     },
      [counts, edges, frame, nodes, onFramingNeedsRoom, paint],
@@ -1453,7 +1449,6 @@ export default function DigitalThreadCanvas({
     paint()
   }, [paint])
 
-
   useEffect(() => {
     if (!framing) {
       framedFor.current = null
@@ -1462,8 +1457,7 @@ export default function DigitalThreadCanvas({
     if (framedFor.current === framing.key) return
     // Consumed only once the framing has actually applied. If the frame is not usable yet the key stays
     // pending, and the resize path retries it the moment a real rect arrives.
-    // The selection's own framing is the automatic zoom the owner asked to slow down; the resize retry above
-    // keeps the snappier timing because it is repairing a measurement, not presenting a new selection.
+    // A selection and its deferred resize retry use the same bounded slow framing path.
     if (!cameraOwned.current && applyFraming(framing, false, true)) framedFor.current = framing.key
   }, [applyFraming, framing, paint])
 
@@ -1577,40 +1571,17 @@ export default function DigitalThreadCanvas({
             Math.min(0, start.offset + dy / transform.current.zoom),
           )
           targets.current[lane] = offsets.current[lane]
-          if ((window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG) {
-            console.log("SCRUB_SET", JSON.stringify({
-              lane, startOffset: Number(start.offset.toFixed(1)), dy: Number(dy.toFixed(1)),
-              assigned: Number(offsets.current[lane].toFixed(1)), floor: Number(laneFloor(lane).toFixed(1)),
-            }))
-          }
           // Deliberate lane scrolling no longer drags other lanes into alignment: #1022 keeps the reader's
           // camera and every other lane exactly where they are.
           settle()
           return
         }
         transform.current = { ...transform.current, x: start.tx + dx, y: start.ty + dy }
-        if ((window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG) {
-          console.log("PAN_SET", JSON.stringify({
-            dx: Number(dx.toFixed(1)),
-            dy: Number(dy.toFixed(1)),
-            startTx: Number(start.tx.toFixed(1)),
-            modelX: Number(transform.current.x.toFixed(1)),
-            inlineStyle: (sceneRef.current?.style.transform ?? "").slice(0, 60),
-            sceneConnected: sceneRef.current?.isConnected ?? null,
-            viewportConnected: viewportRef.current?.isConnected ?? null,
-          }))
-        }
         // A deliberate vertical or diagonal camera move is exploration too — but only for lanes the reader can
         // actually see. A lane prepared while horizontally hidden keeps its right to a first useful reveal;
         // freezing it here would deny that without the reader ever having looked at it.
         if (Math.abs(dy) > 8) for (const lane of usableLanesRef.current) frozenLanes.current.add(lane)
         paint()
-        if ((window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG) {
-          console.log("PAN_AFTER_PAINT", JSON.stringify({
-            modelX: Number(transform.current.x.toFixed(1)),
-            inlineStyle: (sceneRef.current?.style.transform ?? "").slice(0, 60),
-          }))
-        }
       }
       const up = (upEvent: PointerEvent) => {
         if (upEvent.pointerId !== event.pointerId) return
@@ -1687,21 +1658,7 @@ export default function DigitalThreadCanvas({
     [byLane, roving],
   )
 
-  /**
-   * Arrow navigation within a lane, rolling the lane so the newly focused card is actually visible.
-   *
-   * Moving focus without rolling would leave a keyboard user on a card that is faded out and unreachable by
-   * eye, which is the failure #880 §6.9 calls out.
-   */
-  /**
-   * Bring one card fully into view: roll its lane, and pan the camera to its lane.
-   *
-   * Both halves are needed, and each was missing once. Rolling answers "is it inside its lane window";
-   * since #880 §10.1 holds automatic landings to the legibility floor, a board can be wider than the
-   * viewport, so the lane itself can sit outside the free frame and the camera has to travel as well. §6.9
-   * is that focus never rests on a card the reader cannot see, and that has to hold however focus arrived —
-   * by arrow within a lane, or by Tab across lanes.
-   */
+  /** Explicit navigation reveals through the usable window without changing the selected subject. */
   const reveal = useCallback(
     (node: CanvasNode) => {
       takeCameraOwnership()
@@ -1875,7 +1832,7 @@ export default function DigitalThreadCanvas({
       <div className="dtCanvasPlacementNotice" role="status" aria-live="polite" hidden />
       {/* Directional continuation cues: one per lane, positioned by paint at the usable boundary. */}
       <div className="dtCanvasContinuations" aria-hidden="true">
-        {lanes.flatMap((_, lane) => (["up", "down"] as const).map(direction => (
+        {lanes.flatMap((_, lane) => (["up", "down", "left", "right"] as const).map(direction => (
           <span
             key={`continuation-${lane}-${direction}`}
             className="dtCanvasContinuation"

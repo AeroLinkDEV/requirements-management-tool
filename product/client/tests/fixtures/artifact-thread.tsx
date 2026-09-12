@@ -51,7 +51,9 @@ const HASH_2 = "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae
 type Node = Record<string, unknown>
 type Edge = Record<string, unknown>
 
-const node = (over: Node): Node => ({ title: null, state: null, level: null, isFocal: false, ...over })
+const node = (over: Node): Node => ({ title: null, state: null, level: null, isFocal: false, ...over,
+  ...(new URLSearchParams(location.search).has("long") && typeof over.title === "string" ? { title: `${over.title}. `.repeat(4) } : {}),
+})
 
 const edge = (fromId: string, fromKind: string, toId: string, toKind: string, relation: string,
   isSuspect = false): Edge => ({ fromId, fromKind, toId, toKind, relation, isSuspect })

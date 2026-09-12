@@ -172,8 +172,8 @@
   padding: 14px 16px;
 }
 
-.dtnPanel-right { right: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
-.dtnPanel-left { left: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
+.dtnPanel-right { right: 16px; top: 112px; bottom: 22px; width: 300px; overflow: auto; }
+.dtnPanel-left { left: 16px; top: 112px; bottom: 22px; width: 300px; overflow: auto; }
 .dtnPanel-bottom {
   left: 16px;
   right: 16px;
@@ -205,14 +205,14 @@
   background: var(--surface);
   padding: 2px 8px;
   color: #8493a6;
-  font: var(--weight-strong) 10px var(--font-body);
+  font: var(--weight-strong) 12px var(--font-body);
   cursor: pointer;
 }
 
 .dtnPanelTools button:hover { border-color: #a9c9c4; color: var(--teal-700); }
 .dtnPanelTools button.is-on { border-color: var(--teal-700); background: #eff9f6; color: var(--teal-700); }
 
-.dtnEyebrow { margin: 0; color: var(--teal-600); font: var(--weight-bold) 9px var(--font-body); letter-spacing: .13em; }
+.dtnEyebrow { margin: 0; color: var(--teal-600); font: var(--weight-bold) 12px/1.35 var(--font-body); letter-spacing: .07em; }
 /* #1022 A17: the owner called out small headings and cramped detail text beside oversized boxes. The type goes
    up to the product's 12px floor and the boxes give back the height in padding and gaps, so the tray reads
    better instead of simply growing. */
@@ -221,7 +221,7 @@
 /* Flattened, the panel is four columns rather than one third of a tall box with empty space beneath it. */
 .dtnPanel-bottom .dtnPanelGrid {
   display: grid;
-  grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr) 158px;
+  grid-template-columns: 250px minmax(0, 1fr) minmax(0, 1fr) 200px;
   gap: 18px;
   align-items: stretch;
   height: auto;
@@ -375,3 +375,7 @@
   font: var(--weight-strong) var(--text-xs) var(--font-body);
   cursor: pointer;
 }
+
+.dtnRelHead { flex-wrap: wrap; gap: 3px 8px; margin-bottom: 6px; }
+.dtnRel button > span { min-width: 0; }
+.dtnRelEmpty { font-size: 12px; line-height: 1.4; }

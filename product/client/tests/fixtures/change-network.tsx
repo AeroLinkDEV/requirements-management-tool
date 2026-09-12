@@ -26,6 +26,7 @@ const node = (over: Partial<NetworkNode> & { id: string; kind: string; displayNu
   state: "InReview",
   buildVersion: "1.6",
   ...over,
+  ...(new URLSearchParams(location.search).has("long") ? { title: "Oceanic route sequencing after a discontinuity, including crew confirmation and retained downstream verification context. ".repeat(3) } : {}),
 })
 
 /** One record per badge `badgeOf` can produce, each with a long identifier so collisions are visible. */

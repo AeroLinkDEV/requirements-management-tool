@@ -239,7 +239,7 @@
 .dtaKv i { color: #8493a6; font-style: normal; }
 .dtaKv b { color: #26425e; font: var(--weight-strong) 10.5px ui-monospace, SFMono-Regular, Consolas, monospace; }
 
-.dtaEyebrow { margin: 0; color: var(--teal-600); font: var(--weight-bold) 9px var(--font-body); letter-spacing: .13em; }
+.dtaEyebrow { margin: 0; color: var(--teal-600); font: var(--weight-bold) 12px/1.35 var(--font-body); letter-spacing: .07em; }
 
 .dtaEvidence { display: flex; flex-direction: column; gap: 6px; }
 .dtaEvidenceRow { display: flex; flex-direction: column; gap: 2px; }
@@ -286,8 +286,8 @@
   padding: 14px 16px;
 }
 
-.dtaPanel-right { right: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
-.dtaPanel-left { left: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
+.dtaPanel-right { right: 16px; top: 112px; bottom: 22px; width: 300px; overflow: auto; }
+.dtaPanel-left { left: 16px; top: 112px; bottom: 22px; width: 300px; overflow: auto; }
 .dtaPanel-bottom {
   left: 16px;
   right: 16px;
@@ -319,7 +319,7 @@
   background: var(--surface);
   padding: 2px 8px;
   color: #8493a6;
-  font: var(--weight-strong) 10px var(--font-body);
+  font: var(--weight-strong) 12px var(--font-body);
   cursor: pointer;
 }
 
@@ -331,7 +331,7 @@
 /* Flattened, the panel is four columns rather than one third of a tall box with empty space beneath it. */
 .dtaPanel-bottom .dtaPanelGrid {
   display: grid;
-  grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr) 158px;
+  grid-template-columns: 250px minmax(0, 1fr) minmax(0, 1fr) 200px;
   gap: 18px;
   align-items: stretch;
   height: auto;
@@ -468,3 +468,7 @@
 @media (prefers-reduced-motion: reduce) {
   .dtaFilters button { transition: none; }
 }
+
+.dtaRelHead { flex-wrap: wrap; gap: 3px 8px; margin-bottom: 6px; }
+.dtaRel button > span { min-width: 0; }
+.dtaRelEmpty { font-size: 12px; line-height: 1.4; }

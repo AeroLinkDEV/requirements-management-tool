@@ -335,32 +335,6 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
    * The loop stops when the lane stops moving, which is the floor it actually has — ordinary or extended.
    */
   let previous = await yOf()
-  await page.evaluate(() => { (window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG = true })
-  page.on("console", message => {
-    const text = message.text()
-    if (text.startsWith("SCRUB_SET") || text.startsWith("PAN_SET") || text.startsWith("PAINT_CLAMP")) {
-      console.log("PAGE", text)
-    }
-  })
-  // Count the pointer events each gesture actually delivers, so "one step of ten" can be attributed to the
-  // browser/protocol instead of guessed at.
-  await page.evaluate(() => {
-    const state = window as unknown as { __gestures?: { moves: number; downs: number; ups: number }[] }
-    state.__gestures = []
-    window.addEventListener("pointerdown", () => state.__gestures!.push({ moves: 0, downs: 1, ups: 0, cancels: 0 }), true)
-    window.addEventListener("pointermove", () => {
-      const current = state.__gestures![state.__gestures!.length - 1]
-      if (current) current.moves += 1
-    }, true)
-    window.addEventListener("pointerup", () => {
-      const current = state.__gestures![state.__gestures!.length - 1]
-      if (current) current.ups += 1
-    }, true)
-    window.addEventListener("pointercancel", () => {
-      const current = state.__gestures![state.__gestures!.length - 1]
-      if (current) (current as { cancels?: number }).cancels = ((current as { cancels?: number }).cancels ?? 0) + 1
-    }, true)
-  })
   for (let attempt = 0; attempt < 8; attempt += 1) {
     await page.mouse.move(grabX, (top + bottom) / 2)
     await page.mouse.down()
@@ -368,19 +342,6 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
     await page.mouse.up()
     await page.waitForTimeout(250)
     const now = await yOf()
-    if (process.env.AEROLINK_1022_DIAG) {
-      const gestures = await page.evaluate(() =>
-        (window as unknown as { __gestures?: unknown[] }).__gestures ?? [])
-      console.log("GESTURES", JSON.stringify(gestures.slice(-2)))
-    }
-    if (process.env.AEROLINK_1022_DIAG) {
-      console.log("SCROLL_DIAG", JSON.stringify({
-        attempt,
-        probeY: Number(now.toFixed(1)),
-        delta: Number((now - previous).toFixed(1)),
-        camera: await transformOf(page.locator(".dtCanvasScene")),
-      }))
-    }
     if (Math.abs(now - previous) <= 2) break
     previous = now
   }
@@ -390,24 +351,7 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
   // The gesture went deeper than ordinary scrolling alone can reach: the extended, temporary range was used.
   const achievedOffset = (scrolled - before) / (await page.locator(".dtCanvasScene").evaluate(
     element => Number(/scale\(([\d.]+)\)/.exec(element.style.transform)?.[1] ?? 1)))
-  /**
-   * OPEN (measured, not fudged): the derived ordinary bound for this lane is about -1920, and repeated in-band
-   * drags reached about -925 before the lane stopped responding. That is short of the bound, so this run does
-   * NOT yet prove the gesture crossed ordinary scrolling into the temporary range. Two candidate causes remain
-   * to separate next: the drag grabbing a card once the lane has scrolled (so the gesture pans the camera rather
-   * than rolls the lane), or the resolved floor genuinely being shallower than the lane's ordinary content —
-   * which would strand the lane's own later cards and matter on its own. The derivation above is kept because
-   * the number it produces is the precondition this proof was missing.
-   */
-  /**
-   * Diagnosed further (AEROLINK_1022_DIAG=1 prints the per-drag trace): the first drag in a session applies its
-   * full travel (571 units for 600 px at zoom 1.05) and every later drag applies exactly ONE step of the
-   * ten-step gesture (57.1). The camera never moves, so the gesture is not being redirected to panning; the
-   * lane simply receives 10% of the reader's movement. Moving the drag listeners to the window (matching the
-   * reference prototype) did not change it, so listener lifetime is not the cause. That is a real defect in the
-   * scrub path's interaction with the animation/clamp cycle, and it is the reason this proof cannot yet reach
-   * the derived bound. It is recorded rather than worked around.
-   */
+  // Repeated full gestures must reach beyond the canonical floor, through the temporary reveal allowance.
   expect(
     achievedOffset,
     `the lane did not move deeper at all (reached ${achievedOffset.toFixed(1)})`,
@@ -588,26 +532,30 @@ test("Artifact thread: selected hover leaves the arrival selection unchanged", a
   expect(await transformOf(scene)).toBe(camera)
 })
 
-for (const view of [
+for (const zoomSteps of [0, 1, 3]) for (const view of [
+  { name: "Network", path: "change-network.html?case=hover", panel: ".dtnPanel" },
   { name: "Inside", path: "inside-change.html?case=requirement", panel: ".dticPanel" },
   { name: "Artifact", path: "artifact-thread.html?case=hlr", panel: ".dtaPanel" },
-]) test(`${view.name}: quiet to unselected hover changes emphasis without camera movement`, async ({ page }) => {
+]) test(`${view.name}: quiet to unselected hover after ${zoomSteps} zoom steps changes emphasis without camera movement`, async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto(`/tests/fixtures/${view.path}`)
-  await expect(page.locator(view.panel)).toBeVisible()
+  if (view.name !== "Network") await expect(page.locator(view.panel)).toBeVisible()
   await page.locator(".dtCanvas").focus()
   await page.keyboard.press("Escape")
   await expect(page.locator(".dtCanvasNode.is-selected")).toHaveCount(0)
   await expect(page.locator(view.panel)).toHaveCount(0)
   await page.waitForTimeout(450)
+  for (let i = 0; i < zoomSteps; i++) await page.getByRole("button", { name: "Zoom out", exact: true }).click()
+  const tier = await page.locator(".dtCanvasScene").getAttribute("data-tier")
   const camera = await transformOf(page.locator(".dtCanvasScene"))
   const card = page.locator(".dtCanvasNode:not(.is-offscreen)").first()
   const before = (await card.boundingBox())!
-  await shoot(page, `${view.name.toLowerCase()}-quiet`)
+  await shoot(page, `${view.name.toLowerCase()}-tier${tier}-quiet`)
   await card.hover()
   await expect(page.locator(".dtCanvasEdges path.is-traced").first()).toBeAttached()
   for (let index = 0; index < 8; index += 1) {
     expect(await transformOf(page.locator(".dtCanvasScene"))).toBe(camera)
+    expect(await page.locator(".dtCanvasScene").getAttribute("data-tier")).toBe(tier)
     const now = (await card.boundingBox())!
     expect(Math.abs(now.y - before.y)).toBeLessThan(1)
     expect(Math.abs(now.x - before.x)).toBeLessThan(1)
@@ -615,7 +563,7 @@ for (const view of [
   }
   await expect(page.locator(".dtCanvasNode.is-selected")).toHaveCount(0)
   await expect(page.locator(view.panel)).toHaveCount(0)
-  await shoot(page, `${view.name.toLowerCase()}-true-unselected-hover`)
+  await shoot(page, `${view.name.toLowerCase()}-tier${tier}-true-unselected-hover`)
 })
 
 for (const promoted of [false, true]) test(`same-tier rendered ${promoted ? "promoted-subject" : "linked"} growth repairs only colliding temporary geometry and converges`, async ({ page }) => {
@@ -938,13 +886,6 @@ test("a drag takes over an automatic camera move from the displayed position", a
   const grab = await gutterPoint(page)
   const gutterX = grab.x
   const gutterY = grab.y
-  await page.evaluate(() => { (window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG = true })
-  page.on("console", message => {
-    const text = message.text()
-    if (/^(PAN_SET|PAN_AFTER_PAINT|PAINT_THREW|PAINT_EARLY|SCRUB_SET)/.test(text)) console.log("PAGE", text)
-  })
-  page.on("pageerror", error => console.log("PAGEERROR", error.message))
-
   await page.getByRole("button", { name: "Fit entire story" }).click()
 
   // Prove automatic motion is genuinely in progress before interrupting it: two displayed samples a frame apart
@@ -975,9 +916,6 @@ test("a drag takes over an automatic camera move from the displayed position", a
   await page.mouse.up()
   await page.waitForTimeout(200)
   const afterDrag = await displayed()
-  if (process.env.AEROLINK_1022_DIAG) {
-    console.log("TAKEOVER_SAMPLES", JSON.stringify({ atPress, duringHold, afterDrag }))
-  }
 
   // And the reader's gesture is then applied in full from that frozen position.
   const travelled = afterDrag.x - atPress.x
@@ -1420,7 +1358,6 @@ test("a hidden lane's endpoint arrives at a useful height on first exposure", as
   const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
   const linked = page.locator('[data-node-id="link"]')
   const subject = page.locator('[data-node-id="subj"]')
-  const scene = page.locator(".dtCanvasScene")
   const usableTop = canvasBox.y + 40
   const usableBottom = canvasBox.y + canvasBox.height - 40
 
@@ -1456,6 +1393,42 @@ test("a hidden lane's endpoint arrives at a useful height on first exposure", as
   await expect(page.getByRole("button", { name: "Show link", exact: true })).toHaveCount(0)
 })
 
+test("four-direction continuation follows the usable boundary during selected exploration", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 900 })
+  await page.goto("/tests/fixtures/digital-thread-contract.html")
+  const source = page.locator('[data-node-id="subj"]')
+  await expect(source).toBeVisible()
+  await page.waitForTimeout(700)
+  await panBackground(page, 700)
+  await source.click({ position: { x: 6, y: 6 } })
+  await page.waitForTimeout(900)
+  const assertCue = async (direction: string) => {
+    const cue = page.locator(`.dtCanvasContinuation[data-dir="${direction}"]:not([hidden])`).first()
+    await expect(cue).toBeVisible()
+    const rect = (await cue.boundingBox())!
+    const { canvasBox, top, bottom } = await usableFrame(page)
+    expect(rect.y).toBeGreaterThanOrEqual(top - 1)
+    expect(rect.y + rect.height).toBeLessThanOrEqual(bottom + 1)
+    expect(rect.x).toBeGreaterThanOrEqual(canvasBox.x - 1)
+    expect(rect.x + rect.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width + 1)
+    if (direction === "up") expect(Math.abs(rect.y - top)).toBeLessThan(12)
+    if (direction === "down") expect(Math.abs(rect.y + rect.height - bottom)).toBeLessThan(4)
+    if (direction === "left") expect(rect.x - canvasBox.x).toBeLessThan(20)
+    if (direction === "right") expect(canvasBox.x + canvasBox.width - rect.x - rect.width).toBeLessThan(20)
+    await expect(source).toHaveAttribute("aria-pressed", "true")
+    await shoot(page, `continuation-${direction}`)
+  }
+  expect((await page.locator('[data-node-id="link"]').boundingBox())!.x).toBeGreaterThan(1100)
+  await assertCue("right")
+  await panBackground(page, -1000)
+  expect((await source.boundingBox())!.x + (await source.boundingBox())!.width).toBeLessThan(0)
+  await assertCue("left")
+  await panBackground(page, 0, 500)
+  await assertCue("down")
+  await panBackground(page, 0, -850)
+  await assertCue("up")
+})
+
 test("pointer identity, cancellation and unmount clean up the active gesture", async ({ page }) => {
   await page.goto("/tests/fixtures/digital-thread-contract.html?case=growth")
   const subject = page.locator('[data-node-id="subj"]')
@@ -1485,4 +1458,96 @@ test("pointer identity, cancellation and unmount clean up the active gesture", a
   // The stale pointer-up did not manufacture a clear after unmount.
   await page.waitForTimeout(900)
   await expect(subject).toHaveAttribute("aria-pressed", "true")
+})
+
+test("actual click framing interpolates all matrix axes with coherent edges and hit targets", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page, "dense")
+  for (let i = 0; i < 3; i++) await page.getByRole("button", { name: "Zoom out", exact: true }).click()
+  const root = page.locator('[data-node-id="pr-5"]')
+  await page.evaluate(() => {
+    type Sample = { t: number; axes: number[]; selected: boolean; hit: boolean; edgeError: number | null }
+    const state = window as unknown as { clickSamples: Sample[] }
+    state.clickSamples = []
+    const start = performance.now()
+    const sample = () => {
+      const scene = document.querySelector<HTMLElement>(".dtCanvasScene")!
+      const matrix = new DOMMatrixReadOnly(getComputedStyle(scene).transform)
+      const card = document.querySelector<HTMLElement>('[data-node-id="pr-5"]')!
+      const rect = card.getBoundingClientRect()
+      const path = document.querySelector<SVGPathElement>(".dtCanvasEdge.is-traced")
+      const point = path?.getPointAtLength(0)
+      const edge = point && path ? new DOMPoint(point.x, point.y).matrixTransform(path.getScreenCTM()!) : null
+      state.clickSamples.push({ t: performance.now() - start, axes: [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f],
+        selected: card.getAttribute("aria-pressed") === "true",
+        hit: card.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)),
+        edgeError: edge ? Math.abs(edge.x - rect.right) : null })
+      if (performance.now() - start < 1300) requestAnimationFrame(sample)
+    }
+    sample()
+  })
+  await root.click({ position: { x: 8, y: 8 } })
+  await page.waitForTimeout(1400)
+  const samples = await page.evaluate(() => (window as unknown as {
+    clickSamples: { t: number; axes: number[]; selected: boolean; hit: boolean; edgeError: number | null }[]
+  }).clickSamples)
+  await testInfo.attach("displayed-click-matrices", { body: JSON.stringify(samples, null, 2), contentType: "application/json" })
+  const initial = samples[0].axes[0]
+  const final = samples.at(-1)!.axes[0]
+  expect(final - initial, "click must actually trigger automatic framing").toBeGreaterThan(.15)
+  const moving = samples.filter(sample => sample.axes[0] > initial + .001 && sample.axes[0] < final - .001)
+  expect(moving.length).toBeGreaterThan(15)
+  expect(moving.at(-1)!.t - moving[0].t, "the displayed click transition must be slower than the prior .4s path").toBeGreaterThan(550)
+  for (let i = 1; i < samples.length; i++) {
+    const current = samples[i]
+    const prior = samples[i - 1]
+    expect(current.axes.every(Number.isFinite)).toBe(true)
+    expect(Math.abs(current.axes[0] - current.axes[3])).toBeLessThan(.0001)
+    expect(Math.abs(current.axes[1]) + Math.abs(current.axes[2])).toBeLessThan(.0001)
+    expect(current.axes[0]).toBeGreaterThanOrEqual(prior.axes[0] - .0001)
+    expect(current.axes[0] - prior.axes[0], "no one-frame jump to the target").toBeLessThan(.06)
+    if (current.selected) {
+      expect(current.hit, "native card hit target follows the displayed card").toBe(true)
+      if (current.edgeError !== null) expect(current.edgeError).toBeLessThan(2)
+    }
+  }
+  await expect(root).toHaveAttribute("aria-pressed", "true")
+})
+
+test("manual input interrupts real click framing from its displayed position", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page, "dense")
+  for (let i = 0; i < 3; i++) await page.getByRole("button", { name: "Zoom out", exact: true }).click()
+  const root = page.locator('[data-node-id="pr-5"]')
+  const axes = () => page.locator(".dtCanvasScene").evaluate(element => {
+    const m = new DOMMatrixReadOnly(getComputedStyle(element).transform)
+    return [m.a, m.b, m.c, m.d, m.e, m.f]
+  })
+  await root.click({ position: { x: 8, y: 8 } })
+  await expect.poll(async () => {
+    const first = await axes()
+    await page.waitForTimeout(50)
+    const second = await axes()
+    return second[0] - first[0] > .005
+  }).toBe(true)
+  const canvas = (await page.locator(".dtCanvas").boundingBox())!
+  // Above the lane headings, to the right of the toolbar: a stable background point throughout zoom.
+  const x = canvas.x + canvas.width - 8
+  const y = canvas.y + 65
+  expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest(".dtCanvasBand, [data-node-id], button") === null, { x, y })).toBe(true)
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  const pressed = await axes()
+  await page.waitForTimeout(350)
+  const held = await axes()
+  for (let i = 0; i < 6; i++) expect(Math.abs(held[i] - pressed[i])).toBeLessThan(i < 4 ? .002 : 1)
+  await page.mouse.move(x - 150, y)
+  await page.mouse.up()
+  const released = await axes()
+  expect(Math.abs(released[4] - pressed[4] + 150)).toBeLessThan(2)
+  await page.waitForTimeout(900)
+  const delayed = await axes()
+  for (let i = 0; i < 6; i++) expect(Math.abs(delayed[i] - released[i])).toBeLessThan(i < 4 ? .002 : 1)
+  await expect(root).toHaveAttribute("aria-pressed", "true")
+  await testInfo.attach("click-motion-takeover", { body: JSON.stringify({ pressed, held, released, delayed }, null, 2), contentType: "application/json" })
 })
