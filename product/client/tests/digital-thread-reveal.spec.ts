@@ -28,6 +28,43 @@ const laneReachable = (q: number, h: number, window: { top: number; bottom: numb
   Math.max(L, window.top - q) <= Math.min(0, window.bottom - h - q)
 
 test.describe("lane-local reveal", () => {
+  test("same-tier growth reconciles a retained reveal collision without moving residents", () => {
+    const nodes: CanvasNode[] = [
+      { id: "subject", lane: 0, row: 0 },
+      { id: "resident-0", lane: 1, row: 0 },
+      { id: "resident-2", lane: 1, row: 2 },
+      { id: "linked", lane: 1, row: 8 },
+    ]
+    const input = {
+      nodes, geometry: GEOMETRY, laneOffsets: [0, 0],
+      storyIds: new Set(["subject", "linked"]), subjectId: "subject",
+      windowByLane: new Map([[1, { top: 0, bottom: 400 }]]), bandHeight: 400,
+    }
+    const first = planReveal({ ...input, frozenLanes: new Set<number>() })
+    expect(first.deltas.get("linked")).toBe(-992)
+    const measuredHeights = new Map([["linked", 200]])
+    const grown = planReveal({ ...input, measuredHeights, existing: first.deltas, frozenLanes: new Set([1]) })
+    const positions = contentPositionsForNodes(nodes, GEOMETRY, measuredHeights, grown.deltas)
+    const top = positions.get("linked")!
+    for (const id of ["resident-0", "resident-2"]) {
+      expect(grown.deltas.has(id)).toBe(false)
+      const resident = positions.get(id)!
+      expect(top + 200 <= resident || top >= resident + 108, `grown linked card overlaps ${id}`).toBe(true)
+    }
+    expect([...planReveal({ ...input, measuredHeights, existing: grown.deltas, frozenLanes: new Set([1]) }).deltas])
+      .toEqual([...grown.deltas])
+  })
+
+  test("a valid retained placement survives being panned entirely offscreen", () => {
+    const nodes: CanvasNode[] = [{ id: "subject", lane: 0, row: 0 }, { id: "linked", lane: 1, row: 8 }]
+    const existing = new Map([["linked", -992]])
+    const result = planReveal({
+      nodes, geometry: GEOMETRY, laneOffsets: [0, 0], storyIds: new Set(["subject", "linked"]),
+      subjectId: "subject", windowByLane: new Map([[1, { top: 500, bottom: 900 }]]),
+      frozenLanes: new Set([1]), existing, bandHeight: 900,
+    })
+    expect([...result.deltas]).toEqual([...existing])
+  })
   test("displaces only out-of-view linked cards and leaves residents where they are", () => {
     const nodes = lane(12)
     const window: RevealWindow = { top: contentTop(nodes, "n0"), bottom: contentTop(nodes, "n3") + GEOMETRY.cardHeight }
