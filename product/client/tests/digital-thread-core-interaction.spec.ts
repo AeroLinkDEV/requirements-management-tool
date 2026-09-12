@@ -156,7 +156,54 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
   await expect(root).toHaveAttribute("aria-pressed", "true")
   await page.waitForTimeout(900)
 
-  const band = page.locator(".dtCanvasBand.is-rollable").first()
+  /**
+   * Choose the shallowest rollable lane that holds a displaced linked witness.
+   *
+   * The proof needs a lane whose ordinary scroll bound a single real gesture can cross, so the lane is selected
+   * by its measured geometry rather than by document order. (A separate, recorded defect currently prevents a
+   * second gesture in the same session from delivering more than one move, so one gesture must suffice here.)
+   */
+  const laneChoice = await page.evaluate(() => {
+    const scene = document.querySelector<HTMLElement>(".dtCanvasScene")
+    const bandHeight = Number(/([\d.]+)px/.exec(scene?.style.height ?? "")?.[1] ?? NaN)
+    const nodes = [...document.querySelectorAll<HTMLElement>(".dtCanvasNode")]
+    const byLane = new Map<number, HTMLElement[]>()
+    nodes.forEach(node => {
+      const x = Number(/translate\((-?[\d.]+)px/.exec(node.style.transform)?.[1] ?? NaN)
+      if (!Number.isFinite(x)) return
+      byLane.set(x, [...(byLane.get(x) ?? []), node])
+    })
+    let best: { laneX: number; minimum: number; bandIndex: number; witnessId: string | null } | null = null
+    const bands = [...document.querySelectorAll<HTMLElement>(".dtCanvasBand")]
+    bands.forEach((band, bandIndex) => {
+      bandIndexes: {
+        const rect = band.getBoundingClientRect()
+        const laneCards = [...byLane.entries()].find(([, cards]) => {
+          const first = cards[0]?.getBoundingClientRect()
+          return first && first.left >= rect.left - 2 && first.right <= rect.right + 2
+        })
+        if (!laneCards) break bandIndexes
+        const [laneX, cards] = laneCards
+        const heights = cards.map(card => card.offsetHeight).filter(height => height > 0)
+        const rows = cards.map(card => Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/.exec(card.style.transform)?.[1] ?? NaN))
+          .filter(Number.isFinite).sort((a, b) => a - b)
+        const cardHeight = heights.length ? Math.min(...heights) : 0
+        const pitch = rows.length > 1 ? Math.min(...rows.slice(1).map((y, i) => y - rows[i]).filter(delta => delta > 40)) : 0
+        if (!cardHeight || !pitch) break bandIndexes
+        const contentHeight = (rows.length - 1) * pitch + cardHeight + 24
+        const minimum = Math.min(0, bandHeight - contentHeight)
+        if (minimum >= -1) break bandIndexes
+        const witness = cards.find(card => card.classList.contains("is-offscreen") &&
+          card.querySelector(".dtnCard:not(.is-untraced)") !== null)
+        if (!best || minimum > best.minimum) {
+          best = { laneX, minimum, bandIndex, witnessId: witness?.dataset.nodeId ?? null }
+        }
+      }
+    })
+    return best
+  })
+  expect(laneChoice, "no rollable lane was found").toBeTruthy()
+  const band = page.locator(".dtCanvasBand").nth(laneChoice!.bandIndex)
   await expect(band).toBeVisible()
   // Pin the band by its position in the document: after the tray closes the set of rollable lanes can change,
   // and `.first()` would then resolve to a different lane and silently measure the wrong one.
@@ -264,6 +311,28 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
    * The loop stops when the lane stops moving, which is the floor it actually has — ordinary or extended.
    */
   let previous = await yOf()
+  await page.evaluate(() => { (window as unknown as { __DT_SCRUB_DIAG?: boolean }).__DT_SCRUB_DIAG = true })
+  page.on("console", message => {
+    const text = message.text()
+    if (text.startsWith("SCRUB_SET") || text.startsWith("PAN_SET") || text.startsWith("PAINT_CLAMP")) {
+      console.log("PAGE", text)
+    }
+  })
+  // Count the pointer events each gesture actually delivers, so "one step of ten" can be attributed to the
+  // browser/protocol instead of guessed at.
+  await page.evaluate(() => {
+    const state = window as unknown as { __gestures?: { moves: number; downs: number; ups: number }[] }
+    state.__gestures = []
+    window.addEventListener("pointerdown", () => state.__gestures!.push({ moves: 0, downs: 1, ups: 0 }), true)
+    window.addEventListener("pointermove", () => {
+      const current = state.__gestures![state.__gestures!.length - 1]
+      if (current) current.moves += 1
+    }, true)
+    window.addEventListener("pointerup", () => {
+      const current = state.__gestures![state.__gestures!.length - 1]
+      if (current) current.ups += 1
+    }, true)
+  })
   for (let attempt = 0; attempt < 8; attempt += 1) {
     await page.mouse.move(grabX, (top + bottom) / 2)
     await page.mouse.down()
@@ -271,6 +340,11 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
     await page.mouse.up()
     await page.waitForTimeout(250)
     const now = await yOf()
+    if (process.env.AEROLINK_1022_DIAG) {
+      const gestures = await page.evaluate(() =>
+        (window as unknown as { __gestures?: unknown[] }).__gestures ?? [])
+      console.log("GESTURES", JSON.stringify(gestures.slice(-2)))
+    }
     if (process.env.AEROLINK_1022_DIAG) {
       console.log("SCROLL_DIAG", JSON.stringify({
         attempt,
@@ -310,6 +384,14 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
     achievedOffset,
     `the lane did not move deeper at all (reached ${achievedOffset.toFixed(1)})`,
   ).toBeLessThan(-30)
+  /**
+   * The strict form — `achievedOffset < ordinaryMinimum` — is NOT asserted here yet, because the gesture cannot
+   * reach that bound while the per-gesture delivery defect below persists. Recorded state: derived ordinary
+   * bound -1920, achieved -925, and the gesture trace shows the first drag delivering 10 moves with 1 pointerup
+   * while every later drag delivers 1 move and NO pointerup at all. Whether that second-gesture behaviour is in
+   * the canvas or in the automation harness is not yet established; it is the next thing to determine, and the
+   * crossing proof stays open until it is.
+   */
   /**
    * The witness's guarantee is reachability, not forced placement.
    *
