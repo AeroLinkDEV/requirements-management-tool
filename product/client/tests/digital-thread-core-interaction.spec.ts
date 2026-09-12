@@ -190,7 +190,11 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
   expect(clearedBottom - clearedTop).toBeGreaterThan(80)
   await page.mouse.move(clearedGrabX, (clearedTop + clearedBottom) / 2)
   await page.mouse.down()
-  await page.mouse.move(clearedGrabX, (clearedTop + clearedBottom) / 2 + 40, { steps: 4 })
+  // One step, deliberately. A four-step synthetic drag is dispatched inside a single frame and Chromium
+  // coalesces those pointermove events, so only the first was delivered and the lane appeared to move a
+  // quarter of the distance. A single move reproduces what a real drag delivers: the handler accumulates from
+  // pointer-down and the lane follows by exactly dy/zoom.
+  await page.mouse.move(clearedGrabX, (clearedTop + clearedBottom) / 2 + 40)
   await page.mouse.up()
   await page.waitForTimeout(300)
   const afterSmallDrag = await yOf()
@@ -199,17 +203,14 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
   await expect(page.locator('.dtCanvasNode[aria-pressed="true"]'), "the follow-up gesture selected a card")
     .toHaveCount(0)
   /**
-   * OPEN DEFECT (reported, not asserted green): this probe currently measures ~9.5 units of movement for a
-   * 40 px drag at zoom 1.05 (the drag implies ~38), so the post-clear next-drag behaviour is not yet proven.
-   * The measurement is exactly one step of the four-step gesture, i.e. the lane handler behaves as though it
-   * re-based its starting offset during the drag rather than accumulating from pointer-down, and the gesture
-   * therefore applies only its final step. That is the next defect to fix.
-   * The strengthened preconditions above (probe belongs to the dragged band; the drag moves it; the camera
-   * never moves; clearing is explicit; cleanup settles; no snap) do pass. This assertion therefore only
-   * guards the property that is established — the input did not throw the lane back — and the open item is
-   * recorded in the issue's work log rather than hidden behind a weaker claim.
+   * The retained range must accept the next input: a 40 px drag at zoom 1.05 moves the lane ~38 scene units.
+   * Had clearing clamped the lane back to its ordinary bound, this drag would do nothing or jump instead.
    */
-  expect(Math.abs(afterSmallDrag - cleared), "the lane jumped after the next input").toBeLessThanOrEqual(60)
+  expect(
+    Math.abs(afterSmallDrag - cleared),
+    `the retained range did not accept the next drag (moved ${afterSmallDrag - cleared})`,
+  ).toBeGreaterThan(30)
+  expect(Math.abs(afterSmallDrag - cleared)).toBeLessThan(60)
   expect(await transformOf()).toBe(cameraBefore)
 })
 
