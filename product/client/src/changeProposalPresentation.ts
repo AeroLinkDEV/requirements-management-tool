@@ -210,16 +210,6 @@ export const LEVEL_NOUNS: Record<string, string> = {
 export const levelNoun = (level: string): string =>
   LEVEL_NOUNS[level] ?? `${level.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toUpperCase()} REQUIREMENTS`
 
-/** The verification vocabulary for a level, which differs by tier rather than by name. */
-const VERIFICATION_NOUNS: Record<string, string> = {
-  System: "SYSTEM PROCEDURES",
-  HighLevel: "HLR CASES AND PROCEDURES",
-  LowLevel: "LLR CASES AND PROCEDURES",
-}
-
-export const verificationNoun = (level: string): string =>
-  VERIFICATION_NOUNS[level] ?? `${levelNoun(level)} PROCEDURES`
-
 /**
  * The level directly below this one on the project's ladder, or null at the bottom.
  *
@@ -274,7 +264,9 @@ export const insideLaneLabels = (
     // At the bottom of the ladder nothing is allocated below, so the lane is named for what it would hold and
     // then dropped as empty rather than being labelled for a ladder step the project does not have.
     allocated: below ? `ALLOCATED ${levelNoun(below)}` : "ALLOCATED DOWNSTREAM",
-    verification: verificationNoun(level),
+    // Coverage includes downstream allocations, so a System change can lead to HLR Cases as well as
+    // Procedures. The source CR level does not identify the artifacts in this lane; each card does.
+    verification: "VERIFICATION ARTIFACTS",
     effect: "EFFECT ON THE BUILD",
   }
 }

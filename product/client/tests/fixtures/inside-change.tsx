@@ -285,6 +285,14 @@ const openedTcr: NetworkNode = {
 
 const params = new URLSearchParams(window.location.search)
 const scenario = params.get("case") ?? "requirement"
+const mixedVerification: ProposalContent = {
+  ...requirementModify,
+  covering: [...requirementModify.covering, {
+    requirementRevisionId: "hlr-1-rev", artifactId: "case-art", artifactRevisionId: "case-rev",
+    displayNumber: "HLRTC-000150.00", title: "Legacy case — exact historical title was not recorded",
+    level: "HighLevel", artifactKind: "Case", artifactState: "Approved", coverageState: "Confirmed",
+  }],
+}
 
 const shared = {
   opened,
@@ -335,6 +343,6 @@ root.render(
       }}
     />
   ) : (
-    <DigitalThreadInsideChange {...shared} content={requirementModify} />
+    <DigitalThreadInsideChange {...shared} content={scenario === "mixed-verification" ? mixedVerification : requirementModify} />
   ),
 )

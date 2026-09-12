@@ -46,12 +46,13 @@ test("lane labels follow the level of the change being opened", () => {
   const system = insideLaneLabels("System", false)
   expect(system.proposed).toBe("PROPOSED SYSTEM REQUIREMENTS")
   expect(system.allocated).toBe("ALLOCATED HLRs")
-  expect(system.verification).toBe("SYSTEM PROCEDURES")
+  expect(system.verification).toBe("VERIFICATION ARTIFACTS")
 
   const high = insideLaneLabels("HighLevel", false)
   expect(high.proposed).toBe("PROPOSED HLRs")
   expect(high.allocated).toBe("ALLOCATED LLRs")
-  expect(high.verification).toBe("HLR CASES AND PROCEDURES")
+  expect(high.verification).toBe("VERIFICATION ARTIFACTS")
+  expect(insideLaneLabels("LowLevel", false).verification).toBe("VERIFICATION ARTIFACTS")
 })
 
 test("a test change reads in verification vocabulary, and what sits below it is what it covers", () => {
