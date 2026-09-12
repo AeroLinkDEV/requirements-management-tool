@@ -842,3 +842,38 @@ test("a new selection during cleanup replaces the old subject cleanly", async ({
   await expect(pressed).toHaveCount(1)
   await expect(pressed).toHaveAttribute("data-node-id", otherId!)
 })
+
+/**
+ * Clearing while an automatic framing is still running.
+ *
+ * The old transition must not keep travelling once the selection is gone: the reader pressed Escape while
+ * looking at a particular frame, and that frame is where the camera stays. Measured as *remaining travel
+ * after the clear* — sampling before the clear would include the ease's own progress during Playwright's
+ * sampling window and would not be a measurement of the clear at all.
+ */
+test("clearing during motion stops the camera where the reader saw it", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page, "dense")
+  const cameraNumbers = async () => {
+    const value = /transform:[^;]*/.exec((await page.locator(".dtCanvasScene").getAttribute("style")) ?? "")?.[0] ?? ""
+    const [, x, y, zoom] = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)\s*scale\(([\d.]+)\)/.exec(value) ?? []
+    return { x: Number(x), y: Number(y), zoom: Number(zoom) }
+  }
+
+  // Start an automatic move and clear immediately, without letting it finish.
+  const card = page.locator('.dtCanvasNode:not(.is-offscreen):has(.dtnCard)').nth(2)
+  const box = (await card.boundingBox())!
+  await page.mouse.click(box.x + 6, box.y + 6)
+  await page.keyboard.press("Escape")
+  const atClear = await cameraNumbers()
+
+  await expect(page.locator('.dtCanvasNode[aria-pressed="true"]')).toHaveCount(0)
+  await page.waitForTimeout(700)
+  const after = await cameraNumbers()
+  expect(
+    Math.abs(after.x - atClear.x),
+    `the camera kept travelling after clear by ${(after.x - atClear.x).toFixed(1)} units`,
+  ).toBeLessThanOrEqual(4)
+  expect(Math.abs(after.y - atClear.y)).toBeLessThanOrEqual(4)
+  expect(Math.abs(after.zoom - atClear.zoom)).toBeLessThanOrEqual(0.02)
+})
