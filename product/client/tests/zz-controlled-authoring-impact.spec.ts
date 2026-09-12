@@ -28,7 +28,7 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   await expect(requirementInspector).toBeVisible();
   await page.getByRole("tab", { name: "Trace & impact" }).click();
   await expect(page.getByRole("heading", { name: "Verification coverage" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Open complete Digital Thread →" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open complete Digital Thread →" })).toBeVisible();
   await page.getByRole("tab", { name: "Overview" }).click();
   await page
     .getByRole("button", { name: "Propose controlled change →" })
