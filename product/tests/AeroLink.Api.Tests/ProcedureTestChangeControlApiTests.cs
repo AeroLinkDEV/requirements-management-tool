@@ -42,11 +42,13 @@ public sealed class ProcedureTestChangeControlApiTests
             var foreignProgram = new ProgramRecord("Unrelated inherited context", $"UP{Guid.NewGuid():N}"[..12]);
             var foreignProject = new ProjectRecord(foreignProgram.Id, "Other product", "Other project");
             var foreign = new ProblemReport(foreignProject.Id, "PR-07253", "Private anomaly", "Other project", "", "other.author", now);
+            var authorAccountId = await db.UserAccounts.Where(x => x.UserName == "procedure.author").Select(x => x.Id).SingleAsync();
             reportId = report.Id; outsideId = outside.Id;
             db.AddRange(report, outside, foreignProgram, foreignProject, foreign,
+                new ProgramMembership(authorAccountId, foreignProgram.Id, ProgramRole.TestEngineer, "setup", now),
                 new ProblemReportLink(report.Id, "Release", fixture.ReleaseId, ProblemReportRelationshipPolicy.BuildScope, "case.author", now),
                 new ProblemReportLink(report.Id, "TestChangeRequest", parentId, ProblemReportRelationshipPolicy.VerificationForProblem, "case.author", now),
-                // Legacy inconsistent relationship fixture: the linked-source read must still enforce report access.
+                // Even a dual-project reader must not see a legacy foreign PR asserted as this source's context.
                 new ProblemReportLink(foreign.Id, "TestChangeRequest", parentId, ProblemReportRelationshipPolicy.VerificationForProblem, "legacy", now));
             await db.SaveChangesAsync();
         }
