@@ -393,3 +393,62 @@ test("manual vertical exploration survives horizontal away and back", async ({ p
   expect(Math.abs((await yOf()) - scrolled), "the manual lane position was not retained").toBeLessThanOrEqual(4)
   await expect(root).toHaveAttribute("aria-pressed", "true")
 })
+
+/**
+ * Branch A of the reveal contract: enough safe space exists.
+ *
+ * A short lane's linked card sits above the current viewing height while the usable window below it is empty.
+ * Hovering its neighbour must place the card inside that window automatically — no Show action, no vertical
+ * hunt, and no camera movement. Fixture `?case=reveal` is a shared-canvas contract arrangement.
+ */
+test("a linked card is revealed automatically into available space without moving the camera", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/tests/fixtures/change-network.html?case=reveal")
+  await expect(page.locator(".dtCanvas")).toBeVisible()
+  await page.waitForTimeout(800)
+
+  // Pan the view down so the short lane's card is above the usable window and the space below it is free.
+  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
+  const gutter = { x: canvasBox.x + 24, y: canvasBox.y + canvasBox.height - 30 }
+  await page.mouse.move(gutter.x, gutter.y)
+  await page.mouse.down()
+  await page.mouse.move(gutter.x, gutter.y - 280)
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+
+  const linked = page.locator('[data-node-id="pr-5"]')
+  const subject = page.locator('[data-node-id="hlr-127"]')
+  const scene = page.locator(".dtCanvasScene")
+  const camera = await transformOf(scene)
+
+  // Preconditions: the endpoint is not usable, and its lane has empty space inside the usable window.
+  const before = await linked.boundingBox()
+  const usable = {
+    top: canvasBox.y + 40,
+    bottom: canvasBox.y + canvasBox.height - 40,
+  }
+  const startsOutside = !before || before.y + before.height <= usable.top || before.y >= usable.bottom ||
+    (await linked.getAttribute("class"))?.includes("is-offscreen") === true
+  expect(startsOutside, "the fixture did not start with the linked card outside the usable region").toBe(true)
+
+  await subject.hover()
+  await page.waitForTimeout(700)
+
+  // It arrives inside the usable region on its own: no Show action, and the camera never moved.
+  await expect(linked, "the linked card was not revealed into available space")
+    .not.toHaveClass(/is-offscreen/)
+  const after = (await linked.boundingBox())!
+  expect(after.y).toBeGreaterThanOrEqual(usable.top - 1)
+  expect(after.y + after.height).toBeLessThanOrEqual(usable.bottom + 1)
+  expect(await transformOf(scene)).toBe(camera)
+  await expect(page.locator(".dtCanvasHoverTarget")).toHaveCount(0)
+
+  // Leaving the hover retires the temporary contribution.
+  await page.mouse.move(2, 2)
+  await page.waitForTimeout(700)
+  const retired = await linked.boundingBox()
+  const backOutside = !retired || retired.y + retired.height <= usable.top || retired.y >= usable.bottom ||
+    (await linked.getAttribute("class"))?.includes("is-offscreen") === true
+  expect(backOutside, "hover exit did not retire the temporary placement").toBe(true)
+  expect(await transformOf(scene)).toBe(camera)
+})

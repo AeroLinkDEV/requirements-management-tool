@@ -108,7 +108,31 @@ const hoverProjection: NetworkProjection = {
 const denseProjection = { ...hoverProjection, edges: [...hoverProjection.edges,
   ...Array.from({ length: 18 }, (_, index) => edge("hlr-127", "ChangeRequest", `case-${index}`, "TestChangeRequest", "CoveredByTestChangeRequest")),
 ] }
-const chosen = scenario === "dense" ? denseProjection : scenario === "hover" ? hoverProjection : scenario === "server" ? serverChainProjection : projection
+/**
+ * Available-space reveal: a short lane whose linked card sits above the current viewing height, with empty
+ * usable space below it, and a visible neighbour to act as the subject. Shared-canvas contract coverage only —
+ * this is not a claim that a production adapter emits exactly this arrangement.
+ */
+const revealProjection: NetworkProjection = {
+  ...serverChainProjection,
+  nodes: [
+    node({ id: "pr-5", kind: "ProblemReport", displayNumber: "PR-00005", state: "Open" }),
+    // Spacers put the subject a few rows down its own lane, so panning can lift the short lane's card out of
+    // the usable window while the subject stays visible and hoverable.
+    node({ id: "other-a", kind: "ChangeRequest", displayNumber: "HLRCR-00031", level: "HighLevel" }),
+    node({ id: "other-b", kind: "ChangeRequest", displayNumber: "HLRCR-00032", level: "HighLevel" }),
+    node({ id: "other-c", kind: "ChangeRequest", displayNumber: "HLRCR-00033", level: "HighLevel" }),
+    node({ id: "hlr-127", kind: "ChangeRequest", displayNumber: "HLRCR-00127", level: "HighLevel" }),
+  ],
+  edges: [
+    edge("pr-5", "ProblemReport", "hlr-127", "ChangeRequest", "ProblemReportResolution"),
+  ],
+}
+const chosen = scenario === "dense" ? denseProjection
+  : scenario === "hover" ? hoverProjection
+  : scenario === "reveal" ? revealProjection
+  : scenario === "server" ? serverChainProjection
+  : projection
 
 createRoot(document.getElementById("root")!).render(
   <DigitalThreadNetwork projection={chosen} buildLabel="Build 1.6" />,
