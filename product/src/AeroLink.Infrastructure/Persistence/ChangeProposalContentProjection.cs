@@ -152,7 +152,7 @@ public sealed record ChangeProposalContentResult(
 /// Reads what a change request proposes, resolved at the revision the proposal was actually written against.
 ///
 /// This exists because the two facts the inside-a-change view needs are not on the change record. A
-/// <see cref="RequirementChange"/> carries the proposed statement and the revision it supersedes, but not that
+/// <see cref="RequirementChange"/> carries the proposed statement and result revision, but not the preceding
 /// revision's text, and nothing reads downward from a proposal at all. `/api/authoring/impact` answers a similar
 /// question for authoring, but anchors to the requirement's *latest* revision, which is the wrong anchor here:
 /// a change written against Build 1.5 and read during Build 1.6 would be diffed against text that was never its

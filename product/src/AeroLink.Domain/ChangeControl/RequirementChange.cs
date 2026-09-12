@@ -92,13 +92,15 @@ public sealed class RequirementChange
     /// and moving the number would assert that they wrote them against wording they never saw, and the change
     /// request would then claim to be a considered modification of something nobody read.
     /// </summary>
-    internal void Rebase(int revision, string statement)
+    internal void Rebase(int ontoRevision, string statement)
     {
-        if (revision <= Revision)
+        // Revision is the proposed result. Rebasing onto that same numbered approved result
+        // is valid: the competing proposals previously targeted the same next revision.
+        if (ontoRevision < Revision || ontoRevision == int.MaxValue)
             throw new DomainException("A rebase moves a change onto a later revision.");
         if (string.IsNullOrWhiteSpace(statement) && Kind != RequirementChangeKind.Retire)
             throw new DomainException("Re-apply the statement against the revision being rebased onto.");
-        Revision = revision;
+        Revision = ontoRevision + 1;
         Statement = statement.Trim();
     }
 }
