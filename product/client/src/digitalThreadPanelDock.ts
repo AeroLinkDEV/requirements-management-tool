@@ -47,11 +47,32 @@ export function usePanelDock(
   frameInset?: FrameInset
 } {
   const [escalatedFor, setEscalatedFor] = useState<string | null>(null)
+  const [escalatedDock, setEscalatedDock] = useState<ResolvedDock | null>(null)
   const [panelElement, setPanelElement] = useState<HTMLElement | null>(null)
   const [measuredInset, setMeasuredInset] = useState<FrameInset | null>(null)
-  /** The one placement that gives back the axis the preferred dock spends. */
-  const otherAxis: ResolvedDock = preferred === "bottom" ? "right" : "bottom"
-  const dock: ResolvedDock = escalatedFor === situation ? otherAxis : preferred
+  /**
+   * The recovery placement, chosen by measurement rather than by assuming the opposite axis helps.
+   *
+   * A bottom panel spends height; a side panel spends width. Whichever costs a *smaller share* of its own axis
+   * is the one that leaves the board more usable, which is what the canvas needs when it reports that the
+   * selected record does not fit. The panel's own measured size is used when available, so a tall relationship
+   * list and a short one do not get the same answer.
+   */
+  const chooseRecovery = useCallback((current: ResolvedDock): ResolvedDock => {
+    const canvas = canvasHostRef?.current?.querySelector<HTMLElement>(".dtCanvas")
+    const canvasRect = canvas?.getBoundingClientRect()
+    const panelRect = panelElement?.getBoundingClientRect()
+    if (!canvasRect || !panelRect || canvasRect.width < 1 || canvasRect.height < 1) {
+      return current === "bottom" ? "right" : "bottom"
+    }
+    const heightCost = panelRect.height / canvasRect.height
+    const widthCost = panelRect.width / canvasRect.width
+    if (current === "bottom") return heightCost <= widthCost ? "right" : "bottom"
+    return widthCost <= heightCost ? "bottom" : current
+  }, [canvasHostRef, panelElement])
+
+  /** The one placement, measured once per situation: repeated reports cannot walk through more placements. */
+  const dock: ResolvedDock = escalatedFor === situation && escalatedDock ? escalatedDock : preferred
 
   // The canvas and panel are siblings in each view. Measure their rendered rectangles instead of reserving a
   // guessed 300x150 box: selected cards and relationship lists can grow, and the free frame must follow them.
@@ -99,7 +120,13 @@ export function usePanelDock(
      * new situation replaces it and becomes eligible for its own supported recovery. Retaining the first
      * situation forever silently denied every later selection its fallback.
      */
-    reportNeedsRoom: useCallback(() => setEscalatedFor(situation), [situation]),
+    reportNeedsRoom: useCallback(() => {
+      setEscalatedFor(current => {
+        if (current === situation) return current
+        setEscalatedDock(chooseRecovery(preferred))
+        return situation
+      })
+    }, [chooseRecovery, preferred, situation]),
     panelRef: useCallback((element: HTMLElement | null) => setPanelElement(element), []),
     frameInset: panelElement
       ? measuredInset ?? (dock === "bottom"
