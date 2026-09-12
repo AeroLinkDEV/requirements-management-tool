@@ -156,7 +156,7 @@ test('a seeded software Procedure package uses the shared shell, exact origin, w
   const editor = page.locator('[data-tcr-editor]')
   await editor.getByLabel('Title').fill('LLR Procedure package from exact Case origin')
   for (const field of ['Problem', 'Analysis', 'Solution'])
-    await editor.getByLabel(field).fill(`${field} for an exact LLR Procedure package.`)
+    await editor.getByLabel(field, { exact: true }).fill(`${field} for an exact LLR Procedure package.`)
   await page.getByRole('button', { name: 'Raise LLRTPCR' }).click()
   await expect.poll(() => procedureCreateBody).toBeTruthy()
   expect(procedureCreateBody?.artifactKind).toBe('Procedure')

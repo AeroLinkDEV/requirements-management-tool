@@ -161,7 +161,7 @@ test('a configured two-stage sequential TCR review completes through the UI', as
   await caseWorkspace.getByRole('button', { name: 'Write engineering case' }).click()
   const caseDialog = page.getByRole('dialog', { name: /Edit the case of/ })
   await caseDialog.getByLabel('Title').fill('Workflow journey verification case')
-  await caseDialog.getByLabel('Problem').fill('The changed behavior has no controlled verification coverage.')
+  await caseDialog.getByLabel('Problem', { exact: true }).fill('The changed behavior has no controlled verification coverage.')
   await caseDialog.getByLabel('Analysis').fill('A new procedure is required to qualify the behavior.')
   await caseDialog.getByLabel('Solution').fill('Introduce and independently approve the proposed procedure.')
   await caseDialog.getByRole('button', { name: 'Save case' }).click()

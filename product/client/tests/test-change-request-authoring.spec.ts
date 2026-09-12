@@ -204,7 +204,7 @@ test('an engineer raises a System test change request with its case from the Cha
   await expect(editor.getByRole('heading', { name: 'Procedure changes', level: 2 })).toBeVisible()
 
   await editor.getByLabel('Title').fill('Verify the TCR authoring behavior as one package')
-  await editor.getByLabel('Problem').fill('The approved change introduces behavior with no procedure.')
+  await editor.getByLabel('Problem', { exact: true }).fill('The approved change introduces behavior with no procedure.')
   await editor.getByLabel('Analysis').fill('The behavior spans one procedure boundary and belongs together.')
   await editor.getByLabel('Solution').fill('Raise one SYSTPCR and write the procedure it needs.')
 

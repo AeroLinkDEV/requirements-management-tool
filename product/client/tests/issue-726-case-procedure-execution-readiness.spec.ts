@@ -431,7 +431,7 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
     const editor = page.locator('[data-tcr-editor]')
     await editor.getByLabel('Title').fill(`${level.toUpperCase()} ${kind} editor contract`)
     for (const field of ['Problem', 'Analysis', 'Solution'])
-      await editor.getByLabel(field).fill(`${field} for ${level} ${kind}.`)
+      await editor.getByLabel(field, { exact: true }).fill(`${field} for ${level} ${kind}.`)
     const raise = page.getByRole('button', { name: `Raise ${procedureKind ? level === 'hlr' ? 'HLRTPCR' : 'LLRTPCR' : level === 'hlr' ? 'HLRTCCR' : 'LLRTCCR'}` })
     await expect(raise).toBeEnabled()
     await raise.click()
