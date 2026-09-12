@@ -1478,13 +1478,22 @@ export default function DigitalThreadCanvas({
       element.classList.remove("is-panning", "is-rolling", "is-idle")
         scrubbing.current = false
         if (!start.moved && upEvent.type !== "pointercancel") onSelect?.(card?.dataset.nodeId ?? null)
-        element.removeEventListener("pointermove", move)
-        element.removeEventListener("pointerup", up)
-        element.removeEventListener("pointercancel", up)
+        window.removeEventListener("pointermove", move)
+        window.removeEventListener("pointerup", up)
+        window.removeEventListener("pointercancel", up)
       }
-      element.addEventListener("pointermove", move)
-      element.addEventListener("pointerup", up)
-      element.addEventListener("pointercancel", up)
+      /**
+       * Window listeners, not element listeners.
+       *
+       * A lane's cards are re-painted during the gesture, and the canvas element itself can be re-rendered by
+       * the view above it. Attaching the drag to the element meant that after the first gesture in a session
+       * only the first pointermove reached the handler — a ten-step drag moved the lane by one step (57 units
+       * instead of 571 in the diagnostic), which is a silent loss of most of the reader's travel. The
+       * prototype this canvas was ported from listens on the window for exactly this reason.
+       */
+      window.addEventListener("pointermove", move)
+      window.addEventListener("pointerup", up)
+      window.addEventListener("pointercancel", up)
     },
     [edges, lanes.length, nodes, onSelect, paint, settle, takeCameraOwnership],
   )

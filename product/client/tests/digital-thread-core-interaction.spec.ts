@@ -271,6 +271,14 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
     await page.mouse.up()
     await page.waitForTimeout(250)
     const now = await yOf()
+    if (process.env.AEROLINK_1022_DIAG) {
+      console.log("SCROLL_DIAG", JSON.stringify({
+        attempt,
+        probeY: Number(now.toFixed(1)),
+        delta: Number((now - previous).toFixed(1)),
+        camera: await transformOf(page.locator(".dtCanvasScene")),
+      }))
+    }
     if (Math.abs(now - previous) <= 2) break
     previous = now
   }
@@ -288,6 +296,15 @@ test("a revealed lane can be scrolled into its temporary range and clear does no
    * than rolls the lane), or the resolved floor genuinely being shallower than the lane's ordinary content —
    * which would strand the lane's own later cards and matter on its own. The derivation above is kept because
    * the number it produces is the precondition this proof was missing.
+   */
+  /**
+   * Diagnosed further (AEROLINK_1022_DIAG=1 prints the per-drag trace): the first drag in a session applies its
+   * full travel (571 units for 600 px at zoom 1.05) and every later drag applies exactly ONE step of the
+   * ten-step gesture (57.1). The camera never moves, so the gesture is not being redirected to panning; the
+   * lane simply receives 10% of the reader's movement. Moving the drag listeners to the window (matching the
+   * reference prototype) did not change it, so listener lifetime is not the cause. That is a real defect in the
+   * scrub path's interaction with the animation/clamp cycle, and it is the reason this proof cannot yet reach
+   * the derived bound. It is recorded rather than worked around.
    */
   expect(
     achievedOffset,
