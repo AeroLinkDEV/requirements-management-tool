@@ -51,7 +51,14 @@ const panBackground = async (
     return { x: rect.x, width: rect.width }
   }))
   let gutterX: number | null = null
+  // Prefer clearly outside the band area entirely: right of the last band, else left of the first. This cannot
+  // be stale or accidentally inside a lane, unlike a computed gap between two bands.
+  const rightmost = rects.reduce((max, rect) => Math.max(max, rect.x + rect.width), canvasBox.x)
+  const leftmost = rects.reduce((min, rect) => Math.min(min, rect.x), canvasBox.x + canvasBox.width)
+  if (rightmost + 12 < canvasBox.x + canvasBox.width - 4) gutterX = rightmost + 12
+  else if (leftmost - 12 > canvasBox.x + 4) gutterX = leftmost - 12
   for (let index = 0; index + 1 < rects.length; index += 1) {
+    if (gutterX !== null) break
     const left = rects[index].x + rects[index].width
     const right = rects[index + 1].x
     const midpoint = left + (right - left) / 2
@@ -652,11 +659,45 @@ test("a drag takes over an automatic camera move from the displayed position", a
     return { x: Number(x), y: Number(y), zoom: Number(zoom) }
   }
 
-  // Command an automatic move, then interrupt it without waiting for it to finish.
+  // Command an automatic move, then interrupt it without waiting for it to finish. The gesture is driven by
+  // hand here rather than through the helper so the camera can be sampled at the exact moment of the press:
+  // sampling earlier measures the ease's own advance, not the takeover.
+  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
+  const rects = await page.locator(".dtCanvasBand").evaluateAll(elements => elements.map(element => {
+    const rect = element.getBoundingClientRect()
+    return { x: rect.x, width: rect.width }
+  }))
+  const rightmost = rects.reduce((max, rect) => Math.max(max, rect.x + rect.width), canvasBox.x)
+  const leftmost = rects.reduce((min, rect) => Math.min(min, rect.x), canvasBox.x + canvasBox.width)
+  const gutterX = rightmost + 12 < canvasBox.x + canvasBox.width - 4
+    ? rightmost + 12
+    : Math.max(canvasBox.x + 4, leftmost - 12)
+  const gutterY = canvasBox.y + canvasBox.height / 2
+
   await page.getByRole("button", { name: "Fit entire story" }).click()
-  const atTakeover = await cameraNumbers()
-  await panBackground(page, 200)
+  await page.mouse.move(gutterX, gutterY)
+  const beforePress = await cameraNumbers()
+  await page.mouse.down()
+  const atPress = await cameraNumbers()
+  await page.mouse.move(gutterX + 200, gutterY)
+  await page.mouse.up()
+  await page.waitForTimeout(200)
   const afterDrag = await cameraNumbers()
+
+  /**
+   * The press must not jump the board toward the commanded destination.
+   *
+   * A frame-exact "no movement at the press" is not measurable from Playwright: sampling the camera takes
+   * milliseconds and the ease is still running during them, which is what produced a −135 reading here. What
+   * can be asserted is the absence of the severe failure — a jump to the destination would be the full travel
+   * of the fit, far larger than any sampling artifact.
+   */
+  expect(
+    Math.abs(atPress.x - beforePress.x),
+    `the press jumped the camera by ${(atPress.x - beforePress.x).toFixed(1)} units`,
+  ).toBeLessThanOrEqual(220)
+  // And the reader's gesture is then applied in full from that frozen position.
+  const travelled = afterDrag.x - atPress.x
 
   /**
    * OPEN DEFECT (reported, not accepted): interrupting an eased automatic move currently yields roughly HALF
@@ -666,9 +707,9 @@ test("a drag takes over an automatic camera move from the displayed position", a
    * commanded destination) while the fractional shortfall is recorded here and in the issue work log.
    */
   expect(
-    Math.abs((afterDrag.x - atTakeover.x) - 200),
-    `takeover travelled ${(afterDrag.x - atTakeover.x).toFixed(1)} px for a 200 px gesture`,
-  ).toBeLessThanOrEqual(120)
+    Math.abs(travelled - 200),
+    `takeover travelled ${travelled.toFixed(1)} px for a 200 px gesture`,
+  ).toBeLessThanOrEqual(10)
   // And it did not keep travelling toward the commanded destination afterwards.
   await page.waitForTimeout(600)
   const settled = await cameraNumbers()
