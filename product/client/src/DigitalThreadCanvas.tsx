@@ -1188,6 +1188,8 @@ export default function DigitalThreadCanvas({
       target: { selectedId: string; wanted: string[]; intent: FrameIntent; key: string } | null,
       /** An explicit Fit is a reader command: it must never be swallowed by the automatic suitability rule. */
       explicit = false,
+      /** Automatic selection framing takes #1022's half-speed trial; dock/inset re-frames stay snappy. */
+      slow = false,
     ): boolean => {
       if (!target) return false
       const box = frame()
@@ -1286,6 +1288,7 @@ export default function DigitalThreadCanvas({
       }
 
       sceneRef.current?.classList.add("is-easing")
+      sceneRef.current?.classList.toggle("is-motion-slow", slow)
       transform.current = next
       paint()
       // The new zoom can change row pitch and card height. Reconcile the anchor against that actual tier,
@@ -1314,10 +1317,11 @@ export default function DigitalThreadCanvas({
       if (easeTimer.current !== null) window.clearTimeout(easeTimer.current)
       easeTimer.current = window.setTimeout(() => {
         sceneRef.current?.classList.remove("is-easing")
+        sceneRef.current?.classList.remove("is-motion-slow")
         easeTimer.current = null
         // Keep this just past the stylesheet's transition duration: a shorter timer cuts the movement short
         // and leaves the class-based easing inconsistent with where the board actually is.
-      }, 460)
+      }, slow ? 860 : 460)
       return true
     },
      [counts, edges, frame, nodes, onFramingNeedsRoom, paint],
@@ -1400,7 +1404,9 @@ export default function DigitalThreadCanvas({
     if (framedFor.current === framing.key) return
     // Consumed only once the framing has actually applied. If the frame is not usable yet the key stays
     // pending, and the resize path retries it the moment a real rect arrives.
-    if (!cameraOwned.current && applyFraming(framing)) framedFor.current = framing.key
+    // The selection's own framing is the automatic zoom the owner asked to slow down; the resize retry above
+    // keeps the snappier timing because it is repairing a measurement, not presenting a new selection.
+    if (!cameraOwned.current && applyFraming(framing, false, true)) framedFor.current = framing.key
   }, [applyFraming, framing, paint])
 
   useEffect(
