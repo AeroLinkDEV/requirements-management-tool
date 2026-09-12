@@ -11,6 +11,18 @@ import { expect, test, type Page } from "@playwright/test"
 
 const fixture = (scenario: string) => `/tests/fixtures/inside-change.html?case=${scenario}`
 
+test("a System change labels mixed downstream verification without claiming its source discipline", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto(fixture("mixed-verification"))
+  await expect(page.getByText("VERIFICATION ARTIFACTS", { exact: true })).toBeVisible()
+  await expect(page.getByText("SYSTEM PROCEDURES", { exact: true })).toHaveCount(0)
+  const caseCard = page.locator('.dticTrace:has-text("HLRTC-000150.00")')
+  await expect(caseCard).toContainText("TC")
+  await expect(caseCard).toContainText("exact historical title was not recorded")
+  await expect(page.locator('.dticTrace:has-text("HLRTP-00090.00")')).toContainText("TP")
+  await page.screenshot({ path: testInfo.outputPath("mixed-verification-lane.png"), fullPage: true })
+})
+
 const selectModifyProposal = async (page: Page) => {
   // Arrival now frames the opened CR at readable size. Its tall proposal lane may need the explicit reveal
   // action; a raw click on an offscreen card would bypass the reader's actual navigation path.
