@@ -751,3 +751,50 @@ test("reduced motion reaches the same arrangement without animating", async ({ p
   expect(after.y).toBeGreaterThanOrEqual(usableTop - 1)
   expect(after.y + after.height).toBeLessThanOrEqual(canvasBox.y + canvasBox.height - 40 + 1)
 })
+
+/**
+ * Hover-to-click promotion while the reveal is still moving.
+ *
+ * The press that selects the hovered subject must not be mistaken for abandoning the reveal: the arrangement
+ * carries over, the linked card still arrives, and the exact subject is the one selected. A rebuild from the
+ * ordinary rows would show as the card failing to arrive or flashing back out.
+ */
+test("clicking during an incoming reveal keeps the arrangement and selects that subject", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/tests/fixtures/change-network.html?case=reveal")
+  await expect(page.locator(".dtCanvas")).toBeVisible()
+  await page.waitForTimeout(800)
+  await panBackground(page, 0, -420)
+
+  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
+  const usableTop = canvasBox.y + 40
+  const linked = page.locator('[data-node-id="pr-5"]')
+  const subject = page.locator('[data-node-id="hlr-127"]')
+  const camera = await transformOf(page.locator(".dtCanvasScene"))
+
+  await subject.hover()
+  // Just past the hover dwell: the reveal has begun but has not finished.
+  await page.waitForTimeout(380)
+  await subject.click({ position: { x: 6, y: 6 } })
+  await expect(subject).toHaveAttribute("aria-pressed", "true")
+  await page.waitForTimeout(900)
+
+  await expect(linked, "the promoted click did not keep the reveal").not.toHaveClass(/is-offscreen/)
+  const arrived = (await linked.boundingBox())!
+  expect(arrived.y).toBeGreaterThanOrEqual(usableTop - 1)
+  expect(arrived.y + arrived.height).toBeLessThanOrEqual(canvasBox.y + canvasBox.height - 40 + 1)
+  /**
+   * A click may take its bounded readability correction — here the tray's arrival changed the usable band, and
+   * framing settled exactly on the documented 0.81 selection floor. What must hold is that the floor was
+   * respected and the correction stayed bounded, not that the camera is bit-identical to the hover state.
+   */
+  const after = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)\s*scale\(([\d.]+)\)/
+    .exec(await transformOf(page.locator(".dtCanvasScene")))
+  const before = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)\s*scale\(([\d.]+)\)/.exec(camera)
+  expect(after, "the camera transform became unreadable").toBeTruthy()
+  const afterZoom = Number(after![3])
+  expect(afterZoom, `the click-time correction went below the readable floor (zoom ${afterZoom})`)
+    .toBeGreaterThanOrEqual(0.81 - 0.01)
+  expect(Math.abs(Number(after![1]) - Number(before![1])), "the click-time pan was not bounded")
+    .toBeLessThanOrEqual(400)
+})
