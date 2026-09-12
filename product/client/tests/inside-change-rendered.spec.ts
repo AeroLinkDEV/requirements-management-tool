@@ -188,7 +188,7 @@ test.describe("frame behaviour", () => {
       "CHANGE REQUEST",
       "PROPOSED SYSTEM REQUIREMENTS",
       "ALLOCATED HLRs",
-      "SYSTEM PROCEDURES",
+      "VERIFICATION ARTIFACTS",
       "EFFECT ON THE BUILD",
     ])
     // Every lane now has content, so nothing compacts here — the point is that the set never grew.
