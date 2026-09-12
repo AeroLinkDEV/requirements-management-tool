@@ -1630,6 +1630,10 @@ export default function DigitalThreadCanvas({
         )
         paint()
       } else if (event.key === "Escape") {
+        // Clearing must preserve the camera the reader is actually looking at, even if an automatic framing is
+        // still running: take the camera first, so the displayed transform is frozen and the old transition
+        // cannot keep travelling after the selection is gone. Per-card cleanup continues independently.
+        takeCameraOwnership()
         onSelect?.(null)
       } else {
         return

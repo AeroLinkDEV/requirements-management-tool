@@ -67,8 +67,9 @@ export function usePanelDock(
     }
     const heightCost = panelRect.height / canvasRect.height
     const widthCost = panelRect.width / canvasRect.width
-    if (current === "bottom") return heightCost <= widthCost ? "right" : "bottom"
-    return widthCost <= heightCost ? "bottom" : current
+    // Staying on the current axis costs that axis; moving costs the other one. Keep the cheaper loss.
+    if (current === "bottom") return heightCost <= widthCost ? "bottom" : "right"
+    return widthCost <= heightCost ? current : "bottom"
   }, [canvasHostRef, panelElement])
 
   /** The one placement, measured once per situation: repeated reports cannot walk through more placements. */
