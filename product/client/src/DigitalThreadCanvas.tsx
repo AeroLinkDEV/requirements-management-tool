@@ -185,6 +185,14 @@ export default function DigitalThreadCanvas({
   const cameraOwned = useRef(false)
   /** Where a newly selected record was actually being displayed when it became the subject. */
   const retainedSubjectY = useRef<number | null>(null)
+  /**
+   * The effective positions written by the previous paint.
+   *
+   * The rebase must capture where the new subject was *actually displayed* before the new measured layout
+   * replaces it — reading a position after this paint has already re-measured gives back the new base and the
+   * rebase becomes a no-op.
+   */
+  const lastPaintedPositions = useRef<Map<string, { x: number; y: number }>>(new Map())
   /** The deepest scroll extent this scope has needed per lane, so cleanup cannot snap the reader's lane. */
   const deepestMinimum = useRef<number[]>([])
   /** The lane windows the last plan was built against, so an unchanged view is not re-planned. */
@@ -229,9 +237,11 @@ export default function DigitalThreadCanvas({
     previewTimer.current = null
     setHoverId(null)
     onHover?.(null)
-    // A deliberate selection is a new, legitimate framing request: the earlier takeover cancels pending
-    // automatic motion, but it must not suppress the correction this selection is allowed to make.
-    cameraOwned.current = false
+    // A deliberate *selection* is a new, legitimate framing request: the earlier takeover cancels pending
+    // automatic motion, but it must not suppress the correction this selection is allowed to make. Clearing
+    // is the opposite: it must not re-authorise automatic framing, or a later resize would move a camera the
+    // reader positioned while clearing.
+    if (id !== null) cameraOwned.current = false
     onPin?.(id)
   }, [onHover, onPin])
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -253,6 +263,10 @@ export default function DigitalThreadCanvas({
         const matrix = new DOMMatrixReadOnly(computed)
         if (Number.isFinite(matrix.a) && matrix.a > 0) {
           transform.current = { x: matrix.e, y: matrix.f, zoom: matrix.a }
+          // Freeze atomically: write the captured transform back before the transition is removed, or removing
+          // the class would expose the old commanded destination for a frame.
+          scene.style.transform =
+            `translate(${matrix.e}px,${matrix.f}px) scale(${matrix.a})`
         }
       }
       scene.classList.remove("is-easing")
@@ -265,7 +279,7 @@ export default function DigitalThreadCanvas({
   }, [])
   const edgeLayerRef = useRef<SVGSVGElement | null>(null)
   const offscreenRefs = useRef(new Map<string, HTMLButtonElement>())
-  const continuationRefs = useRef(new Map<number, HTMLElement>())
+  const continuationRefs = useRef(new Map<string, HTMLElement>())
   /** Directional continuation per lane, from the last reveal plan. */
   const planCues = useRef<Map<number, { up: boolean; down: boolean }>>(new Map())
   const cardRefs = useRef(new Map<string, HTMLDivElement>())
@@ -546,8 +560,7 @@ export default function DigitalThreadCanvas({
       // delta is not enough: measured expansion changes when the previous selection collapses and the new one
       // expands, so the delta is rebased against the new base below.
       retainedSubjectY.current = emphasisId
-        ? positionsForNodes(nodes, result.geometry, offsets.current, measuredCardHeights, revealDeltas.current)
-            .get(emphasisId)?.y ?? null
+        ? lastPaintedPositions.current.get(emphasisId)?.y ?? null
         : null
       subjectOwnership.current = emphasisId
       frozenLanes.current = new Set()
@@ -694,22 +707,50 @@ export default function DigitalThreadCanvas({
     // a wrapped identity cannot cover the next direct card; the same measured map is consumed by framing and
     // label obstacles below.
     const positions = positionsForNodes(nodes, geometry, offsets.current, measuredCardHeights, revealDeltas.current)
+    lastPaintedPositions.current = positions
     /**
      * Directional continuation: a small, unobtrusive cue at the real usable boundary where traced records
      * continue beyond what the lane currently shows. It is the honest cue where a numeric badge or a popup
      * would be the wrong answer, and it updates with the camera rather than living in the data.
      */
-    for (const [lane, element] of continuationRefs.current) {
-      const cue = planCues.current.get(lane)
-      const show = Boolean(cue && (cue.up || cue.down))
-      element.hidden = !show
-      if (!show || !cue) continue
-      const dir = cue.down ? "down" : "up"
-      const centre = lane * geometry.lanePitch * transform.current.zoom + transform.current.x +
-        (geometry.laneWidth * transform.current.zoom) / 2
-      element.dataset.dir = dir
-      element.style.left = `${centre}px`
-      element.style.top = `${dir === "down" ? box.y + box.height - 12 : box.y + 2}px`
+    /**
+     * Continuation is derived from the CURRENT effective positions, not from a stored plan.
+     *
+     * A card that was below the window when the plan was made may have arrived inside it since, and manual
+     * scrolling changes the true direction without any replan. Both directions are reported honestly, and a
+     * cue for a lane the camera does not show is clamped to the usable boundary so it still says which way the
+     * thread continues rather than being drawn off-screen.
+     */
+    {
+      const zoom = transform.current.zoom || 1
+      const windowTop = Math.max(0, (box.y - transform.current.y) / zoom)
+      const windowBottom = Math.min(bandHeight, (box.y + box.height - transform.current.y) / zoom)
+      const above = new Set<number>()
+      const below = new Set<number>()
+      for (const node of nodes) {
+        if (!story?.nodes.has(node.id)) continue
+        const position = positions.get(node.id)
+        if (!position) continue
+        const height = measuredCardHeights.get(node.id) ?? geometry.cardHeight
+        if (position.y + height <= windowTop) above.add(node.lane)
+        else if (position.y >= windowBottom) below.add(node.lane)
+      }
+      for (const [key, element] of continuationRefs.current) {
+        const separator = key.lastIndexOf(":")
+        const lane = Number(key.slice(0, separator))
+        const direction = key.slice(separator + 1)
+        const show = direction === "up" ? above.has(lane) : below.has(lane)
+        element.hidden = !show
+        if (!show) continue
+        const laneLeft = lane * geometry.lanePitch * zoom + transform.current.x
+        const laneRight = laneLeft + geometry.laneWidth * zoom
+        const centre = Math.min(
+          Math.max((laneLeft + laneRight) / 2, box.x + 12),
+          box.x + box.width - 12,
+        )
+        element.style.left = `${centre}px`
+        element.style.top = `${direction === "down" ? box.y + box.height - 12 : box.y + 2}px`
+      }
     }
     for (const node of nodes) {
       const position = positions.get(node.id) ?? nodePosition(node, geometry, offsets.current)
@@ -1411,14 +1452,10 @@ export default function DigitalThreadCanvas({
           return
         }
         transform.current = { ...transform.current, x: start.tx + dx, y: start.ty + dy }
-        // A deliberate vertical or diagonal camera move is exploration too: the thread's cards in the lanes
-        // the reader can see stay where they are instead of being re-homed on the next horizontal move.
-        if (Math.abs(dy) > 8) {
-          for (const id of revealDeltas.current.keys()) {
-            const node = nodes.find(candidate => candidate.id === id)
-            if (node) frozenLanes.current.add(node.lane)
-          }
-        }
+        // A deliberate vertical or diagonal camera move is exploration too — but only for lanes the reader can
+        // actually see. A lane prepared while horizontally hidden keeps its right to a first useful reveal;
+        // freezing it here would deny that without the reader ever having looked at it.
+        if (Math.abs(dy) > 8) for (const lane of usableLanesRef.current) frozenLanes.current.add(lane)
         paint()
       }
       const up = (upEvent: PointerEvent) => {
@@ -1651,17 +1688,19 @@ export default function DigitalThreadCanvas({
       <div className="dtCanvasPlacementNotice" role="status" aria-live="polite" hidden />
       {/* Directional continuation cues: one per lane, positioned by paint at the usable boundary. */}
       <div className="dtCanvasContinuations" aria-hidden="true">
-        {lanes.map((_, lane) => (
+        {lanes.flatMap((_, lane) => (["up", "down"] as const).map(direction => (
           <span
-            key={`continuation-${lane}`}
+            key={`continuation-${lane}-${direction}`}
             className="dtCanvasContinuation"
+            data-dir={direction}
             hidden
             ref={element => {
-              if (element) continuationRefs.current.set(lane, element)
-              else continuationRefs.current.delete(lane)
+              const key = `${lane}:${direction}`
+              if (element) continuationRefs.current.set(key, element)
+              else continuationRefs.current.delete(key)
             }}
           />
-        ))}
+        )))}
       </div>
       {story && <nav className="dtCanvasOffscreen" style={{ bottom: (inspectorInset?.bottom ?? 0) + 6 }} aria-label="Connected records outside view" onPointerDown={event => event.stopPropagation()}>
         {sourceNodes.filter(node => story.nodes.has(node.id)).map(({ id }) => <button key={id} type="button"

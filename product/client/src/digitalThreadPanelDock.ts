@@ -92,8 +92,14 @@ export function usePanelDock(
 
   return {
     dock,
-    // Bounded: repeated reports for the same selection cannot walk through more placements.
-    reportNeedsRoom: useCallback(() => setEscalatedFor(current => current ?? situation), [situation]),
+    /**
+     * Bounded per situation, not for the lifetime of the hook.
+     *
+     * Repeated reports for the same situation are idempotent (the state already holds it), while a genuinely
+     * new situation replaces it and becomes eligible for its own supported recovery. Retaining the first
+     * situation forever silently denied every later selection its fallback.
+     */
+    reportNeedsRoom: useCallback(() => setEscalatedFor(situation), [situation]),
     panelRef: useCallback((element: HTMLElement | null) => setPanelElement(element), []),
     frameInset: panelElement
       ? measuredInset ?? (dock === "bottom"
