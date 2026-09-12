@@ -173,6 +173,8 @@ export default function DigitalThreadCanvas({
   const nodeLaneRef = useRef<Map<string, number>>(new Map())
   /** The emphasis subject the ownership sets belong to; a different subject starts a new context. */
   const subjectOwnership = useRef<string | null | undefined>(undefined)
+  /** Relationship + measured-geometry signature of the last plan, so genuine content changes reconcile. */
+  const contentSignature = useRef("")
   /** Effective per-lane scroll minimum for the arrangement as displayed and as it is heading. */
   const limitsRef = useRef<Map<number, number>>(new Map())
   /** The single resolved floor every consumer uses: effective limit, allowance and deepest extent combined. */
@@ -594,6 +596,18 @@ export default function DigitalThreadCanvas({
       for (const lane of usable) if (!pendingLanes.has(lane)) visitedLanes.current.add(lane)
     }
     const measuredSignature = nodes.map(node => `${node.id}:${Math.round(measuredCardHeights.get(node.id) ?? 0)}`).join("|")
+    /**
+     * A genuine relationship or measured-geometry change reconciles lanes the reader has merely *seen*; it does
+     * not take away lanes they deliberately own. Without this the freeze set (delivered ∩ visited) would carry
+     * a stale arrangement through an edge repoint or a size change, which is exactly the case that must not be
+     * frozen by navigation protection.
+     */
+    const contentKey = `${edgesKey}|${measuredSignature}`
+    if (contentSignature.current !== contentKey) {
+      contentSignature.current = contentKey
+      visitedLanes.current = new Set()
+      revealSignature.current = ""
+    }
     const windowArrival = [...usable].some(lane => !visitedLanes.current.has(lane))
     const revealKey = `${scopeKey}|${emphasisId ?? ""}|${result.tier}|${measuredSignature}|${edgesKey}|${windowArrival ? "arrival" : "stable"}`
     if (revealKey !== revealSignature.current) {
@@ -1302,7 +1316,9 @@ export default function DigitalThreadCanvas({
       // window after the frame settled. Retried here because the settling resize needs no React state change,
       // so nothing else would run the framing effect again.
       const pending = framingRef.current
-      if (pending && framedFor.current !== pending.key && applyFraming(pending)) {
+      // A request that predates the reader taking the camera must not run afterwards. A genuine new selection
+      // re-authorises framing (onSelect clears the flag), so this cancels stale work without blocking intent.
+      if (pending && framedFor.current !== pending.key && !cameraOwned.current && applyFraming(pending)) {
         framedFor.current = pending.key
       }
     }
@@ -1352,7 +1368,7 @@ export default function DigitalThreadCanvas({
     if (framedFor.current === framing.key) return
     // Consumed only once the framing has actually applied. If the frame is not usable yet the key stays
     // pending, and the resize path retries it the moment a real rect arrives.
-    if (applyFraming(framing)) framedFor.current = framing.key
+    if (!cameraOwned.current && applyFraming(framing)) framedFor.current = framing.key
   }, [applyFraming, framing, paint])
 
   useEffect(
