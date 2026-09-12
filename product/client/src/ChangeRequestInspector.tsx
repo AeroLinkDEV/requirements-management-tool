@@ -4,6 +4,7 @@ import ExactArtifactLink from './ExactArtifactLink'
 import { PersonName } from './People'
 import { formatEvidentiaryDateTime, formatOrdinaryDateTime, stateLabel } from './presentation'
 import { traceProvenanceLabel } from './tracePresentation'
+import { TraceInspector, TraceRelation } from './TraceInspector'
 import './RequirementsWorkspace.css'
 
 type TraceNode = {
@@ -221,7 +222,9 @@ export default function ChangeRequestInspector({
       {changes.length ? changes.map(change => <article className="traceRelation" key={change.id}><b>{change.displayNumber} · {change.kind}</b><p>{change.title || change.statement || 'Controlled change proposal'}</p>{change.rationale && <small>Rationale: {change.rationale}</small>}</article>) : <div className="traceEmpty"><span>No proposed controlled changes are recorded.</span></div>}
     </div>}
 
-    {tab === 'trace' && <div className="inspectorBody traceInspector">
+    {tab === 'trace' && <TraceInspector digitalThreadHref={digitalThreadHref}
+      summary={trace ? [{label: 'upstream', count: upstream.length}, {label: 'downstream', count: downstream.length}] : undefined}
+      unavailable={!trace ? 'The server did not expose a trace projection for this exact record. No client-side relationship has been inferred.' : undefined}>
       {trace?.state && <p className="traceStateLine"><span>Trace status</span><b>{stateLabel(trace.state.upstream)}</b><i>upstream</i><b>{stateLabel(trace.state.downstream)}</b><i>downstream</i><b>{stateLabel(trace.state.overall)}</b><i>overall</i></p>}
       {trace?.state?.warnings?.map(warning => <p className="inspectorNote warn" key={warning}>{warning}</p>)}
       {trace && <><h3>Upstream</h3>
@@ -229,9 +232,7 @@ export default function ChangeRequestInspector({
       <h3>Downstream / verification impact</h3>
       {downstream.length ? downstream.map(edge => { const otherId = edge.fromId === rootId ? edge.toId : edge.fromId; const otherKind = edge.fromId === rootId ? edge.toKind : edge.fromKind; const node = nodeById.get(otherId); return <TraceEdgeCard key={`${edge.fromId}-${edge.toId}-${edge.relation}`} edge={edge} node={node} otherKind={otherKind} href={node ? artifactHref?.(node) : undefined} /> }) : <div className="traceEmpty"><span>No immediate downstream relationship or verification impact is recorded.</span></div>}
       </>}
-      {digitalThreadHref && <ExactArtifactLink className="openDigitalThread" href={digitalThreadHref}>Open Digital Thread →</ExactArtifactLink>}
-      {!trace && <p className="inspectorNote warn">The server did not expose a trace projection for this exact record. No client-side relationship has been inferred.</p>}
-    </div>}
+    </TraceInspector>}
 
     {tab === 'history' && <div className="inspectorBody">
       <div className="traceRevisionIdentity"><b>{detail.displayNumber}</b><span>Exact controlled revision {detail.revision}</span></div>
@@ -248,5 +249,8 @@ export default function ChangeRequestInspector({
 }
 
 function TraceEdgeCard({ edge, node, otherKind, href }: { edge: TraceEdge; node?: TraceNode; otherKind: string; href?: string }) {
-  return <article className="traceRelation"><div className="traceRequirementHead"><ExactArtifactLink href={href}>{node ? nodeLabel(node) : 'Exact connected artifact'}</ExactArtifactLink><span>{node?.kind ?? otherKind}</span></div><p>{node?.title || 'Exact connected controlled artifact'}</p>{node?.state && <small>{stateLabel(node.state)}{node.level ? ` · ${node.level}` : ''}{node.buildVersion ? ` · Build ${node.buildVersion}` : ''}</small>}<div className="traceProvenance">{edge.provenance.map((fact, index) => <span key={`${fact.kind}-${index}`}><b>{traceProvenanceLabel(fact.kind)}</b>{fact.isLive === false ? ' · Historical evidence' : ''}{fact.rationale ? ` · ${fact.rationale}` : ''}{fact.status ? ` · ${fact.status}` : ''}</span>)}</div></article>
+  return <TraceRelation label={node ? nodeLabel(node) : 'Exact connected artifact'} href={href}
+    title={node?.title || 'Exact connected controlled artifact'} detail={`${node?.kind ?? otherKind}${node?.state ? ` · ${stateLabel(node.state)}` : ''}${node?.level ? ` · ${node.level}` : ''}${node?.buildVersion ? ` · Build ${node.buildVersion}` : ''}`}>
+    <div className="traceProvenance">{edge.provenance.map((fact, index) => <span key={`${fact.kind}-${index}`}><b>{traceProvenanceLabel(fact.kind)}</b>{fact.isLive === false ? ' · Historical evidence' : ''}{fact.rationale ? ` · ${fact.rationale}` : ''}{fact.status ? ` · ${fact.status}` : ''}</span>)}</div>
+  </TraceRelation>
 }

@@ -715,4 +715,122 @@ public sealed class ChangeRequestTraceProjectionTests
             return new ValueTask<InterceptionResult<DbDataReader>>(result);
         }
     }
+    /// <summary>
+    /// #1016 S13A. A verification package with no controlled number says so, rather than rendering ".00".
+    ///
+    /// An assessment raised against an approved change is deliberately unnumbered until somebody concludes
+    /// that verification work is required, so "no controlled number" is an ordinary current state. The node
+    /// used to be labelled by formatting a revision onto an empty base number, which reads as a corrupt
+    /// identifier and tells a reader nothing about which record they are looking at.
+    ///
+    /// Two facts are therefore kept apart: a label for a person, and whether a governed number exists. The
+    /// second is stated, never inferred from the first — and the record the package was raised from is named
+    /// as context, never put where this record's own number belongs.
+    /// </summary>
+    [Fact]
+    public async Task Verification_nodes_state_whether_a_controlled_number_exists_and_never_render_a_bare_revision()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var root = new SystemChangeRequest("SRCR-07870", 0, fixture.Project.Id, fixture.Release.Id,
+            "Root", "P", "A", "S", "author", fixture.Now);
+
+        // Numbered, at a legitimate revision 00. Its complete controlled identity must be untouched.
+        var numbered = new TestChangeReview(fixture.Project.Id, fixture.Release.Id, root.Id,
+            TestChangeReviewDiscipline.System, root.DisplayNumber, fixture.Now,
+            baseNumber: "SYSTPCR-07870", revision: 0);
+
+        // Current, unnumbered, undecided: the ordinary state of an assessment nobody has concluded.
+        // Revisions differ because one change request holds at most one package per discipline, artifact
+        // kind and revision; reopening for further work is what advances the revision.
+        var pending = new TestChangeReview(fixture.Project.Id, fixture.Release.Id, root.Id,
+            TestChangeReviewDiscipline.System, root.DisplayNumber, fixture.Now, revision: 1);
+
+        // A second assessment against the same approved change. It shares the first one's label by design,
+        // which is exactly why the label must never be treated as a key.
+        var sibling = new TestChangeReview(fixture.Project.Id, fixture.Release.Id, root.Id,
+            TestChangeReviewDiscipline.System, root.DisplayNumber, fixture.Now, revision: 2);
+
+        // Concluded: no verification work required. It earns no controlled number, and that is the answer,
+        // not an omission.
+        var noChange = new TestChangeReview(fixture.Project.Id, fixture.Release.Id, root.Id,
+            TestChangeReviewDiscipline.System, root.DisplayNumber, fixture.Now, revision: 3);
+        noChange.RecordNoTestChangeRequired("test.engineer", "The change does not touch a procedure.", fixture.Now);
+
+        fixture.Db.AddRange(root, pending, sibling, noChange, numbered);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await ChangeRequestTraceProjection.ForChangeRequestAsync(
+            fixture.Db, fixture.Project.Id, root.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
+        Assert.NotNull(result);
+
+        var pendingNode = Assert.Single(result!.Nodes, x => x.Id == pending.Id);
+        Assert.Equal("Unnumbered assessment", pendingNode.DisplayNumber);
+        Assert.DoesNotContain(result.Nodes, x => x.DisplayNumber.StartsWith("."));
+
+        // Stated, not inferred. A consumer asking "is this controlled?" reads this, not the label's prefix.
+        var verification = Assert.IsType<ChangeRequestTraceVerification>(pendingNode.Verification);
+        Assert.False(verification.HasControlledNumber);
+        Assert.Null(verification.ControlledNumber);
+        Assert.Null(verification.ControlledRevision);
+        Assert.Equal(nameof(TestChangeReviewOutcome.Pending), verification.Outcome);
+        Assert.Equal(nameof(TestChangeReviewOriginKind.ChangeRequest), verification.OriginKind);
+        Assert.Equal(root.Id, verification.OriginReferenceId);
+
+        // The source is context. It is carried in its own field, and it is not this record's number.
+        Assert.Equal(root.DisplayNumber, verification.SourceDisplayNumber);
+        Assert.NotEqual(root.DisplayNumber, pendingNode.DisplayNumber);
+
+        // Two unnumbered siblings share a label and remain two distinct records with their own stable ids.
+        var siblingNode = Assert.Single(result.Nodes, x => x.Id == sibling.Id);
+        Assert.Equal(pendingNode.DisplayNumber, siblingNode.DisplayNumber);
+        Assert.NotEqual(pendingNode.Id, siblingNode.Id);
+
+        // A recorded no-change conclusion is truthful about both facts at once.
+        var noChangeNode = Assert.Single(result.Nodes, x => x.Id == noChange.Id);
+        Assert.False(noChangeNode.Verification!.HasControlledNumber);
+        Assert.Equal(nameof(TestChangeReviewOutcome.NoChangeRequired), noChangeNode.Verification.Outcome);
+        // Draft, not approved: a conclusion that has been written is not a conclusion that has been signed.
+        Assert.Equal(nameof(TestChangeReviewState.Draft), noChangeNode.State);
+
+        // The numbered package keeps its complete controlled identity, revision 00 included.
+        var numberedNode = Assert.Single(result.Nodes, x => x.Id == numbered.Id);
+        Assert.Equal("SYSTPCR-07870.00", numberedNode.DisplayNumber);
+        Assert.True(numberedNode.Verification!.HasControlledNumber);
+        Assert.Equal("SYSTPCR-07870", numberedNode.Verification.ControlledNumber);
+        Assert.Equal(0, numberedNode.Verification.ControlledRevision);
+
+        // The other node families are untouched by this correction, and carry no verification metadata.
+        var rootNode = Assert.Single(result.Nodes, x => x.Kind == "ChangeRequest" && x.Id == root.Id);
+        Assert.Equal("SRCR-07870.00", rootNode.DisplayNumber);
+        Assert.Null(rootNode.Verification);
+    }
+
+    /// <summary>
+    /// #1016 S13A. A package raised from a Problem Report names the Problem Report, not a change request.
+    ///
+    /// The source is interpreted by the package's own origin discriminator rather than guessed from whichever
+    /// identity column happens to be populated, so an unnumbered package raised from a field report reads as
+    /// what it is.
+    /// </summary>
+    [Fact]
+    public async Task An_unnumbered_package_names_the_problem_report_it_was_raised_from()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var report = new ProblemReport(fixture.Project.Id, "PR-07871", "Field report",
+            "Observed in service.", "Analysis", "author", fixture.Now);
+        var fromReport = TestChangeReview.FromProblemReport(fixture.Project.Id, fixture.Release.Id, report.Id,
+            TestChangeReviewDiscipline.System, report.DisplayNumber, fixture.Now);
+        fixture.Db.AddRange(report, fromReport);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await ChangeRequestTraceProjection.ForTestChangeReviewAsync(
+            fixture.Db, fixture.Project.Id, fromReport.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
+        Assert.NotNull(result);
+        var node = Assert.Single(result!.Nodes, x => x.Id == fromReport.Id);
+        Assert.Equal("Unnumbered assessment", node.DisplayNumber);
+        Assert.Equal(nameof(TestChangeReviewOriginKind.ProblemReport), node.Verification!.OriginKind);
+        Assert.Equal(report.Id, node.Verification.OriginReferenceId);
+        Assert.Equal(report.DisplayNumber, node.Verification.SourceDisplayNumber);
+        Assert.False(node.Verification.HasControlledNumber);
+    }
 }

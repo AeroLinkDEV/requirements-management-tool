@@ -70,7 +70,6 @@ test('Software Draft keeps downstream impact with consuming engineers before an 
   await page.getByLabel('Section for proposal 1').selectOption({ index: 1 })
   await page.locator('.derivedControl button').click()
   await page.getByLabel('Rationale', { exact: true }).fill('Architecture-derived behavior for this isolated software workspace.')
-  await page.getByRole('textbox',{name:'Author',exact:true}).fill('software.author')
   await page.getByRole('button',{name:'Save HLRCR Draft'}).click()
 
   await expect(page.getByRole('heading',{name:'Control software authoring readiness'})).toBeVisible()
@@ -83,7 +82,8 @@ test('Software Draft keeps downstream impact with consuming engineers before an 
   await expect(page.getByRole('button',{name:'Retire existing HLR'})).toBeVisible()
   await expect(page.getByRole('button',{name:'Modify existing LLR'})).toBeVisible()
   await expect(page.getByRole('button',{name:'Retire existing LLR'})).toBeVisible()
-  await expect(page.getByRole('textbox',{name:'Author',exact:true})).toHaveValue('software.author')
+  // #1016 S01. The proposal no longer carries an Author of its own; the change request records the author.
+  await expect(page.getByRole('textbox',{name:'Author',exact:true})).toHaveCount(0)
   await expect(page.getByText('Known downstream context',{exact:true})).toBeVisible()
   await expect(page.locator('.editorColumns aside select')).toHaveCount(0)
   await page.getByLabel('No upstream change-request rationale').fill('This derived software change has no direct upstream change request in the controlled authoring journey.')

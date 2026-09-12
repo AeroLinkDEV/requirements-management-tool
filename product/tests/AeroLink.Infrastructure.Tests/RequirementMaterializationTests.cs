@@ -15,6 +15,63 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class RequirementMaterializationTests
 {
     [Fact]
+    public async Task Rebased_proposal_reads_the_approved_base_and_materializes_the_next_revision()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-rebase-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("Rebase", "RBM");
+            var project = new ProjectRecord(program.Id, "Software", "Rebase materialization");
+            var release = new SoftwareRelease(project.Id, "1.6", false);
+            db.AddRange(program, project, release);
+            await db.SaveChangesAsync();
+            var materializer = new RequirementBaselineMaterializer(db, new VerificationImpactService(db));
+            Guid? previous = null;
+            foreach (var revision in new[] { 0, 3, 4 })
+            {
+                var approved = ApprovedScr($"HLRCR-009{revision:D2}", "HLR-009001", revision,
+                    revision == 0 ? RequirementChangeKind.Introduce : RequirementChangeKind.Modify,
+                    $"Approved wording at revision {revision}.", project.Id, release.Id, now);
+                var baseline = FrozenBaseline($"SW-009{revision:D2}", project.Id, release.Id, previous, approved, now);
+                db.AddRange(approved, baseline);
+                await db.SaveChangesAsync();
+                await materializer.MaterializeAsync(baseline.Id, "cm", now, default);
+                previous = baseline.Id;
+            }
+
+            // Two authors originally proposed .04 against .03. Once the winner's .04 exists,
+            // re-applying the second author's intent must propose .05 against that exact .04.
+            var mine = ApprovedScr("HLRCR-00905", "HLR-009001", 4, RequirementChangeKind.Modify,
+                "Original competing wording.", project.Id, release.Id, now);
+            var change = Assert.Single(mine.RequirementChanges);
+            mine.RebaseRequirementChange("author", change.Id, 4, "Re-applied wording.", "HLRCR-00904.00", now);
+            Assert.Equal(5, change.Revision);
+            Assert.Equal(ChangeRequestState.Draft, mine.State);
+            mine.SubmitForReview("author", [new("reviewer", "Reviewer")], now);
+            mine.ApproveActiveStage("reviewer", now);
+            var next = FrozenBaseline("SW-00905", project.Id, release.Id, previous, mine, now);
+            db.AddRange(mine, next);
+            await db.SaveChangesAsync();
+
+            var proposal = await ChangeProposalContentProjection.ForChangeRequestAsync(db, project.Id, mine.Id, default);
+            var item = Assert.Single(proposal!.Items);
+            var exactBase = await db.RequirementRevisions.SingleAsync(x => x.Revision == 4);
+            Assert.Equal(exactBase.Id, item.BaseRevisionId);
+            Assert.Equal(4, item.SupersededRevision);
+            Assert.Equal("Approved wording at revision 4.", item.SupersededStatement);
+            await materializer.MaterializeAsync(next.Id, "cm", now, default);
+            var result = await db.RequirementRevisions.SingleAsync(x => x.Revision == 5);
+            Assert.Equal("Re-applied wording.", result.Statement);
+            Assert.Equal(result.Id, (await db.BaselineRequirements.SingleAsync(x => x.BaselineId == next.Id)).RevisionId);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public async Task Materialized_requirement_classification_is_persisted_and_published_deterministically()
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-req-output-{Guid.NewGuid():N}.db");

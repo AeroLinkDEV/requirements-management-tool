@@ -106,11 +106,12 @@ test('modifying a requirement shows the approved wording beside the proposed wor
   await modified.fill(`${approved} The sequencing shall additionally be configurable.`)
   expect(await existing.inputValue()).toBe(approved)
 
-  // Criticality is no longer asked of the author, and Owner is called Author.
+  // Criticality is no longer asked of the author, and neither is a per-requirement Author (#1016 S01): a
+  // proposal has no author of its own, because the change request it is written inside already records one.
   const proposal = page.locator('.controlledEditor').first()
   await expect(page.getByLabel('Criticality')).toHaveCount(0)
   await expect(proposal.getByRole('textbox', { name: 'Owner' })).toHaveCount(0)
-  await expect(proposal.getByRole('textbox', { name: 'Author' })).toBeVisible()
+  await expect(proposal.getByRole('textbox', { name: 'Author' })).toHaveCount(0)
 })
 
 test('a specification section filters to the requirements it holds', async ({ page, request }) => {

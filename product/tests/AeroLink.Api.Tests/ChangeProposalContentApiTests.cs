@@ -17,8 +17,8 @@ namespace AeroLink.Api.Tests;
 /// <summary>
 /// The proposed content of a change request, as the Digital Thread's inside-a-change view reads it.
 ///
-/// The subject of most of these is the revision the answer is anchored to. A proposal names the exact revision
-/// it supersedes, and the requirement it targets has moved on since; resolving against the latest revision
+/// The subject of most of these is the revision the answer is anchored to. A proposal names its result revision;
+/// its immediate predecessor is the exact base, and the requirement has moved on since. Resolving against latest
 /// instead would diff the proposal against text that was never its baseline.
 /// </summary>
 public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
@@ -34,7 +34,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
         Guid RetireId, Guid AllocatingModifyId, Guid MaterializedChildId, Guid ProposedChildId,
         Guid OtherBuildChildId, Guid RealRetireId, Guid RetiredCascadeChildId, string Member, string Outsider);
 
-    private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory)
+    private static async Task<Fixture> SeedAsync(AeroLinkApiFactory factory, int proposedRevision = 2)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -93,9 +93,10 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
         db.RequirementTraces.Add(new RequirementTraceLink(project.Id, childRevision.Id, allocatingRevision.Id,
             RequirementTraceType.AllocatedFrom, "Allocated from the system requirement.", now));
 
-        var modify = subject.AddRequirementChange(memberName, "SR-91001", 1, RequirementLevel.System,
+        // Authoring stores the proposed result revision, one greater than its exact base.
+        var modify = subject.AddRequirementChange(memberName, "SR-91001", proposedRevision, RequirementLevel.System,
             RequirementChangeKind.Modify, ProposedText, "Rationale", "Test", now);
-        var allocatingModify = subject.AddRequirementChange(memberName, "SR-91004", 0, RequirementLevel.System,
+        var allocatingModify = subject.AddRequirementChange(memberName, "SR-91004", 1, RequirementLevel.System,
             RequirementChangeKind.Modify, "The FMS shall annunciate a sequencing fault within 1 second.",
             "Rationale", "Test", now);
         var introduce = subject.AddRequirementChange(memberName, "SR-91002", 0, RequirementLevel.System,
@@ -124,7 +125,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
         db.RequirementTraces.Add(new RequirementTraceLink(project.Id, cascadeChildRevision.Id,
             retiringRevision.Id, RequirementTraceType.AllocatedFrom, "Allocated from the system requirement.", now));
 
-        var realRetire = subject.AddRequirementChange(memberName, "SR-91005", 0, RequirementLevel.System,
+        var realRetire = subject.AddRequirementChange(memberName, "SR-91005", 1, RequirementLevel.System,
             RequirementChangeKind.Retire, "", "Superseded by round-robin sequencing.", "Test", now);
 
         // A proposed child in a sibling change request in the same build, pointing at the allocating revision.
@@ -242,9 +243,27 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
         var modify = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.ModifyId);
 
         // Revision 2 is the requirement's current text and is deliberately not the answer.
+        Assert.Equal("SR-91001.02", modify.GetProperty("displayNumber").GetString());
         Assert.Equal(SupersededText, modify.GetProperty("supersededStatement").GetString());
         Assert.Equal(1, modify.GetProperty("supersededRevision").GetInt32());
         Assert.Equal(ProposedText, modify.GetProperty("statement").GetString());
+    }
+
+    [Fact]
+    public async Task A_missing_exact_predecessor_does_not_fall_back_to_an_older_or_latest_revision()
+    {
+        var fixture = await SeedAsync(_host.Factory, proposedRevision: 4);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, fixture.Member);
+
+        var modify = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.ModifyId);
+
+        // .01 and .02 exist, but .03 does not. Neither is evidence of the base of proposal .04.
+        Assert.Equal("SR-91001.04", modify.GetProperty("displayNumber").GetString());
+        Assert.Equal(2, modify.GetProperty("latestRevision").GetInt32());
+        Assert.Equal(JsonValueKind.Null, modify.GetProperty("baseRevisionId").ValueKind);
+        Assert.Equal(JsonValueKind.Null, modify.GetProperty("supersededStatement").ValueKind);
+        Assert.Equal("BaseRevisionUnresolved", modify.GetProperty("disposition").GetString());
     }
 
     [Fact]

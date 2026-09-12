@@ -18,6 +18,10 @@ import './TestProcedureExplorer.css'
 import { LadderCapability, ladderAllows, ladderEnablesArtifactKind } from './projectLadder'
 import type { LadderLevel, ProjectLadderProjection } from './projectLadder'
 import ExactLinkLifecyclePanel from './ExactLinkLifecyclePanel'
+import { TraceInspector, TraceGroup, TraceRelation } from './TraceInspector'
+import { ArtifactTraceRelations } from './artifactTraceInspector'
+import type { ArtifactThreadNode } from './artifactThreadContract'
+import { parseInspectorThread } from './artifactTraceInspectorModel'
 
 type Procedure = {
   id: string
@@ -133,6 +137,8 @@ type TraceProvenance = {
   changeRequest: string; package: string; subjectDisplayNumber: string; action: string; isLegacy?: boolean
 }
 type ProcedureTrace = {
+  thread?: unknown
+  traceExcludedRecords?: number
   procedureId: string
   baseNumber: string
   title: string
@@ -196,7 +202,7 @@ const validLevel = (value: string | null, discipline: ProcedureScope, ladder: Pr
  * to be verified.
  */
 export default function TestProcedureExplorer({ api, projectId, releaseId, discipline, buildName, releaseVersion,
-  released, onBack, onOpenRequirementRevision, onOpenTestChangeRequest, onCoverageReportChange, onCoverageLevelChange, onClearExplorerFilters, initialLevel, ladder }: {
+  released, onBack, onOpenTestChangeRequest, onCoverageReportChange, onCoverageLevelChange, onClearExplorerFilters, initialLevel, ladder, traceArtifactHref, digitalThreadHref }: {
   api: string; projectId: string; releaseId: string; discipline: ProcedureScope; buildName: string
   /** The build's own version, which the document actions name. `buildName` is the display label, not this. */
   releaseVersion: string
@@ -212,6 +218,8 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   onClearExplorerFilters?: () => void
   initialLevel?: 'HighLevel' | 'LowLevel'
   ladder: ProjectLadderProjection | null
+  traceArtifactHref?: (node: ArtifactThreadNode) => string | undefined
+  digitalThreadHref?: (revisionId: string, kind: 'case' | 'procedure') => string | undefined
 }) {
   const opening = useRef(typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams()).current
   const coverageReportRequested = opening.get('coverage') === 'report'
@@ -283,7 +291,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
     return seeded === 'trace' || seeded === 'history' || seeded === 'discussion' ? seeded : 'details'
   })
   const [history, setHistory] = useState<History>()
-  const [trace, setTrace] = useState<ProcedureTrace>()
+  const [loadedTrace, setTrace] = useState<ProcedureTrace>()
   const [traceError, setTraceError] = useState(false)
   const [comments, setComments] = useState<Comment[]>([])
   const [error, setError] = useState('')
@@ -511,6 +519,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   const selected = useMemo(() => data?.items.find(x => x.id === selectedId), [data, selectedId])
   const selectedArtifactApiRoot = verificationArtifactApiRoot(isSystemScope ? 'System' : 'Software', selected?.artifactKind)
   const selectedRevision = selectedRevisionId || selected?.revisionId || ''
+  const trace = loadedTrace?.revisionId === selectedRevision ? loadedTrace : undefined
   const selectedIsProcedure = selected?.artifactKind === 'Procedure'
   const selectedIsSoftwareProcedure = selectedIsProcedure && !isSystemScope
   const selectedArtifactWord = selectedIsProcedure ? 'test procedure' : 'test case'
@@ -537,13 +546,19 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   useEffect(() => {
     if (!selected || tab !== 'trace') return
     let active = true
+    setTrace(undefined)
     setTraceError(false)
     void (async () => {
       try {
         const response = await fetch(
            `${api}${selectedArtifactApiRoot}/${selected.id}/trace?releaseId=${releaseId}&revisionId=${selectedRevision}`)
-        if (response.ok && active) setTrace(await response.json())
-        else if (active) setTraceError(true)
+        if (response.ok) {
+          const value = await response.json()
+          if (active) {
+            if (value.revisionId === selectedRevision && value.artifactId === selected.id) setTrace(value)
+            else setTraceError(true)
+          }
+        } else if (active) setTraceError(true)
       } catch { if (active) setTraceError(true) }
     })()
     return () => { active = false }
@@ -801,6 +816,7 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   }
 
   // A workspace is its own <main>: the shell supplies the navigation and context bar, not the landmark.
+  const traceThread = trace?.thread ? parseInspectorThread(trace.thread, selectedRevision) : undefined
   return <main className="reqWorkspace">
     <ControlledArtifactExplorerHeader
       back={onBack ? { label: 'Command Center', onClick: onBack } : undefined}
@@ -1233,85 +1249,40 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
           )}
 
           {tab === 'trace' && (
-            <div className="inspectorBody">
-              {/* A Case traces to the requirements it verifies. A software Procedure traces to its exact Case
-                  parents and their Case <-> Procedure lifecycle; System remains the direct requirement trace. */}
-              {trace ? (
-                <>
-                  <div className="traceRevisionIdentity">
-                    <b>{trace.displayNumber}</b>
-                    <span>{trace.title}</span>
-                    <span>{stateLabel(trace.state)} · {trace.level} · revision {trace.revisionId}</span>
-                    <small>Written by <PersonName userName={trace.authorId} /> · {new Date(trace.createdAt).toLocaleString()}</small>
-                  </div>
-                  {trace.titleNote && <p className="inspectorNote warn">{trace.titleNote}</p>}
-                  {trace.provenance.length > 0 && (
-                    <p className="traceProvenance">
-                      {trace.provenance.some(driver => driver.isLegacy) ? 'Related controlled impact: ' : 'Produced by '}
-                      {trace.provenance.map(driver => `${driver.package} (${driver.changeRequest})`).join(', ')}
-                    </p>
-                  )}
-                  {trace.provenance.length === 0 && trace.package && (
-                    <p className="traceProvenance">Produced by {trace.package}</p>
-                  )}
-                  {trace.provenanceNote && <p className="inspectorNote warn">{trace.provenanceNote}</p>}
-                  {selectedIsProcedure && selected.level !== 'System' ? (
-                    trace.caseParents?.length ? <>
-                      <p className="inspectorNote">This Procedure runs against {trace.caseParents.length} exact Case parent{trace.caseParents.length === 1 ? '' : 's'}.</p>
-                      <ul className="traceRequirements" aria-label="Exact Case parents">
-                        {trace.caseParents.map(parent => <li key={parent.linkId} className="traceRequirement">
-                          <div className="traceRequirementHead">
-                            <b>{parent.displayNumber ?? parent.caseRevisionId}</b>
-                            <span>Case</span>
-                            <i className="traceCoverageBadge confirmed">{parent.state}</i>
-                          </div>
-                          {parent.title && <p>{parent.title}</p>}
-                          <small>Exact Case revision {parent.caseRevisionId}</small>
-                          {parent.outcome && <small>Disposition: {parent.outcome}</small>}
-                          <ExactLinkLifecyclePanel api={api} routeRoot="case-procedure-links"
-                            linkId={parent.linkId} initialState={parent.state} />
-                        </li>)}
-                      </ul>
-                    </> : <p className="inspectorNote warn">No exact Case parent is linked to this Procedure revision.</p>
-                  ) : <>
-                    <p className="inspectorNote">
-                      This {trace.level === 'System' ? 'procedure' : 'Case'} verifies {trace.requirements.length} requirement{trace.requirements.length === 1 ? '' : 's'}.
-                    </p>
-                    {trace.requirements.length === 0 ? (
-                      <p className="inspectorNote warn">
-                        Nothing is verified by {trace.displayNumber}. Either it has not been linked yet, or the
-                        requirement it was written against has been retired.
-                      </p>
-                    ) : <ul className="traceRequirements">
-                      {trace.requirements.map(item => (
-                        <li key={item.revisionId}
-                          className={`traceRequirement${item.coverageState === 'Suspect' ? ' suspect' : ''}`}>
-                          <div className="traceRequirementHead">
-                            <b>{item.displayNumber}</b>
-                            <span>{item.level}</span>
-                            <i className={`traceCoverageBadge ${item.coverageState === 'Suspect' ? 'suspect' : 'confirmed'}`}>
-                              {item.coverageState}
-                            </i>
-                          </div>
-                          <p>{item.statement}</p>
-                          <small>Revision {item.revisionId}</small>
-                          <button type="button" className="linkedArtifactText"
-                            onClick={() => onOpenRequirementRevision(item)}>
-                            Open requirement →
-                          </button>
-                        </li>
-                      ))}
-                    </ul>}
-                  </>}
-                </>
-              ) : traceError ? (
-                <p className="inspectorNote warn">The trace for this {selectedArtifactShortWord} revision could not be loaded.</p>
-              ) : (
-                <p className="inspectorNote">Loading trace…</p>
-              )}
-            </div>
+            <TraceInspector loading={!trace && !traceError} error={traceError ? 'The trace for this exact revision could not be loaded.' : undefined}
+              digitalThreadHref={trace ? digitalThreadHref?.(trace.revisionId, selectedIsProcedure ? 'procedure' : 'case') : undefined}>
+              {trace && <>
+                <div className="traceRevisionIdentity"><b>{trace.displayNumber}</b><span>{trace.title}</span>
+                  <span>{stateLabel(trace.state)} · {trace.level} · revision {trace.revisionId}</span>
+                  <small>Recorded {new Date(trace.createdAt).toLocaleString()}</small>
+                </div>
+                {trace.titleNote && <p className="inspectorNote warn">{trace.titleNote}</p>}
+                {trace.provenance.map((driver, index) => <p className="traceProvenance" key={index}>
+                  {driver.isLegacy ? 'Related controlled impact: ' : 'Produced by '}{driver.package} ({driver.changeRequest})
+                </p>)}
+                {!trace.provenance.length && trace.package && <p className="traceProvenance">Produced by {trace.package}</p>}
+                {trace.provenanceNote && <p className="inspectorNote warn">{trace.provenanceNote}</p>}
+                {(!selectedIsProcedure || selected.level === 'System') && <>
+                  <p className="inspectorNote">This {trace.level === 'System' ? 'procedure' : 'Case'} verifies {trace.requirements.length} requirement{trace.requirements.length === 1 ? '' : 's'}.</p>
+                  <TraceGroup title="Verification coverage" count={trace.requirements.length} empty={`Nothing is verified by ${trace.displayNumber}. No current exact coverage is recorded.`}>
+                    {trace.requirements.map(item => { const node = traceThread?.ok ? traceThread.thread.nodes.find(node => node.id === item.revisionId) : undefined; return <TraceRelation key={item.revisionId} className="traceRequirement" label={item.displayNumber}
+                      href={node ? traceArtifactHref?.(node) : undefined}
+                      title={item.statement} detail={`${item.level} · ${item.coverageState} · Revision ${item.revisionId}`} attention={item.coverageState === 'Suspect'}>
+                      {item.coverageState === 'Suspect' && <small>Suspect applicability — does not count as coverage</small>}
+                    </TraceRelation>})}
+                  </TraceGroup>
+                </>}
+                {traceThread?.ok ? <ArtifactTraceRelations thread={traceThread.thread} omitDirectKinds={(!selectedIsProcedure || selected.level === 'System') ? ['Requirement'] : []} hrefFor={traceArtifactHref} excludedRecords={trace.traceExcludedRecords} />
+                  : <p className="inspectorNote warn">{traceThread && !traceThread.ok ? traceThread.reason : 'The complete trace is unavailable in this exact build scope. No relationships have been inferred.'}</p>}
+                {!!trace.caseParents?.length && <section aria-label="Case relationship lifecycle"><h3>Case relationship lifecycle</h3>
+                  {trace.caseParents.map(parent => <div key={parent.linkId}>
+                    <b>{parent.displayNumber ?? parent.caseRevisionId}</b>
+                    <ExactLinkLifecyclePanel api={api} routeRoot="case-procedure-links" linkId={parent.linkId} initialState={parent.state} />
+                  </div>)}
+                </section>}
+              </>}
+            </TraceInspector>
           )}
-
           {tab === 'history' && (
             <div className="inspectorBody">
               {history

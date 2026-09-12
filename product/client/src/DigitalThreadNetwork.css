@@ -120,6 +120,15 @@
 }
 
 .dtnMeta { display: flex; gap: 10px; color: #5f7080; font-size: 10px; }
+/* #1016 S13A. Source context on a card, in the secondary line and at its size. The card's identifier row is
+   fixed-width and does not wrap, and an earlier attempt to carry the source up there spilled out of the
+   card entirely; here it is truncated instead, and the complete value is in the inspector. The type is not
+   shrunk to make it fit — a card that cannot hold a value truncates it, it does not become unreadable. */
+.dtnSource { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dtnVerificationFacts { display: grid; gap: 6px 14px; margin: 8px 0 0; }
+.dtnVerificationFacts > div { display: flex; gap: 8px; align-items: baseline; }
+.dtnVerificationFacts dt { color: #5f7080; font-size: 11px; min-width: 128px; }
+.dtnVerificationFacts dd { margin: 0; color: #21374b; font-size: 12px; overflow-wrap: anywhere; }
 
 /* Suspect carries its word in the pill as well as the colour; colour alone is never the signal. */
 .dtCanvasNode:has(.dtnCard.is-suspect) { border-color: #e0c17e; background: #fffdf6; }

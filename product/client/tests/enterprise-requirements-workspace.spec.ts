@@ -208,7 +208,7 @@ test("requirements stay read-only while controlled proposals and imports move in
   await page.getByLabel("Search requirements").fill("SYSR-000150");
   await page.getByRole("link", { name: /SYSR-000150\.\d{2}/ }).first().click();
   await page.getByRole("tab", { name: "Trace & impact" }).click();
-  await expect(page.getByRole("button", { name: "Open complete Digital Thread →" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open complete Digital Thread →" })).toBeVisible();
   await page.getByRole("tab", { name: "Overview" }).click();
   await page.getByRole("button", { name: "Propose controlled change →" }).click();
   await page.getByRole("dialog", { name: "Choose a change request" })

@@ -42,13 +42,14 @@ test('an author chooses the section a new requirement goes in', async ({ page })
   await page.getByLabel('Analysis', { exact: true }).fill('The section is part of the controlled proposal.')
   await page.getByLabel('Solution').fill('Carry the exact section through save and checkout.')
   await page.getByLabel('Requirement statement').fill('The FMS shall retain its authored specification section.')
-  await page.getByRole('textbox', { name: 'Author', exact: true }).fill('systems.author')
   await page.getByRole('button', { name: 'Save SRCR Draft' }).click()
 
   await expect(page.getByRole('heading', { name: 'Persist an authored specification section' })).toBeVisible()
   await page.getByRole('button', { name: 'Check out & edit' }).click()
   await expect(page.getByLabel('Section for proposal 1')).toHaveValue(selectedSection)
-  await expect(page.getByRole('textbox', { name: 'Author', exact: true })).toHaveValue('systems.author')
+  // #1016 S01. The section is what this journey is about, and it survives the checkout on its own — the
+  // per-requirement Author that used to be filled here no longer exists.
+  await expect(page.getByRole('textbox', { name: 'Author', exact: true })).toHaveCount(0)
 })
 
 test('modifying a requirement selects its current controlled section', async ({ page }) => {

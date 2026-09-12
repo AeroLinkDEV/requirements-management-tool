@@ -1184,6 +1184,7 @@
       "path": "/api/enterprise-requirements/views",
       "file": "RequirementsEndpoints.cs",
       "coveredBy": [
+        "RequirementFilterExactnessApiTests",
         "SavedViewLifecycleApiTests"
       ]
     },
@@ -2171,6 +2172,7 @@
       "file": "VerificationImpactEndpoints.cs",
       "coveredBy": [
         "ManualTestChangeRequestApiTests",
+        "ProcedureTestChangeControlApiTests",
         "TestChangeRequestReviewWorkflowTests"
       ]
     },

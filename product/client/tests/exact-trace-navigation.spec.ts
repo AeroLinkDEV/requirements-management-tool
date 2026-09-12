@@ -59,6 +59,7 @@ test("a trace row offers one exact navigation action, and refuses to offer one i
     body.parents = [{
       id: upstream.artifactId, revisionId: upstream.revisionId, displayNumber: upstream.displayNumber,
       level: "System", type: "AllocatedFrom", statement: "The upstream requirement this one is allocated from.",
+      isSuspect: true,
     }]
     body.children = [
       {
@@ -84,7 +85,7 @@ test("a trace row offers one exact navigation action, and refuses to offer one i
   await page.getByLabel("Search requirements").fill(subject.displayNumber)
   await page.getByRole("link", { name: new RegExp(subject.displayNumber.replace(/\./g, "\\.")) }).first().click()
   await page.getByRole("tab", { name: "Trace & impact" }).click()
-  await expect(page.getByRole("button", { name: "Open complete Digital Thread →" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Open complete Digital Thread →" })).toBeVisible()
   const subjectUrl = page.url()
 
   const inspector = page.locator(".traceInspector")
@@ -100,6 +101,9 @@ test("a trace row offers one exact navigation action, and refuses to offer one i
   // One action per destination: the identifier is the link, and there is no second control beside it doing
   // the same journey.
   await expect(upstreamRow.locator(".traceRelationTarget a, .traceRelationTarget button")).toHaveCount(1)
+  await expect(upstreamRow).toContainText('Suspect relationship')
+  await expect(upstreamRow).toHaveClass(/attention/)
+  await expect(inspector.locator('.traceSummary')).toContainText('0confirmed tests')
   await expect(historicalRow.locator(".traceRelationTarget a, .traceRelationTarget button")).toHaveCount(1)
 
   // The exact address, complete with the program, project and build the reader is working in — not a bare
@@ -183,6 +187,7 @@ test("the verification identifier refuses to link when the exact target is not e
   await page.route(`**/api/enterprise-requirements/${subject.artifactId}/impact**`, route => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({
+      requirementRevisionId: subject.revisionId,
       parents: [], children: [], baselines: [], builds: [], documents: [], activeChanges: [],
       tests: [
         // Supported, and the control case: a System Procedure with a complete identity.
@@ -261,6 +266,7 @@ test("the exact trace link is operable by keyboard, opens in a new tab, and surv
   await page.route(`**/api/enterprise-requirements/${subject.artifactId}/impact**`, route => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({
+      requirementRevisionId: subject.revisionId,
       parents: [{
         id: upstream.artifactId, revisionId: upstream.revisionId, displayNumber: upstream.displayNumber,
         level: "System", type: "AllocatedFrom", statement: "The upstream requirement this one is allocated from.",
@@ -360,6 +366,7 @@ test("the verification identifier goes where it says by click, keyboard and new 
   await page.route(`**/api/enterprise-requirements/${subject.artifactId}/impact**`, route => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({
+      requirementRevisionId: subject.revisionId,
       parents: [], children: [], baselines: [], builds: [], documents: [], activeChanges: [],
       tests: [{
         id: procedureId, artifactRevisionId: procedureRevisionId, revisionId: procedureRevisionId,

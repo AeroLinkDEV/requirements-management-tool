@@ -136,7 +136,7 @@ test('a test engineer proposes a new procedure inside the test change request th
   await drawer.getByRole('button', { name: 'Write engineering case' }).click()
   const caseDialog = page.getByRole('dialog', { name: /Edit the case of/ })
   await caseDialog.getByLabel('Title').fill('Oceanic procedure change')
-  await caseDialog.getByLabel('Problem').fill('The changed behavior has no controlled procedure decision.')
+  await caseDialog.getByLabel('Problem', { exact: true }).fill('The changed behavior has no controlled procedure decision.')
   await caseDialog.getByLabel('Analysis').fill('A new procedure is required to verify the requirement.')
   await caseDialog.getByLabel('Solution').fill('Propose and independently approve the new procedure.')
   await caseDialog.getByRole('button', { name: 'Save case' }).click()

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import type { AuthUser } from './IdentityCenter'
 import { RichCaseField } from './RichContent'
 import ProblemReportPicker from './ProblemReportPicker'
+import InheritedProblemReports, { type ProblemReportSource } from './InheritedProblemReports'
 import { fromPlainText, toPlainText } from './richContentModel'
 import ControlledProcedureEditor from './ControlledProcedureEditor'
 import { apiRequest, operationError } from './apiClient'
@@ -26,6 +27,8 @@ type SourceChoice = {
   changeRequestId?: string
   sourceId: string
   sourceKind: 'ChangeRequest' | 'CaseChange' | 'CaseAssessment'
+  problemReportSourceId?: string
+  problemReportSourceDisplayNumber?: string
   displayNumber: string
   title: string
   state: string
@@ -350,9 +353,18 @@ export default function TestChangeRequestEditor({
               ))}
           </fieldset>
 
-          {!procedurePackage && <ProblemReportPicker api={api} projectId={projectId} scope="target-build" releaseId={releaseId}
+          <InheritedProblemReports api={api} projectId={projectId} releaseId={releaseId}
+            sources={choices.filter(choice => selected.includes(choice.sourceId)).flatMap<ProblemReportSource>(choice =>
+              choice.sourceKind === 'ChangeRequest'
+                ? [{ id: choice.sourceId, kind: 'ChangeRequest' as const, displayNumber: choice.displayNumber }]
+                : choice.problemReportSourceId
+                  ? [{ id: choice.problemReportSourceId, kind: 'TestChangeRequest' as const,
+                    displayNumber: choice.problemReportSourceDisplayNumber || choice.displayNumber }]
+                  : [])}
+            selected={problemReportIds} onChange={setProblemReportIds} />
+          <ProblemReportPicker api={api} projectId={projectId} scope="target-build" releaseId={releaseId}
             selected={problemReportIds} onChange={setProblemReportIds}
-            legend={`Problem Reports driving this ${label} TCR`} />}
+            legend={`Problem Reports linked to this ${label} TCR`} />
 
           {!hasDriver && (
             <p className="tcrDriverHint">
