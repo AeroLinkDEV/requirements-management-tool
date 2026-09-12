@@ -965,12 +965,50 @@ test("clicking during an incoming reveal keeps the arrangement and selects that 
   const subject = page.locator('[data-node-id="hlr-127"]')
   const camera = await transformOf(page.locator(".dtCanvasScene"))
 
+  /**
+   * Record the linked card's screen position every frame, with a marker at the moment of the click.
+   *
+   * Waiting a fixed 380 ms and then clicking does not by itself prove the reveal was still moving at
+   * activation — it proves only that time passed. This samples the actual card, so "the arrangement was in
+   * flight when the press landed" becomes a measurement instead of an assumption.
+   */
+  await page.evaluate(() => {
+    const view = window as unknown as { __samples?: (number | string)[]; __sampling?: boolean }
+    view.__samples = []
+    view.__sampling = true
+    const sample = () => {
+      if (!view.__sampling) return
+      const node = document.querySelector<HTMLElement>('[data-node-id="pr-5"]')
+      const y = node?.getBoundingClientRect().y ?? Number.NaN
+      view.__samples!.push(Number.isFinite(y) ? Math.round(y * 10) / 10 : null as unknown as number)
+      requestAnimationFrame(sample)
+    }
+    requestAnimationFrame(sample)
+  })
+
   await subject.hover()
   // Just past the hover dwell: the reveal has begun but has not finished.
   await page.waitForTimeout(380)
+  await page.evaluate(() => { (window as unknown as { __samples?: unknown[] }).__samples!.push("CLICK") })
   await subject.click({ position: { x: 6, y: 6 } })
   await expect(subject).toHaveAttribute("aria-pressed", "true")
   await page.waitForTimeout(900)
+
+  const trace = await page.evaluate(() => {
+    const view = window as unknown as { __samples?: unknown[]; __sampling?: boolean }
+    view.__sampling = false
+    return view.__samples ?? []
+  })
+  const clickAt = trace.indexOf("CLICK")
+  const beforeClick = trace.slice(0, clickAt).filter((value): value is number => typeof value === "number")
+  expect(clickAt, "the click marker was not recorded").toBeGreaterThan(0)
+  const travelBeforeClick = beforeClick.length
+    ? Math.max(...beforeClick) - Math.min(...beforeClick)
+    : 0
+  expect(
+    travelBeforeClick,
+    `the reveal was not in flight when the press landed (card moved ${travelBeforeClick.toFixed(1)} px before it)`,
+  ).toBeGreaterThan(2)
 
   await expect(linked, "the promoted click did not keep the reveal").not.toHaveClass(/is-offscreen/)
   const arrived = (await linked.boundingBox())!
@@ -1009,8 +1047,35 @@ test("a new selection during cleanup replaces the old subject cleanly", async ({
 
   // A different, reachable card to become the new subject.
   // Clear, then select the new subject immediately — before the retirement has finished.
+  /**
+   * Prove an outgoing contribution is genuinely still retiring when the new selection lands.
+   *
+   * A traced card that the reveal had displaced is sampled every frame: it must still be moving after Escape and
+   * before the new press, or "selection during cleanup" would be describing an idle board.
+   */
+  // A *displaced* card: only records with no intersection with the usable window receive a temporary
+  // displacement, so an off-screen traced card is the one with something to retire.
+  const retiringId = await page.locator(".dtCanvasNode.is-offscreen:has(.dtnCard:not(.is-untraced))")
+    .first().getAttribute("data-node-id")
+  expect(retiringId, "no traced card was available to observe the retirement").toBeTruthy()
+  await page.evaluate(retiringIdValue => {
+    const view = window as unknown as { __cleanup?: (number | string)[]; __cleanupSampling?: boolean }
+    view.__cleanup = []
+    view.__cleanupSampling = true
+    const sample = () => {
+      if (!view.__cleanupSampling) return
+      const node = document.querySelector<HTMLElement>(`[data-node-id="${retiringIdValue}"]`)
+      const y = node?.getBoundingClientRect().y ?? Number.NaN
+      view.__cleanup!.push(Number.isFinite(y) ? Math.round(y * 10) / 10 : (null as unknown as number))
+      requestAnimationFrame(sample)
+    }
+    requestAnimationFrame(sample)
+  }, retiringId)
+
   await page.keyboard.press("Escape")
   await expect(page.locator('.dtCanvasNode[aria-pressed="true"]')).toHaveCount(0)
+  await page.waitForTimeout(120)
+  await page.evaluate(() => { (window as unknown as { __cleanup?: unknown[] }).__cleanup!.push("SELECT") })
   /**
    * Resolve the target *after* the clear, and take its id and box together.
    *
@@ -1023,6 +1088,19 @@ test("a new selection during cleanup replaces the old subject cleanly", async ({
   const box = (await other.boundingBox())!
   await page.mouse.click(box.x + 6, box.y + 6)
   await page.waitForTimeout(900)
+
+  const cleanupTrace = await page.evaluate(() => {
+    const view = window as unknown as { __cleanup?: unknown[]; __cleanupSampling?: boolean }
+    view.__cleanupSampling = false
+    return view.__cleanup ?? []
+  })
+  const selectAt = cleanupTrace.indexOf("SELECT")
+  const beforeSelect = cleanupTrace.slice(0, selectAt).filter((value): value is number => typeof value === "number")
+  const retirementTravel = beforeSelect.length ? Math.max(...beforeSelect) - Math.min(...beforeSelect) : 0
+  expect(
+    retirementTravel,
+    `no outgoing contribution was retiring when the new selection landed (moved ${retirementTravel.toFixed(1)} px)`,
+  ).toBeGreaterThan(2)
 
   const pressed = page.locator('.dtCanvasNode[aria-pressed="true"]')
   const selected = page.locator(".dtCanvasNode.is-selected")
