@@ -411,6 +411,8 @@
 
 /* Deeper than one hop reads dashed, so a direct relationship is never mistaken for a distant one. */
 .dticRel button.is-far { border-style: dashed; }
-.dticRel button small { color: #8fa0b2; font-size: 9px; font-weight: var(--weight-strong); }
-.dticRel button span { overflow: hidden; color: #17324d; font: var(--weight-strong) 10px ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; }
+/* #1022 A17: the linked identity and its relation word go up to the 12px floor while the row keeps its compact
+   padding, so the tray reads better rather than growing. */
+.dticRel button small { color: #6f8095; font-size: 12px; font-weight: var(--weight-strong); }
+.dticRel button span { overflow: hidden; color: #17324d; font: var(--weight-strong) 12px ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; }
 .dticRelEmpty { margin: 0; color: #8fa0b2; font-size: 10.5px; }

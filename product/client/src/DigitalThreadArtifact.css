@@ -356,8 +356,10 @@
 .dtaPanelEvidence small { color: #8493a6; font-size: 9.5px; }
 
 .dtaPanelCol { min-width: 0; display: flex; flex-direction: column; }
-.dtaRelHead { display: flex; align-items: baseline; gap: 6px; margin-bottom: 5px; }
-.dtaRelHead span { color: #8fa0b2; font-size: 9.5px; font-weight: var(--weight-strong); }
+/* #1022 A17: same correction as the change network's tray — type up to the 12px floor, height given back in
+   padding and gaps so the panel does not grow. */
+.dtaRelHead { display: flex; align-items: baseline; gap: 6px; margin-bottom: 4px; }
+.dtaRelHead span { color: #7d8fa3; font-size: 12px; font-weight: var(--weight-strong); letter-spacing: .04em; }
 
 .dtaRel { display: grid; gap: 4px; overflow-y: auto; max-height: 152px; }
 .dtaPanel-bottom .dtaRel {
@@ -377,7 +379,7 @@
   border: 1px solid #e7edf2;
   border-radius: 7px;
   background: #fafcfd;
-  padding: 5px 8px;
+  padding: 2px 6px;
   text-align: left;
   cursor: pointer;
 }
@@ -388,8 +390,8 @@
 /* A suspect relationship row carries the word SUSPECT as well as the amber, per the colour-alone rule. */
 .dtaRel button.is-suspect { border-color: #e0c17e; background: #fffdf6; }
 .dtaRel button.is-suspect small { color: #8a5a00; }
-.dtaRel small { display: block; color: #8493a6; font-size: 8.5px; letter-spacing: .04em; }
-.dtaRel button > span > span { display: block; overflow: hidden; color: #17324d; font: var(--weight-strong) 10px ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; }
+.dtaRel small { display: block; color: #6f8095; font-size: 12px; letter-spacing: .02em; }
+.dtaRel button > span > span { display: block; overflow: hidden; color: #17324d; font: var(--weight-strong) 12px ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; }
 .dtaRel em { margin-left: auto; color: #8493a6; font-size: 13px; font-style: normal; }
 .dtaRelEmpty { margin: 0; color: #8fa0b2; font-size: 10.5px; padding: 4px 0; }
 
