@@ -39,4 +39,10 @@ public sealed class ProjectRepositoryConfigurationTests
     public void Connect_now_rejects_unverifiable_endpoints(string endpoint)
         => Assert.Throws<DomainException>(() => new ProjectRepositoryConfiguration(Guid.NewGuid(),
             ProjectRepositorySetupMode.ConnectNow, "GitLab", endpoint, "admin", DateTimeOffset.UtcNow));
+
+    [Fact]
+    public void Configure_later_rejects_an_endpoint_at_construction()
+        => Assert.Throws<DomainException>(() => new ProjectRepositoryConfiguration(Guid.NewGuid(),
+            ProjectRepositorySetupMode.ConfigureLater, "GitLab", "https://gitlab.example.test/rmt", "admin",
+            DateTimeOffset.UtcNow));
 }

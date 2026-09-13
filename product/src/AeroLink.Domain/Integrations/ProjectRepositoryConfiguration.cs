@@ -21,6 +21,8 @@ public sealed class ProjectRepositoryConfiguration
         if (string.IsNullOrWhiteSpace(actor)) throw new DomainException("Repository setup requires an attributable actor.");
         if (mode == ProjectRepositorySetupMode.ConnectNow)
             ValidateEndpoint(endpoint);
+        else if (!string.IsNullOrWhiteSpace(endpoint))
+            throw new DomainException("A deferred repository cannot carry an endpoint.");
         Id = Guid.NewGuid(); ProjectId = projectId; Mode = mode;
         Status = mode == ProjectRepositorySetupMode.ConfigureLater
             ? ProjectRepositorySetupStatus.Pending : ProjectRepositorySetupStatus.ConfiguredUnverified;

@@ -42,10 +42,15 @@ public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db, ILadder
         // Creation activates its ladder and stages it in the same DbContext before this bootstrap runs. A
         // resolver query cannot see those unsaved rows, so prefer the tracked aggregate when one is present;
         // normal backfill and restart paths continue through the persisted effective-policy resolver.
-        var localConfiguration = policy is null
-            ? db.ProjectLadderConfigurations.Local.SingleOrDefault(x => x.ProjectId == projectId)
-            : null;
-        var ladderPolicy = localConfiguration is not null
+        var localConfiguration = db.ProjectLadderConfigurations.Local.SingleOrDefault(x => x.ProjectId == projectId);
+        // A new project and an empty Active correction carry their effective graph only in this DbContext until
+        // the enclosing transaction saves it. Prefer that graph even when the normal DI catalogue is present.
+        // Legacy Stored rows remain on the explicitly supplied compatibility policy when a focused caller gives
+        // one, preserving historical test and migration seams.
+        var useLocalConfiguration = localConfiguration is not null
+            && (policy is null || localConfiguration.Classification == ProjectLadderConfigurationClassification.NonDefault
+                && localConfiguration.State == ProjectLadderConfigurationState.Active);
+        var ladderPolicy = useLocalConfiguration
             ? ProjectLadderPolicyStorage.ResolvePersisted(localConfiguration, projectId, fallbackPolicy)
             : policyResolver is null
                 ? fallbackPolicy
