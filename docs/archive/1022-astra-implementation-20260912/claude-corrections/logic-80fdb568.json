@@ -1,0 +1,3194 @@
+{
+  "config": {
+    "argv": [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Sean Project\\RMT-1022-astra-implementation\\product\\client\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "--config=playwright.logic.config.ts",
+      "--reporter=list,json"
+    ],
+    "configFile": "C:\\Sean Project\\RMT-1022-astra-implementation\\product\\client\\playwright.logic.config.ts",
+    "rootDir": "C:/Sean Project/RMT-1022-astra-implementation/product/client/tests",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Sean Project/RMT-1022-astra-implementation/product/client/test-results/fast/logic",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "logic",
+        "name": "logic",
+        "testDir": "C:/Sean Project/RMT-1022-astra-implementation/product/client/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "artifact-thread-contract.spec.ts",
+          "digital-thread-canvas-geometry.spec.ts",
+          "digital-thread-reveal.spec.ts"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "artifact-thread-contract.spec.ts",
+      "file": "artifact-thread-contract.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "inspector groups preserve direct direction, upstream causes and hop-qualified execution context",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 7,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.432Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-a0c9d8364d0512dfb0c0",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 76,
+          "column": 1
+        },
+        {
+          "title": "inspector refuses an internally valid graph for another focal revision and malformed payloads",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.464Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-1008127b6b4cd48ead85",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 88,
+          "column": 1
+        },
+        {
+          "title": "a production-shaped response carrying every supported kind is accepted",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.472Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-cb11c70f2f79493386f4",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 94,
+          "column": 1
+        },
+        {
+          "title": "there are exactly six lanes and the last one is RESULT · BUILD",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.480Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-8f6b6a831348e5db2d8f",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 102,
+          "column": 1
+        },
+        {
+          "title": "an execution and a build stay together in the final lane",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.491Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-5f22ef9c581993346031",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 107,
+          "column": 1
+        },
+        {
+          "title": "a change request and a test change request stay distinct in the change request lane",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.502Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-a71e68367bf6a61027dc",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 118,
+          "column": 1
+        },
+        {
+          "title": "exact identities survive normalization unchanged",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.509Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-e7ed31dc5cf0f0d4e1bf",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 127,
+          "column": 1
+        },
+        {
+          "title": "edge endpoint kinds and the authoritative relation survive unchanged",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.525Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-daa2cb1569004d893c74",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 142,
+          "column": 1
+        },
+        {
+          "title": "a suspect edge stays suspect because the server said so",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.531Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-9b486fa5f32449fd32ac",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 156,
+          "column": 1
+        },
+        {
+          "title": "a settled edge stays settled even when its wording sounds alarming",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.537Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-47be93e817d7e495d764",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 162,
+          "column": 1
+        },
+        {
+          "title": "evidence keeps its hash and every identity field",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.543Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-09f0c08b0cc37ab6f012",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 177,
+          "column": 1
+        },
+        {
+          "title": "an execution with no display number keeps none",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.548Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-493d53980b3f7ada9782",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 194,
+          "column": 1
+        },
+        {
+          "title": "an unconnected focal artifact is a valid one-node thread",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.554Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-5ef86ba40fead8a89bfb",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 204,
+          "column": 1
+        },
+        {
+          "title": "a level with no verification discipline keeps its reason and fabricates nothing",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.561Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-2f327c9582d45b619e80",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 219,
+          "column": 1
+        },
+        {
+          "title": "an unknown node kind is refused rather than guessed into a lane",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.567Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-e6c2819b1ee2dad0d307",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 234,
+          "column": 1
+        },
+        {
+          "title": "a kind sitting in the wrong lane is refused rather than relocated",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.579Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-035f351854dde387e713",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 246,
+          "column": 1
+        },
+        {
+          "title": "a lane outside the six is refused",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.585Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-5151a9971bc3c121fc8a",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 255,
+          "column": 1
+        },
+        {
+          "title": "an edge naming a node that is not on the board is refused, not silently dropped",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.592Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-f1a31b3580cbdce9554e",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 264,
+          "column": 1
+        },
+        {
+          "title": "a thread missing its own focal node is refused",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.601Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-b4002906382f9b9aa818",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 275,
+          "column": 1
+        },
+        {
+          "title": "a thread naming more than one focal node is refused",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.608Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-758ef6dac4929fa06662",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 284,
+          "column": 1
+        },
+        {
+          "title": "a focal node that is not the artifact requested is refused",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.615Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-8d7b6bf9bc3abafdb669",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 296,
+          "column": 1
+        },
+        {
+          "title": "the request url carries the configuration the read requires",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.629Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-4e1f2ea5350283ae4b49",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 306,
+          "column": 1
+        },
+        {
+          "title": "an empty lane is dropped rather than rendered as a placeholder",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.642Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-fdb1ef905376f438a6a9",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 321,
+          "column": 1
+        },
+        {
+          "title": "an edge whose endpoint kind contradicts the node it names is refused",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.648Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-8a7676da5ab0a4626445",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 341,
+          "column": 1
+        },
+        {
+          "title": "an edge whose target kind contradicts its node is refused",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.653Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-6bd4ae783852732d2ae5",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 353,
+          "column": 1
+        },
+        {
+          "title": "a focal node whose kind contradicts the requested focal kind is refused",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.659Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-873bd3bf8f33e6d2892b",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 364,
+          "column": 1
+        },
+        {
+          "title": "a response with no focal identity at all is refused rather than skipping the check",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.664Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-6ac0cc13c166a5731748",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 375,
+          "column": 1
+        },
+        {
+          "title": "required top-level identities are validated, not assumed",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.674Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-82d15aef56e46795a0e5",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 386,
+          "column": 1
+        },
+        {
+          "title": "a malformed display number is refused rather than normalized to null",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.682Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-51bd52b8647ef17df012",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 395,
+          "column": 1
+        },
+        {
+          "title": "a malformed verification reason is refused rather than normalized to null",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.689Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-887266915745e103f4a8",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 407,
+          "column": 1
+        },
+        {
+          "title": "a missing verification applicability is refused",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.696Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-d103c19debe540da912f",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 413,
+          "column": 1
+        },
+        {
+          "title": "evidence missing its hash is refused, not carried through untyped",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.702Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-1464e55ef3a63e58d0df",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 419,
+          "column": 1
+        },
+        {
+          "title": "an execution with no evidence yields an empty list, not a missing field",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.707Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-adcf90a37711897a2250",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 436,
+          "column": 1
+        },
+        {
+          "title": "a duplicated node identity is refused rather than silently deduplicated",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.714Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-3eaa9bcc3c74a0863262",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 446,
+          "column": 1
+        },
+        {
+          "title": "a missing focal flag is refused rather than read as false",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.722Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-bfa394a14900086a4722",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 461,
+          "column": 1
+        },
+        {
+          "title": "a missing suspect flag is refused rather than read as settled",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:30.727Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7fd6aa05870df08c9655-3bdcc4812fe3135e2a0b",
+          "file": "artifact-thread-contract.spec.ts",
+          "line": 469,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "digital-thread-canvas-geometry.spec.ts",
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "digital thread canvas geometry",
+          "file": "digital-thread-canvas-geometry.spec.ts",
+          "line": 40,
+          "column": 6,
+          "specs": [
+            {
+              "title": "story arrangement retrieves distant rows without traversing sibling branches or mutating input",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.755Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-840bae045e58e4630c4e",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 41,
+              "column": 3
+            },
+            {
+              "title": "uses a stable directed identity for edges",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.762Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-32bf1d1338462bee9b1b",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 52,
+              "column": 3
+            },
+            {
+              "title": "density tiers change the row pitch, not the type size",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.767Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-c54221d793bd2f5260a2",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 56,
+              "column": 3
+            },
+            {
+              "title": "pulling back fills the freed space with records instead of background",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.773Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-fc684ead1c44bf671375",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 70,
+              "column": 3
+            },
+            {
+              "title": "zooming out stops once everything legible is shown",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.779Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-5001653529e738171682",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 80,
+              "column": 3
+            },
+            {
+              "title": "a lane taller than its window can roll, and the clamp keeps its content inside",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.786Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-ba3efc5fad18016e09f4",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 98,
+              "column": 3
+            },
+            {
+              "title": "lanes follow the anchor's links, and a lane with nothing linked holds its position",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.794Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-755d353181d64e70ccf5",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 108,
+              "column": 3
+            },
+            {
+              "title": "selection fetches back a linked record that had been rolled out of its lane",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.800Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-ecb17fa7cb862da52796",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 137,
+              "column": 3
+            },
+            {
+              "title": "the anchor is the record nearest the middle of the rolled lane",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.806Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-e9979bc45334996823e3",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 172,
+              "column": 3
+            },
+            {
+              "title": "a density change preserves each lane's relative scroll position",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.812Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-1fca8d411059b68b1c69",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 188,
+              "column": 3
+            },
+            {
+              "title": "a lane that stops overflowing after a density change is returned to its top",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.820Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-1548e2b3d8e10e4d4adf",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 210,
+              "column": 3
+            },
+            {
+              "title": "the trace follows direction and does not leak into a sibling",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.826Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-eba03498423e912396a2",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 223,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "digital thread canvas framing and lanes",
+          "file": "digital-thread-canvas-geometry.spec.ts",
+          "line": 249,
+          "column": 6,
+          "specs": [
+            {
+              "title": "a structurally empty lane is dropped and the remaining lanes close the gap",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.836Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-0c4b483ee886598429ba",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 250,
+              "column": 3
+            },
+            {
+              "title": "framing keeps every real record inside the area the panel is not covering",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.841Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-10735e46a13980cfdc34",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 266,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "keyboard reveal",
+          "file": "digital-thread-canvas-geometry.spec.ts",
+          "line": 296,
+          "column": 6,
+          "specs": [
+            {
+              "title": "a row already in the window does not move its lane",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.849Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-c33d116350c799691116",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 300,
+              "column": 3
+            },
+            {
+              "title": "a row below the window rolls the lane up to reach it",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.854Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-50418e1ed6068e7ec68c",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 306,
+              "column": 3
+            },
+            {
+              "title": "a shifted row uses its measured position when keyboard reveal rolls the lane",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.859Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-f23c4b81704fb1008dcb",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 316,
+              "column": 3
+            },
+            {
+              "title": "a row above the window rolls the lane back down to reach it",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.865Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-381dcfd2e4a8560e5abd",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 324,
+              "column": 3
+            },
+            {
+              "title": "a lane is never rolled below its own first row",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.873Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-c31b5ba707c18a540d4b",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 335,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "keyboard tab stops and lane order",
+          "file": "digital-thread-canvas-geometry.spec.ts",
+          "line": 341,
+          "column": 6,
+          "specs": [
+            {
+              "title": "a card rolled out of its lane loses the tab stop to a visible one",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.878Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-32be314edee0ed00cbb5",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 357,
+              "column": 3
+            },
+            {
+              "title": "a remembered card keeps the stop while it stays visible",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.883Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-1208620cf5c55576656d",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 373,
+              "column": 3
+            },
+            {
+              "title": "a lane with nothing visible offers no tab stop at all",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.888Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-ab45fb1ce01227645edb",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 382,
+              "column": 3
+            },
+            {
+              "title": "cards are ordered lane first, then row, so Tab walks the ladder in order",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.894Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-2ec82d95f2734bc4f899",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 387,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "intra-lane edges",
+          "file": "digital-thread-canvas-geometry.spec.ts",
+          "line": 411,
+          "column": 6,
+          "specs": [
+            {
+              "title": "two endpoints in the same lane are recognised as intra-lane",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.899Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-457b8394347a26467179",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 414,
+              "column": 3
+            },
+            {
+              "title": "an intra-lane edge bows into the gutter instead of sweeping across its own lane",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.904Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-568d6826676e78bad4bd",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 421,
+              "column": 3
+            },
+            {
+              "title": "the bow stays within the overhang the canvas reserves for it",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.910Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-fbd1859fdda49e4c97b4",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 435,
+              "column": 3
+            },
+            {
+              "title": "a lane-to-lane edge is unchanged, forwards and backwards",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.915Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-f51fa5408667364d3aed",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 444,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "framing ignores records rolled out of their lane",
+          "file": "digital-thread-canvas-geometry.spec.ts",
+          "line": 463,
+          "column": 6,
+          "specs": [
+            {
+              "title": "a wanted record outside its lane window does not drag the board off screen",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.921Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-cf3e2882b14ab984bbab",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 466,
+              "column": 3
+            },
+            {
+              "title": "with nothing drawn it still frames something rather than giving up",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.927Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-f93e7855b9a6ef7100c1",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 488,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "story framing and label obstacles",
+          "file": "digital-thread-canvas-geometry.spec.ts",
+          "line": 497,
+          "column": 6,
+          "specs": [
+            {
+              "title": "measured expanded cards move later rows clear of the selected body",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.932Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-9845d27992ff0ce0a828",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 498,
+              "column": 3
+            },
+            {
+              "title": "measured expansion extends the lane rolling range",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.937Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-7b3bf433ad7794f9c81f",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 518,
+              "column": 3
+            },
+            {
+              "title": "a same-lane direct card uses spare viewport height after the selected card expands",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.942Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-8eeb7d925316101eade9",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 531,
+              "column": 3
+            },
+            {
+              "title": "leader clearance checks the complete segment, including a short obstacle between samples",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.948Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-4b799670365a8c2c0fbe",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 543,
+              "column": 3
+            },
+            {
+              "title": "an occupied frame fails closed instead of painting a colliding midpoint",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.953Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-883f17fbf977975fadf0",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 556,
+              "column": 3
+            },
+            {
+              "title": "deliberate selection can use the measured readable compact floor",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.962Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-5bb1658c94aba4e8dd03",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 569,
+              "column": 3
+            },
+            {
+              "title": "edge phrases choose a connector-adjacent slot clear of measured card bounds",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.968Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-170d57994c866176e607",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 591,
+              "column": 3
+            },
+            {
+              "title": "a crossing phrase attaches to a free point on its connector",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.973Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-3d39e6afeb1912702808",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 610,
+              "column": 3
+            },
+            {
+              "title": "distinct crossing phrases keep their connector slots after local slots exhaust",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 23,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:30.979Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2b67f72545b684d058a1-37bd402b4d45cb4854b9",
+              "file": "digital-thread-canvas-geometry.spec.ts",
+              "line": 641,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "digital-thread-reveal.spec.ts",
+      "file": "digital-thread-reveal.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "manual scrolling can expose the tail of a card taller than the usable window",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "logic",
+              "projectName": "logic",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:27:31.015Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "e5d897837658e8cfd878-6868779ec34a0ffdaf3c",
+          "file": "digital-thread-reveal.spec.ts",
+          "line": 24,
+          "column": 1
+        }
+      ],
+      "suites": [
+        {
+          "title": "lane-local reveal",
+          "file": "digital-thread-reveal.spec.ts",
+          "line": 38,
+          "column": 6,
+          "specs": [
+            {
+              "title": "same-tier growth reconciles a retained linked collision without moving residents",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:31.020Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e5d897837658e8cfd878-9250141a5a19f62c903e",
+              "file": "digital-thread-reveal.spec.ts",
+              "line": 39,
+              "column": 41
+            },
+            {
+              "title": "same-tier growth reconciles a retained selected collision without moving residents",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:31.028Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e5d897837658e8cfd878-234fdd45440a89977c30",
+              "file": "digital-thread-reveal.spec.ts",
+              "line": 39,
+              "column": 41
+            },
+            {
+              "title": "a valid retained placement survives being panned entirely offscreen",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:31.034Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e5d897837658e8cfd878-3ff110f8df4a53e1da72",
+              "file": "digital-thread-reveal.spec.ts",
+              "line": 67,
+              "column": 3
+            },
+            {
+              "title": "displaces only out-of-view linked cards and leaves residents where they are",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:31.038Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e5d897837658e8cfd878-86000fb145e29dcff5a6",
+              "file": "digital-thread-reveal.spec.ts",
+              "line": 77,
+              "column": 3
+            },
+            {
+              "title": "a partially visible linked card is never displaced during hover",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:31.046Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e5d897837658e8cfd878-fab1bb2a7bae5aa5953c",
+              "file": "digital-thread-reveal.spec.ts",
+              "line": 92,
+              "column": 3
+            },
+            {
+              "title": "a placed card never overlaps a resident and is reachable through the derived scroll range",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:31.052Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e5d897837658e8cfd878-5a11e5515a88ae638395",
+              "file": "digital-thread-reveal.spec.ts",
+              "line": 108,
+              "column": 3
+            },
+            {
+              "title": "the counterexample: a band-only bound strands a below-window card, the derived bound does not",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:31.063Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e5d897837658e8cfd878-2f063c32bb918dc834f6",
+              "file": "digital-thread-reveal.spec.ts",
+              "line": 137,
+              "column": 3
+            },
+            {
+              "title": "two promised cards derive the deeper bound the later one needs, and the bound is reachable",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:31.068Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e5d897837658e8cfd878-79688e94d6af4dcf43f0",
+              "file": "digital-thread-reveal.spec.ts",
+              "line": 150,
+              "column": 3
+            },
+            {
+              "title": "a linked card is placed inside the usable window even when that space is beyond the lane's content",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:31.074Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e5d897837658e8cfd878-85ab201ab70d38ee29a2",
+              "file": "digital-thread-reveal.spec.ts",
+              "line": 169,
+              "column": 3
+            },
+            {
+              "title": "a frozen lane keeps its displayed arrangement for records still in the thread",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:31.080Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e5d897837658e8cfd878-4a8b4193764d0997e0bf",
+              "file": "digital-thread-reveal.spec.ts",
+              "line": 193,
+              "column": 3
+            },
+            {
+              "title": "a frozen lane still retires a card that has left the traced thread",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:31.085Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e5d897837658e8cfd878-a92e4cfe9f26bb4156bc",
+              "file": "digital-thread-reveal.spec.ts",
+              "line": 207,
+              "column": 3
+            },
+            {
+              "title": "a lane that is not frozen retires displacements whose ownership ended",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:31.090Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e5d897837658e8cfd878-a0e67089f8a6794b2647",
+              "file": "digital-thread-reveal.spec.ts",
+              "line": 218,
+              "column": 3
+            },
+            {
+              "title": "planning is idempotent and never mutates canonical rows",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:31.095Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e5d897837658e8cfd878-e0a705a31e29511983ab",
+              "file": "digital-thread-reveal.spec.ts",
+              "line": 229,
+              "column": 3
+            },
+            {
+              "title": "deltas compose with the lane offset instead of being overwritten by it",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "logic",
+                  "projectName": "logic",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:31.106Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e5d897837658e8cfd878-8dc4b12d46fe8d543502",
+              "file": "digital-thread-reveal.spec.ts",
+              "line": 243,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-13T00:27:30.045Z",
+    "duration": 1090.5149999999999,
+    "expected": 89,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

@@ -1,0 +1,4068 @@
+{
+  "schemaVersion": 1,
+  "full": 811,
+  "fast": {
+    "logic": 89,
+    "rendered": 46
+  },
+  "fullOnly": 676,
+  "fullIdentitySha256": "d599e4c3b45448f85664d3598dd92f53f7e3890ee66df1808a35a9725f9c090c",
+  "note": "Fast is additive. Full still executes every identity once; unknown files remain Full-only.",
+  "identities": [
+    {
+      "file": "acceptance-closure.spec.ts",
+      "title": "acceptance closure proves governed revisioning, direct review work, publications, full trace and historical discovery",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "accessibility-contrast.spec.ts",
+      "title": "every surface meets WCAG 2.2 AA contrast in both densities",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "accessibility-contrast.spec.ts",
+      "title": "Change Request author role metadata meets WCAG body-text contrast",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "administrator-change-actions.spec.ts",
+      "title": "administrator actions work identically for another authors System and Software changes",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "aerolink-3-closure-recovery.spec.ts",
+      "title": "enterprise control exposes governed product-line reuse and evidence-based operations assurance",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "application-smoke.spec.ts",
+      "title": "Password visibility is a compact control that does not cover the password field",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "application-smoke.spec.ts",
+      "title": "AeroLink starts against the real API and presents a valid entry state",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "application-smoke.spec.ts",
+      "title": "The sign-in story panel gives truthful workspace context without changing authentication",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "application-smoke.spec.ts",
+      "title": "Sign in recovers cleanly when the local API is temporarily unavailable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "approval-authority-cutover.spec.ts",
+      "title": "the approval editor demands an explicit modern authority and persists it truthfully",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "approval-configuration.spec.ts",
+      "title": "The legacy approval configuration deep link survives a reload",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "approval-configuration.spec.ts",
+      "title": "Every artifact type a procedure can govern is listed, configured or not",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "approval-configuration.spec.ts",
+      "title": "Selecting an artifact shows either its stages or why it has none",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "approval-configuration.spec.ts",
+      "title": "Editing an artifact locks navigation until the draft is saved or cancelled",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-acronym-presentation.spec.ts",
+      "title": "numbered artifacts keep their canonical uppercase acronym in presentation",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-acronym-presentation.spec.ts",
+      "title": "document labels use canonical acronyms while draft remains a separate status",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-acronym-presentation.spec.ts",
+      "title": "composite HLR and LLR Procedure route kinds share the Procedure vocabulary",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-acronym-presentation.spec.ts",
+      "title": "configured verification document targets are filtered by each exact level and kind",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "inspector groups preserve direct direction, upstream causes and hop-qualified execution context",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "inspector refuses an internally valid graph for another focal revision and malformed payloads",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a production-shaped response carrying every supported kind is accepted",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "there are exactly six lanes and the last one is RESULT · BUILD",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "an execution and a build stay together in the final lane",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a change request and a test change request stay distinct in the change request lane",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "exact identities survive normalization unchanged",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "edge endpoint kinds and the authoritative relation survive unchanged",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a suspect edge stays suspect because the server said so",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a settled edge stays settled even when its wording sounds alarming",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "evidence keeps its hash and every identity field",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "an execution with no display number keeps none",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "an unconnected focal artifact is a valid one-node thread",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a level with no verification discipline keeps its reason and fabricates nothing",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "an unknown node kind is refused rather than guessed into a lane",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a kind sitting in the wrong lane is refused rather than relocated",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a lane outside the six is refused",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "an edge naming a node that is not on the board is refused, not silently dropped",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a thread missing its own focal node is refused",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a thread naming more than one focal node is refused",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a focal node that is not the artifact requested is refused",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "the request url carries the configuration the read requires",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "an empty lane is dropped rather than rendered as a placeholder",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "an edge whose endpoint kind contradicts the node it names is refused",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "an edge whose target kind contradicts its node is refused",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a focal node whose kind contradicts the requested focal kind is refused",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a response with no focal identity at all is refused rather than skipping the check",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "required top-level identities are validated, not assumed",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a malformed display number is refused rather than normalized to null",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a malformed verification reason is refused rather than normalized to null",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a missing verification applicability is refused",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "evidence missing its hash is refused, not carried through untyped",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "an execution with no evidence yields an empty list, not a missing field",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a duplicated node identity is refused rather than silently deduplicated",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a missing focal flag is refused rather than read as false",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-contract.spec.ts",
+      "title": "a missing suspect flag is refused rather than read as settled",
+      "fastTier": "logic"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "card identity > each kind carries its own badge, and a requirement's comes from its served level",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "card identity > a change request is not badged with a level the response never stated",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "card identity > a change request and a test change request stay distinct kinds in one lane",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "card identity > exact revision identities are shown as served, never rounded to an artifact",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "card identity > an execution with no display number never gains a synthetic one",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "card identity > a build keeps the server's own build identity",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "evidence > the immutable facts survive into presentation, hash included",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "evidence > the abbreviation is a prefix of the real hash, never a rewriting of it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "evidence > a size reads at a glance without claiming precision the byte count lacks",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "suspectness is read, never decided > only the server-stated edge produces suspect endpoints",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "suspectness is read, never decided > wording that mentions suspect does not make an edge suspect",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "suspectness is read, never decided > the relation text is carried through exactly as the server stated it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "the six-lane model > a fully populated thread occupies all six lanes in prototype order",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "the six-lane model > a result and a build share the final lane rather than taking one each",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "the six-lane model > the execution sits above the build, as the prototype orders that lane",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "the six-lane model > the final lane carries an edge whose endpoints share it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "the six-lane model > a System chain bypasses Test Case, and the lane is dropped rather than shown empty",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "the six-lane model > an artifact with no relationships is a one-node thread, not an empty board",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "the six-lane model > lane membership is the server's, never recomputed from the kind",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "the six-lane model > rows are stable when the server returns the same thread in a different order",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "filter groups > families group as the prototype's thread does",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "filter groups > a layer above System answers the System chip rather than vanishing",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "verification applicability > a level with no discipline is stated, with no verification records invented",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "within-lane ordering is fully deterministic > equal sort keys still land in the same rows whichever order the server sent them",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-presentation.spec.ts",
+      "title": "within-lane ordering is fully deterministic > the two runs keep distinct rows rather than collapsing",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "the six-lane model on screen > a fully populated thread draws all six lanes, result and build sharing the last",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "the six-lane model on screen > every lane is present and reachable when the thread first opens",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "the six-lane model on screen > an explicit Fit shows the whole board, which automatic landing no longer has to",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "the six-lane model on screen > a System chain drops the Test Case lane rather than showing it empty",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "the six-lane model on screen > an edge inside the final lane is drawn beside it, not across it",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "exact identity > the focal artifact is the one selected, expanded and named",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "exact identity > each supported focal kind opens its own thread on its own record",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "exact identity > an execution's card carries no invented identifier",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "evidence > the identity and the whole hash survive into what the reader sees",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "evidence > evidence is a fact on the result, not a lane of its own",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "suspectness > a server-stated suspect link looks different from a settled one, and says so",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "suspectness > the expanded card explains the suspect link rather than leaving the colour to carry it",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "suspectness > the Suspect chip selects endpoints of a suspect relationship",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "the trace the server returned > the whole directed web highlights, and untraced records recede rather than disappear",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "the trace the server returned > the trace does not walk sideways into a record that merely shares a procedure",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "the trace the server returned > the panel lists every hop, with the relation word on the direct ones",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "the trace the server returned > a panel row re-centres the board on that record",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "the branching hierarchy story (#925 F5/V5) > System above, two LLR children with their verification below, sibling kept out",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "states the canvas must tell apart > a malformed response draws nothing at all, and says why",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "states the canvas must tell apart > a transport failure is a different state from a malformed one",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "states the canvas must tell apart > an unconnected artifact renders as a normal card, not as empty containers",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "states the canvas must tell apart > a level with no verification discipline states the reason and invents nothing",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "states the canvas must tell apart > a filter that empties a lane leaves the lane in place and says so",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "shared canvas behaviour > the board zooms, changes density tier and refits",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "shared canvas behaviour > a density tier drops card content instead of shrinking it",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "shared canvas behaviour > dragging a lane band rolls that lane",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "shared canvas behaviour > selecting a record makes its linked records reachable in their own lanes",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "shared canvas behaviour > the detail panel never comes to rest on a directly linked record",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "keyboard access > tabbing across lanes never rests focus on a card the canvas has hidden",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "keyboard access > cards are reachable and activate, and each lane holds one tab stop",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "keyboard access > arrow keys move within a lane and the lane rolls to keep the focused card visible",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "keyboard access > the traced web is announced, not only drawn",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "keyboard access > the canvas keeps its group role and names the artifact the thread is about",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "suspect meaning survives the density tiers > the suspect word is visible at the tier a six-lane thread lands on",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "suspect meaning survives the density tiers > the suspect word survives the compact tier the reader zooms out to",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "suspect meaning survives the density tiers > it stays visible at the detailed tier too",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "suspect meaning survives the density tiers > it is still visible at the dense tier, to a sighted reader",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "suspect meaning survives the density tiers > the suspect word is never inside a density-gated container",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "the loading frame > lane bands and headers are up before any card arrives",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "the loading frame > a refused response replaces the frame rather than leaving a skeleton up",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "a rolled lane survives a re-render > leaving an unselected hover removes only the temporary emphasis and keeps a manual roll",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "a rolled lane survives a re-render > selecting a record never moves the cards outside its thread",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "a rolled lane survives a re-render > re-docking the panel still reframes the board",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "a rolled lane survives a re-render > a dock that cannot hold the selected record gives way to one that can",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "a graph change still re-syncs and re-frames > re-pointing the selected record's link brings the new record into view",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "artifact-thread-rendered.spec.ts",
+      "title": "a selection made before the viewport settled > is synchronised and framed once a real frame arrives",
+      "fastTier": "rendered"
+    },
+    {
+      "file": "assessment-detail-identity.spec.ts",
+      "title": "unnumbered System Procedure Draft/Pending keeps source identity separate",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "assessment-detail-identity.spec.ts",
+      "title": "unnumbered HighLevelSoftware Case Draft/Pending keeps source identity separate",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "assessment-detail-identity.spec.ts",
+      "title": "unnumbered LowLevelSoftware Procedure Approved/NoChangeRequired keeps source identity separate",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "assessment-detail-identity.spec.ts",
+      "title": "unnumbered HighLevelSoftware Procedure Superseded/Pending keeps source identity separate",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "assessment-detail-identity.spec.ts",
+      "title": "unnumbered System Procedure Draft/ChangeRequired keeps source identity separate",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "assurance-policy.spec.ts",
+      "title": "Assurance policy states its basis, refuses an unauthorised relaxation, and records an approved one",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "attribution-names-people.spec.ts",
+      "title": "test procedure authorship names a person rather than the account that signed in",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "audit-narrative.spec.ts",
+      "title": "a checked-in change reads as a narrative and keeps its technical evidence beside it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "audit-value-containment.spec.ts",
+      "title": "a long unbroken audit value wraps instead of taking the page sideways",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "authoring-input-fidelity.spec.ts",
+      "title": "the change case keeps every space the author types",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "authoring-input-fidelity.spec.ts",
+      "title": "modifying a requirement shows the approved wording beside the proposed wording",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "authoring-input-fidelity.spec.ts",
+      "title": "a specification section filters to the requirements it holds",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "authoring-input-fidelity.spec.ts",
+      "title": "the System explorer never lists software requirements, whatever else is filtered",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "authoring-target-picker-levels.spec.ts",
+      "title": "the target picker offers only the proposal exact level across LLR, HLR, and System workspaces",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "autosave-draft-recovery.spec.ts",
+      "title": "unfinished authoring survives a reload, is offered rather than applied, and can be discarded",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "cancel-review.spec.ts",
+      "title": "an author stops a review they should not have started, and the history says why",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "cancel-review.spec.ts",
+      "title": "somebody with no part in a review is not offered the control",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "capture-overview.spec.ts",
+      "title": "capture the product surfaces used by the overview video",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-presentation.spec.ts",
+      "title": "the loading frame uses the project's own ladder, so the lane set does not change when data arrives",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-presentation.spec.ts",
+      "title": "change network presentation > lane and badge come from the server-stated kind and level, never the identifier",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-presentation.spec.ts",
+      "title": "change network presentation > the panel docks away from the links, so it cannot cover one",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-presentation.spec.ts",
+      "title": "change network presentation > suspect is read from the served field, never from wording",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-presentation.spec.ts",
+      "title": "change network presentation > rows are per lane and stable, so the board does not reshuffle between loads",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-presentation.spec.ts",
+      "title": "configurable ladder layers > the ladder order comes from the projection, not from the client",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-presentation.spec.ts",
+      "title": "configurable ladder layers > a project without a layer never shows its lane",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-presentation.spec.ts",
+      "title": "configurable ladder layers > a project that configures a higher layer gets its lane, above System",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-presentation.spec.ts",
+      "title": "records at a level the ladder does not configure > FMS: Interface change requests get no lane, because the ladder does not configure that level",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-presentation.spec.ts",
+      "title": "records at a level the ladder does not configure > records without a lane are counted, so the canvas never shows a smaller build than there is",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-presentation.spec.ts",
+      "title": "records at a level the ladder does not configure > a ladder that configures the layer has nothing off-ladder and gains the lane",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-presentation.spec.ts",
+      "title": "suspect is a property of relationships, not of these records > the change network cannot carry suspect relations, structurally",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-presentation.spec.ts",
+      "title": "suspect is a property of relationships, not of these records > a Suspect filter keeps records incident to a server-stated suspect edge",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-rendered.spec.ts",
+      "title": "hover emphasis is stationary and keyboard activation selects the exact subject",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-rendered.spec.ts",
+      "title": "touch pins the same complete story without relying on hover",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-rendered.spec.ts",
+      "title": "a dense story keeps individual records and offers a working offscreen reveal",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-rendered.spec.ts",
+      "title": "hover reveals a two-hop endpoint without moving the camera, and selection cannot be replaced by hover",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-rendered.spec.ts",
+      "title": "card badges > every badge fits its own box, including the three-letter ones",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-rendered.spec.ts",
+      "title": "card badges > a badge never overlaps the identifier beside it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-rendered.spec.ts",
+      "title": "the detail panel never rests on a directly linked record > with the panel docked Bottom",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-rendered.spec.ts",
+      "title": "the detail panel never rests on a directly linked record > with the panel docked Right",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-rendered.spec.ts",
+      "title": "the detail panel never rests on a directly linked record > with the panel docked Auto",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-network-rendered.spec.ts",
+      "title": "the server-truth change chain (#925 F5/V5) > resolved by, allocates to, and verified by render along the story's arrows",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "badges read as the operation, not as a state",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "the allocated lane is named from the ladder, not from a fixed level below System",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "lane labels follow the level of the change being opened",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "a test change reads in verification vocabulary, and what sits below it is what it covers",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "a level the label table does not name still reads sensibly",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "the register lane header echoes the active type filter",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "the type filter groups layers above System under the SYS chip",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "only a Modify carries a diff",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "a Modify with no resolvable before text shows no diff rather than a diff from nothing",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "the downstream sentence comes from the server disposition, not from a null base",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "behind-target states both revisions and claims nothing about where the allocation sits",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "a stale item cannot contaminate a sibling, because each carries its own disposition",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "coverage joins on the exact requirement revision the server recorded it against",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "a downstream allocation is identified by its revision, and a proposal by its own id",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "an execution is joined to the exact procedure revision that was run",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "a retirement and its cascade are marked so they can be drawn dashed",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "the opened change links to every item it proposes",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "level badges follow the configured ladder rather than falling back to System",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "verification proposals are verification content > a verification proposal links to the exact revision it covers, by revision identity",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "verification proposals are verification content > final coverage is what the lane shows, not the added delta",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-proposal-presentation.spec.ts",
+      "title": "verification proposals are verification content > a retired verification proposal draws its cascade dashed and proposes no successor body",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-request-register-parity.spec.ts",
+      "title": "the requirements register keeps its shape on the shared component",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-request-register-parity.spec.ts",
+      "title": "unavailable direct trace never claims that no relationships are recorded",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-request-register-parity.spec.ts",
+      "title": "requirements register preserves deep-link history, native links, and authoritative trace facts",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-request-register-parity.spec.ts",
+      "title": "register row double-click opens, explicit open works, and modified click retains native href",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-request-register-parity.spec.ts",
+      "title": "requirements selection fails closed when the detail is outside the active register scope",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-request-register-parity.spec.ts",
+      "title": "requirements inspector distinguishes discussion failure from an empty discussion",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-request-register-parity.spec.ts",
+      "title": "register keeps rows readable and stacks the inspector at a supported 1280px width",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-request-register-parity.spec.ts",
+      "title": "the verification register is the same register over test change requests",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-request-register-parity.spec.ts",
+      "title": "shared register supports keyboard selection, empty state, tab navigation, and narrow layout",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-request-register-parity.spec.ts",
+      "title": "the verification register searches and filters like the requirements one",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-request-register-parity.spec.ts",
+      "title": "Verification navigation reaches the register rather than the coverage page",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-request-register-parity.spec.ts",
+      "title": "register authorship names the person, keeps the role secondary, and preserves automatic attribution",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "change-request-register-parity.spec.ts",
+      "title": "in-flight route handlers settle before browser teardown",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "closed-release-authoring.spec.ts",
+      "title": "a released build explains where to raise a change instead of taking one",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "code-traceability.spec.ts",
+      "title": "Code reports the active build gate as unevaluated until the build has its own population",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "code-traceability.spec.ts",
+      "title": "Code shows the released build as evaluated, complete, and historical",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "code-traceability.spec.ts",
+      "title": "Digital Thread reads the requirement-to-evidence chain by exact identifier, and says what is missing",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "command-palette-scope.spec.ts",
+      "title": "Ctrl/Cmd+K is inert above a build and opens quick navigation inside one",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "configured-reviewer-identity.spec.ts",
+      "title": "configured reviewer identity remains canonical from assignment through signature",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "controlled-authoring-productization.spec.ts",
+      "title": "System proposal identity and stages are controlled from the first screen",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "controlled-authoring-productization.spec.ts",
+      "title": "Software Draft keeps downstream impact with consuming engineers before an explicitly selected reviewer signs",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "controlled-authoring-productization.spec.ts",
+      "title": "an incomplete Draft can be saved and checked in while review remains gated",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "controlled-identity.spec.ts",
+      "title": "draft updates preserve controlled identities and normalize new proposals on the server",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "controlled-scr-workflow.spec.ts",
+      "title": "author creates, edits, submits, and sequentially approves a change request",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "corrective-action-routing.spec.ts",
+      "title": "a corrective action opens the discipline, report and procedure it belongs to",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "corrective-action-routing.spec.ts",
+      "title": "a corrective action opens Test Results, names the report, and survives a reload",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "coverage-gap-to-action.spec.ts",
+      "title": "a verification gap can be filtered to, read, and acted on from the requirements workspace",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "coverage-navigation.spec.ts",
+      "title": "Verification landing Coverage opens the exact Explorer report and survives reload, Back, and Forward",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "coverage-navigation.spec.ts",
+      "title": "Coverage waits for an authoritative response before showing counts",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "coverage-navigation.spec.ts",
+      "title": "Coverage read rejection reports failure without invented counts",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "coverage-navigation.spec.ts",
+      "title": "Verification sidebar exposes Coverage for each supported scope and marks that destination active",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "coverage-navigation.spec.ts",
+      "title": "Coverage navigation omits a software level without the Verification capability",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "coverage-navigation.spec.ts",
+      "title": "Software Coverage level selection keeps the shell scope aligned, and Clear exits Coverage",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "dashboard-history-drilldown.spec.ts",
+      "title": "System and Software dashboard metrics open shareable, build-scoped History drill-downs",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "date-time-presentation.spec.ts",
+      "title": "ordinary date/time presentation > formats minute precision with a fixed grammar in an explicit zone",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "date-time-presentation.spec.ts",
+      "title": "ordinary date/time presentation > drops seconds and never falls back to the browser-default locale string",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "date-time-presentation.spec.ts",
+      "title": "ordinary date/time presentation > formats the time half alone for date-labelled contexts",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "date-time-presentation.spec.ts",
+      "title": "ordinary date/time presentation > absence stays empty so the surface can own its wording, but a present invalid value fails closed",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "date-time-presentation.spec.ts",
+      "title": "evidentiary date/time presentation > keeps second precision and states the explicit offset",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "date-time-presentation.spec.ts",
+      "title": "evidentiary date/time presentation > preserves the exact instant without rounding",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "date-time-presentation.spec.ts",
+      "title": "rendered surfaces > the register lists scan-friendly instants and its history keeps the exact evidence",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "deferred-backlog.spec.ts",
+      "title": "deferred work waits in its own tab until a build takes it, and the build that raised it keeps it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "design-system.spec.ts",
+      "title": "every surface honours the readability floor and target sizes in both densities",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "design-system.spec.ts",
+      "title": "compact density fits materially more on the screen than comfortable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "design-system.spec.ts",
+      "title": "compact density shows more records at once where the list scrolls inside a pane",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "design-system.spec.ts",
+      "title": "opening the requirement inspector does not push the page sideways",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-c5-acceptance.spec.ts",
+      "title": "branching network labels stay readable at 1280 comfortable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-c5-acceptance.spec.ts",
+      "title": "branching network labels stay readable at 1440 comfortable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-c5-acceptance.spec.ts",
+      "title": "branching network labels stay readable at 1920 comfortable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-c5-acceptance.spec.ts",
+      "title": "branching network labels stay readable at 1280 compact",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-c5-acceptance.spec.ts",
+      "title": "branching network labels stay readable at 1440 compact",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-c5-acceptance.spec.ts",
+      "title": "branching network labels stay readable at 1920 compact",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-c5-acceptance.spec.ts",
+      "title": "artifact full story retains both verification branches and excludes the sibling",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-c5-acceptance.spec.ts",
+      "title": "artifact cards reflow after delayed web fonts settle",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-c5-acceptance.spec.ts",
+      "title": "clearing and reselecting the arrival focal uses selection framing instead of replaying landing",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-c5-acceptance.spec.ts",
+      "title": "network inspector dock controls remain separate from actions and content",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-c5-acceptance.spec.ts",
+      "title": "artifact inspector dock controls remain separate from actions and content",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-c5-acceptance.spec.ts",
+      "title": "inside inspector dock controls remain separate from actions and content",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-c5-acceptance.spec.ts",
+      "title": "Inside identifier search preserves the opened record and truthful no-match across Map and Table",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-c5-acceptance.spec.ts",
+      "title": "Inside preserves explicit missing-base and target states alongside known before and after text",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "digital thread canvas geometry > story arrangement retrieves distant rows without traversing sibling branches or mutating input",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "digital thread canvas geometry > uses a stable directed identity for edges",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "digital thread canvas geometry > density tiers change the row pitch, not the type size",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "digital thread canvas geometry > pulling back fills the freed space with records instead of background",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "digital thread canvas geometry > zooming out stops once everything legible is shown",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "digital thread canvas geometry > a lane taller than its window can roll, and the clamp keeps its content inside",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "digital thread canvas geometry > lanes follow the anchor's links, and a lane with nothing linked holds its position",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "digital thread canvas geometry > selection fetches back a linked record that had been rolled out of its lane",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "digital thread canvas geometry > the anchor is the record nearest the middle of the rolled lane",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "digital thread canvas geometry > a density change preserves each lane's relative scroll position",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "digital thread canvas geometry > a lane that stops overflowing after a density change is returned to its top",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "digital thread canvas geometry > the trace follows direction and does not leak into a sibling",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "digital thread canvas framing and lanes > a structurally empty lane is dropped and the remaining lanes close the gap",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "digital thread canvas framing and lanes > framing keeps every real record inside the area the panel is not covering",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "keyboard reveal > a row already in the window does not move its lane",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "keyboard reveal > a row below the window rolls the lane up to reach it",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "keyboard reveal > a shifted row uses its measured position when keyboard reveal rolls the lane",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "keyboard reveal > a row above the window rolls the lane back down to reach it",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "keyboard reveal > a lane is never rolled below its own first row",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "keyboard tab stops and lane order > a card rolled out of its lane loses the tab stop to a visible one",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "keyboard tab stops and lane order > a remembered card keeps the stop while it stays visible",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "keyboard tab stops and lane order > a lane with nothing visible offers no tab stop at all",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "keyboard tab stops and lane order > cards are ordered lane first, then row, so Tab walks the ladder in order",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "intra-lane edges > two endpoints in the same lane are recognised as intra-lane",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "intra-lane edges > an intra-lane edge bows into the gutter instead of sweeping across its own lane",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "intra-lane edges > the bow stays within the overhang the canvas reserves for it",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "intra-lane edges > a lane-to-lane edge is unchanged, forwards and backwards",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "framing ignores records rolled out of their lane > a wanted record outside its lane window does not drag the board off screen",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "framing ignores records rolled out of their lane > with nothing drawn it still frames something rather than giving up",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "story framing and label obstacles > measured expanded cards move later rows clear of the selected body",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "story framing and label obstacles > measured expansion extends the lane rolling range",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "story framing and label obstacles > a same-lane direct card uses spare viewport height after the selected card expands",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "story framing and label obstacles > leader clearance checks the complete segment, including a short obstacle between samples",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "story framing and label obstacles > an occupied frame fails closed instead of painting a colliding midpoint",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "story framing and label obstacles > deliberate selection can use the measured readable compact floor",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "story framing and label obstacles > edge phrases choose a connector-adjacent slot clear of measured card bounds",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "story framing and label obstacles > a crossing phrase attaches to a free point on its connector",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-canvas-geometry.spec.ts",
+      "title": "story framing and label obstacles > distinct crossing phrases keep their connector slots after local slots exhaust",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "a tall partially visible card stays painted and its native tail action becomes reachable by rolling",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "StrictMode arrival clears easing and keeps a revealed Artifact card pointer accessible",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "continuation affordances stay beside the inspector in every dock",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "overflowing Show controls own wheel input and remain keyboard reachable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "Bottom long-text identity and Right dense relationships scroll to their actual ends",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "a touch swipe starting between Show buttons scrolls the strip without moving the camera",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "unselected hover prepares an entirely left and above linked card without camera movement",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "hover emphasises without moving the camera or the source card",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "hover emphasis ends without a popup and without a camera restore",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "the real card is the click target and selection is persistent",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "a dense thread keeps every record reachable through its explicit reveal action",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "a revealed lane can be scrolled into its temporary range and clear does not snap it back",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "Inside a change: selected hover is inert and a selected record owns its thread",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "Artifact thread: selected hover leaves the arrival selection unchanged",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "Network: quiet to unselected hover after 0 zoom steps changes emphasis without camera movement",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "Inside: quiet to unselected hover after 0 zoom steps changes emphasis without camera movement",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "Artifact: quiet to unselected hover after 0 zoom steps changes emphasis without camera movement",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "Network: quiet to unselected hover after 1 zoom steps changes emphasis without camera movement",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "Inside: quiet to unselected hover after 1 zoom steps changes emphasis without camera movement",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "Artifact: quiet to unselected hover after 1 zoom steps changes emphasis without camera movement",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "Network: quiet to unselected hover after 3 zoom steps changes emphasis without camera movement",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "Inside: quiet to unselected hover after 3 zoom steps changes emphasis without camera movement",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "Artifact: quiet to unselected hover after 3 zoom steps changes emphasis without camera movement",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "same-tier rendered linked growth repairs only colliding temporary geometry and converges",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "same-tier rendered promoted-subject growth repairs only colliding temporary geometry and converges",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "a hidden lane's linked endpoint arrives at a useful height when the reader pans to it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "manual vertical exploration survives horizontal away and back",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "a linked card is revealed automatically into available space without moving the camera",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "clicking a relocated linked card keeps it where the reader saw it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "a drag takes over an automatic camera move from the displayed position",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "reduced motion reaches the same arrangement without animating",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "clicking during an incoming reveal keeps the arrangement and selects that subject",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "a new selection during cleanup replaces the old subject cleanly",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "clearing during motion stops the camera where the reader saw it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "Arrow Down moves focus within the same lane and keeps it visible",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "a density change after manual exploration leaves no overlapping cards",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "a scope change resets navigation while a same-scope refresh keeps it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "a hidden lane's endpoint arrives at a useful height on first exposure",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "four-direction continuation follows the usable boundary during selected exploration",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "pointer identity, cancellation and unmount clean up the active gesture",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "actual click framing interpolates all matrix axes with coherent edges and hit targets",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-core-interaction.spec.ts",
+      "title": "manual input interrupts real click framing from its displayed position",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-focus.spec.ts",
+      "title": "opening the Digital Thread from a requirement focuses that requirement and survives reload",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-focus.spec.ts",
+      "title": "a change request opens in the change network, in context rather than inside itself",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-focus.spec.ts",
+      "title": "a focal change request this build does not contain fails closed",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-focus.spec.ts",
+      "title": "a failed read keeps the canvas frame and offers a retry",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "navigation > Digital Thread is in RELEASE, not REQUIREMENTS",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "navigation > the route is unchanged, so existing bookmarks still resolve",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "the reclaimed header > the old page chrome is gone and the canvas starts under the breadcrumb",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "the reclaimed header > the replaced presentation is gone",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "the toolbar > carries the view switch, representation toggle and explicit baseline report",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "the toolbar > the export links keep their existing report behaviour",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "the evidence table > is a real table exposing the relationships the canvas draws",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "the evidence table > switching representation keeps the reader on the same page and address",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "the evidence table > every requirement in the baseline is reachable, not just the first page",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "active-view table representations > Network Table keeps its selected change, search and typed relationships",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "active-view table representations > Inside Table keeps the opened change and type filter across the round trip",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "active-view table representations > Artifact Table keeps a non-focal exact record selected and searchable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "focal deep links > global navigation lands on the change network with nothing selected",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "focal deep links > a requirement focal opens the artifact thread on that exact revision",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "focal deep links > a change request focal lands on the change network, not inside the change",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "focal deep links > an inside-a-change address whose change this build does not carry fails closed",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "selection and navigation coherence > a selected change becomes the exact Inside focal and survives refresh",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "selection and navigation coherence > a card action opens Inside once for pointer and keyboard activation",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "selection and navigation coherence > Inside card links keep native pointer activation within the shared canvas",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "selection and navigation coherence > Artifact card actions survive shared canvas pointer and keyboard handling",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "selection and navigation coherence > unsupported Artifact entry is explicit and returning to Network clears its error context",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "selection and navigation coherence > an exact requirement that is absent from the build fails closed instead of loading forever",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "selection and navigation coherence > a failed requirement resolution clears on retry and then opens the exact revision",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "selection and navigation coherence > a new Artifact focal cannot render the previous thread while its exact requirement resolves",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "selection and navigation coherence > a failed Artifact read clears after a real retry and successful navigation",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "selection and navigation coherence > a late failed Artifact response cannot poison the Network view",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "inside a change > a Test Change Request is read from its own authoritative resource",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "inside a change > opening a second change never shows the first change's proposed content",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "landing legibility > identifiers, titles and state labels clear the readable floor at 1280px",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "landing legibility > a deep-linked artifact thread lands legibly at 1280px",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "landing legibility > a deep-linked change request lands legibly at 1280px",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "landing legibility > identifiers, titles and state labels clear the readable floor at 1440px",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "landing legibility > a deep-linked artifact thread lands legibly at 1440px",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "landing legibility > a deep-linked change request lands legibly at 1440px",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "landing legibility > identifiers, titles and state labels clear the readable floor at 1920px",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "landing legibility > a deep-linked artifact thread lands legibly at 1920px",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "landing legibility > a deep-linked change request lands legibly at 1920px",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "landing legibility > card top rows contain their identifier, badge and state label",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "landing legibility > an explicit Fit really fits the board, and may go below the landing floor",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "route state is real state > a focal artifact and view survive refresh",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-page.spec.ts",
+      "title": "route state is real state > back and forward walk the views the reader actually visited",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "manual scrolling can expose the tail of a card taller than the usable window",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "lane-local reveal > same-tier growth reconciles a retained linked collision without moving residents",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "lane-local reveal > same-tier growth reconciles a retained selected collision without moving residents",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "lane-local reveal > a valid retained placement survives being panned entirely offscreen",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "lane-local reveal > displaces only out-of-view linked cards and leaves residents where they are",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "lane-local reveal > a partially visible linked card is never displaced during hover",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "lane-local reveal > a placed card never overlaps a resident and is reachable through the derived scroll range",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "lane-local reveal > the counterexample: a band-only bound strands a below-window card, the derived bound does not",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "lane-local reveal > two promised cards derive the deeper bound the later one needs, and the bound is reachable",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "lane-local reveal > a linked card is placed inside the usable window even when that space is beyond the lane's content",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "lane-local reveal > a frozen lane keeps its displayed arrangement for records still in the thread",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "lane-local reveal > a frozen lane still retires a card that has left the traced thread",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "lane-local reveal > a lane that is not frozen retires displacements whose ownership ended",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "lane-local reveal > planning is idempotent and never mutates canonical rows",
+      "fastTier": "logic"
+    },
+    {
+      "file": "digital-thread-reveal.spec.ts",
+      "title": "lane-local reveal > deltas compose with the lane offset instead of being overwritten by it",
+      "fastTier": "logic"
+    },
+    {
+      "file": "document-generation-where-you-are.spec.ts",
+      "title": "the requirements explorer offers the document for the build being read",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "document-generation-where-you-are.spec.ts",
+      "title": "the software explorer offers the document for the level being read",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "document-review-comments.spec.ts",
+      "title": "a document reviewer comments on a revision, and the owner cannot see it while it is a draft",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "downstream-assessments-states.spec.ts",
+      "title": "the mixed queue is headed \"Downstream Assessments\" and describes itself truthfully",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "downstream-assessments-states.spec.ts",
+      "title": "the empty queue is headed \"Downstream Assessments\" and describes itself truthfully",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "downstream-assessments-states.spec.ts",
+      "title": "the failed queue is headed \"Downstream Assessments\" and describes itself truthfully",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "downstream-assessments-states.spec.ts",
+      "title": "the loading queue is headed \"Downstream Assessments\" and describes itself truthfully",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "downstream-assessments-states.spec.ts",
+      "title": "a mixed collection shows pending and dispositioned rows under the same heading",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "downstream-assessments-states.spec.ts",
+      "title": "an empty queue says so in the corrected terminology",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "downstream-assessments-states.spec.ts",
+      "title": "a failed load keeps the heading, states the failure, and can be retried",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "downstream-assessments-states.spec.ts",
+      "title": "the loading state says what it is loading, in the corrected terminology",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "downstream-assessments.spec.ts",
+      "title": "downstream assessment actions follow authority and submit without a form-navigation no-op",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "downstream-assessments.spec.ts",
+      "title": "an assessment deep link explains impact and a required change creates and links the correct Draft HLRCR",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "downstream-assessments.spec.ts",
+      "title": "a concluded assessment states its conclusion, and correcting it is an act of its own",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "draft-save-simplification.spec.ts",
+      "title": "a Draft needs only a title and never consumes an identifier for an empty form",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "draft-save-simplification.spec.ts",
+      "title": "proposal validation clears when the author corrects the proposal",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "enterprise-requirements-workspace.spec.ts",
+      "title": "requirements explorer shows truthful access-aware counts",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "enterprise-requirements-workspace.spec.ts",
+      "title": "requirements explorer keeps every primary filter usable at desktop review widths",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "enterprise-requirements-workspace.spec.ts",
+      "title": "requirements explorer primary targets are native links in table and document views",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "enterprise-requirements-workspace.spec.ts",
+      "title": "requirements stay read-only while controlled proposals and imports move into Changes",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "enterprise-requirements-workspace.spec.ts",
+      "title": "requirements explorer chooser opens an eligible Draft and preserves keyboard escape focus",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "exact-link-lifecycle-controls.spec.ts",
+      "title": "Digital Thread reuses projected lifecycle data and the shared exact-link controls",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "exact-link-lifecycle-controls.spec.ts",
+      "title": "a recorded relationship refreshes the active Artifact and keeps a follow-up read failure truthful",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "exact-link-lifecycle-controls.spec.ts",
+      "title": "the active table states loading, error, truncation and no-match without a baseline read",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "exact-trace-navigation.spec.ts",
+      "title": "a trace row offers one exact navigation action, and refuses to offer one it cannot honour",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "exact-trace-navigation.spec.ts",
+      "title": "the verification identifier refuses to link when the exact target is not established",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "exact-trace-navigation.spec.ts",
+      "title": "the exact trace link is operable by keyboard, opens in a new tab, and survives Back and Forward",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "exact-trace-navigation.spec.ts",
+      "title": "the verification identifier goes where it says by click, keyboard and new tab, and is the row's only control",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "execution-time-is-local.spec.ts",
+      "title": "the execution time field is prefilled with local wall time, not the UTC clock",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "fms-showcase-program.spec.ts",
+      "title": "FMS 1.5 released baseline supports active 1.6 work and full lifecycle exploration",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "form-semantics.spec.ts",
+      "title": "every controlled authoring form is programmatically what it looks like",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "form-semantics.spec.ts",
+      "title": "verification, review and administration forms carry the same semantics",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "high-value-ui-tuning.spec.ts",
+      "title": "workspace tuning persists and quick navigation provides previews and recents",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "history-and-build-provenance.spec.ts",
+      "title": "searches scoped change history while dormant build management stays unreachable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "history-and-build-provenance.spec.ts",
+      "title": "an unfiltered empty build still reports that no change requests are recorded",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "identity-lifecycle.spec.ts",
+      "title": "administrators see current Program roles and retain revoke failures",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "identity-lifecycle.spec.ts",
+      "title": "security implementation remains dormant while MFA and account-security controls are hidden",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "imported-baselines.spec.ts",
+      "title": "imported baselines > the practice project opens its own import page, and stays on it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "imported-baselines.spec.ts",
+      "title": "imported baselines > an import is started from the page, and lands on its first gate",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "imported-baselines.spec.ts",
+      "title": "imported baselines > the page states what an import is, and what it never claims",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "imported-baselines.spec.ts",
+      "title": "imported baselines > a source identifier the source retired is answerable, and says it joins nothing",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inherited-problem-reports.spec.ts",
+      "title": "overlapping upstream reports require explicit acceptance and refresh preserves authored choices",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "a System change labels mixed downstream verification without claiming its source discipline",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "requirement proposals > a Modify shows its badge and a truthful before/after",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "requirement proposals > a behind-target item states both revisions and claims nothing about the newer one",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "requirement proposals > a retirement is marked RET and its cascade target is dashed",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "requirement proposals > a proposal identifier is not an exact artifact link",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "verification proposals > every populated field survives to the DOM, including both members of each pair",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "verification proposals > a Modify whose change is outside Steps still shows what changed",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "verification proposals > a retired Case says Case, and proposes no successor body",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "verification proposals > a Case parent is shown as a parent, never as requirement coverage",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "verification proposals > unresolved and malformed references are stated, without invented identity",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "frame behaviour > an error renders inside the still-mounted canvas",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "frame behaviour > loading holds the five-lane frame, and content arriving does not move it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "frame behaviour > a genuinely empty lane still compacts once the content is known",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "trace and interaction > selecting a card traces its web and pushes the rest back",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "trace and interaction > clicking another register entry asks the caller to open it in place",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "trace and interaction > a card is reachable and activatable from the keyboard",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "panel placement > the panel offers bottom, right and auto, and auto picks the emptier side",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "panel placement > the panel lists the whole traced web, marking deeper hops",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "lanes three and four > a requirement change shows the covering artifact with its own state",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "lanes three and four > coverage joins on the exact requirement revision, not the artifact",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "lanes three and four > a verification package shows executions rather than covering artifacts",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "lanes three and four > the build lane names the candidate baseline and the one it supersedes",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "lanes three and four > all five lanes are populated once the content is known",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "exact identity on the board > two revisions of one artifact both keep their card",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "exact identity on the board > one procedure revision covering two requirements is one card, not two",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "exact identity on the board > coverage state is not presented as the procedure's own state",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "the detail panel never rests on a directly linked record > with the panel docked Bottom",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "the detail panel never rests on a directly linked record > with the panel docked Right",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "inside-change-rendered.spec.ts",
+      "title": "the detail panel never rests on a directly linked record > with the panel docked Auto",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "instance-badge.spec.ts",
+      "title": "the badge shows the installation name and keeps the declaration in the tooltip",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "instance-badge.spec.ts",
+      "title": "an undeclared installation keeps its modest label unchanged",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "instance-badge.spec.ts",
+      "title": "custom declared labels render verbatim under other supported classifications",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "integration-command-center.spec.ts",
+      "title": "the operator console shows runtime status without the product capability checklist",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "integration-command-center.spec.ts",
+      "title": "integration command center governs machine access and signed event delivery",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "integration-command-center.spec.ts",
+      "title": "the journey reruns cleanly after a first attempt stopped once its machine identity existed",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "integration-command-center.spec.ts",
+      "title": "the journey reruns cleanly after a first attempt stopped once its webhook destination existed",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "issue-726-case-procedure-execution-readiness.spec.ts",
+      "title": "Case to allocated Procedure execution chain drives release readiness",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "issue-762-combined-artifacts-api.spec.ts",
+      "title": "profile-driven verification aliases and globally sorted neutral paging stay deterministic",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "ladder-aware-assessments.spec.ts",
+      "title": "the effective ladder keeps the FMS System root free of downstream-assessment requests",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "ladder-aware-assessments.spec.ts",
+      "title": "the Interface change-request register never borrows the software assessment queue",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "ladder-aware-assessments.spec.ts",
+      "title": "a direct System to LowLevel effective edge makes one LLR queue request",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "ladder-aware-assessments.spec.ts",
+      "title": "an Interface parent makes System assessments applicable without a System special case",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "ladder-aware-assessments.spec.ts",
+      "title": "multiple effective parents still mount one queue and issue one target request",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "ladder-aware-assessments.spec.ts",
+      "title": "a slower prior HLR response cannot overwrite the newer LLR queue",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "ladder-aware-assessments.spec.ts",
+      "title": "an incoming parent without ChangeControl makes no queue and issues no queue reads",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "ladder-aware-assessments.spec.ts",
+      "title": "an applicable HLR queue distinguishes loading and a successful empty result with level-aware copy",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "ladder-aware-assessments.spec.ts",
+      "title": "an applicable HLR queue reports a read failure and can retry into empty state",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "legacy-procedure-bootstrap.spec.ts",
+      "title": "a Configuration Manager previews, confirms, and revisits the exact legacy procedure snapshot",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "lifecycle-decision-room.spec.ts",
+      "title": "Lifecycle Decision Room connects readiness, impact, evidence, people, and compact identifiers",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "lifecycle-decision-room.spec.ts",
+      "title": "a released build tells the story that let it ship, and offers no decision to take",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "managed-document-discoverability.spec.ts",
+      "title": "managed document work, notification links and search all open the exact project-wide record",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "managed-document-recovery.spec.ts",
+      "title": "retained connector work is reachable by direct Project URL and fails closed without losing recovery context",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "managed-documentation-center.spec.ts",
+      "title": "controlled relationship links use canonical targets and exact browser routes",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "managed-documentation-center.spec.ts",
+      "title": "managed Word documents remain one Project-wide register across build navigation",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "managed-documentation-center.spec.ts",
+      "title": "the Project register loads bounded pages while direct document URLs remain reachable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "managed-documentation-center.spec.ts",
+      "title": "review signature dialog exposes and submits the exact frozen intent",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "managed-documentation-center.spec.ts",
+      "title": "author builds and persists an ordered named document review route",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "managed-documentation-center.spec.ts",
+      "title": "an integrity-blocked revision is explicit and cannot launch or submit from the browser",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "managed-documentation-center.spec.ts",
+      "title": "a Draft revision can be withdrawn with retained history and survives refresh",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "managed-documentation-center.spec.ts",
+      "title": "configuration authority can explicitly reassign document stewardship in the browser",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "managed-documentation-center.spec.ts",
+      "title": "Documentation Center back navigation retains a non-showcase Project across refresh",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "managed-documentation-center.spec.ts",
+      "title": "the status filter shows human state labels while querying exact enum values",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "market-ui-evolution.spec.ts",
+      "title": "market evolution views stay live, legible, and visually contained",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "mutation-failure-contract.spec.ts",
+      "title": "upload, job, identity, and conflict failures stay visible without false success or stuck controls",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "mutation-failure-contract.spec.ts",
+      "title": "a rejected approval preserves signature input and records no approval evidence",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "my-work-metrics.spec.ts",
+      "title": "the whole metrics section is compact and the queue moves up, at every width and density",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "navigation-icons.spec.ts",
+      "title": "navigation icon system > shell navigation renders SVG icons without clipping at 1920px wide",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "navigation-icons.spec.ts",
+      "title": "navigation icon system > shell navigation renders SVG icons without clipping at 1366px wide",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "navigation-icons.spec.ts",
+      "title": "navigation icon system > navigation meaning stays on the labels, with icons decorative and behavior unchanged",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "navigation-icons.spec.ts",
+      "title": "navigation icon system > the command palette renders the same SVG system for its page destinations",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "navigation-icons.spec.ts",
+      "title": "navigation icon system > a pre-migration recent destination renders the canonical SVG, not its stored glyph",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "navigation-icons.spec.ts",
+      "title": "navigation icon system > compact workspace density keeps the navigation icons aligned and unclipped",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "notification-operations.spec.ts",
+      "title": "global administrator can inspect bounded SMTP delivery operations without rendering message content",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "people-not-accounts.spec.ts",
+      "title": "no surface names a person by their account",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "people-portraits.spec.ts",
+      "title": "registry identity resolution > resolution order: caller record, casting, manifest directory, then generic",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "people-portraits.spec.ts",
+      "title": "FMS showcase portrait system > the manifest and the committed portrait files agree exactly",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "people-portraits.spec.ts",
+      "title": "FMS showcase portrait system > generated portraits are unique per identity; only the curated same-person pair is shared",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "people-portraits.spec.ts",
+      "title": "FMS showcase portrait system > every portrait stays within the asset-size ceiling",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "people-portraits.spec.ts",
+      "title": "FMS showcase portrait system > every manifest entry carries a display name and role",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "people-portraits.spec.ts",
+      "title": "FMS showcase portrait system > Team Work renders portraits for every strip member, with no initials fallback",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "people-portraits.spec.ts",
+      "title": "FMS showcase portrait system > Personnel renders portraits for leadership, assurance and roster members",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "primary-navigation-alignment.spec.ts",
+      "title": "primary navigation separates generated data, managed documents, code and problem reporting without breaking historical routes",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-active-metric.spec.ts",
+      "title": "quality assurance and the Problem Report center display the same active-work count",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-actor-identity.spec.ts",
+      "title": "a Problem Report history names an actor the demo registry does not contain",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-change-linking.spec.ts",
+      "title": "a PR links to change requests and System TCRs without changing its lifecycle state",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-detail-selection.spec.ts",
+      "title": "a Problem Report stays in the pane while an earlier selection detail response is still arriving",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-detail-selection.spec.ts",
+      "title": "a failed open the reader already superseded must not revert the selection or report itself",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-detail-selection.spec.ts",
+      "title": "a lifecycle action refresh cannot drag the pane back to the record that was acted on",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-detail-selection.spec.ts",
+      "title": "the last record the reader clicked wins when two open responses arrive in the opposite order",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-detail-selection.spec.ts",
+      "title": "a refresh committing a held open's record keeps the address aligned and the duplicate failure invisible",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-detail-selection.spec.ts",
+      "title": "a queue clear committed while an open is in flight supersedes that open",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-filtering.spec.ts",
+      "title": "the queue filters as the search is typed, with no refresh to press",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-filtering.spec.ts",
+      "title": "the queue can be narrowed to one kind of problem",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-impact-evidence.spec.ts",
+      "title": "a change request raised months later appears under the impact answer it belongs to",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-impact-evidence.spec.ts",
+      "title": "evidence under a not-impacted answer is shown, with the disagreement named",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-mvp.spec.ts",
+      "title": "an engineer creates a structured Draft PR and advances it through the SCCB workbench",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-mvp.spec.ts",
+      "title": "an Open Problem Report is checked out, corrected, and the correction survives with its history",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-owner-authority.spec.ts",
+      "title": "Problem Report ownership offers only accountable Program authority and the new owner can work immediately",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-paging.spec.ts",
+      "title": "the Project queue and build picker reach every Problem Report beyond their first pages",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-picker-scope.spec.ts",
+      "title": "build-specific PR pickers preserve the explicit target while the Project database stays Project-wide",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-related.spec.ts",
+      "title": "relating two Problem Reports records it on both, and unlinking removes both halves",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-scope.spec.ts",
+      "title": "Problem Reports remain workable and explicitly target-filtered from every build",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-scope.spec.ts",
+      "title": "an explicit target-build action refresh keeps its own history entry",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-scope.spec.ts",
+      "title": "Back restores the exact historical Problem Report snapshot after another report is shown",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-scope.spec.ts",
+      "title": "a failed route restoration cannot leave the previous Problem Report actionable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-scope.spec.ts",
+      "title": "an implicit zero-row target clear replaces its history entry",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-shared-editing.spec.ts",
+      "title": "a Project member who does not own a Verifying Problem Report can still correct it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-whole-record.spec.ts",
+      "title": "raising a Problem Report shows every field it has, and saves them all",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-whole-record.spec.ts",
+      "title": "the checkout editor shows the whole record and its three closing controls",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-whole-record.spec.ts",
+      "title": "a delayed inline image upload keeps create save behind the pending upload",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-whole-record.spec.ts",
+      "title": "resized adjacent figures share a responsive document row and guidance is not repeated per narrative field",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-whole-record.spec.ts",
+      "title": "a delayed inline image upload keeps checkout save and check-in behind the pending upload",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-whole-record.spec.ts",
+      "title": "a supporting-file form submits once without checking in, and blocks explicit check-in until it settles",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "problem-report-whole-record.spec.ts",
+      "title": "Problem Report output links distinguish the current record from its exact historical revision",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-approval.spec.ts",
+      "title": "an unapproved procedure revision cannot have an execution recorded against it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-browsing.spec.ts",
+      "title": "the procedure workspace pages, filters and deep-links instead of rendering everything",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-browsing.spec.ts",
+      "title": "a slow unfiltered reply cannot bury the search result that overtook it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "the Explorer groups Cases by the document they are written into",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "a Case-only profile does not present disabled software Procedure documents",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "a Case-only profile refuses a direct disabled Procedure change route but keeps Case routes usable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "saved Explorer views apply legacy Case, explicit all, and explicit Procedure kinds",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "a Procedure-enabled profile adds distinct HLRTPD and LLRTPD actions in the shared Document Center",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "a partial Procedure profile offers only its exact HLR Procedure document target",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "the search reports how many Cases matched",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "procedures are listed in a columned table, not a flat list",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "rows and the document selection survive a reload",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "the combined document rail is offered where the artifacts are read",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "a worklist can be saved, reopened and removed",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "Clear returns the whole library",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "Clear canonicalizes the legacy software Procedure Explorer route",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "Clear resets a filtered canonical Software Explorer route without relying on remount",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "the combined Explorer names the software workspace and opens on all software artifacts",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "the result summary says how many Cases answer and where in them you are",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-explorer-parity.spec.ts",
+      "title": "the filters read as one row rather than a stack of captioned fields",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-trace-impact.spec.ts",
+      "title": "Trace & impact lists the exact requirements and opens the exact requirement revision",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-trace-impact.spec.ts",
+      "title": "a released build keeps its exact procedure revision trace across refresh",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-trace-impact.spec.ts",
+      "title": "zero coverage stays explicit and truthful in Trace & impact",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-trace-impact.spec.ts",
+      "title": "a software HLR trace navigates to the exact software requirement revision",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "procedure-trace-impact.spec.ts",
+      "title": "an exact requirement deep link fails closed instead of substituting the latest revision",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "product-claims.spec.ts",
+      "title": "no surface presents a certification or tool-qualification claim",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "product-claims.spec.ts",
+      "title": "the assurance surface states the boundary rather than leaving it to be inferred",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "project-configuration.spec.ts",
+      "title": "Project configuration authors and activates a disposable graph, records history, and nests approvals",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "project-personnel.spec.ts",
+      "title": "Project Leadership renders eight positions in stable order on the showcase",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "project-personnel.spec.ts",
+      "title": "a leader can be assigned from an eligible member and replaced with another eligible member",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "project-personnel.spec.ts",
+      "title": "a standing backup is named and removed, and the roster records it separately from the primary",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "project-personnel.spec.ts",
+      "title": "a person is added from the directory with several base roles in one confirm",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "project-personnel.spec.ts",
+      "title": "an administrator edits the current identity of a disposable account, and the change is scoped to now",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "project-personnel.spec.ts",
+      "title": "a non-admin roster manager cannot create accounts or edit global identity",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "projects-landing.spec.ts",
+      "title": "successful login opens the accessible Projects selector before the current workspace",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "projects-landing.spec.ts",
+      "title": "the project grid collapses cleanly without horizontal scrolling",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "projects-landing.spec.ts",
+      "title": "the project and build selectors survive refresh before entering a build-specific deep route",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "records-name-people-and-builds.spec.ts",
+      "title": "a review cycle names the person waiting, their role, and whose turn it is",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "records-name-people-and-builds.spec.ts",
+      "title": "audit history reads as events, in the product's own abbreviation",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "records-name-people-and-builds.spec.ts",
+      "title": "an allocated change says which build it went into",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "records-name-people-and-builds.spec.ts",
+      "title": "the approver search answers on the first letter and never shows an account handle",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "released-execution-evidence.spec.ts",
+      "title": "released test results keep evidence history readable and expose no evidence mutation",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "reqif-exchange-center.spec.ts",
+      "title": "ReqIF Exchange Center exports and securely previews a governed package",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "requirement-author-belongs-to-the-change.spec.ts",
+      "title": "the proposal form no longer asks for an author, and the change request still names one",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "requirement-author-belongs-to-the-change.spec.ts",
+      "title": "an authored owner survives a controlled checkout, edit and check-in untouched",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "requirement-author-belongs-to-the-change.spec.ts",
+      "title": "the Requirements Explorer still presents the owner filter control",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "requirement-author-belongs-to-the-change.spec.ts",
+      "title": "the procedure trace header drops individual authorship while History keeps it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "requirement-comment-authority.spec.ts",
+      "title": "a successful comment stays visible after creation and across a reselect",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "requirement-comment-authority.spec.ts",
+      "title": "an older in-flight comment read cannot overwrite a successful creation",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "requirement-comment-authority.spec.ts",
+      "title": "a stale read for a previously selected requirement cannot leak onto the current one",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "requirement-redline-rendered.spec.ts",
+      "title": "long redlines explain full-field comparison and retain both changed tails",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "requirement-redline-rendered.spec.ts",
+      "title": "short redlines retain word highlighting without a long-field notice",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "requirement-redline-rendered.spec.ts",
+      "title": "incomplete comparison metadata cannot present an unchanged redline",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "resizable-workspace-panels.spec.ts",
+      "title": "Command Center presents a responsive, aligned three-way work summary",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "resizable-workspace-panels.spec.ts",
+      "title": "Reusable layout supports up and down resizing with keyboard access",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "resizable-workspace-panels.spec.ts",
+      "title": "Resizable layouts rebuild when a panel is added dynamically",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "review-authority-labels.spec.ts",
+      "title": "every authority a configured stage can require has a readable label",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "review-authority-labels.spec.ts",
+      "title": "the five names that used to render raw are covered",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "review-authority-labels.spec.ts",
+      "title": "the two vocabularies cover the same names, and differ only where the server differs",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "review-authority-labels.spec.ts",
+      "title": "an unknown or retired authority is shown exactly as stored, not guessed",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "review-comments.spec.ts",
+      "title": "a reviewer comments on a requirement, and the author sees it only once the reviewer decides",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "review-setup-rendered.spec.ts",
+      "title": "a configured review row reads as a stage, an authority and a person",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "review-setup-rendered.spec.ts",
+      "title": "the stage still says what it is after somebody is selected",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "review-setup-rendered.spec.ts",
+      "title": "the row is reachable and operable from the keyboard, and keeps saying what it is",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "review-setup-rendered.spec.ts",
+      "title": "a stage nobody can fill stays visible and blocks submission",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "review-setup-rendered.spec.ts",
+      "title": "submitting sends canonical identities and the configured mode, not display labels",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "review-setup-rendered.spec.ts",
+      "title": "a Parallel policy is presented as parallel, and submits as parallel",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "review-setup-rendered.spec.ts",
+      "title": "routine configured policy is stated once, and not as a warning",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "review-setup-rendered.spec.ts",
+      "title": "a long stage name stays readable across supported widths",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "review-workflow-procedure.spec.ts",
+      "title": "a team records its review procedure, puts it in force, and revises it without losing the prior version",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "rich-content-emphasis.spec.ts",
+      "title": "emphasis applied in the browser survives check-in and reload",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "rich-content-emphasis.spec.ts",
+      "title": "text that looks like markup is stored and shown as text",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "the authenticated project selector has a context-free route",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "change-request route generation and parsing preserve both engineering disciplines",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "Team Work route generation and parsing preserve project and shell build context",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "software authoring routes preserve the selected HLR or LLR level",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "configured Interface ladders have a dedicated ICD change authoring route",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "software change history routes preserve the selected HLR or LLR level",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "problem reports and configuration baselines are active while retired product-version pages reject direct navigation",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "exact verification artifact routes preserve immutable revision identity alongside release context",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "controlled document TCR links open the exact package in its build and discipline",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "HLR and LLR Procedure TCR routes round-trip through their level branch and retain the Procedure kind",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "TCR proposal focus is stable and shareable for System and software Procedure routes",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "TCR register selection is stable, typed, and omitted when context changes",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "legacy context-free change-request routes remain loadable until detail canonicalizes them",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "Change Request Digital Thread routes use an explicit stable-ID kind",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "Documentation Center has a canonical Project route while legacy build routes remain readable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "each verification page round-trips, and a results route may carry a problem report",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "Coverage routes open the existing Explorer report without changing Downstream Assessment compatibility routes",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "an unnumbered assessment routes by its stated discipline and family, not its label",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "verification metadata decides, and an unusable answer refuses rather than guessing",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "routing-contract.spec.ts",
+      "title": "empty or null-valued verification metadata is present and unusable, not absent",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "saved-view-stable-link.spec.ts",
+      "title": "the copied saved-view link reopens the view and applies its filters",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "section-on-authored-requirement.spec.ts",
+      "title": "an author chooses the section a new requirement goes in",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "section-on-authored-requirement.spec.ts",
+      "title": "modifying a requirement selects its current controlled section",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "security-boundaries.spec.ts",
+      "title": "mutation authentication and Program-scoped discovery prevent direct-object access",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "security-boundaries.spec.ts",
+      "title": "Program scope protects dashboards, signatures, impacts, directories, and baseline views",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "shelf-and-superseded-revisions.spec.ts",
+      "title": "a change request goes on the shelf with its state remembered, and comes back",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "shelf-and-superseded-revisions.spec.ts",
+      "title": "superseded revisions collapse under the newest one and expand on request",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "showcase-usability.spec.ts",
+      "title": "showcase-critical surfaces are readable, focused, and progressively disclosed",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "software-builds.spec.ts",
+      "title": "Command Center renders the build-scoped software verification population",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "software-builds.spec.ts",
+      "title": "FMS selection opens the ordered, accessible Software Builds lineage",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "software-builds.spec.ts",
+      "title": "released Build 1.5 is a durable read-only workspace and exits explicitly",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "software-builds.spec.ts",
+      "title": "Build 1.6 keeps editing capability, scopes search, and labels predecessor evidence",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "software-builds.spec.ts",
+      "title": "an authenticated invalid build deep link stays authenticated without substituting another build",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "software-builds.spec.ts",
+      "title": "the build lineage stacks without horizontal scrolling on mobile",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "software-change-level-scope.spec.ts",
+      "title": "software change control keeps HLR and LLR context through links, refresh, history, and released builds",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "source-authority-label.spec.ts",
+      "title": "the requirement inspector names its source authority by change-request type",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "source-change-request-link.spec.ts",
+      "title": "the source change request named on a requirement revision opens that change request",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "stage-two-procedure-authoring.spec.ts",
+      "title": "the three acts are offered as three buttons, not chosen after the fact",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "stage-two-procedure-authoring.spec.ts",
+      "title": "a proposal card states the identity it has taken",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "stage-two-procedure-authoring.spec.ts",
+      "title": "modifying searches the controlled library and locks the exact identity and next revision",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "stage-two-procedure-authoring.spec.ts",
+      "title": "a retirement asks for the procedure and the reason, not for steps to invent",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "suspect-verification-coverage.spec.ts",
+      "title": "modified requirement coverage stays suspect until an exact approved procedure is reconfirmed",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work-rendered.spec.ts",
+      "title": "compact cards preserve next actions, details, stages and exact links",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work is a project-wide three-lane board with API-owned card truth and canonical links",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work preserves a numbered automatic TCR whose title was not persisted",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work surfaces API failures locally and does not invent a card for an invalid projection",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work fails closed for malformed people and unresolved current holders",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work rejects incomplete controlled identity and fabricated assessment identity",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work ignores a stale failed projection after changing projects",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work reports an authorized project with no active items without rendering fake lanes or cards",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work is available from the normal command palette after My Work",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work rejects an unknown holder basis and reports a true fetch failure locally",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work keeps a board-shaped loading skeleton while the project projection is pending",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work derives contextual layers and artifact types without duplicating parallel items",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work replaces person selection, preserves shared-holder cards, and clears without hiding the board",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work uses initials for an unproven username prefix and does not infer a role",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work searches people, filters by one holder, and keeps details behind an explicit affordance",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work keeps its holder drawer contained at a 320px viewport",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work stays readable without document overflow at the supported narrow breakpoint",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work retains zero-hold members, scopes affinity storage, and exposes the exact zero-holder empty state",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work has a distinct project-empty state while still showing its member strip",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work validates active obligation uniqueness and invalid holder URL state",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work opens a valid initial holder deep link and preserves unrelated URL state",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work attributes mixed frozen Review and Approval obligations to the right holder",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work preserves one holder with simultaneous frozen Review and Approval obligations",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work composes filters against unique items and clear preserves holder grouping",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work keeps holder-group Details beside the person heading and opens the right drawer",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work exposes a keyboard-focusable horizontal board hint at a narrow breakpoint",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work drawer traps focus, restores its trigger, preserves query state, and follows history",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work scopes workload-first affinity by viewer, project, and user id",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work retains a newly selected affinity when its scoped map is already full",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work ranks current workloads before zero-work members and keeps build counts scoped",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work labels person-filtered board totals separately from roster workloads",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work caps selection frequency below substantially busier workloads",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work keeps holders of matching records visible with scoped counts",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work resolves drawer workload visuals in roster scope",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work preserves focus and scroll when selection crosses a boost threshold",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work keeps busy holders in the visible strip when filters reorder the roster",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work counts holder-heading selections but not Details",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work keeps affinity bound to account identity after a display-name change",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work falls back to workload ordering when affinity storage is unavailable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work rejects retired role vocabulary and fabricated stage provenance",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "team-work.spec.ts",
+      "title": "Team Work names a known raiser without exposing their account handle",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-assignment-authority.spec.ts",
+      "title": "TCR assignment authority drives the controls the browser shows",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-assignment.spec.ts",
+      "title": "answering a test change request makes it yours, and it is in My Work after refresh",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-authoring.spec.ts",
+      "title": "upstream PR context is accepted explicitly and saved atomically with the authored test package",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-authoring.spec.ts",
+      "title": "multiple exact CR sources share inherited reports without losing independent direct selections on check-in",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-authoring.spec.ts",
+      "title": "an engineer raises a System test change request with its case from the Change Requests page",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-authoring.spec.ts",
+      "title": "released builds offer no new test change request action",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-authoring.spec.ts",
+      "title": "HLR and LLR Change Requests pages offer their own creation actions",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-page.spec.ts",
+      "title": "a package opens on its own page, not in a drawer",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-page.spec.ts",
+      "title": "a seeded software Procedure package uses the shared shell, exact origin, workflow, and Procedure library",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-page.spec.ts",
+      "title": "the page carries the same sections the requirements change request page carries",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-page.spec.ts",
+      "title": "check out and edit uses the same full-page two-stage authoring flow as a requirement change",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-page.spec.ts",
+      "title": "the shared authoring page checks in and reopens the persisted test change case",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-page.spec.ts",
+      "title": "the controlled publication is offered from the package",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-page.spec.ts",
+      "title": "a draft package can be put away and taken back off the shelf",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-supersession-presentation.spec.ts",
+      "title": "a cross-release superseded review remains visible when its successor is not loaded",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-supersession-presentation.spec.ts",
+      "title": "a same-release predecessor moves under the exact successor rather than remaining a peer row",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-supersession-presentation.spec.ts",
+      "title": "folding several automatic assessments preserves every sibling and earlier ancestor",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-supersession-presentation.spec.ts",
+      "title": "folded automatic predecessors remain assessments while numbered predecessors remain TCRs",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-supersession.spec.ts",
+      "title": "a revised TCR keeps its predecessor in history and out of active work and baseline selection",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-workflow-journey.spec.ts",
+      "title": "a configured two-stage sequential TCR review completes through the UI",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-workspace.spec.ts",
+      "title": "a test engineer proposes a new procedure inside the test change request that governs it",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-workspace.spec.ts",
+      "title": "a procedure modification shows retained coverage and records an explicit reviewed delta",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-change-request-workspace.spec.ts",
+      "title": "a stale Modify target reloads controlled state and requires an explicit re-selection",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-procedure-explorer.spec.ts",
+      "title": "a procedure opens onto the same four-tab inspector a requirement does",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-procedure-explorer.spec.ts",
+      "title": "System Procedure rows retain their requirement coverage count",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-procedure-explorer.spec.ts",
+      "title": "a procedure says who wrote it and what drove each revision",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-procedure-explorer.spec.ts",
+      "title": "the Software Explorer opens on all artifacts and can move to the configured LLR level",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-procedure-explorer.spec.ts",
+      "title": "the shared Explorer deep-link can inspect active software Procedures with exact Case parents",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-procedure-explorer.spec.ts",
+      "title": "the Explorer browses procedures without offering a way to write one",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-procedure-explorer.spec.ts",
+      "title": "released Build 1.5 procedures remain readable without create or edit actions",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-procedure-explorer.spec.ts",
+      "title": "the Procedure explorer change chooser is exact, bounded, and keyboard dismissible",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-procedure-explorer.spec.ts",
+      "title": "the combined Explorer carries Case identity into the verification change chooser",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-procedure-explorer.spec.ts",
+      "title": "the Case chooser adds an exact eligible Draft and focuses its persisted proposal",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-results-workspace.spec.ts",
+      "title": "a lead chooses what the build runs, and the set says why each procedure is there",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-results-workspace.spec.ts",
+      "title": "software HLR and LLR each have their own test set",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "test-results-workspace.spec.ts",
+      "title": "a procedure shows every run against this build, and a failure can be retested by name",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "testing-coverage-workspace.spec.ts",
+      "title": "the page lists the change requests controlling test work, and nothing else",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "testing-coverage-workspace.spec.ts",
+      "title": "a package opens onto its decisions, and each one is an explicit judgement",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "testing-coverage-workspace.spec.ts",
+      "title": "software HLR and LLR each have their own change request page",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "testing-coverage-workspace.spec.ts",
+      "title": "a decision can ask for a procedure that does not exist, and author it from there",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "testing-coverage-workspace.spec.ts",
+      "title": "a test change request opens onto its source changes, its requirements and the coverage they already have",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "toast-does-not-block-controls.spec.ts",
+      "title": "the confirmation toast never intercepts a click meant for the page",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "traced-impact-informs-the-author.spec.ts",
+      "title": "a modified requirement shows read-only downstream context without author impact controls",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "universal-routing-and-locking.spec.ts",
+      "title": "deep links survive refresh, universal search resolves fragments, and checkout is read-only to another user",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "upstream-change-request-authoring.spec.ts",
+      "title": "initial upstream authoring blocks Deferred with a popup and persists multiple exact approved revisions",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "upward-allocation.spec.ts",
+      "title": "software proposals govern exact build-scoped upward allocations and derived exceptions",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "upward-allocation.spec.ts",
+      "title": "an engineer can search, select, and explicitly replace an upward allocation with a derived exception",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "upward-allocation.spec.ts",
+      "title": "modifying an HLR hydrates its exact parent and preserves an engineer replacement as a navigable reference",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-change-request-register.spec.ts",
+      "title": "every discipline lists the packages controlling its build test procedures",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-change-request-register.spec.ts",
+      "title": "downstream assessments come before the register on both historical and current routes",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-change-request-register.spec.ts",
+      "title": "verification register selection is a stable URL state through refresh and back/forward",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-change-request-register.spec.ts",
+      "title": "verification selection fails closed when the TCR detail belongs to another build",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-identity.spec.ts",
+      "title": "an unnumbered assessment does not wear the badge of a controlled test change request",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-identity.spec.ts",
+      "title": "a node that carries no verification metadata is treated as controlled, not as an assessment",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-identity.spec.ts",
+      "title": "the source number is carried as context and never becomes the record's own identity",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-identity.spec.ts",
+      "title": "two unnumbered assessments from one source stay distinct and stably ordered",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-identity.spec.ts",
+      "title": "a controlled package at revision 00 keeps its complete identity",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-identity.spec.ts",
+      "title": "the rendered board shows both assessments, neither as a bare revision nor as a TCR",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-identity.spec.ts",
+      "title": "an unnumbered card shows its source as context, and the inspector separates every fact",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-identity.spec.ts",
+      "title": "a rendered unnumbered card links to its own discipline, through the page's adapter",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-identity.spec.ts",
+      "title": "a missing controlled revision is reported, not rendered as .00",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-identity.spec.ts",
+      "title": "the Table carries the same source and outcome, with state kept separate",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-identity.spec.ts",
+      "title": "every verification fact is geometrically readable in each dock",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-identity.spec.ts",
+      "title": "a keyboard user can reach and scroll the inspector to the facts below the fold",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-identity.spec.ts",
+      "title": "a pointer user can scroll the inspector to the same facts",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-landing.spec.ts",
+      "title": "system verification offers its named destinations, including Coverage, on real work",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-landing.spec.ts",
+      "title": "software verification offers named HLR and LLR destinations, including Coverage",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-method-vocabulary.spec.ts",
+      "title": "Project Configuration declares the vocabulary, authoring offers exactly it, and an off-vocabulary value is reported not rewritten",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-method-vocabulary.spec.ts",
+      "title": "A canonical method reaches review while an off-vocabulary one is refused, and the controlled output carries the configured value",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-method-vocabulary.spec.ts",
+      "title": "the new change request editor cannot start a proposal before the vocabulary arrives, and what it shows is what it sends",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-method-vocabulary.spec.ts",
+      "title": "a checked-out draft cannot start a proposal before the vocabulary arrives, and what it shows is what it sends",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-method-vocabulary.spec.ts",
+      "title": "a vocabulary that fails to load blocks verification-bearing authoring on both surfaces instead of creating a blank proposal",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-method-vocabulary.spec.ts",
+      "title": "a blank retirement cannot become a verification-bearing proposal while the vocabulary is unavailable, on the new change request editor",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-method-vocabulary.spec.ts",
+      "title": "a blank retirement cannot become a verification-bearing proposal while the vocabulary is unavailable, on a checked-out draft",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-method-vocabulary.spec.ts",
+      "title": "a vocabulary that fails to load also blocks turning a retirement into a verification-bearing proposal",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-method-vocabulary.spec.ts",
+      "title": "a slow vocabulary for one project cannot become the authority for another",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-method-vocabulary.spec.ts",
+      "title": "saving the vocabulary sends the version belonging to the project being saved",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "verification-program-capabilities.spec.ts",
+      "title": "verification actions follow authority in the selected Program",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "webhook-delivery-operations.spec.ts",
+      "title": "operator console surfaces expired work and keeps live claims unreplayable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "withdraw-and-reopen.spec.ts",
+      "title": "a frozen build refuses a withdrawal, says what reopening costs, and the work it strands is flagged",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-contract.spec.ts",
+      "title": "workspace projection accepts nullable predecessor and preserves exact IDs and release flags",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-contract.spec.ts",
+      "title": "malformed workspace payloads never become a partially accepted context",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-contract.spec.ts",
+      "title": "controlled trace links require exact context and revision identities",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-contract.spec.ts",
+      "title": "supported trace kinds retain exact targets and unsupported kinds stay non-openable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-contract.spec.ts",
+      "title": "real workspace projection matches the client contract and error payloads cannot be selected",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-navigation.spec.ts",
+      "title": "an authenticated root destination canonicalizes to the Projects portal",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-navigation.spec.ts",
+      "title": "delayed hydration retains a real project-card selection and exact build scope",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-navigation.spec.ts",
+      "title": "missing exact build never substitutes the current build",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-navigation.spec.ts",
+      "title": "project switches and browser history resolve the named project's own requests",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-navigation.spec.ts",
+      "title": "legacy project-wide document links discard obsolete build context",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-navigation.spec.ts",
+      "title": "workspace failures have a truthful retry state",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-navigation.spec.ts",
+      "title": "malformed build data cannot display or request a fabricated workspace and retry retains intent",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-navigation.spec.ts",
+      "title": "late dashboard completion cannot overwrite a newer build",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-navigation.spec.ts",
+      "title": "a failed build read does not display another build's summary",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-navigation.spec.ts",
+      "title": "route resolution preserves exact history and rejects absent program, project and build",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "workspace-navigation.spec.ts",
+      "title": "new package authoring selection survives route parsing for each verification scope",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zz-controlled-authoring-impact.spec.ts",
+      "title": "engineer analyzes impact and creates a rich controlled requirement proposal",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-enterprise-hardening.spec.ts",
+      "title": "enterprise control proves content, queries, exports, redlines, and cryptographic qualification",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-post-414-picker-integrity.spec.ts",
+      "title": "a stale released-build context cannot overwrite the active build effective baseline",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-post-414-picker-integrity.spec.ts",
+      "title": "a multi-page requirement selection keeps the picker request line bounded and stays fully editable",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-post-414-picker-integrity.spec.ts",
+      "title": "the TCR driving-requirement picker stays bounded with a large selection",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-post-414-picker-integrity.spec.ts",
+      "title": "a failed picker response shows a visible error and recovers instead of silently freezing",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-post-414-picker-integrity.spec.ts",
+      "title": "a Modify/Retire target picker stays bounded with a large existing-decision TCR",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-pro-audit-417.spec.ts",
+      "title": "an unsaved Modify target and its driving selections survive search, paging and target changes",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-pro-audit-417.spec.ts",
+      "title": "an obsolete successful picker response cannot clear a newer visible failure",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-pro-audit-421-424.spec.ts",
+      "title": "predecessor and successor keep exact titles and folded provenance through deep links",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-pro-audit-422.spec.ts",
+      "title": "the execution workflow offers and records only the exact carried procedure revision",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-problem-report-disposition.spec.ts",
+      "title": "Problem Report lifecycle controls expose canonical states, rationale gates, and immutable history",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-problem-report-disposition.spec.ts",
+      "title": "Problem Report status filters expose exactly the eight canonical lifecycle states",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-searchable-authoring-pickers.spec.ts",
+      "title": "a Modify target beyond the former 200-row limit is searchable, selectable and survives reload",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-searchable-authoring-pickers.spec.ts",
+      "title": "a requirement beyond the former 200-row limit is hydrated, searchable and selectable for authoring",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-searchable-authoring-pickers.spec.ts",
+      "title": "an approved Case beyond the former 200-row limit is searchable in the coverage-confirmed picker and survives reload",
+      "fastTier": "full-only"
+    },
+    {
+      "file": "zzz-searchable-authoring-pickers.spec.ts",
+      "title": "a Modify target beyond the former 500 limit is reachable in the real picker and survives reload",
+      "fastTier": "full-only"
+    }
+  ]
+}

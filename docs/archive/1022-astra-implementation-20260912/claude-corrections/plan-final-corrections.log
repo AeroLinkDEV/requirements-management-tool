@@ -1,0 +1,62 @@
+AeroLink changed validation plan (Fast)
+Planner: aerolink-test-planner/v1 / 134b6b8c397e546ba2a015f47b35428c44afaeb69074d756a5b138c947d33fb3
+Changed paths: 26; merge base: 858791c6e12b316bb7ded56a2d17dab05e0b872b
+WARNING: origin/main is a local remote-tracking ref at 858791c6e12b316bb7ded56a2d17dab05e0b872b and may be stale. No 
+fetch or rebase was performed; refresh it deliberately before relying on this plan.
+Safety: persistent PostgreSQL and product/.local evidence roots are untouched; the planner performs no fetch or rebase.
+Dry-run: no build, test, database, evidence, package restore, or network operation was started.
+Full merge evidence remains with GitHub Actions.
+Resource posture:
+  PostgreSQL: not selected
+  SQLite: Full mode uses the repository broader disposable SQLite/browser subset; Fast mode does not claim SQLite evidence
+  Browser: selected browser smoke lane may start browser processes when execution is allowed
+  Evidence filesystem: persistent product/.local evidence roots are untouched; any disposable lane owns its temporary paths
+
+Changed paths and selected areas:
+  DECISIONS_AND_OPEN_QUESTIONS.md -> documentation/non-product
+  PROJECT_STATE.md -> documentation/non-product
+  product/client/fast-client-tests.json -> client, browser
+  product/client/playwright.rendered.config.ts -> client, browser
+  product/client/src/DigitalThreadArtifact.css -> client, browser
+  product/client/src/DigitalThreadArtifact.tsx -> client, browser
+  product/client/src/DigitalThreadCanvas.css -> client, browser
+  product/client/src/DigitalThreadCanvas.tsx -> client, browser
+  product/client/src/DigitalThreadInsideChange.css -> client, browser
+  product/client/src/DigitalThreadInsideChange.tsx -> client, browser
+  product/client/src/DigitalThreadNetwork.css -> client, browser
+  product/client/src/DigitalThreadNetwork.tsx -> client, browser
+  product/client/src/DigitalThreadPage.tsx -> client, browser
+  product/client/src/digitalThreadGeometry.ts -> client, browser
+  product/client/src/digitalThreadPanelDock.ts -> client, browser
+  product/client/tests/artifact-thread-rendered.spec.ts -> client, browser
+  product/client/tests/change-network-rendered.spec.ts -> client, browser
+  product/client/tests/digital-thread-core-interaction.spec.ts -> client, browser
+  product/client/tests/digital-thread-page.spec.ts -> client, browser
+  product/client/tests/digital-thread-rendered-helpers.ts -> client, browser
+  product/client/tests/digital-thread-reveal.spec.ts -> client, browser
+  product/client/tests/fixtures/artifact-thread.tsx -> client, browser
+  product/client/tests/fixtures/change-network.tsx -> client, browser
+  product/client/tests/fixtures/digital-thread-contract.html -> client, browser
+  product/client/tests/fixtures/digital-thread-contract.tsx -> client, browser
+  product/client/tests/fixtures/inside-change.tsx -> client, browser
+
+Classification:
+  docsOnly     False
+  backend      False
+  client       True
+  browser      True
+  postgresql   False
+
+Local plan:
+  - Client lint, type-check and build
+      npm --prefix product/client run lint && npm --prefix product/client run build
+      The client gate is under a minute in CI but blocks the whole merge.
+  - Browser smoke journeys
+      npm --prefix product/client run test:smoke
+      Client changes keep the showcase usability smoke; the full journey set still belongs in CI.
+  - Operator and recovery script contracts
+      Full mode can run the same non-documentation script-contract family in the disposable checkout; Fast leaves this hosted family CI-only.
+
+
+Dry run requested: no build, test, database, evidence, fetch, rebase, or network operation was started.
+AEROLINK_TEST_PLAN_RESULT={"planner":{"version":"aerolink-test-planner/v1","hash":"134b6b8c397e546ba2a015f47b35428c44afaeb69074d756a5b138c947d33fb3"},"source":{"base":"origin/main","head":"HEAD","baseSha":"858791c6e12b316bb7ded56a2d17dab05e0b872b","headSha":"a78e1bf70055813425c2e3413512b7bad886e8f7","mergeBase":"858791c6e12b316bb7ded56a2d17dab05e0b872b","paths":"git-diff"},"event":"pull_request","areas":{"docsOnly":false,"backend":false,"client":true,"browser":true,"postgresql":false},"unknownPaths":[],"ci":{"selected":["changes","client","script-contracts","browser-pr","browser-production","gate","metrics-tooling","metrics-report"],"skipped":["warm-chromium-cache","backend-api","backend-core-domain","backend-core-infrastructure","browser-full","postgresql-smoke"]},"execution":{"schemaVersion":1,"mode":"Fast","status":"not-run","authoritative":false,"selectedCiJobs":["changes","client","script-contracts","browser-pr","browser-production","gate","metrics-tooling","metrics-report"],"executedCiJobs":[],"ciOnlyJobs":["changes","client","script-contracts","browser-pr","browser-production","gate","metrics-tooling","metrics-report"],"resources":{"persistentPostgreSqlTouched":false,"persistentEvidenceRootTouched":false,"disposableDockerPostgreSql":"not selected","networkAccessPossible":false},"timing":{"totalMs":0,"steps":[]},"error":null}}

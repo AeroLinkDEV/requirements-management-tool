@@ -1,0 +1,3741 @@
+{
+  "config": {
+    "argv": [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Sean Project\\RMT-1022-astra-implementation\\product\\client\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "--config=playwright.rendered.config.ts",
+      "--reporter=list,json",
+      "--output=C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results"
+    ],
+    "configFile": "C:\\Sean Project\\RMT-1022-astra-implementation\\product\\client\\playwright.rendered.config.ts",
+    "rootDir": "C:/Sean Project/RMT-1022-astra-implementation/product/client/tests",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/seanm/AppData/Local/Temp/astra-1022-implementation-20260912/rendered-80fdb568-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "rendered",
+        "name": "rendered",
+        "testDir": "C:/Sean Project/RMT-1022-astra-implementation/product/client/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "artifact-thread-rendered.spec.ts",
+          "digital-thread-core-interaction.spec.ts"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 1,
+    "webServer": {
+      "command": "npm run dev -- --host 127.0.0.1 --port 5222 --strictPort",
+      "url": "http://127.0.0.1:5222",
+      "reuseExistingServer": false,
+      "timeout": 60000
+    }
+  },
+  "suites": [
+    {
+      "title": "artifact-thread-rendered.spec.ts",
+      "file": "artifact-thread-rendered.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "the six-lane model on screen",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 106,
+          "column": 6,
+          "specs": [
+            {
+              "title": "a fully populated thread draws all six lanes, result and build sharing the last",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1591,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:18.660Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-t-1315b--and-build-sharing-the-last-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-e21d308933cb1ad7890d",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 107,
+              "column": 3
+            },
+            {
+              "title": "every lane is present and reachable when the thread first opens",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2071,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:20.343Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-t-fb7c0-when-the-thread-first-opens-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-cf5343bd3f2ae090861c",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 133,
+              "column": 3
+            },
+            {
+              "title": "an explicit Fit shows the whole board, which automatic landing no longer has to",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1993,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:22.423Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-t-00c93-ic-landing-no-longer-has-to-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-4959b9d361a0d02201b2",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 157,
+              "column": 3
+            },
+            {
+              "title": "a System chain drops the Test Case lane rather than showing it empty",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1491,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:24.424Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-t-78fae-ather-than-showing-it-empty-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-1bc665e3bada7d7766e3",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 174,
+              "column": 3
+            },
+            {
+              "title": "an edge inside the final lane is drawn beside it, not across it",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1469,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:25.922Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-t-9e47f-awn-beside-it-not-across-it-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-55717562ee0d7d189bba",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 188,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "exact identity",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 216,
+          "column": 6,
+          "specs": [
+            {
+              "title": "the focal artifact is the one selected, expanded and named",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1552,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:27.400Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-e-d4cb3-selected-expanded-and-named-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-c4b1ebbdcc283011bcb1",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 217,
+              "column": 3
+            },
+            {
+              "title": "each supported focal kind opens its own thread on its own record",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6587,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:28.961Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-e-b928b-wn-thread-on-its-own-record-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-075706a00ac9048f815e",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 229,
+              "column": 3
+            },
+            {
+              "title": "an execution's card carries no invented identifier",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1466,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:35.555Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-e-56438-ries-no-invented-identifier-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-19fcf69e17e1c74bb2e8",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 245,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "evidence",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 262,
+          "column": 6,
+          "specs": [
+            {
+              "title": "the identity and the whole hash survive into what the reader sees",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1477,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:37.029Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-e-50b38-e-into-what-the-reader-sees-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-b6895a1c9a5db74ef3b7",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 263,
+              "column": 3
+            },
+            {
+              "title": "evidence is a fact on the result, not a lane of its own",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1449,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:38.514Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-e-a4eda-esult-not-a-lane-of-its-own-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-89455bc44995d41dfd46",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 279,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "suspectness",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 288,
+          "column": 6,
+          "specs": [
+            {
+              "title": "a server-stated suspect link looks different from a settled one, and says so",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1517,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:39.970Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-f5bf3-m-a-settled-one-and-says-so-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-2948d7ffe012a8c2133f",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 289,
+              "column": 3
+            },
+            {
+              "title": "the expanded card explains the suspect link rather than leaving the colour to carry it",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1572,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:41.494Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-79111-ving-the-colour-to-carry-it-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-4d4a81b8896f0eece268",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 313,
+              "column": 3
+            },
+            {
+              "title": "the Suspect chip selects endpoints of a suspect relationship",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1554,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:43.074Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-181f8-s-of-a-suspect-relationship-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-ad2883431ef840634da6",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 321,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "the trace the server returned",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 331,
+          "column": 6,
+          "specs": [
+            {
+              "title": "the whole directed web highlights, and untraced records recede rather than disappear",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1472,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:44.635Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-t-18ae2-ecede-rather-than-disappear-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-f87feebe5beaa1475577",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 332,
+              "column": 3
+            },
+            {
+              "title": "the trace does not walk sideways into a record that merely shares a procedure",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1474,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:46.116Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-t-a453d-t-merely-shares-a-procedure-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-20c74f505558212a6758",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 341,
+              "column": 3
+            },
+            {
+              "title": "the panel lists every hop, with the relation word on the direct ones",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1483,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:47.598Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-t-e05b6-ion-word-on-the-direct-ones-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-fe1f96a2c9b8734356e3",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 355,
+              "column": 3
+            },
+            {
+              "title": "a panel row re-centres the board on that record",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2021,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:49.089Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-t-12cad-es-the-board-on-that-record-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-34389b0350fb1bfba44f",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 371,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "the branching hierarchy story (#925 F5/V5)",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 380,
+          "column": 6,
+          "specs": [
+            {
+              "title": "System above, two LLR children with their verification below, sibling kept out",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1074,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:51.117Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-t-ff328-tion-below-sibling-kept-out-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-81dd91e36662815c8ed0",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 383,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "states the canvas must tell apart",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 426,
+          "column": 6,
+          "specs": [
+            {
+              "title": "a malformed response draws nothing at all, and says why",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 595,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:52.198Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-99db9-nothing-at-all-and-says-why-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-9818d7c64c269ed68e10",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 427,
+              "column": 3
+            },
+            {
+              "title": "a transport failure is a different state from a malformed one",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 575,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:52.801Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-7f792--state-from-a-malformed-one-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-e62da451102fd22e664c",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 441,
+              "column": 3
+            },
+            {
+              "title": "an unconnected artifact renders as a normal card, not as empty containers",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1449,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:53.383Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-19fe9-ard-not-as-empty-containers-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-62b362a893dd9a4a5569",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 450,
+              "column": 3
+            },
+            {
+              "title": "a level with no verification discipline states the reason and invents nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1449,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:54.842Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-e3407--reason-and-invents-nothing-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-1187b45e217338e3e29d",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 461,
+              "column": 3
+            },
+            {
+              "title": "a filter that empties a lane leaves the lane in place and says so",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1782,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:56.298Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-dc44e-e-lane-in-place-and-says-so-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-350ab8e8f879abeca72a",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 475,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "shared canvas behaviour",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 486,
+          "column": 6,
+          "specs": [
+            {
+              "title": "the board zooms, changes density tier and refits",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2331,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:27:58.087Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-9f1ff-ges-density-tier-and-refits-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-e00f1760779fc4baec1f",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 487,
+              "column": 3
+            },
+            {
+              "title": "a density tier drops card content instead of shrinking it",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1520,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:00.426Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-bc869-ent-instead-of-shrinking-it-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-14a484af5580fdbc92cc",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 532,
+              "column": 3
+            },
+            {
+              "title": "dragging a lane band rolls that lane",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1975,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:01.952Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-7737f-a-lane-band-rolls-that-lane-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-75f14aaae1ac13009b66",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 548,
+              "column": 3
+            },
+            {
+              "title": "selecting a record makes its linked records reachable in their own lanes",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2096,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:03.936Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-b0e1f-eachable-in-their-own-lanes-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-0d29edb65179ee50d514",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 560,
+              "column": 3
+            },
+            {
+              "title": "the detail panel never comes to rest on a directly linked record",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4839,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:06.038Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-3a1a2-on-a-directly-linked-record-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-9731e7b47faf49fb9012",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 593,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "keyboard access",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 647,
+          "column": 6,
+          "specs": [
+            {
+              "title": "tabbing across lanes never rests focus on a card the canvas has hidden",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2820,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:10.884Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-k-4f843--card-the-canvas-has-hidden-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-01036d564b2ea5d943ab",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 658,
+              "column": 3
+            },
+            {
+              "title": "cards are reachable and activate, and each lane holds one tab stop",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2029,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:13.713Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-k-19665-ach-lane-holds-one-tab-stop-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-62ee57192ee46f53d5e6",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 687,
+              "column": 3
+            },
+            {
+              "title": "arrow keys move within a lane and the lane rolls to keep the focused card visible",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1861,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:15.751Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-k-68189-ep-the-focused-card-visible-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-76329c9137409f048fe7",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 702,
+              "column": 3
+            },
+            {
+              "title": "the traced web is announced, not only drawn",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1798,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:17.619Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-k-f0117-is-announced-not-only-drawn-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-cf02aae2b6785eb016af",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 718,
+              "column": 3
+            },
+            {
+              "title": "the canvas keeps its group role and names the artifact the thread is about",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1941,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:19.425Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-k-07b73-rtifact-the-thread-is-about-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-c596bdc3808972bbbb15",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 729,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "suspect meaning survives the density tiers",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 742,
+          "column": 6,
+          "specs": [
+            {
+              "title": "the suspect word is visible at the tier a six-lane thread lands on",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2871,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:21.384Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-d4b8a--a-six-lane-thread-lands-on-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-d77dda34d3981a5d57d9",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 743,
+              "column": 3
+            },
+            {
+              "title": "the suspect word survives the compact tier the reader zooms out to",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2979,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:24.298Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-859f8-ier-the-reader-zooms-out-to-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-f29ee2ad450cf5938f94",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 766,
+              "column": 3
+            },
+            {
+              "title": "it stays visible at the detailed tier too",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2920,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:27.291Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-0a6d6-le-at-the-detailed-tier-too-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-d0d815c4accaee56d332",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 778,
+              "column": 3
+            },
+            {
+              "title": "it is still visible at the dense tier, to a sighted reader",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3593,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:30.228Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-2fdc3-se-tier-to-a-sighted-reader-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-21a2bf1f1ec50edb839c",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 790,
+              "column": 3
+            },
+            {
+              "title": "the suspect word is never inside a density-gated container",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1565,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:33.829Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-s-fa544-e-a-density-gated-container-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-fdd587cace9aac3fea52",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 826,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "the loading frame",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 839,
+          "column": 6,
+          "specs": [
+            {
+              "title": "lane bands and headers are up before any card arrives",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 736,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:35.422Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-t-ef022--up-before-any-card-arrives-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-5fdb758e3dd93c331e91",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 840,
+              "column": 3
+            },
+            {
+              "title": "a refused response replaces the frame rather than leaving a skeleton up",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 624,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:36.167Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-t-fcbcd--than-leaving-a-skeleton-up-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-89987a3514472637a2d7",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 854,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "a rolled lane survives a re-render",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 862,
+          "column": 6,
+          "specs": [
+            {
+              "title": "leaving an unselected hover removes only the temporary emphasis and keeps a manual roll",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 5372,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:36.798Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-a-4d77f-sis-and-keeps-a-manual-roll-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-26a7c2bcb69cd799f8cd",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 863,
+              "column": 3
+            },
+            {
+              "title": "selecting a record never moves the cards outside its thread",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4023,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:42.177Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-a-79e33-he-cards-outside-its-thread-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-8ab86f0f923275bbafb3",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 905,
+              "column": 3
+            },
+            {
+              "title": "re-docking the panel still reframes the board",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2527,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:46.207Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-a-97c48-el-still-reframes-the-board-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-852cc212a8d635d04afe",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 970,
+              "column": 3
+            },
+            {
+              "title": "a dock that cannot hold the selected record gives way to one that can",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2539,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:48.741Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-a-733de-d-gives-way-to-one-that-can-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-a5a90a834d87957b5963",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 990,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "a graph change still re-syncs and re-frames",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 1034,
+          "column": 6,
+          "specs": [
+            {
+              "title": "re-pointing the selected record's link brings the new record into view",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2314,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:51.290Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-a-5c0d0-gs-the-new-record-into-view-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-1ebbceae9c6208327272",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 1037,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "a selection made before the viewport settled",
+          "file": "artifact-thread-rendered.spec.ts",
+          "line": 1093,
+          "column": 6,
+          "specs": [
+            {
+              "title": "is synchronised and framed once a real frame arrives",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "rendered",
+                  "projectName": "rendered",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2680,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T00:28:53.611Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\artifact-thread-rendered-a-8b6eb-d-once-a-real-frame-arrives-rendered\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "dcf026310cff28d82a41-c0b7d4b59fa1812828a4",
+              "file": "artifact-thread-rendered.spec.ts",
+              "line": 1096,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "digital-thread-core-interaction.spec.ts",
+      "file": "digital-thread-core-interaction.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "a tall partially visible card stays painted and its native tail action becomes reachable by rolling",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2188,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:28:56.338Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-00e3e-ecomes-reachable-by-rolling-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-810371a2be57ad5de32c",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 30,
+          "column": 1
+        },
+        {
+          "title": "StrictMode arrival clears easing and keeps a revealed Artifact card pointer accessible",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1670,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:28:58.535Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-7ed55-act-card-pointer-accessible-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-c7e8ae4e9c14c98d657d",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 63,
+          "column": 1
+        },
+        {
+          "title": "continuation affordances stay beside the inspector in every dock",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2263,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:00.213Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-2b590-the-inspector-in-every-dock-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-31e70ceaa251bcf675f7",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 78,
+          "column": 1
+        },
+        {
+          "title": "overflowing Show controls own wheel input and remain keyboard reachable",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1835,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:02.487Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-d6b0c-d-remain-keyboard-reachable-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-1d929dbbb6406d3355fa",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 98,
+          "column": 1
+        },
+        {
+          "title": "Bottom long-text identity and Right dense relationships scroll to their actual ends",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3030,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:04.335Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-b69a9-scroll-to-their-actual-ends-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-d220ee0bccc32ded5c33",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 121,
+          "column": 1
+        },
+        {
+          "title": "a touch swipe starting between Show buttons scrolls the strip without moving the camera",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1616,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:07.375Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-eb062-p-without-moving-the-camera-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-0ea2819e457794b72f21",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 154,
+          "column": 1
+        },
+        {
+          "title": "unselected hover prepares an entirely left and above linked card without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2557,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:09.000Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-ef9ea-ard-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-cd423122729dbcf4b7a6",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 183,
+          "column": 1
+        },
+        {
+          "title": "hover emphasises without moving the camera or the source card",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1596,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:11.566Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-b9734-e-camera-or-the-source-card-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-26089ca089b55b746b13",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 290,
+          "column": 1
+        },
+        {
+          "title": "hover emphasis ends without a popup and without a camera restore",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2085,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:13.172Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-8c7a5-nd-without-a-camera-restore-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-ca18393348b16f2e2011",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 307,
+          "column": 1
+        },
+        {
+          "title": "the real card is the click target and selection is persistent",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1689,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:15.266Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-3c22b-and-selection-is-persistent-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-b6d2840bc23f9a8597f9",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 321,
+          "column": 1
+        },
+        {
+          "title": "a dense thread keeps every record reachable through its explicit reveal action",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 916,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:16.963Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-1768a--its-explicit-reveal-action-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7e0b48ece9551631f762",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 337,
+          "column": 1
+        },
+        {
+          "title": "a revealed lane can be scrolled into its temporary range and clear does not snap it back",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6111,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:17.887Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-1bc39-clear-does-not-snap-it-back-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-3fe7184f89e6a84769cc",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 362,
+          "column": 1
+        },
+        {
+          "title": "Inside a change: selected hover is inert and a selected record owns its thread",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2977,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:24.006Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-e6f60-cted-record-owns-its-thread-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-b74fa1ee615d1493c160",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 681,
+          "column": 1
+        },
+        {
+          "title": "Artifact thread: selected hover leaves the arrival selection unchanged",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2563,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:26.991Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-1f474-arrival-selection-unchanged-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-422c95c1b67d5c24b9ba",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 703,
+          "column": 1
+        },
+        {
+          "title": "Network: quiet to unselected hover after 0 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2192,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:29.562Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-59dc0-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7198f59fb758eafce0e4",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 726,
+          "column": 4
+        },
+        {
+          "title": "Inside: quiet to unselected hover after 0 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2149,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:31.763Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-0cb31-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e9eafda3f963f3d1a09a",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 726,
+          "column": 4
+        },
+        {
+          "title": "Artifact: quiet to unselected hover after 0 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2234,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:33.920Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-fd88a-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-9b45ac4bfbe63b633934",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 726,
+          "column": 4
+        },
+        {
+          "title": "Network: quiet to unselected hover after 1 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2250,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:36.166Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-dc042-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-0f9ece0645312d8ac5e6",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 726,
+          "column": 4
+        },
+        {
+          "title": "Inside: quiet to unselected hover after 1 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2232,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:38.423Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-ed4be-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-8d88301f46987e45b582",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 726,
+          "column": 4
+        },
+        {
+          "title": "Artifact: quiet to unselected hover after 1 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2332,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:40.662Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-8efed-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-5c49e54bb3881e08ea21",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 726,
+          "column": 4
+        },
+        {
+          "title": "Network: quiet to unselected hover after 3 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2600,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:43.002Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-08907-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-b885dc221d252fb9b729",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 726,
+          "column": 4
+        },
+        {
+          "title": "Inside: quiet to unselected hover after 3 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2294,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:45.613Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-d9e75-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-26681f01c0533849aec9",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 726,
+          "column": 4
+        },
+        {
+          "title": "Artifact: quiet to unselected hover after 3 zoom steps changes emphasis without camera movement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2312,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:47.915Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-ce5d0-sis-without-camera-movement-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-ed0db2a2082854fcae6a",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 726,
+          "column": 4
+        },
+        {
+          "title": "same-tier rendered linked growth repairs only colliding temporary geometry and converges",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4164,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:50.234Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-66bf2-rary-geometry-and-converges-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-c98ef4d140d3dc0d1d0a",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 756,
+          "column": 39
+        },
+        {
+          "title": "same-tier rendered promoted-subject growth repairs only colliding temporary geometry and converges",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4410,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:54.405Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-fb530-rary-geometry-and-converges-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-18c5c36bf34f3bf1a53d",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 756,
+          "column": 39
+        },
+        {
+          "title": "a hidden lane's linked endpoint arrives at a useful height when the reader pans to it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2434,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:29:58.823Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-fd06b--when-the-reader-pans-to-it-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-07d46c6929a93e30caae",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 802,
+          "column": 1
+        },
+        {
+          "title": "manual vertical exploration survives horizontal away and back",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3579,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:01.266Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-f074a-es-horizontal-away-and-back-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-25f456f1b564f58891e8",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 853,
+          "column": 1
+        },
+        {
+          "title": "a linked card is revealed automatically into available space without moving the camera",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3440,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:04.858Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-f0bee-e-without-moving-the-camera-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e5bca653c820c293554a",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 931,
+          "column": 1
+        },
+        {
+          "title": "clicking a relocated linked card keeps it where the reader saw it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4000,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:08.306Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-aad5a--it-where-the-reader-saw-it-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-df2bdcb39a75c4f6dae7",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 990,
+          "column": 1
+        },
+        {
+          "title": "a drag takes over an automatic camera move from the displayed position",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2848,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:12.315Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-e8723-from-the-displayed-position-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-98e8c81c01a3f799f935",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1044,
+          "column": 1
+        },
+        {
+          "title": "reduced motion reaches the same arrangement without animating",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2015,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:15.171Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-65b86-rangement-without-animating-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-5bc587c7227c59f101fa",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1138,
+          "column": 1
+        },
+        {
+          "title": "clicking during an incoming reveal keeps the arrangement and selects that subject",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3378,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:17.193Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-aa262-nt-and-selects-that-subject-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7db58906581161f0995c",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1173,
+          "column": 1
+        },
+        {
+          "title": "a new selection during cleanup replaces the old subject cleanly",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3907,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:20.582Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-fda8e-ces-the-old-subject-cleanly-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7cc0d8268ad9f54fb4a5",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1262,
+          "column": 1
+        },
+        {
+          "title": "clearing during motion stops the camera where the reader saw it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1637,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:24.498Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-1c67a-era-where-the-reader-saw-it-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e465a44bb89bc79a368d",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1347,
+          "column": 1
+        },
+        {
+          "title": "Arrow Down moves focus within the same lane and keeps it visible",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1051,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:26.143Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-e8220-e-lane-and-keeps-it-visible-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e5eeebf043fa9ab0d1c2",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1381,
+          "column": 1
+        },
+        {
+          "title": "a density change after manual exploration leaves no overlapping cards",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2712,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:27.204Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-050e4-leaves-no-overlapping-cards-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-e62ff13c22f8939ac35c",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1415,
+          "column": 1
+        },
+        {
+          "title": "a scope change resets navigation while a same-scope refresh keeps it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4033,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:29.923Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-1fbef-same-scope-refresh-keeps-it-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-58ddd770df534bce6dcc",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1473,
+          "column": 1
+        },
+        {
+          "title": "a hidden lane's endpoint arrives at a useful height on first exposure",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2950,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:33.964Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-3464a-ul-height-on-first-exposure-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-8a27a418fd3622b76ec6",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1537,
+          "column": 1
+        },
+        {
+          "title": "four-direction continuation follows the usable boundary during selected exploration",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4550,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:36.921Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-bf024-during-selected-exploration-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-9f1f3a5e812ec9c88c52",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1583,
+          "column": 1
+        },
+        {
+          "title": "pointer identity, cancellation and unmount clean up the active gesture",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2319,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:41.479Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-9cbb0-clean-up-the-active-gesture-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-cb8412a5f2a2b0c46de3",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1619,
+          "column": 1
+        },
+        {
+          "title": "actual click framing interpolates all matrix axes with coherent edges and hit targets",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2626,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:43.805Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "displayed-click-matrices",
+                      "contentType": "application/json",
+                      "body": "WwogIHsKICAgICJ0IjogMC4wOTk5OTk5OTQwMzk1MzU1MiwKICAgICJheGVzIjogWwogICAgICAwLjU4LAogICAgICAwLAogICAgICAwLAogICAgICAwLjU4LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiBmYWxzZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IG51bGwKICB9LAogIHsKICAgICJ0IjogMTIuNSwKICAgICJheGVzIjogWwogICAgICAwLjU4LAogICAgICAwLAogICAgICAwLAogICAgICAwLjU4LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiBmYWxzZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IG51bGwKICB9LAogIHsKICAgICJ0IjogMjcuNjk5OTk5OTg4MDc5MDcsCiAgICAiYXhlcyI6IFsKICAgICAgMC41OCwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC41OCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogZmFsc2UsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiBudWxsCiAgfSwKICB7CiAgICAidCI6IDEyMC41LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNTgsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNTgsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTU5NjU2ODY2MzIxNzExMjgKICB9LAogIHsKICAgICJ0IjogMTI3LjkwMDAwMDAwNTk2MDQ2LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNTgsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNTgsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTU5NjU2ODY2MzIxNzExMjgKICB9LAogIHsKICAgICJ0IjogMTQ0LjE5OTk5OTk4ODA3OTA3LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNTkzMzIxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjU5MzMyMSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAxNTg3NzM3NTAwOTI2Nzc4CiAgfSwKICB7CiAgICAidCI6IDE2MC41LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNjA2NTQxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjYwNjU0MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAxNjQyMDUyODE1NDQxMjc1CiAgfSwKICB7CiAgICAidCI6IDE3Ni4zMDAwMDAwMTE5MjA5MywKICAgICJheGVzIjogWwogICAgICAwLjYxOTQzNSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC42MTk0MzUsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTY2Njg4MjE2MzEzNTU5NjgKICB9LAogIHsKICAgICJ0IjogMTkzLjgwMDAwMDAxMTkyMDkzLAogICAgImF4ZXMiOiBbCiAgICAgIDAuNjMyMjI2LAogICAgICAwLAogICAgICAwLAogICAgICAwLjYzMjIyNiwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAxNzA1NzM1NDEzNzkzMjYzNAogIH0sCiAgewogICAgInQiOiAyMTAuNSwKICAgICJheGVzIjogWwogICAgICAwLjY0NDY2MywKICAgICAgMCwKICAgICAgMCwKICAgICAgMC42NDQ2NjMsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTcwNTI1NDY2NDg5ODM0OAogIH0sCiAgewogICAgInQiOiAyMjYuNjk5OTk5OTg4MDc5MDcsCiAgICAiYXhlcyI6IFsKICAgICAgMC42NTY1OTYsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNjU2NTk2LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE3NjkzMzYwMTgxMjgzNDI0CiAgfSwKICB7CiAgICAidCI6IDI0My45MDAwMDAwMDU5NjA0NiwKICAgICJheGVzIjogWwogICAgICAwLjY2ODE2NSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC42NjgxNjUsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTc4NTcwNzU4MjkzOTcyMTgKICB9LAogIHsKICAgICJ0IjogMjU5LjQwMDAwMDAwNTk2MDQ2LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNjc5MDQxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjY3OTA0MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAxODIzMzM5NjcxODg2OTY5OQogIH0sCiAgewogICAgInQiOiAyNzcuMTk5OTk5OTg4MDc5MDcsCiAgICAiYXhlcyI6IFsKICAgICAgMC42ODkzODksCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNjg5Mzg5LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE4ODE4NDI1OTA3MDU2NzM1CiAgfSwKICB7CiAgICAidCI6IDI5NCwKICAgICJheGVzIjogWwogICAgICAwLjY5OTEyMiwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC42OTkxMjIsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTg2NjgwNjk3ODQ1NTMxNTQKICB9LAogIHsKICAgICJ0IjogMzEwLjQwMDAwMDAwNTk2MDQ2LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzA4MTgzLAogICAgICAwLAogICAgICAwLAogICAgICAwLjcwODE4MywKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAxODc3NjE4NjYzNjg0MTg4NQogIH0sCiAgewogICAgInQiOiAzMjcuNjk5OTk5OTg4MDc5MDcsCiAgICAiYXhlcyI6IFsKICAgICAgMC43MTY2NDEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzE2NjQxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE5NDI0NzU2MTIxNjc5ODIKICB9LAogIHsKICAgICJ0IjogMzQzLjA5OTk5OTk5NDAzOTU0LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzI0NjA0LAogICAgICAwLAogICAgICAwLAogICAgICAwLjcyNDYwNCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAxOTM2MTQzMzcxMjY3NDYyNQogIH0sCiAgewogICAgInQiOiAzNjAuNTk5OTk5OTk0MDM5NTQsCiAgICAiYXhlcyI6IFsKICAgICAgMC43MzE5MDcsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzMxOTA3LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDE5NjY4OTY1MjM4MTExMDE0CiAgfSwKICB7CiAgICAidCI6IDM3Ni40MDAwMDAwMDU5NjA0NiwKICAgICJheGVzIjogWwogICAgICAwLjczODcxNywKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43Mzg3MTcsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMTk5MzkzNTgzMzg2NjA4OTUKICB9LAogIHsKICAgICJ0IjogMzk0LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzQ1MDE4LAogICAgICAwLAogICAgICAwLAogICAgICAwLjc0NTAxOCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAxOTkzMTQyODIzODM1MTE0NQogIH0sCiAgewogICAgInQiOiA0MDkuNjk5OTk5OTg4MDc5MDcsCiAgICAiYXhlcyI6IFsKICAgICAgMC43NTA4MTEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzUwODExLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIwMTgzOTY4ODIzMDYyMDYKICB9LAogIHsKICAgICJ0IjogNDI2LjQwMDAwMDAwNTk2MDQ2LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzU2MTY0LAogICAgICAwLAogICAgICAwLAogICAgICAwLjc1NjE2NCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMDUxMTcyMzUzOTU4NDYzNgogIH0sCiAgewogICAgInQiOiA0NDQuNSwKICAgICJheGVzIjogWwogICAgICAwLjc2MTEzOSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43NjExMzksCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjAzNDc2NTc5MzM4MjU3NgogIH0sCiAgewogICAgInQiOiA0NTkuNjk5OTk5OTg4MDc5MDcsCiAgICAiYXhlcyI6IFsKICAgICAgMC43NjU3MywKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43NjU3MywKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMDUyMDE2OTAyNTUzMDc3NwogIH0sCiAgewogICAgInQiOiA0NzcuMzAwMDAwMDExOTIwOTMsCiAgICAiYXhlcyI6IFsKICAgICAgMC43Njk5NDEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzY5OTQxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIwOTMxNTk4MjkyMDA4ODU3CiAgfSwKICB7CiAgICAidCI6IDQ5My4xOTk5OTk5ODgwNzkwNywKICAgICJheGVzIjogWwogICAgICAwLjc3Mzg0OSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43NzM4NDksCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjA5ODc5NjAyMjE1MzIzNzYKICB9LAogIHsKICAgICJ0IjogNTA5LjUsCiAgICAiYXhlcyI6IFsKICAgICAgMC43Nzc0NTIsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzc3NDUyLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIwNjk1MTQ5NDcwMzg0NDIKICB9LAogIHsKICAgICJ0IjogNTI2LjgwMDAwMDAxMTkyMDksCiAgICAiYXhlcyI6IFsKICAgICAgMC43ODA3NTEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzgwNzUxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIwODQ5NTY3NTU3NjYxNDMKICB9LAogIHsKICAgICJ0IjogNTQzLjA5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC43ODM4MDgsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzgzODA4LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxMjM5NDQ2MTgwMDYxMzUKICB9LAogIHsKICAgICJ0IjogNTYwLAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzg2NjIsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzg2NjIsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjEyODE3OTU3MzUwMzUzMDMKICB9LAogIHsKICAgICJ0IjogNTc2LjQwMDAwMDAwNTk2MDUsCiAgICAiYXhlcyI6IFsKICAgICAgMC43ODkyMDUsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzg5MjA1LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxMzg5NTM5NDE4ODA1NzI1CiAgfSwKICB7CiAgICAidCI6IDU5My4zMDAwMDAwMTE5MjA5LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzkxNTY0LAogICAgICAwLAogICAgICAwLAogICAgICAwLjc5MTU2NCwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTIzMDEzOTQ5MTMwODM2NAogIH0sCiAgewogICAgInQiOiA2MTAuMDk5OTk5OTk0MDM5NSwKICAgICJheGVzIjogWwogICAgICAwLjc5MzczOSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC43OTM3MzksCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjEzNzgxNDAyNzYwNTYKICB9LAogIHsKICAgICJ0IjogNjI2LjgwMDAwMDAxMTkyMDksCiAgICAiYXhlcyI6IFsKICAgICAgMC43OTU3MzEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuNzk1NzMxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxMjc5MTc1MjM5MjE0OTY1CiAgfSwKICB7CiAgICAidCI6IDY0My40MDAwMDAwMDU5NjA1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzk3NTQ5LAogICAgICAwLAogICAgICAwLAogICAgICAwLjc5NzU0OSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTc5NzgzMTE0MTcyNTUxCiAgfSwKICB7CiAgICAidCI6IDY2MC45MDAwMDAwMDU5NjA1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuNzk5MTk3LAogICAgICAwLAogICAgICAwLAogICAgICAwLjc5OTE5NywKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTY1NzQxOTgzMDQ4OTc0NAogIH0sCiAgewogICAgInQiOiA2NzYuMTk5OTk5OTg4MDc5MSwKICAgICJheGVzIjogWwogICAgICAwLjgwMDcwMywKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDA3MDMsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE3Mzg1MTE2MTg0MjMyMTcKICB9LAogIHsKICAgICJ0IjogNjkzLjUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MDIwNTksCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODAyMDU5LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxMzU1NDEzOTMxNTg3NDY0CiAgfSwKICB7CiAgICAidCI6IDcxMCwKICAgICJheGVzIjogWwogICAgICAwLjgwMzI5LAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwMzI5LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODQ3NTE2NDEzNzk5ODk1CiAgfSwKICB7CiAgICAidCI6IDcyNi42OTk5OTk5ODgwNzkxLAogICAgImF4ZXMiOiBbCiAgICAgIDAuODA0Mzk1LAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwNDM5NSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTQ4OTgzOTc3OTc0Njk0NAogIH0sCiAgewogICAgInQiOiA3NDMuMzAwMDAwMDExOTIwOSwKICAgICJheGVzIjogWwogICAgICAwLjgwNTM3NSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDUzNzUsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE3NTk0MzM2NzQzMzMxOTUKICB9LAogIHsKICAgICJ0IjogNzU5LjY5OTk5OTk4ODA3OTEsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MDYyNSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDYyNSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTc4NTM3NzM3MzkzMDcxNAogIH0sCiAgewogICAgInQiOiA3NzYuMTk5OTk5OTg4MDc5MSwKICAgICJheGVzIjogWwogICAgICAwLjgwNzAxNSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDcwMTUsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE3NTcwOTMyNjcwNjk2NQogIH0sCiAgewogICAgInQiOiA4MDIuNTk5OTk5OTk0MDM5NSwKICAgICJheGVzIjogWwogICAgICAwLjgwNzY4NCwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDc2ODQsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDk2OTA3MjkyNDE5OTMKICB9LAogIHsKICAgICJ0IjogODA5LjUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MDgyNTksCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODA4MjU5LAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxNTEwNDUxMjc0NDgwMTQ3CiAgfSwKICB7CiAgICAidCI6IDgyNi40MDAwMDAwMDU5NjA1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODA4NzQxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwODc0MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTkxMDg2MTgzMDE3ODg3NAogIH0sCiAgewogICAgInQiOiA4NDIuNDAwMDAwMDA1OTYwNSwKICAgICJheGVzIjogWwogICAgICAwLjgwOTE0MywKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDkxNDMsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE3ODIyMTMyOTQ3Mjc2MjYKICB9LAogIHsKICAgICJ0IjogODYwLjkwMDAwMDAwNTk2MDUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MDk0NiwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDk0NiwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTcxODAyMzQ3MjIwMzY0CiAgfSwKICB7CiAgICAidCI6IDg3NS45MDAwMDAwMDU5NjA1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODA5NzAxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgwOTcwMSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTczMDQ5MjU3NzQ4OTcxMwogIH0sCiAgewogICAgInQiOiA4OTMuNDAwMDAwMDA1OTYwNSwKICAgICJheGVzIjogWwogICAgICAwLjgwOTg2OSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDk4NjksCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjIwMjU4NzY3NTY5NzAzMgogIH0sCiAgewogICAgInQiOiA5MDkuOTAwMDAwMDA1OTYwNSwKICAgICJheGVzIjogWwogICAgICAwLjgwOTk2OCwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MDk5NjgsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE3MDU0ODI0Mjc1OTE5NgogIH0sCiAgewogICAgInQiOiA5MjYuMDk5OTk5OTk0MDM5NSwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDk0Mi45MDAwMDAwMDU5NjA1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogOTYwLjA5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiA5NzYuNSwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDk5My44MDAwMDAwMTE5MjA5LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTAwOS42OTk5OTk5ODgwNzkxLAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTAyNS44MDAwMDAwMTE5MjEsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMDQyLjQwMDAwMDAwNTk2MDUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMDU5LjU5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMDc1LjgwMDAwMDAxMTkyMSwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDEwOTIuMTk5OTk5OTg4MDc5LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTEwOS40MDAwMDAwMDU5NjA1LAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTEyNi4zMDAwMDAwMTE5MjEsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMTQyLjQwMDAwMDAwNTk2MDUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMTYwLjgwMDAwMDAxMTkyMSwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDExNzYsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMTk0LjA5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMjA5LjA5OTk5OTk5NDAzOTUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMjI2LjQwMDAwMDAwNTk2MDUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMjQyLjUsCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0sCiAgewogICAgInQiOiAxMjYwLjY5OTk5OTk4ODA3OSwKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDEyNzUuODAwMDAwMDExOTIxLAogICAgImF4ZXMiOiBbCiAgICAgIDAuODEsCiAgICAgIDAsCiAgICAgIDAsCiAgICAgIDAuODEsCiAgICAgIDMxNC4wNCwKICAgICAgMTk4LjE4NgogICAgXSwKICAgICJzZWxlY3RlZCI6IHRydWUsCiAgICAiaGl0IjogdHJ1ZSwKICAgICJlZGdlRXJyb3IiOiAwLjAwMjE4MDY0ODQ5NzkyNjU0MDYKICB9LAogIHsKICAgICJ0IjogMTI5MywKICAgICJheGVzIjogWwogICAgICAwLjgxLAogICAgICAwLAogICAgICAwLAogICAgICAwLjgxLAogICAgICAzMTQuMDQsCiAgICAgIDE5OC4xODYKICAgIF0sCiAgICAic2VsZWN0ZWQiOiB0cnVlLAogICAgImhpdCI6IHRydWUsCiAgICAiZWRnZUVycm9yIjogMC4wMDIxODA2NDg0OTc5MjY1NDA2CiAgfSwKICB7CiAgICAidCI6IDEzMDksCiAgICAiYXhlcyI6IFsKICAgICAgMC44MSwKICAgICAgMCwKICAgICAgMCwKICAgICAgMC44MSwKICAgICAgMzE0LjA0LAogICAgICAxOTguMTg2CiAgICBdLAogICAgInNlbGVjdGVkIjogdHJ1ZSwKICAgICJoaXQiOiB0cnVlLAogICAgImVkZ2VFcnJvciI6IDAuMDAyMTgwNjQ4NDk3OTI2NTQwNgogIH0KXQ=="
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-427c3-erent-edges-and-hit-targets-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-9e1bb77ad1c998d9ef3d",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1650,
+          "column": 1
+        },
+        {
+          "title": "manual input interrupts real click framing from its displayed position",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "rendered",
+              "projectName": "rendered",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2601,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T00:30:46.438Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "click-motion-takeover",
+                      "contentType": "application/json",
+                      "body": "ewogICJwcmVzc2VkIjogWwogICAgMC43MTY2NjQsCiAgICAwLAogICAgMCwKICAgIDAuNzE2NjY0LAogICAgMzE0LjA0LAogICAgMTk4LjE4NgogIF0sCiAgImhlbGQiOiBbCiAgICAwLjcxNjY2NCwKICAgIDAsCiAgICAwLAogICAgMC43MTY2NjQsCiAgICAzMTQuMDQsCiAgICAxOTguMTg2CiAgXSwKICAicmVsZWFzZWQiOiBbCiAgICAwLjcxNjY2NCwKICAgIDAsCiAgICAwLAogICAgMC43MTY2NjQsCiAgICAxNjQuMDQsCiAgICAxOTguMTg2CiAgXSwKICAiZGVsYXllZCI6IFsKICAgIDAuNzE2NjY0LAogICAgMCwKICAgIDAsCiAgICAwLjcxNjY2NCwKICAgIDE2NC4wNCwKICAgIDE5OC4xODYKICBdCn0="
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\rendered-80fdb568-results\\digital-thread-core-intera-8f7a2-from-its-displayed-position-rendered\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "524fc18e4900294b8134-7edc6f1b57b8d4a30010",
+          "file": "digital-thread-core-interaction.spec.ts",
+          "line": 1704,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-13T00:27:17.333Z",
+    "duration": 212544.507,
+    "expected": 88,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

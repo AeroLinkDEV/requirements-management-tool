@@ -1,0 +1,57 @@
+Fast feedback aggregate (advisory)	Set up job	﻿2026-09-13T00:40:24.4543784Z Current runner version: '2.337.0'
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4611505Z ##[group]Runner Image Provisioner
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4612940Z Hosted Compute Agent
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4614105Z Version: 20260828.587
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4615370Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4617366Z Build Date: 2026-08-28T16:44:25Z
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4618742Z Worker ID: {ece87e92-9a83-4154-98c7-a854d37b4df9}
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4620077Z Azure Region: northcentralus
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4621334Z ##[endgroup]
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4623682Z ##[group]Operating System
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4624802Z Microsoft Windows Server 2025
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4625914Z 10.0.26100
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4626802Z Datacenter
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4627656Z ##[endgroup]
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4628684Z ##[group]Runner Image
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4629785Z Image: windows-2025-vs2026
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4630965Z Version: 20260907.229.1
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4633081Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20260907.229/images/windows/Windows2025-VS2026-Readme.md
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4637223Z Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20260907.229
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4639168Z ##[endgroup]
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4641243Z ##[group]GITHUB_TOKEN Permissions
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4644105Z Contents: read
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4645241Z Metadata: read
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4646189Z ##[endgroup]
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4649328Z Secret source: Actions
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4650935Z Cache mode: write
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.4652218Z Prepare workflow directory
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.6208558Z Prepare all required actions
+Fast feedback aggregate (advisory)	Set up job	2026-09-13T00:40:24.6305585Z Complete job name: Fast feedback aggregate (advisory)
+Fast feedback aggregate (advisory)	Summarize Fast feedback	﻿2026-09-13T00:40:24.8275226Z ##[group]Run $ErrorActionPreference = 'Stop'
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8277065Z ^[[36;1m$ErrorActionPreference = 'Stop'^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8278458Z ^[[36;1m$backend = 'success'^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8279572Z ^[[36;1m$client = 'success'^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8280786Z ^[[36;1m$backendMs = [int64]('0145833')^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8282023Z ^[[36;1m$clientMs = [int64]('0193536')^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8283585Z ^[[36;1m$commandCriticalPathMs = [Math]::Max($backendMs, $clientMs)^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8285445Z ^[[36;1m@(^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8286175Z ^[[36;1m  '## Advisory Fast PR feedback',^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8287009Z ^[[36;1m  '',^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8287725Z ^[[36;1m  "- backend-fast: $backend ($backendMs ms command time)",^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8289425Z ^[[36;1m  "- client-fast: $client ($clientMs ms command time)",^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8290448Z ^[[36;1m  "- command critical path: $commandCriticalPathMs ms",^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8291202Z ^[[36;1m  '- target: 240000 ms',^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8292354Z ^[[36;1m  '- API-independent client logic and rendered fixtures: additive Fast proof; all identities remain in Full',^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8293585Z ^[[36;1m  '- integrated browsers/PostgreSQL/full matrices: Full proof',^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8294513Z ^[[36;1m  '- merge authority: unchanged Product quality gate',^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8295626Z ^[[36;1m  '- workflow start-to-aggregate timing must be measured from Actions job timestamps before phase 2'^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8296835Z ^[[36;1m) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8297710Z ^[[36;1m^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8298522Z ^[[36;1mif ($backend -ne 'success' -or $client -ne 'success') { throw 'Advisory Fast feedback failed.' }^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8300037Z ^[[36;1mif ($commandCriticalPathMs -gt 240000) { throw "Advisory Fast command critical path exceeded 240000 ms: $commandCriticalPathMs ms." }^[[0m
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8470235Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8471326Z env:
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8471906Z   DOTNET_CLI_TELEMETRY_OPTOUT: 1
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8472523Z   DOTNET_NOLOGO: 1
+Fast feedback aggregate (advisory)	Summarize Fast feedback	2026-09-13T00:40:24.8473036Z ##[endgroup]
+Fast feedback aggregate (advisory)	Complete job	﻿2026-09-13T00:40:27.4950636Z Cleaning up orphan processes

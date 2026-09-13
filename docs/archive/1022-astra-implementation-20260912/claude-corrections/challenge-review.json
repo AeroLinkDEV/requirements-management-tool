@@ -1,0 +1,127 @@
+{
+  "before": {
+    "strip": {
+      "width": 320,
+      "scrollWidth": 2964,
+      "scrollLeft": 0,
+      "pe": "none",
+      "rect": {
+        "x": 12,
+        "y": 508,
+        "width": 320,
+        "height": 26,
+        "top": 508,
+        "right": 332,
+        "bottom": 534,
+        "left": 12
+      }
+    },
+    "identity": {
+      "height": 120,
+      "scrollHeight": 402,
+      "scrollTop": 0,
+      "overflow": "auto"
+    },
+    "camera": "matrix(1.05, 0, 0, 1.05, 49.9, 125)"
+  },
+  "wheelOnButton": {
+    "strip": {
+      "width": 320,
+      "scrollWidth": 2964,
+      "scrollLeft": 400,
+      "pe": "none",
+      "rect": {
+        "x": 12,
+        "y": 508,
+        "width": 320,
+        "height": 26,
+        "top": 508,
+        "right": 332,
+        "bottom": 534,
+        "left": 12
+      }
+    },
+    "identity": {
+      "height": 120,
+      "scrollHeight": 402,
+      "scrollTop": 0,
+      "overflow": "auto"
+    },
+    "camera": "matrix(1.05, 0, 0, 1.05, 49.9, 125)"
+  },
+  "blank": {
+    "x": 54,
+    "y": 508,
+    "hit": "dtCanvas"
+  },
+  "wheelOnGap": {
+    "strip": {
+      "width": 320,
+      "scrollWidth": 2964,
+      "scrollLeft": 400,
+      "pe": "none",
+      "rect": {
+        "x": 12,
+        "y": 508,
+        "width": 320,
+        "height": 26,
+        "top": 508,
+        "right": 332,
+        "bottom": 534,
+        "left": 12
+      }
+    },
+    "identity": {
+      "height": 120,
+      "scrollHeight": 402,
+      "scrollTop": 0,
+      "overflow": "auto"
+    },
+    "camera": "matrix(1.05, 0, 0, 1.05, 49.9, 125)"
+  },
+  "identityScrolled": {
+    "strip": {
+      "width": 320,
+      "scrollWidth": 2964,
+      "scrollLeft": 400,
+      "pe": "none",
+      "rect": {
+        "x": 12,
+        "y": 508,
+        "width": 320,
+        "height": 26,
+        "top": 508,
+        "right": 332,
+        "bottom": 534,
+        "left": 12
+      }
+    },
+    "identity": {
+      "height": 120,
+      "scrollHeight": 402,
+      "scrollTop": 282,
+      "overflow": "auto"
+    },
+    "camera": "matrix(1.05, 0, 0, 1.05, 49.9, 125)"
+  },
+  "panMetrics": {
+    "before": {
+      "LayoutCount": 0,
+      "RecalcStyleCount": 0,
+      "LayoutDuration": 0,
+      "RecalcStyleDuration": 0
+    },
+    "after": {
+      "LayoutCount": 247,
+      "RecalcStyleCount": 298,
+      "LayoutDuration": 0.017794,
+      "RecalcStyleDuration": 0.007051
+    },
+    "delta": {
+      "LayoutCount": 247,
+      "RecalcStyleCount": 298,
+      "LayoutDuration": 0.017794,
+      "RecalcStyleDuration": 0.007051
+    }
+  }
+}
