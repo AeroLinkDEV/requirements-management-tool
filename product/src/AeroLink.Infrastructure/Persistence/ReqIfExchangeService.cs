@@ -153,13 +153,19 @@ public sealed class ReqIfExchangeService(AeroLinkDbContext db, EvidenceFileStore
         package.Position = 0; return ParseXml(package, 0, ladderPolicy);
     }
 
-    private static ReqIfPreviewManifest ParseXml(Stream stream, int attachmentCount, ILadderPolicy ladderPolicy)
+    internal static XDocument ReadSourceXml(Stream stream)
     {
         var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = MaxExpandedBytes, MaxCharactersFromEntities = 0 };
         using var reader = XmlReader.Create(stream, settings); var doc = XDocument.Load(reader, LoadOptions.None);
         if (doc.Root?.Name.LocalName != "REQ-IF") throw new InvalidOperationException("The document root is not REQ-IF.");
+        return doc;
+    }
+
+    private static ReqIfPreviewManifest ParseXml(Stream stream, int attachmentCount, ILadderPolicy ladderPolicy)
+    {
+        var doc = ReadSourceXml(stream);
         var warnings = new List<string>();
-        if (doc.Root.Name.NamespaceName != ReqIfNamespace) warnings.Add($"Namespace '{doc.Root.Name.NamespaceName}' differs from the ReqIF 1.2 namespace.");
+        if (doc.Root!.Name.NamespaceName != ReqIfNamespace) warnings.Add($"Namespace '{doc.Root.Name.NamespaceName}' differs from the ReqIF 1.2 namespace.");
         var version = Value(doc, "REQ-IF-VERSION"); if (version is not ("1.0" or "1.2")) warnings.Add($"Package declares ReqIF version '{version}'. AeroLink targets the ReqIF 1.2 standard and its normative 1.0 XML schema version.");
         var sourceTool = Value(doc, "SOURCE-TOOL-ID");
         var definitions = doc.Descendants().Where(x => x.Name.LocalName.StartsWith("ATTRIBUTE-DEFINITION-", StringComparison.Ordinal)).Select(x => new { Id = Attr(x, "IDENTIFIER"), Name = Attr(x,"LONG-NAME") is { Length: > 0 } name ? name : ChildValue(x, "LONG-NAME") }).Where(x => x.Id.Length > 0).GroupBy(x => x.Id).ToDictionary(x => x.Key, x => x.First().Name);

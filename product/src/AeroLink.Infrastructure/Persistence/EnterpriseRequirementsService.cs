@@ -357,11 +357,7 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderP
 
     private static string SectionName(int i)=>i switch{1=>"Functional Behavior",2=>"Navigation and Guidance",3=>"Data and Interfaces",4=>"Integrity and Monitoring",_=>"Operational Constraints"};
 
-    private static List<string[]> ParseCsv(string text)
-    {
-        var rows=new List<string[]>();var row=new List<string>();var field=new StringBuilder();var quoted=false;
-        for(var i=0;i<text.Length;i++){var c=text[i];if(c=='"'){if(quoted&&i+1<text.Length&&text[i+1]=='"'){field.Append('"');i++;}else quoted=!quoted;}else if(c==','&&!quoted){row.Add(field.ToString());field.Clear();}else if((c=='\r'||c=='\n')&&!quoted){if(c=='\r'&&i+1<text.Length&&text[i+1]=='\n')i++;row.Add(field.ToString());field.Clear();rows.Add(row.ToArray());row=[];}else field.Append(c);}if(field.Length>0||row.Count>0){row.Add(field.ToString());rows.Add(row.ToArray());}return rows;
-    }
+    private static List<string[]> ParseCsv(string text) => InceptionTableReader.CsvRows(text);
     private static List<string[]> ParseXlsx(Stream stream)
     {
         using var zip=new ZipArchive(stream,ZipArchiveMode.Read,true);if(zip.Entries.Sum(x=>x.Length)>WorkbookLimit)throw new InvalidOperationException("The workbook expands beyond the 100 MB safety limit.");XNamespace ns="http://schemas.openxmlformats.org/spreadsheetml/2006/main";var shared=new List<string>();var sharedEntry=zip.GetEntry("xl/sharedStrings.xml");
