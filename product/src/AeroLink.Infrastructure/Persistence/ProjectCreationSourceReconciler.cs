@@ -124,6 +124,9 @@ public static class ProjectCreationSourceReconciler
             if (!mapping.FindingResolutions.TryGetValue(finding, out var reason) || string.IsNullOrWhiteSpace(reason))
                 errors.Add($"Source finding needs an explicit disposition: {finding}");
         foreach (var finding in mapping.FindingResolutions.Keys.Where(x => !source.Findings.Contains(x))) errors.Add($"Disposition does not match a current source finding: {finding}");
+        foreach (var requirement in requirements.Where(x => ladder.ParentLevels(x.Level).Count > 0))
+            if (!traces.Any(x => x.ChildSourceKey == requirement.SourceKey && x.Type == RequirementTraceType.AllocatedFrom))
+                errors.Add($"Object '{requirement.SourceKey}' requires an included exact upstream allocation in the accepted ladder. Include and map its source parent relation, exclude this object, or review a compatible ladder mapping; an excluded reference cannot make it a root.");
         if (requirements.Count == 0) errors.Add("At least one source requirement must be included.");
         string? manifestHash = null;
         if (errors.Count == 0)

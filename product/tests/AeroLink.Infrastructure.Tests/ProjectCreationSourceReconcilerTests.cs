@@ -105,6 +105,26 @@ public sealed class ProjectCreationSourceReconcilerTests
         Assert.False(Reconcile(source with { Objects = [source.Objects[0] with { Kind = "TestCase" }] }, mapping).Ready);
     }
 
+    [Fact]
+    public void ExcludingAParentReferenceCannotSilentlyReclassifyTheChildAsARoot()
+    {
+        var source = Source("foreign/1");
+        source = source with
+        {
+            Objects = [source.Objects[0], source.Objects[0] with { Key = "child", SourceIdentifier = "foreign/2" }],
+            Relations = [new("link", source.Objects[0].Key, "child", "allocation", new Dictionary<string, string>())]
+        };
+        var initial = Mapping(source);
+        var mapping = initial with
+        {
+            Objects = [initial.Objects[0], initial.Objects[1] with { Level = RequirementLevel.HighLevel }],
+            Relations = [new("link", false, "Creator excluded the source relation", null, null)]
+        };
+        Assert.Contains(Reconcile(source, mapping).Errors, x => x.Contains("requires an included exact upstream allocation"));
+        Assert.False(Reconcile(source, mapping with { Relations = [new("link", true, null, RequirementTraceType.DerivedFrom, true)] }).Ready);
+        Assert.True(Reconcile(source, mapping with { Relations = [new("link", true, null, RequirementTraceType.AllocatedFrom, true)] }).Ready);
+    }
+
     private static InceptionReconciliation Reconcile(ProjectCreationSourceAnalysis source, InceptionMapping mapping) =>
         ProjectCreationSourceReconciler.Reconcile(source, mapping, LegacyLadderPolicy.Instance,
             new VerificationMethodPolicy(FoundingVerificationMethods.Ordered), new string('a', 64));
