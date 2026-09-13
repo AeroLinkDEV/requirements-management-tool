@@ -99,6 +99,19 @@ body:has(.buildsLandingPage) { min-width: 0; }
 .softwareBuildCard:has(.buildStatus.planned){border-style:dashed;background:#faf9fc}
 .softwareBuildCard h3 { margin: 14px 0 5px; font: 650 14px var(--font-display); }
 .softwareBuildCard > p { flex: 1; margin: 0 0 13px; color: #536376; font-size: 12px; line-height: 1.45; }
+.softwareBuildCard .buildLifecycleDescription { flex: 0 0 auto; }
+.buildPredecessor {
+  flex: 0 0 auto !important;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 35px;
+  margin: 0 0 13px !important;
+  color: #536376;
+}
+.buildPredecessor strong { color: var(--ink-500); font-size: 12px; }
+.buildPredecessor span { color: var(--ink-800); font-size: 12px; }
+.buildLineageEmpty { margin: 15px 0 0; border: 1px dashed #bdc9d5; border-radius: var(--radius-md); padding: 25px; color: var(--ink-500); font-size: 13px; }
 .softwareBuildCard button { min-height: 38px; border: 1px solid #278aca; border-radius: 7px; background: white; color: #136eaa; font: 650 13px var(--font-body); cursor: pointer; }
 .softwareBuildCard button:hover:not(:disabled) { background: #f0f8fd; border-color: #0e6fae; }
 .softwareBuildCard button:disabled { border-color: #d9dee5; background: #f5f6f8; color: #a8b0bb; cursor: not-allowed; }

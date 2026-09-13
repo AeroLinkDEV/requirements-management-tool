@@ -1,51 +1,44 @@
 import type { AuthUser } from "./IdentityCenter";
 import PortalHeader from "./PortalHeader";
 import { ProjectIcon } from "./ProjectsLanding";
-import { officialBuildName } from "./presentation";
+import { buildVersionOrder, officialBuildName } from "./presentation";
+import type { WorkspaceRelease } from "./workspaceContext";
 import "./SoftwareBuildsLanding.css";
 
-export type SelectableRelease = {
-  id: string;
-  version: string;
-  isReleased: boolean;
-};
+export type SelectableRelease = WorkspaceRelease;
 
-type BuildDefinition = {
-  id: string;
-  version: string;
-  status: "released" | "in-work" | "planned";
-  statusLabel: string;
-  title: string;
-  description: string;
-  isAccessible: boolean;
-  isReleased: boolean;
-  isReadOnly: boolean;
-  isCurrent: boolean;
-  sortOrder: number;
-  isPlan?: boolean;
-};
+function MetadataIcon({ kind }: { kind: "builds" | "released" | "work" }) {
+  const path = kind === "builds"
+    ? <><rect x="3" y="4" width="22" height="18" rx="2"/><path d="M3 10h22M8 2v5m12-5v5M7 16h4m3 0h4"/></>
+    : kind === "released"
+      ? <><path d="M12 3 23 8v7c0 6-5 10-11 13C6 25 1 21 1 15V8z"/><path d="m7 15 3 3 6-7"/></>
+      : <><circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/></>;
+  return <svg viewBox="0 0 26 26" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{path}</svg>;
+}
 
-const softwareBuilds: readonly BuildDefinition[] = [
-  { id: "fms-0-5", version: "0.5", status: "released", statusLabel: "Released", title: "Baseline release", description: "Initial baseline for core FMS capabilities.", isAccessible: false, isReleased: true, isReadOnly: true, isCurrent: false, sortOrder: 1 },
-  { id: "fms-1-0", version: "1.0", status: "released", statusLabel: "Released", title: "Feature release", description: "Adds advanced navigation and performance features.", isAccessible: false, isReleased: true, isReadOnly: true, isCurrent: false, sortOrder: 2 },
-  { id: "fms-1-5", version: "1.5", status: "released", statusLabel: "Released", title: "Stability release", description: "Reliability improvements and defect remediation.", isAccessible: true, isReleased: true, isReadOnly: true, isCurrent: false, sortOrder: 3 },
-  { id: "fms-1-6", version: "1.6", status: "in-work", statusLabel: "In Work", title: "Current in-work build", description: "", isAccessible: true, isReleased: false, isReadOnly: false, isCurrent: true, sortOrder: 4 },
-  { id: "plan-next", version: "next", status: "planned", statusLabel: "Planned", title: "Plan next build", description: "Future-build placeholder. No build record has been created.", isAccessible: false, isReleased: false, isReadOnly: false, isCurrent: false, sortOrder: 5, isPlan: true },
-];
+function statusFor(release: SelectableRelease, identity?: string) {
+  if (!identity) return { key: "unavailable", label: "Unavailable" };
+  return release.isReleased
+    ? { key: "released", label: "Released" }
+    : { key: "in-work", label: "In Work" };
+}
 
-function MetadataIcon({ kind }: { kind: "owner" | "created" | "phase" }) {
-  const path = kind === "owner"
-    ? <><circle cx="8" cy="6" r="3"/><circle cx="18" cy="8" r="3"/><path d="M2 18c0-4 3-7 6-7s6 3 6 7M13 18c0-3 2-6 5-6s5 3 5 6"/></>
-    : kind === "created"
-      ? <><rect x="3" y="5" width="19" height="17" rx="2"/><path d="M7 2v6m11-6v6M3 10h19"/></>
-      : <><path d="m3 9 8-7 11 10-8 9L3 9z"/><circle cx="9" cy="8" r="1"/></>;
-  return <svg viewBox="0 0 25 25" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{path}</svg>;
+function sortReleases(releases: SelectableRelease[]) {
+  return [...releases].sort((left, right) => {
+    const leftOrder = buildVersionOrder(left.version);
+    const rightOrder = buildVersionOrder(right.version);
+    if (leftOrder === undefined && rightOrder === undefined) return left.id.localeCompare(right.id);
+    if (leftOrder === undefined) return 1;
+    if (rightOrder === undefined) return -1;
+    return leftOrder - rightOrder || left.id.localeCompare(right.id);
+  });
 }
 
 export default function SoftwareBuildsLanding({
   user,
   releases,
   projectName,
+  softwareProduct,
   onOpenBuild,
   onProjectOverview,
   onImportedBaselines,
@@ -56,6 +49,7 @@ export default function SoftwareBuildsLanding({
   user: AuthUser;
   releases: SelectableRelease[];
   projectName: string;
+  softwareProduct: string;
   onOpenBuild: (release: SelectableRelease) => void;
   onProjectOverview: () => void;
   onImportedBaselines: () => void;
@@ -63,11 +57,14 @@ export default function SoftwareBuildsLanding({
   onProjectConfiguration: () => void;
   onSignOut: () => void;
 }) {
-  const releaseByVersion = new Map(releases.map((release) => [release.version, release]));
+  const ordered = sortReleases(releases);
+  const releaseById = new Map(ordered.map(release => [release.id, release]));
+  const releasedCount = ordered.filter(release => release.isReleased).length;
+  const inWorkCount = ordered.length - releasedCount;
 
   return (
     <div className="buildsLandingPage">
-      <PortalHeader user={user} onSignOut={onSignOut}/>
+      <PortalHeader user={user} onSignOut={onSignOut} />
       <main className="buildsLandingMain">
         <nav className="buildBreadcrumb" aria-label="Breadcrumb">
           <button type="button" onClick={onProjectOverview}>Projects</button>
@@ -80,37 +77,22 @@ export default function SoftwareBuildsLanding({
             <p>Select a build to explore or work on.</p>
           </div>
           <div className="buildsLandingActions">
-            {/* Alongside the import for the same reason: who is on the project, and what their position
-                authorises, is the same across every build it has. There is no build to have entered when the
-                question is who should be allowed in. */}
-            <button type="button" className="personnelButton" onClick={onPersonnel}>
-              Personnel
-            </button>
-            {/* Beside Personnel because it is read against it: whether a stage can be signed is a question
-                about the procedure and the roster together. */}
-            <button type="button" className="approvalConfigurationButton" onClick={onProjectConfiguration}>
-              Project configuration
-            </button>
-            {/* Sits here rather than in a build's navigation because an import does not belong to a build —
-                it creates one. Somebody porting a program in has no build to have entered yet. */}
-            <button type="button" className="importedBaselinesButton" onClick={onImportedBaselines}>
-              Imported baselines
-            </button>
-            <button type="button" className="projectOverviewButton" onClick={onProjectOverview}>
-              <span aria-hidden="true">←</span> Project overview
-            </button>
+            <button type="button" className="personnelButton" onClick={onPersonnel}>Personnel</button>
+            <button type="button" className="approvalConfigurationButton" onClick={onProjectConfiguration}>Project configuration</button>
+            <button type="button" className="importedBaselinesButton" onClick={onImportedBaselines}>Imported baselines</button>
+            <button type="button" className="projectOverviewButton" onClick={onProjectOverview}><span aria-hidden="true">←</span> Project overview</button>
           </div>
         </header>
 
         <section className="buildProjectSummary" aria-labelledby="build-project-name">
-          <span className="buildProjectIcon"><ProjectIcon name="fms"/></span>
+          <span className="buildProjectIcon"><ProjectIcon name="project" /></span>
           <div className="buildProjectContent">
             <h2 id="build-project-name">{projectName}</h2>
-            <p>Requirements traceability, verification, and release planning.</p>
+            <p>{softwareProduct}</p>
             <dl>
-              <div><MetadataIcon kind="owner"/><span><dt>Project owner</dt><dd>Jane Doe</dd></span></div>
-              <div><MetadataIcon kind="created"/><span><dt>Created</dt><dd>Feb 12, 2024</dd></span></div>
-              <div><MetadataIcon kind="phase"/><span><dt>Lifecycle phase</dt><dd>Development</dd></span></div>
+              <div><MetadataIcon kind="builds"/><span><dt>Builds</dt><dd>{ordered.length}</dd></span></div>
+              <div><MetadataIcon kind="released"/><span><dt>Released</dt><dd>{releasedCount}</dd></span></div>
+              <div><MetadataIcon kind="work"/><span><dt>In work</dt><dd>{inWorkCount}</dd></span></div>
             </dl>
           </div>
         </section>
@@ -118,52 +100,57 @@ export default function SoftwareBuildsLanding({
         <section className="buildLineage" aria-labelledby="build-lineage-heading">
           <header>
             <h2 id="build-lineage-heading">Build lineage</h2>
-            <p>Builds are shown in evolutionary order from oldest to newest.</p>
+            <p>Builds are ordered by their canonical version identity. Each edge below comes from the stored predecessor relationship.</p>
           </header>
-          <ol>
-            {[...softwareBuilds].sort((a, b) => a.sortOrder - b.sortOrder).map((build, index) => {
-              const release = releaseByVersion.get(build.version);
-              const enabled = build.isAccessible && Boolean(release);
-              return (
-                <li key={build.id}>
-                  <article
-                    className={`softwareBuildCard${build.isCurrent ? " current" : ""}${enabled ? " accessible" : " unavailable"}`}
-                    data-build-card
-                    data-build-version={build.version}
-                  >
-                    <div className="buildCardTop">
-                      <strong className="buildVersion">{build.isPlan ? "Next" : officialBuildName(build.version)}</strong>
-                      <span className={`buildStatus ${build.status}`}>{build.statusLabel}</span>
-                    </div>
-                    <h3>{build.title}</h3>
-                    {build.description && <p>{build.description}</p>}
-                    {/*
-                      The visible label is "Open build", so the accessible name has to contain that text
-                      (WCAG 2.2 AA, Label in Name). "Open software build …" split those two words apart,
-                      which broke the requirement and every locator that identified a build by its version.
-                      Both identifiers are named because the card itself shows both.
-                    */}
-                    <button
-                      type="button"
-                      disabled={!enabled}
-                      onClick={() => release && onOpenBuild(release)}
-                      aria-label={build.isPlan ? "Plan next build placeholder" : `Open build ${build.version} (${officialBuildName(build.version)})`}
-                      title={!enabled ? build.isPlan ? "No future build record has been created" : "Controlled workspace not available" : undefined}
+          {ordered.length ? (
+            <ol>
+              {ordered.map(release => {
+                const identity = officialBuildName(release.version);
+                const status = statusFor(release, identity);
+                const predecessor = release.predecessorReleaseId ? releaseById.get(release.predecessorReleaseId) : undefined;
+                const predecessorIdentity = predecessor ? officialBuildName(predecessor.version) : undefined;
+                const enabled = Boolean(identity);
+                return (
+                  <li key={release.id} data-predecessor-release-id={release.predecessorReleaseId ?? ""}>
+                    <article
+                      className={`softwareBuildCard ${status.key}${enabled ? " accessible" : " unavailable"}`}
+                      data-build-card
+                      data-build-id={release.id}
+                      data-build-version={release.version}
                     >
-                      <span aria-hidden="true">{build.isPlan ? "+" : "↗"}</span> {build.isPlan ? "Not created" : "Open build"}
-                    </button>
-                  </article>
-                  {index < softwareBuilds.length - 1 && <span className="buildConnector" aria-hidden="true">→</span>}
-                </li>
-              );
-            })}
-          </ol>
+                      <div className="buildCardTop">
+                        <strong className="buildVersion">{identity ?? "Identity unavailable"}</strong>
+                        <span className={`buildStatus ${status.key}`}>{status.label}</span>
+                      </div>
+                      <h3>{identity ? `Build ${release.version}` : "Unsupported build version"}</h3>
+                      <p className="buildLifecycleDescription">
+                        {release.isReleased ? "Released build · read-only" : "In-work build · authoring available"}
+                      </p>
+                      <p className="buildPredecessor" data-lineage-edge>
+                        <strong>Predecessor</strong>{predecessorIdentity ? <span>↳ {predecessorIdentity}</span> : <span>{release.predecessorReleaseId ? "Unavailable source build" : "None recorded"}</span>}
+                      </p>
+                      <button
+                        type="button"
+                        disabled={!enabled}
+                        onClick={() => enabled && onOpenBuild(release)}
+                        aria-label={enabled ? `Open build ${release.version} (${identity})` : `Open build ${release.version}`}
+                        title={!enabled ? "This build has no supported official identity" : undefined}
+                      >
+                        <span aria-hidden="true">↗</span> Open build
+                      </button>
+                    </article>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : (
+            <p className="buildLineageEmpty">This project has no software builds yet.</p>
+          )}
         </section>
 
         <aside className="buildDetailsHelper">
           <span aria-hidden="true">◇</span>
-          <div><h2>Build details</h2><p>Select a build above to view full details including changelog and other build information.</p></div>
-          <button type="button" disabled title="Detailed build summaries are not available yet">Learn more <span aria-hidden="true">↗</span></button>
+          <div><h2>Build details</h2><p>Select a build above to view its controlled workspace.</p></div>
         </aside>
       </main>
     </div>

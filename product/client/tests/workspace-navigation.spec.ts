@@ -12,7 +12,8 @@ const other = { program: { id: "other-program", name: "Other Program", code: "OT
   releases: [{ id: "other-build", version: "1.6", isReleased: false }],
 }] };
 const workspaces = [other, fms];
-const fmsPath = projectAreaPath(projectSlugOf("FMS Product Development"), "builds");
+const fmsPath = projectAreaPath("fms-project", "builds");
+const legacyFmsPath = projectAreaPath(projectSlugOf("FMS Product Development"), "builds");
 const context = { programId: "fms-program", projectId: "fms-project", releaseId: "fms-current" };
 
 async function mockShell(page: Page, load: () => Promise<unknown> = async () => workspaces) {
@@ -85,6 +86,13 @@ test("legacy project-wide document links discard obsolete build context", async 
   await page.goto("/programs/fms-program/projects/fms-project/releases/removed/documentation-center");
   await expect(page).toHaveURL(/\/programs\/fms-program\/projects\/fms-project\/documentation-center$/);
   await expect(page.getByRole("heading", { name: "Workspace unavailable", exact: true })).toHaveCount(0);
+});
+
+test("a legacy Project slug remains readable when it identifies one authorized Project", async ({ page }) => {
+  await mockShell(page);
+  await page.goto(legacyFmsPath);
+  await expect(page.getByRole("heading", { name: "FMS Product Development", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp("/projects/fms-product-development/builds$"));
 });
 
 test("workspace failures have a truthful retry state", async ({ page }) => {

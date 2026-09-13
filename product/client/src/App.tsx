@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
-import type { ComponentType, FormEvent } from "react";
+import type { ComponentType } from "react";
 import { useWorkspaceRoute } from "./useWorkspaceRoute";
-import { decodeWorkspaces, resolveWorkspaceContext } from "./workspaceContext";
+import { authorizedProjects, decodeWorkspaces, resolveWorkspaceContext } from "./workspaceContext";
 import type { Workspace } from "./workspaceContext";
 import { useLatestRequest } from "./useLatestRequest";
 import CommandPalette from "./CommandPalette";
@@ -12,7 +12,7 @@ import type { IconName } from "./icons";
 import { officialBuildName, verificationArtifactLevel, verificationArtifactRouteKey } from "./presentation";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
-import { coverageExplorerPath, exactTraceArtifactPath, problemReportSnapshotPath, projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectSlugOf, routePath } from "./routing";
+import { coverageExplorerPath, exactTraceArtifactPath, problemReportSnapshotPath, projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectSetupPath, routePath } from "./routing";
 import type { Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, ThreadView, View } from "./routing";
 import type { ThreadFocalKind } from "./DigitalThreadPage";
 import { artifactTraceIdentity } from './artifactTraceInspectorModel';
@@ -33,10 +33,13 @@ import BaselineImportCenter from "./BaselineImportCenter";
 import PersonnelCenter from "./PersonnelCenter";
 import ApprovalConfigurationCenter from "./ApprovalConfigurationCenter";
 import ProjectConfigurationCenter from "./ProjectConfigurationCenter";
+import ProjectSetupWalkthrough from "./ProjectSetupWalkthrough";
+import { decodeProjectSetupDraftSummaries } from "./projectSetupDrafts";
+import type { ProjectSetupDraftSummary } from "./projectSetupDrafts";
 import TestChangeRequestEditor from "./TestChangeRequestEditor";
 // Eager, unlike the other fourteen workspaces. See the note above `lazyView`.
 import EnterpriseControlCenter from "./EnterpriseControlCenter";
-import { apiRequest, operationError, recordClientOperationFailure } from "./apiClient";
+import { apiRequest } from "./apiClient";
 import "./App.css";
 import "./Onboarding.css";
 import "./DashboardInteractions.css";
@@ -47,7 +50,7 @@ import "./ExperiencePolish.css";
 import "./People.css";
 import "./CohesionPass.css";
 
-const projectLevelViews: View[] = ["projects", "builds", "baselineImports", "personnel", "approvalConfiguration", "projectConfiguration"];
+const projectLevelViews: View[] = ["projects", "projectSetup", "builds", "baselineImports", "personnel", "approvalConfiguration", "projectConfiguration"];
 
 /**
  * Each workspace is fetched the first time somebody opens it, rather than every time anybody signs in.
@@ -160,12 +163,6 @@ type Metrics = {
   software: ChangeMetrics;
   verification: { system: VerificationMetrics; hlr: VerificationMetrics; llr: VerificationMetrics };
 };
-/// The two Projects the Projects landing offers by name. Both cards address their Project explicitly, so
-/// neither depends on the order workspaces happen to come back in.
-const showcaseProjectName = "FMS Product Development";
-const practiceProjectName = "DOORS Import Practice";
-
-
 /**
  * Where the API is. The reasoning moved to apiOrigin.ts when the instance badge needed the same answer.
  */
@@ -178,7 +175,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
   const active = workspaces.find(x => x.program.id === activeId) ?? workspaces[0];
   const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
   const release = project?.releases.find(x => x.id === selectedReleaseId) ?? project?.releases.at(-1);
-  const officialBuild = release ? officialBuildName(release.version) : "";
+  const officialBuild = release ? officialBuildName(release.version) ?? "Identity unavailable" : "";
   const hasSystem = ladderAllows(ladder, "System");
   const hasSoftware = ladderHasAny(ladder, ["HighLevel", "LowLevel"]);
   const hasSystemChange = ladderAllows(ladder, "System", LadderCapability.ChangeControl);
@@ -300,13 +297,11 @@ function App() {
       },
     }),
      [workspaces, setWorkspaces] = useState<Workspace[]>([]),
+     [setupDrafts, setSetupDrafts] = useState<ProjectSetupDraftSummary[]>([]),
      [ladder, setLadder] = useState<ProjectLadderProjection|null>(null),
      [ladderError, setLadderError] = useState(""),
      [ladderAttempt, setLadderAttempt] = useState(0),
     [dashboardError, setDashboardError] = useState(""),
-    [error, setError] = useState(""),
-    [saving, setSaving] = useState(false),
-
     [paletteOpen,setPaletteOpen]=useState(false),
     [displayOpen,setDisplayOpen]=useState(false),
     [density,setDensity]=useState<WorkspaceDensity>(()=>(localStorage.getItem('aerolink-density')==='compact'?'compact':'comfortable')),
@@ -363,6 +358,18 @@ function App() {
       setWorkspaces([]);
     }
   }, [beginWorkspaces]);
+  const loadSetupDrafts = useCallback(async () => {
+    try {
+      const response = await fetch(`${API}/api/project-setups`);
+      if (!response.ok) throw new Error();
+      const value = await response.json();
+      setSetupDrafts(decodeProjectSetupDraftSummaries(value));
+    } catch {
+      // Draft discovery is additive to the Projects selector. A service outage must not turn existing
+      // authorized projects into synthetic placeholders or discard a draft already open in the walkthrough.
+      setSetupDrafts([]);
+    }
+  }, []);
   const { active, project, release, unavailable } = resolveWorkspaceContext(workspaces, route);
   const projectId = project?.project.id ?? "";
   const context:RouteContext|undefined=active&&project&&release?{programId:active.program.id,projectId:project.project.id,releaseId:release.id}:undefined;
@@ -424,108 +431,29 @@ function App() {
   useEffect(() => {
     if (!user||user.mustChangePassword) return;
     void loadWorkspaces();
+    void loadSetupDrafts();
     return invalidateWorkspaces;
-  }, [loadWorkspaces, user, invalidateWorkspaces]);
+  }, [loadWorkspaces, loadSetupDrafts, user, invalidateWorkspaces]);
   useEffect(() => {
     void loadData();
     return invalidateDashboard;
   }, [loadData, invalidateDashboard]);
-  const createWorkspace = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (saving) return;
-    setSaving(true);
-    setError("");
-    const form = new FormData(e.currentTarget),
-      body = {
-        ...Object.fromEntries(form),
-        initialReleaseIsReleased: form.has("initialReleaseIsReleased"),
-      };
-    try {
-      const created = await apiRequest<{ program: { id: string } }>(`${API}/api/workspaces`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      updateRoute("programId", created.program.id);
-      await loadWorkspaces();
-    } catch (reason) {
-      recordClientOperationFailure("workspace.create", reason);
-      setError(operationError(reason, "Unable to create program."));
-    } finally {
-      setSaving(false);
-    }
-  };
   if (user === undefined)
     return <div className="appBoot"><div className="bootMark">▲</div><div><p>AEROLINK CONTROLLED WORKSPACE</p><h1>Establishing your secure session</h1><span>Confirming identity, authority, and active program context…</span><i><b/></i></div></div>;
   if (user === null) return <LoginPage api={API} onLogin={setUser} />;
   if (user.mustChangePassword) return <RequiredPasswordChange api={API} onComplete={()=>setUser(null)} />;
+  const openProjectSetup = (id?: string) => {
+    writeHistory("pushState", projectSetupPath(id));
+  };
+  const completeProjectSetup = async (result: { programId: string; projectId: string; releaseId: string }) => {
+    await Promise.all([loadWorkspaces(), loadSetupDrafts()]);
+    updateRoute("view", "builds");
+    writeHistory("pushState", projectAreaPath(result.projectId, "builds"));
+  };
+  if (view === "projectSetup")
+    return <ProjectSetupWalkthrough user={user} api={API} draftId={route.projectSetupDraftId} onExit={() => { void loadSetupDrafts(); updateRoute("view", "projects"); writeHistory("pushState", "/projects"); }} onSignOut={signOut} onCompleted={result => { void completeProjectSetup(result); }} />;
   if (workspaceStatus === "ready" && !workspaces.length)
-    return (
-      <div className="onboarding">
-        <div className="onboardBrand">
-          <span>▲</span> AeroLink
-        </div>
-        <div className="setup">
-          <p className="step">GET STARTED · STEP 1 OF 1</p>
-          <h1>Create your first program</h1>
-          <p>
-            Start with a clean, controlled workspace. Add more projects,
-            releases, users, and imported baseline data later.
-          </p>
-          <form onSubmit={createWorkspace}>
-            <label>
-              Program name
-              <input
-                name="programName"
-                placeholder="e.g. Navigation Systems"
-                required
-              />
-            </label>
-            <label>
-              Program code
-              <input
-                name="programCode"
-                placeholder="e.g. NAV"
-                maxLength={30}
-                required
-              />
-            </label>
-            <label>
-              Project name
-              <input
-                name="projectName"
-                placeholder="e.g. Navigation Software"
-                required
-              />
-            </label>
-            <label>
-              Software product
-              <input
-                name="softwareProduct"
-                placeholder="e.g. Integrated Navigation Software"
-                required
-              />
-            </label>
-            <label>
-              Initial release or baseline
-              <input name="initialRelease" placeholder="e.g. 1.0" required />
-            </label>
-            <label className="check">
-              <input type="checkbox" name="initialReleaseIsReleased" /> This
-              version is already released
-            </label>
-            {error && <div className="formError">{error}</div>}
-            <button disabled={saving}>
-              {saving ? "Creating workspace…" : "Create program workspace →"}
-            </button>
-          </form>
-          <small>
-            No demonstration records are created. This becomes your real
-            starting point.
-          </small>
-        </div>
-      </div>
-    );
+    return <ProjectsLanding user={user} projects={[]} drafts={setupDrafts} onCreateProject={() => openProjectSetup()} onResumeSetup={draft => openProjectSetup(draft.draftId)} onOpenProject={() => undefined} onSignOut={signOut}/>;
   // These two render nothing without an artifact to render, so a navigation that omits one used to change the
   // address bar and then fall through to whichever view matched next — Command Center. The reader saw a
   // populated dashboard, the URL still claimed to be on the artifact, and nothing was reported. A link built
@@ -704,7 +632,7 @@ function App() {
     if (context) writeHistory("pushState", routePath(context, 'testChangeRequest', area, change.testChangeReviewId, routeKind, undefined, undefined, undefined, change.proposalId));
   };
 
-  const signOut=async()=>{
+  async function signOut(){
     // Signing out must not be able to fail. Logout is a mutation, so the patched fetch first fetches a CSRF
     // token from /api/auth/csrf — which is itself behind the session gate and answers 401 once a session has
     // gone. The token fetch then throws, the await rejects, and this handler used to end right there with
@@ -718,38 +646,37 @@ function App() {
     setWorkspaceStatus("loading");
     writeHistory("replaceState", "/projects");
     setUser(null);
-  };
-  const buildsPath=projectAreaPath(projectSlugOf(project?.project.name??""),"builds");
+  }
+  const buildsPath=projectAreaPath(project?.project.id??"","builds");
   const showProjects=()=>{updateRoute("view", "projects");writeHistory("pushState", "/projects")};
   const exitBuild=()=>{setPaletteOpen(false);setDisplayOpen(false);updateRoute("view", "builds");updateRoute("artifactId", "");updateRoute("artifactKind", "");updateRoute("artifactRevisionId", "");updateRoute("artifactId", "");writeHistory("pushState", buildsPath)};
-  /**
-   * Opening a Project card names the Project it opens.
-   *
-   * Every card used to lean on whichever workspace came back first, which held only while there was one.
-   * A second Program can arrive first and silently make its Project the default, so the showcase card would
-   * open a builds page belonging to a Project with no builds.
-   */
-  const openProjectPage=(name:string,area:"builds"|"baselineImports")=>{
-    updateRoute("view", area);writeHistory("pushState", projectAreaPath(projectSlugOf(name),area));
+  /** Opening a Project card names its stable server identity, never a mutable display name. */
+  const openProjectPage=(selected: Workspace["projects"][number],area:"builds"|"baselineImports")=>{
+    updateRoute("view", area);writeHistory("pushState", projectAreaPath(selected.project.id,area));
   };
   if(view!=="projects" && (workspaceStatus!=="ready" || unavailable))return <main className="artifactState"><div><h1>{workspaceStatus==="loading"?"Opening workspace":workspaceStatus==="error"?"Workspace access unavailable":"Workspace unavailable"}</h1><p>{workspaceStatus==="loading"?"Loading the selected project and build…":"The selected project or build could not be opened. No other workspace has been substituted."}</p>{workspaceStatus==="error"&&<button onClick={()=>void loadWorkspaces()}>Retry</button>}<button onClick={showProjects}>Back to Projects</button></div></main>;
   if(view==="projects")return <ProjectsLanding user={user}
-    workspaceHref={projectAreaPath(projectSlugOf(showcaseProjectName),"builds")}
-    importPracticeHref={projectAreaPath(projectSlugOf(practiceProjectName),"baselineImports")}
-    onOpenWorkspace={()=>openProjectPage(showcaseProjectName,"builds")}
-    onOpenImportPractice={()=>openProjectPage(practiceProjectName,"baselineImports")}
+    projects={authorizedProjects(workspaces)}
+    drafts={setupDrafts}
+    onCreateProject={() => openProjectSetup()}
+    onResumeSetup={draft => openProjectSetup(draft.draftId)}
+    onOpenProject={selected => {
+      const workspaceProject = workspaces
+        .find(workspace => workspace.program.id === selected.programId)
+        ?.projects.find(entry => entry.project.id === selected.id);
+      if (workspaceProject) openProjectPage(workspaceProject, "builds");
+    }}
     onSignOut={signOut}/>;
-  // Derived from the Project actually open, so these two pages stay on it. Sending the practice Project's
-  // import page back to the showcase Project's builds would silently switch which Project you were in.
-  const openProjectSlug=projectSlugOf(project?.project.name??"");
-  const importsPath=projectAreaPath(openProjectSlug,"baselineImports");
-  const openProjectBuildsPath=projectAreaPath(openProjectSlug,"builds");
-  const personnelPath=projectAreaPath(openProjectSlug,"personnel");
-  const projectConfigurationPath=projectAreaPath(openProjectSlug,"projectConfiguration");
+  // Derived from the Project actually open, so each project-wide page stays on its own stable identity.
+  const openProjectId=project?.project.id??"";
+  const importsPath=projectAreaPath(openProjectId,"baselineImports");
+  const openProjectBuildsPath=projectAreaPath(openProjectId,"builds");
+  const personnelPath=projectAreaPath(openProjectId,"personnel");
+  const projectConfigurationPath=projectAreaPath(openProjectId,"projectConfiguration");
   const showImports=()=>{updateRoute("view", "baselineImports");writeHistory("pushState", importsPath)};
   const showPersonnel=()=>{updateRoute("view", "personnel");writeHistory("pushState", personnelPath)};
-  const showProjectConfiguration=(section:"ladder"|"assurance"|"history"|"readiness"|"approvals"="ladder")=>{updateRoute("view", "projectConfiguration");updateRoute("projectConfigurationSection", section);writeHistory("pushState", section==="approvals"?projectConfigurationApprovalsPath(openProjectSlug):section==="assurance"?projectConfigurationAssurancePath(openProjectSlug):projectConfigurationPath)};
-  if(view==="builds")return <SoftwareBuildsLanding user={user} projectName={project?.project.name??""} releases={project?.releases??[]} onProjectOverview={showProjects} onImportedBaselines={showImports} onPersonnel={showPersonnel} onProjectConfiguration={()=>showProjectConfiguration()} onOpenBuild={(selected)=>{if(!active||!project||!project.releases.some(item=>item.id===selected.id))return;updateRoute("releaseId", selected.id);updateRoute("view", "dashboard");writeHistory("pushState", routePath({programId:active.program.id,projectId:project.project.id,releaseId:selected.id},"dashboard"))}} onSignOut={signOut}/>;
+  const showProjectConfiguration=(section:"ladder"|"assurance"|"history"|"readiness"|"approvals"="ladder")=>{updateRoute("view", "projectConfiguration");updateRoute("projectConfigurationSection", section);writeHistory("pushState", section==="approvals"?projectConfigurationApprovalsPath(openProjectId):section==="assurance"?projectConfigurationAssurancePath(openProjectId):projectConfigurationPath)};
+  if(view==="builds")return <SoftwareBuildsLanding user={user} projectName={project?.project.name??""} softwareProduct={project?.project.softwareProduct??""} releases={project?.releases??[]} onProjectOverview={showProjects} onImportedBaselines={showImports} onPersonnel={showPersonnel} onProjectConfiguration={()=>showProjectConfiguration()} onOpenBuild={(selected)=>{if(!active||!project||!project.releases.some(item=>item.id===selected.id))return;updateRoute("releaseId", selected.id);updateRoute("view", "dashboard");writeHistory("pushState", routePath({programId:active.program.id,projectId:project.project.id,releaseId:selected.id},"dashboard"))}} onSignOut={signOut}/>;
   // Rendered beside Software Builds rather than inside a build workspace, because an import does not belong
   // to a build — it creates one. There is no build to have entered when this page is what you need.
   if(view==="baselineImports"&&project)return <BaselineImportCenter user={user} api={API} projectId={project.project.id} onBackToBuilds={()=>{updateRoute("view", "builds");writeHistory("pushState", openProjectBuildsPath)}} onSignOut={signOut}/>;
@@ -761,7 +688,7 @@ function App() {
   if(view==="approvalConfiguration"&&project)return <ApprovalConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} onBackToBuilds={()=>{updateRoute("view", "builds");writeHistory("pushState", openProjectBuildsPath)}} onSignOut={signOut}/>;
    if(view==="projectConfiguration"&&project)return <ProjectConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} initialSection={projectConfigurationSection} onBackToBuilds={()=>{updateRoute("view", "builds");writeHistory("pushState", openProjectBuildsPath)}} onOpenApprovalConfiguration={()=>showProjectConfiguration("approvals")} onActivated={value=>{setLadder({effectiveSteps:value.effectiveSteps,effectiveRelationships:value.effectiveRelationships});setLadderError("");}} onSignOut={signOut}/>;
    const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={active?.program.id??""} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} coverageReport={coverageReport} context={context} projectWide={view==="managedDocuments"} density={density} ladder={ladder} onNavigate={navigate} onOpenCoverage={openCoverage} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
-   const labels:Record<View,string>={projects:"Projects",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",projectConfiguration:"Project Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",createInterfaceChange:"New Interface / ICD Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Test Coverage",testChangeRequests:"Change Requests",testChangeRequest:"Test Change Request",createTestChangeRequest:"New Test Change Request",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",teamwork:"Team Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
+   const labels:Record<View,string>={projects:"Projects",projectSetup:"Create New Project",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",projectConfiguration:"Project Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",createInterfaceChange:"New Interface / ICD Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Test Coverage",testChangeRequests:"Change Requests",testChangeRequest:"Test Change Request",createTestChangeRequest:"New Test Change Request",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",teamwork:"Team Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
   const coverageLabel = discipline === "systemTest" ? "System Coverage" : selectedArtifactKind === "LowLevel" ? "Software LLR Coverage" : selectedArtifactKind === "HighLevel" ? "Software HLR Coverage" : "Software Coverage";
   const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:view==="procedureExplorer"?coverageReport?coverageLabel:`${discipline==="softwareTest"?"Software Test Case/Procedure":"System Test Procedure"} Explorer`:labels[view];
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};

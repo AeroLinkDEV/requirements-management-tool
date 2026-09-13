@@ -1,324 +1,106 @@
 import type { AuthUser } from "./IdentityCenter";
 import PortalHeader from "./PortalHeader";
+import type { AuthorizedProject } from "./workspaceContext";
+import type { ProjectSetupDraftSummary } from "./ProjectSetupWalkthrough";
+import { projectAreaPath } from "./routing";
 import "./ProjectsLanding.css";
 
-type ProjectIconName =
-  | "fms"
-  | "satellite"
-  | "navigation"
-  | "certification"
-  | "coverage"
-  | "integrity"
-  | "route"
-  | "sensors"
-  | "map"
-  | "display"
-  | "import"
-  | "create";
+export type ProjectIconName = "project";
 
-type ProjectCardDefinition = {
-  id: string;
-  name: string;
-  description: string;
-  icon: ProjectIconName;
-  status: "active" | "mock" | "disabled";
-  statusLabel?: string;
-  active: boolean;
-  destination?: "current-workspace" | "import-practice";
-  footer?: string;
-  cardType: "project" | "create-project";
-};
-
-const projectCards: readonly ProjectCardDefinition[] = [
-  {
-    id: "fms-product-development",
-    name: "FMS Product Development",
-    description: "Requirements, traceability, verification, and release planning.",
-    icon: "fms",
-    status: "active",
-    statusLabel: "Active",
-    active: true,
-    destination: "current-workspace",
-    footer: "Opens your current workspace.",
-    cardType: "project",
-  },
-  {
-    id: "gps-receiver-modernization",
-    name: "GPS Receiver Modernization",
-    description: "Upgrade planning and architecture study.",
-    icon: "satellite",
-    status: "mock",
-    statusLabel: "Mock",
-    active: false,
-    footer: "Mock project",
-    cardType: "project",
-  },
-  {
-    id: "integrated-navigation-suite",
-    name: "Integrated Navigation Suite",
-    description: "Concept phase for integrated navigation subsystem.",
-    icon: "navigation",
-    status: "mock",
-    statusLabel: "Mock",
-    active: false,
-    footer: "Mock project",
-    cardType: "project",
-  },
-  {
-    id: "fms-certification-block-2",
-    name: "FMS Certification Block 2",
-    description: "Certification planning and requirements package.",
-    icon: "certification",
-    status: "mock",
-    statusLabel: "Mock",
-    active: false,
-    footer: "Mock project",
-    cardType: "project",
-  },
-  {
-    id: "waas-sbas-upgrade",
-    name: "WAAS / SBAS Upgrade",
-    description: "Upgrade planning for performance and coverage.",
-    icon: "coverage",
-    status: "mock",
-    statusLabel: "Mock",
-    active: false,
-    footer: "Mock project",
-    cardType: "project",
-  },
-  {
-    id: "gnss-integrity-monitor",
-    name: "GNSS Integrity Monitor",
-    description: "Integrity monitoring and fault-detection concept.",
-    icon: "integrity",
-    status: "mock",
-    statusLabel: "Mock",
-    active: false,
-    footer: "Mock project",
-    cardType: "project",
-  },
-  {
-    id: "flight-planning-core",
-    name: "Flight Planning Core",
-    description: "Core algorithms and route-optimization planning.",
-    icon: "route",
-    status: "mock",
-    statusLabel: "Mock",
-    active: false,
-    footer: "Mock project",
-    cardType: "project",
-  },
-  {
-    id: "multi-sensor-position-engine",
-    name: "Multi-Sensor Position Engine",
-    description: "Fusion algorithms and sensor-integration concept.",
-    icon: "sensors",
-    status: "mock",
-    statusLabel: "Mock",
-    active: false,
-    footer: "Mock project",
-    cardType: "project",
-  },
-  {
-    id: "avionics-map-database",
-    name: "Avionics Map Database",
-    description: "Database architecture and update strategy.",
-    icon: "map",
-    status: "mock",
-    statusLabel: "Mock",
-    active: false,
-    footer: "Mock project",
-    cardType: "project",
-  },
-  {
-    id: "fms-hmi-refresh",
-    name: "FMS HMI Refresh",
-    description: "User-interface modernization and usability study.",
-    icon: "display",
-    status: "mock",
-    statusLabel: "Mock",
-    active: false,
-    footer: "Mock project",
-    cardType: "project",
-  },
-  {
-    // Where bringing a program in from another tool is rehearsed, so no Program anybody works in collects
-    // the abandoned attempts it takes to get a mapping right. Temporary by intent: once the workflow is
-    // proven against a real extract, the import belongs wherever a new Project is started from.
-    id: "doors-import-practice",
-    name: "DOORS Import Practice",
-    description: "Rehearse bringing a program in from another requirements tool.",
-    icon: "import",
-    status: "active",
-    statusLabel: "Practice",
-    active: true,
-    destination: "import-practice",
-    footer: "No builds yet",
-    cardType: "project",
-  },
-  {
-    id: "create-project",
-    name: "Create New Project",
-    description: "Start a new requirements workspace for your team.",
-    icon: "create",
-    status: "disabled",
-    active: false,
-    cardType: "create-project",
-  },
-];
-
-export function ProjectIcon({ name }: { name: ProjectIconName }) {
-  const shared = {
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 1.7,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-  };
-  const paths: Record<ProjectIconName, React.ReactNode> = {
-    fms: <><rect x="5" y="4" width="22" height="26" rx="3"/><rect x="9" y="8" width="14" height="10" rx="1"/><path d="M9 23h2m3 0h2m3 0h2M9 27h2m3 0h2m3 0h2"/></>,
-    satellite: <><path d="m13 13 6 6m-8-4 6-6 6 6-6 6zM8 7l5 5-4 4-5-5zm16 16 5 5-5 2-4-4z"/><path d="M20 11c4-3 8-2 10 0M22 8c5-4 9-3 11-1"/></>,
-    navigation: <><circle cx="17" cy="17" r="13"/><path d="m21 10-3 9-9 3 3-9zM17 1v4m0 24v4M1 17h4m24 0h4"/></>,
-    certification: <><path d="M7 3h15l6 6v20H7zM22 3v7h6M11 15h12m-12 5h8"/><circle cx="23" cy="24" r="5"/><path d="m20 29-1 4 4-2 3 2 1-5"/></>,
-    coverage: <><path d="M17 25V14m-4 11h8M9 31h16"/><circle cx="17" cy="10" r="2"/><path d="M10 17a10 10 0 0 1 14 0M6 13a15 15 0 0 1 22 0M3 9a20 20 0 0 1 28 0"/></>,
-    integrity: <><path d="M17 3 29 8v8c0 8-5 13-12 16C10 29 5 24 5 16V8z"/><path d="m11 17 4 4 8-9"/></>,
-    route: <><circle cx="6" cy="27" r="3"/><circle cx="14" cy="12" r="3"/><path d="M8 25c4-2 2-7 5-10m4-2c5 1 6 7 10 6"/><path d="m24 7 7 3-6 3 1-3z"/></>,
-    sensors: <><circle cx="17" cy="17" r="4"/><circle cx="17" cy="17" r="9"/><path d="M17 3v3m0 22v3M3 17h3m22 0h3M7 7l3 3m14 14 3 3m0-20-3 3M10 24l-3 3"/><path d="m25 25 5 5m0-5-5 5"/></>,
-    map: <><path d="m4 7 8-3 10 3 8-3v24l-8 3-10-3-8 3zM12 4v24M22 7v24"/><path d="M17 14c0-3 5-3 5 0 0 2-2.5 5-2.5 5S17 16 17 14z"/></>,
-    display: <><rect x="3" y="5" width="28" height="23" rx="3"/><path d="M8 22V11h18M10 19l4-4 4 2 5-6M12 32h10m-5-4v4"/></>,
-    // Arriving from outside and landing here, which is the one thing this card is about. Every other icon
-    // on the page is already spoken for, and two cards wearing the same mark read as a mistake.
-    import: <><path d="M17 4v16m0 0-6-6m6 6 6-6"/><path d="M5 23v4a3 3 0 0 0 3 3h18a3 3 0 0 0 3-3v-4"/></>,
-    create: <><circle cx="17" cy="17" r="14"/><path d="M17 10v14m-7-7h14"/></>,
-  };
-  return <svg viewBox="0 0 34 34" aria-hidden="true" focusable="false" {...shared}>{paths[name]}</svg>;
+/** A neutral project mark; the portal never assigns FMS imagery to another authorized project. */
+export function ProjectIcon({ name: _name }: { name: ProjectIconName }) {
+  return <svg viewBox="0 0 34 34" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="4" y="5" width="26" height="24" rx="3" />
+    <path d="M4 12h26M10 5v7m14-7v7M10 18h14M10 23h9" />
+  </svg>;
 }
 
-function ProjectCard({
-  project,
-  workspaceHref,
-  onOpenWorkspace,
-}: {
-  project: ProjectCardDefinition;
-  workspaceHref?: string;
-  onOpenWorkspace: () => void;
-}) {
-  if (project.cardType === "create-project") {
-    return (
-      <article className="projectCard createProjectCard" data-project-card aria-disabled="true">
-        <span className="createProjectIcon"><ProjectIcon name={project.icon}/></span>
-        <h2>{project.name}</h2>
-        <p>{project.description}</p>
-        <small>Project creation is not available yet.</small>
-      </article>
-    );
-  }
-
-  const content = (
-    <>
+function ProjectCard({ project, onOpen }: { project: AuthorizedProject; onOpen: () => void }) {
+  const releasedCount = project.releases.filter(release => release.isReleased).length;
+  const state = project.releases.length === 0
+    ? "No builds"
+    : `${releasedCount} released · ${project.releases.length - releasedCount} in work`;
+  return (
+    <a
+      className="projectCard activeProjectCard"
+      data-project-card
+      data-project-id={project.id}
+      href={projectAreaPath(project.id, "builds")}
+      onClick={event => { event.preventDefault(); onOpen(); }}
+      aria-label={`Open ${project.name}`}
+    >
       <div className="projectCardTop">
-        <span className="projectIcon"><ProjectIcon name={project.icon}/></span>
-        <span className={`projectBadge ${project.status}`}>{project.statusLabel}</span>
+        <span className="projectIcon"><ProjectIcon name="project" /></span>
+        <span className="projectBadge active">Authorized</span>
       </div>
       <h2>{project.name}</h2>
-      <p>{project.description}</p>
+      <p>{project.softwareProduct}</p>
       <footer>
-        {project.active && <strong>Open project <span aria-hidden="true">→</span></strong>}
-        <small><span aria-hidden="true">{project.active ? "◇" : "□"}</span>{project.footer}</small>
+        <strong>Open project <span aria-hidden="true">→</span></strong>
+        <small><span aria-hidden="true">◇</span>{state}</small>
       </footer>
-    </>
-  );
-
-  if (project.active && workspaceHref) {
-    return (
-      <a
-        className="projectCard activeProjectCard"
-        data-project-card
-        href={workspaceHref}
-        onClick={(event) => {
-          event.preventDefault();
-          onOpenWorkspace();
-        }}
-        aria-label={`Open ${project.name}`}
-      >
-        {content}
-      </a>
-    );
-  }
-
-  return (
-    <article className="projectCard mockProjectCard" data-project-card aria-disabled="true">
-      {content}
-    </article>
+    </a>
   );
 }
 
 export default function ProjectsLanding({
   user,
-  workspaceHref,
-  importPracticeHref,
-  onOpenWorkspace,
-  onOpenImportPractice,
+  projects,
+  drafts,
+  onCreateProject,
+  onResumeSetup,
+  onOpenProject,
   onSignOut,
 }: {
   user: AuthUser;
-  workspaceHref?: string;
-  importPracticeHref?: string;
-  onOpenWorkspace: () => void;
-  onOpenImportPractice: () => void;
+  projects: AuthorizedProject[];
+  drafts: ProjectSetupDraftSummary[];
+  onCreateProject: () => void;
+  onResumeSetup: (draft: ProjectSetupDraftSummary) => void;
+  onOpenProject: (project: AuthorizedProject) => void;
   onSignOut: () => void;
 }) {
-  const activeProject = projectCards.find((project) => project.id === "fms-product-development");
-  const utilityProject = projectCards.find((project) => project.id === "doors-import-practice");
-  const sampleProjects = projectCards.filter((project) => project.status === "mock");
-  const createProject = projectCards.find((project) => project.cardType === "create-project");
-
-  const renderProjectCard = (project: ProjectCardDefinition) => {
-    const practice = project.destination === "import-practice";
-    return (
-      <ProjectCard
-        key={project.id}
-        project={project}
-        workspaceHref={practice ? importPracticeHref : project.destination ? workspaceHref : undefined}
-        onOpenWorkspace={practice ? onOpenImportPractice : onOpenWorkspace}
-      />
-    );
-  };
-
   return (
     <div className="projectsPage">
-      <PortalHeader user={user} onSignOut={onSignOut}/>
+      <PortalHeader user={user} onSignOut={onSignOut} />
       <main className="projectsMain">
         <header>
           <div>
-            <p className="eyebrow">AUTHORIZED WORKSPACES</p>
+            <p className="eyebrow">AUTHORIZED PROJECTS</p>
             <h1>Projects</h1>
-            <p>Select a project to continue.</p>
+            <p>{projects.length ? "Select a project to continue." : "You do not have access to any projects yet."}</p>
           </div>
         </header>
-        <section className="projectsSections" aria-label="Available projects">
-          {activeProject && <div className="projectsGrid projectsPrimaryGrid">{renderProjectCard(activeProject)}</div>}
-          {utilityProject && (
-            <section className="projectUtilitySection" aria-labelledby="project-utility-heading">
-              <h2 id="project-utility-heading">Utility workspace</h2>
-              <div className="projectsGrid">{renderProjectCard(utilityProject)}</div>
-            </section>
-          )}
-          <details className="sampleProjectsSection">
-            <summary>
-              <span>
-                <strong>Sample projects</strong>
-                <small>Explore example project structures</small>
-              </span>
-              <span className="sampleProjectsCount">{sampleProjects.length} examples</span>
-            </summary>
-            <div className="projectsGrid" aria-label="Sample projects">
-              {sampleProjects.map(renderProjectCard)}
+        {projects.length ? (
+          <section className="projectsSections" aria-label="Authorized projects">
+            <div className="projectsGrid" data-project-list>
+              {projects.map(project => <ProjectCard key={project.id} project={project} onOpen={() => onOpenProject(project)} />)}
             </div>
-          </details>
-          {createProject && <div className="projectsGrid projectsCreateGrid">{renderProjectCard(createProject)}</div>}
-        </section>
+            {(user.isAdministrator || drafts.length > 0) && <SetupDrafts drafts={drafts} canCreate={user.isAdministrator} onCreateProject={onCreateProject} onResumeSetup={onResumeSetup} />}
+          </section>
+        ) : (
+          <section className="projectsSections" aria-label="No authorized projects">
+            <div className="projectsEmptyState">
+            <span className="projectsEmptyIcon"><ProjectIcon name="project" /></span>
+            <h2>No authorized projects</h2>
+            <p>Projects become available here when an AeroLink administrator grants your account access.</p>
+            </div>
+            {(user.isAdministrator || drafts.length > 0) && <SetupDrafts drafts={drafts} canCreate={user.isAdministrator} onCreateProject={onCreateProject} onResumeSetup={onResumeSetup} />}
+          </section>
+        )}
       </main>
     </div>
   );
+}
+
+function SetupDrafts({ drafts, canCreate, onCreateProject, onResumeSetup }: {
+  drafts: ProjectSetupDraftSummary[];
+  canCreate: boolean;
+  onCreateProject: () => void;
+  onResumeSetup: (draft: ProjectSetupDraftSummary) => void;
+}) {
+  return <section className="setupDraftsSection" aria-labelledby="setup-drafts-heading">
+    <div className="setupDraftsHeading"><div><h2 id="setup-drafts-heading">Setup drafts</h2><p>Saved project creation work remains recoverable until it is finalized.</p></div>{canCreate && <button type="button" onClick={onCreateProject}>Create New Project</button>}</div>
+    {drafts.length ? <div className="setupDraftsList">{drafts.map(draft => <article key={draft.draftId} className="setupDraftCard" data-setup-draft-id={draft.draftId}><div><strong>{draft.project.name || "Untitled Project"}</strong><span>{draft.project.softwareProduct || "Software product not provided"}</span></div><small>{draft.state === "Finalizing" ? "Finalizing — resume to recover the result" : `Step ${draft.currentStep} · ${draft.lastSavedAt ? `Saved ${new Date(draft.lastSavedAt).toLocaleString()}` : "Not saved yet"}`}</small><button type="button" onClick={() => onResumeSetup(draft)}>Resume setup</button></article>)}</div> : canCreate ? <p className="setupDraftsEmpty">No saved setup drafts. Start a Project when you are ready.</p> : null}
+  </section>;
 }

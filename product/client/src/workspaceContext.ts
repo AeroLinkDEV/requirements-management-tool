@@ -10,6 +10,13 @@ export type Workspace = {
   }[];
 };
 
+export type AuthorizedProject = Workspace["projects"][number]["project"] & {
+  programId: string;
+  programName: string;
+  programCode: string;
+  releases: WorkspaceRelease[];
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -53,24 +60,55 @@ export function decodeWorkspaces(value: unknown): Workspace[] {
   });
 }
 
+/** Flatten the server's authorized projection without adding sample or inferred projects. */
+export function authorizedProjects(workspaces: Workspace[]): AuthorizedProject[] {
+  return workspaces
+    .flatMap(workspace => workspace.projects.map(entry => ({
+      ...entry.project,
+      programId: workspace.program.id,
+      programName: workspace.program.name,
+      programCode: workspace.program.code,
+      releases: entry.releases,
+    })))
+    .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+}
+
+const projectLevelViews = new Set<AppRoute["view"]>([
+  "projects", "projectSetup", "builds", "baselineImports", "personnel", "approvalConfiguration", "projectConfiguration",
+]);
+
+function projectMatch(workspaces: Workspace[], requestedId: string, activeProgramId?: string) {
+  const candidates = workspaces.flatMap(workspace => workspace.projects
+    .filter(() => !activeProgramId || workspace.program.id === activeProgramId)
+    .map(entry => ({ workspace, entry })));
+  const exact = candidates.filter(candidate => candidate.entry.project.id === requestedId);
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) return undefined;
+
+  // Slug routes predate stable project identity. They remain readable only when the name maps to one
+  // authorized project; choosing the first collision would silently switch controlled context.
+  const legacy = candidates.filter(candidate => projectSlugOf(candidate.entry.project.name) === requestedId);
+  return legacy.length === 1 ? legacy[0] : undefined;
+}
+
 /** Explicit destinations never borrow another project's context or a different build. */
 export function resolveWorkspaceContext(workspaces: Workspace[], route: AppRoute) {
   const active = route.programId
     ? workspaces.find(item => item.program.id === route.programId)
-    : route.projectSlug
-      ? workspaces.find(item => item.projects.some(entry => projectSlugOf(entry.project.name) === route.projectSlug))
+    : route.projectId
+      ? projectMatch(workspaces, route.projectId)?.workspace
       : workspaces.find(item => item.projects.some(entry => entry.releases.length)) ?? workspaces[0];
-  const project = route.projectId
-    ? active?.projects.find(item => item.project.id === route.projectId)
-    : route.projectSlug
-      ? active?.projects.find(item => projectSlugOf(item.project.name) === route.projectSlug)
-      : active?.projects[0];
-  // Legacy Documentation Center URLs carry a build, but this surface is project-wide.
-  const requiresBuild = route.view !== "managedDocuments";
+  const matched = route.projectId
+    ? projectMatch(workspaces, route.projectId, active?.program.id)
+    : undefined;
+  const project = matched?.entry ?? (route.projectId ? undefined : active?.projects[0]);
+  // Context-free project pages do not enter a build. A build is required only by the existing
+  // build-scoped workspaces, where an explicit release is part of the route.
+  const requiresBuild = !projectLevelViews.has(route.view) && route.view !== "managedDocuments";
   const release = route.releaseId && requiresBuild
     ? project?.releases.find(item => item.id === route.releaseId)
-    : [...(project?.releases ?? [])].reverse().find(item => !item.isReleased) ?? project?.releases.at(-1);
-  const unavailable = !!((route.programId && !active) || ((route.projectId || route.projectSlug) && !project)
+    : undefined;
+  const unavailable = !!((route.programId && !active) || (route.projectId && !project)
     || (requiresBuild && route.releaseId && !release));
   return unavailable ? { active: undefined, project: undefined, release: undefined, unavailable } : { active, project, release, unavailable };
 }

@@ -9,7 +9,8 @@ import { useVerificationVocabulary } from "./verificationMethods";
 import "./ProjectConfigurationCenter.css";
 
 type Level = string;
-type Step = { catalogueEntry: Level; position: number; capabilities: number };
+type VerificationKind = "Case" | "Procedure";
+type Step = { catalogueEntry: Level; position: number; capabilities: number; enabledArtifactKinds?: VerificationKind[] };
 type Relationship = { parent: Level; child: Level };
 type HistoryItem = { revision: number; actor: string; occurredAt: string; reason: string; canonicalSnapshot: string; snapshotHash: string };
 type Consumer = { id: string; description: string; routed: boolean };
@@ -31,13 +32,40 @@ type ConfigurationResponse = Omit<Configuration, "steps" | "effectiveSteps" | "e
 const capabilityLabels = ["Change control", "Verification", "Requirements document", "Code traceability"];
 
 function displayLevel(level: Level) {
-  return level === "HighLevel" ? "High-Level software" : level === "LowLevel" ? "Low-Level software" : "System";
+  return ({
+    System: "System",
+    HighLevel: "High-Level software",
+    LowLevel: "Low-Level software",
+    Customer: "Customer",
+    Interface: "Interface",
+  } as Record<string, string>)[level] ?? level;
+}
+
+function defaultVerificationKinds(level: Level, capabilities: number): VerificationKind[] {
+  if ((capabilities & (1 << 1)) === 0) return [];
+  if (level === "System") return ["Procedure"];
+  if (level === "HighLevel" || level === "LowLevel") return ["Case", "Procedure"];
+  return [];
+}
+
+function supportedCapabilitiesFor(level: Level, capabilities: number) {
+  // Customer and Interface are legitimate ladder levels with their own supported non-verification
+  // capabilities. A catalogue that accidentally carries the verification bit must not make this editor
+  // offer a discipline the level does not support.
+  return level === "Customer" || level === "Interface"
+    ? capabilities & ~(1 << 1)
+    : capabilities;
 }
 
 function normalizeConfiguration(value: ConfigurationResponse): Configuration {
   const normalizeStep = (step: ConfigurationResponse["steps"][number]): Step => ({
     ...step,
-    capabilities: capabilityMask(step.capabilities),
+    capabilities: supportedCapabilitiesFor(step.catalogueEntry, capabilityMask(step.capabilities)),
+    enabledArtifactKinds: (() => {
+      const supported = supportedCapabilitiesFor(step.catalogueEntry, capabilityMask(step.capabilities));
+      const selected = step.enabledArtifactKinds?.filter((kind): kind is VerificationKind => kind === "Case" || kind === "Procedure") ?? [];
+      return selected.length ? selected : defaultVerificationKinds(step.catalogueEntry, supported);
+    })(),
   });
   return {
     ...value,
@@ -46,7 +74,7 @@ function normalizeConfiguration(value: ConfigurationResponse): Configuration {
     effectiveRelationships: value.effectiveRelationships ?? [],
     catalogue: value.catalogue.map(entry => ({
       ...entry,
-      supportedCapabilities: capabilityMask(entry.supportedCapabilities),
+      supportedCapabilities: supportedCapabilitiesFor(entry.catalogueEntry, capabilityMask(entry.supportedCapabilities)),
     })),
   };
 }
@@ -64,6 +92,7 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
+  const [rememberedVerificationProfiles, setRememberedVerificationProfiles] = useState<Record<string, VerificationKind[]>>({});
 
   // The project's permitted verification methods (#701). Edited here because this decides what every future
   // submission will accept, which is the same authority the ladder above already carries. The stored values
@@ -126,10 +155,23 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
     if (!configuration) return;
     const available = configuration.catalogue.find(entry => !steps.some(step => step.catalogueEntry === entry.catalogueEntry));
     if (!available) return;
-    setSteps([...steps, { catalogueEntry: available.catalogueEntry, position: steps.length + 1, capabilities: available.supportedCapabilities }]);
+    setSteps([...steps, {
+      catalogueEntry: available.catalogueEntry,
+      position: steps.length + 1,
+      capabilities: available.supportedCapabilities,
+      enabledArtifactKinds: rememberedVerificationProfiles[available.catalogueEntry]
+        ?? defaultVerificationKinds(available.catalogueEntry, available.supportedCapabilities),
+    }]);
   };
   const removeStep = (index: number) => {
-    const removed = steps[index].catalogueEntry;
+    const removedStep = steps[index];
+    const removed = removedStep.catalogueEntry;
+    if (removedStep) {
+      setRememberedVerificationProfiles(current => ({
+        ...current,
+        [removed]: removedStep.enabledArtifactKinds ?? defaultVerificationKinds(removed, removedStep.capabilities),
+      }));
+    }
     setSteps(steps.filter((_, i) => i !== index).map((step, i) => ({ ...step, position: i + 1 })));
     setRelationships(relationships.filter(edge => edge.parent !== removed && edge.child !== removed));
   };
@@ -204,7 +246,32 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
           </>}
           {section === "ladder" && <>
             <div className="projectConfigurationPanelHeader"><div><h2>Requirement ladder</h2><p>Version {configuration.version} · {configuration.classification} · {configuration.state}. Authored edits remain drafts until the sole activation gate succeeds.</p></div><span className="projectConfigurationPill">{dirty ? "Unsaved changes" : "Saved"}</span></div>
-            <ol className="ladderRows">{steps.map((step, index) => <li key={`${step.catalogueEntry}-${index}`} className="ladderRow"><span className="ladderPosition">{index + 1}</span><label>Level<select value={step.catalogueEntry} disabled={!canAuthor} onChange={event => updateStep(index, { catalogueEntry: event.target.value as Level })}>{configuration.catalogue.map(entry => <option key={entry.catalogueEntry} value={entry.catalogueEntry}>{displayLevel(entry.catalogueEntry)}</option>)}</select></label><fieldset disabled={!canAuthor}><legend>Capabilities</legend>{capabilityLabels.map((label, capabilityIndex) => <label key={label}><input type="checkbox" checked={(step.capabilities & (1 << capabilityIndex)) !== 0} onChange={event => updateStep(index, { capabilities: event.target.checked ? step.capabilities | (1 << capabilityIndex) : step.capabilities & ~(1 << capabilityIndex) })}/>{label}</label>)}</fieldset><div className="ladderRowActions">{canAuthor && <><button type="button" onClick={() => reorder(index, -1)} disabled={index === 0}>↑</button><button type="button" onClick={() => reorder(index, 1)} disabled={index === steps.length - 1}>↓</button><button type="button" onClick={() => removeStep(index)}>Remove</button></>}</div></li>)}</ol>
+            <ol className="ladderRows">{steps.map((step, index) => {
+              const catalogue = configuration.catalogue.find(entry => entry.catalogueEntry === step.catalogueEntry);
+              const supported = catalogue?.supportedCapabilities ?? 0;
+              const profile = step.enabledArtifactKinds ?? defaultVerificationKinds(step.catalogueEntry, step.capabilities);
+              return <li key={`${step.catalogueEntry}-${index}`} className="ladderRow">
+                <span className="ladderPosition">{index + 1}</span>
+                <label>Level<select value={step.catalogueEntry} disabled={!canAuthor} onChange={event => {
+                  const nextCatalogue = configuration.catalogue.find(entry => entry.catalogueEntry === event.target.value);
+                  updateStep(index, {
+                    catalogueEntry: event.target.value as Level,
+                    capabilities: nextCatalogue?.supportedCapabilities ?? 0,
+                    enabledArtifactKinds: defaultVerificationKinds(event.target.value, nextCatalogue?.supportedCapabilities ?? 0),
+                  });
+                }}>{configuration.catalogue.map(entry => <option key={entry.catalogueEntry} value={entry.catalogueEntry}>{displayLevel(entry.catalogueEntry)}</option>)}</select></label>
+                <div className="ladderRowOptions">
+                  <fieldset disabled={!canAuthor}><legend>Capabilities</legend>{capabilityLabels.map((label, capabilityIndex) => {
+                    const allowed = (supported & (1 << capabilityIndex)) !== 0;
+                    return <label key={label}><input type="checkbox" checked={allowed && (step.capabilities & (1 << capabilityIndex)) !== 0} disabled={!allowed} onChange={event => updateStep(index, { capabilities: event.target.checked ? step.capabilities | (1 << capabilityIndex) : step.capabilities & ~(1 << capabilityIndex) })}/>{label}</label>
+                  })}</fieldset>
+                  {(step.catalogueEntry === "HighLevel" || step.catalogueEntry === "LowLevel") && (supported & (1 << 1)) !== 0 && <fieldset className="verificationProfile" disabled={!canAuthor}><legend>Verification profile</legend><select aria-label={`${displayLevel(step.catalogueEntry)} verification profile`} value={profile.includes("Procedure") ? "Case+Procedure" : "Case"} onChange={event => updateStep(index, { enabledArtifactKinds: event.target.value === "Case+Procedure" ? ["Case", "Procedure"] : ["Case"] })}><option value="Case">Case-only</option><option value="Case+Procedure">Case + Procedure</option></select><small>Choose Case-only or Case + Procedure.</small></fieldset>}
+                  {step.catalogueEntry === "System" && (supported & (1 << 1)) !== 0 && <p className="verificationProfileFixed">Procedure profile (System)</p>}
+                  {(step.catalogueEntry === "Customer" || step.catalogueEntry === "Interface") && <p className="verificationProfileFixed">No verification profile; this level keeps its supported non-verification capabilities.</p>}
+                </div>
+                <div className="ladderRowActions">{canAuthor && <><button type="button" onClick={() => reorder(index, -1)} disabled={index === 0}>↑</button><button type="button" onClick={() => reorder(index, 1)} disabled={index === steps.length - 1}>↓</button><button type="button" onClick={() => removeStep(index)}>Remove</button></>}</div>
+              </li>
+            })}</ol>
             {canAuthor ? <div className="ladderActions"><button type="button" onClick={addStep} disabled={steps.length >= configuration.catalogue.length}>Add level</button><label>Reason<input value={reason} onChange={event => setReason(event.target.value)} placeholder="Why is this ladder changing?" /></label><button type="button" className="primaryProjectConfigurationAction" disabled={saving || !dirty} onClick={() => void save()}>Save draft</button><button type="button" disabled={saving} onClick={() => void activate()}>Attempt activation</button></div> : <p className="projectConfigurationNotice">{configuration.state === "Active" ? "This ladder is active and immutable. Its stored manifest is now the runtime authority; author a new configuration revision through the project configuration workflow." : "You have read access to this project configuration. A Configuration Manager, Program Manager, or Administrator must author changes."}</p>}
             <div className="relationshipEditor"><h3>Allowed upstream relationships</h3>{relationships.map((edge, index) => <div className="relationshipRow" key={`${edge.parent}-${edge.child}-${index}`}><select value={edge.parent} disabled={!canAuthor} onChange={event => setRelationships(relationships.map((current, i) => i === index ? { ...current, parent: event.target.value as Level } : current))}>{steps.map(step => <option key={step.catalogueEntry} value={step.catalogueEntry}>{displayLevel(step.catalogueEntry)}</option>)}</select><span>→</span><select value={edge.child} disabled={!canAuthor} onChange={event => setRelationships(relationships.map((current, i) => i === index ? { ...current, child: event.target.value as Level } : current))}>{steps.map(step => <option key={step.catalogueEntry} value={step.catalogueEntry}>{displayLevel(step.catalogueEntry)}</option>)}</select>{canAuthor && <button type="button" onClick={() => setRelationships(relationships.filter((_, i) => i !== index))}>Remove</button>}</div>)}{canAuthor && <button type="button" onClick={addRelationship}>Add relationship</button>}</div>
           </>}
