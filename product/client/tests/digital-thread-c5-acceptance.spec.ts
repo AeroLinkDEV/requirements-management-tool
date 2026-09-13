@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { V5_FIXTURE_IDS as ids } from "./fixtures/digital-thread-v5"
+import { waitForCanvasSettled } from "./digital-thread-rendered-helpers"
 
 const open = async (page: Page, view: string, width = 1440, density = "comfortable") => {
   await page.setViewportSize({ width, height: 900 })
@@ -174,23 +175,52 @@ test("artifact cards reflow after delayed web fonts settle", async ({ page }) =>
   await expect.poll(overlap, { timeout: 3_000 }).toBeLessThanOrEqual(1)
 })
 
-test("clearing and reselecting the arrival focal uses selection framing instead of replaying landing", async ({ page }) => {
+test("clearing and reselecting the arrival focal retains useful manual zoom instead of replaying landing", async ({ page }) => {
   await open(page, "network", 1280)
   const scale = page.getByLabel("Current canvas scale")
   await expect(scale).toHaveText("86% · Detailed")
   const focal = page.locator(`[data-node-id="${ids.hlr}"]`)
+  // DEC-127 makes activation idempotent: clearing is explicit, not a selected-card toggle.
   await focal.press("Enter")
+  await expect(focal).toHaveAttribute("aria-pressed", "true")
+  await expect(page.locator(".dtnPanel")).toBeVisible()
+  const camera = () => page.locator(".dtCanvasScene").evaluate(element => getComputedStyle(element).transform)
+  const landingCamera = await camera()
+  // Establish a genuinely different user view. DEC-127 contains the selected record rather than fitting its
+  // entire story, so the old forced 86%-to-81% tier switch is no longer the selection-framing contract.
+  await page.getByRole("button", { name: "Zoom in", exact: true }).click()
+  await page.getByRole("button", { name: "Zoom in", exact: true }).click()
+  await waitForCanvasSettled(page)
+  await expect.poll(camera).not.toBe(landingCamera)
+  const manualScale = await scale.textContent()
+  const manualTier = await page.locator(".dtCanvasScene").getAttribute("data-tier")
+  const retainedCamera = await camera()
+  await page.locator(".dtCanvas").focus()
+  await page.keyboard.press("Escape")
   await expect(page.locator(".dtnPanel")).toHaveCount(0)
+  await expect.poll(camera).toBe(retainedCamera)
+  await expect(scale).toHaveText(manualScale!)
   await focal.press("Enter")
   await expect(page.locator(".dtnPanel")).toBeVisible()
-  await expect(scale).toHaveText("81% · Compact")
-  await expect(page.locator(".dtCanvasScene")).toHaveAttribute("data-tier", "1")
+  await expect(focal).toHaveAttribute("aria-pressed", "true")
+  await expect(scale).toHaveText(manualScale!)
+  await expect(page.locator(".dtCanvasScene")).toHaveAttribute("data-tier", manualTier!)
+  await expect.poll(camera).not.toBe(landingCamera)
+  await focal.click({ trial: true })
 })
 
 for (const view of ["network", "artifact", "inside"]) {
   test(`${view} inspector dock controls remain separate from actions and content`, async ({ page }, testInfo) => {
     await open(page, view, 1280, "compact")
-    if (view === "inside") await page.locator(".dtCanvasNode").filter({ hasText: "SYSR-00076.02" }).click()
+    if (view === "inside") {
+      // The card's center is below the usable frame on this dense arrival. Reveal it through the real control
+      // before requiring ordinary pointer activation; partial paint is not proof that its center is actionable.
+      const reveal = page.getByRole("button", { name: "Show SYSR-00076.02", exact: true })
+      await expect(reveal).toBeVisible()
+      await reveal.click()
+      await page.locator(".dtCanvasNode").filter({ hasText: "SYSR-00076.02" }).click()
+      await expect(page.locator(".dticPanel")).toContainText("SYSR-00076.02")
+    }
     const panel = page.locator(".dtnPanel, .dtaPanel, .dticPanel")
     await expect(panel).toBeVisible()
     for (const dock of ["Bottom", "Right", "Auto"]) {
