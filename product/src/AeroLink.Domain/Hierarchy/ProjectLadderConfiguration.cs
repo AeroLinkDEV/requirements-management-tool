@@ -100,6 +100,21 @@ public sealed class ProjectLadderConfiguration
     }
 
     /// <summary>
+    /// Claims an empty Active configuration for a structural correction while keeping it effective. Empty
+    /// containers do not count as engineering content, so changing a selected supported tier before first
+    /// content must not pass through Draft/fallback and create a seal-before-activation deadlock.
+    /// </summary>
+    internal void BeginEmptyActiveCorrection(DateTimeOffset now)
+    {
+        if (IsSealed) throw new DomainException("A sealed project ladder cannot be structurally edited.");
+        if (Classification != ProjectLadderConfigurationClassification.NonDefault
+            || State != ProjectLadderConfigurationState.Active)
+            throw new DomainException("Only an empty Active non-default ladder can be corrected in place.");
+        UpdatedAt = now;
+        Version++;
+    }
+
+    /// <summary>
     /// Records the one controlled transition from an authored draft to runtime authority. The service that owns
     /// this call has already validated the complete consumer manifest; keeping the mutation here ensures no
     /// endpoint, seeder, or persistence helper can write Active without the required evidence pair.

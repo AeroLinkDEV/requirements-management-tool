@@ -181,6 +181,8 @@ public static class DependencyInjection
         services.AddScoped<ProjectAuthorityResolver>();
         services.AddScoped<IdentityService>();
         services.AddScoped<ProjectLadderAuthoringService>();
+        services.AddScoped<ProjectSetupService>();
+        services.AddScoped<SoftwareReleaseIdentityAuthority>();
         services.AddScoped<ProjectAssurancePolicyService>();
         services.AddScoped<ProjectVerificationVocabularyService>();
         services.AddScoped<IdentitySeeder>();

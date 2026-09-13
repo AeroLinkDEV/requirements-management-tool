@@ -1,3 +1,4 @@
+using AeroLink.Domain.Common;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Documents;
 using AeroLink.Domain.Identity;
@@ -147,7 +148,7 @@ public static class WorkspaceEndpoints
             return Results.Ok(await db.Programs.AsNoTracking().Where(p=>allowed==null||allowed.Contains(p.Id)).Select(p => new { p.Id, p.Name, p.Code }).ToListAsync(ct));
         });
 
-        app.MapPost("/api/workspaces", async (CreateWorkspaceRequest request, HttpContext http, AeroLinkDbContext db, TestProcedureDocumentBootstrap procedureDocuments, CancellationToken ct) =>
+        app.MapPost("/api/workspaces", async (CreateWorkspaceRequest request, HttpContext http, AeroLinkDbContext db, TestProcedureDocumentBootstrap procedureDocuments, SoftwareReleaseIdentityAuthority releaseIdentity, CancellationToken ct) =>
         {
             if(!http.UserAccount().IsAdministrator)return Results.Forbid();
             if (await db.Programs.AnyAsync(x => x.Code == request.ProgramCode.Trim().ToUpper(), ct))
@@ -156,6 +157,7 @@ public static class WorkspaceEndpoints
             {
                 var program = new ProgramRecord(request.ProgramName, request.ProgramCode);
                 var project = new ProjectRecord(program.Id, request.ProjectName, request.SoftwareProduct);
+                _ = await releaseIdentity.ValidateNewAsync(project.Id, request.InitialRelease, ct);
                 var release = new SoftwareRelease(project.Id, request.InitialRelease, request.InitialReleaseIsReleased);
                 // #726: new projects default to the full software Procedure tier ([Case, Procedure]) as an
                 // authored Draft, so the owner can deliberately remove Procedure before sealing. The
@@ -241,14 +243,15 @@ public static class WorkspaceEndpoints
             return Results.Ok(new { releases = releases.Select(x => new { x.Id, x.Version, x.IsReleased, x.ReleasedAt, x.PredecessorReleaseId }), baselines, campaigns, changes });
         });
 
-        app.MapPost("/api/releases", async (CreateReleaseRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapPost("/api/releases", async (CreateReleaseRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, SoftwareReleaseIdentityAuthority releaseIdentity, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
             var version = request.Version.Trim();
             if (string.IsNullOrWhiteSpace(version)) return Results.BadRequest(new { error = "A release version is required." });
             var current = await db.Releases.AsNoTracking().FirstOrDefaultAsync(x => x.ProjectId == request.ProjectId && !x.IsReleased, ct);
             if (current is not null) return Results.Conflict(new { error = $"Release {current.Version} is still in work. Release or formally close it before planning its successor." });
-            if (await db.Releases.AnyAsync(x => x.ProjectId == request.ProjectId && x.Version.ToLower() == version.ToLower(), ct)) return Results.Conflict(new { error = $"Release {version} already exists in this project." });
+            try { _ = await releaseIdentity.ValidateNewAsync(request.ProjectId, version, ct); }
+            catch (DomainException ex) { return Results.Conflict(new { error = ex.Message }); }
             if (request.PredecessorReleaseId is not null)
             {
                 var predecessor = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.PredecessorReleaseId && x.ProjectId == request.ProjectId, ct);

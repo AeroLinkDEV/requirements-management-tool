@@ -57,6 +57,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         => PendingLadderSeals.Add(new(configuration.Id, projectId, kind, identity));
 
     public DbSet<ProgramRecord> Programs => Set<ProgramRecord>();
+    public DbSet<ProjectSetupDraft> ProjectSetupDrafts => Set<ProjectSetupDraft>();
+    public DbSet<ProjectRepositoryConfiguration> ProjectRepositoryConfigurations => Set<ProjectRepositoryConfiguration>();
     public DbSet<IdentifierSequence> IdentifierSequences => Set<IdentifierSequence>();
     public DbSet<ShowcaseUpgradeStep> ShowcaseUpgradeSteps => Set<ShowcaseUpgradeStep>();
     public DbSet<ProjectRecord> Projects => Set<ProjectRecord>();
@@ -435,6 +437,52 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.SoftwareProduct).HasMaxLength(200).IsRequired();
             b.HasIndex(x => new { x.ProgramId, x.Name }).IsUnique();
         });
+        modelBuilder.Entity<ProjectSetupDraft>(b =>
+        {
+            b.ToTable("project_setup_drafts", t => t.HasCheckConstraint("CK_project_setup_draft_version", "\"Version\" > 0"));
+            b.HasKey(x => x.Id);
+            b.Property(x => x.CreatorUserName).HasMaxLength(100).IsRequired();
+            b.Property(x => x.InternalProgramName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.InternalProgramCode).HasMaxLength(30).IsRequired();
+            b.Property(x => x.ProjectName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.SoftwareProduct).HasMaxLength(200).IsRequired();
+            b.Property(x => x.InitialReleaseVersion).HasMaxLength(40).IsRequired();
+            b.Property(x => x.InitialReleaseCanonicalIdentity).HasMaxLength(40).IsRequired();
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.CurrentStep).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.StartKind).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.SelectedCategoriesJson).IsRequired();
+            b.Property(x => x.LadderJson).IsRequired();
+            b.Property(x => x.ReviewRulesJson).IsRequired();
+            b.Property(x => x.RepositoryJson).IsRequired();
+            b.Property(x => x.MappingJson).IsRequired();
+            b.Property(x => x.ReviewRulesAcceptanceHash).HasMaxLength(64);
+            b.Property(x => x.FinalizationOperationKey).HasMaxLength(200);
+            b.Property(x => x.FinalizationResultJson);
+            b.Property(x => x.Version).IsConcurrencyToken();
+            b.HasIndex(x => x.InternalProgramCode).IsUnique();
+            b.HasIndex(x => x.InternalProgramId).IsUnique();
+            b.HasIndex(x => x.ProjectId).IsUnique();
+            b.HasIndex(x => x.InitialReleaseId).IsUnique();
+            b.HasIndex(x => new { x.CreatorUserId, x.State });
+            b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatorUserId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ProjectRepositoryConfiguration>(b =>
+        {
+            b.ToTable("project_repository_configurations");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Mode).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.Provider).HasMaxLength(80);
+            b.Property(x => x.Endpoint).HasMaxLength(500);
+            b.Property(x => x.ConfiguredBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.LastVerifiedBy).HasMaxLength(100);
+            b.Property(x => x.RemotePathWithNamespace).HasMaxLength(300);
+            b.Property(x => x.LastVerificationFailureBy).HasMaxLength(100);
+            b.Property(x => x.Version).IsConcurrencyToken();
+            b.HasIndex(x => x.ProjectId).IsUnique();
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<ProjectLadderConfiguration>(b =>
         {
             b.ToTable("project_ladder_configurations", t => t.HasCheckConstraint("CK_project_ladder_configuration_state",
@@ -623,7 +671,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("software_releases"); b.HasKey(x => x.Id);
             b.Property(x => x.Version).HasMaxLength(40).IsRequired();
+            b.Property(x => x.CanonicalIdentity).HasMaxLength(40);
             b.HasIndex(x => new { x.ProjectId, x.Version }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.CanonicalIdentity }).IsUnique();
             b.HasIndex(x => x.PredecessorReleaseId);
             b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.PredecessorReleaseId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -2017,6 +2067,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                          .Where(x => x.State is EntityState.Added or EntityState.Modified))
                 entry.Entity.ValidateOriginForPersistence();
 
+            await ValidateReleaseCanonicalIdentitiesAsync(cancellationToken);
+
             // The save contract is intentionally visible here. Each phase may mutate tracked state or perform
             // pre-save I/O, but only EF's base save writes. Callers that need all pre-save reads and the write
             // in one transaction must provide an explicit transaction; EF's implicit transaction starts at base
@@ -2046,6 +2098,58 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             PendingLadderSeals.Clear();
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Enforces canonical release identity at the save boundary as well as at HTTP entry points. Historical rows
+    /// can predate CanonicalIdentity, so they are parsed and checked here before any new row is written; an
+    /// invalid or colliding historical inventory fails closed instead of relying on nullable-index behavior.
+    /// </summary>
+    private async Task ValidateReleaseCanonicalIdentitiesAsync(CancellationToken ct)
+    {
+        ChangeTracker.DetectChanges();
+        var added = ChangeTracker.Entries<SoftwareRelease>()
+            .Where(x => x.State == EntityState.Added).Select(x => x.Entity).ToArray();
+        if (added.Length == 0) return;
+
+        foreach (var projectId in added.Select(x => x.ProjectId).Distinct())
+        {
+            var existing = await Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
+            var seen = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var release in existing)
+            {
+                SoftwareBuildIdentifier.Parsed parsed;
+                try { parsed = SoftwareBuildIdentifier.Parse(release.Version); }
+                catch (DomainException ex)
+                {
+                    throw new DomainException($"Release identity review is required before saving another build: existing raw version '{release.Version}' is invalid. {ex.Message}");
+                }
+                var key = parsed.OfficialName;
+                if (seen.TryGetValue(key, out var prior))
+                    throw new DomainException($"Release identity review is required: '{prior}' and '{release.Version}' share canonical identity {key}.");
+                seen[key] = release.Version;
+                if (release.CanonicalIdentity is not null && !string.Equals(release.CanonicalIdentity, key, StringComparison.Ordinal))
+                    throw new DomainException($"Release identity review is required: stored canonical identity for '{release.Version}' is inconsistent.");
+            }
+
+            foreach (var release in added.Where(x => x.ProjectId == projectId))
+            {
+                SoftwareBuildIdentifier.Parsed parsed;
+                try { parsed = SoftwareBuildIdentifier.Parse(release.Version); }
+                catch (DomainException ex) { throw new DomainException($"Invalid software build version: {ex.Message}"); }
+                var key = parsed.OfficialName;
+                if (release.CanonicalIdentity is null)
+                    release.SetCanonicalIdentity(key);
+                if (!string.Equals(release.CanonicalIdentity, key, StringComparison.Ordinal))
+                    throw new DomainException($"Release '{release.Version}' has an incorrect canonical identity.");
+                if (seen.TryGetValue(key, out var prior))
+                    throw new DomainException($"Build '{release.Version}' conflicts with existing canonical identity {key} from '{prior}'.");
+                if (added.Count(x => x.ProjectId == projectId &&
+                        string.Equals(x.CanonicalIdentity ?? SoftwareBuildIdentifier.FromVersion(x.Version), key, StringComparison.Ordinal)) > 1)
+                    throw new DomainException($"The project cannot save more than one release with canonical identity {key}.");
+                seen[key] = release.Version;
+            }
         }
     }
 }

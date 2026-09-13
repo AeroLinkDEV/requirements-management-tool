@@ -347,7 +347,7 @@ public static class BaselineImportEndpoints
 
         // Gate 5. A named person accepts it, and the build exists from here.
         app.MapPost("/api/baseline-imports/{id:guid}/accept", async (Guid id, AcceptBaselineImportRequest request,
-            HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+            HttpContext http, AeroLinkDbContext db, IdentityService identity, SoftwareReleaseIdentityAuthority releaseIdentity, CancellationToken ct) =>
         {
             var import = await db.BaselineImports.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (import is null) return Results.NotFound();
@@ -358,8 +358,8 @@ public static class BaselineImportEndpoints
             if (await db.BaselineImportPackageItems.AnyAsync(x => x.BaselineImportId == id, ct))
                 return Results.BadRequest(new { error = "This import has staged Customer package content; select it into an existing Draft candidate baseline instead." });
             var version = request.Version.Trim();
-            if (await db.Releases.AnyAsync(x => x.ProjectId == import.ProjectId && x.Version == version, ct))
-                return Results.Conflict(new { error = $"Build {version} already exists in this Project." });
+            try { _ = await releaseIdentity.ValidateNewAsync(import.ProjectId, version, ct); }
+            catch (DomainException ex) { return Results.Conflict(new { error = ex.Message }); }
             try
             {
                 var now = DateTimeOffset.UtcNow;
