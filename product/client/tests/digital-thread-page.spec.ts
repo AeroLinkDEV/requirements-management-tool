@@ -1033,7 +1033,17 @@ test.describe("inside a change", () => {
     })
     // Navigated in the app rather than reloaded: a reload discards everything and could never carry the
     // previous record's content over, which is precisely the failure being guarded against.
-    await page.locator(`.dticCard.dticRegister:has-text("${second.displayNumber}")`).first().click()
+    const secondCard = page.locator(`.dticCard.dticRegister:has-text("${second.displayNumber}")`).first()
+    await expect(page.locator(".dtCanvasScene")).not.toHaveClass(/is-easing/)
+    const cardRect = (await secondCard.boundingBox())!
+    const canvasRect = (await page.locator(".dtCanvas").boundingBox())!
+    const toolbarRect = (await page.locator(".dtCanvasControls").boundingBox())!
+    const inspectorRect = (await page.locator(".dticPanel").boundingBox())!
+    expect(cardRect.x + cardRect.width).toBeGreaterThan(canvasRect.x)
+    expect(cardRect.x).toBeLessThan(canvasRect.x + canvasRect.width)
+    expect(cardRect.y + cardRect.height).toBeGreaterThan(toolbarRect.y + toolbarRect.height + 38)
+    expect(cardRect.y).toBeLessThan(inspectorRect.y - 76)
+    await secondCard.click()
 
     // While the second change's proposal is still in flight the board is under the second change's identity,
     // and its proposal region says it is loading rather than still rendering the first change's proposed

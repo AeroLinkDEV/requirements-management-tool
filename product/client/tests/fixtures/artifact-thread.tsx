@@ -11,7 +11,7 @@
  *
  * The scenario is chosen by `?case=` so one fixture serves every rendered assertion.
  */
-import { useState } from "react"
+import { StrictMode, Fragment, useState } from "react"
 import { createRoot } from "react-dom/client"
 // The product stylesheet, because the card typography is written against its tokens. Without it every
 // `font: var(--weight-strong) 11.5px …` shorthand is invalid at computed-value time and silently falls back to
@@ -51,7 +51,9 @@ const HASH_2 = "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae
 type Node = Record<string, unknown>
 type Edge = Record<string, unknown>
 
-const node = (over: Node): Node => ({ title: null, state: null, level: null, isFocal: false, ...over })
+const node = (over: Node): Node => ({ title: null, state: null, level: null, isFocal: false, ...over,
+  ...(new URLSearchParams(location.search).has("long") && typeof over.title === "string" ? { title: `${over.title}. `.repeat(4) } : {}),
+})
 
 const edge = (fromId: string, fromKind: string, toId: string, toKind: string, relation: string,
   isSuspect = false): Edge => ({ fromId, fromKind, toId, toKind, relation, isSuspect })
@@ -483,8 +485,9 @@ function Unsettled() {
 // as an unknown scenario and fell back to the populated thread — so both states silently rendered a full board.
 const response = scenario in responses ? responses[scenario] : responses.hlr
 
+const Lifecycle = new URLSearchParams(location.search).has("strict") ? StrictMode : Fragment
 createRoot(document.getElementById("root")!).render(
-  scenario === "relink" ? (
+  <Lifecycle>{scenario === "relink" ? (
     <Relink />
   ) : scenario === "unsettled" ? (
     <Unsettled />
@@ -495,5 +498,5 @@ createRoot(document.getElementById("root")!).render(
       loading={scenario === "loading"}
       error={scenario === "error" ? "The server did not answer in time." : null}
     />
-  ),
+  )}</Lifecycle>,
 )

@@ -715,6 +715,7 @@ export default function DigitalThreadPage({
       ) : active === "inside" && opened ? (
         <DigitalThreadInsideChange
           opened={opened}
+          scopeKey={`inside|${projectId}|${releaseId}|${baselineId}|${opened.id}`}
           register={register}
           content={proposal}
           representation={representation}
@@ -738,6 +739,7 @@ export default function DigitalThreadPage({
       ) : active === "artifact" ? (
         <DigitalThreadArtifact
           response={thread}
+          scopeKey={`artifact|${projectId}|${releaseId}|${baselineId}|${artifactContext ?? ""}|${focalId ?? ""}`}
           representation={representation}
           loading={loading || (!!focalId && !thread && !artifactError)}
           error={artifactError}
@@ -749,6 +751,7 @@ export default function DigitalThreadPage({
       ) : (
         <DigitalThreadNetwork
           projection={network}
+          scopeKey={`network|${projectId}|${releaseId}|${baselineId}|${focalId ?? ""}`}
           representation={representation}
           loading={loading}
           error={error}

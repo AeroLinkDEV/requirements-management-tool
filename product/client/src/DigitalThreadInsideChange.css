@@ -336,7 +336,7 @@
   cursor: pointer;
 }
 
-.dticEyebrow { margin: 0; color: var(--teal-600); font: var(--weight-bold) 9px var(--font-body); letter-spacing: .13em; }
+.dticEyebrow { margin: 0; color: var(--teal-600); font: var(--weight-bold) 12px/1.35 var(--font-body); letter-spacing: .07em; }
 .dticPanelIdentity { margin: 5px 0 8px; color: #2b3d54; font: var(--weight-strong) 13px ui-monospace, SFMono-Regular, Consolas, monospace; }
 .dticPanelWeb { margin: 8px 0 0; color: var(--ink-500); font-size: 10.5px; }
 
@@ -381,12 +381,12 @@
    a record out underneath whichever edge the panel took. */
 .dticPanel-bottom { left: 16px; right: 16px; bottom: 18px; height: 150px; }
 .dticPanel-bottom .dticPanelTools { position: absolute; right: 16px; top: 14px; z-index: 2; margin: 0; }
-.dticPanel-bottom .dticPanelContent > :last-child { padding-top: 32px; }
-.dticPanel-right { right: 16px; top: 70px; bottom: 22px; left: auto; width: 300px; height: auto; overflow: auto; }
-.dticPanel-left { left: 16px; top: 70px; bottom: 22px; right: auto; width: 300px; height: auto; overflow: auto; }
+.dticPanel-bottom .dticPanelContent::after { content: ""; }
+.dticPanel-right { right: 16px; top: 112px; bottom: 22px; left: auto; width: 300px; height: auto; overflow: auto; }
+.dticPanel-left { left: 16px; top: 112px; bottom: 22px; right: auto; width: 300px; height: auto; overflow: auto; }
 
 .dticPanelContent { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 8px; overflow: auto; }
-.dticPanel-bottom .dticPanelContent { display: grid; grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; overflow: hidden; }
+.dticPanel-bottom .dticPanelContent { display: grid; grid-template-columns: 250px minmax(0, 1fr) minmax(0, 1fr) max(200px, 18em); gap: 18px; align-items: start; overflow: hidden; }
 .dticPanelIdentityCol { min-width: 0; overflow-y: auto; }
 .dticPanel-bottom .dticPanelIdentityCol { max-height: 100%; overflow-wrap: anywhere; }
 
@@ -411,6 +411,18 @@
 
 /* Deeper than one hop reads dashed, so a direct relationship is never mistaken for a distant one. */
 .dticRel button.is-far { border-style: dashed; }
-.dticRel button small { color: #8fa0b2; font-size: 9px; font-weight: var(--weight-strong); }
-.dticRel button span { overflow: hidden; color: #17324d; font: var(--weight-strong) 10px ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; }
+/* #1022 A17: the linked identity and its relation word go up to the 12px floor while the row keeps its compact
+   padding, so the tray reads better rather than growing. */
+.dticRel button small { color: #6f8095; font-size: 12px; font-weight: var(--weight-strong); }
+.dticRel button span { overflow: hidden; color: #17324d; font: var(--weight-strong) 12px ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; }
 .dticRelEmpty { margin: 0; color: #8fa0b2; font-size: 10.5px; }
+
+/* The inspector uses the same label/value spacing as an expanded record. */
+.dticPanel .dticKv { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 4px 10px; margin-top: 5px; font-size: 12px; }
+.dticPanel .dticKv i { color: var(--ink-500); font-style: normal; }
+.dticPanel .dticKv b { overflow-wrap: anywhere; }
+.dticPanelCol > .dticEyebrow { margin-bottom: 6px; }
+.dticPanelTools button { font: var(--weight-strong) 12px var(--font-body); }
+.dticRel button { min-width: 0; padding: 4px 7px; }
+.dticRel button small { flex: 0 0 auto; }
+.dticRelEmpty { font-size: 12px; line-height: 1.4; }

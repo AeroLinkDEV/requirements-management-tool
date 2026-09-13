@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Digital Thread canvas contract fixture</title>
+    <style>
+      /* The canvas takes its height from the view's stage element in the product; this fixture supplies one. */
+      .dtCanvas { height: 700px; }
+    </style>
+  </head>
+  <body>
+    <!--
+      Shared-canvas contract coverage for #1022.
+
+      This mounts `DigitalThreadCanvas` directly with deliberately spaced rows, which `CanvasNode` permits but no
+      production adapter emits. It exists to exercise the available-space reveal and first-exposure behaviour that
+      a contiguous row assignment cannot produce — it is contract coverage for the shared canvas, not a claim
+      about any view's data.
+    -->
+    <div id="root" style="height: 720px"></div>
+    <script type="module" src="./digital-thread-contract.tsx"></script>
+  </body>
+</html>

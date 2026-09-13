@@ -3,6 +3,10 @@
    Tokens come from index.css — nothing here invents a colour or a radius. */
 
 .dtCanvas {
+  /* The canvas owns pointer gestures: a native text/image drag starting from a card cancels the pointer and
+     silently reduces a lane drag to its first step. Nested controls keep their own behaviour. */
+  user-select: none;
+  -webkit-user-drag: none;
   position: relative;
   overflow: clip;
   cursor: grab;
@@ -15,9 +19,25 @@
 .dtCanvasHoverTarget { z-index: 95; box-sizing: border-box; cursor: pointer; background: var(--surface); border: 2px solid var(--teal-700); border-radius: 8px; overflow: hidden; box-shadow: 0 4px 14px #17324d33; }
 .dtCanvasHoverTarget > div { height: calc(100% - 22px); overflow: hidden; }
 .dtCanvasHoverTarget > span { display: block; padding: 3px 6px; background: var(--teal-700); color: white; font-size: 12px; }
-.dtCanvasOffscreen { position: absolute; bottom: 6px; left: 12px; right: 12px; z-index: 90; display: flex; flex-wrap: wrap; gap: 4px; max-height: 58px; overflow: auto; pointer-events: none; }
-.dtCanvasOffscreen button { pointer-events: auto; border: 1px solid var(--teal-700); border-radius: 5px; background: var(--surface); color: var(--teal-700); min-height: 26px; padding: 3px 7px; font: inherit; font-size: 12px; }
+.dtCanvasOffscreen { position: absolute; bottom: 6px; left: 12px; max-width: min(320px, calc(100% - 24px)); z-index: 90; display: flex; flex-wrap: nowrap; gap: 4px; max-height: 42px; overflow: auto; pointer-events: auto; touch-action: pan-x; overscroll-behavior: contain; scrollbar-width: thin; }
+.dtCanvasOffscreen button { flex: 0 0 auto; white-space: nowrap; pointer-events: auto; border: 1px solid var(--teal-700); border-radius: 5px; background: var(--surface); color: var(--teal-700); min-height: 26px; padding: 3px 7px; font: inherit; font-size: 12px; }
 .dtCanvasOffscreen button[hidden] { display: none; }
+
+/* Directional continuation: a small chevron where the traced thread continues beyond what the lane shows.
+   Deliberately not a count or a popup — #1022 asks for direction, and this is proof the link continues
+   rather than appearing broken at the boundary. Positioned by paint, never by React state. */
+.dtCanvasContinuations { position: absolute; inset: 0; z-index: 88; pointer-events: none; }
+.dtCanvasContinuation {
+  position: absolute; transform: translateX(-50%);
+  padding: 1px 7px; border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .92); border: 1px solid #9ec9c2;
+  color: var(--teal-700); font: var(--weight-bold) 11px var(--font-body);
+}
+.dtCanvasContinuation[hidden] { display: none; }
+.dtCanvasContinuation::after { content: "▼"; }
+.dtCanvasContinuation[data-dir="up"]::after { content: "▲"; }
+.dtCanvasContinuation[data-dir="left"]::after { content: "◀"; }
+.dtCanvasContinuation[data-dir="right"]::after { content: "▶"; }
 
 /* Controls live in the viewport rather than the transformed scene. They are real buttons, so the shared
    pointer handler sees them as nested controls and cannot turn activation into a pan, roll, or selection. */
@@ -59,6 +79,7 @@
 /* Fail closed when a genuinely occupied frame has no measured on-line label slot. This stays in the free
    viewport chrome and directs the reader to a layout recovery path while preserving the cards and edge data. */
 .dtCanvasPlacementNotice {
+  pointer-events: none;
   position: absolute;
   left: 12px;
   right: 12px;
@@ -200,8 +221,13 @@
   .dtCanvasNode { transition: none; }
 }
 
-/* Programmatic moves ease; pointer-driven pan and zoom never do, because easing a drag feels like lag. */
+/* Programmatic moves ease; pointer-driven pan and zoom never do, because easing a drag feels like lag.
+   #1022 asks for roughly half the speed on automatic *selection* framing — twice the duration for the same
+   travel — so a click reads as movement rather than a jump. Explicit Fit commands use the shorter timing.
+   Manual input interrupts either
+   immediately, and reduced motion disables both. */
 .dtCanvasScene.is-easing { transition: transform .4s cubic-bezier(.22, .61, .36, 1); }
+.dtCanvasScene.is-easing.is-motion-slow { transition-duration: .8s; }
 
 @media (prefers-reduced-motion: reduce) {
   .dtCanvasScene.is-easing { transition: none; }

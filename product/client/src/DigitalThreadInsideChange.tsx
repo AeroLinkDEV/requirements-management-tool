@@ -84,6 +84,8 @@ export type DigitalThreadInsideChangeProps = {
   onOpenChange?: (node: NetworkNode) => void
   onBackToNetwork?: () => void
   representation?: ThreadRepresentation
+  /** Stable project/build/baseline navigation identity supplied by the page. */
+  scopeKey?: string
 }
 
 type Card =
@@ -130,6 +132,7 @@ export default function DigitalThreadInsideChange({
   onOpenChange,
   onBackToNetwork,
   representation = "map",
+  scopeKey,
 }: DigitalThreadInsideChangeProps) {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all")
   const [selectedId, setSelectedId] = useState<string | null>(opened.id)
@@ -437,7 +440,11 @@ export default function DigitalThreadInsideChange({
     canvasViewRef,
   )
 
-  const cardWeb = useMemo(() => hoveredId ? trace(hoveredId, canvasEdges) : web, [hoveredId, canvasEdges, web])
+  // Persistent selection wins: hovering another card while a record is selected must not preview it (#1022).
+  const cardWeb = useMemo(
+    () => (hoveredId && !selectedId ? trace(hoveredId, canvasEdges) : web),
+    [hoveredId, canvasEdges, selectedId, web],
+  )
   const renderCard = useCallback(
     (canvasNode: CanvasNode) => {
       const card = cards.get(canvasNode.id)
@@ -939,6 +946,7 @@ export default function DigitalThreadInsideChange({
             selectedId={selectedId}
             onSelect={handleSelect}
             onHover={setHoveredId}
+            scopeKey={scopeKey ?? `inside|${opened.id}`}
             tracedEdges={web?.edges}
             frameInset={frameInset}
             frameIds={selectedId ? [...(web?.nodes ?? [])] : undefined}

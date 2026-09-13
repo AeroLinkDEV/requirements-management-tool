@@ -172,8 +172,8 @@
   padding: 14px 16px;
 }
 
-.dtnPanel-right { right: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
-.dtnPanel-left { left: 16px; top: 70px; bottom: 22px; width: 300px; overflow: auto; }
+.dtnPanel-right { right: 16px; top: 112px; bottom: 22px; width: 300px; overflow: auto; }
+.dtnPanel-left { left: 16px; top: 112px; bottom: 22px; width: 300px; overflow: auto; }
 .dtnPanel-bottom {
   left: 16px;
   right: 16px;
@@ -205,20 +205,23 @@
   background: var(--surface);
   padding: 2px 8px;
   color: #8493a6;
-  font: var(--weight-strong) 10px var(--font-body);
+  font: var(--weight-strong) 12px var(--font-body);
   cursor: pointer;
 }
 
 .dtnPanelTools button:hover { border-color: #a9c9c4; color: var(--teal-700); }
 .dtnPanelTools button.is-on { border-color: var(--teal-700); background: #eff9f6; color: var(--teal-700); }
 
-.dtnEyebrow { margin: 0; color: var(--teal-600); font: var(--weight-bold) 9px var(--font-body); letter-spacing: .13em; }
-.dtnPanelGrid { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 13px; }
+.dtnEyebrow { margin: 0; color: var(--teal-600); font: var(--weight-bold) 12px/1.35 var(--font-body); letter-spacing: .07em; }
+/* #1022 A17: the owner called out small headings and cramped detail text beside oversized boxes. The type goes
+   up to the product's 12px floor and the boxes give back the height in padding and gaps, so the tray reads
+   better instead of simply growing. */
+.dtnPanelGrid { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 8px; }
 
 /* Flattened, the panel is four columns rather than one third of a tall box with empty space beneath it. */
 .dtnPanel-bottom .dtnPanelGrid {
   display: grid;
-  grid-template-columns: 286px minmax(0, 1fr) minmax(0, 1fr) 158px;
+  grid-template-columns: 250px minmax(0, 1fr) minmax(0, 1fr) 200px;
   gap: 18px;
   align-items: stretch;
   height: auto;
@@ -232,9 +235,9 @@
 
 .dtnPanelCol { min-width: 0; display: flex; flex-direction: column; }
 .dtnRelHead { display: flex; align-items: baseline; gap: 6px; margin-bottom: 5px; }
-.dtnRelHead span { color: #8fa0b2; font-size: 9.5px; font-weight: var(--weight-strong); }
+.dtnRelHead span { color: #7d8fa3; font-size: 12px; font-weight: var(--weight-strong); letter-spacing: .04em; }
 
-.dtnRel { display: grid; gap: 4px; overflow-y: auto; max-height: 152px; }
+.dtnRel { display: grid; gap: 3px; overflow-y: auto; max-height: 152px; }
 .dtnPanel-bottom .dtnRel {
   grid-template-columns: 1fr 1fr;
   align-content: start;
@@ -252,7 +255,7 @@
   border: 1px solid #e7edf2;
   border-radius: 7px;
   background: #fafcfd;
-  padding: 5px 8px;
+  padding: 2px 6px;
   text-align: left;
   cursor: pointer;
 }
@@ -260,8 +263,8 @@
 .dtnRel button:hover { border-color: #a9c9c4; background: #f2f9f8; }
 /* Anything past the first hop is dashed, so direct and distant links are not read as the same thing. */
 .dtnRel button.is-far { border-style: dashed; background: var(--surface); }
-.dtnRel small { display: block; color: #8493a6; font-size: 8.5px; letter-spacing: .04em; }
-.dtnRel button > span > span { display: block; overflow: hidden; color: #17324d; font: var(--weight-strong) 10px ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; }
+.dtnRel small { display: block; color: #6f8095; font-size: 12px; letter-spacing: .02em; }
+.dtnRel button > span > span { display: block; overflow: hidden; color: #17324d; font: var(--weight-strong) 12px ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; }
 .dtnRel em { margin-left: auto; color: #8493a6; font-size: 13px; font-style: normal; }
 .dtnRelEmpty { margin: 0; color: #8fa0b2; font-size: 10.5px; padding: 4px 0; }
 
@@ -372,3 +375,7 @@
   font: var(--weight-strong) var(--text-xs) var(--font-body);
   cursor: pointer;
 }
+
+.dtnRelHead { flex-wrap: wrap; gap: 3px 8px; margin-bottom: 6px; }
+.dtnRel button > span { min-width: 0; }
+.dtnRelEmpty { font-size: 12px; line-height: 1.4; }

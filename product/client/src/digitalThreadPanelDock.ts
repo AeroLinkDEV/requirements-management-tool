@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { RefObject } from "react"
 
 /** Where a detail panel sits. `auto` picks the side with less linked content; the rest are explicit. */
@@ -10,25 +10,10 @@ export const PANEL_FALLBACK_HEIGHT = 150 + 18 + 16
 
 type FrameInset = { left?: number; right?: number; bottom?: number }
 
-
 /**
- * Where a detail panel may rest, given that it must never cover a directly linked record.
- *
- * #880 §6.6 is a shared-canvas guarantee, and the canonical prototype's `checks.js` exercises it in the change
- * network as well as the artifact thread: for every dock mode, the selected record **and every direct link**
- * must be inside the panel-free frame. Since §10.1 stopped the board zooming out past the legibility floor to
- * make room, a side dock can no longer always leave enough width — and the answer is that the panel moves, not
- * that the record is hidden. A hidden linked record satisfies "not underneath the panel" only by making it not
- * present, which is the same failure wearing a different face.
- *
- * This lives in one place rather than three because it was wired into one view first and the other two kept
- * the defect. A fourth view that renders the panel gets the behaviour by using this hook, rather than by
- * remembering to reimplement it.
- *
- * `situation` is what the shortfall was observed for — the selection and the reader's preference. The flag is
- * resolved against it at render rather than cleared by an effect, because clearing it in an effect does not
- * work: child effects run before parent effects, so the reset lands *after* the canvas has already reported
- * the shortfall in the same commit and silently undoes it.
+ * Measure the inspector's real constraint and recover to the other dock axis only when the selected record
+ * cannot fit. Each candidate is measured under its own CSS; no candidate borrows the current dock's size.
+ * Recovery is bounded once per selection/preference situation to prevent dock/zoom/measurement loops.
  */
 export function usePanelDock(
   preferred: ResolvedDock,
@@ -40,14 +25,55 @@ export function usePanelDock(
   panelRef: (element: HTMLElement | null) => void
   frameInset?: FrameInset
 } {
-  const [narrowFor, setNarrowFor] = useState<string | null>(null)
+  const [recovery, setRecovery] = useState<{ situation: string; dock: ResolvedDock } | null>(null)
+  const reportedSituation = useRef<string | null>(null)
   const [panelElement, setPanelElement] = useState<HTMLElement | null>(null)
   const [measuredInset, setMeasuredInset] = useState<FrameInset | null>(null)
-  const dock: ResolvedDock = narrowFor === situation ? "bottom" : preferred
+  const chooseRecovery = useCallback((current: ResolvedDock): ResolvedDock => {
+    const canvas = canvasHostRef?.current?.querySelector<HTMLElement>(".dtCanvas")
+    const canvasRect = canvas?.getBoundingClientRect()
+    if (!canvasRect || !panelElement || canvasRect.width < 1 || canvasRect.height < 1) {
+      return current === "bottom" ? "right" : "bottom"
+    }
+    const cardRect = canvas?.querySelector<HTMLElement>(".dtCanvasNode.is-selected")?.getBoundingClientRect()
+    if (!cardRect) return current
+    const toolbar = canvas?.querySelector<HTMLElement>(".dtCanvasControls")?.getBoundingClientRect()
+    const heading = canvas?.querySelector<HTMLElement>(".dtCanvasLaneHead")
+    const headingOffset = heading ? Math.max(0, -parseFloat(getComputedStyle(heading).top) || 0) : 0
+    const top = Math.max(40, Math.ceil((toolbar?.bottom ?? canvasRect.top + 38) - canvasRect.top + headingOffset + 8))
+    // Each candidate is measured with its own CSS in the same containing block. The inert, invisible clone
+    // exists only during this synchronous measurement, and is removed before a frame can be displayed.
+    const measureCandidate = (candidate: ResolvedDock) => {
+      const probe = panelElement.cloneNode(true) as HTMLElement
+      probe.className = probe.className.replace(/Panel-(bottom|left|right)/g, `Panel-${candidate}`)
+      probe.inert = true
+      probe.setAttribute("aria-hidden", "true")
+      probe.style.visibility = "hidden"
+      probe.style.pointerEvents = "none"
+      probe.removeAttribute("id")
+      probe.querySelectorAll("[id]").forEach(node => node.removeAttribute("id"))
+      panelElement.parentElement!.appendChild(probe)
+      try {
+        const rect = probe.getBoundingClientRect()
+        const width = canvasRect.width - (candidate === "bottom" ? 0 : candidate === "left"
+          ? rect.right - canvasRect.left + 12 : canvasRect.right - rect.left + 12)
+        const height = canvasRect.height - top - 64 - (candidate === "bottom" ? canvasRect.bottom - rect.top + 12 : 0)
+        return { fits: cardRect.width + 24 <= width && cardRect.height + 24 <= height,
+          room: Math.min(width / cardRect.width, height / cardRect.height) }
+      } finally { probe.remove() }
+    }
+    const opposite = current === "bottom" ? "right" : "bottom"
+    const own = measureCandidate(current)
+    const other = measureCandidate(opposite)
+    return own.fits ? current : other.fits || other.room > own.room ? opposite : current
+  }, [canvasHostRef, panelElement])
+
+  /** The one placement, measured once per situation: repeated reports cannot walk through more placements. */
+  const dock: ResolvedDock = recovery?.situation === situation ? recovery.dock : preferred
 
   // The canvas and panel are siblings in each view. Measure their rendered rectangles instead of reserving a
   // guessed 300x150 box: selected cards and relationship lists can grow, and the free frame must follow them.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!panelElement || !canvasHostRef) {
       setMeasuredInset(null)
       return undefined
@@ -83,9 +109,21 @@ export function usePanelDock(
   }, [canvasHostRef, dock, panelElement])
 
   return {
-    // Bottom keeps the full width, so it is the placement that can hold a wide directed story.
     dock,
-    reportNeedsRoom: useCallback(() => setNarrowFor(situation), [situation]),
+    /**
+     * Bounded per situation, not for the lifetime of the hook.
+     *
+     * Repeated reports for the same situation are idempotent (the state already holds it), while a genuinely
+     * new situation replaces it and becomes eligible for its own supported recovery. Retaining the first
+     * situation forever silently denied every later selection its fallback.
+     */
+    reportNeedsRoom: useCallback(() => {
+      if (reportedSituation.current === situation) return
+      const dock = chooseRecovery(preferred)
+      reportedSituation.current = situation
+      // DOM measurement belongs to the report, not to a replayable React state updater.
+      setRecovery({ situation, dock })
+    }, [chooseRecovery, preferred, situation]),
     panelRef: useCallback((element: HTMLElement | null) => setPanelElement(element), []),
     frameInset: panelElement
       ? measuredInset ?? (dock === "bottom"

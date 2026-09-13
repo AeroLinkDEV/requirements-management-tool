@@ -24,7 +24,7 @@ const opened: NetworkNode = {
   id: "cr-1",
   kind: "ChangeRequest",
   displayNumber: "SRCR-00100.00",
-  title: "Sequencing rework",
+  title: new URLSearchParams(location.search).has("long") ? "Sequencing rework with retained downstream allocation and verification context. ".repeat(4) : "Sequencing rework",
   state: "Draft",
   level: "System",
   buildVersion: "1.6",
@@ -47,6 +47,7 @@ const requirementItem = (over: Partial<ProposalItem> & { id: string; kind: strin
   allocatedDownstream: [],
   disposition: "Allocated",
   ...over,
+  ...(new URLSearchParams(location.search).has("long") ? { statement: "The FMS shall preserve the active route sequence and associated downstream context when the crew accepts an oceanic waypoint discontinuity. ".repeat(3) } : {}),
 })
 
 const verificationItem = (

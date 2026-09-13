@@ -11,6 +11,7 @@
  * rather than counted as off-ladder.
  */
 import { createRoot } from "react-dom/client"
+import { useMemo, useState } from "react"
 // The product stylesheet, because the card typography is written against its tokens. Without it every
 // `font: var(--weight-strong) 8.5px …` shorthand is invalid at computed-value time and silently falls back to
 // the 16px default, which would measure type the product never renders.
@@ -25,6 +26,7 @@ const node = (over: Partial<NetworkNode> & { id: string; kind: string; displayNu
   state: "InReview",
   buildVersion: "1.6",
   ...over,
+  ...(new URLSearchParams(location.search).has("long") ? { title: "Oceanic route sequencing after a discontinuity, including crew confirmation and retained downstream verification context. ".repeat(3) } : {}),
 })
 
 /** One record per badge `badgeOf` can produce, each with a long identifier so collisions are visible. */
@@ -111,6 +113,56 @@ const denseProjection = { ...hoverProjection, edges: [...hoverProjection.edges,
   ...Array.from({ length: 18 }, (_, index) => edge("hlr-127", "ChangeRequest", `case-${index}`, "TestChangeRequest", "CoveredByTestChangeRequest")),
 ] }
 /**
+ * Available-space reveal: a short lane whose linked card sits above the current viewing height, with empty
+ * usable space below it, and a visible neighbour to act as the subject. Shared-canvas contract coverage only —
+ * this is not a claim that a production adapter emits exactly this arrangement.
+ */
+const revealProjection: NetworkProjection = {
+  ...serverChainProjection,
+  nodes: [
+    node({ id: "pr-5", kind: "ProblemReport", displayNumber: "PR-00005", state: "Open" }),
+    // Spacers put the subject a few rows down its own lane, so panning can lift the short lane's card out of
+    // the usable window while the subject stays visible and hoverable.
+    node({ id: "other-a", kind: "ChangeRequest", displayNumber: "HLRCR-00031", level: "HighLevel" }),
+    node({ id: "other-b", kind: "ChangeRequest", displayNumber: "HLRCR-00032", level: "HighLevel" }),
+    node({ id: "other-c", kind: "ChangeRequest", displayNumber: "HLRCR-00033", level: "HighLevel" }),
+    node({ id: "hlr-127", kind: "ChangeRequest", displayNumber: "HLRCR-00127", level: "HighLevel" }),
+  ],
+  edges: [
+    edge("pr-5", "ProblemReport", "hlr-127", "ChangeRequest", "ProblemReportResolution"),
+  ],
+}
+
+/**
+ * Scope harness (test-only): the same content under two navigation scopes, plus a content-only re-render.
+ *
+ * #1022 requires a genuine scope change to start a new navigation context while an equivalent refresh inside
+ * the same scope keeps the reader's position. Neither can be exercised by reloading the page, which would reset
+ * everything regardless, so the fixture flips the canvas's `scopeKey` prop in place.
+ */
+function ScopeHarness({ projection: data }: { projection: NetworkProjection }) {
+  const [scope, setScope] = useState("scope-a")
+  const [generation, setGeneration] = useState(0)
+  const refreshed = useMemo(
+    () => ({ ...data, nodes: data.nodes.map(node => ({ ...node })) }),
+    [data, generation],
+  )
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <button id="scope-flip" type="button" onClick={() => setScope(current => current === "scope-a" ? "scope-b" : "scope-a")}>
+        flip scope
+      </button>
+      <button id="content-refresh" type="button" onClick={() => setGeneration(value => value + 1)}>
+        refresh content
+      </button>
+      <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+        <DigitalThreadNetwork projection={refreshed} buildLabel="Build 1.6" scopeKey={`network|${scope}`} />
+      </div>
+    </div>
+  )
+}
+
+/**
  * #1016 S13A. Verification packages with and without a controlled number, side by side.
  *
  * The two unnumbered rows are raised from the same approved change and therefore carry the same label by
@@ -169,7 +221,12 @@ const verificationIdentityProjection: NetworkProjection = {
   truncated: false,
   orderedLevels: ["System"],
 }
-const chosen = scenario === "dense" ? denseProjection : scenario === "hover" ? hoverProjection : scenario === "server" ? serverChainProjection : scenario === "verification-identity" ? verificationIdentityProjection : projection
+const chosen = scenario === "dense" ? denseProjection
+  : scenario === "hover" || scenario === "scope" ? hoverProjection
+  : scenario === "reveal" ? revealProjection
+  : scenario === "server" ? serverChainProjection
+  : scenario === "verification-identity" ? verificationIdentityProjection
+  : projection
 
 /**
  * #1016 S13A. The real adapter and the real router, wired exactly as the page wires them.
@@ -191,7 +248,7 @@ const hrefFor = (node: Parameters<typeof exactCardIdentity>[0]) => {
 const representation = new URLSearchParams(window.location.search).get("view") === "table" ? "table" : "map"
 
 createRoot(document.getElementById("root")!).render(
-  <DigitalThreadNetwork
+  scenario === "scope" ? <ScopeHarness projection={chosen} /> : <DigitalThreadNetwork
     projection={chosen}
     buildLabel="Build 1.6"
     hrefFor={hrefFor}
