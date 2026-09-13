@@ -117,7 +117,10 @@ was started and nothing was changed.
 }
 
 # A single installation lease remains held across synchronous continuation and compensation.
-Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1') -Force
+# Reuse the module during nested topology restoration. Force-reloading it removes the continuation
+# caller's exported cleanup command while that caller still owns a lease. Source advances already
+# hand off to a fresh process, so retaining this process's transition module cannot retain old-source code.
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1')
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessControl.psm1')
 $lease = Enter-AeroLinkTransition -InstallationRoot $installation.InstallationRoot

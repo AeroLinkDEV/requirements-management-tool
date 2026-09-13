@@ -2,6 +2,7 @@
 # Executes the production controller with disposable dependency adapters. No API, tunnel, Git source or
 # database is changed. Native process/lease and real Git generation behavior have separate contract suites.
 $ErrorActionPreference = 'Stop'
+& (Join-Path $PSScriptRoot 'AeroLinkTransitionImport.Tests.ps1')
 $root = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-924-production-' + [guid]::NewGuid().ToString('N'))
 $scripts = Join-Path $root 'product\scripts'
 New-Item -ItemType Directory -Path $scripts -Force | Out-Null
