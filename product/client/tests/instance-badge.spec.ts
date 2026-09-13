@@ -5,7 +5,7 @@ test('HOME currency refreshes passively and loses its current claim when the sta
   await showcaseSeed(request)
   await page.clock.install()
   let state = 'Current'
-  let unavailable = false
+  let unavailable = true
   let reads = 0
   await page.route('**/health/identity', route => {
     reads++
@@ -19,9 +19,12 @@ test('HOME currency refreshes passively and loses its current claim when the sta
   await login(page, 'admin')
   const badge = page.getByTestId('instance-badge')
   const currency = badge.getByTestId('main-currency')
+  await expect(badge).toHaveCount(0)
+  unavailable = false
+  await page.clock.fastForward(61_000)
   await expect(currency).toContainText('Current main')
   await expect(currency).toContainText('abc12345')
-  await expect(currency).toContainText('checked 0m ago')
+  await expect(currency).toContainText(/checked \d+m ago/)
   const firstReads = reads
   state = 'UpdateAvailable'
   await page.clock.fastForward(61_000)

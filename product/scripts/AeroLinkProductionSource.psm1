@@ -623,31 +623,43 @@ function Update-AeroLinkProductionSource {
         return $result
     }
     finally {
-        # Never write another installation's status through a broken source binding or a qualification
-        # bypass. Ordinary disposable tests can configure the same real dedicated-source binding.
-        $binding = Get-AeroLinkProductionSourcePosture -SourceRoot $SourceRoot -RemoteName $RemoteName
-        if (-not $AllowNonDedicated -and $binding.Dedicated) {
-            # Like the dedicated-source marker, this belongs to the source itself, not the shared
-            # installation pointer (which may resolve inside the developer checkout).
-            $directory = Split-Path (Get-AeroLinkProductionSourceMarkerPath -SourceRoot $SourceRoot) -Parent
-            $path = Join-Path $directory 'main-currency.json'
-            $temporary = $path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
-            try {
-                New-Item -ItemType Directory -Path $directory -Force | Out-Null
-                $observation = @{
-                    sourceRoot = [IO.Path]::GetFullPath($SourceRoot).TrimEnd('\', '/')
-                    sourceSha = if ($result) { $result.HeadSha } else { $null }
-                    remoteSha = if ($result) { $result.TargetSha } else { $null }
-                    checkedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
-                    verified = [bool]($result -and $result.Canonical -and $result.RemoteReachable -eq $true)
+        $path = $null
+        try {
+            # Never write another installation's status through a broken source binding or a qualification
+            # bypass. Ordinary disposable tests can configure the same real dedicated-source binding.
+            $binding = Get-AeroLinkProductionSourcePosture -SourceRoot $SourceRoot -RemoteName $RemoteName
+            if (-not $AllowNonDedicated -and $binding.Dedicated) {
+                # Like the dedicated-source marker, this belongs to the source itself, not the shared
+                # installation pointer (which may resolve inside the developer checkout).
+                $directory = Split-Path (Get-AeroLinkProductionSourceMarkerPath -SourceRoot $SourceRoot) -Parent
+                $path = Join-Path $directory 'main-currency.json'
+                $temporary = $path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+                try {
+                    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+                    $observation = @{
+                        sourceRoot = [IO.Path]::GetFullPath($SourceRoot).TrimEnd('\', '/')
+                        sourceSha = if ($result) { $result.HeadSha } else { $null }
+                        remoteSha = if ($result) { $result.TargetSha } else { $null }
+                        checkedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
+                        verified = [bool]($result -and $result.Canonical -and $result.RemoteReachable -eq $true)
+                    }
+                    $observation | ConvertTo-Json -Compress | Set-Content -LiteralPath $temporary -Encoding UTF8
+                    if (Test-Path -LiteralPath $path) { [IO.File]::Replace($temporary, $path, [NullString]::Value) }
+                    else { [IO.File]::Move($temporary, $path) }
                 }
-                $observation | ConvertTo-Json -Compress | Set-Content -LiteralPath $temporary -Encoding UTF8
-                if (Test-Path -LiteralPath $path) { [IO.File]::Replace($temporary, $path, [NullString]::Value) }
-                else { [IO.File]::Move($temporary, $path) }
+                finally {
+                    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+                }
             }
-            finally {
-                if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+        }
+        catch {
+            # Source advancement is irreversible here. Never let optional status persistence replace
+            # Updated with an exception: callers need that exact result to enter fresh-process handoff.
+            $publicationFailure = $_.Exception.Message
+            if ($path) {
+                try { [IO.File]::Delete($path) } catch { } # Best effort; a locked old observation still expires.
             }
+            Write-Warning "Main-currency observation could not be saved; the source-operation result is unchanged. An older observation may remain until expiry. $publicationFailure" -WarningAction Continue
         }
     }
 }

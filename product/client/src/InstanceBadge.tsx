@@ -51,6 +51,7 @@ export default function InstanceBadge() {
   useEffect(() => {
     let cancelled = false;
     let homeProduction = false;
+    let identityEstablished = false;
     let timer: ReturnType<typeof setTimeout>;
     let controller: AbortController;
     // Refresh the passive runtime observation, never GitHub or the deployment controller. Serialize
@@ -63,13 +64,14 @@ export default function InstanceBadge() {
         if (!response.ok) throw new Error("Runtime status unavailable");
         const value = await response.json() as InstanceIdentity;
         homeProduction = value.mode === "HOME-PRODUCTION" && value.instance?.classification === "HomeCanonical";
+        identityEstablished = true;
         if (!cancelled) setIdentity(value);
       } catch {
         if (!cancelled) setIdentity(previous => previous ? { ...previous,
           mainCurrency: { ...previous.mainCurrency, state: "Unverified" } } : null);
       } finally {
         clearTimeout(timeout);
-        if (!cancelled && homeProduction) timer = setTimeout(() => { void refresh(); }, 60_000);
+        if (!cancelled && (!identityEstablished || homeProduction)) timer = setTimeout(() => { void refresh(); }, 60_000);
       }
     };
     void refresh();

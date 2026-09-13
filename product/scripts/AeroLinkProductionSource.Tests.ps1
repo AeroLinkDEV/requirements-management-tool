@@ -204,6 +204,19 @@ try {
     Assert-True (([DateTimeOffset]::UtcNow - [DateTimeOffset]$currency.checkedAtUtc).TotalMinutes -lt 1) `
         'The observation must carry the check time rather than a timeless Current flag.'
 
+    # A metadata reader that denies replacement must not turn an already-completed source advance into
+    # Refused: callers use Updated to enter the mandatory fresh-process handoff.
+    $lockedObservation = [IO.File]::Open($currencyPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $remoteSha = Push-RemoteCommit -Fixture $fixture -Content 'v3-publication-lock'
+    try {
+        $publication = Update-AeroLinkProductionSource -SourceRoot $fixture.Production -WarningVariable publicationWarnings
+    }
+    finally { $lockedObservation.Dispose() }
+    Assert-True ($publication.Action -eq 'Updated' -and $publication.Canonical -and $publication.HeadSha -eq $remoteSha) `
+        'Observation persistence failure must preserve the exact successful update result and handoff eligibility.'
+    Assert-True ($publicationWarnings.Count -gt 0) 'Failed observation publication must be reported to the operator.'
+    Assert-DevelopmentUnchanged -Fixture $fixture -Before $devBefore -Scenario 'observation failure:'
+
     # =====================================================================================================
     # 5. GitHub unavailable: a previously verified clean cached main runs, and says it is unverified.
     # =====================================================================================================

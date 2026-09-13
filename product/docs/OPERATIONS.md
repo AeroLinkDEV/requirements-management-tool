@@ -194,6 +194,9 @@ credentials are per-user), and neither carrying a secret:
   status once a minute; it cannot start deployment. `CONFIGURE_AEROLINK_PRODUCTION_SOURCE.bat Update`
   remains the manual immediate-refresh path. Offline cached-main startup remains permitted, with unverified
   currency. Explicit remote-demo Start/recovery already uses this source authority before runtime/401 READY.
+  Observation-write failures produce an operator warning and do not change the source update's result or
+  prevent its required fresh-process handoff. The old observation is removed where possible; if another
+  process locks it, its original check age still expires and it cannot qualify a different running revision.
 
   **The control plane is part of what an update replaces.** Every implementation file loaded before a source
   advance is either in the production launcher's re-entry fingerprint — so an update to it re-execs a fresh
