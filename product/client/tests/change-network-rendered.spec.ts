@@ -85,10 +85,12 @@ test("hover reveals a two-hop endpoint without moving the camera, and selection 
   // The selected story may genuinely reach a lane the camera is not showing; that is the accepted contract, so
   // the endpoint is either drawn or carries its honest reveal action — never silently missing.
   if ((await endpoint.getAttribute('class'))?.includes('is-offscreen')) {
-    await expect(page.getByRole('button', { name: 'Show HLRTCCR-000034', exact: true })).toBeVisible()
-  } else {
-    await expect(endpoint).not.toHaveClass(/is-offscreen/)
+    await page.getByRole('button', { name: 'Show HLRTCCR-000034', exact: true }).click()
   }
+  // Both legitimate starting arrangements must end with an accessible endpoint and the same subject.
+  await expect(endpoint).not.toHaveClass(/is-offscreen/)
+  await endpoint.click({ trial: true })
+  await expect(root).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('.dtCanvasLaneHead').filter({ hasText: 'TEST CASE CHANGES' })).toBeVisible()
   await expect(page.locator('.dtCanvasLaneHead').filter({ hasText: 'TEST PROCEDURE CHANGES' })).toBeVisible()
   await testInfo.attach('pinned-two-hop-story', { body: await page.screenshot(), contentType: 'image/png' })

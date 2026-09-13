@@ -1,4 +1,5 @@
 import { expect, renderedTest as test } from "./isolated-client-test"
+import { waitForCanvasSettled } from "./digital-thread-rendered-helpers"
 
 /**
  * Core #1022 interaction, in the real shared canvas.
@@ -10,8 +11,7 @@ import { expect, renderedTest as test } from "./isolated-client-test"
 
 const open = async (page: import("@playwright/test").Page, scenario: string) => {
   await page.goto(`/tests/fixtures/change-network.html?case=${scenario}`)
-  await expect(page.locator(".dtCanvas")).toBeVisible()
-  await page.waitForTimeout(700)
+  await waitForCanvasSettled(page)
 }
 
 /**
@@ -93,6 +93,125 @@ test("continuation affordances stay beside the inspector in every dock", async (
     expect(strip.height).toBeLessThanOrEqual(42)
     await shoot(page, `affordances-${mode.toLowerCase()}`)
   }
+})
+
+test("overflowing Show controls own wheel input and remain keyboard reachable", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page, "dense")
+  await page.locator('[data-node-id="pr-5"]').click()
+  await waitForCanvasSettled(page)
+  const strip = page.getByRole('navigation', { name: 'Connected records outside view' })
+  expect(await strip.evaluate(e => e.scrollWidth > e.clientWidth)).toBe(true)
+  const camera = await page.locator('.dtCanvasScene').evaluate(e => getComputedStyle(e).transform)
+  const rect = (await strip.boundingBox())!
+  await page.mouse.move(rect.x + 60, rect.y + 12)
+  await page.mouse.wheel(0, 250)
+  await expect.poll(() => strip.evaluate(e => e.scrollLeft)).toBeGreaterThan(100)
+  await expect(page.locator('.dtCanvasScene')).toHaveCSS('transform', camera)
+  const tail = strip.locator('button:visible').last()
+  await tail.focus()
+  await expect(tail).toBeFocused()
+  const tailRect = (await tail.boundingBox())!
+  expect(tailRect.x).toBeGreaterThanOrEqual(rect.x - 1)
+  expect(tailRect.x + tailRect.width).toBeLessThanOrEqual(rect.x + rect.width + 1)
+  await expect(page.locator('.dtCanvasScene')).toHaveCSS('transform', camera)
+  await shoot(page, 'overflow-strip-keyboard-tail')
+})
+
+test("Bottom long-text identity and Right dense relationships scroll to their actual ends", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await page.goto('/tests/fixtures/change-network.html?case=dense&long=1')
+  await page.locator('[data-node-id="pr-5"]').click()
+  await page.locator('.dtnPanelTools').getByRole('button', { name: 'Bottom', exact: true }).click()
+  await page.locator('.dtnPanel').evaluate(panel => {
+    const sizes = [...panel.querySelectorAll<HTMLElement>('*')].map(e => [e, parseFloat(getComputedStyle(e).fontSize)] as const)
+    for (const [element, size] of sizes) element.style.fontSize = `${size * 1.25}px`
+  })
+  await waitForCanvasSettled(page)
+  const identity = page.locator('.dtnPanelIdentityCol')
+  expect(await identity.evaluate(e => e.scrollHeight > e.clientHeight)).toBe(true)
+  await identity.hover()
+  await page.mouse.wheel(0, 1000)
+  await expect.poll(() => identity.evaluate(e => e.scrollHeight - e.clientHeight - e.scrollTop)).toBeLessThanOrEqual(1)
+  await shoot(page, 'bottom-long-text-scrolled-end')
+  await page.goto('/tests/fixtures/artifact-thread.html?case=dense&long=1')
+  await page.locator('.dtaPanelTools').getByRole('button', { name: 'Right', exact: true }).click()
+  await waitForCanvasSettled(page)
+  const relationships = page.locator('.dtaRel').last()
+  expect(await relationships.evaluate(e => e.scrollHeight > e.clientHeight)).toBe(true)
+  await relationships.hover()
+  await page.mouse.wheel(0, 2000)
+  await expect.poll(() => relationships.evaluate(e => e.scrollHeight - e.clientHeight - e.scrollTop)).toBeLessThanOrEqual(1)
+  const list = (await relationships.boundingBox())!
+  const tail = relationships.locator('button').last()
+  const last = (await tail.boundingBox())!
+  expect(last.y).toBeGreaterThanOrEqual(list.y - 1)
+  expect(last.y + last.height).toBeLessThanOrEqual(list.y + list.height + 1)
+  await tail.click({ trial: true })
+  await shoot(page, 'right-dense-relationships-scrolled-end')
+})
+
+test("a touch swipe starting between Show buttons scrolls the strip without moving the camera", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page, 'dense')
+  await page.locator('[data-node-id="pr-5"]').click()
+  await waitForCanvasSettled(page)
+  const strip = page.locator('.dtCanvasOffscreen')
+  const gap = await strip.evaluate(element => {
+    const box = element.getBoundingClientRect()
+    for (let x = box.left + 80; x < box.right - 4; x++) {
+      const y = box.top + 12
+      if (document.elementFromPoint(x, y) === element) return { x, y }
+    }
+    return null
+  })
+  expect(gap, 'a real gap must belong to the scroll strip').not.toBeNull()
+  const camera = await page.locator('.dtCanvasScene').evaluate(e => getComputedStyle(e).transform)
+  const session = await page.context().newCDPSession(page)
+  await session.send('Emulation.setTouchEmulationEnabled', { enabled: true })
+  await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [gap!] })
+  for (let step = 1; step <= 8; step++) {
+    await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: gap!.x - step * 9, y: gap!.y }] })
+  }
+  await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await expect.poll(() => strip.evaluate(e => e.scrollLeft)).toBeGreaterThan(20)
+  await expect(page.locator('.dtCanvasScene')).toHaveCSS('transform', camera)
+  await expect(page.locator('[data-node-id="pr-5"]')).toHaveAttribute('aria-pressed', 'true')
+  await session.detach()
+})
+
+test("unselected hover prepares an entirely left and above linked card without camera movement", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page, 'reveal')
+  const canvas = (await page.locator('.dtCanvas').boundingBox())!
+  const pan = async (dx: number, dy = 0) => {
+    await page.mouse.move(canvas.x + canvas.width - 8, canvas.y + 65)
+    await page.mouse.down()
+    await page.mouse.move(canvas.x + canvas.width - 8 + dx, canvas.y + 65 + dy, { steps: 10 })
+    await page.mouse.up()
+    await waitForCanvasSettled(page)
+  }
+  const link = page.locator('[data-node-id="pr-5"]')
+  await pan(0, -280)
+  const initial = (await link.boundingBox())!
+  await pan(-initial.x - initial.width - 10)
+  const before = (await link.boundingBox())!
+  expect(before.x + before.width).toBeLessThanOrEqual(canvas.x)
+  expect(before.y + before.height).toBeLessThan(canvas.y + 80)
+  await expect(page.locator('.dtCanvasNode[aria-pressed=true]')).toHaveCount(0)
+  await expect(page.locator('.dtnPanel')).toHaveCount(0)
+  const scene = page.locator('.dtCanvasScene')
+  const camera = await scene.evaluate(e => getComputedStyle(e).transform)
+  await page.locator('[data-node-id="hlr-127"]').hover()
+  const toolbar = (await page.locator('.dtCanvasControls').boundingBox())!
+  await expect.poll(async () => (await link.boundingBox())!.y).toBeGreaterThanOrEqual(toolbar.y + toolbar.height + 37)
+  const prepared = (await link.boundingBox())!
+  expect(prepared.x).toBeCloseTo(before.x, 1)
+  expect(prepared.y + prepared.height).toBeLessThan(canvas.y + canvas.height)
+  await expect(scene).toHaveCSS('transform', camera)
+  await expect(page.locator('.dtCanvasNode[aria-pressed=true]')).toHaveCount(0)
+  await expect(page.locator('.dtnPanel')).toHaveCount(0)
+  await shoot(page, 'left-above-true-unselected-hover')
 })
 
 /**

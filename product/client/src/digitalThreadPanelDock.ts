@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useState } from "react"
+import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { RefObject } from "react"
 
 /** Where a detail panel sits. `auto` picks the side with less linked content; the rest are explicit. */
@@ -25,8 +25,8 @@ export function usePanelDock(
   panelRef: (element: HTMLElement | null) => void
   frameInset?: FrameInset
 } {
-  const [escalatedFor, setEscalatedFor] = useState<string | null>(null)
-  const [escalatedDock, setEscalatedDock] = useState<ResolvedDock | null>(null)
+  const [recovery, setRecovery] = useState<{ situation: string; dock: ResolvedDock } | null>(null)
+  const reportedSituation = useRef<string | null>(null)
   const [panelElement, setPanelElement] = useState<HTMLElement | null>(null)
   const [measuredInset, setMeasuredInset] = useState<FrameInset | null>(null)
   const chooseRecovery = useCallback((current: ResolvedDock): ResolvedDock => {
@@ -69,7 +69,7 @@ export function usePanelDock(
   }, [canvasHostRef, panelElement])
 
   /** The one placement, measured once per situation: repeated reports cannot walk through more placements. */
-  const dock: ResolvedDock = escalatedFor === situation && escalatedDock ? escalatedDock : preferred
+  const dock: ResolvedDock = recovery?.situation === situation ? recovery.dock : preferred
 
   // The canvas and panel are siblings in each view. Measure their rendered rectangles instead of reserving a
   // guessed 300x150 box: selected cards and relationship lists can grow, and the free frame must follow them.
@@ -118,11 +118,11 @@ export function usePanelDock(
      * situation forever silently denied every later selection its fallback.
      */
     reportNeedsRoom: useCallback(() => {
-      setEscalatedFor(current => {
-        if (current === situation) return current
-        setEscalatedDock(chooseRecovery(preferred))
-        return situation
-      })
+      if (reportedSituation.current === situation) return
+      const dock = chooseRecovery(preferred)
+      reportedSituation.current = situation
+      // DOM measurement belongs to the report, not to a replayable React state updater.
+      setRecovery({ situation, dock })
     }, [chooseRecovery, preferred, situation]),
     panelRef: useCallback((element: HTMLElement | null) => setPanelElement(element), []),
     frameInset: panelElement

@@ -809,12 +809,22 @@ export default function DigitalThreadCanvas({
         element.style.top = `${horizontal ? box.y + (box.height - cueHeight) / 2 : direction === "down" ? box.y + box.height - cueHeight - 2 : box.y + 2}px`
       }
     }
+    // Commit all card positions before reading their dimensions. A read after each card write would force
+    // the browser to lay out the board repeatedly during a single pointer move.
+    for (const node of nodes) {
+      const card = cardRefs.current.get(node.id)
+      if (!card) continue
+      const position = positions.get(node.id) ?? nodePosition(node, geometry, offsets.current)
+      card.style.transform = `translate(${position.x}px,${position.y}px)`
+      card.style.width = `${geometry.laneWidth}px`
+    }
+    const paintedHeights = new Map(nodes.map(node => [node.id,
+      cardRefs.current.get(node.id)?.offsetHeight || geometry.cardHeight]))
+    const controlFrames: { card: HTMLDivElement; offscreen: boolean; top: number; bottom: number }[] = []
     for (const node of nodes) {
       const position = positions.get(node.id) ?? nodePosition(node, geometry, offsets.current)
       const card = cardRefs.current.get(node.id)
       if (!card) continue
-      card.style.transform = `translate(${position.x}px,${position.y}px)`
-      card.style.width = `${geometry.laneWidth}px`
       // Paint the exposed part of a card; complete containment is a navigation/focus constraint, not a
       // visibility test. In particular a long card must remain readable through manual lane exploration.
       const left = position.x * display.zoom + display.x
@@ -822,7 +832,7 @@ export default function DigitalThreadCanvas({
       // A partially exposed card retains its position and an explicit route to the rest of its content.
       const inFrame = left >= box.x - 1 && right <= box.x + box.width + 1
       const top = position.y * display.zoom + display.y
-      const bottom = top + (card.offsetHeight || geometry.cardHeight) * display.zoom
+      const bottom = top + paintedHeights.get(node.id)! * display.zoom
       const fullyVisible = inFrame && top >= box.y - 1 && bottom <= box.y + box.height + 1 && isVisible(position.y, geometry, bandHeight)
       const visibleTop = Math.max(box.y, selectedId === node.id ? box.y : display.y)
       const visibleBottom = Math.min(box.y + box.height,
@@ -834,21 +844,30 @@ export default function DigitalThreadCanvas({
         const filtered = Boolean(card.querySelector(".is-filtered"))
         indicator.hidden = fullyVisible && !filtered
         indicator.disabled = filtered
-        indicator.textContent = `${filtered ? "Excluded by filters:" : "Show"} ${card.querySelector(".dtnId, .dticId, .dtaId, .exactArtifactLink, strong")?.textContent ?? "connected record"}`
+        const label = `${filtered ? "Excluded by filters:" : "Show"} ${card.querySelector(".dtnId, .dticId, .dtaId, .exactArtifactLink, strong")?.textContent ?? "connected record"}`
+        if (indicator.textContent !== label) indicator.textContent = label
       }
       card.classList.toggle(
         "is-offscreen",
         !anyVisible && selectedId !== node.id,
       )
       const offscreen = card.classList.contains("is-offscreen")
-      const viewport = viewportRef.current!.getBoundingClientRect()
+      controlFrames.push({ card, offscreen, top: visibleTop, bottom: visibleBottom })
+    }
+    const viewport = viewportRef.current!.getBoundingClientRect()
+    const controlVisibility = controlFrames.flatMap(({ card, offscreen, top, bottom }) =>
+      [...card.querySelectorAll<HTMLElement>("a,button,input,select,textarea,summary,[role='link']")].map(control => {
+        const rect = control.getBoundingClientRect()
+        return { control, usable: !offscreen && rect.left >= viewport.left + box.x - 1
+          && rect.right <= viewport.left + box.x + box.width + 1
+          && rect.top >= viewport.top + top - 1 && rect.bottom <= viewport.top + bottom + 1 }
+      }))
+    // Read every control at its current displayed position before applying tab stops. Partial-card movement
+    // and measured growth still update this on every paint; no visibility-only cache can strand a control.
+    for (const { control, usable } of controlVisibility) {
       // Native controls require their own usable rectangle. An exposed card edge must not restore Tab to
       // a link underneath the toolbar or inspector. Preserve the authored tabindex as exploration reveals it.
-      card.querySelectorAll<HTMLElement>("a,button,input,select,textarea,summary,[role='link']").forEach(control => {
-        const rect = control.getBoundingClientRect()
-        const usable = rect.left >= viewport.left + box.x - 1 && rect.right <= viewport.left + box.x + box.width + 1
-          && rect.top >= viewport.top + visibleTop - 1 && rect.bottom <= viewport.top + visibleBottom + 1
-        if (offscreen || !usable) {
+        if (!usable) {
           if (control.dataset.dtOriginalTabIndex === undefined) {
             control.dataset.dtOriginalTabIndex = control.getAttribute("tabindex") ?? ""
           }
@@ -859,7 +878,6 @@ export default function DigitalThreadCanvas({
           else control.removeAttribute("tabindex")
           delete control.dataset.dtOriginalTabIndex
         }
-      })
     }
 
     // Tab stops are authored here, from the positions just written, because a lane rolls under the pointer
@@ -878,7 +896,7 @@ export default function DigitalThreadCanvas({
         const left = position.x * display.zoom + display.x
         const right = left + geometry.laneWidth * display.zoom
         const top = position.y * display.zoom + display.y
-        const bottom = top + (cardRefs.current.get(candidate.id)?.offsetHeight || geometry.cardHeight) * display.zoom
+        const bottom = top + (paintedHeights.get(candidate.id) ?? geometry.cardHeight) * display.zoom
         return isVisible(position.y, geometry, bandHeight)
           && left >= box.x - 1 && right <= box.x + box.width + 1
           && top >= box.y - 1 && bottom <= box.y + box.height + 1
@@ -1853,7 +1871,16 @@ export default function DigitalThreadCanvas({
       {story && <nav className="dtCanvasOffscreen" style={{ bottom: (inspectorInset?.bottom ?? 0) + 6,
         left: (inspectorInset?.left ?? 0) + 12,
         maxWidth: `min(320px, calc(100% - ${(inspectorInset?.left ?? 0) + (inspectorInset?.right ?? 0) + 24}px))`,
-      }} aria-label="Connected records outside view" onPointerDown={event => event.stopPropagation()}>
+      }} aria-label="Connected records outside view" onPointerDown={event => event.stopPropagation()}
+        onWheel={event => {
+          event.stopPropagation()
+          // A conventional vertical wheel explores this horizontal strip instead of zooming the canvas.
+          // Trackpad horizontal scrolling and native touch/keyboard scrolling keep their browser behavior.
+          if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+            event.currentTarget.scrollLeft += event.deltaY
+            event.preventDefault()
+          }
+        }}>
         {sourceNodes.filter(node => story.nodes.has(node.id)).map(({ id }) => <button key={id} type="button"
           ref={element => { if (element) offscreenRefs.current.set(id, element); else offscreenRefs.current.delete(id) }}
           onClick={() => { const node = nodes.find(candidate => candidate.id === id); if (node) reveal(node) }}>

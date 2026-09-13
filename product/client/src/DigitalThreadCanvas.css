@@ -19,7 +19,7 @@
 .dtCanvasHoverTarget { z-index: 95; box-sizing: border-box; cursor: pointer; background: var(--surface); border: 2px solid var(--teal-700); border-radius: 8px; overflow: hidden; box-shadow: 0 4px 14px #17324d33; }
 .dtCanvasHoverTarget > div { height: calc(100% - 22px); overflow: hidden; }
 .dtCanvasHoverTarget > span { display: block; padding: 3px 6px; background: var(--teal-700); color: white; font-size: 12px; }
-.dtCanvasOffscreen { position: absolute; bottom: 6px; left: 12px; max-width: min(320px, calc(100% - 24px)); z-index: 90; display: flex; flex-wrap: nowrap; gap: 4px; max-height: 42px; overflow: auto; pointer-events: none; }
+.dtCanvasOffscreen { position: absolute; bottom: 6px; left: 12px; max-width: min(320px, calc(100% - 24px)); z-index: 90; display: flex; flex-wrap: nowrap; gap: 4px; max-height: 42px; overflow: auto; pointer-events: auto; touch-action: pan-x; overscroll-behavior: contain; scrollbar-width: thin; }
 .dtCanvasOffscreen button { flex: 0 0 auto; white-space: nowrap; pointer-events: auto; border: 1px solid var(--teal-700); border-radius: 5px; background: var(--surface); color: var(--teal-700); min-height: 26px; padding: 3px 7px; font: inherit; font-size: 12px; }
 .dtCanvasOffscreen button[hidden] { display: none; }
 

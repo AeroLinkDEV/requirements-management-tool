@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test"
 import { expect, renderedTest as test } from "./isolated-client-test"
+import { waitForCanvasSettled } from "./digital-thread-rendered-helpers"
 
 /**
  * Rendered behaviour of the artifact thread.
@@ -22,8 +23,7 @@ const fixture = (scenario: string) => `/tests/fixtures/artifact-thread.html?case
  * scene legitimately has no size, and requiring it to be visible would make the fail-closed case unassertable.
  */
 const settled = async (page: Page) => {
-  await expect(page.locator(".dtCanvas")).toBeVisible()
-  await page.waitForTimeout(700)
+  await waitForCanvasSettled(page)
 }
 
 const open = async (page: Page, scenario: string) => {
@@ -1011,12 +1011,14 @@ test.describe("a rolled lane survives a re-render", () => {
     expect(names.length).toBeGreaterThan(0)
     for (const name of names) {
       const card = page.locator(`.dtCanvasNode:has(.dtaCard:has-text("${name}"))`).first()
-      if ((await card.getAttribute("class"))?.includes("is-offscreen")) {
-        await expect(page.getByRole("button", { name: `Show ${name}`, exact: true }))
-          .toBeVisible()
-      } else {
-        await expect(card).not.toHaveClass(/is-offscreen/)
+      const reveal = page.getByRole("button", { name: `Show ${name}`, exact: true })
+      // A painted fragment can still be clipped by the inspector. The explicit route must make the
+      // complete target usable, not merely remove the entirely-offscreen class.
+      if (await reveal.isVisible()) {
+        await reveal.click()
       }
+      await expect(card).not.toHaveClass(/is-offscreen/)
+      await card.click({ trial: true })
     }
   })
 })
@@ -1135,7 +1137,11 @@ test.describe("a selection made before the viewport settled", () => {
     if (after.offscreen) {
       const identity = await page.locator(`[data-node-id="${FAR_RUN}"]`).evaluate(node =>
         node.querySelector(".dtaId")?.textContent ?? "")
-      await expect(page.getByRole("button", { name: `Show ${identity}`, exact: true })).toBeVisible()
+      await page.getByRole("button", { name: `Show ${identity}`, exact: true }).click()
     }
+    const reached = page.locator(`[data-node-id="${FAR_RUN}"]`)
+    await expect(reached).not.toHaveClass(/is-offscreen/)
+    await reached.click({ trial: true })
+    await expect(page.locator(".dtaCard.is-selected .dtaId")).toHaveText("HLRTP-000300.00")
   })
 })
