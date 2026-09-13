@@ -1,6 +1,4 @@
-using System.IO.Compression;
 using System.Text;
-using System.Xml;
 using System.Xml.Linq;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -10,7 +8,6 @@ internal sealed record InceptionSourceTable(string Key, string Name, IReadOnlyLi
 /// <summary>Table decoding shared with proposal interchange; inception separately retains every source column.</summary>
 internal static class InceptionTableReader
 {
-    private const long ExpandedLimit = 100L * 1024 * 1024;
     private const int MaximumRows = 50_001;
     private const int MaximumColumns = 1024;
 
@@ -62,28 +59,42 @@ internal static class InceptionTableReader
 
     public static IReadOnlyList<InceptionSourceTable> Xlsx(Stream stream)
     {
-        using var archive = new ZipArchive(stream, ZipArchiveMode.Read, true);
-        if (archive.Entries.Count > 4096 || archive.Entries.Sum(x => x.Length) > ExpandedLimit)
-            throw new InvalidOperationException("The workbook exceeds its expanded size or entry limit.");
-        var entries = archive.Entries.GroupBy(x => x.FullName, StringComparer.Ordinal).ToList();
-        if (entries.Any(x => x.Count() > 1)) throw new InvalidOperationException("The workbook contains duplicate ZIP entries.");
+        using var archive = new InceptionArchiveReader(stream);
         XNamespace ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
         var shared = new List<string>();
-        if (archive.GetEntry("xl/sharedStrings.xml") is { } sharedEntry)
+        if (archive.Entry("xl/sharedStrings.xml") is { } sharedEntry)
         {
-            using var part = sharedEntry.Open();
-            shared = ReadXml(part).Descendants(ns + "si").Select(x => string.Concat(x.Descendants(ns + "t").Select(t => t.Value))).ToList();
+            shared = archive.ReadXml(sharedEntry).Descendants(ns + "si").Select(x => string.Concat(x.Descendants(ns + "t").Select(t => t.Value))).ToList();
         }
-        var sheets = archive.Entries.Where(x => x.FullName.StartsWith("xl/worksheets/", StringComparison.Ordinal)
-            && x.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) && !x.FullName.Contains("/_rels/", StringComparison.Ordinal)).OrderBy(x => x.FullName).ToList();
+        var workbook = archive.ReadXml(archive.Entry("xl/workbook.xml") ?? throw new InvalidOperationException("The workbook metadata is missing."));
+        var relationships = archive.ReadXml(archive.Entry("xl/_rels/workbook.xml.rels") ?? throw new InvalidOperationException("The workbook relationships are missing."));
+        var relationRows = relationships.Root?.Elements().Where(x => x.Name.LocalName == "Relationship").ToList() ?? [];
+        if (relationRows.Any(x => string.IsNullOrEmpty((string?)x.Attribute("Id"))) || relationRows.GroupBy(x => (string?)x.Attribute("Id")).Any(x => x.Count() > 1))
+            throw new InvalidOperationException("The workbook contains invalid relationship identities.");
+        var relations = relationRows.ToDictionary(x => (string)x.Attribute("Id")!);
+        var sheets = workbook.Descendants(ns + "sheet").ToList();
         if (sheets.Count == 0) throw new InvalidOperationException("The workbook contains no worksheets.");
         var output = new List<InceptionSourceTable>();
+        var observed = new HashSet<string>(StringComparer.Ordinal);
+        var totalRows = 0;
         foreach (var sheet in sheets)
         {
-            using var part = sheet.Open();
-            var document = ReadXml(part);
+            var relationshipId = (string?)sheet.Attribute(XName.Get("id", "http://schemas.openxmlformats.org/officeDocument/2006/relationships")) ?? "";
+            if (!relations.TryGetValue(relationshipId, out var relationship)
+                || (string?)relationship.Attribute("TargetMode") == "External"
+                || !((string?)relationship.Attribute("Type") ?? "").EndsWith("/worksheet", StringComparison.Ordinal))
+                throw new InvalidOperationException("A workbook sheet has an unsupported relationship.");
+            var target = (string?)relationship.Attribute("Target") ?? "";
+            var path = target.StartsWith('/') ? target.TrimStart('/') : "xl/" + target;
+            if (path.Contains("..", StringComparison.Ordinal) || path.Contains('\\') || !path.StartsWith("xl/worksheets/", StringComparison.Ordinal) || !observed.Add(path))
+                throw new InvalidOperationException("The workbook contains an invalid or repeated worksheet target.");
+            var name = (string?)sheet.Attribute("name") ?? "";
+            if (string.IsNullOrWhiteSpace(name)) throw new InvalidOperationException("Workbook sheets require source names.");
+            var document = archive.ReadXml(archive.Entry(path) ?? throw new InvalidOperationException("A declared worksheet is missing."));
             var rows = new List<string[]>();
             var findings = new List<string>();
+            var state = (string?)sheet.Attribute("state") ?? "visible";
+            if (state != "visible") findings.Add($"Worksheet '{name}' is {state}; its source rows are included in analysis.");
             foreach (var row in document.Descendants(ns + "row"))
             {
                 var cells = new SortedDictionary<int, string>();
@@ -93,7 +104,7 @@ internal static class InceptionTableReader
                     var column = ColumnIndex(reference);
                     var raw = cell.Element(ns + "v")?.Value ?? string.Concat(cell.Descendants(ns + "t").Select(x => x.Value));
                     if (cell.Element(ns + "f") is not null)
-                        throw new InvalidOperationException($"Workbook cell '{sheet.FullName}:{reference}' contains a formula. Export source values before importing.");
+                        throw new InvalidOperationException($"Workbook cell '{name}:{reference}' contains a formula. Export source values before importing.");
                     var type = (string?)cell.Attribute("t");
                     if (type == "s")
                     {
@@ -108,11 +119,16 @@ internal static class InceptionTableReader
                 var values = Enumerable.Repeat("", cells.Keys.Max() + 1).ToArray();
                 foreach (var cell in cells) values[cell.Key] = cell.Value;
                 rows.Add(values);
-                if (rows.Count > MaximumRows) throw new InvalidOperationException("Source tables are limited to 50,000 data rows.");
+                totalRows++;
+                if (totalRows > MaximumRows) throw new InvalidOperationException("The workbook is limited to 50,001 rows across all sheets, including headers.");
             }
-            if (document.Descendants(ns + "hyperlink").Any()) findings.Add($"Worksheet '{sheet.FullName}' includes hyperlinks; link metadata requires explicit exclusion.");
-            output.Add(new(sheet.FullName, sheet.FullName, rows, findings));
+            if (document.Descendants(ns + "hyperlink").Any()) findings.Add($"Worksheet '{name}' includes hyperlinks; link metadata requires explicit exclusion.");
+            output.Add(new(path, name, rows, findings));
         }
+        var orphans = archive.Entries.Where(x => x.FullName.StartsWith("xl/worksheets/", StringComparison.Ordinal)
+            && x.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) && !x.FullName.Contains("/_rels/", StringComparison.Ordinal) && !observed.Contains(x.FullName)).ToList();
+        if (orphans.Count > 0)
+            output[0] = output[0] with { Findings = output[0].Findings.Concat(orphans.Select(x => $"Unreferenced worksheet part '{x.FullName}' is not a workbook sheet and was not imported.")).ToArray() };
         return output;
     }
 
@@ -127,13 +143,4 @@ internal static class InceptionTableReader
         return value - 1;
     }
 
-    private static XDocument ReadXml(Stream stream)
-    {
-        using var reader = XmlReader.Create(stream, new XmlReaderSettings
-        {
-            DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null,
-            MaxCharactersInDocument = ExpandedLimit, MaxCharactersFromEntities = 0
-        });
-        return XDocument.Load(reader, LoadOptions.None);
-    }
 }

@@ -77,8 +77,9 @@ public sealed class ProjectCreationSourceParserTests
         var result = ProjectCreationSourceParser.Analyse(input, "source.reqif");
         Assert.Equal(2, result.Objects.Count);
         var item = result.Objects[0];
-        Assert.Equal("Subsystem", item.Attributes["Level"]);
-        Assert.Equal("source.person", item.Attributes["Created By"]);
+        Assert.Equal("Subsystem", item.Attributes["attribute:level"]);
+        Assert.Equal("source.person", item.Attributes["attribute:author"]);
+        Assert.Equal("Created By", item.AttributeNames!["attribute:author"]);
         Assert.Equal("Unmapped", item.Kind);
         Assert.Equal("Module", item.Module);
         Assert.Equal("Section", result.Objects[1].Kind);
@@ -97,6 +98,83 @@ public sealed class ProjectCreationSourceParserTests
         Assert.Throws<InvalidOperationException>(() => ProjectCreationSourceParser.Analyse(duplicate, "source.reqif"));
     }
 
+    [Fact]
+    public void ReqIfDistinctDefinitionsKeepDuplicateDisplayNamesAndCompressedPackageWorks()
+    {
+        const string xml = "<REQ-IF><ATTRIBUTE-DEFINITION-STRING IDENTIFIER='a' LONG-NAME='Status'/><ATTRIBUTE-DEFINITION-STRING IDENTIFIER='b' LONG-NAME='Status'/><SPEC-OBJECT IDENTIFIER='item'><VALUES><ATTRIBUTE-VALUE-STRING THE-VALUE='Approved'><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>a</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING><ATTRIBUTE-VALUE-STRING THE-VALUE='Historical'><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>b</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING></VALUES></SPEC-OBJECT></REQ-IF>";
+        using var input = new MemoryStream();
+        using (var zip = new ZipArchive(input, ZipArchiveMode.Create, true))
+        {
+            using (var writer = new StreamWriter(zip.CreateEntry("source.reqif").Open())) writer.Write(xml);
+            using (var writer = new StreamWriter(zip.CreateEntry("attachment.txt").Open())) writer.Write("source attachment");
+        }
+        input.Position = 0;
+        var result = ProjectCreationSourceParser.Analyse(input, "source.reqifz");
+        var item = Assert.Single(result.Objects);
+        Assert.Equal("Approved", item.Attributes["attribute:a"]);
+        Assert.Equal("Historical", item.Attributes["attribute:b"]);
+        Assert.Equal("Status", item.AttributeNames!["attribute:a"]);
+        Assert.Equal("Status", item.AttributeNames["attribute:b"]);
+        Assert.Contains(result.Findings, x => x.Contains("attachment.txt"));
+    }
+
+    [Fact]
+    public void XlsxUsesDeclaredNamesAndReportsOrphansInsteadOfImportingThem()
+    {
+        using var workbook = Workbook(("custom.xml", Sheet("actual")));
+        using (var archive = new ZipArchive(workbook, ZipArchiveMode.Update, true))
+        {
+            using var writer = new StreamWriter(archive.CreateEntry("xl/worksheets/orphan.xml").Open());
+            writer.Write(Sheet("orphan"));
+        }
+        workbook.Position = 0;
+        var analysis = ProjectCreationSourceParser.Analyse(workbook, "source.xlsx");
+        Assert.Equal("Module 1", Assert.Single(analysis.Objects).Module);
+        Assert.Contains(analysis.Findings, x => x.Contains("orphan.xml"));
+    }
+
+    [Fact]
+    public void XlsxRefusesAggregateRowCountBeforeCollectingEverySheet()
+    {
+        var rows = string.Concat(Enumerable.Range(1, 25_001).Select(x => $"<row r='{x}'><c r='A{x}' t='inlineStr'><is><t>Value</t></is></c></row>"));
+        var sheet = $"<worksheet xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main'><sheetData>{rows}</sheetData></worksheet>";
+        using var workbook = Workbook(("one.xml", sheet), ("two.xml", sheet));
+        var error = Assert.Throws<InvalidOperationException>(() => ProjectCreationSourceParser.Analyse(workbook, "source.xlsx"));
+        Assert.Contains("across all sheets", error.Message);
+    }
+
+    [Fact]
+    public void XlsxRejectsAggregateExpansionAndFalseLengthsDoNotBypassTheReader()
+    {
+        using var workbook = Workbook(("one.xml", ""));
+        using (var archive = new ZipArchive(workbook, ZipArchiveMode.Update, true))
+        {
+            archive.GetEntry("xl/worksheets/one.xml")!.Delete();
+            var chunk = new string('x', 1024 * 1024);
+            foreach (var name in new[] { "xl/sharedStrings.xml", "xl/worksheets/one.xml" })
+            {
+                using var writer = new StreamWriter(archive.CreateEntry(name, CompressionLevel.SmallestSize).Open());
+                writer.Write("<root><value>");
+                for (var i = 0; i < 55; i++) writer.Write(chunk);
+                writer.Write("</value></root>");
+            }
+        }
+        workbook.Position = 0;
+        var overLimit = Assert.Throws<InvalidOperationException>(() => ProjectCreationSourceParser.Analyse(workbook, "source.xlsx"));
+        Assert.Contains("expanded size", overLimit.Message);
+        var bytes = workbook.ToArray();
+        for (var index = 0; index <= bytes.Length - 28; index++)
+        {
+            if (BitConverter.ToUInt32(bytes, index) != 0x02014b50) continue;
+            if (BitConverter.ToUInt32(bytes, index + 24) > 1024 * 1024)
+                BitConverter.GetBytes(1u).CopyTo(bytes, index + 24);
+        }
+        using var tampered = new MemoryStream(bytes);
+        // .NET's ZIP entry stream truncates at the forged declared length. The closed XML parser must
+        // reject that partial document; it must never become a successful small-looking analysis.
+        Assert.Throws<System.Xml.XmlException>(() => ProjectCreationSourceParser.Analyse(tampered, "source.xlsx"));
+    }
+
     private static MemoryStream Utf8(string content) => new(Encoding.UTF8.GetBytes(content));
     private static string Sheet(string id) => $"""
         <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
@@ -108,11 +186,17 @@ public sealed class ProjectCreationSourceParserTests
     {
         var output = new MemoryStream();
         using (var archive = new ZipArchive(output, ZipArchiveMode.Create, true))
+        {
+            using (var writer = new StreamWriter(archive.CreateEntry("xl/workbook.xml").Open()))
+                writer.Write("<workbook xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main' xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships'><sheets>" + string.Concat(sheets.Select((x, i) => $"<sheet name='Module {i+1}' sheetId='{i+1}' r:id='rId{i+1}'/>")) + "</sheets></workbook>");
+            using (var writer = new StreamWriter(archive.CreateEntry("xl/_rels/workbook.xml.rels").Open()))
+                writer.Write("<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'>" + string.Concat(sheets.Select((x, i) => $"<Relationship Id='rId{i+1}' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet' Target='worksheets/{x.Name}'/>")) + "</Relationships>");
             foreach (var (name, xml) in sheets)
             {
                 using var writer = new StreamWriter(archive.CreateEntry($"xl/worksheets/{name}").Open());
                 writer.Write(xml);
             }
+        }
         output.Position = 0;
         return output;
     }
