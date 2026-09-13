@@ -1757,6 +1757,7 @@
       "file": "ProjectSetupEndpoints.cs",
       "coveredBy": [
         "ProjectSetupApiTests",
+        "ProjectSetupBoundaryRegressionApiTests",
         "ProjectSetupDiscoveryApiTests"
       ]
     },
@@ -1973,7 +1974,9 @@
       "method": "POST",
       "path": "/api/releases",
       "file": "WorkspaceEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "ProjectSetupBoundaryRegressionApiTests"
+      ]
     },
     {
       "method": "POST",
@@ -2412,6 +2415,7 @@
         "NotificationOperationsApiTests",
         "ProcedureDiscussionApiTests",
         "ProjectSetupApiTests",
+        "ProjectSetupBoundaryRegressionApiTests",
         "SecurityHardeningTests",
         "TestProcedureDocumentApiTests",
         "VerificationVocabularyApiTests"
@@ -2504,6 +2508,7 @@
       "file": "ProjectSetupEndpoints.cs",
       "coveredBy": [
         "ProjectSetupApiTests",
+        "ProjectSetupBoundaryRegressionApiTests",
         "ProjectSetupDiscoveryApiTests"
       ]
     },

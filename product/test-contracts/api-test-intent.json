@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 891,
-    "cases": 999,
-    "classes": 135,
-    "hostedTests": 846,
-    "hostedCases": 932,
+    "tests": 892,
+    "cases": 1000,
+    "classes": 136,
+    "hostedTests": 847,
+    "hostedCases": 933,
     "nonHostedTests": 32,
     "nonHostedCases": 46,
     "unknownHostTests": 13,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 557,
-      "cases": 625,
+      "tests": 558,
+      "cases": 626,
       "unknownCases": 0,
-      "classes": 107
+      "classes": 108
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -10177,6 +10177,23 @@
       "sourceLines": {
         "start": 21,
         "end": 180
+      }
+    },
+    {
+      "cls": "ProjectSetupBoundaryRegressionApiTests",
+      "test": "Setup_rejects_unsupported_repository_provider_but_accepts_gitlab_without_network_call",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 14,
+        "end": 69
       }
     },
     {
