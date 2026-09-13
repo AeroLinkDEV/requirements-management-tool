@@ -393,6 +393,7 @@ app.MapGet("/health/routes", (EndpointDataSource endpoints) =>
 app.MapAuthEndpoints();
 app.MapWorkspaceEndpoints();
 app.MapProjectSetupEndpoints();
+app.MapProjectRepositoryEndpoints();
 app.MapTeamWorkEndpoints();
 app.MapProjectConfigurationEndpoints();
 app.MapAssurancePolicyEndpoints();

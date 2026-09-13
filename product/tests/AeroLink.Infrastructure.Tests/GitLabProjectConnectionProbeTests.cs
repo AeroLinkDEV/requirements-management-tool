@@ -1,11 +1,30 @@
 using System.Net;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using AeroLink.Infrastructure;
 
 namespace AeroLink.Infrastructure.Tests;
 
 public sealed class GitLabProjectConnectionProbeTests
 {
+    [Fact]
+    public void ProductionRegistrationDisablesRedirectsCookiesAndBoundsTimeout()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAeroLinkInfrastructure(new ConfigurationBuilder().Build());
+        using var provider = services.BuildServiceProvider();
+        var handler = provider.GetRequiredService<IHttpMessageHandlerFactory>().CreateHandler(nameof(GitLabProjectConnectionProbe));
+        while (handler is DelegatingHandler wrapper) handler = wrapper.InnerHandler!;
+        var transport = Assert.IsType<HttpClientHandler>(handler);
+        Assert.False(transport.AllowAutoRedirect);
+        Assert.False(transport.UseCookies);
+        using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(GitLabProjectConnectionProbe));
+        Assert.Equal(TimeSpan.FromSeconds(15), client.Timeout);
+    }
+
     [Theory]
     [InlineData("https://other.example/group/project")]
     [InlineData("https://user:secret@gitlab.example/group/project")]

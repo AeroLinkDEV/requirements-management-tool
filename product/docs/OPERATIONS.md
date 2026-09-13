@@ -605,6 +605,30 @@ the five-attempt limit become dead-lettered during that repair.
 - `Integrations__AllowPrivateWebhookTargets=true` (isolated development only) exempts addresses from the prohibition check, but the endpoint must still resolve to at least one connectable address, the connection remains pinned to a validated address, and connections are still never reused across deliveries. It does not relax the HTTPS rule.
 - Automatic redirects are disabled. A `3xx` response is recorded as a failed delivery attempt; AeroLink never connects to a redirect target.
 
+### Project repository setup
+
+Each project keeps its own repository setup. **Configure later** is `Pending`; entering a URL is
+`ConfiguredUnverified`. Neither status asserts remote access or implementation evidence. An authorized
+project Configuration Manager, Program Manager or project administrator can configure it later and request
+a read-only connection check. Unrelated engineering work remains available while setup is pending.
+
+The supported connection probe uses the installation's GitLab service configuration:
+
+- `ProjectGitLab__BaseUrl`: the approved HTTPS GitLab server, including its deployment subpath if applicable.
+- `ProjectGitLab__ReadAccessToken`: a credential with read access to the intended existing GitLab projects.
+  Supply it through the installation's protected secret configuration, never a browser form or repository file.
+
+The probe sends only an exact-project `GET` to the configured server. Automatic redirects and cookies are
+disabled, requests time out after 15 seconds, and responses must identify the requested project. A verified
+connection records the observed GitLab numeric project identity and namespace path. It does not establish a
+merge, code review, CI result, commit-in-build fact or requirement implementation. Those retain their existing
+controlled-evidence prerequisites. URL changes clear verification; a failed recheck removes current verified
+status while retaining the last-success audit. A concurrent configuration change prevents an older probe from
+overwriting the newer answer. Missing installation settings and remote failures remain explicitly unverified.
+
+Local handler/capture tests establish request and lifecycle behavior only. Actual service access requires an
+operator-authorized check against the configured installation and target; it must not be inferred from mocks.
+
 ## Production first-install administrator
 
 Production does not seed identities. Before the first API start against an empty database, set `Identity__BootstrapSecret` in the service environment to a randomly generated value of at least 32 characters. Do not place it in `appsettings.json`, source control, a command-line argument, or an operator transcript. `GET /api/setup/status` reports only whether bootstrap is required and enabled.

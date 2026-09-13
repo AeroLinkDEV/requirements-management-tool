@@ -53,6 +53,26 @@ The application under `product/` is the single demonstrable software product. Th
 
 See [product/docs/ARCHITECTURE.md](product/docs/ARCHITECTURE.md).
 
+## Project creation and entry
+
+Administrators can create a server-side setup draft and resume it across sessions. The creator and
+administrators may edit it; unfinished setup is distinct from a usable project. Fresh completion atomically
+creates an isolated internal backing scope, the accepted effective ladder and review rules, necessary empty
+containers, creator management access, and the chosen first **IN WORK** build. It inherits no FMS team or
+engineering content. Canonical `SW-NN.NN` identity validation governs new build allocation without renumbering
+historical records. Empty-project ladder corrections preserve configuration history and synchronize containers;
+authored or inherited engineering content locks structural changes.
+
+Project entry uses stable identity and opens the actual visual build-lineage selector, including for a single
+build. Explicit build links retain their exact authorized target. Repository setup can remain Pending and be
+configured later; a server-observed GitLab connection is separate from controlled implementation evidence.
+See [Architecture](product/docs/ARCHITECTURE.md) and [Operations](product/docs/OPERATIONS.md).
+
+The current creation surface completes Fresh starts. Existing-baseline inheritance and external-file inception
+remain unavailable until their server materialization and acceptance composition is qualified. The source
+analysis/reconciliation foundation does not itself claim a usable imported project. Complete delivery and
+acceptance remain tracked in [issue #1037](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1037).
+
 ## Current requirements architecture
 
 The normal software-oriented lifecycle is:

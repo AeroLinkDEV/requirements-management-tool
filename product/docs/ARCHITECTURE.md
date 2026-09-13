@@ -65,8 +65,14 @@ LLR revision in one build. The Code center and release readiness use the same re
 mappings are included in the signed review manifest. Released-build mutation protection applies server-side
 at the endpoint even when a caller does not supply browser workspace context.
 
-The first integration is manual evidence capture and a small, conspicuously labelled FMS demonstration set.
-Webhook synchronization, GitLab project allow-lists, CI state, many-to-many MR/LLR mapping, and automated
+Project repository configuration is independent of those evidence records and of the creation draft. A URL
+starts unverified; an installation-scoped read-only GitLab probe can record the exact remote project identity.
+The browser cannot supply connection verification, and edits or failed rechecks clear current verified status.
+No database transaction spans the probe; optimistic configuration versions prevent stale observations from
+overwriting a newer connection. Deferred setup remains pending and does not block unrelated engineering work.
+
+Implementation evidence capture remains manual, with a small, conspicuously labelled FMS demonstration set.
+Webhook synchronization, CI state, many-to-many MR/LLR mapping, and automated
 commit-in-build proof remain later integration depth. AeroLink never clones a repository or approves a merge.
 
 ## Persistence
