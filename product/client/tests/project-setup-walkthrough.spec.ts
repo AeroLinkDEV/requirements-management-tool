@@ -38,7 +38,8 @@ test("a fresh setup finalizes into one In Work build and returns to its lineage 
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
-  await page.getByRole("button", { name: "Save review" }).click();
+  // Continue saved the accepted definition before arriving at Review; no unsaved edit remains here.
+  await expect(page.getByRole("button", { name: "Save review" })).toBeDisabled();
   await expect(page.getByText("Saved on the server", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Create Project" }).click();
 

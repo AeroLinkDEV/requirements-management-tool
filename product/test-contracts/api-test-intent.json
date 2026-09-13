@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 886,
-    "cases": 994,
-    "classes": 132,
-    "hostedTests": 841,
-    "hostedCases": 927,
+    "tests": 891,
+    "cases": 999,
+    "classes": 135,
+    "hostedTests": 846,
+    "hostedCases": 932,
     "nonHostedTests": 32,
     "nonHostedCases": 46,
     "unknownHostTests": 13,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 555,
-      "cases": 623,
+      "tests": 557,
+      "cases": 625,
       "unknownCases": 0,
-      "classes": 106
+      "classes": 107
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 94,
-      "cases": 98,
+      "tests": 97,
+      "cases": 101,
       "unknownCases": 0,
-      "classes": 55
+      "classes": 58
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -10109,6 +10109,91 @@
       "sourceLines": {
         "start": 286,
         "end": 298
+      }
+    },
+    {
+      "cls": "ProjectRepositoryApiTests",
+      "test": "AProbeCannotOverwriteConfigurationChangedWhileGitLabWasResponding",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 18,
+        "end": 50
+      }
+    },
+    {
+      "cls": "ProjectRepositoryApiTests",
+      "test": "DeferredSetupCanBeConfiguredLaterWithTruthfulUnconfiguredServiceAndStaleEditRefusal",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 52,
+        "end": 76
+      }
+    },
+    {
+      "cls": "ProjectRepositoryApiTests",
+      "test": "RepositoryAuthorityIsProjectScopedAndOrdinaryMembershipCannotConfigureOrProbe",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 78,
+        "end": 93
+      }
+    },
+    {
+      "cls": "ProjectSetupApiTests",
+      "test": "Administrator_can_resume_finalize_and_replay_fresh_setup_without_inheriting_content",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 21,
+        "end": 180
+      }
+    },
+    {
+      "cls": "ProjectSetupDiscoveryApiTests",
+      "test": "CreatorCanSaveExitAndResumeWhileAnUnrelatedEmployeeCannotReadOrEditTheDraft",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 16,
+        "end": 59
       }
     },
     {

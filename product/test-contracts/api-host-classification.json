@@ -1,22 +1,22 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 132,
-    "tests": 886,
-    "knownCases": 994,
+    "classes": 135,
+    "tests": 891,
+    "knownCases": 999,
     "unknownCaseTests": 0
   },
   "summary": {
     "converted": {
-      "classes": 30,
-      "tests": 252,
-      "knownCases": 277,
+      "classes": 32,
+      "tests": 254,
+      "knownCases": 279,
       "unknownCaseTests": 0
     },
     "fresh-host": {
-      "classes": 50,
-      "tests": 312,
-      "knownCases": 352,
+      "classes": 51,
+      "tests": 315,
+      "knownCases": 355,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -398,6 +398,28 @@
       ]
     },
     {
+      "cls": "ProjectSetupApiTests",
+      "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
+        "auth-policy"
+      ]
+    },
+    {
+      "cls": "ProjectSetupDiscoveryApiTests",
+      "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
+      "classification": "converted",
+      "reason": "Already sharing a host through the #563 pilot.",
+      "intents": [
+        "auth-policy"
+      ]
+    },
+    {
       "cls": "TestChangeRequestReviewWorkflowTests",
       "tests": 46,
       "knownCases": 50,
@@ -763,6 +785,18 @@
       "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
       "intents": [
         "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ProjectRepositoryApiTests",
+      "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy",
         "http-boundary"
       ]
     },

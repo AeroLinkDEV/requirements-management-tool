@@ -357,6 +357,8 @@
         "ProjectConfigurationApiTests",
         "ProjectLeadershipApiTests",
         "ProjectPersonnelApiTests",
+        "ProjectRepositoryApiTests",
+        "ProjectSetupDiscoveryApiTests",
         "RebaseRequirementChangeTests",
         "ReleaseCampaignExactIntentApiTests",
         "ReleasedExecutionEvidenceApiTests",
@@ -1751,6 +1753,31 @@
     },
     {
       "method": "POST",
+      "path": "/api/project-setups",
+      "file": "ProjectSetupEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupApiTests",
+        "ProjectSetupDiscoveryApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/project-setups/{draftId:guid}/finalize",
+      "file": "ProjectSetupEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/project-setups/{draftId:guid}/save-and-exit",
+      "file": "ProjectSetupEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupDiscoveryApiTests"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/projects/{projectId:guid}/configuration/activate",
       "file": "ProjectConfigurationEndpoints.cs",
       "coveredBy": [
@@ -1797,6 +1824,14 @@
       "coveredBy": [
         "ApprovalConfigurationApiTests",
         "WorkflowAuthorityCutoverApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{projectId:guid}/repository/verify",
+      "file": "ProjectRepositoryEndpoints.cs",
+      "coveredBy": [
+        "ProjectRepositoryApiTests"
       ]
     },
     {
@@ -2376,6 +2411,7 @@
       "coveredBy": [
         "NotificationOperationsApiTests",
         "ProcedureDiscussionApiTests",
+        "ProjectSetupApiTests",
         "SecurityHardeningTests",
         "TestProcedureDocumentApiTests",
         "VerificationVocabularyApiTests"
@@ -2464,6 +2500,15 @@
     },
     {
       "method": "PUT",
+      "path": "/api/project-setups/{draftId:guid}",
+      "file": "ProjectSetupEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupApiTests",
+        "ProjectSetupDiscoveryApiTests"
+      ]
+    },
+    {
+      "method": "PUT",
       "path": "/api/projects/{projectId:guid}/approval-configuration/{subject}",
       "file": "ApprovalConfigurationEndpoints.cs",
       "coveredBy": [
@@ -2497,6 +2542,14 @@
       "file": "ProjectLeadershipEndpoints.cs",
       "coveredBy": [
         "ProjectLeadershipApiTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/{projectId:guid}/repository",
+      "file": "ProjectRepositoryEndpoints.cs",
+      "coveredBy": [
+        "ProjectRepositoryApiTests"
       ]
     },
     {
