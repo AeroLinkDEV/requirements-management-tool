@@ -96,6 +96,8 @@ test("continuation affordances stay beside the inspector in every dock", async (
 })
 
 test("overflowing Show controls own wheel input and remain keyboard reachable", async ({ page }) => {
+  const consoleErrors: string[] = []
+  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()) })
   await page.setViewportSize({ width: 1280, height: 900 })
   await open(page, "dense")
   await page.locator('[data-node-id="pr-5"]').click()
@@ -106,7 +108,9 @@ test("overflowing Show controls own wheel input and remain keyboard reachable", 
   const rect = (await strip.boundingBox())!
   await page.mouse.move(rect.x + 60, rect.y + 12)
   await page.mouse.wheel(0, 250)
-  await expect.poll(() => strip.evaluate(e => e.scrollLeft)).toBeGreaterThan(100)
+  await expect.poll(() => strip.evaluate(e => e.scrollLeft)).toBe(250)
+  await page.mouse.wheel(150, 0)
+  await expect.poll(() => strip.evaluate(e => e.scrollLeft)).toBe(400)
   await expect(page.locator('.dtCanvasScene')).toHaveCSS('transform', camera)
   const tail = strip.locator('button:visible').last()
   await tail.focus()
@@ -116,6 +120,7 @@ test("overflowing Show controls own wheel input and remain keyboard reachable", 
   expect(tailRect.x + tailRect.width).toBeLessThanOrEqual(rect.x + rect.width + 1)
   await expect(page.locator('.dtCanvasScene')).toHaveCSS('transform', camera)
   await shoot(page, 'overflow-strip-keyboard-tail')
+  expect(consoleErrors).toEqual([])
 })
 
 test("Bottom long-text identity and Right dense relationships scroll to their actual ends", async ({ page }) => {

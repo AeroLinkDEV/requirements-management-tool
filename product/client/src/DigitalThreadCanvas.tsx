@@ -1878,7 +1878,6 @@ export default function DigitalThreadCanvas({
           // Trackpad horizontal scrolling and native touch/keyboard scrolling keep their browser behavior.
           if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
             event.currentTarget.scrollLeft += event.deltaY
-            event.preventDefault()
           }
         }}>
         {sourceNodes.filter(node => story.nodes.has(node.id)).map(({ id }) => <button key={id} type="button"
