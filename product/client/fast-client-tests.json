@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "logic": [
     "project-navigation-contract.spec.ts",
+    "repository-configuration-contract.spec.ts",
     "artifact-thread-contract.spec.ts",
     "digital-thread-canvas-geometry.spec.ts",
     "digital-thread-reveal.spec.ts"

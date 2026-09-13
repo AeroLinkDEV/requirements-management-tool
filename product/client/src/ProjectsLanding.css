@@ -143,6 +143,8 @@ body:has(.projectsPage) { min-width: 0; }
 .setupDraftsHeading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
 .setupDraftsHeading h2 { margin: 0 0 4px; font: 700 16px/1.25 var(--font-display); }
 .setupDraftsHeading p, .setupDraftsEmpty { margin: 0; color: var(--ink-500); font-size: 12px; }
+.setupDraftsError { margin: 0 0 12px; color: #8f2f3d; font-size: 12px; line-height: 1.45; }
+.setupDraftsError button { border: 0; background: transparent; color: #236b9f; padding: 0; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
 .setupDraftsHeading button, .setupDraftCard button { border: 1px solid #236b9f; border-radius: 7px; background: #236b9f; color: white; padding: 8px 11px; font: 700 12px var(--font-body); cursor: pointer; white-space: nowrap; }
 .setupDraftsHeading button:hover, .setupDraftCard button:hover { background: #174f79; }
 .setupDraftsList { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }

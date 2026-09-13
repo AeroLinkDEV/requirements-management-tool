@@ -47,6 +47,8 @@ export default function ProjectsLanding({
   user,
   projects,
   drafts,
+  draftStatus,
+  onRetryDrafts,
   onCreateProject,
   onResumeSetup,
   onOpenProject,
@@ -55,6 +57,8 @@ export default function ProjectsLanding({
   user: AuthUser;
   projects: AuthorizedProject[];
   drafts: ProjectSetupDraftSummary[];
+  draftStatus: "loading" | "ready" | "error";
+  onRetryDrafts: () => void;
   onCreateProject: () => void;
   onResumeSetup: (draft: ProjectSetupDraftSummary) => void;
   onOpenProject: (project: AuthorizedProject) => void;
@@ -76,7 +80,7 @@ export default function ProjectsLanding({
             <div className="projectsGrid" data-project-list>
               {projects.map(project => <ProjectCard key={project.id} project={project} onOpen={() => onOpenProject(project)} />)}
             </div>
-            {(user.isAdministrator || drafts.length > 0) && <SetupDrafts drafts={drafts} canCreate={user.isAdministrator} onCreateProject={onCreateProject} onResumeSetup={onResumeSetup} />}
+            {(user.isAdministrator || drafts.length > 0 || draftStatus !== "ready") && <SetupDrafts drafts={drafts} draftStatus={draftStatus} onRetryDrafts={onRetryDrafts} canCreate={user.isAdministrator} onCreateProject={onCreateProject} onResumeSetup={onResumeSetup} />}
           </section>
         ) : (
           <section className="projectsSections" aria-label="No authorized projects">
@@ -85,7 +89,7 @@ export default function ProjectsLanding({
             <h2>No authorized projects</h2>
             <p>Projects become available here when an AeroLink administrator grants your account access.</p>
             </div>
-            {(user.isAdministrator || drafts.length > 0) && <SetupDrafts drafts={drafts} canCreate={user.isAdministrator} onCreateProject={onCreateProject} onResumeSetup={onResumeSetup} />}
+            {(user.isAdministrator || drafts.length > 0 || draftStatus !== "ready") && <SetupDrafts drafts={drafts} draftStatus={draftStatus} onRetryDrafts={onRetryDrafts} canCreate={user.isAdministrator} onCreateProject={onCreateProject} onResumeSetup={onResumeSetup} />}
           </section>
         )}
       </main>
@@ -93,14 +97,17 @@ export default function ProjectsLanding({
   );
 }
 
-function SetupDrafts({ drafts, canCreate, onCreateProject, onResumeSetup }: {
+function SetupDrafts({ drafts, draftStatus, onRetryDrafts, canCreate, onCreateProject, onResumeSetup }: {
   drafts: ProjectSetupDraftSummary[];
+  draftStatus: "loading" | "ready" | "error";
+  onRetryDrafts: () => void;
   canCreate: boolean;
   onCreateProject: () => void;
   onResumeSetup: (draft: ProjectSetupDraftSummary) => void;
 }) {
   return <section className="setupDraftsSection" aria-labelledby="setup-drafts-heading">
     <div className="setupDraftsHeading"><div><h2 id="setup-drafts-heading">Setup drafts</h2><p>Saved project creation work remains recoverable until it is finalized.</p></div>{canCreate && <button type="button" onClick={onCreateProject}>Create New Project</button>}</div>
-    {drafts.length ? <div className="setupDraftsList">{drafts.map(draft => <article key={draft.draftId} className="setupDraftCard" data-setup-draft-id={draft.draftId}><div><strong>{draft.project.name || "Untitled Project"}</strong><span>{draft.project.softwareProduct || "Software product not provided"}</span></div><small>{draft.state === "Finalizing" ? "Finalizing — resume to recover the result" : `Step ${draft.currentStep} · ${draft.lastSavedAt ? `Saved ${new Date(draft.lastSavedAt).toLocaleString()}` : "Not saved yet"}`}</small><button type="button" onClick={() => onResumeSetup(draft)}>Resume setup</button></article>)}</div> : canCreate ? <p className="setupDraftsEmpty">No saved setup drafts. Start a Project when you are ready.</p> : null}
+    {draftStatus === "error" && <p className="setupDraftsError" role="alert">Saved setup drafts could not be loaded. Existing draft rows are retained. <button type="button" onClick={onRetryDrafts}>Retry draft discovery</button></p>}
+    {drafts.length ? <div className="setupDraftsList">{drafts.map(draft => <article key={draft.draftId} className="setupDraftCard" data-setup-draft-id={draft.draftId}><div><strong>{draft.project.name || "Untitled Project"}</strong><span>{draft.project.softwareProduct || "Software product not provided"}</span></div><small>{draft.state === "Finalizing" ? "Finalizing — resume to recover the result" : `Step ${draft.currentStep} · ${draft.lastSavedAt ? `Saved ${new Date(draft.lastSavedAt).toLocaleString()}` : "Not saved yet"}`}</small><button type="button" onClick={() => onResumeSetup(draft)}>Resume setup</button></article>)}</div> : draftStatus === "loading" ? <p className="setupDraftsEmpty" role="status">Loading saved setup drafts…</p> : draftStatus === "ready" && canCreate ? <p className="setupDraftsEmpty">No saved setup drafts. Start a Project when you are ready.</p> : null}
   </section>;
 }

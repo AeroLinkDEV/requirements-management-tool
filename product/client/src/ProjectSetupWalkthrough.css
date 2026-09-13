@@ -322,6 +322,74 @@
   margin: 9px 0 0;
   color: var(--ink-500);
 }
+.setupRulesDefinition {
+  display: grid;
+  gap: 14px;
+  max-width: 1040px;
+  margin: 0 0 18px;
+}
+.setupRulesDefinition > .setupFieldHint {
+  max-width: none;
+  margin: 0;
+}
+.setupRule {
+  display: grid;
+  gap: 13px;
+  border: 1px solid #dce6eb;
+  border-radius: 8px;
+  background: #f8fbfc;
+  padding: 15px 17px;
+}
+.setupRule > header {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(240px, 1.2fr);
+  align-items: end;
+  gap: 15px;
+}
+.setupRule > header strong,
+.setupRule > header small {
+  display: block;
+}
+.setupRule > header strong { color: var(--ink-800); font-size: 13px; }
+.setupRule > header small { margin-top: 3px; color: var(--ink-500); font-size: 11px; }
+.setupRuleStages {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.setupRuleStage {
+  display: grid;
+  grid-template-columns: 24px minmax(150px, 1fr) minmax(120px, 0.75fr) minmax(210px, 1.15fr) auto;
+  align-items: end;
+  gap: 9px;
+  border: 1px solid #e1e8ec;
+  border-radius: 7px;
+  background: white;
+  padding: 10px;
+}
+.setupRuleStageNumber {
+  align-self: center;
+  color: #5d7888;
+  font: 700 13px var(--font-display);
+  text-align: center;
+}
+.setupRuleStage label { min-width: 0; }
+.setupRuleStage > button,
+.setupRule > button {
+  border: 1px solid #bed0db;
+  border-radius: 6px;
+  background: white;
+  color: #236b9f;
+  padding: 7px 9px;
+  font: 650 11px var(--font-body);
+  cursor: pointer;
+}
+.setupRuleStage > button:disabled { cursor: not-allowed; opacity: .45; }
+.setupRule > button { justify-self: start; }
+.setupRepositoryEndpoint { max-width: 720px; margin: 1px 0 2px 27px; }
+.setupRepositoryEndpoint small { color: var(--ink-500); font-size: 11px; font-weight: 500; line-height: 1.4; }
 .setupFieldHint,
 .setupFieldError,
 .setupPendingNotice,
@@ -494,6 +562,13 @@
   .setupRowActions {
     grid-column: 2;
   }
+  .setupRule > header,
+  .setupRuleStage {
+    grid-template-columns: 1fr;
+  }
+  .setupRuleStageNumber { text-align: left; }
+  .setupRuleStage > button,
+  .setupRepositoryEndpoint { margin-left: 0; }
   .setupReviewList div {
     grid-template-columns: 1fr;
     gap: 4px;

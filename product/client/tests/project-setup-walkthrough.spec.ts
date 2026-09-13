@@ -33,10 +33,11 @@ test("a fresh setup finalizes into one In Work build and returns to its lineage 
   await page.getByLabel("Version").fill("1.02");
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Review and approval rules", level: 2 })).toBeVisible();
+  await page.getByLabel(/explicitly accept these concrete review and approval rules/i).check();
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
-  await page.getByLabel(/explicitly accept the standard rules/i).check();
   await page.getByRole("button", { name: "Save review" }).click();
   await expect(page.getByText("Saved on the server", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Create Project" }).click();

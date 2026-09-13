@@ -105,7 +105,7 @@ export type AppRoute = {
   testChangeRequestProposalId?: string;
   /// An immutable ProblemReportRevision.Id for the read-only historical Problem Report page.
   historicalProblemReportSnapshotId?: string;
-  projectConfigurationSection?: "ladder" | "assurance" | "history" | "readiness" | "approvals";
+  projectConfigurationSection?: "ladder" | "assurance" | "history" | "readiness" | "approvals" | "repository";
   /** Opens the existing Explorer's authoritative coverage report, never the legacy assessment workspace. */
   coverageReport?: boolean;
 };
@@ -148,6 +148,8 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
     return { view: "projectConfiguration", discipline: "system", projectId: decoded(parts[1]), projectConfigurationSection: "approvals" };
   if (parts.length === 4 && parts[0] === "projects" && parts[2] === "configuration" && parts[3] === "assurance")
     return { view: "projectConfiguration", discipline: "system", projectId: decoded(parts[1]), projectConfigurationSection: "assurance" };
+  if (parts.length === 4 && parts[0] === "projects" && parts[2] === "configuration" && parts[3] === "repository")
+    return { view: "projectConfiguration", discipline: "system", projectId: decoded(parts[1]), projectConfigurationSection: "repository" };
   if (parts.length === 3 && parts[0] === "projects" && parts[2] === "configuration")
     return { view: "projectConfiguration", discipline: "system", projectId: decoded(parts[1]) };
   if (parts[0] !== "programs" || parts[2] !== "projects" || parts[4] !== "releases")
@@ -314,6 +316,9 @@ export const projectConfigurationApprovalsPath = (projectId: string) =>
 
 export const projectConfigurationAssurancePath = (projectId: string) =>
   `${projectAreaPath(projectId, "projectConfiguration")}/assurance`;
+
+export const projectConfigurationRepositoryPath = (projectId: string) =>
+  `${projectAreaPath(projectId, "projectConfiguration")}/repository`;
 
 export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent, selectionId?: string, proposalId?: string, artifactRevisionId?: string, threadView?: ThreadView) {
   const root = `/programs/${context.programId}/projects/${context.projectId}/releases/${context.releaseId}`;

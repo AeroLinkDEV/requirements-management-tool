@@ -1,0 +1,30 @@
+.repositoryConfigurationPanel { display: grid; gap: 18px; }
+.repositoryConfigurationHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+.repositoryConfigurationHeader h2 { margin: 0 0 5px; font-family: var(--font-display); font-size: var(--text-xl); color: var(--ink-900); }
+.repositoryConfigurationHeader p { margin: 0; max-width: 72ch; color: var(--ink-500); font-size: var(--text-control); }
+.repositoryStatusPill { flex: 0 0 auto; padding: 5px 10px; border-radius: var(--radius-pill); font-size: var(--text-xs); font-weight: var(--weight-bold); }
+.repositoryStatusPill.pending { background: #f8f1dc; color: #725b20; }
+.repositoryStatusPill.unverified { background: #fcebdc; color: #8b501e; }
+.repositoryStatusPill.verified { background: var(--teal-100); color: var(--teal-700); }
+.repositoryConfigurationSummary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 0; }
+.repositoryConfigurationSummary > div { padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-subtle); }
+.repositoryConfigurationSummary dt { color: var(--ink-500); font-size: var(--text-xs); font-weight: var(--weight-strong); }
+.repositoryConfigurationSummary dd { margin: 4px 0 0; color: var(--ink-900); font-size: var(--text-control); overflow-wrap: anywhere; }
+.repositoryConfigurationSummary code { font-size: var(--text-xs); }
+.repositoryConfigurationForm { display: grid; gap: 13px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-subtle); }
+.repositoryConfigurationForm legend { padding: 0 5px; color: var(--ink-900); font-size: var(--text-control); font-weight: var(--weight-strong); }
+.repositoryConfigurationForm label { display: grid; gap: 5px; color: var(--ink-700); font-size: var(--text-xs); font-weight: var(--weight-strong); }
+.repositoryConfigurationForm input { min-height: 37px; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink-900); font: var(--text-control) var(--font-body); }
+.repositoryConfigurationChoices { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+.repositoryConfigurationChoices label { display: flex; align-items: center; gap: 6px; font-weight: var(--weight-normal); }
+.repositoryConfigurationActions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.repositoryConfigurationProvider { margin: 0; color: var(--ink-500); font-size: var(--text-xs); }
+.repositoryConfigurationActions button { min-height: 35px; padding: 7px 11px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--teal-700); font: var(--weight-strong) var(--text-xs) var(--font-body); cursor: pointer; }
+.repositoryConfigurationActions button.primary { border-color: var(--teal-700); background: var(--teal-700); color: white; }
+.repositoryConfigurationActions button:disabled { opacity: .5; cursor: not-allowed; }
+.repositoryConfigurationNotice { margin: 0; padding: 11px 13px; border: 1px solid #b8ded8; border-radius: var(--radius-sm); background: var(--teal-100); color: var(--teal-700); font-size: var(--text-control); }
+.repositoryConfigurationError { margin: 0; padding: 11px 13px; border: 1px solid #eccfd3; border-radius: var(--radius-sm); background: #fce9eb; color: #8f2f3d; font-size: var(--text-control); }
+.repositoryConfigurationWarning { margin: 0; padding: 11px 13px; border: 1px solid #e0d3ae; border-left: 4px solid #b8912f; border-radius: var(--radius-sm); background: #fdf7e7; color: #6b551d; font-size: var(--text-control); }
+.repositoryConfigurationAudit { margin: 0; color: var(--ink-500); font-size: var(--text-xs); }
+.repositoryConfigurationRecovery { display: inline-flex; margin-left: 8px; border: 0; background: none; color: var(--teal-700); text-decoration: underline; font: inherit; cursor: pointer; }
+@media (max-width: 620px) { .repositoryConfigurationHeader { flex-direction: column; } .repositoryConfigurationActions { align-items: stretch; flex-direction: column; } .repositoryConfigurationActions button { width: 100%; } }

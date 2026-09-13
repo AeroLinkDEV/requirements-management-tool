@@ -12,7 +12,7 @@ import type { IconName } from "./icons";
 import { officialBuildName, verificationArtifactLevel, verificationArtifactRouteKey } from "./presentation";
 import ExperienceControls from "./ExperienceControls";
 import type { MotionPreference, WorkspaceDensity } from "./ExperienceControls";
-import { coverageExplorerPath, exactTraceArtifactPath, problemReportSnapshotPath, projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectSetupPath, routePath } from "./routing";
+import { coverageExplorerPath, exactTraceArtifactPath, problemReportSnapshotPath, projectAreaPath, projectConfigurationApprovalsPath, projectConfigurationAssurancePath, projectConfigurationRepositoryPath, projectSetupPath, routePath } from "./routing";
 import type { Discipline, HistoryStateIntent, HistoryTypeIntent, RouteContext, ThreadView, View } from "./routing";
 import type { ThreadFocalKind } from "./DigitalThreadPage";
 import { artifactTraceIdentity } from './artifactTraceInspectorModel';
@@ -298,6 +298,7 @@ function App() {
     }),
      [workspaces, setWorkspaces] = useState<Workspace[]>([]),
      [setupDrafts, setSetupDrafts] = useState<ProjectSetupDraftSummary[]>([]),
+     [setupDraftStatus, setSetupDraftStatus] = useState<"loading" | "ready" | "error">("loading"),
      [ladder, setLadder] = useState<ProjectLadderProjection|null>(null),
      [ladderError, setLadderError] = useState(""),
      [ladderAttempt, setLadderAttempt] = useState(0),
@@ -341,6 +342,7 @@ function App() {
   }, [user, writeHistory]);
   const [workspaceStatus, setWorkspaceStatus] = useState<"loading" | "ready" | "error">("loading");
   const { begin: beginWorkspaces, invalidate: invalidateWorkspaces } = useLatestRequest();
+  const { begin: beginSetupDrafts, invalidate: invalidateSetupDrafts } = useLatestRequest();
   const { begin: beginDashboard, invalidate: invalidateDashboard } = useLatestRequest();
   const loadWorkspaces = useCallback(async () => {
     const current = beginWorkspaces();
@@ -359,17 +361,21 @@ function App() {
     }
   }, [beginWorkspaces]);
   const loadSetupDrafts = useCallback(async () => {
+    const current = beginSetupDrafts();
+    if (current()) setSetupDraftStatus("loading");
     try {
       const response = await fetch(`${API}/api/project-setups`);
       if (!response.ok) throw new Error();
       const value = await response.json();
+      if (!current()) return;
       setSetupDrafts(decodeProjectSetupDraftSummaries(value));
+      setSetupDraftStatus("ready");
     } catch {
       // Draft discovery is additive to the Projects selector. A service outage must not turn existing
       // authorized projects into synthetic placeholders or discard a draft already open in the walkthrough.
-      setSetupDrafts([]);
+      if (current()) setSetupDraftStatus("error");
     }
-  }, []);
+  }, [beginSetupDrafts]);
   const { active, project, release, unavailable } = resolveWorkspaceContext(workspaces, route);
   const projectId = project?.project.id ?? "";
   const context:RouteContext|undefined=active&&project&&release?{programId:active.program.id,projectId:project.project.id,releaseId:release.id}:undefined;
@@ -432,8 +438,8 @@ function App() {
     if (!user||user.mustChangePassword) return;
     void loadWorkspaces();
     void loadSetupDrafts();
-    return invalidateWorkspaces;
-  }, [loadWorkspaces, loadSetupDrafts, user, invalidateWorkspaces]);
+    return () => { invalidateWorkspaces(); invalidateSetupDrafts(); };
+  }, [loadWorkspaces, loadSetupDrafts, user, invalidateWorkspaces, invalidateSetupDrafts]);
   useEffect(() => {
     void loadData();
     return invalidateDashboard;
@@ -453,7 +459,7 @@ function App() {
   if (view === "projectSetup")
     return <ProjectSetupWalkthrough user={user} api={API} draftId={route.projectSetupDraftId} onExit={() => { void loadSetupDrafts(); updateRoute("view", "projects"); writeHistory("pushState", "/projects"); }} onSignOut={signOut} onCompleted={result => { void completeProjectSetup(result); }} />;
   if (workspaceStatus === "ready" && !workspaces.length)
-    return <ProjectsLanding user={user} projects={[]} drafts={setupDrafts} onCreateProject={() => openProjectSetup()} onResumeSetup={draft => openProjectSetup(draft.draftId)} onOpenProject={() => undefined} onSignOut={signOut}/>;
+    return <ProjectsLanding user={user} projects={[]} drafts={setupDrafts} draftStatus={setupDraftStatus} onRetryDrafts={() => void loadSetupDrafts()} onCreateProject={() => openProjectSetup()} onResumeSetup={draft => openProjectSetup(draft.draftId)} onOpenProject={() => undefined} onSignOut={signOut}/>;
   // These two render nothing without an artifact to render, so a navigation that omits one used to change the
   // address bar and then fall through to whichever view matched next — Command Center. The reader saw a
   // populated dashboard, the URL still claimed to be on the artifact, and nothing was reported. A link built
@@ -658,6 +664,8 @@ function App() {
   if(view==="projects")return <ProjectsLanding user={user}
     projects={authorizedProjects(workspaces)}
     drafts={setupDrafts}
+    draftStatus={setupDraftStatus}
+    onRetryDrafts={() => void loadSetupDrafts()}
     onCreateProject={() => openProjectSetup()}
     onResumeSetup={draft => openProjectSetup(draft.draftId)}
     onOpenProject={selected => {
@@ -675,7 +683,7 @@ function App() {
   const projectConfigurationPath=projectAreaPath(openProjectId,"projectConfiguration");
   const showImports=()=>{updateRoute("view", "baselineImports");writeHistory("pushState", importsPath)};
   const showPersonnel=()=>{updateRoute("view", "personnel");writeHistory("pushState", personnelPath)};
-  const showProjectConfiguration=(section:"ladder"|"assurance"|"history"|"readiness"|"approvals"="ladder")=>{updateRoute("view", "projectConfiguration");updateRoute("projectConfigurationSection", section);writeHistory("pushState", section==="approvals"?projectConfigurationApprovalsPath(openProjectId):section==="assurance"?projectConfigurationAssurancePath(openProjectId):projectConfigurationPath)};
+  const showProjectConfiguration=(section:"ladder"|"assurance"|"history"|"readiness"|"approvals"|"repository"="ladder")=>{updateRoute("view", "projectConfiguration");updateRoute("projectConfigurationSection", section);writeHistory("pushState", section==="approvals"?projectConfigurationApprovalsPath(openProjectId):section==="assurance"?projectConfigurationAssurancePath(openProjectId):section==="repository"?projectConfigurationRepositoryPath(openProjectId):projectConfigurationPath)};
   if(view==="builds")return <SoftwareBuildsLanding user={user} projectName={project?.project.name??""} softwareProduct={project?.project.softwareProduct??""} releases={project?.releases??[]} onProjectOverview={showProjects} onImportedBaselines={showImports} onPersonnel={showPersonnel} onProjectConfiguration={()=>showProjectConfiguration()} onOpenBuild={(selected)=>{if(!active||!project||!project.releases.some(item=>item.id===selected.id))return;updateRoute("releaseId", selected.id);updateRoute("view", "dashboard");writeHistory("pushState", routePath({programId:active.program.id,projectId:project.project.id,releaseId:selected.id},"dashboard"))}} onSignOut={signOut}/>;
   // Rendered beside Software Builds rather than inside a build workspace, because an import does not belong
   // to a build — it creates one. There is no build to have entered when this page is what you need.

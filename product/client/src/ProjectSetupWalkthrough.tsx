@@ -4,6 +4,13 @@ import PortalHeader from "./PortalHeader";
 import { apiRequest, operationError } from "./apiClient";
 import { buildVersionOrder, officialBuildName } from "./presentation";
 import { isSetupStep, type SetupStep } from "./projectSetupDrafts";
+import {
+  authorityLabel,
+  authorityToken,
+  baseRoleAuthorities,
+  leadershipAuthorities,
+  parseAuthorityToken,
+} from "./workflowAuthorities";
 import "./ProjectSetupWalkthrough.css";
 
 type StartKind = "Fresh" | "AeroLinkBaseline" | "ExternalBaseline";
@@ -15,9 +22,20 @@ type LadderStep = {
   enabledArtifactKinds?: VerificationKind[];
 };
 type LadderDefinition = { steps: LadderStep[]; relationships: { parent: string; child: string }[] };
+type ReviewStage = {
+  name: string;
+  kind: "Review" | "Approval";
+  requiredRole: string;
+  authorityKind: "BaseRole" | "LeadershipPosition" | null;
+};
+type ReviewRule = { subject: string; name: string; stages: ReviewStage[] };
+type ReviewRulesDefinition = { rules: ReviewRule[] };
+type RepositoryStatus = "Pending" | "ConfiguredUnverified" | "Verified";
 type RepositorySettings = {
   mode: "ConnectNow" | "ConfigureLater";
-  status?: "Pending" | "Configured-unverified" | "Verified";
+  status: RepositoryStatus;
+  provider: string;
+  endpoint: string;
 };
 type SetupDraft = {
   draftId: string;
@@ -30,7 +48,7 @@ type SetupDraft = {
   build: { version: string; officialName?: string };
   selectedCategories: string[];
   ladder: unknown;
-  reviewRules: { accepted: boolean; acceptanceHash?: string | null; definition?: unknown };
+  reviewRules: { accepted: boolean; acceptanceHash?: string | null; definition?: unknown; suggestedDefinition?: unknown };
   repository: unknown;
   mapping: unknown;
   finalization?: { programId: string; projectId: string; releaseId: string } | null;
@@ -56,7 +74,7 @@ type SetupValues = {
   buildVersion: string;
   selectedCategories: string[];
   ladder: LadderDefinition;
-  reviewRulesDefinition: unknown;
+  reviewRulesDefinition?: ReviewRulesDefinition;
   reviewRulesAccepted: boolean;
   repository: RepositorySettings;
   mapping: unknown;
@@ -120,7 +138,12 @@ const defaultLadder = (): LadderDefinition => ({
   ],
 });
 
-const defaultRepository = (): RepositorySettings => ({ mode: "ConfigureLater", status: "Pending" });
+const defaultRepository = (): RepositorySettings => ({
+  mode: "ConfigureLater",
+  status: "Pending",
+  provider: "GitLab",
+  endpoint: "",
+});
 
 const asObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -171,11 +194,76 @@ function normalizeLadder(value: unknown): LadderDefinition {
 function normalizeRepository(value: unknown): RepositorySettings {
   const source = asObject(value);
   const mode = source.mode === "ConnectNow" ? "ConnectNow" : "ConfigureLater";
-  const status =
-    source.status === "Verified" || source.status === "Configured-unverified"
-      ? source.status
-      : "Pending";
-  return { mode, status };
+  const status: RepositoryStatus =
+    source.status === "Verified"
+      ? "Verified"
+      : source.status === "ConfiguredUnverified" || source.status === "Configured-unverified"
+        ? "ConfiguredUnverified"
+        : "Pending";
+  const provider = typeof source.provider === "string" && source.provider.trim() ? source.provider.trim() : "GitLab";
+  const endpoint = typeof source.endpoint === "string" ? source.endpoint.trim() : "";
+  return { mode, status, provider, endpoint };
+}
+
+const subjectLabels: Record<string, string> = {
+  System: "System change requests",
+  Software: "Software change requests",
+  Interface: "Interface change requests",
+  SystemTest: "System test procedures",
+  HighLevelSoftwareCase: "High-level software test cases",
+  HighLevelSoftwareProcedure: "High-level software test procedures",
+  LowLevelSoftwareCase: "Low-level software test cases",
+  LowLevelSoftwareProcedure: "Low-level software test procedures",
+};
+
+function normalizeReviewRules(value: unknown): ReviewRulesDefinition | undefined {
+  const source = asObject(value);
+  if (!Array.isArray(source.rules)) return undefined;
+  // An empty typed rules array is a concrete server decision for a ladder with no applicable
+  // review subjects (for example a Customer-only project). It is distinct from an absent definition.
+  if (source.rules.length === 0) return { rules: [] };
+  const rules = source.rules.flatMap((item) => {
+    const rule = asObject(item);
+    const subject = typeof rule.subject === "string" ? rule.subject.trim() : "";
+    const name = typeof rule.name === "string" && rule.name.trim() ? rule.name.trim() : subject;
+    if (!subject || !name || !Array.isArray(rule.stages)) return [];
+    const stages = rule.stages.flatMap((item) => {
+      const stage = asObject(item);
+      const stageName = typeof stage.name === "string" ? stage.name.trim() : "";
+      const kind: ReviewStage["kind"] | undefined = stage.kind === "Review" || stage.kind === "Approval" ? stage.kind : undefined;
+      const requiredRole = typeof stage.requiredRole === "string" ? stage.requiredRole.trim() : "";
+      const authorityKind: ReviewStage["authorityKind"] = stage.authorityKind === "BaseRole" || stage.authorityKind === "LeadershipPosition"
+        ? stage.authorityKind
+        : null;
+      if (!stageName || !kind || !requiredRole) return [];
+      return [{ name: stageName, kind, requiredRole, authorityKind }];
+    });
+    if (stages.length !== rule.stages.length) return [];
+    return [{ subject, name, stages }];
+  });
+  return rules.length === source.rules.length ? { rules } : undefined;
+}
+
+function reviewRulesAreComplete(definition?: ReviewRulesDefinition) {
+  if (!definition) return false;
+  if (definition.rules.length === 0) return true;
+  return definition.rules.every((rule) => {
+    const kinds = new Set(rule.stages.map((stage) => stage.kind));
+    return rule.stages.length > 0
+      && kinds.has("Review")
+      && kinds.has("Approval")
+      && rule.stages.every((stage) => {
+        if (!stage.authorityKind) return false;
+        const roleSet = stage.authorityKind === "LeadershipPosition" ? leadershipAuthorities : baseRoleAuthorities;
+        return Boolean(stage.name.trim()) && roleSet.includes(stage.requiredRole);
+      });
+  });
+}
+
+function repositoryStatusLabel(status: RepositoryStatus) {
+  if (status === "Verified") return "Verified";
+  if (status === "ConfiguredUnverified") return "Configured · unverified";
+  return "Pending";
 }
 
 function valuesFromDraft(draft: SetupDraft): SetupValues {
@@ -190,7 +278,9 @@ function valuesFromDraft(draft: SetupDraft): SetupValues {
       ? draft.selectedCategories.filter((item): item is string => typeof item === "string")
       : [],
     ladder: normalizeLadder(draft.ladder),
-    reviewRulesDefinition: draft.reviewRules?.definition ?? {},
+    reviewRulesDefinition:
+      normalizeReviewRules(draft.reviewRules?.definition)
+      ?? normalizeReviewRules(draft.reviewRules?.suggestedDefinition),
     reviewRulesAccepted: draft.reviewRules?.accepted === true,
     repository: normalizeRepository(draft.repository),
     mapping: draft.mapping ?? {},
@@ -238,9 +328,13 @@ function requestBody(values: SetupValues, currentStep: SetupStep, expectedVersio
     ...(values.buildVersion.trim() ? { build: { version: values.buildVersion } } : {}),
     selectedCategories: values.selectedCategories,
     ladder: values.ladder,
-    reviewRules: values.reviewRulesDefinition,
+    reviewRules: values.reviewRulesDefinition ?? {},
     reviewRulesAccepted: values.reviewRulesAccepted,
-    repository: values.repository,
+    repository: {
+      mode: values.repository.mode,
+      provider: values.repository.provider || "GitLab",
+      endpoint: values.repository.mode === "ConnectNow" ? values.repository.endpoint || null : null,
+    },
     mapping: values.mapping,
   };
 }
@@ -332,8 +426,53 @@ export default function ProjectSetupWalkthrough({
   }, [api, draftId, loadDraft]);
 
   const update = <K extends keyof SetupValues>(key: K, value: SetupValues[K]) => {
-    setValues((current) => (current ? { ...current, [key]: value } : current));
+    setValues((current) => {
+      if (!current) return current;
+      const next = { ...current, [key]: value };
+      // A changed ladder or rule definition must be reviewed and accepted again. Keeping the old
+      // checkbox checked would make the server hash a new definition under stale user intent.
+      if (key === "ladder" || key === "reviewRulesDefinition") next.reviewRulesAccepted = false;
+      return next;
+    });
     setNotice("");
+  };
+  const updateReviewRule = (index: number, patch: Partial<ReviewRule>) => {
+    if (!values?.reviewRulesDefinition) return;
+    update("reviewRulesDefinition", {
+      rules: values.reviewRulesDefinition.rules.map((rule, ruleIndex) =>
+        ruleIndex === index ? { ...rule, ...patch } : rule,
+      ),
+    });
+  };
+  const updateReviewStage = (ruleIndex: number, stageIndex: number, patch: Partial<ReviewStage>) => {
+    if (!values?.reviewRulesDefinition) return;
+    update("reviewRulesDefinition", {
+      rules: values.reviewRulesDefinition.rules.map((rule, currentRuleIndex) =>
+        currentRuleIndex === ruleIndex
+          ? { ...rule, stages: rule.stages.map((stage, currentStageIndex) => currentStageIndex === stageIndex ? { ...stage, ...patch } : stage) }
+          : rule,
+      ),
+    });
+  };
+  const addReviewStage = (ruleIndex: number) => {
+    if (!values?.reviewRulesDefinition) return;
+    update("reviewRulesDefinition", {
+      rules: values.reviewRulesDefinition.rules.map((rule, currentRuleIndex) =>
+        currentRuleIndex === ruleIndex
+          ? { ...rule, stages: [...rule.stages, { name: "", kind: "Review" as const, requiredRole: "", authorityKind: null }] }
+          : rule,
+      ),
+    });
+  };
+  const removeReviewStage = (ruleIndex: number, stageIndex: number) => {
+    if (!values?.reviewRulesDefinition) return;
+    update("reviewRulesDefinition", {
+      rules: values.reviewRulesDefinition.rules.map((rule, currentRuleIndex) =>
+        currentRuleIndex === ruleIndex && rule.stages.length > 1
+          ? { ...rule, stages: rule.stages.filter((_, currentStageIndex) => currentStageIndex !== stageIndex) }
+          : rule,
+      ),
+    });
   };
   const hasUnsavedChanges = useMemo(
     () =>
@@ -366,7 +505,8 @@ export default function ProjectSetupWalkthrough({
     Boolean(values.softwareProduct.trim()) &&
     versionOrder !== undefined &&
     values.ladder.steps.length > 0 &&
-    values.reviewRulesAccepted;
+    values.reviewRulesAccepted &&
+    reviewRulesAreComplete(values.reviewRulesDefinition);
 
   const saveDraft = async (exitAfterSave = false, stepToSave = currentStep) => {
     if (!draft || !values) return false;
@@ -843,28 +983,103 @@ export default function ProjectSetupWalkthrough({
         <section className="setupStepPanel">
           <h2>Review and approval rules</h2>
           <p>
-            AeroLink offers standard ladder-appropriate rules for explicit review, adjustment, and
-            acceptance. No people are assigned automatically.
+            The server supplies the maintained ladder-appropriate standard. Review each stage, adjust
+            its name, signature meaning, or supported project authority, then explicitly accept the
+            resulting definition. No people are assigned automatically.
           </p>
-          <div className="setupRulesSummary">
-            <strong>Standard rules will be offered for:</strong>
-            <ul>
-              {values.ladder.steps.map((step) => (
-                <li key={step.catalogueEntry}>
-                  {levelCatalogue.find((level) => level.id === step.catalogueEntry)?.label ??
-                    step.catalogueEntry}
-                </li>
+          {values.reviewRulesDefinition ? (
+            <div className="setupRulesDefinition">
+              <p className="setupFieldHint">
+                These are the concrete rules returned by the server for this ladder. Stage names and
+                authority selections are saved as part of the accepted configuration.
+              </p>
+              {values.reviewRulesDefinition.rules.length === 0 && <p className="setupFieldHint">The server found no applicable review subjects for this ladder. Acknowledging this empty standard is still required before finalization.</p>}
+              {values.reviewRulesDefinition.rules.map((rule, ruleIndex) => (
+                <article className="setupRule" key={`${rule.subject}-${ruleIndex}`}>
+                  <header>
+                    <div>
+                      <strong>{subjectLabels[rule.subject] ?? rule.subject}</strong>
+                      <small>{rule.subject}</small>
+                    </div>
+                    <label>Rule name
+                      <input
+                        value={rule.name}
+                        aria-label={`Rule name ${ruleIndex + 1}`}
+                        onChange={(event) => updateReviewRule(ruleIndex, { name: event.target.value })}
+                      />
+                    </label>
+                  </header>
+                  <ol className="setupRuleStages">
+                    {rule.stages.map((stage, stageIndex) => (
+                      <li className="setupRuleStage" key={`${rule.subject}-${stageIndex}`}>
+                        <span className="setupRuleStageNumber">{stageIndex + 1}</span>
+                        <label>Stage name
+                          <input
+                            value={stage.name}
+                            aria-label={`${rule.subject} stage name ${stageIndex + 1}`}
+                            onChange={(event) => updateReviewStage(ruleIndex, stageIndex, { name: event.target.value })}
+                          />
+                        </label>
+                        <label>Signature meaning
+                          <select
+                            value={stage.kind}
+                            aria-label={`${rule.subject} signature meaning ${stageIndex + 1}`}
+                            onChange={(event) => updateReviewStage(ruleIndex, stageIndex, { kind: event.target.value as ReviewStage["kind"] })}
+                          >
+                            <option value="Review">Review</option>
+                            <option value="Approval">Approval</option>
+                          </select>
+                        </label>
+                        <label>Required project authority
+                          <select
+                            value={`${stage.authorityKind ?? ""}:${stage.requiredRole}`}
+                            aria-label={`${rule.subject} project authority ${stageIndex + 1}`}
+                            onChange={(event) => {
+                              const selected = parseAuthorityToken(event.target.value);
+                              updateReviewStage(ruleIndex, stageIndex, {
+                                authorityKind: selected?.kind ?? null,
+                                requiredRole: selected?.value ?? "",
+                              });
+                            }}
+                          >
+                            <option value=":">Choose authority…</option>
+                            <optgroup label="Base project roles">
+                              {baseRoleAuthorities.map((role) => <option key={`base-${role}`} value={authorityToken("BaseRole", role)}>{authorityLabel(role)}</option>)}
+                            </optgroup>
+                            <optgroup label="Project Leadership">
+                              {leadershipAuthorities.map((role) => <option key={`leadership-${role}`} value={authorityToken("LeadershipPosition", role)}>{authorityLabel(role)} — leadership position</option>)}
+                            </optgroup>
+                          </select>
+                        </label>
+                        <button type="button" onClick={() => removeReviewStage(ruleIndex, stageIndex)} disabled={rule.stages.length <= 1}>Remove</button>
+                      </li>
+                    ))}
+                  </ol>
+                  <button type="button" onClick={() => addReviewStage(ruleIndex)}>Add stage</button>
+                </article>
               ))}
-            </ul>
-          </div>
+            </div>
+          ) : (
+            <p className="setupFieldError" role="alert">
+              The server has not supplied a concrete standard definition for this ladder yet. Save
+              the ladder and resume when the standard is available; finalization remains blocked.
+            </p>
+          )}
           <label className="setupAccept">
             <input
               type="checkbox"
               checked={values.reviewRulesAccepted}
+              disabled={!reviewRulesAreComplete(values.reviewRulesDefinition)}
               onChange={(event) => update("reviewRulesAccepted", event.target.checked)}
             />{" "}
-            I reviewed and explicitly accept the standard rules for this ladder.
+            I reviewed and explicitly accept these concrete Review and Approval rules for this ladder.
           </label>
+          {values.reviewRulesDefinition && !reviewRulesAreComplete(values.reviewRulesDefinition) && (
+            <p className="setupFieldError" role="alert">
+              Every rule needs a named stage, at least one Review and one Approval signature, and a
+              supported base project role or Project Leadership authority before it can be accepted.
+            </p>
+          )}
         </section>
       );
     if (currentStep === "Services")
@@ -877,29 +1092,39 @@ export default function ProjectSetupWalkthrough({
           </p>
           <fieldset className="setupChoiceList">
             <legend>Repository</legend>
+            <p className="setupFieldHint">Supported provider: GitLab. Credentials stay with the server and are never entered in this browser form.</p>
             <label>
               <input
                 type="radio"
                 name="repositoryMode"
                 checked={values.repository.mode === "ConnectNow"}
-                onChange={() => update("repository", { mode: "ConnectNow", status: "Pending" })}
+                onChange={() => update("repository", { ...values.repository, mode: "ConnectNow", status: "Pending" })}
               />
               Connect now
               <small>
                 {values.repository.mode === "ConnectNow"
-                  ? "Pending verification until the repository service confirms it."
+                  ? `${repositoryStatusLabel(values.repository.status)} until the repository service confirms it.`
                   : "Attempt setup during this walkthrough when supported."}
               </small>
             </label>
+            {values.repository.mode === "ConnectNow" && <label className="setupRepositoryEndpoint">GitLab project endpoint (HTTPS)
+              <input
+                value={values.repository.endpoint}
+                onChange={(event) => update("repository", { ...values.repository, endpoint: event.target.value, status: "Pending" })}
+                placeholder="https://gitlab.example/group/project"
+                autoComplete="off"
+              />
+              <small>Use the project URL without credentials, query parameters, or a fragment. The server verifies access after saving.</small>
+            </label>}
             <label>
               <input
                 type="radio"
                 name="repositoryMode"
                 checked={values.repository.mode === "ConfigureLater"}
-                onChange={() => update("repository", { mode: "ConfigureLater", status: "Pending" })}
+                onChange={() => update("repository", { ...values.repository, mode: "ConfigureLater", status: "Pending" })}
               />
               Configure later
-              <small>Pending. Unrelated project work can continue after creation.</small>
+              <small>{values.repository.mode === "ConfigureLater" ? "Pending. Unrelated project work can continue after creation." : "Keep this project pending until repository setup is ready."}</small>
             </label>
           </fieldset>
           <p className="setupFieldHint">
@@ -950,14 +1175,14 @@ export default function ProjectSetupWalkthrough({
           </div>
           <div>
             <dt>Rules</dt>
-            <dd>{values.reviewRulesAccepted ? "Explicitly accepted" : "Acceptance required"}</dd>
+            <dd>{values.reviewRulesAccepted ? `Explicitly accepted · ${values.reviewRulesDefinition?.rules.length ?? 0} server-supplied rules` : values.reviewRulesDefinition ? "Review and acceptance required" : "Server standard unavailable"}</dd>
           </div>
           <div>
             <dt>Repository</dt>
             <dd>
               {values.repository.mode === "ConnectNow"
-                ? "Connect now · Pending"
-                : "Configure later · Pending"}
+                ? `Connect now · ${repositoryStatusLabel(values.repository.status)}${values.repository.endpoint ? ` · ${values.repository.endpoint}` : " · endpoint required"}`
+                : `Configure later · ${repositoryStatusLabel(values.repository.status)}`}
             </dd>
           </div>
         </dl>
