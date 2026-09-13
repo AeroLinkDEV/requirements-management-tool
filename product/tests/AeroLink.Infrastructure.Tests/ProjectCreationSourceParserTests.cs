@@ -195,6 +195,30 @@ public sealed class ProjectCreationSourceParserTests
         Assert.Contains("length or CRC", error.Message);
     }
 
+    [Fact]
+    public void ReqIfzRejectsASecondDeflateMemberHiddenAfterValidXml()
+    {
+        using var package = new MemoryStream();
+        using (var archive = new ZipArchive(package, ZipArchiveMode.Create, true))
+        using (var writer = new StreamWriter(archive.CreateEntry("source.reqif").Open(), new UTF8Encoding(false)))
+            writer.Write("<REQ-IF/>");
+        using var hidden = new MemoryStream();
+        using (var deflate = new DeflateStream(hidden, CompressionLevel.Optimal, true))
+            deflate.Write(Encoding.UTF8.GetBytes("HIDDEN-" + new string('x', 1024 * 1024)));
+        var original = package.ToArray();
+        var end = original.Length - 22;
+        var central = BitConverter.ToInt32(original, end + 16);
+        var extra = hidden.ToArray();
+        var forged = original[..central].Concat(extra).Concat(original[central..]).ToArray();
+        var compressedLength = BitConverter.ToInt32(original, 18) + extra.Length;
+        BitConverter.GetBytes(compressedLength).CopyTo(forged, 18);
+        BitConverter.GetBytes(compressedLength).CopyTo(forged, central + extra.Length + 20);
+        BitConverter.GetBytes(central + extra.Length).CopyTo(forged, end + extra.Length + 16);
+        using var input = new MemoryStream(forged);
+        var error = Assert.Throws<InvalidOperationException>(() => ProjectCreationSourceParser.Analyse(input, "source.reqifz"));
+        Assert.Contains("exactly one complete deflate member", error.Message);
+    }
+
     private static MemoryStream Utf8(string content) => new(Encoding.UTF8.GetBytes(content));
     private static string Sheet(string id) => $"""
         <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>

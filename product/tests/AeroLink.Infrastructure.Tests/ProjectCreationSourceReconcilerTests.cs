@@ -10,6 +10,20 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class ProjectCreationSourceReconcilerTests
 {
     [Fact]
+    public void MissingSourceVerificationMethodRemainsEmptyForLaterReadiness()
+    {
+        var source = Source("foreign/1");
+        source = source with { Objects = source.Objects.Select(x => x with
+        { Attributes = x.Attributes.Where(a => a.Key != "VerificationMethod").ToDictionary() }).ToArray() };
+        var mapping = Mapping(source);
+        mapping = mapping with { Objects = mapping.Objects.Select(x => x with
+        { Attributes = x.Attributes.Where(a => a.SourceAttribute != "VerificationMethod").ToArray() }).ToArray() };
+        var result = Reconcile(source, mapping);
+        Assert.True(result.Ready, string.Join("; ", result.Errors));
+        Assert.Equal("", Assert.Single(result.Requirements).VerificationMethod);
+    }
+
+    [Fact]
     public void ReconcileMapsForeignValuesAndBindsAllReviewedSourceFacts()
     {
         var source = Source("foreign/1");

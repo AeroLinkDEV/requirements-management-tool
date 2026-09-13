@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Buffers.Binary;
 using System.Xml;
 using System.Xml.Linq;
+using ICSharpCode.SharpZipLib.Zip.Compression;
 
 namespace AeroLink.Infrastructure.Persistence;
 
@@ -33,20 +34,23 @@ internal sealed class InceptionArchiveReader : IDisposable
         if (index < 0) throw new InvalidOperationException("The source part does not belong to this archive.");
         var metadata = parts[index];
         using var compressed = new MemoryStream(bytes, metadata.Offset, metadata.Compressed, false);
-        // ZipArchiveEntry.Open limits output to the declared expanded length. Read the actual deflate
-        // stream instead, then verify length and CRC so a valid XML prefix cannot hide trailing source.
-        using Stream part = metadata.Method == 0 ? compressed : new DeflateStream(compressed, CompressionMode.Decompress, true);
+        // The inflater exposes unconsumed bytes; DeflateStream buffers past its first member and
+        // cannot prove that the declared compressed slice contains exactly one member.
+        var inflater = metadata.Method == 8 ? new Inflater(true) : null;
+        inflater?.SetInput(bytes, metadata.Offset, metadata.Compressed);
         using var counted = new MemoryStream();
         var buffer = new byte[81920];
         var crc = uint.MaxValue;
         int read;
-        while ((read = part.Read(buffer, 0, buffer.Length)) > 0)
+        while ((read = inflater is null ? compressed.Read(buffer, 0, buffer.Length) : inflater.Inflate(buffer)) > 0)
         {
             remaining -= read;
             if (remaining < 0) throw new InvalidOperationException("The source archive exceeds its actual expanded size limit.");
             foreach (var value in buffer.AsSpan(0, read)) crc = CrcTable[(crc ^ value) & 0xff] ^ (crc >> 8);
             counted.Write(buffer, 0, read);
         }
+        if (inflater is not null && (!inflater.IsFinished || inflater.RemainingInput != 0))
+            throw new InvalidOperationException("The source archive part must contain exactly one complete deflate member.");
         if (counted.Length != metadata.Expanded || ~crc != metadata.Crc)
             throw new InvalidOperationException("The source archive part failed its length or CRC integrity check.");
         counted.Position = 0;

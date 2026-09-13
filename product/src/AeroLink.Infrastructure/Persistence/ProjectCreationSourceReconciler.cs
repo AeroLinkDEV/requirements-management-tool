@@ -90,7 +90,7 @@ public static class ProjectCreationSourceReconciler
             if (string.IsNullOrWhiteSpace(sourceIdentifier)) errors.Add($"Object '{item.Key}' needs an exact source identifier attribute mapping.");
             var method = fields.GetValueOrDefault(InceptionAttributeDestination.VerificationMethod, "");
             if (string.IsNullOrWhiteSpace(statement)) errors.Add($"Object '{item.Key}' needs mapped requirement wording.");
-            if (ladder.HasVerification(level) && !methods.IsPermitted(method))
+            if (ladder.HasVerification(level) && !string.IsNullOrWhiteSpace(method) && !methods.IsPermitted(method))
                 errors.Add($"Object '{item.Key}' verification method must map to the accepted vocabulary: {methods.DescribePermitted()}.");
             if (!ladder.HasVerification(level) && !string.IsNullOrWhiteSpace(method))
                 errors.Add($"Object '{item.Key}' targets a non-verification level; retain the source method as source-only data.");
