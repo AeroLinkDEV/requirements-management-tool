@@ -170,9 +170,29 @@ public sealed class ProjectCreationSourceParserTests
                 BitConverter.GetBytes(1u).CopyTo(bytes, index + 24);
         }
         using var tampered = new MemoryStream(bytes);
-        // .NET's ZIP entry stream truncates at the forged declared length. The closed XML parser must
-        // reject that partial document; it must never become a successful small-looking analysis.
-        Assert.Throws<System.Xml.XmlException>(() => ProjectCreationSourceParser.Analyse(tampered, "source.xlsx"));
+        Assert.Throws<InvalidOperationException>(() => ProjectCreationSourceParser.Analyse(tampered, "source.xlsx"));
+    }
+
+    [Fact]
+    public void ReqIfzRejectsValidXmlPrefixWithHiddenContentEvenWhenBothSizeHeadersAreForged()
+    {
+        using var package = new MemoryStream();
+        using (var archive = new ZipArchive(package, ZipArchiveMode.Create, true))
+        {
+            using var writer = new StreamWriter(archive.CreateEntry("source.reqif").Open(), new UTF8Encoding(false));
+            writer.Write("<REQ-IF/>");
+            writer.Write(new string('x', 1024 * 1024));
+        }
+        var bytes = package.ToArray();
+        for (var offset = 0; offset <= bytes.Length - 28; offset++)
+        {
+            var signature = BitConverter.ToUInt32(bytes, offset);
+            if (signature == 0x02014b50) BitConverter.GetBytes(9u).CopyTo(bytes, offset + 24);
+            if (signature == 0x04034b50) BitConverter.GetBytes(9u).CopyTo(bytes, offset + 22);
+        }
+        using var forged = new MemoryStream(bytes);
+        var error = Assert.Throws<InvalidOperationException>(() => ProjectCreationSourceParser.Analyse(forged, "source.reqifz"));
+        Assert.Contains("length or CRC", error.Message);
     }
 
     private static MemoryStream Utf8(string content) => new(Encoding.UTF8.GetBytes(content));
