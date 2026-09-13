@@ -126,7 +126,13 @@ public static class ProjectSetupEndpoints
         build = new { version = draft.InitialReleaseVersion, officialName = draft.InitialReleaseCanonicalIdentity },
         selectedCategories = Parse(draft.SelectedCategoriesJson),
         ladder = Parse(draft.LadderJson),
-        reviewRules = new { accepted = draft.ReviewRulesAccepted, acceptanceHash = draft.ReviewRulesAcceptanceHash, definition = Parse(draft.ReviewRulesJson) },
+        reviewRules = new
+        {
+            accepted = draft.ReviewRulesAccepted,
+            acceptanceHash = draft.ReviewRulesAcceptanceHash,
+            definition = Parse(draft.ReviewRulesJson),
+            suggestedDefinition = SuggestedRules(draft),
+        },
         repository = Parse(draft.RepositoryJson),
         mapping = Parse(draft.MappingJson),
         finalization = draft.CompletedProjectId is null ? null : new { programId = draft.CompletedProgramId, projectId = draft.CompletedProjectId, releaseId = draft.CompletedReleaseId },
@@ -136,6 +142,12 @@ public static class ProjectSetupEndpoints
     {
         try { using var document = JsonDocument.Parse(json); return document.RootElement.Clone(); }
         catch (JsonException) { return JsonDocument.Parse("{}").RootElement.Clone(); }
+    }
+
+    private static JsonElement? SuggestedRules(ProjectSetupDraft draft)
+    {
+        try { return Parse(ProjectSetupReviewRules.SuggestedJson(draft.LadderJson, draft.ProjectId)); }
+        catch (InvalidOperationException) { return null; }
     }
 }
 

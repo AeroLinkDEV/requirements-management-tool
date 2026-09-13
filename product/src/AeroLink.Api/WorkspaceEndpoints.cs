@@ -155,6 +155,7 @@ public static class WorkspaceEndpoints
                 return Results.Conflict(new { error = "A program with that code already exists." });
             try
             {
+                await using var transaction = await db.Database.BeginTransactionAsync(ct);
                 var program = new ProgramRecord(request.ProgramName, request.ProgramCode);
                 var project = new ProjectRecord(program.Id, request.ProjectName, request.SoftwareProduct);
                 _ = await releaseIdentity.ValidateNewAsync(project.Id, request.InitialRelease, ct);
@@ -176,9 +177,19 @@ public static class WorkspaceEndpoints
                 // after it ran, and the Explorer's document rail would be empty until the next restart.
                 await procedureDocuments.EnsureForProjectAsync(project.Id, ct);
                 await db.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
                 return Results.Created($"/api/programs/{program.Id}", ApiMap.Workspace(program, project, release));
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new { error = "The project or build identity changed concurrently. Refresh and retry." });
+            }
+            catch (DbUpdateException ex) when (ReleaseIdentityPersistencePolicy.IsIdentityRace(ex))
+            {
+                return Results.Conflict(new { error = "The project or build identity already exists or changed concurrently. Refresh and retry." });
+            }
         });
 
         app.MapGet("/api/workspaces", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
@@ -252,15 +263,28 @@ public static class WorkspaceEndpoints
             if (current is not null) return Results.Conflict(new { error = $"Release {current.Version} is still in work. Release or formally close it before planning its successor." });
             try { _ = await releaseIdentity.ValidateNewAsync(request.ProjectId, version, ct); }
             catch (DomainException ex) { return Results.Conflict(new { error = ex.Message }); }
-            if (request.PredecessorReleaseId is not null)
+            try
             {
-                var predecessor = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.PredecessorReleaseId && x.ProjectId == request.ProjectId, ct);
-                if (predecessor is null) return Results.BadRequest(new { error = "The predecessor release does not belong to this project." });
-                if (!predecessor.IsReleased) return Results.BadRequest(new { error = "A successor release can only branch from a released product version." });
+                if (request.PredecessorReleaseId is not null)
+                {
+                    var predecessor = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.PredecessorReleaseId && x.ProjectId == request.ProjectId, ct);
+                    if (predecessor is null) return Results.BadRequest(new { error = "The predecessor release does not belong to this project." });
+                    if (!predecessor.IsReleased) return Results.BadRequest(new { error = "A successor release can only branch from a released product version." });
+                }
+                var release = new SoftwareRelease(request.ProjectId, version, false, request.PredecessorReleaseId); db.Releases.Add(release);
+                var actor = http.UserAccount(); db.SecurityAuditEvents.Add(new SecurityAuditEvent("ReleaseCreated", actor.UserName, $"Release:{release.Id}", "Success", $"Created in-work release {version} from predecessor {request.PredecessorReleaseId?.ToString() ?? "none"}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow));
+                await db.SaveChangesAsync(ct); return Results.Created($"/api/releases/{release.Id}", new { release.Id, release.Version, release.IsReleased, request.PredecessorReleaseId });
             }
-            var release = new SoftwareRelease(request.ProjectId, version, false, request.PredecessorReleaseId); db.Releases.Add(release);
-            var actor = http.UserAccount(); db.SecurityAuditEvents.Add(new SecurityAuditEvent("ReleaseCreated", actor.UserName, $"Release:{release.Id}", "Success", $"Created in-work release {version} from predecessor {request.PredecessorReleaseId?.ToString() ?? "none"}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow));
-            await db.SaveChangesAsync(ct); return Results.Created($"/api/releases/{release.Id}", new { release.Id, release.Version, release.IsReleased, request.PredecessorReleaseId });
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new { error = "The release changed concurrently. Refresh and retry." });
+            }
+            catch (DbUpdateException ex) when (ReleaseIdentityPersistencePolicy.IsIdentityRace(ex))
+            {
+                return Results.Conflict(new { error = "That canonical build identity already exists or changed concurrently. Refresh and retry." });
+            }
         });
 
         app.MapGet("/api/showcase/overview", async (Guid projectId, Guid? releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>

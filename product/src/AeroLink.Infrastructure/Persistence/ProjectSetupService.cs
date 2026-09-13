@@ -70,7 +70,9 @@ public sealed class ProjectSetupService(
         RequireAuthenticated(actor);
         var query = db.ProjectSetupDrafts.AsNoTracking().AsQueryable();
         if (!actor.IsAdministrator) query = query.Where(x => x.CreatorUserId == actor.Id);
-        return await query.OrderByDescending(x => x.UpdatedAt).ToListAsync(ct);
+        // SQLite cannot order DateTimeOffset values server-side. Draft discovery is an intentionally small,
+        // authorized list, so materialize it and apply the same stable ordering in the application.
+        return (await query.ToListAsync(ct)).OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.Id).ToList();
     }
 
     public async Task<ProjectSetupDraft?> ReadAsync(Guid draftId, AuthenticatedUser actor, CancellationToken ct)
@@ -91,11 +93,33 @@ public sealed class ProjectSetupService(
         ValidateUpdatePayload(command);
         try
         {
-            draft.UpdateAnswers(command.ExpectedVersion, command.CurrentStep, command.ProjectName,
-                command.SoftwareProduct, command.StartKind, command.SourceBaselineId, command.SourceImportId,
-                command.InitialReleaseVersion, command.SelectedCategoriesJson, command.LadderJson,
-                command.ReviewRulesJson, command.ReviewRulesAccepted, command.RepositoryJson,
-                command.MappingJson, DateTimeOffset.UtcNow);
+            // Resolve the maintained standard before the acceptance hash is calculated. Once accepted, the
+            // draft retains the concrete typed definition rather than regenerating rules during finalization.
+            var reviewRulesJson = command.ReviewRulesJson ?? draft.ReviewRulesJson;
+            if (command.ReviewRulesAccepted == true && ProjectSetupReviewRules.IsEmptyDefinition(reviewRulesJson))
+            {
+                try
+                {
+                    reviewRulesJson = ProjectSetupReviewRules.SuggestedJson(
+                        command.LadderJson ?? draft.LadderJson, draft.ProjectId);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    throw new ProjectSetupInvalidException(
+                        "The maintained review standard could not be derived from the selected ladder.", ex);
+                }
+            }
+
+            var effectiveCommand = command with
+            {
+                ReviewRulesJson = command.ReviewRulesJson is not null || command.ReviewRulesAccepted == true
+                    ? reviewRulesJson : null,
+            };
+            draft.UpdateAnswers(effectiveCommand.ExpectedVersion, effectiveCommand.CurrentStep, effectiveCommand.ProjectName,
+                effectiveCommand.SoftwareProduct, effectiveCommand.StartKind, effectiveCommand.SourceBaselineId, effectiveCommand.SourceImportId,
+                effectiveCommand.InitialReleaseVersion, effectiveCommand.SelectedCategoriesJson, effectiveCommand.LadderJson,
+                effectiveCommand.ReviewRulesJson, effectiveCommand.ReviewRulesAccepted, effectiveCommand.RepositoryJson,
+                effectiveCommand.MappingJson, DateTimeOffset.UtcNow);
             await db.SaveChangesAsync(ct);
             return draft;
         }
@@ -185,6 +209,12 @@ public sealed class ProjectSetupService(
             return new(program.Id, project.Id, release.Id, release.Version, release.CanonicalIdentity!, false,
                 resultJson);
         }
+        catch (ProjectSetupConcurrencyException ex)
+        {
+            db.ChangeTracker.Clear();
+            throw new ProjectSetupConflictException(
+                "The setup changed before finalization could be claimed. Refresh and retry.", ex);
+        }
         catch (DbUpdateConcurrencyException ex)
         {
             throw new ProjectSetupConflictException("Another setup or project creation request won this draft.", ex);
@@ -218,6 +248,8 @@ public sealed class ProjectSetupService(
             System.Text.Encoding.UTF8.GetBytes($"{draft.LadderJson}\n{draft.ReviewRulesJson}"))).ToLowerInvariant();
         if (!string.Equals(draft.ReviewRulesAcceptanceHash, acceptanceHash, StringComparison.Ordinal))
             throw new ProjectSetupInvalidException("The accepted ladder and review rules changed. Review and accept them again.");
+        if (ProjectSetupReviewRules.IsEmptyDefinition(draft.ReviewRulesJson))
+            throw new ProjectSetupInvalidException("Review and approval rules must retain the concrete definition that was accepted.");
         ValidateRepository(draft.RepositoryJson);
         ValidateReviewRules(draft.ReviewRulesJson);
     }
@@ -332,9 +364,11 @@ public sealed class ProjectSetupService(
         }
     }
 
-    private ProjectLadderConfiguration CreateLadder(ProjectSetupDraft draft, Guid projectId, DateTimeOffset now)
+    private ProjectLadderConfiguration CreateLadder(ProjectSetupDraft draft, Guid projectId, DateTimeOffset now,
+        string? ladderJson = null)
     {
-        using var document = JsonDocument.Parse(draft.LadderJson);
+        ladderJson ??= draft.LadderJson;
+        using var document = JsonDocument.Parse(ladderJson);
         if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.EnumerateObject().Any() == false)
             return NewProjectLadderFactory.Create(projectId, now);
 
@@ -372,65 +406,34 @@ public sealed class ProjectSetupService(
     private void AddReviewRules(Guid projectId, ProjectLadderConfiguration ladder, string rulesJson, string actor,
         DateTimeOffset now)
     {
-        var rules = new List<(ReviewSubject Subject, string Name, ProgramRole ReviewRole)>();
         using var parsed = JsonDocument.Parse(rulesJson);
-        if (parsed.RootElement.ValueKind == JsonValueKind.Object && parsed.RootElement.EnumerateObject().Any())
-        {
-            var supplied = Deserialize<ReviewRulesWire>(rulesJson, "review rules");
-            if (supplied.Rules is null || supplied.Rules.Count == 0)
-                throw new ProjectSetupInvalidException("The reviewed rules must contain at least one typed rule.");
-            var applicable = ApplicableSubjects(ladder);
-            var suppliedSubjects = supplied.Rules.Select(x => x.Subject).ToArray();
-            if (suppliedSubjects.Distinct().Count() != suppliedSubjects.Length || !applicable.SetEquals(suppliedSubjects))
-                throw new ProjectSetupInvalidException("Review rules must cover each applicable ladder subject exactly once.");
-            foreach (var suppliedRule in supplied.Rules)
-            {
-                if (suppliedRule.Stages is null || suppliedRule.Stages.Count == 0)
-                    throw new ProjectSetupInvalidException($"Review rule {suppliedRule.Subject} requires a stage.");
-                if (!suppliedRule.Stages.Any(x => x.Kind == ReviewStageKind.Review)
-                    || !suppliedRule.Stages.Any(x => x.Kind == ReviewStageKind.Approval))
-                    throw new ProjectSetupInvalidException($"Review rule {suppliedRule.Subject} requires explicit Review and Approval stages.");
-                var workflow = new ReviewWorkflow(projectId, suppliedRule.Name ?? suppliedRule.Subject.ToString(),
-                    suppliedRule.Subject, ReviewMode.Sequential,
-                    suppliedRule.Stages.Select(x => new ReviewWorkflowStageDraft(x.Name, x.RequiredRole, x.Kind,
-                        x.AuthorityKind)).ToArray(), actor, now);
-                workflow.Activate(actor, now);
-                db.ReviewWorkflows.Add(workflow);
-            }
-            return;
-        }
+        if (parsed.RootElement.ValueKind != JsonValueKind.Object || !parsed.RootElement.EnumerateObject().Any())
+            throw new ProjectSetupInvalidException("Review and approval rules must retain a concrete accepted definition.");
 
-        var levels = ladder.Steps.Select(x => Enum.Parse<RequirementLevel>(x.CatalogueEntry, false)).ToHashSet();
-        if (levels.Contains(RequirementLevel.System)) rules.Add((ReviewSubject.System, "System requirements", ProgramRole.SystemEngineer));
-        if (levels.Contains(RequirementLevel.HighLevel) || levels.Contains(RequirementLevel.LowLevel))
-            rules.Add((ReviewSubject.Software, "Software requirements", ProgramRole.SoftwareEngineer));
-        if (levels.Contains(RequirementLevel.Interface))
-            rules.Add((ReviewSubject.Interface, "Interface requirements", ProgramRole.ConfigurationManager));
-        if (levels.Contains(RequirementLevel.System) && HasArtifact(ladder, RequirementLevel.System, VerificationArtifactKind.Procedure))
-            rules.Add((ReviewSubject.SystemTest, "System test procedures", ProgramRole.SystemTestEngineer));
-        if (levels.Contains(RequirementLevel.HighLevel))
+        var supplied = Deserialize<ReviewRulesWire>(rulesJson, "review rules");
+        if (supplied.Rules is null)
+            throw new ProjectSetupInvalidException("The reviewed rules must contain a typed rules array.");
+        var applicable = ApplicableSubjects(ladder);
+        if (supplied.Rules.Count == 0)
         {
-            if (HasArtifact(ladder, RequirementLevel.HighLevel, VerificationArtifactKind.Case))
-                rules.Add((ReviewSubject.HighLevelSoftwareCase, "High-level software test cases", ProgramRole.SoftwareTestEngineer));
-            if (HasArtifact(ladder, RequirementLevel.HighLevel, VerificationArtifactKind.Procedure))
-                rules.Add((ReviewSubject.HighLevelSoftwareProcedure, "High-level software test procedures", ProgramRole.SoftwareTestEngineer));
+            if (applicable.Count != 0)
+                throw new ProjectSetupInvalidException("The reviewed rules must cover each applicable ladder subject.");
+            return; // A Customer-only/non-verification ladder truthfully has no review workflows to offer.
         }
-        if (levels.Contains(RequirementLevel.LowLevel))
+        var suppliedSubjects = supplied.Rules.Select(x => x.Subject).ToArray();
+        if (suppliedSubjects.Distinct().Count() != suppliedSubjects.Length || !applicable.SetEquals(suppliedSubjects))
+            throw new ProjectSetupInvalidException("Review rules must cover each applicable ladder subject exactly once.");
+        foreach (var suppliedRule in supplied.Rules)
         {
-            if (HasArtifact(ladder, RequirementLevel.LowLevel, VerificationArtifactKind.Case))
-                rules.Add((ReviewSubject.LowLevelSoftwareCase, "Low-level software test cases", ProgramRole.SoftwareTestEngineer));
-            if (HasArtifact(ladder, RequirementLevel.LowLevel, VerificationArtifactKind.Procedure))
-                rules.Add((ReviewSubject.LowLevelSoftwareProcedure, "Low-level software test procedures", ProgramRole.SoftwareTestEngineer));
-        }
-        foreach (var (subject, name, reviewRole) in rules)
-        {
-            var workflow = new ReviewWorkflow(projectId, name, subject, ReviewMode.Sequential,
-            [
-                new ReviewWorkflowStageDraft("Engineering review", reviewRole, ReviewStageKind.Review,
-                    ReviewStageAuthorityKind.BaseRole),
-                new ReviewWorkflowStageDraft("Project acceptance", ProgramRole.ProjectEngineer,
-                    ReviewStageKind.Approval, ReviewStageAuthorityKind.LeadershipPosition),
-            ], actor, now);
+            if (suppliedRule.Stages is null || suppliedRule.Stages.Count == 0)
+                throw new ProjectSetupInvalidException($"Review rule {suppliedRule.Subject} requires a stage.");
+            if (!suppliedRule.Stages.Any(x => x.Kind == ReviewStageKind.Review)
+                || !suppliedRule.Stages.Any(x => x.Kind == ReviewStageKind.Approval))
+                throw new ProjectSetupInvalidException($"Review rule {suppliedRule.Subject} requires explicit Review and Approval stages.");
+            var workflow = new ReviewWorkflow(projectId, suppliedRule.Name ?? suppliedRule.Subject.ToString(),
+                suppliedRule.Subject, ReviewMode.Sequential,
+                suppliedRule.Stages.Select(x => new ReviewWorkflowStageDraft(x.Name, x.RequiredRole, x.Kind,
+                    x.AuthorityKind)).ToArray(), actor, now);
             workflow.Activate(actor, now);
             db.ReviewWorkflows.Add(workflow);
         }

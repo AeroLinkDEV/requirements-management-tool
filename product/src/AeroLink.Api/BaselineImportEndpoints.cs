@@ -362,6 +362,7 @@ public static class BaselineImportEndpoints
             catch (DomainException ex) { return Results.Conflict(new { error = ex.Message }); }
             try
             {
+                await using var transaction = await db.Database.BeginTransactionAsync(ct);
                 var now = DateTimeOffset.UtcNow;
                 var release = new SoftwareRelease(import.ProjectId, version, isReleased: false);
                 // Accept first, so an import that has not cleared its gates is refused before a build for it
@@ -373,7 +374,16 @@ public static class BaselineImportEndpoints
                 release.MarkReleased(now);
                 db.Releases.Add(release);
                 await db.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
                 return Results.Ok(Detail(import, await TallyAsync(db, id, ct)));
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new { error = "The import or canonical build identity changed concurrently. Refresh and retry." });
+            }
+            catch (DbUpdateException ex) when (ReleaseIdentityPersistencePolicy.IsIdentityRace(ex))
+            {
+                return Results.Conflict(new { error = "That canonical build identity already exists or changed concurrently. Refresh and retry." });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });

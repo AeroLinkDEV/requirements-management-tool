@@ -28,12 +28,33 @@ public sealed class ProjectSetupApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
 
+        using var invalidWorkspace = await client.PostAsJsonAsync("/api/workspaces", new
+        {
+            programName = "Invalid Build Program",
+            programCode = "IBP1037",
+            projectName = "Invalid Build Project",
+            softwareProduct = "Invalid Build Product",
+            initialRelease = "1.3.0",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, invalidWorkspace.StatusCode);
+
         using var created = await client.PostAsJsonAsync("/api/project-setups", new { projectName = "Fresh Recovery" });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         using var createdBody = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
         var draftId = createdBody.RootElement.GetProperty("draftId").GetGuid();
         Assert.Equal("Draft", createdBody.RootElement.GetProperty("state").GetString());
         Assert.Equal(1, createdBody.RootElement.GetProperty("version").GetInt64());
+
+        using var drafts = await client.GetAsync("/api/project-setups");
+        Assert.Equal(HttpStatusCode.OK, drafts.StatusCode);
+        using var draftsBody = JsonDocument.Parse(await drafts.Content.ReadAsStringAsync());
+        Assert.Contains(draftsBody.RootElement.EnumerateArray(), x => x.GetProperty("draftId").GetGuid() == draftId);
+
+        using var resumed = await client.GetAsync($"/api/project-setups/{draftId}");
+        Assert.Equal(HttpStatusCode.OK, resumed.StatusCode);
+        using var resumedBody = JsonDocument.Parse(await resumed.Content.ReadAsStringAsync());
+        Assert.True(resumedBody.RootElement.GetProperty("reviewRules").GetProperty("suggestedDefinition")
+            .GetProperty("rules").GetArrayLength() > 0);
 
         using var saved = await client.PutAsJsonAsync($"/api/project-setups/{draftId}", new
         {
@@ -55,6 +76,8 @@ public sealed class ProjectSetupApiTests : IClassFixture<SharedApiHost>
         Assert.Equal("SW-01.30", savedBody.RootElement.GetProperty("build").GetProperty("officialName").GetString());
         Assert.True(savedBody.RootElement.GetProperty("reviewRules").GetProperty("accepted").GetBoolean());
         Assert.NotEqual(JsonValueKind.Null, savedBody.RootElement.GetProperty("reviewRules").GetProperty("acceptanceHash").ValueKind);
+        Assert.True(savedBody.RootElement.GetProperty("reviewRules").GetProperty("definition")
+            .GetProperty("rules").GetArrayLength() > 0);
 
         using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize", new
         {
@@ -102,5 +125,57 @@ public sealed class ProjectSetupApiTests : IClassFixture<SharedApiHost>
         Assert.Equal(ProjectRepositorySetupStatus.Pending, repository.Status);
         Assert.Null(repository.RemoteProjectId);
         Assert.Null(repository.RemotePathWithNamespace);
+
+        // A valid Customer-only, non-verification ladder has no applicable engineering review subjects. The
+        // explicit rules:[] definition is accepted and materializes no fictitious workflow.
+        using var customerDraftResponse = await client.PostAsJsonAsync("/api/project-setups", new
+        {
+            projectName = "Customer-only Recovery",
+        });
+        Assert.Equal(HttpStatusCode.Created, customerDraftResponse.StatusCode);
+        using var customerDraftBody = JsonDocument.Parse(await customerDraftResponse.Content.ReadAsStringAsync());
+        var customerDraftId = customerDraftBody.RootElement.GetProperty("draftId").GetGuid();
+        using var customerSaved = await client.PutAsJsonAsync($"/api/project-setups/{customerDraftId}", new
+        {
+            expectedVersion = 1,
+            currentStep = "Review",
+            project = new { name = "Customer-only Recovery", softwareProduct = "Customer Product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = new
+            {
+                steps = new[]
+                {
+                    new { catalogueEntry = "Customer", position = 1, capabilities = "None", enabledArtifactKinds = Array.Empty<string>() },
+                },
+                relationships = Array.Empty<object>(),
+            },
+            reviewRules = new { },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+        Assert.True(customerSaved.IsSuccessStatusCode, await customerSaved.Content.ReadAsStringAsync());
+        using var customerSavedBody = JsonDocument.Parse(await customerSaved.Content.ReadAsStringAsync());
+        Assert.Empty(customerSavedBody.RootElement.GetProperty("reviewRules").GetProperty("definition")
+            .GetProperty("rules").EnumerateArray());
+        using var staleCustomerFinalize = await client.PostAsJsonAsync($"/api/project-setups/{customerDraftId}/finalize", new
+        {
+            expectedVersion = 1,
+            idempotencyKey = "customer-only-recovery-stale-request",
+        });
+        Assert.Equal(HttpStatusCode.Conflict, staleCustomerFinalize.StatusCode);
+        using var customerFinalized = await client.PostAsJsonAsync($"/api/project-setups/{customerDraftId}/finalize", new
+        {
+            expectedVersion = 2,
+            idempotencyKey = "customer-only-recovery-request-1",
+        });
+        Assert.True(customerFinalized.IsSuccessStatusCode, await customerFinalized.Content.ReadAsStringAsync());
+        using var customerFinalizedBody = JsonDocument.Parse(await customerFinalized.Content.ReadAsStringAsync());
+        var customerProjectId = customerFinalizedBody.RootElement.GetProperty("projectId").GetGuid();
+        using var customerScope = _host.Factory.Services.CreateScope();
+        var customerDb = customerScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Empty(await customerDb.ReviewWorkflows.Where(x => x.ProjectId == customerProjectId).ToListAsync());
     }
 }
