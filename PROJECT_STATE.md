@@ -336,6 +336,12 @@ An installation may declare its own identity (`instance.json`), which the API pu
 from the hostname. `/health/identity` also carries the source SHA and launcher mode, which is what lets a
 launcher tell a matching process from a stale one — readiness alone never could.
 
+HOME production's instance badge also reports main currency and check age. The existing source controller
+records its remote observation beside the dedicated-source marker; the API reads that observation passively
+and binds it to its running source identity. A failed, missing, mismatched, or more-than-30-minute-old
+observation is Unverified. Browser status refreshes cannot fetch Git or trigger deployment; the production
+reconciler retains its 30-minute schedule and explicit remote-demo Start reconciles before READY.
+
 HOME production transitions preserve the prior protected-tunnel ON/OFF state under the initiating policy.
 Exact runtime reuse skips rebuild and PostgreSQL startup. A shared installation lease coordinates manual and
 scheduled controllers through fresh-process continuation; an owed origin is supplied before API startup and

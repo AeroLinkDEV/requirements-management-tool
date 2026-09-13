@@ -1,19 +1,19 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 881,
-    "cases": 981,
-    "classes": 131,
-    "hostedTests": 840,
-    "hostedCases": 926,
+    "tests": 886,
+    "cases": 994,
+    "classes": 132,
+    "hostedTests": 841,
+    "hostedCases": 927,
     "nonHostedTests": 32,
     "nonHostedCases": 46,
-    "unknownHostTests": 9,
-    "unknownHostCases": 9,
+    "unknownHostTests": 13,
+    "unknownHostCases": 21,
     "hostedCandidateTests": 16,
     "hostedCandidateCases": 16,
-    "unknownCandidateTests": 5,
-    "unknownCandidateCases": 5,
+    "unknownCandidateTests": 7,
+    "unknownCandidateCases": 15,
     "unknownCaseTests": 0,
     "criterion7": "unresolved"
   },
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 554,
-      "cases": 622,
+      "tests": 555,
+      "cases": 623,
       "unknownCases": 0,
-      "classes": 105
+      "classes": 106
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -53,10 +53,10 @@
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
       "level": "API or Infrastructure (must stay hosted)",
-      "tests": 19,
-      "cases": 19,
+      "tests": 21,
+      "cases": 21,
       "unknownCases": 0,
-      "classes": 10
+      "classes": 11
     },
     "startup-config": {
       "label": "Startup, hosting and configuration",
@@ -69,10 +69,10 @@
     "rule-matrix": {
       "label": "Business-rule matrix over data variations",
       "level": "Domain (migration candidate)",
-      "tests": 2,
-      "cases": 16,
+      "tests": 4,
+      "cases": 26,
       "unknownCases": 0,
-      "classes": 2
+      "classes": 3
     }
   },
   "tests": [
@@ -5232,6 +5232,80 @@
       "sourceLines": {
         "start": 40,
         "end": 105
+      }
+    },
+    {
+      "cls": "MainCurrencyTests",
+      "test": "Anonymous_identity_exposes_only_currency_summary_and_disables_caching",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 89,
+        "end": 107
+      }
+    },
+    {
+      "cls": "MainCurrencyTests",
+      "test": "Currency_requires_fresh_remote_proof_bound_to_the_actual_running_source",
+      "kind": "Theory",
+      "intent": "rule-matrix",
+      "cases": 8,
+      "caseEvidence": "InlineData",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 32,
+        "end": 47
+      }
+    },
+    {
+      "cls": "MainCurrencyTests",
+      "test": "Missing_malformed_or_foreign_observation_never_becomes_current",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 49,
+        "end": 60
+      }
+    },
+    {
+      "cls": "MainCurrencyTests",
+      "test": "Other_modes_and_installations_have_no_HOME_currency",
+      "kind": "Theory",
+      "intent": "rule-matrix",
+      "cases": 2,
+      "caseEvidence": "InlineData",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 79,
+        "end": 87
+      }
+    },
+    {
+      "cls": "MainCurrencyTests",
+      "test": "Passive_reads_observe_controller_replacement_without_writing_anything",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 62,
+        "end": 77
       }
     },
     {

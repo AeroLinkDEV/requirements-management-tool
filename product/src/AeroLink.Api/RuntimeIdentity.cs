@@ -103,6 +103,8 @@ public static class RuntimeIdentityEndpoints
         app.MapGet("/health/identity", async (HttpContext context, IConfiguration configuration, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var identity = Resolve(configuration);
+            var currency = MainCurrency.Read(configuration, identity, DateTimeOffset.UtcNow);
+            context.Response.Headers.CacheControl = "no-store";
 
             // Two audiences, two answers.
             //
@@ -134,6 +136,12 @@ public static class RuntimeIdentityEndpoints
                 sourceShortSha = loopback ? identity.SourceShortSha : null,
                 sourceIdentity = loopback ? identity.SourceIdentity : null,
                 mode = identity.Mode,
+                mainCurrency = currency is null ? null : new
+                {
+                    state = currency.State,
+                    checkedAtUtc = currency.CheckedAtUtc,
+                    remoteSha = loopback ? currency.RemoteSha : null,
+                },
                 instance = new
                 {
                     id = identity.InstanceId,

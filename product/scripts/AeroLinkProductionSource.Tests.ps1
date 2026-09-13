@@ -197,6 +197,12 @@ try {
     $again = Update-AeroLinkProductionSource -SourceRoot $fixture.Production
     Assert-True ($again.Action -eq 'AlreadyCurrent') 'A second reconciliation with no remote movement must do nothing.'
     Assert-True ($again.HeadSha -eq $remoteSha) 'A no-op reconciliation leaves the source where it was.'
+    $currencyPath = Join-Path $fixture.Production 'product\.local\main-currency.json'
+    $currency = Get-Content -LiteralPath $currencyPath -Raw | ConvertFrom-Json
+    Assert-True ($currency.verified -and $currency.sourceSha -eq $remoteSha -and $currency.remoteSha -eq $remoteSha) `
+        'The controller must publish its successful exact source/remote comparison.'
+    Assert-True (([DateTimeOffset]::UtcNow - [DateTimeOffset]$currency.checkedAtUtc).TotalMinutes -lt 1) `
+        'The observation must carry the check time rather than a timeless Current flag.'
 
     # =====================================================================================================
     # 5. GitHub unavailable: a previously verified clean cached main runs, and says it is unverified.
@@ -208,6 +214,9 @@ try {
     Assert-True ($offline.Action -eq 'CachedCanonical') "An unreachable remote must still allow a verified cached main; it reported $($offline.Action)."
     Assert-True ($offline.Canonical) 'Cached canonical source is usable.'
     Assert-True ($offline.RemoteReachable -eq $false) 'The offline result must record that the remote was not reached.'
+    $offlineCurrency = Get-Content -LiteralPath $currencyPath -Raw | ConvertFrom-Json
+    Assert-True (-not $offlineCurrency.verified -and $offlineCurrency.remoteSha -eq $remoteSha) `
+        'Offline startup must retain only a known remote SHA, never the previous verified-current claim.'
     Assert-True ($offline.Reason -match 'could not be verified') 'The offline diagnostic must say the latest remote revision was not verified, not claim to be current.'
 
     # =====================================================================================================
@@ -342,6 +351,9 @@ try {
     $target = Push-RemoteCommit -Fixture $phaseFixture -Content 'phase-v2'
 
     $inspect = Update-AeroLinkProductionSource -SourceRoot $phaseFixture.Production -InspectOnly
+    $observed = Get-Content -LiteralPath (Join-Path $phaseFixture.Production 'product\.local\main-currency.json') -Raw | ConvertFrom-Json
+    Assert-True ($observed.verified -and $observed.sourceSha -eq $beforeSha -and $observed.remoteSha -eq $target) `
+        'Inspection publishes the known newer remote while leaving the running source unchanged.'
     Assert-True ($inspect.Action -eq 'UpdateAvailable') "Inspection must report an available update; it reported $($inspect.Action): $($inspect.Reason)"
     Assert-True ($inspect.TargetSha -eq $target) 'Inspection must name the revision the advance will land on.'
     Assert-True ($inspect.HeadSha -eq $beforeSha) 'Inspection must report the source still at its current revision...'
@@ -353,6 +365,8 @@ try {
     Assert-True ($moved -ne $target) 'Fixture sanity: origin/main moved again between inspection and advance.'
     $stale = Update-AeroLinkProductionSource -SourceRoot $phaseFixture.Production -AdvanceToSha $target
     Assert-True ($stale.Action -eq 'Refused') 'An advance decided against a revision that is no longer origin/main must be refused.'
+    $refusedCurrency = Get-Content -LiteralPath (Join-Path $phaseFixture.Production 'product\.local\main-currency.json') -Raw | ConvertFrom-Json
+    Assert-True (-not $refusedCurrency.verified) 'A refused transition must invalidate its earlier successful currency observation.'
     Assert-True ($stale.Reason -match 'between inspection and advance') 'The refusal must say why, so the next pass is understood to re-decide.'
     Assert-True ((Get-AeroLinkProductionSourcePosture -SourceRoot $phaseFixture.Production).Posture.HeadSha -eq $beforeSha) `
         'A refused advance must not have moved the working tree.'
