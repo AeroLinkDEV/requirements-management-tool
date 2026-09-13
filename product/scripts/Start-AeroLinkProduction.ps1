@@ -410,6 +410,8 @@ else {
         Runtime__SourceSha       = $sourceFingerprint.Sha
         Runtime__SourceIdentity  = $sourceFingerprint.Identity
         Runtime__Mode            = $launcherMode
+        Runtime__SourceRoot      = $repositoryRoot
+        Runtime__MainCurrencyPath = Join-Path $productRoot '.local\main-currency.json'
         Instance__Label          = $instance.Label
         Instance__Classification = $instance.Classification
         Instance__InstanceId     = $instance.InstanceId

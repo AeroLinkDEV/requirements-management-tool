@@ -183,6 +183,21 @@ credentials are per-user), and neither carrying a secret:
   revision that is on disk rather than left down. Polling rather than a webhook: an inbound public endpoint
   to learn about a merge would be a far larger security surface than the problem justifies.
 
+  Each source check records a non-secret observation in the **dedicated source's own**
+  `product/.local/main-currency.json`, beside its production-source marker, rather than through the shared
+  installation pointer. `/health/identity` reads it without fetching or changing Git. The HOME badge shows
+  Current main only when a successful observation no older than 30 minutes matches the actual running
+  source and remote main. A proven newer remote shows Main update available; a failed, expired, missing or
+  mismatched observation shows Main unverified. The visible check age and tooltip timestamp describe the
+  observation, not a promise that GitHub cannot have advanced since it. Exact source/remote SHAs retain
+  the identity endpoint's existing loopback disclosure restriction. The browser refreshes only this passive
+  status once a minute; it cannot start deployment. `CONFIGURE_AEROLINK_PRODUCTION_SOURCE.bat Update`
+  remains the manual immediate-refresh path. Offline cached-main startup remains permitted, with unverified
+  currency. Explicit remote-demo Start/recovery already uses this source authority before runtime/401 READY.
+  Observation-write failures produce an operator warning and do not change the source update's result or
+  prevent its required fresh-process handoff. The old observation is removed where possible; if another
+  process locks it, its original check age still expires and it cannot qualify a different running revision.
+
   **The control plane is part of what an update replaces.** Every implementation file loaded before a source
   advance is either in the production launcher's re-entry fingerprint — so an update to it re-execs a fresh
   process from the new revision — or the controller hands the rest of the transition to a fresh process

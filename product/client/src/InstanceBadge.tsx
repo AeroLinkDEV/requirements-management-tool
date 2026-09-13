@@ -22,6 +22,7 @@ import "./InstanceBadge.css";
 type InstanceIdentity = {
   sourceShortSha?: string;
   mode?: string;
+  mainCurrency?: { state: string; checkedAtUtc?: string | null; remoteSha?: string | null } | null;
   instance?: {
     label?: string;
     classification?: string;
@@ -49,19 +50,45 @@ export default function InstanceBadge() {
 
   useEffect(() => {
     let cancelled = false;
-    // Anonymous, cheap, and never retried in a loop: an installation that cannot answer this is an
-    // installation with larger problems than a missing badge, and every other surface will say so.
-    fetch(`${API_ORIGIN}/health/identity`)
-      .then((response) => (response.ok ? response.json() as Promise<InstanceIdentity> : null))
-      .then((value) => { if (!cancelled) setIdentity(value); })
-      .catch(() => { if (!cancelled) setIdentity(null); });
-    return () => { cancelled = true; };
+    let homeProduction = false;
+    let identityEstablished = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let controller: AbortController;
+    // Refresh the passive runtime observation, never GitHub or the deployment controller. Serialize
+    // requests and bound a hung read so old success cannot remain on a long-lived page indefinitely.
+    const refresh = async () => {
+      controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+      try {
+        const response = await fetch(`${API_ORIGIN}/health/identity`, { signal: controller.signal, cache: "no-store" });
+        if (!response.ok) throw new Error("Runtime status unavailable");
+        const value = await response.json() as InstanceIdentity;
+        homeProduction = value.mode === "HOME-PRODUCTION" && value.instance?.classification === "HomeCanonical";
+        identityEstablished = true;
+        if (!cancelled) setIdentity(value);
+      } catch {
+        if (!cancelled) setIdentity(previous => previous ? { ...previous,
+          mainCurrency: { ...previous.mainCurrency, state: "Unverified" } } : null);
+      } finally {
+        clearTimeout(timeout);
+        if (!cancelled && (!identityEstablished || homeProduction)) timer = setTimeout(() => { void refresh(); }, 60_000);
+      }
+    };
+    void refresh();
+    return () => { cancelled = true; clearTimeout(timer); controller?.abort(); };
   }, []);
 
   if (!identity) return null;
 
   const label = identity.instance?.label ?? "AEROLINK";
   const classification = identity.instance?.classification ?? "Undeclared";
+  const showCurrency = classification === "HomeCanonical" && identity.mode === "HOME-PRODUCTION";
+  const currency = identity.mainCurrency;
+  const currencyLabel = currency?.state === "Current" ? "Current main"
+    : currency?.state === "UpdateAvailable" ? "Main update available" : "Main unverified";
+  const checked = currency?.checkedAtUtc ? Date.parse(currency.checkedAtUtc) : NaN;
+  const checkAge = Number.isFinite(checked) && checked <= Date.now()
+    ? `checked ${Math.floor((Date.now() - checked) / 60_000)}m ago` : "not checked";
   const snapshot = identity.instance?.snapshot ?? null;
   const age = snapshotAge(snapshot?.createdAtUtc);
 
@@ -86,17 +113,25 @@ export default function InstanceBadge() {
     identity.database?.name ? `Database: ${identity.database.name}` : undefined,
     identity.sourceShortSha ? `Source: ${identity.sourceShortSha}` : undefined,
     identity.mode ? `Mode: ${identity.mode}` : undefined,
+    showCurrency ? `${currencyLabel}; ${checkAge}` : undefined,
+    showCurrency && currency?.checkedAtUtc ? `Last check: ${currency.checkedAtUtc}` : undefined,
+    showCurrency && currency?.remoteSha ? `Last observed remote main: ${currency.remoteSha}` : undefined,
     snapshot ? `Snapshot from ${snapshot.sourceLabel ?? "another installation"}${age ? `, ${age}` : ""}` : undefined,
   ].filter(Boolean).join("\n");
 
   return (
     <span
-      className={`instanceBadge instanceBadge--${classification.toLowerCase()}`}
+      className={`instanceBadge instanceBadge--${classification.toLowerCase()}${showCurrency ? " instanceBadge--currency" : ""}`}
       title={detail}
       data-testid="instance-badge"
       data-classification={classification}
     >
-      {visibleLabel}
+      <span data-testid="instance-label">{visibleLabel}</span>
+      {showCurrency ? <span className="instanceBadgeCurrency" data-testid="main-currency">
+        <span>{currencyLabel}</span>
+        {identity.sourceShortSha ? <span>{identity.sourceShortSha}</span> : null}
+        <span className="instanceBadgeCheckAge">{checkAge}</span>
+      </span> : null}
       {snapshot ? <em className="instanceBadgeSnapshot">snapshot{age ? ` ${age}` : ""}</em> : null}
     </span>
   );

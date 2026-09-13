@@ -1,6 +1,48 @@
 import { expect, test } from '@playwright/test'
 import { login, showcaseSeed } from './auth'
 
+test('HOME currency refreshes passively and loses its current claim when the status read fails', async ({ page, request }, testInfo) => {
+  await showcaseSeed(request)
+  await page.clock.install()
+  let state = 'Current'
+  let unavailable = true
+  let reads = 0
+  await page.route('**/health/identity', route => {
+    reads++
+    expect(route.request().method()).toBe('GET')
+    return route.fulfill({ status: unavailable ? 503 : 200, contentType: 'application/json', body: JSON.stringify({
+      sourceShortSha: 'abc12345', mode: 'HOME-PRODUCTION',
+      instance: { label: 'HOME CANONICAL', classification: 'HomeCanonical' },
+      mainCurrency: { state, checkedAtUtc: new Date().toISOString(), remoteSha: 'b'.repeat(40) },
+    }) })
+  })
+  await login(page, 'admin')
+  const badge = page.getByTestId('instance-badge')
+  const currency = badge.getByTestId('main-currency')
+  await expect(badge).toHaveCount(0)
+  unavailable = false
+  await page.clock.fastForward(61_000)
+  await expect(currency).toContainText('Current main')
+  await expect(currency).toContainText('abc12345')
+  await expect(currency).toContainText(/checked \d+m ago/)
+  const firstReads = reads
+  state = 'UpdateAvailable'
+  await page.clock.fastForward(61_000)
+  await expect(currency).toContainText('Main update available')
+  expect(reads).toBeGreaterThan(firstReads)
+  await expect(badge.getByTestId('instance-label')).toHaveText('HOME')
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const box = await badge.boundingBox()
+  expect(box).not.toBeNull()
+  expect(box!.x + box!.width).toBeLessThanOrEqual(1280)
+  expect(await badge.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('home-main-currency.png') })
+  unavailable = true
+  await page.clock.fastForward(61_000)
+  await expect(currency).toContainText('Main unverified')
+  await expect(currency).not.toContainText('Current main')
+})
+
 /**
  * #925 P2 — the instance badge names the installation without shouting deployment vocabulary.
  *
@@ -28,7 +70,8 @@ test('the badge shows the installation name and keeps the declaration in the too
   await login(page, 'admin')
 
   const badge = page.getByTestId('instance-badge')
-  await expect(badge).toHaveText('HOME')
+  await expect(badge.getByTestId('instance-label')).toHaveText('HOME')
+  await expect(badge.getByTestId('main-currency')).toContainText('Main unverified')
   await expect(badge).not.toContainText('CANONICAL')
   await expect(badge).toHaveAttribute('title', /Instance: HOME CANONICAL \(HomeCanonical\)/)
   await expect(badge).toHaveAttribute('title', /Database: aerolink/)

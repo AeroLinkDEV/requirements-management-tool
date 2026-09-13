@@ -445,7 +445,7 @@ function Initialize-AeroLinkProductionSource {
     }
 }
 
-function Update-AeroLinkProductionSource {
+function Invoke-AeroLinkProductionSourceUpdate {
     <#
         .SYNOPSIS Brings the dedicated production source to the current approved origin/main, or explains why
           it did not.
@@ -601,6 +601,66 @@ function Update-AeroLinkProductionSource {
     return [pscustomobject]@{
         Action = 'AlreadyCurrent'; Canonical = $true; HeadSha = $posture.HeadSha; TargetSha = $posture.RemoteMainSha
         RemoteReachable = $true; Reason = "The production source is current with $RemoteName/main @ $($posture.ShortSha)."
+    }
+}
+
+function Update-AeroLinkProductionSource {
+    # Keep one update authority. Publish its observation for the running API to read; reading this file
+    # never fetches Git, changes source, or restarts a service. A refused/failed check invalidates currency.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SourceRoot,
+        [string]$RemoteName = 'origin',
+        [int]$FetchTimeoutSeconds = 45,
+        [switch]$AllowNonDedicated,
+        [scriptblock]$FetchOverride,
+        [switch]$InspectOnly,
+        [string]$AdvanceToSha
+    )
+    $result = $null
+    try {
+        $result = Invoke-AeroLinkProductionSourceUpdate @PSBoundParameters
+        return $result
+    }
+    finally {
+        $path = $null
+        try {
+            # Never write another installation's status through a broken source binding or a qualification
+            # bypass. Ordinary disposable tests can configure the same real dedicated-source binding.
+            $binding = Get-AeroLinkProductionSourcePosture -SourceRoot $SourceRoot -RemoteName $RemoteName
+            if (-not $AllowNonDedicated -and $binding.Dedicated) {
+                # Like the dedicated-source marker, this belongs to the source itself, not the shared
+                # installation pointer (which may resolve inside the developer checkout).
+                $directory = Split-Path (Get-AeroLinkProductionSourceMarkerPath -SourceRoot $SourceRoot) -Parent
+                $path = Join-Path $directory 'main-currency.json'
+                $temporary = $path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+                try {
+                    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+                    $observation = @{
+                        sourceRoot = [IO.Path]::GetFullPath($SourceRoot).TrimEnd('\', '/')
+                        sourceSha = if ($result) { $result.HeadSha } else { $null }
+                        remoteSha = if ($result) { $result.TargetSha } else { $null }
+                        checkedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
+                        verified = [bool]($result -and $result.Canonical -and $result.RemoteReachable -eq $true)
+                    }
+                    $observation | ConvertTo-Json -Compress | Set-Content -LiteralPath $temporary -Encoding UTF8
+                    if (Test-Path -LiteralPath $path) { [IO.File]::Replace($temporary, $path, [NullString]::Value) }
+                    else { [IO.File]::Move($temporary, $path) }
+                }
+                finally {
+                    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+                }
+            }
+        }
+        catch {
+            # Source advancement is irreversible here. Never let optional status persistence replace
+            # Updated with an exception: callers need that exact result to enter fresh-process handoff.
+            $publicationFailure = $_.Exception.Message
+            if ($path) {
+                try { [IO.File]::Delete($path) } catch { } # Best effort; a locked old observation still expires.
+            }
+            Write-Warning "Main-currency observation could not be saved; the source-operation result is unchanged. An older observation may remain until expiry. $publicationFailure" -WarningAction Continue
+        }
     }
 }
 
