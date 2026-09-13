@@ -53,3 +53,43 @@ test("a fresh setup finalizes into one In Work build and returns to its lineage 
     page.locator("[data-build-card]").getByText("SW-01.02", { exact: true }),
   ).toBeVisible();
 });
+
+test("refreshes review rules after a saved ladder adds Interface and changes software verification", async ({
+  page,
+}, testInfo) => {
+  await login(page, "admin", { openProject: false });
+  await page.goto("/projects/new");
+  await page.getByLabel("Project name").fill("Rules refresh UI " + Date.now());
+  await page.getByLabel("Software product").fill("Rules refresh UI Software");
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  await page.getByLabel("Fresh project").check();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel("Version").fill("1.03");
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  // The first visit persists the default ladder and receives its server standard. The second
+  // visit changes the persisted ladder, which must expose the newer suggested definition.
+  await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+  const ladderRows = page.locator(".setupLadderRows > li");
+  await expect(ladderRows).toHaveCount(3);
+  await page.getByRole("button", { name: "Add supported level" }).click();
+  await page.getByRole("button", { name: "Add supported level" }).click();
+  await expect(ladderRows).toHaveCount(5);
+  await ladderRows.nth(1).getByLabel("Verification profile").selectOption("Case");
+  await ladderRows.nth(2).getByLabel("Verification profile").selectOption("Case");
+  await ladderRows.nth(4).getByRole("combobox").first().selectOption("Interface");
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  await expect(page.getByRole("heading", { name: "Review and approval rules", level: 2 })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Use rules for this ladder" })).toBeVisible();
+  await expect(page.getByText("Required subjects added:", { exact: false })).toBeVisible();
+  await expect(page.getByText("replaces this draft's existing rule definition", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Use rules for this ladder" }).click();
+  const accepted = page.getByLabel(/explicitly accept these concrete review and approval rules/i);
+  await expect(accepted).not.toBeChecked();
+  await accepted.check();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Repository setup", level: 2 })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("fr05-rules-accepted.png"), fullPage: true });
+});

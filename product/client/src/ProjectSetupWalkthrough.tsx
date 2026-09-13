@@ -75,6 +75,8 @@ type SetupValues = {
   selectedCategories: string[];
   ladder: LadderDefinition;
   reviewRulesDefinition?: ReviewRulesDefinition;
+  /** The latest server proposal for the persisted ladder, kept beside any creator edits. */
+  suggestedReviewRulesDefinition?: ReviewRulesDefinition;
   reviewRulesAccepted: boolean;
   repository: RepositorySettings;
   mapping: unknown;
@@ -260,6 +262,34 @@ function reviewRulesAreComplete(definition?: ReviewRulesDefinition) {
   });
 }
 
+type ReviewRulesSubjectDelta = { added: string[]; removed: string[] };
+
+function reviewRulesSubjectDelta(
+  current: ReviewRulesDefinition | undefined,
+  suggested: ReviewRulesDefinition | undefined,
+): ReviewRulesSubjectDelta | undefined {
+  if (!current || !suggested) return undefined;
+  const currentSubjects = new Set(current.rules.map((rule) => rule.subject));
+  const suggestedSubjects = new Set(suggested.rules.map((rule) => rule.subject));
+  return {
+    added: suggested.rules
+      .map((rule) => rule.subject)
+      .filter((subject) => !currentSubjects.has(subject)),
+    removed: current.rules
+      .map((rule) => rule.subject)
+      .filter((subject) => !suggestedSubjects.has(subject)),
+  };
+}
+
+function cloneReviewRulesDefinition(definition: ReviewRulesDefinition): ReviewRulesDefinition {
+  return {
+    rules: definition.rules.map((rule) => ({
+      ...rule,
+      stages: rule.stages.map((stage) => ({ ...stage })),
+    })),
+  };
+}
+
 function repositoryStatusLabel(status: RepositoryStatus) {
   if (status === "Verified") return "Verified";
   if (status === "ConfiguredUnverified") return "Configured · unverified";
@@ -281,6 +311,7 @@ function valuesFromDraft(draft: SetupDraft): SetupValues {
     reviewRulesDefinition:
       normalizeReviewRules(draft.reviewRules?.definition)
       ?? normalizeReviewRules(draft.reviewRules?.suggestedDefinition),
+    suggestedReviewRulesDefinition: normalizeReviewRules(draft.reviewRules?.suggestedDefinition),
     reviewRulesAccepted: draft.reviewRules?.accepted === true,
     repository: normalizeRepository(draft.repository),
     mapping: draft.mapping ?? {},
@@ -436,6 +467,18 @@ export default function ProjectSetupWalkthrough({
     });
     setNotice("");
   };
+  const useSuggestedReviewRules = () => {
+    if (!values?.suggestedReviewRulesDefinition) return;
+    // Only replace the rule definition. Project details, source answers, ladder edits, repository
+    // choices, and mappings remain untouched. `update` also clears the acceptance checkbox.
+    update(
+      "reviewRulesDefinition",
+      cloneReviewRulesDefinition(values.suggestedReviewRulesDefinition),
+    );
+    setNotice(
+      "The server rules for this ladder replaced the previous rule definition. Review and accept them again before continuing.",
+    );
+  };
   const updateReviewRule = (index: number, patch: Partial<ReviewRule>) => {
     if (!values?.reviewRulesDefinition) return;
     update("reviewRulesDefinition", {
@@ -507,6 +550,13 @@ export default function ProjectSetupWalkthrough({
     values.ladder.steps.length > 0 &&
     values.reviewRulesAccepted &&
     reviewRulesAreComplete(values.reviewRulesDefinition);
+  const reviewRulesDelta = reviewRulesSubjectDelta(
+    values?.reviewRulesDefinition,
+    values?.suggestedReviewRulesDefinition,
+  );
+  const reviewRulesNeedRefresh = Boolean(
+    reviewRulesDelta && (reviewRulesDelta.added.length || reviewRulesDelta.removed.length),
+  );
 
   const saveDraft = async (exitAfterSave = false, stepToSave = currentStep) => {
     if (!draft || !values) return false;
@@ -987,6 +1037,35 @@ export default function ProjectSetupWalkthrough({
             its name, signature meaning, or supported project authority, then explicitly accept the
             resulting definition. No people are assigned automatically.
           </p>
+          {reviewRulesNeedRefresh && reviewRulesDelta && (
+            <div className="setupRulesRefresh" role="alert">
+              <strong>The saved ladder has a newer review standard</strong>
+              <p>
+                The server recalculated required subjects from the ladder you saved. This draft still
+                shows the prior definition, so finalization will remain blocked until the current
+                standard is applied and accepted again.
+              </p>
+              {reviewRulesDelta.added.length > 0 && (
+                <p>
+                  Required subjects added:{" "}
+                  {reviewRulesDelta.added.map((subject) => subjectLabels[subject] ?? subject).join(", ")}.
+                </p>
+              )}
+              {reviewRulesDelta.removed.length > 0 && (
+                <p>
+                  Subjects no longer required:{" "}
+                  {reviewRulesDelta.removed.map((subject) => subjectLabels[subject] ?? subject).join(", ")}.
+                </p>
+              )}
+              <p>
+                Using the current standard replaces this draft&apos;s existing rule definition, including
+                any custom edits. Other setup answers remain unchanged.
+              </p>
+              <button type="button" onClick={useSuggestedReviewRules}>
+                Use rules for this ladder
+              </button>
+            </div>
+          )}
           {values.reviewRulesDefinition ? (
             <div className="setupRulesDefinition">
               <p className="setupFieldHint">
