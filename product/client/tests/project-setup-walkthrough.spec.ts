@@ -21,7 +21,7 @@ test("an administrator can save and resume a project setup draft", async ({ page
 
 test("a fresh setup finalizes into one In Work build and returns to its lineage selector", async ({
   page,
-}) => {
+}, testInfo) => {
   await login(page, "admin", { openProject: false });
   await page.goto("/projects/new");
   await page.getByLabel("Project name").fill(`Fresh UI ${Date.now()}`);
@@ -52,6 +52,7 @@ test("a fresh setup finalizes into one In Work build and returns to its lineage 
   await expect(
     page.locator("[data-build-card]").getByText("SW-01.02", { exact: true }),
   ).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("fresh-build-lineage.png"), fullPage: true });
 });
 
 test("refreshes review rules after a saved ladder adds Interface and changes software verification", async ({
@@ -92,4 +93,12 @@ test("refreshes review rules after a saved ladder adds Interface and changes sof
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Repository setup", level: 2 })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("fr05-rules-accepted.png"), fullPage: true });
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
+  await page.getByRole("button", { name: "Create Project" }).click();
+  await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+\/builds$/);
+  await expect(page.locator("[data-build-card]")).toHaveCount(1);
+  await expect(page.locator("[data-build-card]").getByText("SW-01.03", { exact: true })).toBeVisible();
+  await expect(page.locator("[data-build-card]").getByText("In Work", { exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("fr05-adjusted-ladder-created.png"), fullPage: true });
 });
