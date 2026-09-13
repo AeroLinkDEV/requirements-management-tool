@@ -12,7 +12,7 @@ All six original PNGs were opened and inspected, not inferred from OCR. [Origina
 
 `core/` and `motion/`: current rendered proof and 38 recorded core tests, including actual slower click framing and interruption. Click/interruption recordings were decoded and inspected at 0.1-second intervals; contact sheets preserve that sequence. The automated motion proof measures all six displayed matrix axes, more than 15 intermediate samples over more than 550ms, scale steps below .06, edge/card anchor agreement within two pixels and actual hit targets. Interruption verifies the displayed position and subsequent callbacks, not merely CSS duration.
 
-`supplemental/`: real Network adapter fixture with a linked card entirely left and above the usable area. Selection prepares it vertically while x and camera remain fixed; first horizontal exposure arrives at useful y=143. The synthetic fixture projection and before/after coordinates are explicit in its harness and measurements. It supplements the right/below core case without changing domain data.
+`supplemental/`: real Network adapter fixture with a linked card entirely left and above the usable area. Unselected hover prepares it without camera movement (the original harness asserts this but did not capture that stage). Selection keeps lane x and camera x fixed while permitted bounded click framing moves camera y from -155 to -212.4; first horizontal exposure arrives at useful y=143. The synthetic fixture projection and before/after coordinates are explicit in its harness and measurements. It supplements the right/below core case without changing domain data.
 
 ## Changes since previous reviewed head
 
@@ -38,7 +38,7 @@ All six original PNGs were opened and inspected, not inferred from OCR. [Origina
 | A01 | Quiet-hover all three adapters at tiers 0/1/3; repeated camera/density samples; full-application zero-selection/no-inspector preconditions. |
 | A02 | Core source and visible resident rectangles remain stationary; pure partial-visibility exclusion. |
 | A03 | Network available-space reveal, hidden-lane preparation, collision tests and effective geometry measurements. |
-| A04 | Core right/below hidden preparation plus supplemental left/above preparation with unchanged camera and lane x. |
+| A04 | Core right/below hidden hover preparation; supplemental left/above harness asserts hover camera stability, but its published capture/rectangle is selection-time with bounded camera-y framing. A dedicated hover capture is supplied by the correction packet. |
 | A05 | Hover-exit retirement and Artifact manual roll/same-scope rerender. |
 | A06 | Post-selection promotion, direct click and mid-transition hover-click, selected growth reconciliation. |
 | A07 | Selected-hover inert checks in all three views preserve subject/thread/inspector/camera. |
@@ -73,3 +73,9 @@ At 4ed42a9a, logic/build/rendered passed but full page was 40/1: Inside second-c
 An external full-app config attempt at 95d82f8f failed module loading before test collection; it is not counted as a test pass. The corrected harness ran all 47 tests at the final head. An initial video decode attempted a video-disabled run and found no file; the explicit final 38-test video-enabled rerun supplies the actual recordings. No force-clicks, timeout increases or weakened native-action assertions were used.
 
 All earlier result/report/log directories remain locally under `C:\Users\seanm\AppData\Local\Temp\astra-1022-implementation-20260912`; selected historical diagnostics already appear in the parent evidence packet. Raw traces/API logs remain local to avoid publishing session material. There are no unresolved observed browser failures at this candidate; independent gate verdicts and protected CI are still pending.
+
+## Subsequent hosted feedback and correction status
+
+Hosted Fast run34719149684 at this exact head passed backend/client jobs but failed its advisory timing aggregate:284827ms against240000ms. [Run](https://github.com/AeroLinkDEV/requirements-management-tool/actions/runs/34719149684). This was disclosed after the original immutable packet in issuecomment5648816056. It remains tracked within #1022 for measured correction; it is not an all-green hosted result. The original evidence commit45cffab3 remains immutable; this addendum corrects discoverability and the supplemental camera prose without changing the old raw measurements.
+
+Independent CORE_INTERACTION round4 and CROSS_VIEW_VISUAL round1 returned PASS at7d1a8c58 only. Later authorized corrections are on a new implementation head and require fresh qualification/review; this packet does not approve them. The six-axis recording claim must be read precisely: interpolation assertions bound scale steps and sample edge/hit-target coherence; the interruption test asserts stability of all six axes. It does not claim independent monotonicity bounds on every translation axis.
