@@ -1,11 +1,6 @@
 # Claude instructions for AeroLink
 
-Read these before changing the repository:
-
-1. [`AGENTS.md`](AGENTS.md) — canonical cross-agent repository operating/safety contract.
-2. [`PROJECT_STATE.md`](PROJECT_STATE.md) — current product architecture and supported behavior.
-3. [`DECISIONS_AND_OPEN_QUESTIONS.md`](DECISIONS_AND_OPEN_QUESTIONS.md) — authoritative accepted product decisions.
-4. The current GitHub issue/PR being implemented and the relevant technical docs under [`product/docs/`](product/docs/).
+Follow [`AGENTS.md`](AGENTS.md), including its task-specific document routing.
 
 Do not treat this file as an independent product-architecture authority. Mutable product facts belong in `PROJECT_STATE.md`; durable repository rules belong in `AGENTS.md`. This file intentionally stays small so Claude-specific instructions cannot drift into a second stale description of AeroLink.
 

@@ -8,11 +8,16 @@ AeroLink is a controlled aerospace requirements-management and development-assur
 
 Before changing the repository:
 
-1. [PROJECT_STATE.md](PROJECT_STATE.md) — current product truth and present architecture.
-2. [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md) — authoritative product decisions; accepted entries are append-only.
-3. This file — repository working and safety rules.
-4. The relevant technical documentation under [product/docs](product/docs/README.md) where available, especially [ARCHITECTURE.md](product/docs/ARCHITECTURE.md), [OPERATIONS.md](product/docs/OPERATIONS.md), and [MERGING.md](product/docs/MERGING.md).
-5. The GitHub issue being implemented and the current `main` branch. GitHub Issues are the live backlog authority; dated handoffs are historical checkpoints, not a substitute for refreshing GitHub.
+1. Read this file for repository working and safety rules, and refresh the scoped GitHub issue/PR and current `main`. GitHub Issues are the live backlog authority; dated handoffs are historical checkpoints, not a substitute for refreshing GitHub.
+2. Read the portions of [PROJECT_STATE.md](PROJECT_STATE.md) and [DECISIONS_AND_OPEN_QUESTIONS.md](DECISIONS_AND_OPEN_QUESTIONS.md) relevant to the affected behavior. Search headings and terms, then read surrounding sections and relevant superseding decisions. Accepted decisions remain authoritative and append-only; a copied summary is not a replacement.
+3. Consult the applicable contracts under [product/docs](product/docs/README.md): [ARCHITECTURE.md](product/docs/ARCHITECTURE.md) for boundary changes, [OPERATIONS.md](product/docs/OPERATIONS.md) for operational work, migration/provider guidance for schema changes, and [MERGING.md](product/docs/MERGING.md) before integration.
+
+A documentation typo or formatting-only change does not require reading the full product state and decision
+history. Lifecycle, authorization, revision identity, or effectivity changes still require their relevant
+accepted decisions and technical contracts. For explanations and read-only investigation, load the sources
+needed to support the answer; the pre-change reading stack is not an unconditional requirement for every question.
+Reuse context already read while it remains available and applicable. Refresh it when files or task scope
+change, or when material context is missing; expand the search when the applicable decision is uncertain.
 
 ## Authority hierarchy
 
