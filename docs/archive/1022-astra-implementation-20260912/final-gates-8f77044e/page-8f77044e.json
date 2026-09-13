@@ -1,0 +1,2052 @@
+{
+  "config": {
+    "argv": [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Sean Project\\RMT-1022-astra-implementation\\product\\client\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "--config=C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\fullapp-visual.config.ts",
+      "--reporter=list,json"
+    ],
+    "configFile": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\fullapp-visual.config.ts",
+    "rootDir": "C:/Users/seanm/AppData/Local/Temp/astra-1022-implementation-20260912",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": "C:\\Sean Project\\RMT-1022-astra-implementation\\product\\client\\tests\\global-setup.ts",
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/seanm/AppData/Local/Temp/astra-1022-implementation-20260912/page-8f77044e-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "C:/Users/seanm/AppData/Local/Temp/astra-1022-implementation-20260912",
+        "testIgnore": [
+          "production/**"
+        ],
+        "testMatch": [
+          "fullapp-visual.spec.ts"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "fullapp-visual.spec.ts",
+      "file": "fullapp-visual.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "Password visibility is a compact control that does not cover the password field",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 642,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T01:06:32.582Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-Password-vi-94531-ot-cover-the-password-field-chromium\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "53539af0677357b05a72-1252f08024b1be19318d",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/application-smoke.spec.ts",
+          "line": 4,
+          "column": 1
+        },
+        {
+          "title": "AeroLink starts against the real API and presents a valid entry state",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 773,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T01:06:33.232Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-AeroLink-st-72625-resents-a-valid-entry-state-chromium\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "53539af0677357b05a72-e784f921bbf040524565",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/application-smoke.spec.ts",
+          "line": 27,
+          "column": 1
+        },
+        {
+          "title": "The sign-in story panel gives truthful workspace context without changing authentication",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 763,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T01:06:34.012Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-The-sign-in-3111f-out-changing-authentication-chromium\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "53539af0677357b05a72-aa7e3a74c855e605668a",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/application-smoke.spec.ts",
+          "line": 34,
+          "column": 1
+        },
+        {
+          "title": "Sign in recovers cleanly when the local API is temporarily unavailable",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 786,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T01:06:34.782Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-Sign-in-rec-660ef--is-temporarily-unavailable-chromium\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "53539af0677357b05a72-dbbaa4f17b7e54a6b97c",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/application-smoke.spec.ts",
+          "line": 57,
+          "column": 1
+        },
+        {
+          "title": "showcase-critical surfaces are readable, focused, and progressively disclosed",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 8511,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T01:06:35.576Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-showcase-cr-34db1-and-progressively-disclosed-chromium\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "53539af0677357b05a72-c38b18354039e4bb1d4d",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/showcase-usability.spec.ts",
+          "line": 4,
+          "column": 1
+        },
+        {
+          "title": "full application quiet hover selection and manual exploration in all three views",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 25655,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-13T01:06:44.094Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "full-application-provenance",
+                      "contentType": "application/json",
+                      "body": "ewogICJraW5kIjogImZ1bGwgYXBwbGljYXRpb24gd2l0aCBleHBsaWNpdCBkaXNwb3NhYmxlIFNRTGl0ZSBzaG93Y2FzZSBzZWVkOyBub3QgSE9NRSBvciBvcmlnaW5hbCBkYXRhc2V0IGFjY2VwdGFuY2UiLAogICJyZWNvcmRzIjogWwogICAgewogICAgICAidmlldyI6ICJuZXR3b3JrIiwKICAgICAgInBhdGgiOiAiL3Byb2dyYW1zLzNkZTgxZmY2LWRlYjAtNGRjMi1iY2UyLTMxYmIwYjcwNWE2Zi9wcm9qZWN0cy8yZmUyY2ZmZC1lNjk0LTQyYmQtOWJjNS1mN2Y4MDJmNDJjNTcvcmVsZWFzZXMvZGI2NjEzZDgtMDdmNS00NWM5LWE1N2MtNTJiYTc5MTFmZTYwL3RyYWNlYWJpbGl0eSIsCiAgICAgICJzZWxlY3RlZElkIjogImExMjU3ZmJmLWRlMWEtNGUwMy04Zjc0LTM2ZTdlOTVkOTk0ZCIsCiAgICAgICJiZWZvcmUiOiAibWF0cml4KDAuODYsIDAsIDAsIDAuODYsIC0zMC42LCAxMzMpIiwKICAgICAgImFmdGVyIjogIm1hdHJpeCgwLjg2LCAwLCAwLCAwLjg2LCAxNjAsIDEzMykiCiAgICB9LAogICAgewogICAgICAidmlldyI6ICJpbnNpZGUiLAogICAgICAicGF0aCI6ICIvcHJvZ3JhbXMvM2RlODFmZjYtZGViMC00ZGMyLWJjZTItMzFiYjBiNzA1YTZmL3Byb2plY3RzLzJmZTJjZmZkLWU2OTQtNDJiZC05YmM1LWY3ZjgwMmY0MmM1Ny9yZWxlYXNlcy9kYjY2MTNkOC0wN2Y1LTQ1YzktYTU3Yy01MmJhNzkxMWZlNjAvdHJhY2VhYmlsaXR5L2NoYW5nZS1yZXF1ZXN0cy82YWEzYTM2YS00ZTZlLTQyNzMtYjdkMS01NzBkYjg0M2U4Yjk/dmlldz1pbnNpZGUiLAogICAgICAic2VsZWN0ZWRJZCI6ICI2YWEzYTM2YS00ZTZlLTQyNzMtYjdkMS01NzBkYjg0M2U4YjkiLAogICAgICAiYmVmb3JlIjogIm1hdHJpeCgwLjk2MDkzMiwgMCwgMCwgMC45NjA5MzIsIDE3Ljc5ODQsIDEzMykiLAogICAgICAiYWZ0ZXIiOiAibWF0cml4KDAuOTYwOTMyLCAwLCAwLCAwLjk2MDkzMiwgMTYwLCAxMzMpIgogICAgfSwKICAgIHsKICAgICAgInZpZXciOiAiYXJ0aWZhY3QiLAogICAgICAicGF0aCI6ICIvcHJvZ3JhbXMvM2RlODFmZjYtZGViMC00ZGMyLWJjZTItMzFiYjBiNzA1YTZmL3Byb2plY3RzLzJmZTJjZmZkLWU2OTQtNDJiZC05YmM1LWY3ZjgwMmY0MmM1Ny9yZWxlYXNlcy9kYjY2MTNkOC0wN2Y1LTQ1YzktYTU3Yy01MmJhNzkxMWZlNjAvdHJhY2VhYmlsaXR5L2YzZGQyOTYyLTNlNmEtNDY5My1iYjk2LTczYjFkNWM5YmEwMyIsCiAgICAgICJzZWxlY3RlZElkIjogImE5Yjk0MWU0LTQ2ZTEtNDZmMS05OWNlLWUwNWFiN2Q4MWY2ZiIsCiAgICAgICJiZWZvcmUiOiAibWF0cml4KDAuOTgyMjA2LCAwLCAwLCAwLjk4MjIwNiwgMjgsIDE4Ni44NTgpIiwKICAgICAgImFmdGVyIjogIm1hdHJpeCgwLjk4MjIwNiwgMCwgMCwgMC45ODIyMDYsIDE2MCwgMTg2Ljg1OCkiCiAgICB9CiAgXQp9"
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-full-applic-3a562-loration-in-all-three-views-chromium\\video.webm"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "53539af0677357b05a72-ee419b4de6930a8e537a",
+          "file": "fullapp-visual.spec.ts",
+          "line": 6,
+          "column": 1
+        }
+      ],
+      "suites": [
+        {
+          "title": "navigation",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+          "line": 29,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Digital Thread is in RELEASE, not REQUIREMENTS",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1118,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:04:50.255Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-navigation--5e0c4-in-RELEASE-not-REQUIREMENTS-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-904b1c263fa7e0ea478f",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 30,
+              "column": 3
+            },
+            {
+              "title": "the route is unchanged, so existing bookmarks still resolve",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1315,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:04:51.455Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-navigation--0f39f-ing-bookmarks-still-resolve-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-8745d121b8bf1342d27a",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 48,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "the reclaimed header",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+          "line": 62,
+          "column": 6,
+          "specs": [
+            {
+              "title": "the old page chrome is gone and the canvas starts under the breadcrumb",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1694,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:04:52.778Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-the-reclaim-08e40-starts-under-the-breadcrumb-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-9a28436f9953427c7859",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 63,
+              "column": 3
+            },
+            {
+              "title": "the replaced presentation is gone",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1612,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:04:54.480Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-the-reclaim-39c7a-placed-presentation-is-gone-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-bcf25a52e5b9a5a179a4",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 89,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "the toolbar",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+          "line": 105,
+          "column": 6,
+          "specs": [
+            {
+              "title": "carries the view switch, representation toggle and explicit baseline report",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1678,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:04:56.101Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-the-toolbar-0d3f2-nd-explicit-baseline-report-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-cac4280dc954b5d6c97e",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 106,
+              "column": 3
+            },
+            {
+              "title": "the export links keep their existing report behaviour",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1645,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:04:57.787Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-the-toolbar-0022d-r-existing-report-behaviour-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-a088765b4c3b1351f390",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 129,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "the evidence table",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+          "line": 148,
+          "column": 6,
+          "specs": [
+            {
+              "title": "is a real table exposing the relationships the canvas draws",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1934,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:04:59.440Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-the-evidenc-95e1b-ationships-the-canvas-draws-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-26cf20b204ab9fa8997e",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 149,
+              "column": 3
+            },
+            {
+              "title": "switching representation keeps the reader on the same page and address",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1869,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:01.383Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-the-evidenc-032ce-n-the-same-page-and-address-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-ab888b0f6255e9769dc1",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 173,
+              "column": 3
+            },
+            {
+              "title": "every requirement in the baseline is reachable, not just the first page",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2253,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:03.259Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-the-evidenc-e9dfb-ble-not-just-the-first-page-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-84b9acdb66dd956a4777",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 192,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "active-view table representations",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+          "line": 226,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Network Table keeps its selected change, search and typed relationships",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2337,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:05.518Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-active-view-dc4de-rch-and-typed-relationships-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-4c3becf2fe82e4563554",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 227,
+              "column": 3
+            },
+            {
+              "title": "Inside Table keeps the opened change and type filter across the round trip",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4188,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:07.863Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-active-view-788c3-ilter-across-the-round-trip-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-cae1eb59f1980424128f",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 281,
+              "column": 3
+            },
+            {
+              "title": "Artifact Table keeps a non-focal exact record selected and searchable",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3141,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:12.060Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-active-view-039e4-ord-selected-and-searchable-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-1f3dd4ab54a89b9ca7f8",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 337,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "focal deep links",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+          "line": 395,
+          "column": 6,
+          "specs": [
+            {
+              "title": "global navigation lands on the change network with nothing selected",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1542,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:15.208Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-focal-deep--61408-twork-with-nothing-selected-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-9c386992c4eec474d6e5",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 396,
+              "column": 3
+            },
+            {
+              "title": "a requirement focal opens the artifact thread on that exact revision",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2602,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:16.757Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-focal-deep--d42fc-read-on-that-exact-revision-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-2da4f37e539aa072594c",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 410,
+              "column": 3
+            },
+            {
+              "title": "a change request focal lands on the change network, not inside the change",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2353,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:19.367Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-focal-deep--57ba9-twork-not-inside-the-change-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-8844bcbfcbc05ccde16f",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 448,
+              "column": 3
+            },
+            {
+              "title": "an inside-a-change address whose change this build does not carry fails closed",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2559,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:21.726Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-focal-deep--0d6bf-does-not-carry-fails-closed-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-4cd392efafc19d919de0",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 483,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "selection and navigation coherence",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+          "line": 501,
+          "column": 6,
+          "specs": [
+            {
+              "title": "a selected change becomes the exact Inside focal and survives refresh",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3615,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:24.292Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-selection-a-41d2c--focal-and-survives-refresh-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-6c77064802421dcdeebc",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 502,
+              "column": 3
+            },
+            {
+              "title": "a card action opens Inside once for pointer and keyboard activation",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2431,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:27.917Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-selection-a-de8f0-ter-and-keyboard-activation-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-46c5da464f71715e53f5",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 571,
+              "column": 3
+            },
+            {
+              "title": "Inside card links keep native pointer activation within the shared canvas",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 5248,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:30.355Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-selection-a-6b6db-on-within-the-shared-canvas-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-285f4293de411b04fc2a",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 608,
+              "column": 3
+            },
+            {
+              "title": "Artifact card actions survive shared canvas pointer and keyboard handling",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 5711,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:35.610Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-selection-a-3c985-inter-and-keyboard-handling-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-e84bfe96c104f756e939",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 664,
+              "column": 3
+            },
+            {
+              "title": "unsupported Artifact entry is explicit and returning to Network clears its error context",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2368,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:41.328Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-selection-a-95ded-rk-clears-its-error-context-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-fd35d1c5955561c78af4",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 733,
+              "column": 3
+            },
+            {
+              "title": "an exact requirement that is absent from the build fails closed instead of loading forever",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2536,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:43.704Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-selection-a-83530--instead-of-loading-forever-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-59b562d0475158fa901e",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 762,
+              "column": 3
+            },
+            {
+              "title": "a failed requirement resolution clears on retry and then opens the exact revision",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2841,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:46.250Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-selection-a-c0891-en-opens-the-exact-revision-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-7b0f50935b5cace4bc3b",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 787,
+              "column": 3
+            },
+            {
+              "title": "a new Artifact focal cannot render the previous thread while its exact requirement resolves",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2792,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:49.099Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-selection-a-fd23d--exact-requirement-resolves-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-3c7968199a9469292dc1",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 824,
+              "column": 3
+            },
+            {
+              "title": "a failed Artifact read clears after a real retry and successful navigation",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3120,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:51.908Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-selection-a-0d31f-y-and-successful-navigation-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-922b73afeddadf7614f7",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 879,
+              "column": 3
+            },
+            {
+              "title": "a late failed Artifact response cannot poison the Network view",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2389,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:55.034Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-selection-a-5d5de-not-poison-the-Network-view-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-984d865841af0ff47223",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 921,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "inside a change",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+          "line": 967,
+          "column": 6,
+          "specs": [
+            {
+              "title": "a Test Change Request is read from its own authoritative resource",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2621,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:05:57.432Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-inside-a-ch-de09f--own-authoritative-resource-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-7a477aad9e7fbad38fbb",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 968,
+              "column": 3
+            },
+            {
+              "title": "opening a second change never shows the first change's proposed content",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3854,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:06:00.059Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-inside-a-ch-d2984-t-change-s-proposed-content-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-56aadb6781c1c0aad490",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 998,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "landing legibility",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+          "line": 1071,
+          "column": 6,
+          "specs": [
+            {
+              "title": "identifiers, titles and state labels clear the readable floor at 1280px",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1496,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:06:03.920Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-landing-leg-4ecda-he-readable-floor-at-1280px-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-d243ac227ff5646822cb",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 1095,
+              "column": 5
+            },
+            {
+              "title": "a deep-linked artifact thread lands legibly at 1280px",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2499,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:06:05.422Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-landing-leg-92ce6-ead-lands-legibly-at-1280px-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-d0f29078e1cfad7f0b51",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 1119,
+              "column": 5
+            },
+            {
+              "title": "a deep-linked change request lands legibly at 1280px",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2614,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:06:07.928Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-landing-leg-cdacb-est-lands-legibly-at-1280px-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-7822467b3fe81b1e3ee8",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 1146,
+              "column": 5
+            },
+            {
+              "title": "identifiers, titles and state labels clear the readable floor at 1440px",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1515,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:06:10.549Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-landing-leg-3a73f-he-readable-floor-at-1440px-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-8e4bf71957c717b13281",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 1095,
+              "column": 5
+            },
+            {
+              "title": "a deep-linked artifact thread lands legibly at 1440px",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2621,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:06:12.070Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-landing-leg-255ba-ead-lands-legibly-at-1440px-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-e7efe2953cc5b15cead3",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 1119,
+              "column": 5
+            },
+            {
+              "title": "a deep-linked change request lands legibly at 1440px",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2561,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:06:14.698Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-landing-leg-538fe-est-lands-legibly-at-1440px-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-70da4993fe619c5de955",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 1146,
+              "column": 5
+            },
+            {
+              "title": "identifiers, titles and state labels clear the readable floor at 1920px",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1510,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:06:17.266Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-landing-leg-cf40b-he-readable-floor-at-1920px-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-080d90a2d2ae8cb83e50",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 1095,
+              "column": 5
+            },
+            {
+              "title": "a deep-linked artifact thread lands legibly at 1920px",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2549,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:06:18.783Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-landing-leg-7620a-ead-lands-legibly-at-1920px-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-c7c89de13299c67caa09",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 1119,
+              "column": 5
+            },
+            {
+              "title": "a deep-linked change request lands legibly at 1920px",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2549,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:06:21.338Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-landing-leg-ff3a2-est-lands-legibly-at-1920px-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-f5f682dd4b4bc7b25054",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 1146,
+              "column": 5
+            },
+            {
+              "title": "card top rows contain their identifier, badge and state label",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1455,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:06:23.896Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-landing-leg-16dd5-ifier-badge-and-state-label-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-019be1e539411c9dca29",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 1176,
+              "column": 3
+            },
+            {
+              "title": "an explicit Fit really fits the board, and may go below the landing floor",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1579,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:06:25.358Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-landing-leg-fa5c2--go-below-the-landing-floor-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-83f0bbed69ec8d9e111a",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 1208,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "route state is real state",
+          "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+          "line": 1242,
+          "column": 6,
+          "specs": [
+            {
+              "title": "a focal artifact and view survive refresh",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3130,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:06:26.943Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-route-state-526e0-ct-and-view-survive-refresh-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-1c75c9bb96dc79d9b3e8",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 1243,
+              "column": 3
+            },
+            {
+              "title": "back and forward walk the views the reader actually visited",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 180000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2494,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-13T01:06:30.080Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "C:\\Users\\seanm\\AppData\\Local\\Temp\\astra-1022-implementation-20260912\\page-8f77044e-results\\fullapp-visual-route-state-65737-the-reader-actually-visited-chromium\\video.webm"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "53539af0677357b05a72-25ded3cd5f4aa90a05fd",
+              "file": "../../../../../../Sean Project/RMT-1022-astra-implementation/product/client/tests/digital-thread-page.spec.ts",
+              "line": 1268,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-13T01:01:50.776Z",
+    "duration": 319691.674,
+    "expected": 47,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

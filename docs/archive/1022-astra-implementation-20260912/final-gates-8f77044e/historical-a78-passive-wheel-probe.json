@@ -1,0 +1,21 @@
+{
+  "head": "a78e1bf70055813425c2e3413512b7bad886e8f7",
+  "before": {
+    "scroll": 0,
+    "camera": "matrix(1.05, 0, 0, 1.05, 49.9, 125)"
+  },
+  "vertical": {
+    "scroll": 200,
+    "camera": "matrix(1.05, 0, 0, 1.05, 49.9, 125)"
+  },
+  "horizontal": {
+    "scroll": 400,
+    "camera": "matrix(1.05, 0, 0, 1.05, 49.9, 125)"
+  },
+  "messages": [
+    {
+      "type": "error",
+      "text": "Unable to preventDefault inside passive event listener invocation."
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "before": {
+    "scroll": 0,
+    "camera": "matrix(1.05, 0, 0, 1.05, 49.9, 125)"
+  },
+  "touch": {
+    "scroll": 174,
+    "camera": "matrix(1.05, 0, 0, 1.05, 49.9, 125)"
+  },
+  "verticalWheel": {
+    "scroll": 174,
+    "camera": "matrix(0.82584, 0, 0, 0.82584, 52.4832, 197.585)"
+  },
+  "relBefore": {
+    "height": 116,
+    "scrollHeight": 116,
+    "scrollTop": 0,
+    "rect": {
+      "x": 981,
+      "y": 484.5,
+      "width": 266,
+      "height": 116,
+      "top": 484.5,
+      "right": 1247,
+      "bottom": 600.5,
+      "left": 981
+    },
+    "last": {
+      "x": 981,
+      "y": 564.5,
+      "width": 266,
+      "height": 36,
+      "top": 564.5,
+      "right": 1247,
+      "bottom": 600.5,
+      "left": 981
+    },
+    "action": {
+      "x": 981,
+      "y": 613.5,
+      "width": 266,
+      "height": 0,
+      "top": 613.5,
+      "right": 1247,
+      "bottom": 613.5,
+      "left": 981
+    }
+  },
+  "relAfter": {
+    "height": 116,
+    "scrollHeight": 116,
+    "scrollTop": 0,
+    "rect": {
+      "x": 981,
+      "y": 484.5,
+      "width": 266,
+      "height": 116,
+      "top": 484.5,
+      "right": 1247,
+      "bottom": 600.5,
+      "left": 981
+    },
+    "last": {
+      "x": 981,
+      "y": 564.5,
+      "width": 266,
+      "height": 36,
+      "top": 564.5,
+      "right": 1247,
+      "bottom": 600.5,
+      "left": 981
+    },
+    "action": {
+      "x": 981,
+      "y": 613.5,
+      "width": 266,
+      "height": 0,
+      "top": 613.5,
+      "right": 1247,
+      "bottom": 613.5,
+      "left": 981
+    }
+  }
+}
