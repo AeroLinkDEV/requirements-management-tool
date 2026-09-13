@@ -6,7 +6,6 @@
     "digital-thread-reveal.spec.ts"
   ],
   "rendered": [
-    "artifact-thread-rendered.spec.ts",
-    "digital-thread-core-interaction.spec.ts"
+    "artifact-thread-rendered.spec.ts"
   ]
 }
