@@ -257,7 +257,9 @@ public static class WorkspaceEndpoints
         app.MapPost("/api/releases", async (CreateReleaseRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, SoftwareReleaseIdentityAuthority releaseIdentity, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
-            var version = request.Version.Trim();
+            // Nullable JSON values can reach this non-nullable record property at runtime. Validate before
+            // calling Trim so malformed client input is a controlled 400 rather than a null dereference.
+            var version = request.Version?.Trim();
             if (string.IsNullOrWhiteSpace(version)) return Results.BadRequest(new { error = "A release version is required." });
             var current = await db.Releases.AsNoTracking().FirstOrDefaultAsync(x => x.ProjectId == request.ProjectId && !x.IsReleased, ct);
             if (current is not null) return Results.Conflict(new { error = $"Release {current.Version} is still in work. Release or formally close it before planning its successor." });

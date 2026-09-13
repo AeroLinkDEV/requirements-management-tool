@@ -338,6 +338,16 @@ public sealed class ProjectSetupService(
                 && !mode.Value.GetString()!.Equals("ConfigureLater", StringComparison.OrdinalIgnoreCase))
             throw new ProjectSetupInvalidException("Repository setup mode must be ConnectNow or ConfigureLater.");
         var connectNow = mode.Value.GetString()!.Equals("ConnectNow", StringComparison.OrdinalIgnoreCase);
+        var provider = GetPropertyOrNull(repository, "provider");
+        if (provider is { ValueKind: not (JsonValueKind.String or JsonValueKind.Null) })
+            throw new ProjectSetupInvalidException("Repository provider must be a string or null.");
+        var providerText = provider is { ValueKind: JsonValueKind.String }
+            ? provider.Value.GetString()?.Trim()
+            : null;
+        if (providerText is not null && !providerText.Equals("GitLab", StringComparison.OrdinalIgnoreCase))
+            throw new ProjectSetupInvalidException("The supported repository provider is GitLab.");
+        if (connectNow && string.IsNullOrWhiteSpace(providerText))
+            throw new ProjectSetupInvalidException("A connected repository requires the GitLab provider.");
         var endpoint = GetPropertyOrNull(repository, "endpoint");
         if (endpoint is { ValueKind: not (JsonValueKind.String or JsonValueKind.Null) })
             throw new ProjectSetupInvalidException("Repository endpoint must be a string or null.");
