@@ -362,6 +362,7 @@
         "ProjectSetupCodeEvidenceApiTests",
         "ProjectSetupDiscoveryApiTests",
         "ProjectSetupInceptionApiTests",
+        "ProjectSetupKestrelQualificationTests",
         "ProjectSetupPostgresQualificationTests",
         "ProjectSetupServiceQualificationTests",
         "RebaseRequirementChangeTests",

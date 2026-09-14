@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 908,
-    "cases": 1019,
+    "tests": 909,
+    "cases": 1020,
     "classes": 144,
-    "hostedTests": 860,
-    "hostedCases": 949,
+    "hostedTests": 861,
+    "hostedCases": 950,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 14,
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 99,
-      "cases": 105,
+      "tests": 100,
+      "cases": 106,
       "unknownCases": 0,
-      "classes": 59
+      "classes": 60
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -10415,8 +10415,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 17,
-        "end": 65
+        "start": 86,
+        "end": 134
+      }
+    },
+    {
+      "cls": "ProjectSetupKestrelQualificationTests",
+      "test": "Real_kestrel_denies_anonymous_and_outsider_chunked_uploads_without_raising_the_body_limit",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 22,
+        "end": 69
       }
     },
     {

@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 144,
-    "tests": 908,
-    "knownCases": 1019,
+    "tests": 909,
+    "knownCases": 1020,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 54,
-      "tests": 318,
-      "knownCases": 358,
+      "tests": 319,
+      "knownCases": 359,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -881,6 +881,18 @@
       ]
     },
     {
+      "cls": "ProjectSetupKestrelQualificationTests",
+      "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy",
+        "startup-config"
+      ]
+    },
+    {
       "cls": "ReleasedExecutionEvidenceAuthorityMismatchTests",
       "tests": 2,
       "knownCases": 2,
@@ -1055,17 +1067,6 @@
       "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
       "intents": [
         "in-process-logic"
-      ]
-    },
-    {
-      "cls": "ProjectSetupKestrelQualificationTests",
-      "tests": 1,
-      "knownCases": 1,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Owns host-scoped state (startup-config); sharing would leak it between tests.",
-      "intents": [
-        "startup-config"
       ]
     },
     {

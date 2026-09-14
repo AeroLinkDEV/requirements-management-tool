@@ -55,17 +55,22 @@ public static class ProjectSetupSourceEndpoints
         app.MapPost("/api/project-setups/{draftId:guid}/source/upload", async (Guid draftId, HttpRequest request,
             HttpContext http, ProjectSetupInceptionService service, CancellationToken ct) =>
         {
-            // Kestrel's default request limit is commonly below the product's 50 MiB source bound. Set the
-            // endpoint feature before consuming the body, while the service still enforces max+1 for every
-            // hosting surface (including chunked requests and TestServer).
-            var sizeFeature = http.Features.Get<IHttpMaxRequestBodySizeFeature>();
-            if (sizeFeature is { IsReadOnly: false }) sizeFeature.MaxRequestBodySize = MaxUploadBytes;
-            if (request.ContentLength is > MaxUploadBytes)
-                return Results.BadRequest(new { code = "invalid_source", error = "Source files must be between 1 byte and 50 MB." });
-            if (!long.TryParse(request.Query["expectedVersion"], out var expectedVersion))
-                return Results.BadRequest(new { code = "invalid_source", error = "expectedVersion is required." });
-            var fileName = request.Query["fileName"].ToString();
-            try { var result = await service.UploadAsync(draftId, http.UserAccount(), expectedVersion, fileName, request.Body, ct); var package = result.Package; return Results.Ok(new { package.Id, package.Stage, package.Sha256, package.SizeBytes, draftVersion = result.DraftVersion }); }
+            try
+            {
+                var actor = http.UserAccount();
+                await service.AuthorizeUploadAsync(draftId, actor, ct);
+                // Only an authorized draft editor receives the product's larger upload allowance.
+                // UploadAsync rechecks access and bounds the stream on every hosting surface.
+                if (request.ContentLength is > MaxUploadBytes)
+                    return Results.BadRequest(new { code = "invalid_source", error = "Source files must be between 1 byte and 50 MB." });
+                if (!long.TryParse(request.Query["expectedVersion"], out var expectedVersion))
+                    return Results.BadRequest(new { code = "invalid_source", error = "expectedVersion is required." });
+                var sizeFeature = http.Features.Get<IHttpMaxRequestBodySizeFeature>();
+                if (sizeFeature is { IsReadOnly: false }) sizeFeature.MaxRequestBodySize = MaxUploadBytes;
+                var result = await service.UploadAsync(draftId, actor, expectedVersion, request.Query["fileName"].ToString(), request.Body, ct);
+                var package = result.Package;
+                return Results.Ok(new { package.Id, package.Stage, package.Sha256, package.SizeBytes, draftVersion = result.DraftVersion });
+            }
             catch (ProjectSetupAccessException) { return Results.Forbid(); }
             catch (ProjectSetupNotFoundException) { return Results.NotFound(); }
             catch (ProjectSetupConcurrencyException ex) { return Results.Conflict(new { code = "draft_conflict", error = ex.Message }); }

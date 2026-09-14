@@ -284,6 +284,10 @@ public sealed class ProjectSetupInceptionService(
         return new(package, draft.Version);
     }
 
+    /// <summary>Checks draft access without reading an upload, before the host grants its larger body allowance.</summary>
+    public async Task AuthorizeUploadAsync(Guid draftId, AuthenticatedUser actor, CancellationToken ct) =>
+        _ = await LoadDraftAsync(draftId, actor, ct);
+
     public async Task<ProjectSetupSourceMutationResult> UploadAsync(Guid draftId, AuthenticatedUser actor,
         long expectedVersion, string fileName, Stream content, CancellationToken ct)
     {
