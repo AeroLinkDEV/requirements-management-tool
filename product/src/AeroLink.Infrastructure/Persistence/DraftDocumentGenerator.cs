@@ -48,7 +48,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             .SingleOrDefault(artifact => artifact.DocumentType == type)?.Key;
         if (artifactKey is not null)
             return await GenerateProcedureDraftAsync(release, project, program, type, artifactKey.Value,
-                releaseLabel, format, preparedBy, ladderPolicy, ct);
+                format: format, releaseLabel: releaseLabel, preparedBy: preparedBy, ladderPolicy: ladderPolicy, ct: ct);
 
         var level = RequirementLevelFor(type, ladderPolicy);
         if (level is null) return null;

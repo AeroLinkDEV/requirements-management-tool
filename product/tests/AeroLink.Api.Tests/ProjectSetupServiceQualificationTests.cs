@@ -86,6 +86,19 @@ public sealed class ProjectSetupServiceQualificationTests
             }
         }
 
+        using (var procedureDocument = await admin.GetAsync(
+                   $"/api/releases/{releaseId}/draft-document?type=SystemTestProcedures&format=pdf"))
+        {
+            var procedureBytes = await procedureDocument.Content.ReadAsByteArrayAsync();
+            Assert.True(procedureDocument.IsSuccessStatusCode, Encoding.UTF8.GetString(procedureBytes));
+            Assert.Equal("application/pdf", procedureDocument.Content.Headers.ContentType?.MediaType);
+            Assert.Contains("SW-01.30", procedureDocument.Content.Headers.ContentDisposition?.FileName ?? "");
+            var procedurePdf = Encoding.Latin1.GetString(procedureBytes);
+            Assert.StartsWith("%PDF", procedurePdf);
+            Assert.Contains("SW-01.30", procedurePdf);
+            Assert.Contains("System Test Procedure Document", procedurePdf);
+        }
+
         UserAccount Account(string name) => new(name, name, $"{name}@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow);
         var author = Account("fresh.author");
