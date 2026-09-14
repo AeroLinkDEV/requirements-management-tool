@@ -146,6 +146,45 @@ public sealed class ProjectSetupInceptionApiTests
         using var captureBody = JsonDocument.Parse(await capture.Content.ReadAsStringAsync());
         var capturedVersion = captureBody.RootElement.GetProperty("draftVersion").GetInt64();
 
+        // Switching away and returning must retain the exact captured package, even if the source baseline
+        // has since advanced from Frozen to Released. It must not create a second package for one selection.
+        using var initialSourceResponse = await memberClient.GetAsync($"/api/project-setups/{draftId}/source");
+        var initialSource = await initialSourceResponse.Content.ReadFromJsonAsync<JsonElement>();
+        using var initialConfiguration = await memberClient.PutAsJsonAsync($"/api/project-setups/{draftId}/source/configuration", new
+        {
+            expectedVersion = capturedVersion, selectedCategories = new[] { "Requirements" },
+            mapping = BuildNativeMapping(initialSource), metadata = new { },
+        });
+        Assert.Equal(HttpStatusCode.OK, initialConfiguration.StatusCode);
+        var configuredBeforeBacktracking = (await initialConfiguration.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("draftVersion").GetInt64();
+        using var freshSelection = await memberClient.PutAsJsonAsync($"/api/project-setups/{draftId}", new
+        {
+            expectedVersion = configuredBeforeBacktracking, currentStep = "StartingPoint", start = new { kind = "Fresh" },
+            selectedCategories = Array.Empty<string>(), mapping = new { },
+        });
+        Assert.Equal(HttpStatusCode.OK, freshSelection.StatusCode);
+        var freshVersion = (await freshSelection.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        using (var sourceAdvance = factory.Services.CreateScope())
+        {
+            var sourceDb = sourceAdvance.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            (await sourceDb.CandidateBaselines.SingleAsync(x => x.Id == sourceBaselineId))
+                .MarkReleased("source.manager", DateTimeOffset.UtcNow);
+            await sourceDb.SaveChangesAsync();
+        }
+        using var reselected = await memberClient.PostAsJsonAsync($"/api/project-setups/{draftId}/source/native", new
+        { expectedVersion = freshVersion, baselineId = sourceBaselineId });
+        Assert.Equal(HttpStatusCode.OK, reselected.StatusCode);
+        var reselectedBody = await reselected.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(captureBody.RootElement.GetProperty("id").GetGuid(), reselectedBody.GetProperty("id").GetGuid());
+        Assert.Equal(captureBody.RootElement.GetProperty("sha256").GetString(), reselectedBody.GetProperty("sha256").GetString());
+        capturedVersion = reselectedBody.GetProperty("draftVersion").GetInt64();
+        using var restoredSourceResponse = await memberClient.GetAsync($"/api/project-setups/{draftId}/source");
+        Assert.Equal(HttpStatusCode.OK, restoredSourceResponse.StatusCode);
+        var restoredSource = await restoredSourceResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Reconciled", restoredSource.GetProperty("stage").GetString());
+        Assert.Equal("Requirements", Assert.Single(restoredSource.GetProperty("selectedCategories").EnumerateArray()).GetString());
+
         // This token was issued while the member still held the source-program role. The persisted role is
         // ended after capture, so every source boundary must reject the stale in-memory Programs snapshot.
         using (var revoke = factory.Services.CreateScope())
@@ -212,6 +251,7 @@ public sealed class ProjectSetupInceptionApiTests
             && x.Target == draftId.ToString("D"));
         Assert.Equal("admin", completionAudit.ActorId);
         Assert.Contains("AeroLinkBaseline", completionAudit.Detail, StringComparison.Ordinal);
+        Assert.Contains(sourceBaselineId.ToString("D"), completionAudit.Detail, StringComparison.Ordinal);
         Assert.DoesNotContain("no engineering content was inherited", completionAudit.Detail, StringComparison.Ordinal);
     }
 
@@ -535,6 +575,24 @@ public sealed class ProjectSetupInceptionApiTests
         Assert.Equal("Reconciled", configuredBody.RootElement.GetProperty("stage").GetString());
         var configuredVersion = configuredBody.RootElement.GetProperty("draftVersion").GetInt64();
         Assert.NotEqual(JsonValueKind.Null, configuredBody.RootElement.GetProperty("manifestHash").ValueKind);
+
+        // Backtracking without resending source fields clears inherited answers, while returning to the
+        // exact upload restores the server-owned configuration for every supported external format.
+        using var switchedFresh = await client.PutAsJsonAsync($"/api/project-setups/{draftId}", new
+        { expectedVersion = configuredVersion, currentStep = "StartingPoint", start = new { kind = "Fresh" } });
+        Assert.Equal(HttpStatusCode.OK, switchedFresh.StatusCode);
+        var switchedDraft = await switchedFresh.Content.ReadFromJsonAsync<JsonElement>();
+        var switchedVersion = switchedDraft.GetProperty("version").GetInt64();
+        using var reupload = new HttpRequestMessage(HttpMethod.Post,
+            $"/api/project-setups/{draftId}/source/upload?expectedVersion={switchedVersion}&fileName={fileName}")
+        { Content = new ByteArrayContent(sourceBytes) };
+        reupload.Content.Headers.ContentType = new("application/octet-stream");
+        using var reuploaded = await client.SendAsync(reupload);
+        Assert.Equal(HttpStatusCode.OK, reuploaded.StatusCode);
+        var restored = await reuploaded.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(uploadedBody.RootElement.GetProperty("id").GetGuid(), restored.GetProperty("id").GetGuid());
+        Assert.Equal("Reconciled", restored.GetProperty("stage").GetString());
+        configuredVersion = restored.GetProperty("draftVersion").GetInt64();
 
         using var readyResponse = await client.GetAsync($"/api/project-setups/{draftId}/source");
         Assert.Equal(HttpStatusCode.OK, readyResponse.StatusCode);

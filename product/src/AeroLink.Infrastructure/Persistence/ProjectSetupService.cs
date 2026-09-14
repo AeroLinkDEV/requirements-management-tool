@@ -117,6 +117,8 @@ public sealed class ProjectSetupService(
 
             var effectiveCommand = command with
             {
+                SelectedCategoriesJson = command.StartKind == ProjectSetupStartKind.Fresh ? "[]" : command.SelectedCategoriesJson,
+                MappingJson = command.StartKind == ProjectSetupStartKind.Fresh ? "{}" : command.MappingJson,
                 ReviewRulesJson = command.ReviewRulesJson is not null || command.ReviewRulesAccepted == true
                     ? reviewRulesJson : null,
             };
@@ -238,7 +240,9 @@ public sealed class ProjectSetupService(
                 draft.Id.ToString("D"), "Success",
                 draft.StartKind == ProjectSetupStartKind.Fresh
                     ? $"Created Project {project.Id:D} from a fresh setup draft; no engineering content was inherited."
-                    : $"Created Project {project.Id:D} from {draft.StartKind} setup with exact source package {draft.SourceImportId:D}; source acceptance is not a new engineering approval.",
+                    : draft.StartKind == ProjectSetupStartKind.AeroLinkBaseline
+                        ? $"Created Project {project.Id:D} from {draft.StartKind} setup with exact source baseline {draft.SourceBaselineId:D}; source acceptance is not a new engineering approval."
+                        : $"Created Project {project.Id:D} from {draft.StartKind} setup with exact source package {draft.SourceImportId:D}; source acceptance is not a new engineering approval.",
                 "local", DateTimeOffset.UtcNow));
             var priorSealActor = db.LadderSealActor;
             db.LadderSealActor = actor.UserName;
@@ -306,6 +310,14 @@ public sealed class ProjectSetupService(
     private static void ValidateSourceBoundUpdate(ProjectSetupDraft draft, ProjectSetupUpdateCommand command,
         ProjectSetupSourcePackage? selectedSourcePackage)
     {
+        // Fresh clears source-dependent answers while the durable package remains available for re-selection.
+        if (command.StartKind == ProjectSetupStartKind.Fresh)
+        {
+            if (command.SelectedCategoriesJson is not null && !JsonEquivalent(command.SelectedCategoriesJson, "[]")
+                || command.MappingJson is not null && !JsonEquivalent(command.MappingJson, "{}"))
+                throw new ProjectSetupInvalidException("Fresh starts cannot inherit categories or source mappings.");
+            return;
+        }
         if (selectedSourcePackage is not null && command.StartKind is { } requestedKind
             && requestedKind != ProjectSetupStartKind.Fresh)
         {

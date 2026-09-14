@@ -62,6 +62,18 @@ public sealed class ProjectSetupInceptionService(
             return new(existingPackage, draft.Version);
         EnsureVersion(draft, expectedVersion);
 
+        // Returning to a prior selection restores its exact captured facts and source-specific answers.
+        // The live eligibility/access checks above still apply; a later lifecycle transition is not a new snapshot.
+        if (existingPackage is not null)
+        {
+            draft.UpdateAnswers(expectedVersion, ProjectSetupStep.StartingPoint, null, null,
+                ProjectSetupStartKind.AeroLinkBaseline, baselineId, null, null,
+                existingPackage.SelectedCategoriesJson, null, null, null, null, existingPackage.MappingJson,
+                DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync(ct);
+            return new(existingPackage, draft.Version);
+        }
+
         var rows = await (from membership in db.BaselineRequirements.AsNoTracking()
                            join revision in db.RequirementRevisions.AsNoTracking() on membership.RevisionId equals revision.Id
                            join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
@@ -281,7 +293,8 @@ public sealed class ProjectSetupInceptionService(
             db.ProjectSetupSourcePackages.Add(package);
         }
         draft.UpdateAnswers(expectedVersion, ProjectSetupStep.StartingPoint, null, null,
-            ProjectSetupStartKind.AeroLinkBaseline, baseline.Id, null, null, null, null, null, null, null, null,
+            ProjectSetupStartKind.AeroLinkBaseline, baseline.Id, null, null, package.SelectedCategoriesJson,
+            null, null, null, null, package.MappingJson,
             DateTimeOffset.UtcNow);
         await db.SaveChangesAsync(ct);
         return new(package, draft.Version);
@@ -317,7 +330,8 @@ public sealed class ProjectSetupInceptionService(
             db.ProjectSetupSourcePackages.Add(package);
         }
         draft.UpdateAnswers(expectedVersion, ProjectSetupStep.StartingPoint, null, null,
-            ProjectSetupStartKind.ExternalBaseline, null, package.Id, null, null, null, null, null, null, null,
+            ProjectSetupStartKind.ExternalBaseline, null, package.Id, null, package.SelectedCategoriesJson,
+            null, null, null, null, package.MappingJson,
             DateTimeOffset.UtcNow);
         await db.SaveChangesAsync(ct);
         return new(package, draft.Version);
