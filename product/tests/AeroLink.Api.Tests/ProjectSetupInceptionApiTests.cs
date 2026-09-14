@@ -808,6 +808,10 @@ public sealed class ProjectSetupInceptionApiTests
         Assert.Equal(HttpStatusCode.OK, memberLogin.StatusCode);
         using var memberProvenance = await memberClient.GetAsync($"/api/projects/{projectId}/inception-source");
         Assert.Equal(HttpStatusCode.OK, memberProvenance.StatusCode);
+        var requirementsUrl = $"/api/requirements?projectId={projectId}&baselineId={baselineId}&page=1&pageSize=50";
+        using var memberRequirements = await memberClient.GetAsync(requirementsUrl);
+        Assert.Equal(HttpStatusCode.OK, memberRequirements.StatusCode);
+        Assert.Contains("Imported exact wording", await memberRequirements.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         using (var revokeScope = factory.Services.CreateScope())
         {
             var revokeDb = revokeScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -818,6 +822,8 @@ public sealed class ProjectSetupInceptionApiTests
         }
         using var endedProvenance = await memberClient.GetAsync($"/api/projects/{projectId}/inception-source");
         Assert.Equal(HttpStatusCode.Forbidden, endedProvenance.StatusCode);
+        using var endedRequirements = await memberClient.GetAsync(requirementsUrl);
+        Assert.Equal(HttpStatusCode.Forbidden, endedRequirements.StatusCode);
 
         using var outsiderClient = factory.CreateClient();
         using var outsiderLogin = await outsiderClient.PostAsJsonAsync("/api/auth/login", new
@@ -825,6 +831,11 @@ public sealed class ProjectSetupInceptionApiTests
         Assert.Equal(HttpStatusCode.OK, outsiderLogin.StatusCode);
         using var outsiderProvenance = await outsiderClient.GetAsync($"/api/projects/{projectId}/inception-source");
         Assert.Equal(HttpStatusCode.Forbidden, outsiderProvenance.StatusCode);
+        // Project access is required even when the caller omits the browser's optional build header.
+        Assert.False(outsiderClient.DefaultRequestHeaders.Contains("X-AeroLink-Build-Context"));
+        using var outsiderRequirements = await outsiderClient.GetAsync(requirementsUrl);
+        Assert.Equal(HttpStatusCode.Forbidden, outsiderRequirements.StatusCode);
+        Assert.DoesNotContain("Imported exact wording", await outsiderRequirements.Content.ReadAsStringAsync(), StringComparison.Ordinal);
 
         // A newer signature with a different assertion hash is not the source acceptance represented by this
         // package. The route must continue to return the exact hash-bound acceptance fact.
