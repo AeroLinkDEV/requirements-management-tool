@@ -371,7 +371,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             candidates.Add((entry.Entity.ProjectId,
                 entry.Entity.ArtifactKind == VerificationArtifactKind.Case ? "test-case" : "test-procedure",
                 entry.Entity.BaseNumber,
-                entry.Entity.OwnerId));
+                // Inherited inception verification starts unassigned by policy. The finalization boundary
+                // supplies the accepting actor as the attributable seal actor; ordinary authoring still carries
+                // its explicit owner identity here.
+                string.IsNullOrWhiteSpace(entry.Entity.OwnerId) ? LadderSealActor ?? "system.persistence" : entry.Entity.OwnerId));
         foreach (var entry in ChangeTracker.Entries<TestChangeReview>().Where(x => x.State == EntityState.Added))
             candidates.Add((entry.Entity.ProjectId, "test-change-review",
                 string.IsNullOrWhiteSpace(entry.Entity.DisplayNumber) ? entry.Entity.Id.ToString("D") : entry.Entity.DisplayNumber,

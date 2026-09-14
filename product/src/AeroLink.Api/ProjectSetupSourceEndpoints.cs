@@ -8,6 +8,8 @@ namespace AeroLink.Api;
 /// <summary>Source selection, upload, mapping, and reconciliation routes for a recoverable setup draft.</summary>
 public static class ProjectSetupSourceEndpoints
 {
+    private const long MaxUploadBytes = 50L * 1024 * 1024;
+
     public static void MapProjectSetupSourceEndpoints(this WebApplication app)
     {
         app.MapGet("/api/project-setups/{draftId:guid}/source", async (Guid draftId, HttpContext http,
@@ -15,6 +17,8 @@ public static class ProjectSetupSourceEndpoints
         {
             try { var view = await service.ReadSourceAsync(draftId, http.UserAccount(), ct); return view is null ? Results.NotFound() : Results.Ok(view); }
             catch (ProjectSetupAccessException) { return Results.Forbid(); }
+            catch (ProjectSetupNotFoundException) { return Results.NotFound(); }
+            catch (ProjectSetupInvalidException ex) { return Results.Conflict(new { code = "source_unavailable", error = ex.Message }); }
         });
 
         app.MapGet("/api/project-setups/source-options", async (HttpContext http, int? offset, int? limit,
@@ -39,6 +43,8 @@ public static class ProjectSetupSourceEndpoints
         app.MapPost("/api/project-setups/{draftId:guid}/source/upload", async (Guid draftId, HttpRequest request,
             HttpContext http, ProjectSetupInceptionService service, CancellationToken ct) =>
         {
+            if (request.ContentLength is > MaxUploadBytes)
+                return Results.BadRequest(new { code = "invalid_source", error = "Source files must be between 1 byte and 50 MB." });
             if (!long.TryParse(request.Query["expectedVersion"], out var expectedVersion))
                 return Results.BadRequest(new { code = "invalid_source", error = "expectedVersion is required." });
             var fileName = request.Query["fileName"].ToString();

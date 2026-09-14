@@ -1,6 +1,7 @@
 using System.Data;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Nodes;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
@@ -95,6 +96,8 @@ public sealed class ProjectSetupService(
         ValidateUpdatePayload(command);
         try
         {
+            var selectedSourcePackage = await SelectedSourcePackageAsync(draft, ct);
+            ValidateSourceBoundUpdate(draft, command, selectedSourcePackage);
             // Resolve the maintained standard before the acceptance hash is calculated. Once accepted, the
             // draft retains the concrete typed definition rather than regenerating rules during finalization.
             var reviewRulesJson = command.ReviewRulesJson ?? draft.ReviewRulesJson;
@@ -117,6 +120,14 @@ public sealed class ProjectSetupService(
                 ReviewRulesJson = command.ReviewRulesJson is not null || command.ReviewRulesAccepted == true
                     ? reviewRulesJson : null,
             };
+            if (selectedSourcePackage is not null && effectiveCommand.LadderJson is not null)
+            {
+                // A source manifest is valid only against the ladder it was reconciled with. Preserve the
+                // staged answers while invalidating its accepted reconciliation; the source endpoint must run
+                // the server-side reconciler again before materialization.
+                selectedSourcePackage.RecordConfiguration(selectedSourcePackage.SelectedCategoriesJson,
+                    selectedSourcePackage.MappingJson, DateTimeOffset.UtcNow);
+            }
             draft.UpdateAnswers(effectiveCommand.ExpectedVersion, effectiveCommand.CurrentStep, effectiveCommand.ProjectName,
                 effectiveCommand.SoftwareProduct, effectiveCommand.StartKind, effectiveCommand.SourceBaselineId, effectiveCommand.SourceImportId,
                 effectiveCommand.InitialReleaseVersion, effectiveCommand.SelectedCategoriesJson, effectiveCommand.LadderJson,
@@ -276,6 +287,56 @@ public sealed class ProjectSetupService(
             throw new ProjectSetupInvalidException("Review and approval rules must retain the concrete definition that was accepted.");
         ValidateRepository(draft.RepositoryJson);
         ValidateReviewRules(draft.ReviewRulesJson);
+    }
+
+    private async Task<ProjectSetupSourcePackage?> SelectedSourcePackageAsync(ProjectSetupDraft draft,
+        CancellationToken ct)
+    {
+        if (draft.SourceImportId is Guid importId)
+            return await db.ProjectSetupSourcePackages.SingleOrDefaultAsync(
+                x => x.DraftId == draft.Id && x.Id == importId, ct);
+        if (draft.SourceBaselineId is Guid baselineId)
+            return await db.ProjectSetupSourcePackages.SingleOrDefaultAsync(
+                x => x.DraftId == draft.Id && x.SourceBaselineId == baselineId, ct);
+        return null;
+    }
+
+    private static void ValidateSourceBoundUpdate(ProjectSetupDraft draft, ProjectSetupUpdateCommand command,
+        ProjectSetupSourcePackage? selectedSourcePackage)
+    {
+        if (selectedSourcePackage is not null && command.StartKind is { } requestedKind
+            && requestedKind != ProjectSetupStartKind.Fresh)
+        {
+            var matches = requestedKind == ProjectSetupStartKind.ExternalBaseline
+                && selectedSourcePackage.Kind == ProjectSetupSourceKind.ExternalBaseline
+                && command.SourceImportId == selectedSourcePackage.Id && command.SourceBaselineId is null
+                || requestedKind == ProjectSetupStartKind.AeroLinkBaseline
+                && selectedSourcePackage.Kind == ProjectSetupSourceKind.AeroLinkBaseline
+                && command.SourceBaselineId == selectedSourcePackage.SourceBaselineId && command.SourceImportId is null;
+            if (!matches)
+                throw new ProjectSetupInvalidException("The setup source is owned by its staged package; choose it through the source controls.");
+        }
+        else if (command.StartKind is { } requestedKindWithoutPackage && requestedKindWithoutPackage != ProjectSetupStartKind.Fresh)
+        {
+            throw new ProjectSetupInvalidException("A baseline source must be captured or uploaded before it can be selected.");
+        }
+
+        if (command.StartKind is null && (command.SourceBaselineId is not null || command.SourceImportId is not null))
+            throw new ProjectSetupInvalidException("Source identities require a supported staged source.");
+
+        if (selectedSourcePackage is null) return;
+        if (command.SelectedCategoriesJson is not null
+            && !JsonEquivalent(command.SelectedCategoriesJson, selectedSourcePackage.SelectedCategoriesJson))
+            throw new ProjectSetupInvalidException("Source categories are owned by the staged source configuration.");
+        if (command.MappingJson is not null
+            && !JsonEquivalent(command.MappingJson, selectedSourcePackage.MappingJson))
+            throw new ProjectSetupInvalidException("Source mappings are owned by the staged source configuration.");
+    }
+
+    private static bool JsonEquivalent(string left, string right)
+    {
+        try { return JsonNode.DeepEquals(JsonNode.Parse(left), JsonNode.Parse(right)); }
+        catch (JsonException) { return false; }
     }
 
     private static void ValidateFreshAnswers(ProjectSetupDraft draft)

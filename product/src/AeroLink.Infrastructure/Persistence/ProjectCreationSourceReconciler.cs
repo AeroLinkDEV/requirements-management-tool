@@ -34,7 +34,8 @@ public sealed record InceptionReconciliation(bool Ready, int ObservedObjects, in
     IReadOnlyList<ReconciledInceptionSourceFact>? SourceFacts = null);
 public sealed record ReconciledInceptionVerification(string SourceKey, string SourceModule,
     string SourceIdentifier, RequirementLevel Level, string Kind, string Title, string Objective, string Preconditions,
-    string Steps, string ExpectedResult, string SourceRevision, string SourceState);
+    string Steps, string ExpectedResult, string SourceRevision, string SourceState,
+    string SourceOwnerId = "", string SourceAuthorId = "");
 public sealed record ReconciledInceptionRelationship(string SourceKey, string SourceEndpointKey,
     string TargetEndpointKey, string RelationshipKind);
 public sealed record ReconciledInceptionSourceFact(string SourceKey, string SourceModule,

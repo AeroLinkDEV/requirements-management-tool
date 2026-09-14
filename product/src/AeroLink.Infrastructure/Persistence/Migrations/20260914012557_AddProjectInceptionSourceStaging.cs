@@ -25,8 +25,22 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                 name: "InceptionBaselineId",
                 table: "project_setup_drafts",
                 type: "uuid",
+                nullable: true);
+
+            // Existing drafts predate the stable inception-baseline reservation. Their draft identity is already
+            // unique and durable, so it is a safe deterministic backfill that does not rewrite any visible or
+            // controlled identifier. This runs before the non-null/unique constraint below on both supported
+            // PostgreSQL and SQLite providers.
+            migrationBuilder.Sql("UPDATE \"project_setup_drafts\" SET \"InceptionBaselineId\" = \"Id\" WHERE \"InceptionBaselineId\" IS NULL;");
+
+            migrationBuilder.AlterColumn<Guid>(
+                name: "InceptionBaselineId",
+                table: "project_setup_drafts",
+                type: "uuid",
                 nullable: false,
-                defaultValue: new Guid("00000000-0000-0000-0000-000000000000"));
+                oldClrType: typeof(Guid),
+                oldType: "uuid",
+                oldNullable: true);
 
             migrationBuilder.AlterColumn<string>(
                 name: "SourceSystemVersion",

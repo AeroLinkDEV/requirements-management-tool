@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Buffers;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
@@ -104,6 +105,8 @@ public sealed class ProjectSetupInceptionService(
                     ["RevisionId"] = x.revision.Id.ToString("D"),
                     ["State"] = x.revision.State.ToString(),
                     ["ArtifactKind"] = x.procedure.ArtifactKind.ToString(),
+                    ["SourceOwnerId"] = x.procedure.OwnerId,
+                    ["SourceAuthorId"] = x.revision.AuthorId,
                 })).ToArray();
         var objects = requirementObjects.Concat(verificationObjects).ToArray();
         var revisionIds = rows.Select(x => x.revision.Id).ToHashSet();
@@ -185,9 +188,13 @@ public sealed class ProjectSetupInceptionService(
                 "EvidenceExecution", new Dictionary<string, string>()));
         var traceArray = traces.ToArray();
         objects = objects.Concat(sourceFactObjects).ToArray();
-        var baselineEvents = await db.BaselineEvents.AsNoTracking()
-            .Where(x => x.BaselineId == baseline.Id).OrderBy(x => x.OccurredAt)
-            .Select(x => new { x.Id, x.EventType, x.ActorId, x.Detail, x.OccurredAt }).ToListAsync(ct);
+        // SQLite stores DateTimeOffset as text and cannot translate ordering it. This is a small, exact
+        // baseline event projection, so apply the deterministic historical ordering after authorization-filtered
+        // materialization; PostgreSQL follows the same result order.
+        var baselineEvents = (await db.BaselineEvents.AsNoTracking()
+            .Where(x => x.BaselineId == baseline.Id)
+            .Select(x => new { x.Id, x.EventType, x.ActorId, x.Detail, x.OccurredAt }).ToListAsync(ct))
+            .OrderBy(x => x.OccurredAt).ThenBy(x => x.Id).ToList();
         var selectedChangeRequests = await (from selection in db.BaselineSelections.AsNoTracking()
                                              join request in db.SystemChangeRequests.AsNoTracking()
                                                  on selection.ChangeRequestId equals request.Id
@@ -282,11 +289,7 @@ public sealed class ProjectSetupInceptionService(
     {
         var draft = (await LoadDraftAsync(draftId, actor, ct))!;
         if (string.IsNullOrWhiteSpace(fileName)) throw new ProjectSetupInvalidException("A source file name is required.");
-        await using var buffer = new MemoryStream();
-        await content.CopyToAsync(buffer, ct);
-        if (buffer.Length is <= 0 or > MaxUploadBytes)
-            throw new ProjectSetupInvalidException("Source files must be between 1 byte and 50 MB.");
-        var bytes = buffer.ToArray();
+        var bytes = await ReadUploadBoundedAsync(content, ct);
         ProjectCreationSourceAnalysis analysis;
         try { analysis = ProjectCreationSourceParser.Analyse(new MemoryStream(bytes, writable: false), fileName); }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
@@ -319,6 +322,7 @@ public sealed class ProjectSetupInceptionService(
         var draft = (await LoadDraftAsync(draftId, actor, ct))!;
         EnsureVersion(draft, command.ExpectedVersion);
         var package = await LoadPackageAsync(draft, ct);
+        await ValidateNativePackageAsync(package, actor, ct);
         if (!string.IsNullOrWhiteSpace(command.MetadataJson)
             && command.MetadataJson.Trim() is not "{}" and not "null")
             throw new ProjectSetupInvalidException("Source metadata is parser-derived and cannot be edited during reconciliation.");
@@ -348,6 +352,7 @@ public sealed class ProjectSetupInceptionService(
         var draft = (await LoadDraftAsync(draftId, actor, ct))!;
         EnsureVersion(draft, expectedVersion);
         var package = await LoadPackageAsync(draft, ct);
+        await ValidateNativePackageAsync(package, actor, ct);
         var analysis = ReadAnalysis(package);
         var mapping = ReadMapping(package.MappingJson, analysis);
         ValidateCategorySelections(analysis, mapping, ParseCategories(package.SelectedCategoriesJson));
@@ -368,7 +373,9 @@ public sealed class ProjectSetupInceptionService(
         var draft = await LoadDraftAsync(draftId, actor, ct, allowMissing: true);
         if (draft is null) return null;
         var package = await SelectedPackageAsync(draft, ct, asNoTracking: true);
-        return package is null ? null : ToView(package, ReadAnalysis(package), draft);
+        if (package is null) return null;
+        await ValidateNativePackageAsync(package, actor, ct);
+        return ToView(package, ReadAnalysis(package), draft);
     }
 
     public async Task<IReadOnlyList<ProjectSetupSourceOption>> ListNativeOptionsAsync(AuthenticatedUser actor,
@@ -426,6 +433,7 @@ public sealed class ProjectSetupInceptionService(
     {
         if (draft.StartKind == ProjectSetupStartKind.Fresh) return;
         var package = await LoadPackageAsync(draft, ct);
+        await ValidateNativePackageAsync(package, actor, ct);
         if (package.Stage != ProjectSetupSourceStage.Reconciled || package.ManifestHash is null)
             throw new ProjectSetupInvalidException("The selected source must be fully reconciled before finalization.");
         var analysis = ReadAnalysis(package);
@@ -516,12 +524,23 @@ public sealed class ProjectSetupInceptionService(
                 _ => throw new ProjectSetupInvalidException($"Source verification level {item.Level} is not supported by the target ladder."),
             };
             var number = await IdentifierAllocator.NextTestProcedureAsync(db, procedureLevel, artifactKind, ct, ladder);
-            var procedure = new TestProcedure(project.Id, number, item.Title, actor.UserName, now, procedureLevel,
+            var ownerId = package.Kind == ProjectSetupSourceKind.AeroLinkBaseline
+                ? item.SourceOwnerId
+                : null;
+            if (package.Kind == ProjectSetupSourceKind.AeroLinkBaseline
+                && (string.IsNullOrWhiteSpace(ownerId) || string.IsNullOrWhiteSpace(item.SourceAuthorId)))
+                throw new ProjectSetupInvalidException("The native verification source is missing its exact owner or author identity.");
+            // The source identities are provenance facts, retained in the source snapshot and reconciliation.
+            // They are not target-project staffing assignments: the new project starts with no inherited roster,
+            // so its copied verification artifact is deliberately unassigned until project personnel configure it.
+            var targetOwnerId = "";
+            var targetAuthorId = "";
+            var procedure = new TestProcedure(project.Id, number, item.Title, targetOwnerId, now, procedureLevel,
                 ladder, artifactKind, artifactKind == VerificationArtifactKind.Procedure && procedureLevel != TestProcedureLevel.System
                     ? VerificationProcedureParentKind.Allocated : VerificationProcedureParentKind.Unspecified);
             db.TestProcedures.Add(procedure);
             var revision = new TestProcedureRevision(procedure.Id, 0, item.Objective, item.Preconditions,
-                item.Steps, item.ExpectedResult, TestProcedureState.Draft, actor.UserName, now,
+                item.Steps, item.ExpectedResult, TestProcedureState.Draft, targetAuthorId, now,
                 effectiveBaselineId: targetBaseline.Id,
                 parentKind: artifactKind == VerificationArtifactKind.Procedure && procedureLevel != TestProcedureLevel.System
                     ? VerificationProcedureParentKind.Allocated : VerificationProcedureParentKind.Unspecified);
@@ -639,6 +658,52 @@ public sealed class ProjectSetupInceptionService(
         await SelectedPackageAsync(draft, ct)
         ?? throw new ProjectSetupInvalidException("Choose and stage a source before configuring inception.");
 
+    /// <summary>
+    /// Revalidates the source authority at every source boundary. A source can be selected while its baseline is
+    /// available, then reopened or its source-project access can be revoked before a resumed draft is read or
+    /// finalized. The staged snapshot remains durable, but it must never turn stale authority into usable content.
+    /// </summary>
+    private async Task ValidateNativePackageAsync(ProjectSetupSourcePackage package, AuthenticatedUser actor,
+        CancellationToken ct)
+    {
+        if (package.Kind != ProjectSetupSourceKind.AeroLinkBaseline) return;
+        if (package.SourceBaselineId is not Guid sourceBaselineId || package.SourceProjectId is not Guid sourceProjectId)
+            throw new ProjectSetupInvalidException("The native source snapshot is missing its exact source identities.");
+        var baseline = await db.CandidateBaselines.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == sourceBaselineId, ct)
+            ?? throw new ProjectSetupInvalidException("The selected AeroLink baseline is no longer available.");
+        if (baseline.ProjectId != sourceProjectId
+            || baseline.State is not (CandidateBaselineState.Frozen or CandidateBaselineState.Released)
+            || baseline.RequirementsMaterializedAt is null)
+            throw new ProjectSetupInvalidException("The selected AeroLink baseline is no longer a materialized Frozen or Released source.");
+        var sourceProject = await db.Projects.AsNoTracking().SingleOrDefaultAsync(x => x.Id == sourceProjectId, ct)
+            ?? throw new ProjectSetupInvalidException("The selected native source project is no longer available.");
+        if (!actor.IsAdministrator && !actor.Programs.Any(x => x.ProgramId == sourceProject.ProgramId))
+            throw new ProjectSetupAccessException();
+    }
+
+    private static async Task<byte[]> ReadUploadBoundedAsync(Stream content, CancellationToken ct)
+    {
+        await using var buffer = new MemoryStream();
+        var rented = ArrayPool<byte>.Shared.Rent(80 * 1024);
+        try
+        {
+            long total = 0;
+            while (true)
+            {
+                var read = await content.ReadAsync(rented.AsMemory(0, rented.Length), ct);
+                if (read == 0) break;
+                total += read;
+                if (total > MaxUploadBytes)
+                    throw new ProjectSetupInvalidException("Source files must be between 1 byte and 50 MB.");
+                await buffer.WriteAsync(rented.AsMemory(0, read), ct);
+            }
+            if (total == 0) throw new ProjectSetupInvalidException("Source files must be between 1 byte and 50 MB.");
+            return buffer.ToArray();
+        }
+        finally { ArrayPool<byte>.Shared.Return(rented); }
+    }
+
     private Task<ProjectSetupSourcePackage?> SelectedPackageAsync(ProjectSetupDraft draft, CancellationToken ct,
         bool asNoTracking = false)
     {
@@ -714,6 +779,12 @@ public sealed class ProjectSetupInceptionService(
             foreach (var attribute in item.Attributes)
             {
                 if (!attributes.TryGetValue(attribute.Key, out var rule)) { errors.Add($"Verification object '{item.Key}' attribute '{attribute.Key}' is unmapped."); continue; }
+                if (attribute.Key is "SourceOwnerId" or "SourceAuthorId"
+                    && rule.Destination is not (InceptionAttributeDestination.SourceOnly or InceptionAttributeDestination.Exclude))
+                {
+                    errors.Add($"Verification object '{item.Key}' source identity '{attribute.Key}' must remain source-only.");
+                    continue;
+                }
                 if (rule.Destination is InceptionAttributeDestination.SourceOnly or InceptionAttributeDestination.Exclude)
                 {
                     if (string.IsNullOrWhiteSpace(rule.Reason)) errors.Add($"Verification object '{item.Key}' source-only/excluded attribute '{attribute.Key}' needs a reason.");
@@ -730,9 +801,14 @@ public sealed class ProjectSetupInceptionService(
             if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(objective)
                 || string.IsNullOrWhiteSpace(steps) || string.IsNullOrWhiteSpace(expected))
                 errors.Add($"Verification object '{item.Key}' needs mapped title, objective, steps, and expected result.");
+            var sourceOwnerId = item.Attributes.GetValueOrDefault("SourceOwnerId", "");
+            var sourceAuthorId = item.Attributes.GetValueOrDefault("SourceAuthorId", "");
+            if (string.IsNullOrWhiteSpace(sourceOwnerId) || string.IsNullOrWhiteSpace(sourceAuthorId))
+                errors.Add($"Verification object '{item.Key}' needs exact source owner and author identities.");
             verificationRows.Add(new(item.Key, item.Module, sourceIdentifier, level, item.Kind, title, objective,
                 fields.GetValueOrDefault(InceptionAttributeDestination.Preconditions, ""), steps, expected,
-                item.Attributes.GetValueOrDefault("Revision", ""), item.Attributes.GetValueOrDefault("State", "")));
+                item.Attributes.GetValueOrDefault("Revision", ""), item.Attributes.GetValueOrDefault("State", ""),
+                sourceOwnerId, sourceAuthorId));
         }
         foreach (var item in source.Objects.Where(x => x.Kind == "Evidence"))
         {
@@ -967,7 +1043,7 @@ public sealed class ProjectSetupInceptionService(
             analysis.Objects.GroupBy(x => x.Module, StringComparer.Ordinal).Select(group =>
                 new ProjectSetupSourceModule(group.Key, group.Key, group.Count(), group.Select(x => x.Key).ToArray(),
                     group.Select(x => new ProjectSetupSourceObjectView(x.Key, x.Module, x.SourceIdentifier, x.Kind,
-                        x.Attributes)).ToArray())).ToArray(),
+                        ClientSourceAttributes(x.Attributes))).ToArray())).ToArray(),
             analysis.Relations.Select(x => new ProjectSetupSourceRelationView(x.Key, x.SourceKey, x.TargetKey, x.Type,
                 x.Attributes)).ToArray(),
             analysis.Findings, package.Stage.ToString(), package.ManifestHash,
@@ -995,6 +1071,11 @@ public sealed class ProjectSetupInceptionService(
             .ToArray();
         return new(supported, relationships, findings);
     }
+
+    private static IReadOnlyDictionary<string, string> ClientSourceAttributes(
+        IReadOnlyDictionary<string, string> attributes) => attributes
+        .Where(x => !string.Equals(x.Key, "StorageKey", StringComparison.OrdinalIgnoreCase))
+        .ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
 
     private static JsonElement Parse(string json)
     {
@@ -1033,7 +1114,7 @@ public sealed class ProjectSetupInceptionService(
         Guid projectId, Guid baselineId, Guid releaseId, string manifestHash)
     {
         var payload = JsonSerializer.Serialize(new { packageId = package.Id, package.Kind, package.Sha256,
-            package.SourceBaselineId, packageManifestHash = package.ManifestHash, draft.SelectedCategoriesJson, mapping = package.MappingJson,
+            package.SourceBaselineId, packageManifestHash = package.ManifestHash, selectedCategories = package.SelectedCategoriesJson, mapping = package.MappingJson,
             ladderHash = ProjectLadderSnapshot.HashV2(ProjectSetupLadderFactory.Steps(draft.LadderJson),
                 ProjectSetupLadderFactory.Relationships(draft.LadderJson), LegacyLadderPolicy.Instance),
             reconciliationManifestHash = manifestHash, projectId, baselineId, releaseId }, JsonOptions);
