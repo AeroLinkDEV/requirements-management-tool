@@ -3,6 +3,7 @@ import { ApiError, apiRequest, operationError } from "./apiClient";
 import {
   decodeNativeSourceOptions,
   decodeSourceView,
+  defaultSourceObjectMapping,
   sourceConfigurationPayload,
   sourcePageUrl,
   sourceUploadAccept,
@@ -39,6 +40,8 @@ export type ProjectSetupSourcePanelProps = {
   ladderRevision?: string;
   /** Lets the walkthrough review a server-derived, typed ladder suggestion. */
   onApplyLadderSuggestion?: (suggestion: SourceLadderSuggestion) => void;
+  /** Registers the source-owned save used by global Save and exit/navigation actions. */
+  onRegisterSourceSave?: (save: (() => Promise<number | null>) | null) => void;
 };
 
 type SourceEnvelope = { draftVersion?: number; source?: unknown };
@@ -128,13 +131,16 @@ function updateObjectMapping(
   return {
     ...source,
     modules: source.modules.map((module, currentIndex) => {
-      if (currentIndex !== moduleIndex || !module.objectMappings) return module;
-      const current = module.objectMappings[objectKey];
+      if (currentIndex !== moduleIndex) return module;
+      const objectMappings = module.objectMappings ?? Object.fromEntries(
+        (module.objects ?? []).map((object) => [object.key, defaultSourceObjectMapping(module)]),
+      );
+      const current = objectMappings[objectKey] ?? defaultSourceObjectMapping(module);
       if (!current) return module;
       return {
         ...module,
         objectMappings: {
-          ...module.objectMappings,
+          ...objectMappings,
           [objectKey]: { ...current, ...patch },
         },
       };
@@ -320,6 +326,7 @@ export default function ProjectSetupSourcePanel({
   onSourceStateChange,
   ladderRevision,
   onApplyLadderSuggestion,
+  onRegisterSourceSave,
 }: ProjectSetupSourcePanelProps) {
   const [source, setSource] = useState<SourceView | null>(
     initialState.source?.kind === kind ? initialState.source : null,
@@ -610,8 +617,8 @@ export default function ProjectSetupSourcePanel({
     if (source) updateSourceAndNotice({ ...source, selectedCategories: next });
   };
 
-  const saveConfiguration = async () => {
-    if (!source) return;
+  const saveConfiguration = async (): Promise<number | null> => {
+    if (!source) return null;
     const isNativeRelation = (relation: SourceRelation) =>
       ["CaseProcedure", "VerificationCoverage", "EvidenceExecution"].includes(
         relation.type ?? "",
@@ -628,7 +635,7 @@ export default function ProjectSetupSourcePanel({
       setError(
         `Choose AllocatedFrom or DerivedFrom for ${incompleteTrace.sourceType} before reconciling.`,
       );
-      return;
+      return null;
     }
     const incompleteRelation = source.relations.find(
       (relation) =>
@@ -638,7 +645,7 @@ export default function ProjectSetupSourcePanel({
       setError(
         `Choose the direction for ${incompleteRelation.sourceType}, or exclude it with a reason, before reconciling.`,
       );
-      return;
+      return null;
     }
     const unexplainedExclusion = source.relations.find(
       (relation) => !relation.include && !relation.exclusionReason?.trim(),
@@ -647,7 +654,7 @@ export default function ProjectSetupSourcePanel({
       setError(
         `Explain why ${unexplainedExclusion.sourceType} is excluded before reconciling.`,
       );
-      return;
+      return null;
     }
     const request = ++requestNumber.current;
     setBusy(true);
@@ -655,7 +662,7 @@ export default function ProjectSetupSourcePanel({
     setNotice("");
     try {
       const expectedVersion = await beforeSourceCall();
-      if (expectedVersion === null || request !== requestNumber.current) return;
+      if (expectedVersion === null || request !== requestNumber.current) return null;
       const envelope = await apiRequest<unknown>(
         `${api}/api/project-setups/${draftId}/source/configuration`,
         {
@@ -664,15 +671,16 @@ export default function ProjectSetupSourcePanel({
           body: JSON.stringify(sourceConfigurationPayload(source, expectedVersion, selected)),
         },
       );
-      if (request !== requestNumber.current) return;
+      if (request !== requestNumber.current) return null;
       const committed = await sourceAfterMutation(envelope, expectedVersion, request);
-      if (!committed) return;
+      if (!committed) return null;
       applySource(committed.source, committed.version);
       setNotice(
         committed.source.reconciliation?.ready
           ? "Reconciliation passed for the exact source and current ladder. Review the source assertion before finalization."
           : "Source choices were saved. Resolve the reported findings before finalization.",
       );
+      return committed.version;
     } catch (failure) {
       if (request === requestNumber.current) {
         setError(
@@ -682,10 +690,19 @@ export default function ProjectSetupSourcePanel({
           ),
         );
       }
+      return null;
     } finally {
       if (request === requestNumber.current) setBusy(false);
     }
   };
+
+  const saveConfigurationRef = useRef<() => Promise<number | null>>(saveConfiguration);
+  saveConfigurationRef.current = saveConfiguration;
+  useEffect(() => {
+    const registeredSave = () => saveConfigurationRef.current();
+    onRegisterSourceSave?.(registeredSave);
+    return () => onRegisterSourceSave?.(null);
+  }, [onRegisterSourceSave]);
 
   const reconcile = async () => {
     if (!source) return;
@@ -1125,15 +1142,16 @@ export default function ProjectSetupSourcePanel({
                     disabled={module.include}
                   />
                 </label>
-                {module.objectMappings ? (
+                {(module.objects ?? []).length > 0 ? (
                   <div className="setupSourceObjectMappings">
                     <p className="setupSourceHint">
-                      This module has decisions that differ between source objects. Review each
-                      exact object below; the module heading is only a presentation grouping.
+                      {module.hasDivergentObjectMappings
+                        ? "This module has decisions that differ between source objects. Review each exact object below; the module heading is only a presentation grouping."
+                        : "Review each exact source object below. Initial choices copy the module defaults and can be changed independently."}
                     </p>
                     {(module.objects ?? []).map((object) => {
-                      const decision = module.objectMappings?.[object.key];
-                      if (!decision) return null;
+                      const decision = module.objectMappings?.[object.key]
+                        ?? defaultSourceObjectMapping(module);
                       return (
                         <section className="setupSourceObjectMapping" key={object.key}>
                           <header>

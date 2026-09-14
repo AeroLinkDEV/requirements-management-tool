@@ -78,8 +78,8 @@ test("source metadata is read-only and source proof expires after mapping or rel
   // The source panel deliberately saves setup answers before each source mutation. Keep this
   // focused UI fixture independent from the server's real source-package existence check while
   // retaining the optimistic-versioned request shape used by the product.
-  await page.route(/\/api\/project-setups\/[^/]+$/, async (route) => {
-    if (route.request().method() !== "PUT") {
+  await page.route(/\/api\/project-setups\/[^/]+(?:\/save-and-exit)?$/, async (route) => {
+    if (!(["PUT", "POST"] as const).includes(route.request().method() as "PUT" | "POST")) {
       await route.continue();
       return;
     }
@@ -164,6 +164,165 @@ test("source metadata is read-only and source proof expires after mapping or rel
   expect(remappedObjects.find((item) => item.sourceKey === "req-1")?.attributes.find((item) => item.sourceAttribute === "Statement")?.destination).toBe("SourceOnly");
   expect(remappedObjects.find((item) => item.sourceKey === "req-2")?.attributes.find((item) => item.sourceAttribute === "Statement")?.destination).toBe("Statement");
   await page.screenshot({ path: testInfo.outputPath("source-proof-invalidated-and-reconciled.png"), fullPage: true });
+
+  // Global Save and exit must flush a source-owned edit through the versioned source endpoint before
+  // persisting the setup draft. A setup PUT alone cannot own these source choices.
+  await page.getByLabel("Mapping for Requirements REQ-2 Statement").selectOption("Rationale");
+  await expect(page.getByText("Reconciliation ready", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Save and exit" }).click();
+  await expect(page.getByRole("heading", { name: "Projects", level: 1 })).toBeVisible();
+  expect(configurationCalls).toBe(3);
+  if (!configurationBody) throw new Error("The Save and exit source configuration request was not captured.");
+  const flushedObjects = ((configurationBody.mapping as { objects?: Array<{ sourceKey: string; attributes: Array<{ sourceAttribute: string; destination: string }> }> }).objects ?? []);
+  expect(flushedObjects.find((item) => item.sourceKey === "req-2")?.attributes.find((item) => item.sourceAttribute === "Statement")?.destination).toBe("Rationale");
+});
+
+test("unmapped heterogeneous source objects can be configured independently", async ({ page }, testInfo) => {
+  const sourceId = "00000000-0000-4000-8000-000000000204";
+  let source: Record<string, unknown> = {
+    id: sourceId,
+    kind: "ExternalBaseline",
+    displayName: "Heterogeneous source objects",
+    fileName: "heterogeneous.reqif",
+    format: "REQIF",
+    sha256: "source-sha-204",
+    metadata: { sourceSystem: "Foreign ReqIF tool" },
+    selectedCategories: [],
+    categories: [
+      { key: "Requirements", count: 2, requires: [], supported: true },
+      { key: "Traces", count: 0, requires: ["Requirements"], supported: true },
+    ],
+    modules: [{
+      key: "requirements",
+      name: "Requirements",
+      objectCount: 2,
+      include: true,
+      objects: [
+        {
+          key: "source-system",
+          module: "requirements",
+          sourceIdentifier: "SYS-1",
+          kind: "Requirement",
+          attributes: { Statement: "System statement", Owner: "System owner", Level: "System" },
+        },
+        {
+          key: "source-high",
+          module: "requirements",
+          sourceIdentifier: "HLR-1",
+          kind: "Requirement",
+          attributes: { Statement: "High-level statement", Rationale: "High-level rationale", Level: "HighLevel" },
+        },
+      ],
+    }],
+    relations: [],
+    findings: [],
+    findingResolutions: {},
+    reconciliation: null,
+    assertion: null,
+  };
+  let sourceReady = false;
+  let configurationBody: Record<string, unknown> | undefined;
+
+  await page.route(/\/api\/project-setups\/[^/]+\/source$/, async (route) => {
+    await route.fulfill({ json: sourceReady ? source : { draftVersion: 2, source: null } });
+  });
+  await page.route(/\/api\/project-setups\/[^/]+\/source\/upload\?/, async (route) => {
+    sourceReady = true;
+    await route.fulfill({ json: { id: sourceId, stage: "Analysed", sha256: "source-sha-204", draftVersion: 2 } });
+  });
+  await page.route(/\/api\/project-setups\/[^/]+\/source\/configuration$/, async (route) => {
+    configurationBody = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    const mapping = configurationBody.mapping as Record<string, unknown>;
+    source = {
+      ...source,
+      selectedCategories: ["Requirements"],
+      mapping,
+      reconciliation: {
+        ready: true,
+        observedObjects: 2,
+        includedObjects: 1,
+        excludedObjects: 1,
+        observedRelations: 0,
+        includedRelations: 0,
+        excludedRelations: 0,
+        errors: [],
+        manifestHash: "manifest-204",
+      },
+      assertion: { text: "Source source-sha-204 was reconciled.", hash: "assertion-204" },
+    };
+    await route.fulfill({ json: { id: sourceId, stage: "Reconciled", manifestHash: "manifest-204", draftVersion: 3 } });
+  });
+  await page.route(/\/api\/project-setups\/[^/]+(?:\/save-and-exit)?$/, async (route) => {
+    if (!["PUT", "POST"].includes(route.request().method())) {
+      await route.continue();
+      return;
+    }
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    const project = body.project as Record<string, unknown> | undefined;
+    const start = body.start as Record<string, unknown> | undefined;
+    const build = body.build as Record<string, unknown> | undefined;
+    await route.fulfill({
+      json: {
+        draftId: route.request().url().split("/").at(-1),
+        state: "Draft",
+        currentStep: typeof body.currentStep === "string" ? body.currentStep : "StartingPoint",
+        version: Number(body.expectedVersion ?? 1) + 1,
+        project: project ?? { name: "Heterogeneous source", softwareProduct: "Heterogeneous software" },
+        start: start ?? { kind: "ExternalBaseline", sourceImportId: sourceId },
+        build: build ?? { version: "1.02", officialName: "SW-01.02" },
+        selectedCategories: Array.isArray(body.selectedCategories) ? body.selectedCategories : [],
+        ladder: body.ladder ?? {},
+        reviewRules: { accepted: body.reviewRulesAccepted === true, definition: body.reviewRules ?? {} },
+        repository: body.repository ?? { mode: "ConfigureLater", provider: "GitLab", endpoint: null },
+        mapping: body.mapping ?? {},
+      },
+    });
+  });
+
+  await login(page, "admin", { openProject: false });
+  await page.goto("/projects/new");
+  await page.getByLabel("Project name").fill(`Heterogeneous source ${Date.now()}`);
+  await page.getByLabel("Software product").fill("Heterogeneous source software");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel("External baseline from another tool").check();
+  await page.getByLabel("Baseline file (ReqIF, CSV, or XLSX)").setInputFiles({
+    name: "heterogeneous.reqif",
+    mimeType: "application/xml",
+    buffer: Buffer.from("<REQ-IF/>"),
+  });
+  await page.getByRole("button", { name: "Upload and analyze source" }).click();
+  await expect(page.getByText("Heterogeneous source objects", { exact: true })).toBeVisible();
+
+  const system = page.locator("section.setupSourceObjectMapping").filter({ hasText: "SYS-1" });
+  const high = page.locator("section.setupSourceObjectMapping").filter({ hasText: "HLR-1" });
+  await expect(system).toHaveCount(1);
+  await expect(high).toHaveCount(1);
+  await expect(system.getByLabel("Mapping for Requirements SYS-1 Statement")).toBeVisible();
+  await expect(high.getByLabel("Mapping for Requirements HLR-1 Rationale")).toBeVisible();
+  await system.getByRole("combobox").first().selectOption("System");
+  await high.getByLabel("Include this source object").uncheck();
+  await high.getByLabel("Exclusion reason", { exact: true }).fill("Not included in this project start.");
+  await system.getByLabel("Mapping for Requirements SYS-1 Owner").selectOption("SourceOnly");
+  await page.getByRole("button", { name: "Save choices and reconcile" }).click();
+  await expect(page.getByText("Reconciliation ready", { exact: true })).toBeVisible();
+  expect(configurationBody).toBeDefined();
+  if (!configurationBody) throw new Error("The heterogeneous source configuration request was not captured.");
+  const objects = ((configurationBody.mapping as { objects?: Array<{
+    sourceKey: string;
+    include: boolean;
+    level?: string;
+    exclusionReason?: string;
+    attributes: Array<{ sourceAttribute: string; destination: string }>;
+  }> }).objects ?? []);
+  expect(objects.map((object) => object.sourceKey).sort()).toEqual(["source-high", "source-system"]);
+  const systemMapping = objects.find((object) => object.sourceKey === "source-system");
+  const highMapping = objects.find((object) => object.sourceKey === "source-high");
+  expect(systemMapping?.include).toBe(true);
+  expect(systemMapping?.level).toBe("System");
+  expect(systemMapping?.attributes.find((attribute) => attribute.sourceAttribute === "Owner")?.destination).toBe("SourceOnly");
+  expect(highMapping?.include).toBe(false);
+  expect(highMapping?.exclusionReason).toBe("Not included in this project start.");
+  await page.screenshot({ path: testInfo.outputPath("heterogeneous-object-mappings.png"), fullPage: true });
 });
 
 test("native source picker follows an authoritative page total past the first 50 baselines", async ({ page }, testInfo) => {

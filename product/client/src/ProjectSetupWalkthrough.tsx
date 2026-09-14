@@ -423,6 +423,11 @@ export default function ProjectSetupWalkthrough({
   const [sourceState, setSourceState] = useState<SourceDraftState>(emptySourceState);
   const finalizationKey = useRef<string | undefined>(undefined);
   const draftLoadGeneration = useRef(0);
+  const sourceSaveRef = useRef<(() => Promise<number | null>) | null>(null);
+  const flushingSourceRef = useRef(false);
+  const registerSourceSave = useCallback((save: (() => Promise<number | null>) | null) => {
+    sourceSaveRef.current = save;
+  }, []);
 
   const loadDraft = useCallback(
     async (id: string) => {
@@ -635,7 +640,37 @@ export default function ProjectSetupWalkthrough({
     reviewRulesDelta && (reviewRulesDelta.added.length || reviewRulesDelta.removed.length),
   );
 
-  const saveDraft = async (exitAfterSave = false, stepToSave = currentStep) => {
+  const flushSourceBeforeSetupSave = async () => {
+    if (
+      !draft ||
+      !values ||
+      values.startKind === "Fresh" ||
+      !sourceState.source ||
+      sourceState.source.reconciliation ||
+      !sourceSaveRef.current
+    ) {
+      return draft?.version ?? null;
+    }
+    flushingSourceRef.current = true;
+    try {
+      const version = await sourceSaveRef.current();
+      if (version !== null) {
+        setDraft((current) =>
+          current && version >= current.version ? { ...current, version } : current,
+        );
+      }
+      return version;
+    } finally {
+      flushingSourceRef.current = false;
+    }
+  };
+
+  const saveDraft = async (
+    exitAfterSave = false,
+    stepToSave = currentStep,
+    expectedVersionOverride?: number,
+    flushSource = false,
+  ) => {
     if (!draft || !values) return false;
     if (values.startKind === "AeroLinkBaseline" && values.sourceBaselineId && !isUuid(values.sourceBaselineId)) {
       setError(
@@ -649,6 +684,12 @@ export default function ProjectSetupWalkthrough({
       );
       return false;
     }
+    let expectedVersion = expectedVersionOverride ?? draft.version;
+    if (flushSource) {
+      const sourceVersion = await flushSourceBeforeSetupSave();
+      if (sourceVersion === null) return false;
+      expectedVersion = sourceVersion;
+    }
     setSaving(true);
     setError("");
     setNotice("");
@@ -658,7 +699,7 @@ export default function ProjectSetupWalkthrough({
         {
           method: exitAfterSave ? "POST" : "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody(values, stepToSave, draft.version)),
+          body: JSON.stringify(requestBody(values, stepToSave, expectedVersion)),
         },
       );
       const saved = "draft" in response ? response.draft : response;
@@ -683,6 +724,10 @@ export default function ProjectSetupWalkthrough({
 
   const ensureSourceSaved = async () => {
     if (!draft || !values) return null;
+    // Global Save and exit/navigation first flushes the source-owned configuration. During that
+    // callback, the source endpoint already has the current setup token; avoid recursively issuing
+    // a setup PUT that could invalidate the source while it is being saved.
+    if (flushingSourceRef.current) return draft.version;
     const persisted = valuesFromDraft(draft);
     const pendingSourceChoice =
       values.startKind !== "Fresh" &&
@@ -768,7 +813,10 @@ export default function ProjectSetupWalkthrough({
 
   const goTo = async (target: SetupStep) => {
     if (target === currentStep) return;
-    if ((hasUnsavedChanges || target !== draft?.currentStep) && !(await saveDraft(false, target)))
+    if (
+      (hasUnsavedChanges || target !== draft?.currentStep) &&
+      !(await saveDraft(false, target, undefined, currentStep === "StartingPoint"))
+    )
       return;
     setCurrentStep(target);
   };
@@ -992,6 +1040,7 @@ export default function ProjectSetupWalkthrough({
               onSourceIdentity={updateSourceIdentity}
               onSourceStateChange={updateSourceState}
               onApplyLadderSuggestion={applySourceLadderSuggestion}
+              onRegisterSourceSave={registerSourceSave}
             />
           )}
         </section>
@@ -1501,7 +1550,7 @@ export default function ProjectSetupWalkthrough({
           </div>
           <button
             type="button"
-            onClick={() => void saveDraft(true)}
+            onClick={() => void saveDraft(true, currentStep, undefined, true)}
             disabled={saving || finalizing}
           >
             {saving ? "Saving…" : "Save and exit"}

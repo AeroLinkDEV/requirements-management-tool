@@ -313,7 +313,9 @@ test("source upload and mapping survive save-exit and a new signed-in browser co
   try {
     await login(resumedPage, "admin", { openProject: false });
     await expect(resumedPage.getByText(projectName, { exact: true })).toBeVisible({ timeout: 30_000 });
-    await resumedPage.getByRole("button", { name: "Resume setup" }).click();
+    const resumedDraft = resumedPage.getByRole("article").filter({ hasText: projectName });
+    await expect(resumedDraft).toHaveCount(1);
+    await resumedDraft.getByRole("button", { name: "Resume setup" }).click();
     await expect(resumedPage.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
     const resumedSource = await source(resumedPage.request, draftId);
     expect(resumedSource.reconciliation?.ready, JSON.stringify(resumedSource.reconciliation)).toBeTruthy();
@@ -324,7 +326,7 @@ test("source upload and mapping survive save-exit and a new signed-in browser co
     await expect(resumedPage.getByRole("heading", { name: "Choose a starting point", level: 2 })).toBeVisible();
     await expect(resumedPage.getByText("Exact source", { exact: true })).toBeVisible({ timeout: 120_000 });
     await expect(resumedPage.getByText("Reconciliation ready", { exact: true })).toBeVisible();
-    await expect(resumedPage.getByLabel("Mapping for Requirements REQ-SYS Statement")).toHaveValue("Statement");
+    await expect(resumedPage.getByLabel(/Mapping for Attributes in Source objects attribute:statement$/)).toHaveValue("Statement");
     await resumedPage.screenshot({ path: testInfo.outputPath("source-recovery-resumed.png"), fullPage: true });
   } finally {
     await resumedContext.close();
@@ -376,8 +378,45 @@ for (const fixture of externalFixtures) {
     expect(staged.format).toBe(fixture.format);
     expect(staged.fileName).toBe(fixture.fileName);
     await expect(page.getByRole("region", { name: "Source-informed ladder suggestion" })).toBeVisible();
+    if (fixture.name === "ReqIF hierarchical") {
+      // This fixture is the explicit regression for heterogeneous hierarchical source objects.
+      // Drive every mapping decision through the source panel so the browser path proves that
+      // exact per-object choices, relation direction, and dependency selection are usable.
+      const requirements = page.getByRole("checkbox", { name: /^Requirements / });
+      if (!(await requirements.isChecked())) await requirements.check();
+      const traces = page.getByRole("checkbox", { name: /^Trace relationships / });
+      if (!(await traces.isChecked())) await traces.check();
+      const system = page.locator("section.setupSourceObjectMapping").filter({ hasText: "REQ-SYS" });
+      const high = page.locator("section.setupSourceObjectMapping").filter({ hasText: "REQ-HIGH" });
+      await expect(system).toHaveCount(1);
+      await expect(high).toHaveCount(1);
+      await system.getByRole("combobox").first().selectOption("System");
+      await high.getByRole("combobox").first().selectOption("HighLevel");
+      await system.getByLabel(/Mapping for .*statement$/i).selectOption("Statement");
+      await high.getByLabel(/Mapping for .*statement$/i).selectOption("Statement");
+      await system.getByLabel(/Mapping for .*rationale$/i).selectOption("Rationale");
+      await high.getByLabel(/Mapping for .*rationale$/i).selectOption("Rationale");
+      for (const objectPanel of [system, high]) {
+        const reasons = objectPanel.locator('input[aria-label^="Reason for "]');
+        for (let index = 0; index < await reasons.count(); index += 1) {
+          await reasons.nth(index).fill("Retain the exact foreign value as a source fact.");
+        }
+      }
+      await page.getByLabel(/Trace type for/i).selectOption("AllocatedFrom");
+      await page.getByLabel(/Relation direction for/i).selectOption("child");
+      await page.getByRole("button", { name: "Save choices and reconcile" }).click();
+      await expect(page.getByText("Reconciliation ready", { exact: true })).toBeVisible({ timeout: 180_000 });
+    }
     await moveToRepository(page, fixture.format === "REQIF" ? (fixture.name.includes("root") ? "1.10" : "1.07") : fixture.format === "CSV" ? "1.08" : "1.09");
-    const reconciled = await reconcile(page, draftId, [...fixture.categories]);
+    if (fixture.name === "ReqIF hierarchical") {
+      // Source configuration does not implicitly change the setup step. Persist the repository
+      // choice and enter the review step explicitly before the finalization helper reloads it.
+      await page.getByRole("button", { name: "Continue" }).click();
+      await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
+    }
+    const reconciled = fixture.name === "ReqIF hierarchical"
+      ? await source(page.request, draftId)
+      : await reconcile(page, draftId, [...fixture.categories]);
     expect(reconciled.reconciliation?.ready).toBeTruthy();
     expect(reconciled.assertion?.hash).toMatch(/^[0-9a-f]{64}$/i);
     const projectId = await finalizeSource(page, setupUrl, testInfo, `external-${fixture.name.toLocaleLowerCase().replaceAll(" ", "-")}`);

@@ -66,6 +66,8 @@ export type SourceModule = {
   include: boolean;
   exclusionReason?: string;
   objectMappings?: Record<string, SourceObjectMapping>;
+  /** Derived presentation hint; exact decisions still live in objectMappings. */
+  hasDivergentObjectMappings?: boolean;
 };
 
 export type SourceRelation = {
@@ -170,6 +172,31 @@ export type SourceDraftState = {
   password: string;
 };
 
+function cloneAttributeMappings(mappings: SourceAttributeMapping[]): SourceAttributeMapping[] {
+  return mappings.map((mapping) => ({
+    ...mapping,
+    ...(mapping.valueMappings
+      ? { valueMappings: mapping.valueMappings.map((value) => ({ ...value })) }
+      : {}),
+  }));
+}
+
+/**
+ * Build an object decision from the module defaults when a server source view has not yet
+ * persisted per-object decisions. The module is only a presentation group; this helper gives
+ * every exact source object an editable decision without inventing parser facts.
+ */
+export function defaultSourceObjectMapping(module: SourceModule): SourceObjectMapping {
+  return {
+    include: module.include,
+    ...(module.level ? { level: module.level } : {}),
+    ...(module.exclusionReason?.trim()
+      ? { exclusionReason: module.exclusionReason.trim() }
+      : {}),
+    mappings: cloneAttributeMappings(module.mappings),
+  };
+}
+
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -270,9 +297,12 @@ function decodeModules(value: unknown, mappingValue?: unknown): SourceModule[] {
   const mappingsByObject = mappingRows(mappingValue, "objects");
   return value.flatMap((entry) => {
     const row = asRecord(entry);
-    const key = text(row.key).trim();
-    if (!key) return [];
     const objects = decodeObjects(row.objects);
+    // ReqIF files may contain objects without a SPECIFICATION module. Keep those exact objects
+    // available for mapping rather than dropping the entire group; the grouping is presentation
+    // only and does not become part of the source identity.
+    const key = text(row.key).trim() || (objects.length ? "source-objects" : "");
+    if (!key) return [];
     const observedAttributes = objects.flatMap((object) =>
       Object.keys(object.attributes).map((attributeKey) => ({ key: attributeKey, name: attributeKey })),
     );
@@ -292,56 +322,66 @@ function decodeModules(value: unknown, mappingValue?: unknown): SourceModule[] {
       return mapping ? [{ object, mapping }] : [];
     });
     const firstObjectMapping = objectMappingEntries[0]?.mapping;
-    const mappings = decodeAttributes(firstObjectMapping?.attributes ?? row.mappings);
+    const persistedModuleMappings = decodeAttributes(firstObjectMapping?.attributes ?? row.mappings);
     const observedMappings = uniqueAttributes.map((attribute) => ({
       sourceAttribute: attribute.key,
       destination: "SourceOnly" as const,
     }));
+    const mappings = persistedModuleMappings.length ? persistedModuleMappings : observedMappings;
+    const moduleLevel = text(firstObjectMapping?.level ?? row.level).trim()
+      || (objects.length > 0
+        && objects.every((object) => object.attributes.Level === objects[0]?.attributes.Level)
+        ? text(objects[0]?.attributes.Level).trim()
+        : "");
+    const moduleInclude = objects.length > 0
+      ? objects.every((object) => boolean(mappingsByObject.get(object.key)?.include, boolean(row.include, true)))
+      : boolean(row.include, true);
+    const moduleExclusionReason = text(firstObjectMapping?.exclusionReason ?? row.exclusionReason).trim();
     const objectMappings = Object.fromEntries(
-      objectMappingEntries.map(({ object, mapping }) => [
-        object.key,
-        {
-          include: boolean(mapping.include, true),
-          ...(text(mapping.level).trim() ? { level: text(mapping.level).trim() } : {}),
-          ...(text(mapping.exclusionReason).trim()
-            ? { exclusionReason: text(mapping.exclusionReason).trim() }
-            : {}),
-          mappings: decodeAttributes(mapping.attributes),
-        },
-      ]),
+      objects.map((object) => {
+        const mapping = mappingsByObject.get(object.key);
+        return [
+          object.key,
+          mapping
+            ? {
+                include: boolean(mapping.include, true),
+                ...(text(mapping.level).trim() ? { level: text(mapping.level).trim() } : {}),
+                ...(text(mapping.exclusionReason).trim()
+                  ? { exclusionReason: text(mapping.exclusionReason).trim() }
+                  : {}),
+                mappings: decodeAttributes(mapping.attributes).length
+                  ? decodeAttributes(mapping.attributes)
+                  : cloneAttributeMappings(mappings),
+              }
+            : {
+                include: moduleInclude,
+                ...(moduleLevel ? { level: moduleLevel } : {}),
+                ...(moduleExclusionReason ? { exclusionReason: moduleExclusionReason } : {}),
+                mappings: cloneAttributeMappings(mappings),
+              },
+        ] as const;
+      }),
     ) as Record<string, SourceObjectMapping>;
-    const firstObjectDecision = objectMappingEntries[0]
-      ? objectMappings[objectMappingEntries[0].object.key]
-      : undefined;
-    const hasDivergentObjectMappings = objectMappingEntries.length > 0
-      && (objectMappingEntries.length !== objects.length
-        || objectMappingEntries.some(({ object }) =>
-          JSON.stringify(objectMappings[object.key]) !== JSON.stringify(firstObjectDecision)));
+    const firstObjectDecision = objects.length ? objectMappings[objects[0].key] : undefined;
+    const hasDivergentObjectMappings = objects.length > 1
+      && objects.some((object) =>
+        JSON.stringify(objectMappings[object.key]) !== JSON.stringify(firstObjectDecision));
     const objectKeys = Array.isArray(row.objectKeys)
       ? row.objectKeys.filter((item): item is string => typeof item === "string" && item.trim() !== "")
       : objects.map((object) => object.key);
     return [
       {
         key,
-        name: text(row.name).trim() || key,
+        name: text(row.name).trim() || (key === "source-objects" ? "Source objects" : key),
         objectCount: nonNegative(row.objectCount) || objects.length,
         ...(objectKeys.length ? { objectKeys } : {}),
         ...(objects.length ? { objects } : {}),
-        ...(text(firstObjectMapping?.level ?? row.level).trim()
-          ? { level: text(firstObjectMapping?.level ?? row.level).trim() }
-          : objects.every((object) => object.attributes.Level === objects[0]?.attributes.Level)
-            && text(objects[0]?.attributes.Level).trim()
-            ? { level: text(objects[0]?.attributes.Level).trim() }
-            : {}),
+        ...(moduleLevel ? { level: moduleLevel } : {}),
         attributes: uniqueAttributes,
         mappings: mappings.length ? mappings : observedMappings,
-        include: firstObjectMapping
-          ? objectMappingEntries.every(({ mapping }) => boolean(mapping.include, true))
-          : boolean(row.include, true),
-        ...(text(firstObjectMapping?.exclusionReason ?? row.exclusionReason).trim()
-          ? { exclusionReason: text(firstObjectMapping?.exclusionReason ?? row.exclusionReason).trim() }
-          : {}),
-        ...(hasDivergentObjectMappings ? { objectMappings } : {}),
+        include: moduleInclude,
+        ...(moduleExclusionReason ? { exclusionReason: moduleExclusionReason } : {}),
+        ...(objects.length ? { objectMappings, hasDivergentObjectMappings } : {}),
       },
     ];
   });
@@ -643,15 +683,15 @@ export function sourceConfigurationPayload(
           attributes: {},
         }));
     return objects.map((object) => {
-      const exact = module.objectMappings?.[object.key];
-      const mappings = exact?.mappings ?? module.mappings;
+      const exact = module.objectMappings?.[object.key] ?? defaultSourceObjectMapping(module);
+      const mappings = exact.mappings;
       return {
       sourceKey: object.key,
-      include: exact?.include ?? module.include,
-      ...(exact?.exclusionReason?.trim() || module.exclusionReason?.trim()
-        ? { exclusionReason: (exact?.exclusionReason ?? module.exclusionReason)!.trim() }
+      include: exact.include,
+      ...(exact.exclusionReason?.trim()
+        ? { exclusionReason: exact.exclusionReason.trim() }
         : {}),
-      ...(exact?.level || module.level ? { level: exact?.level ?? module.level } : {}),
+      ...(exact.level ? { level: exact.level } : {}),
       attributes: mappings.map((mapping) => ({
         sourceAttribute: mapping.sourceAttribute,
         destination: mapping.destination,
