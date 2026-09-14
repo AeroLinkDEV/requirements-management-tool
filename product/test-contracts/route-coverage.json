@@ -328,6 +328,7 @@
         "LegacyProcedureManifestBootstrapApiTests",
         "LiveTestRegressionApiTests",
         "ManagedDocumentApiTests",
+        "ManagedDocumentApiTests.ProjectSetup",
         "ManagedDocumentRecoveryApiTests",
         "ManualTestChangeRequestApiTests",
         "NotificationOperationsApiTests",
@@ -358,6 +359,7 @@
         "ProjectLeadershipApiTests",
         "ProjectPersonnelApiTests",
         "ProjectRepositoryApiTests",
+        "ProjectSetupCodeEvidenceApiTests",
         "ProjectSetupDiscoveryApiTests",
         "ProjectSetupPostgresQualificationTests",
         "ProjectSetupServiceQualificationTests",
@@ -799,7 +801,8 @@
       "path": "/api/code-traceability",
       "file": "CodeTraceabilityEndpoints.cs",
       "coveredBy": [
-        "CodeTraceabilityApiTests"
+        "CodeTraceabilityApiTests",
+        "ProjectSetupCodeEvidenceApiTests"
       ]
     },
     {
@@ -914,7 +917,8 @@
       "path": "/api/document-connector/{grantId:guid}/release-candidate",
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
-        "ManagedDocumentApiTests"
+        "ManagedDocumentApiTests",
+        "ManagedDocumentApiTests.ProjectSetup"
       ]
     },
     {
@@ -923,6 +927,7 @@
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
         "ManagedDocumentApiTests",
+        "ManagedDocumentApiTests.ProjectSetup",
         "ManagedDocumentRecoveryApiTests"
       ]
     },
@@ -1285,6 +1290,7 @@
       "coveredBy": [
         "ManagedDocumentApiTests",
         "ManagedDocumentApiTests.BuildIdentity",
+        "ManagedDocumentApiTests.ProjectSetup",
         "ManagedDocumentRecoveryApiTests"
       ]
     },
@@ -1350,6 +1356,7 @@
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
         "ManagedDocumentApiTests",
+        "ManagedDocumentApiTests.ProjectSetup",
         "ManagedDocumentRecoveryApiTests"
       ]
     },
@@ -1384,6 +1391,7 @@
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
         "ManagedDocumentApiTests",
+        "ManagedDocumentApiTests.ProjectSetup",
         "ManagedDocumentRecoveryApiTests"
       ]
     },
@@ -1821,6 +1829,7 @@
       "path": "/api/projects/{projectId:guid}/personnel",
       "file": "PersonnelEndpoints.cs",
       "coveredBy": [
+        "ManagedDocumentApiTests.ProjectSetup",
         "PersonnelDirectoryApiTests",
         "ProjectLeadershipApiTests",
         "ProjectPersonnelApiTests",
@@ -1843,7 +1852,8 @@
       "path": "/api/projects/{projectId:guid}/repository/verify",
       "file": "ProjectRepositoryEndpoints.cs",
       "coveredBy": [
-        "ProjectRepositoryApiTests"
+        "ProjectRepositoryApiTests",
+        "ProjectSetupCodeEvidenceApiTests"
       ]
     },
     {
@@ -2567,7 +2577,8 @@
       "path": "/api/projects/{projectId:guid}/repository",
       "file": "ProjectRepositoryEndpoints.cs",
       "coveredBy": [
-        "ProjectRepositoryApiTests"
+        "ProjectRepositoryApiTests",
+        "ProjectSetupCodeEvidenceApiTests"
       ]
     },
     {

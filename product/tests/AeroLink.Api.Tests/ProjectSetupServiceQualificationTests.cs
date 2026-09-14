@@ -5,7 +5,9 @@ using System.Text;
 using System.Text.Json;
 using AeroLink.Domain.Identity;
 using AeroLink.Infrastructure.Persistence;
+using AeroLink.Infrastructure.Notifications;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -126,8 +128,26 @@ public sealed class ProjectSetupServiceQualificationTests
 
         foreach (var signer in new[] { reviewer, approver })
         {
+            // Exercise the real outbox while this stage is active. Capture transport locally; never send
+            // mail to a service or confuse a recording sender with live relay qualification.
+            using (var deliveryScope = factory.Services.CreateScope())
+            {
+                var db = deliveryScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Notifications:BaseUrl"] = "https://aerolink.example.test",
+                    ["Notifications:UnsubscribeSecret"] = "isolated-1037-notification-test-secret-0123456789",
+                }).Build();
+                var sender = new SetupRecordingSender();
+                await new NotificationOutbox(db).DispatchPendingAsync(sender, new NotificationLinkBuilder(configuration),
+                    new UnsubscribeTokenService(configuration), 50, 5, DateTimeOffset.UtcNow, default);
+                Assert.Contains(sender.Sent, x => x.To == signer.Email
+                    && x.PlainTextBody.Contains($"https://aerolink.example.test/open/scr/{changeId}", StringComparison.Ordinal));
+            }
             using var signerClient = factory.CreateClient();
             await LoginAsync(signerClient, signer.UserName);
+            using (var linkedArtifact = await signerClient.GetAsync($"/api/change-requests/{changeId}"))
+                await SuccessAsync(linkedArtifact);
             using var signed = await signerClient.PostAsJsonAsync($"/api/change-requests/{changeId}/approve", new
             {
                 password = AeroLinkApiFactory.MemberPassword, meaning = "I accept my assigned review stage.",
@@ -188,5 +208,16 @@ public sealed class ProjectSetupServiceQualificationTests
     private static async Task<JsonElement> JsonAsync(HttpResponseMessage response)
     {
         using (response) { await SuccessAsync(response); return await response.Content.ReadFromJsonAsync<JsonElement>(); }
+    }
+
+    private sealed class SetupRecordingSender : IEmailSender
+    {
+        public bool IsConfigured => true;
+        public List<EmailMessage> Sent { get; } = [];
+        public Task SendAsync(EmailMessage message, CancellationToken ct)
+        {
+            Sent.Add(message);
+            return Task.CompletedTask;
+        }
     }
 }
