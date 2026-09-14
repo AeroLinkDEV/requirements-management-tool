@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 897,
-    "cases": 1005,
-    "classes": 139,
-    "hostedTests": 850,
-    "hostedCases": 936,
+    "tests": 899,
+    "cases": 1007,
+    "classes": 141,
+    "hostedTests": 852,
+    "hostedCases": 938,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 13,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 560,
-      "cases": 628,
+      "tests": 562,
+      "cases": 630,
       "unknownCases": 0,
-      "classes": 109
+      "classes": 111
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -5805,6 +5805,24 @@
       }
     },
     {
+      "cls": "ManagedDocumentApiTests.ProjectSetup",
+      "test": "Fresh_setup_project_supports_local_connector_check_in_review_and_exact_controlled_release",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 14,
+        "end": 130
+      }
+    },
+    {
       "cls": "ManagedDocumentAssignmentPolicyTests",
       "test": "Project_engineer_position_holder_is_accepted_and_base_only_configuration_manager_is_refused",
       "kind": "Fact",
@@ -10233,6 +10251,24 @@
       }
     },
     {
+      "cls": "ProjectSetupCodeEvidenceApiTests",
+      "test": "Fresh_project_defers_repository_then_requires_observed_matching_identity_for_GitLab_evidence",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 18,
+        "end": 121
+      }
+    },
+    {
       "cls": "ProjectSetupDiscoveryApiTests",
       "test": "CreatorCanSaveExitAndResumeWhileAnUnrelatedEmployeeCannotReadOrEditTheDraft",
       "kind": "Fact",
@@ -10261,8 +10297,8 @@
         "factory-construction"
       ],
       "sourceLines": {
-        "start": 16,
-        "end": 21
+        "start": 18,
+        "end": 23
       }
     },
     {

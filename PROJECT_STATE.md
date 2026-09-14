@@ -55,6 +55,11 @@ See [product/docs/ARCHITECTURE.md](product/docs/ARCHITECTURE.md).
 
 ## Project creation and entry
 
+Projects with creation-time repository configuration require verified repository identity before recording
+GitLab merge evidence. The namespace, configured origin/path and merge-request number must match;
+No-code decisions retain their ordinary lifecycle prerequisites. Repository verification does not verify
+the supplied merge/commit facts, and existing projects without setup configuration retain compatibility.
+
 Administrators can create a server-side setup draft and resume it across sessions. The creator and
 administrators may edit it; unfinished setup is distinct from a usable project. Fresh completion atomically
 creates an isolated internal backing scope, the accepted effective ladder and review rules, necessary empty

@@ -65,11 +65,17 @@ LLR revision in one build. The Code center and release readiness use the same re
 mappings are included in the signed review manifest. Released-build mutation protection applies server-side
 at the endpoint even when a caller does not supply browser workspace context.
 
-Project repository configuration is independent of those evidence records and of the creation draft. A URL
+Project repository configuration persists separately from those evidence records and from the creation draft. A URL
 starts unverified; an installation-scoped read-only GitLab probe can record the exact remote project identity.
 The browser cannot supply connection verification, and edits or failed rechecks clear current verified status.
 No database transaction spans the probe; optimistic configuration versions prevent stale observations from
 overwriting a newer connection. Deferred setup remains pending and does not block unrelated engineering work.
+For projects carrying this configuration, recording a GitLab merge requires current verified repository identity:
+the namespace path, HTTPS origin, repository URL path and merge-request number must match. The Code overview
+exposes this prerequisite; no-code decisions remain available subject to their normal baseline prerequisites.
+An observed repository connection does not assert that a manually supplied merge or commit exists. Existing
+projects without a setup record retain their prior capture contract, and historical evidence is never rewritten
+or hidden when connection configuration changes.
 
 Implementation evidence capture remains manual, with a small, conspicuously labelled FMS demonstration set.
 Webhook synchronization, CI state, many-to-many MR/LLR mapping, and automated
