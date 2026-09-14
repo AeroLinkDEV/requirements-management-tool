@@ -332,12 +332,27 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         // proposed requirement/revision in a bulk import or fresh showcase seed.
         var localRequests = SystemChangeRequests.Local.ToDictionary(x => x.Id);
         var localRequirements = Requirements.Local.ToDictionary(x => x.Id);
-        // An unassigned target verification artifact is valid only when the same unit of work proves that it is
-        // being materialized from a staged inception source. Ordinary authoring with a blank owner must still
-        // fail closed, even when another valid candidate in this batch has already sealed the ladder.
-        var inceptionVerificationTargets = ProjectInceptionSourceRecords.Local
-            .Where(x => x.TargetKind is "TestCase" or "TestProcedure")
-            .Select(x => x.TargetId).ToHashSet();
+        // An unassigned target verification artifact is valid only when the same unit of work proves the full
+        // inception chain: a tracked source record for this project and target, its reconciled/materialized
+        // package, and the completed draft that owns that package. Ordinary authoring with a blank owner must
+        // still fail closed, even when another valid candidate in this batch has already sealed the ladder.
+        var inceptionVerificationTargets = (from record in ProjectInceptionSourceRecords.Local
+                                             join package in ProjectSetupSourcePackages.Local on record.PackageId equals package.Id
+                                             join draft in ProjectSetupDrafts.Local on package.DraftId equals draft.Id
+                                             join baseline in CandidateBaselines.Local on record.BaselineId equals baseline.Id
+                                             join target in TestProcedures.Local on record.TargetId equals target.Id
+                                             where record.TargetKind is "TestCase" or "TestProcedure"
+                                                 && record.ProjectId == package.MaterializedProjectId
+                                                 && record.BaselineId == package.MaterializedBaselineId
+                                                 && baseline.ProjectId == record.ProjectId
+                                                 && target.ProjectId == record.ProjectId
+                                                 && ((record.TargetKind == "TestCase" && target.ArtifactKind == VerificationArtifactKind.Case)
+                                                     || (record.TargetKind == "TestProcedure" && target.ArtifactKind == VerificationArtifactKind.Procedure))
+                                                 && package.Stage == ProjectSetupSourceStage.Reconciled
+                                                 && !string.IsNullOrWhiteSpace(package.AssertionHash)
+                                                 && draft.State == ProjectSetupState.Completed
+                                                 && draft.CompletedProjectId == record.ProjectId
+                                             select (record.ProjectId, record.TargetId, record.TargetKind)).ToHashSet();
 
         foreach (var entry in ChangeTracker.Entries<RequirementChange>().Where(x => x.State == EntityState.Added))
         {
@@ -380,7 +395,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 // Inherited inception verification starts unassigned by policy. Only a tracked source record
                 // proves that this is such a materialization; ordinary authoring still needs an explicit owner.
                 string.IsNullOrWhiteSpace(entry.Entity.OwnerId)
-                    ? inceptionVerificationTargets.Contains(entry.Entity.Id) ? LadderSealActor ?? "" : ""
+                    ? inceptionVerificationTargets.Contains((entry.Entity.ProjectId, entry.Entity.Id,
+                        entry.Entity.ArtifactKind == VerificationArtifactKind.Case ? "TestCase" : "TestProcedure"))
+                        ? LadderSealActor ?? "" : ""
                     : entry.Entity.OwnerId));
         foreach (var entry in ChangeTracker.Entries<TestChangeReview>().Where(x => x.State == EntityState.Added))
             candidates.Add((entry.Entity.ProjectId, "test-change-review",

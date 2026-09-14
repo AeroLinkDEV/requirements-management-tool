@@ -405,12 +405,15 @@ public sealed class ProjectSetupInceptionService(
                 .Where(x => packageIds.Contains(x.Id)).ToListAsync(ct))
             .OrderByDescending(x => x.UpdatedAt).ThenBy(x => x.Id).FirstOrDefault();
         var assertionBaselineId = records[0].BaselineId;
-        // SQLite cannot translate DateTimeOffset ordering. This is one exact, authorized signature lookup, so
-        // materialize its bounded result and apply the deterministic ordering in the application.
-        var acceptance = (await db.ElectronicSignatures.AsNoTracking()
+        // Bind the projection to the package's exact assertion hash and action. A later signature for this
+        // artifact must never replace the person who accepted this immutable source assertion. SQLite cannot
+        // translate DateTimeOffset ordering, so materialize the bounded matching rows and order in memory.
+        var acceptance = package?.AssertionHash is null ? null : (await db.ElectronicSignatures.AsNoTracking()
             .Where(x => x.ProgramId == project.ProgramId
                 && x.ArtifactType == "ProjectInceptionSourceAssertion"
-                && x.ArtifactId == assertionBaselineId)
+                && x.ArtifactId == assertionBaselineId
+                && x.Action == "AcceptSource"
+                && x.ContentHash == package.AssertionHash)
             .Select(x => new ProjectInceptionSourceAcceptance(x.UserId, x.UserName, x.DisplayName,
                 x.SignedAt, x.Action, x.Meaning, x.ContentHash, x.Authority, x.Rationale))
             .ToListAsync(ct)).OrderByDescending(x => x.SignedAt).FirstOrDefault();

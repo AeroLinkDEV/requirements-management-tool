@@ -32,9 +32,9 @@ the method body does not show the host operation.
 
 | Intent | Tests | Cases | Classes | Correct level |
 |---|---:|---:|---:|---|
-| HTTP boundary: route, status, JSON shape | 567 | 638 | 111 | API (must stay hosted) |
+| HTTP boundary: route, status, JSON shape | 566 | 635 | 111 | API (must stay hosted) |
 | EF translation / relational constraints | 167 | 181 | 60 | Infrastructure (needs a database, not a host) |
-| Authentication / authorization wiring | 98 | 102 | 59 | API (must stay hosted) |
+| Authentication / authorization wiring | 99 | 105 | 59 | API (must stay hosted) |
 | In-process logic with no HTTP and no client | 42 | 42 | 18 | Domain or Infrastructure (migration candidate) |
 | Filesystem / evidence-root behaviour | 21 | 21 | 11 | API or Infrastructure (must stay hosted) |
 | Startup, hosting and configuration | 9 | 9 | 7 | API (must stay hosted) |

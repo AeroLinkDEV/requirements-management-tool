@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 567,
-      "cases": 638,
+      "tests": 566,
+      "cases": 635,
       "unknownCases": 0,
       "classes": 111
     },
@@ -37,8 +37,8 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 98,
-      "cases": 102,
+      "tests": 99,
+      "cases": 105,
       "unknownCases": 0,
       "classes": 59
     },
@@ -10283,7 +10283,7 @@
       "cls": "ProjectSetupInceptionApiTests",
       "test": "Administrator_can_reconcile_and_accept_each_supported_external_format",
       "kind": "Theory",
-      "intent": "http-boundary",
+      "intent": "auth-policy",
       "cases": 3,
       "caseEvidence": "InlineData",
       "hosted": "hosted",
@@ -10294,7 +10294,7 @@
       ],
       "sourceLines": {
         "start": 449,
-        "end": 581
+        "end": 641
       }
     },
     {

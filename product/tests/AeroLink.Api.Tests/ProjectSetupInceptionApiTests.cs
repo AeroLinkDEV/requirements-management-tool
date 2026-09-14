@@ -552,6 +552,66 @@ public sealed class ProjectSetupInceptionApiTests
         var provenanceRecord = Assert.Single(provenanceRoot.GetProperty("records").EnumerateArray());
         Assert.DoesNotContain("StorageKey", provenanceRecord.GetProperty("sourceSnapshot").GetRawText(), StringComparison.OrdinalIgnoreCase);
 
+        // Provenance is project-scoped source evidence. A user outside the program and a member whose
+        // source-program access has ended must both be denied, while an active ordinary member may inspect it.
+        var programId = finalizedBody.RootElement.GetProperty("programId").GetGuid();
+        var baselineId = provenanceRecord.GetProperty("baselineId").GetGuid();
+        var suffix = fileName.Replace('.', '-');
+        var memberName = $"inception-provenance-member-{suffix}";
+        var outsiderName = $"inception-provenance-outsider-{suffix}";
+        Guid memberId;
+        using (var identityScope = factory.Services.CreateScope())
+        {
+            var identityDb = identityScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var member = new UserAccount(memberName, "Inception Provenance Member", $"{memberName}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow);
+            var outsider = new UserAccount(outsiderName, "Inception Provenance Outsider", $"{outsiderName}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow);
+            identityDb.AddRange(member, outsider,
+                new ProgramMembership(member.Id, programId, ProgramRole.Engineer, "test.setup", DateTimeOffset.UtcNow));
+            await identityDb.SaveChangesAsync();
+            memberId = member.Id;
+        }
+        using var memberClient = factory.CreateClient();
+        using var memberLogin = await memberClient.PostAsJsonAsync("/api/auth/login", new
+        { userName = memberName, password = AeroLinkApiFactory.MemberPassword });
+        Assert.Equal(HttpStatusCode.OK, memberLogin.StatusCode);
+        using var memberProvenance = await memberClient.GetAsync($"/api/projects/{projectId}/inception-source");
+        Assert.Equal(HttpStatusCode.OK, memberProvenance.StatusCode);
+        using (var revokeScope = factory.Services.CreateScope())
+        {
+            var revokeDb = revokeScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var membership = await revokeDb.ProgramMemberships.SingleAsync(x => x.UserId == memberId
+                && x.ProgramId == programId && x.EndedAt == null);
+            membership.End("test.setup", DateTimeOffset.UtcNow);
+            await revokeDb.SaveChangesAsync();
+        }
+        using var endedProvenance = await memberClient.GetAsync($"/api/projects/{projectId}/inception-source");
+        Assert.Equal(HttpStatusCode.Forbidden, endedProvenance.StatusCode);
+
+        using var outsiderClient = factory.CreateClient();
+        using var outsiderLogin = await outsiderClient.PostAsJsonAsync("/api/auth/login", new
+        { userName = outsiderName, password = AeroLinkApiFactory.MemberPassword });
+        Assert.Equal(HttpStatusCode.OK, outsiderLogin.StatusCode);
+        using var outsiderProvenance = await outsiderClient.GetAsync($"/api/projects/{projectId}/inception-source");
+        Assert.Equal(HttpStatusCode.Forbidden, outsiderProvenance.StatusCode);
+
+        // A newer signature with a different assertion hash is not the source acceptance represented by this
+        // package. The route must continue to return the exact hash-bound acceptance fact.
+        using (var signatureScope = factory.Services.CreateScope())
+        {
+            var signatureDb = signatureScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            signatureDb.ElectronicSignatures.Add(new ElectronicSignature(Guid.NewGuid(), "later.actor",
+                "Later Actor", programId, "ProjectInceptionSourceAssertion", baselineId, "1", "AcceptSource",
+                "Later assertion", new string('f', 64), "local", DateTimeOffset.UtcNow.AddMinutes(1),
+                authority: "Administrator"));
+            await signatureDb.SaveChangesAsync();
+        }
+        using var exactProvenance = await client.GetAsync($"/api/projects/{projectId}/inception-source");
+        Assert.Equal(HttpStatusCode.OK, exactProvenance.StatusCode);
+        using var exactBody = JsonDocument.Parse(await exactProvenance.Content.ReadAsStringAsync());
+        Assert.Equal(assertionHash, exactBody.RootElement.GetProperty("acceptance").GetProperty("contentHash").GetString());
+
         // Replay with the last client-known token proves the committed finalization is recoverable after a lost
         // response. No second project or source import may be created.
         using var replay = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize", new
@@ -575,8 +635,8 @@ public sealed class ProjectSetupInceptionApiTests
         var revision = await db.RequirementRevisions.SingleAsync(x => db.Requirements.Any(a => a.Id == x.ArtifactId && a.ProjectId == projectId));
         Assert.Equal(RequirementRevisionOriginKind.ExternalSourcePackage, revision.OriginKind);
         Assert.Equal(1, await db.ProjectInceptionSourceRecords.CountAsync(x => x.ProjectId == projectId));
-        Assert.Single(await db.ElectronicSignatures.Where(x => x.ProgramId == (Guid)finalizedBody.RootElement.GetProperty("programId").GetGuid()
-            && x.ArtifactType == "ProjectInceptionSourceAssertion").ToListAsync());
+        Assert.Equal(2, await db.ElectronicSignatures.CountAsync(x => x.ProgramId == (Guid)finalizedBody.RootElement.GetProperty("programId").GetGuid()
+            && x.ArtifactType == "ProjectInceptionSourceAssertion"));
         Assert.Empty(await db.TestExecutions.Where(x => x.SoftwareBuildId != null && db.SoftwareBuilds.Any(b => b.Id == x.SoftwareBuildId && b.ProjectId == projectId)).ToListAsync());
     }
 
