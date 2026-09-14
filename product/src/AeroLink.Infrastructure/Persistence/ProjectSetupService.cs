@@ -236,7 +236,9 @@ public sealed class ProjectSetupService(
             draft.Complete(resultJson, program.Id, project.Id, release.Id, DateTimeOffset.UtcNow);
             db.SecurityAuditEvents.Add(new SecurityAuditEvent("ProjectSetupCompleted", actor.UserName,
                 draft.Id.ToString("D"), "Success",
-                $"Created Project {project.Id:D} from a fresh setup draft; no engineering content was inherited.",
+                draft.StartKind == ProjectSetupStartKind.Fresh
+                    ? $"Created Project {project.Id:D} from a fresh setup draft; no engineering content was inherited."
+                    : $"Created Project {project.Id:D} from {draft.StartKind} setup with exact source package {draft.SourceImportId:D}; source acceptance is not a new engineering approval.",
                 "local", DateTimeOffset.UtcNow));
             var priorSealActor = db.LadderSealActor;
             db.LadderSealActor = actor.UserName;

@@ -1,11 +1,13 @@
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Traceability;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -55,15 +57,36 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                     Assert.NotNull(source);
                     Assert.Equal(uploaded.Package.Id, source!.Id);
                     Assert.Equal(uploaded.Package.Sha256, source.Sha256);
-                    Assert.Single(source.Modules.SelectMany(x => x.Objects!));
+                    Assert.Equal(fileName.EndsWith(".reqif", StringComparison.Ordinal) ? 2 : 1,
+                        source.Modules.SelectMany(x => x.Objects!).Count());
                 }
 
                 await using var configureScope = provider.CreateAsyncScope();
                 var configureInception = configureScope.ServiceProvider.GetRequiredService<ProjectSetupInceptionService>();
                 var durableSource = await configureInception.ReadSourceAsync(draft.Id, actor, CancellationToken.None);
                 Assert.NotNull(durableSource);
+                var sourceVersion = uploaded.DraftVersion;
+                var categories = durableSource!.Relations.Count > 0 ? "[\"Requirements\",\"Traces\"]" : "[\"Requirements\"]";
+                if (fileName.EndsWith(".reqif", StringComparison.Ordinal))
+                {
+                    var missingParent = JsonNode.Parse(MappingJson(durableSource))!;
+                    var excluded = missingParent["relations"]![0]!;
+                    excluded["include"] = false;
+                    excluded["exclusionReason"] = "Deliberately omit the required parent for gate qualification.";
+                    var rejectedMapping = await configureInception.SaveConfigurationAsync(draft.Id, actor,
+                        new InceptionConfigurationCommand(sourceVersion, categories, missingParent.ToJsonString(), "{}"),
+                        CancellationToken.None);
+                    sourceVersion = rejectedMapping.DraftVersion;
+                    Assert.NotEqual(ProjectSetupSourceStage.Reconciled, rejectedMapping.Package.Stage);
+                    await using var rejectedScope = provider.CreateAsyncScope();
+                    var finalizer = rejectedScope.ServiceProvider.GetRequiredService<ProjectSetupService>();
+                    await Assert.ThrowsAsync<ProjectSetupInvalidException>(() => finalizer.FinalizeAsync(draft.Id, actor,
+                        sourceVersion, "missing-parent-must-not-complete", CancellationToken.None, password, "", true));
+                    Assert.False(await configureScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>()
+                        .Projects.AnyAsync(x => x.Id == draft.ProjectId));
+                }
                 var configured = await configureInception.SaveConfigurationAsync(draft.Id, actor,
-                        new InceptionConfigurationCommand(uploaded.DraftVersion, "[\"Requirements\"]",
+                        new InceptionConfigurationCommand(sourceVersion, categories,
                         MappingJson(durableSource!), "{}"), CancellationToken.None);
                 if (configured.Package.Stage != ProjectSetupSourceStage.Reconciled)
                     throw new Xunit.Sdk.XunitException($"{fileName}: source mapping did not reconcile.");
@@ -91,7 +114,10 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                     Assert.Equal(draft.ProjectId, replay.ProjectId);
                     var db = replayScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
                     Assert.Single(await db.BaselineImports.AsNoTracking().Where(x => x.ProjectId == replay.ProjectId).ToListAsync());
-                    Assert.Single(await db.ProjectInceptionSourceRecords.AsNoTracking().Where(x => x.ProjectId == replay.ProjectId).ToListAsync());
+                    Assert.Equal(fileName.EndsWith(".reqif", StringComparison.Ordinal) ? 3 : 1,
+                        await db.ProjectInceptionSourceRecords.CountAsync(x => x.ProjectId == replay.ProjectId));
+                    if (fileName.EndsWith(".reqif", StringComparison.Ordinal))
+                        await AssertInheritedHierarchyAsync(db, replay.ProjectId, RequirementRevisionOriginKind.ExternalSourcePackage);
                     Assert.Empty(await db.TestExecutions.AsNoTracking().Where(x => x.SoftwareBuildId != null
                         && db.SoftwareBuilds.Any(build => build.Id == x.SoftwareBuildId && build.ProjectId == replay.ProjectId)).ToListAsync());
                 }
@@ -124,10 +150,17 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 var requirement = new RequirementArtifact(project.Id, "SYSR-910021", RequirementLevel.System, now);
                 var revision = new RequirementRevision(requirement.Id, 0, "The PG native requirement shall remain exact.",
                     "PG source rationale", "Inspection", RequirementRevisionState.Active, sourceChange.Id, baseline.Id, now);
+                var child = new RequirementArtifact(project.Id, "HLR-910022", RequirementLevel.HighLevel, now);
+                var childRevision = new RequirementRevision(child.Id, 0, "The PG native child shall retain its exact parent.",
+                    "Child rationale", "Inspection", RequirementRevisionState.Active, sourceChange.Id, baseline.Id, now,
+                    RequirementParentKind.Allocated, parentRevisionIds: [revision.Id]);
+                var allocation = new RequirementTraceLink(project.Id, childRevision.Id, revision.Id,
+                    RequirementTraceType.AllocatedFrom, "Exact source allocation", now);
                 baseline.FreezeForInception("source.manager", now);
-                baseline.MarkRequirementsMaterialized("source.manager", new string('c', 64), 1, now);
+                baseline.MarkRequirementsMaterialized("source.manager", new string('c', 64), 2, now);
                 db.AddRange(account, program, project, release, baseline, sourceChange, requirement, revision,
-                    new BaselineRequirementSelection(baseline.Id, requirement.Id, revision.Id));
+                    new BaselineRequirementSelection(baseline.Id, requirement.Id, revision.Id), child, childRevision,
+                    allocation, new BaselineRequirementSelection(baseline.Id, child.Id, childRevision.Id));
                 await db.SaveChangesAsync();
                 accountId = account.Id;
                 sourceBaselineId = baseline.Id;
@@ -157,7 +190,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 var source = await restartedInception.ReadSourceAsync(draftId, actor, CancellationToken.None);
                 Assert.NotNull(source);
                 var configured = await restartedInception.SaveConfigurationAsync(draftId, actor,
-                    new InceptionConfigurationCommand(captured.DraftVersion, "[\"Requirements\"]",
+                    new InceptionConfigurationCommand(captured.DraftVersion, "[\"Requirements\",\"Traces\"]",
                         NativeMappingJson(source!), "{}"), CancellationToken.None);
                 Assert.Equal(ProjectSetupSourceStage.Reconciled, configured.Package.Stage);
                 configuredVersion = configured.DraftVersion;
@@ -191,16 +224,35 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 Assert.Single(await db.Projects.Where(x => x.Id == completed.ProjectId).ToListAsync());
                 var sourceRecords = await db.ProjectInceptionSourceRecords.Where(x => x.ProjectId == completed.ProjectId)
                     .ToListAsync();
-                Assert.Equal(2, sourceRecords.Count);
+                Assert.Equal(4, sourceRecords.Count);
                 Assert.Contains(sourceRecords, x => x.TargetKind == "AeroLinkBaselineSnapshot");
                 Assert.Contains(sourceRecords, x => x.TargetKind == "Requirement");
-                var sourceRevision = await db.RequirementRevisions.SingleAsync(x => x.EffectiveBaselineId != Guid.Empty
-                    && db.Requirements.Any(artifact => artifact.Id == x.ArtifactId && artifact.ProjectId == completed.ProjectId));
-                Assert.Equal(RequirementRevisionOriginKind.InheritedAeroLinkBaseline, sourceRevision.OriginKind);
+                await AssertInheritedHierarchyAsync(db, completed.ProjectId, RequirementRevisionOriginKind.InheritedAeroLinkBaseline);
                 Assert.Empty(await db.TestExecutions.Where(x => x.SoftwareBuildId != null
                     && db.SoftwareBuilds.Any(build => build.Id == x.SoftwareBuildId && build.ProjectId == completed.ProjectId)).ToListAsync());
             }
         });
+    }
+
+    private static async Task AssertInheritedHierarchyAsync(AeroLinkDbContext db, Guid projectId,
+        RequirementRevisionOriginKind origin)
+    {
+        var rows = await (from revision in db.RequirementRevisions
+                          join artifact in db.Requirements on revision.ArtifactId equals artifact.Id
+                          where artifact.ProjectId == projectId
+                          select new { revision, artifact }).ToListAsync();
+        Assert.Equal(2, rows.Count);
+        var parent = Assert.Single(rows, x => x.artifact.Level == RequirementLevel.System).revision;
+        var child = Assert.Single(rows, x => x.artifact.Level == RequirementLevel.HighLevel).revision;
+        Assert.All(rows, x => Assert.Equal(origin, x.revision.OriginKind));
+        Assert.Equal(RequirementParentKind.Allocated, child.ParentKind);
+        Assert.Equal(parent.Id, Assert.Single(child.ParentRevisionIds));
+        var allocation = await db.RequirementTraces.SingleAsync(x => x.ProjectId == projectId);
+        Assert.Equal(RequirementTraceType.AllocatedFrom, allocation.Type);
+        Assert.Equal(child.Id, allocation.SourceRevisionId);
+        Assert.Equal(parent.Id, allocation.TargetRevisionId);
+        Assert.Equal(child.EffectiveBaselineId, parent.EffectiveBaselineId);
+        Assert.Equal("Inspection", child.VerificationMethod);
     }
 
     private static async Task<ProjectSetupDraft> PrepareExternalDraftAsync(ProjectSetupService service,
@@ -240,7 +292,9 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         return JsonSerializer.Serialize(new
         {
             sourceSha256 = source.Sha256, objects,
-            relations = Array.Empty<object>(), findingResolutions = new Dictionary<string, string>(),
+            relations = source.Relations.Select(x => new { sourceKey = x.Key, include = true,
+                type = "AllocatedFrom", sourceIsParent = false }).ToArray(),
+            findingResolutions = new Dictionary<string, string>(),
         });
     }
 
@@ -257,7 +311,8 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                     sourceAttribute = attribute.Key,
                     destination = IsSourceField(attribute.Key, "Identifier")
                         ? "SourceIdentifier" : IsSourceField(attribute.Key, "Statement")
-                            ? "Statement" : "SourceOnly",
+                            ? "Statement" : IsSourceField(attribute.Key, "VerificationMethod")
+                                ? "VerificationMethod" : "SourceOnly",
                     reason = IsSourceField(attribute.Key, "Identifier") || IsSourceField(attribute.Key, "Statement")
                         ? null : "Retain exact source fact.",
                 }).ToArray(),
@@ -266,7 +321,8 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         {
             sourceSha256 = source.Sha256,
             objects,
-            relations = Array.Empty<object>(),
+            relations = source.Relations.Select(x => new { sourceKey = x.Key, include = true,
+                type = "AllocatedFrom", sourceIsParent = true }).ToArray(),
             findingResolutions = new Dictionary<string, string>(),
         });
     }
@@ -285,6 +341,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 <ATTRIBUTE-DEFINITION-STRING IDENTIFIER="id" LONG-NAME="Identifier"/>
                 <ATTRIBUTE-DEFINITION-STRING IDENTIFIER="level" LONG-NAME="Level"/>
                 <ATTRIBUTE-DEFINITION-STRING IDENTIFIER="statement" LONG-NAME="Statement"/>
+                <ATTRIBUTE-DEFINITION-STRING IDENTIFIER="VerificationMethod" LONG-NAME="VerificationMethod"/>
               </SPEC-OBJECT-TYPE></SPEC-TYPES>
               <SPEC-OBJECTS><SPEC-OBJECT IDENTIFIER="pg-foreign-1">
                 <TYPE><SPEC-OBJECT-TYPE-REF>REQ</SPEC-OBJECT-TYPE-REF></TYPE><VALUES>
@@ -292,7 +349,18 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                   <ATTRIBUTE-VALUE-STRING THE-VALUE="System"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>level</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
                   <ATTRIBUTE-VALUE-STRING THE-VALUE="PG imported wording"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>statement</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
                 </VALUES>
+              </SPEC-OBJECT><SPEC-OBJECT IDENTIFIER="a-child-before-parent">
+                <TYPE><SPEC-OBJECT-TYPE-REF>REQ</SPEC-OBJECT-TYPE-REF></TYPE><VALUES>
+                  <ATTRIBUTE-VALUE-STRING THE-VALUE="PG-CHILD-2"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>id</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+                  <ATTRIBUTE-VALUE-STRING THE-VALUE="HighLevel"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>level</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+                  <ATTRIBUTE-VALUE-STRING THE-VALUE="PG imported child wording"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>statement</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+                  <ATTRIBUTE-VALUE-STRING THE-VALUE="Inspection"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>VerificationMethod</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+                </VALUES>
               </SPEC-OBJECT></SPEC-OBJECTS>
+              <SPEC-RELATIONS><SPEC-RELATION IDENTIFIER="allocation">
+                <SOURCE><SPEC-OBJECT-REF>pg-foreign-1</SPEC-OBJECT-REF></SOURCE>
+                <TARGET><SPEC-OBJECT-REF>a-child-before-parent</SPEC-OBJECT-REF></TARGET>
+              </SPEC-RELATION></SPEC-RELATIONS>
             </REQ-IF>
             """),
         _ => throw new ArgumentException($"Unsupported source format: {fileName}"),

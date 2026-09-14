@@ -81,6 +81,9 @@ public sealed class ProjectSetupInceptionService(
                     ["Revision"] = x.revision.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["RevisionId"] = x.revision.Id.ToString("D"),
                     ["OriginKind"] = x.revision.OriginKind.ToString(),
+                    ["ParentKind"] = x.revision.ParentKind.ToString(),
+                    ["ParentRevisionIds"] = x.revision.ParentRevisionIdsJson,
+                    ["DerivedRationale"] = x.revision.DerivedRationale,
                     ["State"] = x.revision.State.ToString(),
                 })).ToArray();
         var procedureRows = await (from membership in db.BaselineTestProcedures.AsNoTracking()
@@ -529,8 +532,20 @@ public sealed class ProjectSetupInceptionService(
             db.BaselineImports.Add(import);
         }
         var revisionBySource = new Dictionary<string, RequirementRevision>(StringComparer.Ordinal);
-        foreach (var item in reconciliation.Requirements.OrderBy(x => x.SourceKey, StringComparer.Ordinal))
+        var levelOrder = ladder.OrderedLevels.Select((level, index) => (level, index))
+            .ToDictionary(x => x.level, x => x.index);
+        var allocations = reconciliation.Traces.Where(x => x.Type == RequirementTraceType.AllocatedFrom)
+            .ToLookup(x => x.ChildSourceKey, StringComparer.Ordinal);
+        // The accepted ladder orders parents before children. Allocate target parent revision identities first;
+        // source revision IDs remain provenance and must never become cross-project target parent links.
+        foreach (var item in reconciliation.Requirements.OrderBy(x => levelOrder[x.Level])
+                     .ThenBy(x => x.SourceKey, StringComparer.Ordinal))
         {
+            var parentIds = allocations[item.SourceKey].Select(trace =>
+                revisionBySource.TryGetValue(trace.ParentSourceKey, out var parent) ? parent.Id
+                    : throw new ProjectSetupInvalidException("An exact source parent must be materialized before its child."))
+                .Distinct().ToArray();
+            var parentKind = parentIds.Length > 0 ? RequirementParentKind.Allocated : RequirementParentKind.Unspecified;
             var prefix = ladder.RequirementPrefix(item.Level);
             var number = await IdentifierAllocator.NextRequirementAsync(db, prefix, ct);
             var artifact = new RequirementArtifact(project.Id, number, item.Level, now);
@@ -542,12 +557,13 @@ public sealed class ProjectSetupInceptionService(
                 var sourceRevision = source.Attributes.GetValueOrDefault("RevisionId", source.Attributes.GetValueOrDefault("Revision", "0"));
                 revision = RequirementRevision.FromAeroLinkBaseline(artifact.Id, 0, item.Statement, item.Rationale,
                     RequirementRevisionState.Active, package.SourceBaselineId!.Value, targetBaseline.Id, now,
-                    sourceRevision, item.VerificationMethod);
+                    sourceRevision, item.VerificationMethod, parentKind, parentIds);
             }
             else
             {
                 revision = RequirementRevision.FromExternalSourcePackage(artifact.Id, 0, item.Statement, item.Rationale,
-                    RequirementRevisionState.Active, import!.Id, targetBaseline.Id, now);
+                    RequirementRevisionState.Active, import!.Id, targetBaseline.Id, now,
+                    item.VerificationMethod, parentKind, parentIds);
             }
             db.RequirementRevisions.Add(revision);
             db.BaselineRequirements.Add(new BaselineRequirementSelection(targetBaseline.Id, artifact.Id, revision.Id));

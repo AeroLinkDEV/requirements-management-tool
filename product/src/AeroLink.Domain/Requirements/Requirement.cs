@@ -82,13 +82,26 @@ public sealed class RequirementRevision
 
     public static RequirementRevision FromExternalSourcePackage(Guid artifactId, int revision, string statement,
         string rationale, RequirementRevisionState state, Guid sourceBaselineImportId, Guid effectiveBaselineId,
-        DateTimeOffset createdAt) => new(artifactId, revision, statement, rationale, state, sourceBaselineImportId,
-            effectiveBaselineId, createdAt);
+        DateTimeOffset createdAt, string verificationMethod = "",
+        RequirementParentKind parentKind = RequirementParentKind.Unspecified,
+        IEnumerable<Guid>? parentRevisionIds = null) => new(artifactId, revision, statement, rationale, state, sourceBaselineImportId,
+            effectiveBaselineId, createdAt)
+        {
+            VerificationMethod = verificationMethod.Trim(),
+            ParentKind = parentKind,
+            ParentRevisionIdsJson = CanonicalParentIds(parentRevisionIds, parentKind, ""),
+        };
     public static RequirementRevision FromAeroLinkBaseline(Guid artifactId, int revision, string statement,
         string rationale, RequirementRevisionState state, Guid sourceBaselineId, Guid effectiveBaselineId,
-        DateTimeOffset createdAt, string sourceRevisionIdentity, string verificationMethod = "") => new(artifactId,
+        DateTimeOffset createdAt, string sourceRevisionIdentity, string verificationMethod = "",
+        RequirementParentKind parentKind = RequirementParentKind.Unspecified,
+        IEnumerable<Guid>? parentRevisionIds = null) => new(artifactId,
             revision, statement, rationale, state, sourceBaselineId, effectiveBaselineId, createdAt,
-            sourceRevisionIdentity, verificationMethod);
+            sourceRevisionIdentity, verificationMethod)
+        {
+            ParentKind = parentKind,
+            ParentRevisionIdsJson = CanonicalParentIds(parentRevisionIds, parentKind, ""),
+        };
     public Guid Id { get; private set; }
     public Guid ArtifactId { get; private set; }
     public int Revision { get; private set; }
