@@ -185,11 +185,11 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
                 .Include(x => x.Steps).Include(x => x.AllowedUpstream)
                 .SingleAsync(x => x.ProjectId == workspace!.Project.Id);
             var resolved = ProjectLadderResolver.Resolve(ladder);
-            // #726: a new project defaults to an authored NonDefault Draft with System [Procedure] and
-            // software [Case, Procedure]; its documents are available immediately.
+            // #726: a new project has an authored NonDefault ladder with System [Procedure] and software
+            // [Case, Procedure], activated before any content; its documents are available immediately.
             Assert.False(resolved.AgreesWithLegacyDefault());
             Assert.Equal(ProjectLadderConfigurationClassification.NonDefault, ladder.Classification);
-            Assert.Equal(ProjectLadderConfigurationState.Draft, ladder.State);
+            Assert.Equal(ProjectLadderConfigurationState.Active, ladder.State);
             Assert.Equal([RequirementLevel.System, RequirementLevel.HighLevel, RequirementLevel.LowLevel],
                 resolved.Steps.Select(x => x.Level));
             Assert.Equal([7, 7, 15], resolved.Steps.Select(x => (int)x.Capabilities));
@@ -198,10 +198,14 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
                 await db.ProjectLadderConfigurations.AsNoTracking()
                     .Where(x => x.ProjectId == workspace!.Project.Id)
                     .Select(x => x.Classification).ToListAsync());
-            Assert.Equal([ProjectLadderConfigurationState.Draft],
+            Assert.Equal([ProjectLadderConfigurationState.Active],
                 await db.ProjectLadderConfigurations.AsNoTracking()
                     .Where(x => x.ProjectId == workspace!.Project.Id)
                     .Select(x => x.State).ToListAsync());
+            var activation = await db.ProjectLadderConfigurationHistories.AsNoTracking()
+                .SingleAsync(x => x.ConfigurationId == ladder.Id);
+            Assert.Equal(ladder.Version, activation.Revision);
+            Assert.StartsWith("Activated the new project ladder", activation.Reason, StringComparison.Ordinal);
         }
 
         var documents = (await (await client.GetAsync(

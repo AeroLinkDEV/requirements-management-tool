@@ -1465,13 +1465,19 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
             configuration.Id, project.Id, steps[1].Id, steps[2].Id, now));
         db.ProjectLadderConfigurations.Add(configuration);
         await db.SaveChangesAsync();
-        var sealResult = await new ProjectLadderSealAuthority(db).SealAsync(project.Id,
-            LadderBoundContentCatalog.Current.First().Id, $"{name}-content", "test.sealer", now);
-        Assert.Equal(ProjectLadderSealResultKind.Sealed, sealResult.Kind);
         if (state == MatrixState.NonDefaultActiveCaseOnly)
         {
             configuration.Activate("project.owner", now, LadderConsumerManifestCatalog.VersionV2,
                 new string('0', 64));
+            var sealResult = await new ProjectLadderSealAuthority(db).SealAsync(project.Id,
+                LadderBoundContentCatalog.Current.First().Id, $"{name}-content", "test.sealer", now);
+            Assert.Equal(ProjectLadderSealResultKind.Sealed, sealResult.Kind);
+        }
+        else if (state == MatrixState.SealedAuthoredDraft)
+        {
+            // Preserve the intentionally malformed historical fixture. New first-content attempts against
+            // an unsealed Draft are refused, while an already-sealed historical row remains readable.
+            configuration.Seal(LadderBoundContentCatalog.Current.First().Id, $"{name}-content", "test.sealer", now);
         }
         await db.SaveChangesAsync();
         return project.Id;

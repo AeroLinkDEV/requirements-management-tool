@@ -26,10 +26,15 @@ public sealed record FmsShowcaseSummary(Guid ProgramId, Guid ProjectId, Guid Rel
     int HistoricalSwcrs, int TraceLinks, int TestProcedures, int TestExecutions, int Documents);
 
 public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadderPolicyResolver? policyResolver = null,
-    EvidenceFileStore? evidenceStore = null)
+    EvidenceFileStore? evidenceStore = null, ProjectLadderAuthoringService? ladderAuthoring = null)
 {
     private static readonly SemaphoreSlim UpgradeGate = new(1, 1);
     private readonly IProjectLadderPolicyResolver resolver = policyResolver ?? new EffectiveProjectLadderPolicyResolver(db);
+    // The application supplies the shared activation authority through DI. Direct test construction predates
+    // that seam, so retain a complete local registration projection for those isolated fixture databases only.
+    // It is used solely to prove the same creation transition; it does not alter the ladder catalogue.
+    private readonly ProjectLadderAuthoringService creationAuthority =
+        ladderAuthoring ?? CreateStandaloneCreationAuthority(db);
     public const string ProgramCode = "FMSLIVE";
     private const string QualityAnalystUserName = "quality.analyst";
     // The fresh showcase is a historical record. Its SQA authority must therefore pre-date the deterministic
@@ -119,10 +124,19 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
         var program = new ProgramRecord("Flight Management System Live Program", ProgramCode);
         var project = new ProjectRecord(program.Id, "FMS Product Development", "Flight Management System");
         var release15 = new SoftwareRelease(project.Id, "1.5", true); var release16 = new SoftwareRelease(project.Id, "1.6", false, release15.Id);
-        var ladder = NewProjectLadderFactory.Create(project.Id, start);
+        // The fresh showcase owns a characterized Case dataset, so make that supported profile explicit before
+        // the shared creation authority activates it. Normal new projects continue to use the full Case +
+        // Procedure default through NewProjectLadderFactory.Create.
+        var ladder = NewProjectLadderFactory.CreateCaseOnlySoftwareProfile(project.Id, start);
+        var activation = creationAuthority.PrepareActivationForCreation(ladder, "system.fms", start);
         // The showcase project carries a persisted verification-method vocabulary like any other (#701).
         var vocabulary = ProjectVerificationVocabulary.Founding(project.Id, start);
         db.AddRange(program, project, release15, release16, ladder, vocabulary); await db.SaveChangesAsync(ct);
+        db.ProjectLadderConfigurationHistories.Add(new ProjectLadderConfigurationHistory(
+            ladder.Id, project.Id, ladder.Version, "system.fms", start,
+            "Activated the showcase ladder before first seeded content.", activation.CanonicalSnapshot,
+            ProjectLadderSnapshot.Hash(activation.CanonicalSnapshot), activation.SnapshotSchemaVersion));
+        await db.SaveChangesAsync(ct);
 
         var historical = new List<SystemChangeRequest>();
         for (var i = 1; i <= 30; i++) historical.Add(BuildHistoricalRequest($"SRCR-{i:D5}", ChangeRequestType.System, RequirementLevel.System, 5, (i - 1) * 5, project.Id, release15.Id, start.AddDays(i), "system"));
@@ -2842,5 +2856,31 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
     private static string CurrentStatement(RequirementLevel level, int index) => level switch { RequirementLevel.System => $"The FMS shall provide controlled {Topics[(index - 1) % Topics.Length]} capability {index:D3} throughout the applicable operational modes.", RequirementLevel.HighLevel => $"The FMS software shall compute and manage {Topics[(index - 1) % Topics.Length]} behavior H{index:D3} using validated inputs and deterministic state transitions.", _ => $"The FMS low-level component shall implement {Topics[(index - 1) % Topics.Length]} algorithm L{index:D3} with bounded execution and explicit status reporting." };
     private static string HistoricalStatement(RequirementLevel level, string baseNumber, int revision) => $"Historical revision {revision:D2} of {baseNumber} defined the earlier approved {level} FMS behavior.";
     private static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
+
+    private static ProjectLadderAuthoringService CreateStandaloneCreationAuthority(AeroLinkDbContext db)
+    {
+        var consumers = LadderConsumerManifestCatalog.RequiredConsumerIds
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id))
+            .ToArray();
+        var artifactKeys = new[]
+        {
+            new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Procedure),
+            new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case),
+            new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure),
+            new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Case),
+            new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure),
+        };
+        const VerificationArtifactCapability capabilities =
+            VerificationArtifactCapability.Identity | VerificationArtifactCapability.Header |
+            VerificationArtifactCapability.Revision | VerificationArtifactCapability.Lifecycle |
+            VerificationArtifactCapability.Coverage | VerificationArtifactCapability.Execution |
+            VerificationArtifactCapability.ControlledDocument | VerificationArtifactCapability.ChangeReview;
+        var typedConsumers = consumers.Select(x =>
+            (IVerificationArtifactConsumerRegistration)new VerificationArtifactConsumerRegistration(
+                x.Id, x.Description, artifactKeys, capabilities)).ToArray();
+        return new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers, typedConsumers);
+    }
+
     private sealed record CurrentRequirement(RequirementArtifact Artifact, RequirementRevision Revision);
 }

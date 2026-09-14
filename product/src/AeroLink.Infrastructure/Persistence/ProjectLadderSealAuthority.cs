@@ -65,6 +65,16 @@ public sealed class ProjectLadderSealAuthority(AeroLinkDbContext db)
             configuration = local;
         if (configuration is null)
             return new(ProjectLadderSealResultKind.NotFound, Error: "The project has no persisted ladder configuration.");
+
+        // First-content sealing is only valid against the runtime-effective graph. A newly authored draft must
+        // be activated before content can depend on it, and a retired graph is historical evidence rather than
+        // current authority. Keep the guard ahead of every mutation so a refused attempt cannot append seal
+        // history or allow the caller's content to reach the database. Already-sealed rows retain the historical
+        // AlreadySealed result, including legacy rows whose lifecycle predates this guard.
+        if (!configuration.IsSealed && !IsEffectiveForContent(configuration))
+            throw new DomainException(
+                $"The project ladder is not effective ({configuration.Classification}/{configuration.State}); activate the accepted ladder before creating content.");
+
         if (configuration.IsSealed)
             return new(ProjectLadderSealResultKind.AlreadySealed, configuration);
 
@@ -100,6 +110,12 @@ public sealed class ProjectLadderSealAuthority(AeroLinkDbContext db)
         if (string.IsNullOrWhiteSpace(actor))
             throw new DomainException("Ladder sealing requires an attributable actor.");
     }
+
+    private static bool IsEffectiveForContent(ProjectLadderConfiguration configuration) =>
+        (configuration.Classification == ProjectLadderConfigurationClassification.LegacyDefault
+            && configuration.State == ProjectLadderConfigurationState.Stored)
+        || (configuration.Classification == ProjectLadderConfigurationClassification.NonDefault
+            && configuration.State == ProjectLadderConfigurationState.Active);
 
     public static string ConflictExplanation(ProjectLadderConfiguration configuration) =>
         configuration.IsSealed

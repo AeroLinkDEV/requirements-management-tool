@@ -69,12 +69,12 @@ public sealed class FmsShowcaseSeederTests
                 .Include(x => x.Steps).Include(x => x.AllowedUpstream)
                 .SingleAsync(x => x.ProjectId == project.Id);
             var resolvedLadder = ProjectLadderResolver.Resolve(ladder);
-            // #726: the showcase starts from the new-project default — an authored NonDefault Draft with
-            // software [Case, Procedure]. The seeder writes legacy-shaped demo content directly, so it does
-            // not itself run the first-content seal authority.
+            // The showcase owns a characterized Case dataset, so its fresh ladder is an explicit Case-only
+            // software profile activated before the first seeded content through the shared authority.
             Assert.False(resolvedLadder.AgreesWithLegacyDefault());
             Assert.Equal(ProjectLadderConfigurationClassification.NonDefault, ladder.Classification);
-            Assert.Equal(ProjectLadderConfigurationState.Draft, ladder.State);
+            Assert.Equal(ProjectLadderConfigurationState.Active, ladder.State);
+            Assert.Equal("system.fms", ladder.ActivatedBy);
             Assert.Equal(2, ladder.AllowedUpstream.Count);
             Assert.Equal(["1.5", "1.6"], await db.Releases.AsNoTracking().Where(x => x.ProjectId == project.Id).OrderBy(x => x.Version).Select(x => x.Version).ToArrayAsync());
             Assert.Equal(1250, await db.BaselineRequirements.CountAsync(x => x.BaselineId == first.ReleasedBaselineId));
