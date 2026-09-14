@@ -6,6 +6,8 @@ using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
 
 namespace AeroLink.Infrastructure.Tests;
@@ -75,6 +77,19 @@ public sealed class FmsShowcaseSeederTests
             Assert.Equal(ProjectLadderConfigurationClassification.NonDefault, ladder.Classification);
             Assert.Equal(ProjectLadderConfigurationState.Active, ladder.State);
             Assert.Equal("system.fms", ladder.ActivatedBy);
+            // A standalone seed must attest the same actual consumer inventory as application composition.
+            var applicationServices = new ServiceCollection().AddAeroLinkInfrastructure(
+                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                { ["Database:Provider"] = "Sqlite", ["ConnectionStrings:AeroLink"] = "Data Source=:memory:" }).Build());
+            var applicationAuthority = new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance,
+                applicationServices.Where(x => x.ServiceType == typeof(ILadderConsumerRegistration))
+                    .Select(x => (ILadderConsumerRegistration)x.ImplementationInstance!),
+                applicationServices.Where(x => x.ServiceType == typeof(IVerificationArtifactConsumerRegistration))
+                    .Select(x => (IVerificationArtifactConsumerRegistration)x.ImplementationInstance!));
+            var expectedActivation = applicationAuthority.PrepareActivationForCreation(
+                NewProjectLadderFactory.CreateCaseOnlySoftwareProfile(project.Id, DateTimeOffset.UtcNow),
+                "system.fms", DateTimeOffset.UtcNow);
+            Assert.Equal(expectedActivation.ManifestHash, ladder.ActivationManifestHash);
             Assert.Equal(2, ladder.AllowedUpstream.Count);
             Assert.Equal(["1.5", "1.6"], await db.Releases.AsNoTracking().Where(x => x.ProjectId == project.Id).OrderBy(x => x.Version).Select(x => x.Version).ToArrayAsync());
             Assert.Equal(1250, await db.BaselineRequirements.CountAsync(x => x.BaselineId == first.ReleasedBaselineId));

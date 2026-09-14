@@ -2859,28 +2859,13 @@ public sealed partial class FmsShowcaseSeeder(AeroLinkDbContext db, IProjectLadd
 
     private static ProjectLadderAuthoringService CreateStandaloneCreationAuthority(AeroLinkDbContext db)
     {
-        var consumers = LadderConsumerManifestCatalog.RequiredConsumerIds
-            .OrderBy(x => x, StringComparer.Ordinal)
-            .Select(id => (ILadderConsumerRegistration)new LadderConsumerRegistration(id, id))
-            .ToArray();
-        var artifactKeys = new[]
-        {
-            new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Procedure),
-            new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case),
-            new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Procedure),
-            new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Case),
-            new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure),
-        };
-        const VerificationArtifactCapability capabilities =
-            VerificationArtifactCapability.Identity | VerificationArtifactCapability.Header |
-            VerificationArtifactCapability.Revision | VerificationArtifactCapability.Lifecycle |
-            VerificationArtifactCapability.Coverage | VerificationArtifactCapability.Execution |
-            VerificationArtifactCapability.ControlledDocument | VerificationArtifactCapability.ChangeReview;
-        var typedConsumers = consumers.Select(x =>
-            (IVerificationArtifactConsumerRegistration)new VerificationArtifactConsumerRegistration(
-                x.Id, x.Description, artifactKeys, capabilities)).ToArray();
-        return new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance, consumers, typedConsumers);
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        InfrastructureLadderConsumers.Register(services);
+        return new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance,
+            services.Where(x => x.ServiceType == typeof(ILadderConsumerRegistration))
+                .Select(x => (ILadderConsumerRegistration)x.ImplementationInstance!),
+            services.Where(x => x.ServiceType == typeof(IVerificationArtifactConsumerRegistration))
+                .Select(x => (IVerificationArtifactConsumerRegistration)x.ImplementationInstance!));
     }
-
     private sealed record CurrentRequirement(RequirementArtifact Artifact, RequirementRevision Revision);
 }
