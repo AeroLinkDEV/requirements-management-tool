@@ -68,6 +68,22 @@ function text(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
+function sourceFactLabel(value: string) {
+  const labels: Record<string, string> = {
+    AeroLinkBaseline: "Existing AeroLink baseline",
+    ExternalBaseline: "External baseline",
+    ProjectAdministrator: "Project administrator",
+    AcceptSource: "Accept source",
+    RequirementTrace: "Requirement trace",
+    SourceEvidenceFact: "Source evidence fact",
+    SourceEvidenceRelation: "Source evidence relation",
+    TestCaseProcedure: "Test case to procedure link",
+    TestRequirementCoverage: "Test requirement coverage",
+  };
+  if (labels[value]) return labels[value];
+  return value.replace(/([a-z])([A-Z])/g, "$1 $2");
+}
+
 function formatDate(value?: string | null) {
   if (!value) return "Not recorded";
   const date = new Date(value);
@@ -153,11 +169,24 @@ function snapshotEntries(value: unknown) {
   return Object.entries(row).filter(([key]) => key.toLowerCase() !== "storagekey");
 }
 
-function snapshotValue(value: unknown) {
+function snapshotValue(value: unknown, depth = 0): string {
   if (typeof value === "string") return value || "Empty source value";
   if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) return `${value.length} recorded value${value.length === 1 ? "" : "s"}`;
-  if (value && typeof value === "object") return "Structured source fact";
+  if (value === null || value === undefined) return "Unknown source value";
+  if (depth >= 3) return "Nested source facts omitted after three levels";
+  if (Array.isArray(value)) {
+    if (!value.length) return "Empty source list";
+    const entries = value.slice(0, 12).map((entry) => snapshotValue(entry, depth + 1));
+    return `${entries.join(", ")}${value.length > entries.length ? `, and ${value.length - entries.length} more` : ""}`;
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value).filter(([key]) => key.toLowerCase() !== "storagekey");
+    if (!entries.length) return "No visible source fields";
+    const rendered = entries
+      .slice(0, 20)
+      .map(([key, entry]) => `${key}: ${snapshotValue(entry, depth + 1)}`);
+    return `${rendered.join("; ")}${entries.length > rendered.length ? "; and more source fields" : ""}`;
+  }
   return "Unknown source value";
 }
 
@@ -230,7 +259,7 @@ export default function InceptionSourceProvenancePanel({
             <section className="projectInceptionProvenanceCard" aria-label="Source package identity">
               <h3>Exact source snapshot</h3>
               <dl className="projectInceptionProvenanceGrid">
-                <div><dt>Source kind</dt><dd>{projection.package.kind}</dd></div>
+                <div><dt>Source kind</dt><dd>{sourceFactLabel(projection.package.kind)}</dd></div>
                 <div><dt>Format</dt><dd>{projection.package.format || "Not reported"}</dd></div>
                 <div><dt>File</dt><dd>{projection.package.fileName || "Not reported"}</dd></div>
                 <div><dt>SHA-256</dt><dd><code>{projection.package.sha256 || "Not reported"}</code></dd></div>
@@ -253,8 +282,8 @@ export default function InceptionSourceProvenancePanel({
               </p>
               <dl className="projectInceptionProvenanceGrid">
                 <div><dt>Accepted by</dt><dd>{projection.acceptance.displayName || projection.acceptance.userName || "Identity unavailable"}</dd></div>
-                <div><dt>Authority</dt><dd>{projection.acceptance.authority || "Not reported"}</dd></div>
-                <div><dt>Action</dt><dd>{projection.acceptance.action || "Not reported"}</dd></div>
+                <div><dt>Authority</dt><dd>{projection.acceptance.authority ? sourceFactLabel(projection.acceptance.authority) : "Not reported"}</dd></div>
+                <div><dt>Action</dt><dd>{projection.acceptance.action ? sourceFactLabel(projection.acceptance.action) : "Not reported"}</dd></div>
                 <div><dt>Accepted at</dt><dd>{formatDate(projection.acceptance.signedAt)}</dd></div>
                 <div><dt>Assertion hash</dt><dd><code>{projection.acceptance.contentHash || "Not reported"}</code></dd></div>
               </dl>
@@ -271,7 +300,7 @@ export default function InceptionSourceProvenancePanel({
                 <tbody>
                   {projection.records.map((record) => (
                     <tr key={record.id} data-source-record-key={record.sourceKey}>
-                      <td><strong>{record.targetKind}</strong><small><code>{record.targetId}</code></small>{record.targetRevisionId && <small>Revision <code>{record.targetRevisionId}</code></small>}</td>
+                      <td><strong>{sourceFactLabel(record.targetKind)}</strong><small><code>{record.targetId}</code></small>{record.targetRevisionId && <small>Revision <code>{record.targetRevisionId}</code></small>}</td>
                       <td><strong>{record.sourceIdentifier || record.sourceKey}</strong><small>{record.sourceModule || "Source module unavailable"}</small><small><code>{record.sourceKey}</code></small></td>
                       <td>{record.sourceRevision || "Not reported"}</td>
                       <td>{record.sourceState || "Not reported"}</td>

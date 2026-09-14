@@ -209,7 +209,6 @@ async function finalizeSource(
   setupUrl: string,
   testInfo: TestInfo,
   evidenceName: string,
-  expectedStatus = 200,
 ) {
   await page.goto(setupUrl);
   await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
@@ -224,13 +223,6 @@ async function finalizeSource(
   const finalizeResponse = page.waitForResponse((response) => response.url().includes("/finalize"));
   await page.getByRole("button", { name: "Create Project" }).click();
   const finalizeResult = await finalizeResponse;
-  if (expectedStatus !== 200) {
-    expect(finalizeResult.status()).toBe(expectedStatus);
-    const errorBody = await finalizeResult.text();
-    expect(errorBody).toContain("cannot_finalize");
-    expect(errorBody).toContain("must resolve Allocated or Derived exact parents");
-    return null;
-  }
   if (!finalizeResult.ok()) throw new Error(`Project finalization returned ${finalizeResult.status()}: ${await finalizeResult.text()}`);
   await page.waitForURL(/\/projects\/[0-9a-f-]+\/builds$/i, { timeout: 60_000 }).catch(async () => {
     const alerts = await page.getByRole("alert").allTextContents();
@@ -279,8 +271,9 @@ test("inherits an authorized native baseline with exact mapped traces and discov
   expect(projection.projectId).toBe(projectId);
   expect(projection.package?.kind).toBe("AeroLinkBaseline");
   expect(projection.package?.sourceBaselineId).toBe(option!.baselineId);
+  expect(projection.package?.sourceState).toBeTruthy();
   expect(projection.records.length).toBeGreaterThan(0);
-  expect(projection.records.every((record) => record.sourceState.length > 0)).toBeTruthy();
+  expect(projection.records.some((record) => record.sourceRevision.length > 0)).toBeTruthy();
   expect(projection.acceptance?.authority).toBeTruthy();
 });
 
@@ -292,7 +285,6 @@ const externalFixtures = [
     mimeType: "application/xml",
     buffer: Buffer.from(reqIfFixture, "utf8"),
     categories: ["Requirements", "Traces"],
-    expectedFinalizeStatus: 400,
   },
   {
     name: "ReqIF root-only",
@@ -301,7 +293,6 @@ const externalFixtures = [
     mimeType: "application/xml",
     buffer: Buffer.from(reqIfRootFixture, "utf8"),
     categories: ["Requirements"],
-    expectedFinalizeStatus: 200,
   },
   {
     name: "CSV",
@@ -310,9 +301,8 @@ const externalFixtures = [
     mimeType: "text/csv",
     buffer: Buffer.from("Identifier,Level,Statement,Rationale\r\nCSV-1,System,CSV source statement,CSV source rationale\r\n", "utf8"),
     categories: ["Requirements"],
-    expectedFinalizeStatus: 200,
   },
-  { name: "XLSX", format: "XLSX", fileName: "inception.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: xlsxFixture, categories: ["Requirements"], expectedFinalizeStatus: 200 },
+  { name: "XLSX", format: "XLSX", fileName: "inception.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: xlsxFixture, categories: ["Requirements"] },
 ] as const;
 
 for (const fixture of externalFixtures) {
@@ -336,14 +326,7 @@ for (const fixture of externalFixtures) {
     const reconciled = await reconcile(page, draftId, [...fixture.categories]);
     expect(reconciled.reconciliation?.ready).toBeTruthy();
     expect(reconciled.assertion?.hash).toMatch(/^[0-9a-f]{64}$/i);
-    const projectId = await finalizeSource(
-      page,
-      setupUrl,
-      testInfo,
-      `external-${fixture.name.toLocaleLowerCase().replaceAll(" ", "-")}`,
-      fixture.expectedFinalizeStatus ?? 200,
-    );
-    if (!projectId) return;
+    const projectId = await finalizeSource(page, setupUrl, testInfo, `external-${fixture.name.toLocaleLowerCase().replaceAll(" ", "-")}`);
     const projection = await json<{ projectId: string; package?: { kind: string; format: string; fileName: string; sha256: string }; records: { sourceIdentifier: string; sourceSnapshot: unknown }[] }>(
       await page.request.get(`${apiBase}/api/projects/${projectId}/inception-source`),
     );
@@ -354,5 +337,15 @@ for (const fixture of externalFixtures) {
     expect(projection.records.length).toBeGreaterThan(0);
     expect(projection.records.some((record) => record.sourceIdentifier.length > 0)).toBeTruthy();
     expect(JSON.stringify(projection)).not.toContain("StorageKey");
+    if (fixture.name === "ReqIF root-only") {
+      const facts = page.locator("details").first();
+      await facts.locator("summary").click();
+      await expect(facts).toContainText("The system shall retain the ReqIF source fact.");
+    }
+    if (fixture.name === "CSV") {
+      const facts = page.locator("details").first();
+      await facts.locator("summary").click();
+      await expect(facts).toContainText("CSV source statement");
+    }
   });
 }

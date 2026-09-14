@@ -301,6 +301,13 @@ function repositoryStatusLabel(status: RepositoryStatus) {
   return "Pending";
 }
 
+function startKindLabel(kind: StartKind | "") {
+  if (kind === "AeroLinkBaseline") return "Existing AeroLink baseline";
+  if (kind === "ExternalBaseline") return "External baseline";
+  if (kind === "Fresh") return "Fresh project";
+  return "Not chosen";
+}
+
 function valuesFromDraft(draft: SetupDraft): SetupValues {
   return {
     projectName: draft.project?.name ?? "",
@@ -1376,7 +1383,7 @@ export default function ProjectSetupWalkthrough({
           <div>
             <dt>Starting point</dt>
             <dd>
-              {values.startKind || "Not chosen"}
+              {startKindLabel(values.startKind)}
               {values.selectedCategories.length
                 ? ` · ${values.selectedCategories.length} inherited categories`
                 : " · no inherited categories"}

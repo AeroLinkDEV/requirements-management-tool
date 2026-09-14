@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { login } from "./auth";
+import { apiBase, login } from "./auth";
 
 test("source metadata is read-only and source proof expires after mapping or relation edits", async ({ page }, testInfo) => {
   await login(page, "admin", { openProject: false });
@@ -164,4 +164,110 @@ test("source metadata is read-only and source proof expires after mapping or rel
   expect(remappedObjects.find((item) => item.sourceKey === "req-1")?.attributes.find((item) => item.sourceAttribute === "Statement")?.destination).toBe("SourceOnly");
   expect(remappedObjects.find((item) => item.sourceKey === "req-2")?.attributes.find((item) => item.sourceAttribute === "Statement")?.destination).toBe("Statement");
   await page.screenshot({ path: testInfo.outputPath("source-proof-invalidated-and-reconciled.png"), fullPage: true });
+});
+
+test("native source picker follows an authoritative page total past the first 50 baselines", async ({ page }, testInfo) => {
+  const rows = (offset: number) => Array.from({ length: offset === 0 ? 50 : 1 }, (_, index) => {
+    const number = offset + index + 1;
+    return {
+      baselineId: `00000000-0000-4000-8000-${number.toString().padStart(12, "0")}`,
+      projectId: `00000000-0000-4000-9000-${number.toString().padStart(12, "0")}`,
+      projectName: `Authorized project ${number}`,
+      name: `Baseline ${number}`,
+      displayNumber: `SW-${number.toString().padStart(2, "0")}.01`,
+      state: "Frozen",
+      requirementsCount: number,
+      casesCount: 0,
+      proceduresCount: 0,
+      evidenceCount: 0,
+    };
+  });
+  await page.route(/\/api\/project-setups\/source-options\?/, async (route) => {
+    const offset = Number(new URL(route.request().url()).searchParams.get("offset") ?? "0");
+    await route.fulfill({ json: { items: rows(offset), total: 51, offset, limit: 50 } });
+  });
+
+  await login(page, "admin", { openProject: false });
+  await page.goto("/projects/new");
+  await page.getByLabel("Project name").fill(`Paging proof ${Date.now()}`);
+  await page.getByLabel("Software product").fill("Paging proof software");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel("Existing authorized AeroLink baseline").check();
+  await expect(page.getByText("1–50 of 51", { exact: true })).toBeVisible();
+  const next = page.getByRole("button", { name: "Next page" });
+  await expect(next).toBeEnabled();
+  await next.click();
+  await expect(page.getByText("51–51 of 51", { exact: true })).toBeVisible();
+  await expect(page.getByText("Baseline 51", { exact: true })).toBeVisible();
+  await expect(next).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Previous page" })).toBeEnabled();
+  await page.screenshot({ path: testInfo.outputPath("native-source-paging-last-page.png"), fullPage: true });
+});
+
+test("a delayed stale source load cannot clear a new acceptance", async ({ page }) => {
+  const draftId = "00000000-0000-4000-8000-000000000999";
+  const sourceId = "00000000-0000-4000-8000-000000000998";
+  const source = {
+    id: sourceId,
+    kind: "ExternalBaseline",
+    fileName: "delayed.reqif",
+    format: "REQIF",
+    sha256: "delayed-source-sha",
+    selectedCategories: ["Requirements"],
+    modules: [{ key: "requirements", name: "Requirements", objectCount: 1, objectKeys: ["req-1"], objects: [{ key: "req-1", module: "requirements", sourceIdentifier: "REQ-1", kind: "Requirement", attributes: { Statement: "A delayed source fact", Level: "System" } }] }],
+    relations: [],
+    findings: [],
+    findingResolutions: {},
+    reconciliation: { ready: true, observedObjects: 1, includedObjects: 1, excludedObjects: 0, observedRelations: 0, includedRelations: 0, excludedRelations: 0, errors: [] },
+    assertion: { text: "The delayed source assertion is exact.", hash: "delayed-assertion-hash" },
+    ladderSuggestion: { levels: ["System"], relationships: [], findings: [] },
+  };
+  const draft = {
+    draftId,
+    state: "Draft",
+    currentStep: "Review",
+    version: 4,
+    project: { name: "Delayed source proof", softwareProduct: "Delayed source software" },
+    start: { kind: "ExternalBaseline", sourceImportId: sourceId },
+    build: { version: "1.02", officialName: "SW-01.02" },
+    selectedCategories: ["Requirements"],
+    ladder: { steps: [{ catalogueEntry: "System", position: 1, capabilities: 7, enabledArtifactKinds: ["Procedure"] }], relationships: [] },
+    reviewRules: {
+      accepted: true,
+      definition: {
+        rules: [{ subject: "System", name: "System review", stages: [
+          { name: "Review", kind: "Review", requiredRole: "SystemEngineer", authorityKind: "BaseRole" },
+          { name: "Approval", kind: "Approval", requiredRole: "SystemEngineer", authorityKind: "BaseRole" },
+        ] }],
+      },
+    },
+    repository: { mode: "ConfigureLater", provider: "GitLab", endpoint: null },
+    mapping: {},
+  };
+  let sourceGets = 0;
+  await page.route(new RegExp(`/api/project-setups/${draftId}$`), async (route) => {
+    await route.fulfill({ json: draft });
+  });
+  await page.route(new RegExp(`/api/project-setups/${draftId}/source$`), async (route) => {
+    sourceGets += 1;
+    if (sourceGets === 1) await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await route.fulfill({ json: { draftVersion: 4, source } });
+  });
+
+  await login(page, "admin", { openProject: false });
+  const initialNavigation = page.goto(`/projects/setup/${draftId}`);
+  await expect.poll(() => sourceGets, { timeout: 5_000 }).toBe(1);
+  await page.goto(`/projects/setup/${draftId}`);
+  await initialNavigation.catch(() => undefined);
+  await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
+  const acceptance = page.getByLabel(/I accept this exact source assertion/i);
+  await expect(acceptance).toBeVisible();
+  await acceptance.check();
+  await page.getByLabel("Password to finalize source acceptance").fill("memory-only-password");
+  await expect(acceptance).toBeChecked();
+  await expect(page.getByRole("button", { name: "Create Project" })).toBeEnabled();
+  await new Promise((resolve) => setTimeout(resolve, 1_800));
+  expect(sourceGets).toBeGreaterThan(1);
+  await expect(acceptance).toBeChecked();
+  await expect(page.getByRole("button", { name: "Create Project" })).toBeEnabled();
 });

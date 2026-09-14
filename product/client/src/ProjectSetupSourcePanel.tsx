@@ -78,6 +78,18 @@ function sourceCategoryLabel(category: SourceCategory) {
           : "Evidence facts";
 }
 
+function sourceRelationLabel(value: string) {
+  const labels: Record<string, string> = {
+    RequirementTrace: "Requirement trace",
+    AllocatedFrom: "Allocated from",
+    DerivedFrom: "Derived from",
+    CaseProcedure: "Test case to procedure",
+    VerificationCoverage: "Verification coverage",
+    EvidenceExecution: "Evidence to execution",
+  };
+  return labels[value] ?? value.replace(/([a-z])([A-Z])/g, "$1 $2");
+}
+
 function selectedCategoryKeys(source: SourceView, selected: string[]) {
   const known = new Set<string>(source.categories.map((category) => category.key));
   const sourceSelection = source.selectedCategories.filter((category) => known.has(category));
@@ -939,9 +951,9 @@ export default function ProjectSetupSourcePanel({
                   <strong>Typed source relationships</strong>
                   {source.ladderSuggestion.relationships.length ? (
                     <ul>
-                      {source.ladderSuggestion.relationships.map((relationship, relationshipIndex) => (
+                  {source.ladderSuggestion.relationships.map((relationship, relationshipIndex) => (
                         <li key={`${relationship.key}-${relationshipIndex}`}>
-                          {relationship.type}: {relationship.sourceLevel} → {relationship.targetLevel}
+                          {sourceRelationLabel(relationship.type)}: {relationship.sourceLevel} → {relationship.targetLevel}
                         </li>
                       ))}
                     </ul>
@@ -1224,10 +1236,10 @@ export default function ProjectSetupSourcePanel({
                       )
                     }
                   />{" "}
-                  Include {relation.sourceType} ({formatCount(relation.count)} observed)
+                  Include {sourceRelationLabel(relation.sourceType)} ({formatCount(relation.count)} observed)
                 </label>
                 <small className="setupSourceRelationType">
-                  Source relationship type: {relation.type || relation.sourceType}
+                  Source relationship type: {sourceRelationLabel(relation.type || relation.sourceType)}
                   {relation.sourceKey && relation.targetKey
                     ? ` · ${relation.sourceKey} → ${relation.targetKey}`
                     : ""}
@@ -1257,8 +1269,8 @@ export default function ProjectSetupSourcePanel({
                           }
                         >
                           <option value="">Choose supported trace type</option>
-                          <option value="AllocatedFrom">AllocatedFrom</option>
-                          <option value="DerivedFrom">DerivedFrom</option>
+                          <option value="AllocatedFrom">Allocated from</option>
+                          <option value="DerivedFrom">Derived from</option>
                         </select>
                       </label>
                     )}
