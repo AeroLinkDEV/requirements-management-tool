@@ -203,10 +203,13 @@ async function beginSetup(page: Page, name: string, startLabel: string) {
 
 async function moveToRepository(page: Page, version: string) {
   await page.getByRole("button", { name: /3\. First build/ }).click();
-  const versionInput = page.getByRole("textbox").first();
+  await expect(page.getByRole("heading", { name: "First working build", level: 2 })).toBeVisible();
+  const versionInput = page.getByRole("textbox", { name: "Version", exact: true });
   await expect(versionInput).toBeVisible();
   await versionInput.fill(version);
+  await expect(versionInput).toHaveValue(version);
   await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Review and approval rules", level: 2 })).toBeVisible();
   const acceptance = page.getByLabel(/explicitly accept these concrete review and approval rules/i);
@@ -294,11 +297,23 @@ test("inherits an authorized native baseline with exact mapped traces and discov
   const captured = await source(page.request, draftId);
   expect(captured.kind).toBe("AeroLinkBaseline");
   expect(captured.selectedCategories).toEqual([]);
-  await moveToRepository(page, "1.06");
   const reconciled = await reconcile(page, draftId, ["Requirements", "Traces"]);
+  // A selected native source starts with its exact snapshot saved but its source choices still pending. Finish
+  // that server reconciliation before leaving Starting point so the walkthrough's source-save guard has a
+  // durable configuration to preserve while advancing through the ladder and review steps. Remount the panel
+  // after the API helper so its local source state reflects the server-committed mapping and cannot replay the
+  // pre-reconciliation relation defaults on the next setup save. The server advances a reconciled source to
+  // its Review step, so the step navigation below deliberately moves back to First build before entering the
+  // remaining setup steps.
+  await page.reload();
+  await moveToRepository(page, "1.06");
   expect(reconciled.modules.some((module) => (module.objects?.length ?? 0) > 1)).toBeTruthy();
   expect(reconciled.relations.length).toBeGreaterThan(0);
   expect(reconciled.assertion).toBeTruthy();
+  // Repository setup is the current step after the shared traversal. Enter Review explicitly before the
+  // finalization helper reloads the draft, as the source endpoint does not implicitly advance this UI step.
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
   const projectId = await finalizeSource(page, setupUrl, testInfo, "native-inception");
   const projection = await json<{ projectId: string; package?: { kind: string; format: string; sourceBaselineId?: string; sha256: string }; acceptance?: { authority: string }; records: { sourceIdentifier: string; sourceRevision: string; sourceState: string }[] }>(
     await page.request.get(`${apiBase}/api/projects/${projectId}/inception-source`),
