@@ -39,6 +39,10 @@ test("actual authorized build identities, states and predecessors drive visual s
     await expect(card).toHaveAttribute("data-build-version", release.version);
     await expect(card.locator("..")).toHaveAttribute("data-predecessor-release-id", release.predecessorReleaseId ?? "");
     await expect(card.getByText(release.isReleased ? "Released" : "In Work", { exact: true })).toBeVisible();
+    if (fixture) {
+      const renderedIdentities: Record<string, string> = { "9.0": "SW-09.00", "10.5": "SW-10.50", "11.0": "SW-11.00" };
+      await expect(card.getByText(renderedIdentities[release.version], { exact: true })).toBeVisible();
+    }
   }
   await page.screenshot({ path: testInfo.outputPath("actual-stored-lineage.png"), fullPage: true });
   const selected = project.releases.find(release => release.isReleased)!;

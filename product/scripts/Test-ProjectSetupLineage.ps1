@@ -46,10 +46,12 @@ try {
     Set-Location (Join-Path $repositoryRoot 'product/client')
     # Windows PowerShell treats native stderr as ErrorRecords. Retain warnings/diagnostics and judge
     # Playwright by its process exit code, rather than terminating before its result is written.
+    $browserExit = 1
     try {
         $ErrorActionPreference = 'Continue'
         & npx playwright test tests/project-lineage-browser-contract.spec.ts --grep 'actual authorized build identities' *> (Join-Path $runRoot 'browser.log')
-        $browserExit = $LASTEXITCODE
+        $browserCommandSucceeded = $?
+        if ($browserCommandSucceeded) { $browserExit = $LASTEXITCODE }
     }
     finally { $ErrorActionPreference = 'Stop' }
     if ($browserExit -ne 0) { throw 'Stored branch browser qualification failed; see retained browser.log.' }
