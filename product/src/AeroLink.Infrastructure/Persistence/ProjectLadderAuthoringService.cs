@@ -60,6 +60,14 @@ public sealed record ProjectLadderReadModel(
     /// change applicability before its activation succeeds.
     /// </summary>
     public IReadOnlyList<LadderRelationshipDraft> EffectiveRelationships { get; init; } = [];
+
+    /// <summary>
+    /// Whether the current project authority may make a structural change without first creating a new
+    /// effective configuration. Empty Active non-default configurations remain editable until the first
+    /// authored or inherited engineering record seals the ladder; this is deliberately computed by the
+    /// persistence authority rather than inferred from the lifecycle label in a client.
+    /// </summary>
+    public bool CanEditStructure { get; init; }
 }
 
 public sealed record ProjectLadderEditResult(
@@ -433,6 +441,14 @@ public sealed class ProjectLadderAuthoringService(
     private async Task<ProjectLadderReadModel> ToReadModelAsync(ProjectLadderConfiguration configuration, CancellationToken ct, bool canManage = false)
     {
         var effectivePolicy = ProjectLadderPolicyStorage.ResolvePersisted(configuration, configuration.ProjectId, policy);
+        // Keep this projection aligned with EditAsync's authoritative pre-save and post-claim checks. The
+        // Active state alone does not mean immutable: a new project may correct an empty effective ladder.
+        // Once any ladder-bound engineering content exists, the service returns false and EditAsync refuses
+        // the same request under its transaction/version guard.
+        var canEditStructure = canManage && !configuration.IsSealed
+            && (configuration.State != ProjectLadderConfigurationState.Active
+                || configuration.Classification != ProjectLadderConfigurationClassification.NonDefault
+                || !await HasLadderBoundContentAsync(configuration.ProjectId, ct));
         var history = await db.ProjectLadderConfigurationHistories.AsNoTracking()
             .Where(x => x.ConfigurationId == configuration.Id).OrderByDescending(x => x.Revision)
             .Select(x => new ProjectLadderHistoryReadModel(x.Revision, x.Actor, x.OccurredAt, x.Reason, x.CanonicalSnapshot,
@@ -473,6 +489,7 @@ public sealed class ProjectLadderAuthoringService(
         {
             EffectiveSteps = effectiveSteps,
             EffectiveRelationships = effectiveRelationships,
+            CanEditStructure = canEditStructure,
         };
     }
 }

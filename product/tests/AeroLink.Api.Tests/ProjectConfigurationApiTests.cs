@@ -67,6 +67,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         using var readJson = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
         Assert.Equal(1, readJson.RootElement.GetProperty("version").GetInt64());
         Assert.True(readJson.RootElement.GetProperty("canManage").GetBoolean());
+        Assert.True(readJson.RootElement.GetProperty("canEditStructure").GetBoolean());
         Assert.Equal(new[] { "System", "HighLevel", "LowLevel", "Customer", "Interface" },
             readJson.RootElement.GetProperty("catalogue").EnumerateArray().Select(x => x.GetProperty("catalogueEntry").GetString()).ToArray());
         Assert.Equal(["System>HighLevel", "HighLevel>LowLevel"],
@@ -111,6 +112,105 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
             expectedVersion = 2, reason = "malicious", state = "Active", steps = new[] { new { catalogueEntry = "System", position = 1, capabilities = 7 } }, relationships = Array.Empty<object>(),
         });
         Assert.Equal(HttpStatusCode.BadRequest, lifecycle.StatusCode);
+    }
+
+    [Fact]
+    public async Task Empty_active_ladder_can_be_corrected_until_first_content_then_projection_and_write_lock_agree()
+    {
+        var seeded = await SeedAsync(_host.Factory);
+        using var client = _host.CreateClient();
+        await SignInAsync(client, seeded.ManagerName);
+
+        using (var edit = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
+        {
+            expectedVersion = 1,
+            reason = "Prepare the empty project ladder",
+            steps = new[]
+            {
+                new { catalogueEntry = "System", position = 1, capabilities = 7 },
+                new { catalogueEntry = "HighLevel", position = 2, capabilities = 7 },
+            },
+            relationships = new[] { new { parent = "System", child = "HighLevel" } },
+        }))
+            Assert.True(edit.IsSuccessStatusCode, await edit.Content.ReadAsStringAsync());
+
+        using (var activation = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration/activate",
+            new { expectedVersion = 2, reason = "Make the empty ladder effective" }))
+            Assert.True(activation.IsSuccessStatusCode, await activation.Content.ReadAsStringAsync());
+
+        using var active = JsonDocument.Parse(await (await client.GetAsync($"/api/projects/{seeded.ProjectId}/configuration"))
+            .Content.ReadAsStringAsync());
+        Assert.Equal("Active", active.RootElement.GetProperty("state").GetString());
+        Assert.True(active.RootElement.GetProperty("canEditStructure").GetBoolean());
+        Assert.Equal(3, active.RootElement.GetProperty("version").GetInt64());
+
+        using var correction = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
+        {
+            expectedVersion = 3,
+            reason = "Correct the empty project to its interface boundary",
+            steps = new[]
+            {
+                new { catalogueEntry = "Interface", position = 1, capabilities = 1 },
+                new { catalogueEntry = "System", position = 2, capabilities = 7 },
+            },
+            relationships = new[] { new { parent = "Interface", child = "System" } },
+        });
+        Assert.Equal(HttpStatusCode.OK, correction.StatusCode);
+        using var corrected = JsonDocument.Parse(await correction.Content.ReadAsStringAsync());
+        Assert.Equal("Active", corrected.RootElement.GetProperty("state").GetString());
+        Assert.True(corrected.RootElement.GetProperty("canEditStructure").GetBoolean());
+        Assert.Equal(4, corrected.RootElement.GetProperty("version").GetInt64());
+        Assert.Equal(["Interface", "System"], corrected.RootElement.GetProperty("steps").EnumerateArray()
+            .Select(x => x.GetProperty("catalogueEntry").GetString()).ToArray());
+        Assert.Equal(["Interface>System"], corrected.RootElement.GetProperty("effectiveRelationships").EnumerateArray()
+            .Select(x => $"{x.GetProperty("parent").GetString()}>{x.GetProperty("child").GetString()}").ToArray());
+        Assert.Equal(3, corrected.RootElement.GetProperty("history").GetArrayLength());
+
+        using var content = await client.PostAsJsonAsync("/api/change-request-drafts", new
+        {
+            projectId = seeded.ProjectId,
+            targetReleaseId = seeded.ReleaseId,
+            type = "System",
+            title = "First content locks the accepted ladder",
+            problem = "The empty project now has controlled content.",
+            analysis = "The content must depend on the accepted ladder.",
+            solution = "Keep the ladder structurally stable after authoring begins.",
+            requirementChanges = new[]
+            {
+                new
+                {
+                    level = "System", kind = "Introduce",
+                    statement = "The project shall retain its accepted system ladder.",
+                    rationale = "The first authored package establishes ladder dependency.",
+                    verificationMethod = "Inspection",
+                },
+            },
+        });
+        Assert.Equal(HttpStatusCode.Created, content.StatusCode);
+
+        using var locked = JsonDocument.Parse(await (await client.GetAsync($"/api/projects/{seeded.ProjectId}/configuration"))
+            .Content.ReadAsStringAsync());
+        Assert.False(locked.RootElement.GetProperty("canEditStructure").GetBoolean());
+        Assert.True(locked.RootElement.GetProperty("isSealed").GetBoolean());
+        Assert.Equal(5, locked.RootElement.GetProperty("version").GetInt64());
+
+        using var rejected = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
+        {
+            expectedVersion = 5,
+            reason = "Reject structural edits after content",
+            steps = new[] { new { catalogueEntry = "System", position = 1, capabilities = 7 } },
+            relationships = Array.Empty<object>(),
+        });
+        Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
+        Assert.Contains("sealed",
+            await rejected.Content.ReadAsStringAsync());
+
+        using var unchanged = JsonDocument.Parse(await (await client.GetAsync($"/api/projects/{seeded.ProjectId}/configuration"))
+            .Content.ReadAsStringAsync());
+        Assert.Equal(5, unchanged.RootElement.GetProperty("version").GetInt64());
+        Assert.Equal(4, unchanged.RootElement.GetProperty("history").GetArrayLength());
+        Assert.Equal(["Interface", "System"], unchanged.RootElement.GetProperty("steps").EnumerateArray()
+            .Select(x => x.GetProperty("catalogueEntry").GetString()).ToArray());
     }
 
     [Fact]

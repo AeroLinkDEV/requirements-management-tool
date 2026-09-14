@@ -22,7 +22,7 @@ type Configuration = {
   activationManifestVersion?: string; activationManifestHash?: string;
   steps: Step[]; effectiveSteps: Step[]; effectiveRelationships: Relationship[]; relationships: Relationship[]; history: HistoryItem[];
   readiness: { version: string; hash: string; consumers: Consumer[]; missingOrUnrouted: Consumer[]; isReady: boolean };
-  catalogue: CatalogueEntry[]; canManage: boolean;
+  catalogue: CatalogueEntry[]; canManage: boolean; canEditStructure: boolean;
 };
 type ConfigurationResponse = Omit<Configuration, "steps" | "effectiveSteps" | "effectiveRelationships" | "catalogue"> & {
   steps: (Omit<Step, "capabilities"> & { capabilities: unknown })[];
@@ -145,7 +145,10 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
 
   const dirty = useMemo(() => configuration && (JSON.stringify(steps) !== JSON.stringify(configuration.steps)
     || JSON.stringify(relationships) !== JSON.stringify(configuration.relationships)), [configuration, steps, relationships]);
-  const canAuthor = !!configuration?.canManage && configuration.state !== "Active";
+  // The server projection owns the empty-Active correction decision. Lifecycle state alone is insufficient:
+  // a new project can still correct its ladder until authored or inherited engineering content exists.
+  const canAuthor = !!configuration?.canEditStructure;
+  const activeCorrection = configuration?.state === "Active" && canAuthor;
 
   const updateStep = (index: number, patch: Partial<Step>) => setSteps(current => current.map((step, i) => i === index ? { ...step, ...patch } : step));
   const reorder = (index: number, delta: number) => {
@@ -196,7 +199,11 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
         body: JSON.stringify({ expectedVersion: configuration.version, reason, steps, relationships }),
       });
       const normalized = normalizeConfiguration(value);
-      setConfiguration(normalized); setSteps(normalized.steps); setRelationships(normalized.relationships); setReason(""); setNotice("Draft configuration saved with immutable history evidence.");
+      setConfiguration(normalized); setSteps(normalized.steps); setRelationships(normalized.relationships); setReason("");
+      setNotice(activeCorrection
+        ? "Empty ladder correction saved and effective immediately; the stored history records this change."
+        : "Draft configuration saved with immutable history evidence.");
+      if (activeCorrection) onActivated(normalized);
     } catch (failure) { setError(operationError(failure, "The configuration edit was refused.")); }
     finally { setSaving(false); }
   };
@@ -251,7 +258,7 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
             </>}
           </>}
           {section === "ladder" && <>
-            <div className="projectConfigurationPanelHeader"><div><h2>Requirement ladder</h2><p>Version {configuration.version} · {configuration.classification} · {configuration.state}. Authored edits remain drafts until the sole activation gate succeeds.</p></div><span className="projectConfigurationPill">{dirty ? "Unsaved changes" : "Saved"}</span></div>
+            <div className="projectConfigurationPanelHeader"><div><h2>Requirement ladder</h2><p>Version {configuration.version} · {configuration.classification} · {configuration.state}. {configuration.state === "Active" ? "This is the effective runtime ladder; an empty project may still make a structural correction." : "Authored edits remain drafts until the sole activation gate succeeds."}</p></div><span className="projectConfigurationPill">{dirty ? "Unsaved changes" : "Saved"}</span></div>
             <ol className="ladderRows">{steps.map((step, index) => {
               const catalogue = configuration.catalogue.find(entry => entry.catalogueEntry === step.catalogueEntry);
               const supported = catalogue?.supportedCapabilities ?? 0;
@@ -278,7 +285,7 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
                 <div className="ladderRowActions">{canAuthor && <><button type="button" onClick={() => reorder(index, -1)} disabled={index === 0}>↑</button><button type="button" onClick={() => reorder(index, 1)} disabled={index === steps.length - 1}>↓</button><button type="button" onClick={() => removeStep(index)}>Remove</button></>}</div>
               </li>
             })}</ol>
-            {canAuthor ? <div className="ladderActions"><button type="button" onClick={addStep} disabled={steps.length >= configuration.catalogue.length}>Add level</button><label>Reason<input value={reason} onChange={event => setReason(event.target.value)} placeholder="Why is this ladder changing?" /></label><button type="button" className="primaryProjectConfigurationAction" disabled={saving || !dirty} onClick={() => void save()}>Save draft</button><button type="button" disabled={saving} onClick={() => void activate()}>Attempt activation</button></div> : <p className="projectConfigurationNotice">{configuration.state === "Active" ? "This ladder is active and immutable. Its stored manifest is now the runtime authority; author a new configuration revision through the project configuration workflow." : "You have read access to this project configuration. A Configuration Manager, Program Manager, or Administrator must author changes."}</p>}
+            {canAuthor ? <div className="ladderActions"><button type="button" onClick={addStep} disabled={steps.length >= configuration.catalogue.length}>Add level</button><label>Reason<input value={reason} onChange={event => setReason(event.target.value)} placeholder={activeCorrection ? "Why is this empty ladder changing?" : "Why is this ladder changing?"} /></label><button type="button" className="primaryProjectConfigurationAction" disabled={saving || !dirty} onClick={() => void save()}>{activeCorrection ? "Save effective correction" : "Save draft"}</button>{configuration.state !== "Active" && <button type="button" disabled={saving} onClick={() => void activate()}>Attempt activation</button>}</div> : <p className="projectConfigurationNotice">{configuration.canManage ? `${configuration.state === "Active" ? "This effective ladder" : "This ladder"} is locked because controlled content depends on it.` : "You have read access to this project configuration. A Configuration Manager, Program Manager, or Administrator must author changes."}</p>}
             <div className="relationshipEditor"><h3>Allowed upstream relationships</h3>{relationships.map((edge, index) => <div className="relationshipRow" key={`${edge.parent}-${edge.child}-${index}`}><select value={edge.parent} disabled={!canAuthor} onChange={event => setRelationships(relationships.map((current, i) => i === index ? { ...current, parent: event.target.value as Level } : current))}>{steps.map(step => <option key={step.catalogueEntry} value={step.catalogueEntry}>{displayLevel(step.catalogueEntry)}</option>)}</select><span>→</span><select value={edge.child} disabled={!canAuthor} onChange={event => setRelationships(relationships.map((current, i) => i === index ? { ...current, child: event.target.value as Level } : current))}>{steps.map(step => <option key={step.catalogueEntry} value={step.catalogueEntry}>{displayLevel(step.catalogueEntry)}</option>)}</select>{canAuthor && <button type="button" onClick={() => setRelationships(relationships.filter((_, i) => i !== index))}>Remove</button>}</div>)}{canAuthor && <button type="button" onClick={addRelationship}>Add relationship</button>}</div>
           </>}
           {section === "history" && <><h2>Immutable edit history</h2><p>Each successful edit records its actor, reason, exact canonical snapshot and hash.</p><table className="configurationHistory"><thead><tr><th>Revision</th><th>Actor</th><th>When</th><th>Reason</th><th>Snapshot</th></tr></thead><tbody>{configuration.history.map(item => <tr key={item.revision}><td>{item.revision}</td><td>{item.actor}</td><td>{new Date(item.occurredAt).toLocaleString()}</td><td>{item.reason}</td><td><details><summary><code>{item.snapshotHash.slice(0, 16)}…</code></summary><code>{item.canonicalSnapshot}</code></details></td></tr>)}</tbody></table></>}
