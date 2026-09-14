@@ -353,6 +353,16 @@ test("large source modules page object editors without losing exact mapping deci
       Level: index < 20 ? "System" : "HighLevel",
     },
   }));
+  const relations = Array.from({ length: 45 }, (_, index) => ({
+    key: `source-relation-${index + 1}`,
+    sourceKey: `source-${index + 1}`,
+    targetKey: `source-${Math.max(1, index)}`,
+    sourceType: "AllocatedFrom",
+    type: "AllocatedFrom",
+    count: 1,
+    include: false,
+    exclusionReason: "Initially excluded pending review.",
+  }));
   let sourceReady = false;
   let configurationBody: Record<string, unknown> | undefined;
   let source: Record<string, unknown> = {
@@ -372,7 +382,7 @@ test("large source modules page object editors without losing exact mapping deci
       include: true,
       objects,
     }],
-    relations: [],
+    relations,
     findings: [],
     findingResolutions: {},
     reconciliation: null,
@@ -396,9 +406,9 @@ test("large source modules page object editors without losing exact mapping deci
         observedObjects: objects.length,
         includedObjects: objects.length,
         excludedObjects: 0,
-        observedRelations: 0,
-        includedRelations: 0,
-        excludedRelations: 0,
+        observedRelations: relations.length,
+        includedRelations: 1,
+        excludedRelations: relations.length - 1,
         errors: [],
         manifestHash: "manifest-205",
       },
@@ -481,6 +491,24 @@ test("large source modules page object editors without losing exact mapping deci
   await expect(pageTwo.getByLabel("Ladder level")).toHaveValue("LowLevel");
   await expect(pageTwo.getByLabel("Exclusion reason", { exact: true })).toHaveValue("Per-object exclusion on page two.");
 
+  const relationsSection = page.locator("section.setupSourceRelations");
+  await expect(relationsSection.getByText("1–20 of 45 source relationships", { exact: true })).toBeVisible();
+  await expect(relationsSection.locator(".setupSourceRelation")).toHaveCount(20);
+  await relationsSection.getByRole("button", { name: "Next relationships page" }).click();
+  await expect(relationsSection.getByText("21–40 of 45 source relationships", { exact: true })).toBeVisible();
+  const relationPageTwo = relationsSection.locator(".setupSourceRelation").filter({ hasText: "source-21 → source-20" });
+  await expect(relationPageTwo).toHaveCount(1);
+  await relationPageTwo.getByRole("checkbox").check();
+  await relationPageTwo.getByLabel("Trace type for AllocatedFrom").selectOption("AllocatedFrom");
+  await relationPageTwo.getByLabel("Relation direction for AllocatedFrom").selectOption("parent");
+  await relationsSection.getByRole("button", { name: "Previous relationships page" }).click();
+  await expect(relationsSection.getByText("1–20 of 45 source relationships", { exact: true })).toBeVisible();
+  await relationsSection.getByRole("button", { name: "Next relationships page" }).click();
+  await expect(relationPageTwo.getByRole("checkbox")).toBeChecked();
+  await expect(relationPageTwo.getByLabel("Trace type for AllocatedFrom")).toHaveValue("AllocatedFrom");
+  await expect(relationPageTwo.getByLabel("Relation direction for AllocatedFrom")).toHaveValue("parent");
+  await relationsSection.getByRole("button", { name: "Previous relationships page" }).click();
+
   await module.getByRole("button", { name: "Previous objects page" }).click();
   await page.getByRole("checkbox", { name: /^Requirements / }).check();
   await page.getByRole("button", { name: "Save choices and reconcile" }).click();
@@ -513,6 +541,23 @@ test("large source modules page object editors without losing exact mapping deci
     .find((item) => item.sourceAttribute === "Statement")?.destination).toBe("Rationale");
   expect(pageTwoMapping?.attributes
     .find((item) => item.sourceAttribute === "Statement")?.destination).toBe("SourceOnly");
+  const mappedRelations = ((configurationBody.mapping as {
+    relations?: Array<{
+      sourceKey: string;
+      include: boolean;
+      type: string | null;
+      sourceIsParent?: boolean;
+      exclusionReason?: string;
+    }>;
+  }).relations ?? []);
+  expect(mappedRelations).toHaveLength(relations.length);
+  const relation21 = mappedRelations.find((item) => item.sourceKey === "source-relation-21");
+  const relation22 = mappedRelations.find((item) => item.sourceKey === "source-relation-22");
+  expect(relation21?.include).toBe(true);
+  expect(relation21?.type).toBe("AllocatedFrom");
+  expect(relation21?.sourceIsParent).toBe(true);
+  expect(relation22?.include).toBe(false);
+  expect(relation22?.exclusionReason).toBe("Initially excluded pending review.");
   await page.screenshot({ path: testInfo.outputPath("paged-source-object-mappings.png"), fullPage: false });
 });
 

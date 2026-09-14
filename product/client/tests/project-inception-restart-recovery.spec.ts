@@ -55,6 +55,9 @@ type RecoveryRecord = {
   offPageMappingDestination?: string;
   offPageLevel?: string;
   offPageExclusionReason?: string;
+  offPageRelationKey?: string;
+  offPageRelationPage?: number;
+  offPageRelationExclusionReason?: string;
 };
 
 type RecoveryMappingObject = {
@@ -356,9 +359,28 @@ test("prepare five disposable drafts for a separate API-process recovery invocat
   const affectedRelationKeys = new Set(nativeRelations
     .filter((relation) => [String(relation.sourceKey ?? ""), String(relation.targetKey ?? "")].includes(offPageSourceKey))
     .map((relation) => String(relation.key ?? relation.sourceKey ?? "")));
+  // Keep one independent relation decision on a later UI page. Prefer a relation that is already
+  // excluded so this recovery proof does not change the source dependency closure; if every later
+  // relation is included, excluding one exact row is still a valid, attributable configuration.
+  const excludedOffPageRelationIndex = nativeMapping.relations.findIndex((relation, index) =>
+    index >= 20 && !affectedRelationKeys.has(relation.sourceKey) && !relation.include,
+  );
+  const offPageRelationIndex = excludedOffPageRelationIndex >= 0
+    ? excludedOffPageRelationIndex
+    : nativeMapping.relations.findIndex((relation, index) =>
+      index >= 20 && !affectedRelationKeys.has(relation.sourceKey),
+    );
+  expect(offPageRelationIndex, "native source relation on a later relation page").toBeGreaterThanOrEqual(20);
+  const offPageRelation = nativeMapping.relations[offPageRelationIndex];
+  const offPageRelationExclusionReason = "Excluded from this restart recovery relation proof.";
   nativeMapping.relations = nativeMapping.relations.map((relation) =>
     affectedRelationKeys.has(relation.sourceKey)
       ? { ...relation, include: false, exclusionReason: offPageExclusionReason }
+      : relation,
+  );
+  nativeMapping.relations = nativeMapping.relations.map((relation, index) =>
+    index === offPageRelationIndex
+      ? { ...relation, include: false, exclusionReason: offPageRelationExclusionReason }
       : relation,
   );
   const nativeConfigured = await responseJson<Record<string, unknown>>(await page.request.put(`${apiBase}/api/project-setups/${native.draftId}/source/configuration`, {
@@ -389,6 +411,9 @@ test("prepare five disposable drafts for a separate API-process recovery invocat
     offPageMappingDestination: "Rationale",
     offPageLevel: "System",
     offPageExclusionReason,
+    offPageRelationKey: offPageRelation.sourceKey,
+    offPageRelationPage: Math.floor(offPageRelationIndex / 20),
+    offPageRelationExclusionReason,
   });
 
   for (const format of ["ReqIF", "CSV", "XLSX"] as const) {
@@ -490,6 +515,19 @@ test("resume all five drafts after the API process has been restarted", async ({
           .first();
         await expect(offPageMapping).toHaveValue(record.offPageMappingDestination ?? "Rationale");
       }
+    }
+    if (record.offPageRelationKey) {
+      const relationPage = record.offPageRelationPage ?? 1;
+      for (let pageIndex = 0; pageIndex < relationPage; pageIndex += 1) {
+        await page.getByRole("button", { name: "Next relationships page" }).click();
+      }
+      const offPageRelation = page.locator(
+        `.setupSourceRelation[data-source-relation-key="${record.offPageRelationKey}"]`,
+      );
+      await expect(offPageRelation).toHaveCount(1);
+      await expect(offPageRelation.getByRole("checkbox")).not.toBeChecked();
+      await expect(offPageRelation.getByRole("textbox", { name: "Exclusion reason", exact: true }))
+        .toHaveValue(record.offPageRelationExclusionReason ?? "");
     }
     // Native baselines can contain hundreds of exact source objects. Capture the visible
     // selection/reconciliation state without asking Chromium to rasterize the entire long panel.
