@@ -17,8 +17,9 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
   const suffix = Date.now().toString().slice(-7)
   const label = `726-${suffix}`
 
-  // 1. A new project: the real creation seam must default to System [Procedure] and software
-  //    [Case, Procedure] (authored Draft), then activate through the sole public activation gate.
+  // 1. A new project: the real creation seam establishes the effective System [Procedure] and software
+  //    [Case, Procedure] ladder before the first content operation. Creation owns the short activation
+  //    transaction, so this journey must consume the accepted configuration rather than re-activating it.
   const workspaceResponse = await request.post(`${apiBase}/api/workspaces`, {
     data: {
       programName: `${label} Program`,
@@ -31,11 +32,24 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
   })
   expect(workspaceResponse.ok(), await workspaceResponse.text()).toBeTruthy()
   const workspace = await workspaceResponse.json()
-  const activateResponse = await request.post(
-    `${apiBase}/api/projects/${workspace.project.id}/configuration/activate`, {
-      data: { expectedVersion: 1, reason: 'Activate the #726 default Case + Procedure verification tier.' },
-    })
-  expect(activateResponse.ok(), await activateResponse.text()).toBeTruthy()
+  const configurationResponse = await request.get(
+    `${apiBase}/api/projects/${workspace.project.id}/configuration`)
+  expect(configurationResponse.ok(), await configurationResponse.text()).toBeTruthy()
+  const configuration = await configurationResponse.json() as {
+    state: string
+    effectiveSteps: { catalogueEntry: string; enabledArtifactKinds: string[] }[]
+    effectiveRelationships: { parent: string; child: string }[]
+  }
+  expect(configuration.state).toBe('Active')
+  expect(configuration.effectiveSteps.map(step => step.catalogueEntry)).toEqual(['System', 'HighLevel', 'LowLevel'])
+  expect(configuration.effectiveSteps.find(step => step.catalogueEntry === 'System')?.enabledArtifactKinds)
+    .toEqual(['Procedure'])
+  expect(configuration.effectiveSteps.find(step => step.catalogueEntry === 'HighLevel')?.enabledArtifactKinds)
+    .toEqual(['Case', 'Procedure'])
+  expect(configuration.effectiveSteps.find(step => step.catalogueEntry === 'LowLevel')?.enabledArtifactKinds)
+    .toEqual(['Case', 'Procedure'])
+  expect(configuration.effectiveRelationships.map(edge => `${edge.parent}>${edge.child}`))
+    .toEqual(['System>HighLevel', 'HighLevel>LowLevel'])
 
   // 2. An approved HLR requirement change, a frozen materialized baseline, and an exact build identity.
   const impacts = JSON.stringify({

@@ -47,7 +47,7 @@ test('software proposals govern exact build-scoped upward allocations and derive
 
   const wrongLevel = await draft(`Wrong-level upward allocation ${Date.now()}`, [proposal({ upstreamRevisionIds: [hlrs[0].revisionId] })])
   expect(wrongLevel.status()).toBe(400)
-  expect(await wrongLevel.text()).toContain('current System revision')
+  expect(await wrongLevel.text()).toContain('current configured parent revision from this Project and build')
   const unknownRevision = await draft(`Unknown-build upward allocation ${Date.now()}`, [proposal({ upstreamRevisionIds: ['00000000-0000-0000-0000-000000000001'] })])
   expect(unknownRevision.status()).toBe(400)
 
