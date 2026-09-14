@@ -1,4 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { observeCanvas } from './digital-thread-rendered-helpers'
 
 async function snapshot(page: Page, info: TestInfo, label: string) {
   await info.attach(label, { body: await page.screenshot(), contentType: 'image/png' })
@@ -28,6 +29,7 @@ async function usable(page: Page, id: string) {
 
 for (const mode of ['page-detailed', 'page-compact', 'standalone-control']) test(`owner sequence ${mode}`, async ({ page }, info) => {
   const compact = mode === 'page-compact'
+  await observeCanvas(page)
   await page.addInitScript(() => { (window as any).__1046 = []; for (const name of ['pointerdown', 'pointerup', 'pointerover', 'pointerout', 'click', 'focusin']) document.addEventListener(name, e => {
     const p = e as PointerEvent; (window as any).__1046.push({ kind: name, t: performance.now(), id: (e.target as Element)?.closest?.('[data-node-id]')?.getAttribute('data-node-id'), x: p.clientX, y: p.clientY })
   }, true) })

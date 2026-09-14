@@ -1,8 +1,8 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
-import { waitForCanvasSettled } from './digital-thread-rendered-helpers'
+import { waitForCanvasSettled, readCanvasState, observeCanvas } from './digital-thread-rendered-helpers'
 
 async function open(page: Page, path = '/tests/fixtures/digital-thread-1046.html?page=1') {
-  await page.addInitScript(() => { (window as any).__1046 = [] })
+  await observeCanvas(page)
   await page.goto(path)
   await waitForCanvasSettled(page)
 }
@@ -13,7 +13,7 @@ async function body(page: Page, id: string, click = false) {
   if (click) await page.mouse.click(x, y)
 }
 async function paint(page: Page) {
-  return page.evaluate(() => (window as any).__1046.filter((e: any) => e.kind === 'paint').at(-1))
+  return (await page.evaluate(readCanvasState))!
 }
 async function evidence(page: Page, info: TestInfo) {
   await info.attach('settled', { body: await page.screenshot(), contentType: 'image/png' })
@@ -86,15 +86,17 @@ test('selection uses selection intent; manual pan and passive resize keep reader
   await open(page)
   await body(page, 'sys-33', true)
   await waitForCanvasSettled(page)
-  expect((await paint(page)).framedFor).toContain('|selection|')
+  expect((await paint(page)).display.zoom).toBeGreaterThanOrEqual(0.72)
+  const beforePan = (await paint(page)).display
   const c = (await page.locator('.dtCanvas').boundingBox())!
   await page.mouse.move(c.x + 6, c.y + c.height - 50)
   await page.mouse.down()
   await page.mouse.move(c.x + 6, c.y + c.height - 230, { steps: 12 })
   await page.mouse.up()
   await waitForCanvasSettled(page)
-  expect((await paint(page)).cameraOwned).toBe(true)
+  // Ownership is proved by the unchanged painted camera after passive resize and clear below.
   const owned = (await paint(page)).display
+  expect(owned).not.toEqual(beforePan)
   await page.setViewportSize({ width: 1920, height: 990 })
   await waitForCanvasSettled(page)
   expect((await paint(page)).display).toEqual(owned)
@@ -159,20 +161,20 @@ test('native keyboard activation and touch preserve exact selection under reduce
 test('external arrival and browser back forward retain landing intent after internal selection', async ({ page }, info) => {
   await open(page, '/tests/fixtures/digital-thread-1046.html?page=1&focal=sys-33')
   await selectedFits(page)
-  expect((await paint(page)).framedFor).toContain('|landing|')
+  expect((await paint(page)).display.zoom).toBeGreaterThanOrEqual(0.86)
   await body(page, 'proc-4', true)
   await waitForCanvasSettled(page)
   expect((await paint(page)).selectedId).toBe('proc-4')
-  expect((await paint(page)).framedFor).toContain('|selection|')
+  expect((await paint(page)).display.zoom).toBeGreaterThanOrEqual(0.72)
   await page.goBack()
   await waitForCanvasSettled(page)
   expect((await paint(page)).selectedId).toBe('sys-33')
-  expect((await paint(page)).framedFor).toContain('|landing|')
+  expect((await paint(page)).display.zoom).toBeGreaterThanOrEqual(0.86)
   await selectedFits(page)
   await page.goForward()
   await waitForCanvasSettled(page)
   expect((await paint(page)).selectedId).toBe('proc-4')
-  expect((await paint(page)).framedFor).toContain('|landing|')
+  expect((await paint(page)).display.zoom).toBeGreaterThanOrEqual(0.86)
   await selectedFits(page)
   await evidence(page, info)
 })
@@ -203,5 +205,118 @@ test('recovered strip space fits the selected card without an unnecessary bottom
   const card = (await page.locator('[data-node-id="proc-4"]').boundingBox())!
   expect(card.height + 24).toBeLessThanOrEqual(current.box.height)
   expect(card.height + 24).toBeGreaterThan(current.box.height - 64)
+  await evidence(page, info)
+})
+
+test('relation-label status stays in toolbar clearance across Artifact docks', async ({ page }, info) => {
+  await open(page, '/tests/fixtures/artifact-thread.html?case=hlr')
+  let visibleNotices = 0
+  for (const dock of ['Bottom', 'Right', 'Auto']) {
+    await page.getByRole('button', { name: dock, exact: true }).click()
+    await waitForCanvasSettled(page)
+    const notice = page.locator('.dtCanvasPlacementNotice')
+    if (!await notice.isVisible()) continue
+    visibleNotices++
+    const bounds = await notice.evaluate(element => {
+      const notice = element.getBoundingClientRect()
+      const toolbar = element.closest('.dtCanvasControls')!.getBoundingClientRect()
+      const painted = { left: Math.max(notice.left, toolbar.left), right: Math.min(notice.right, toolbar.right),
+        top: notice.top, bottom: notice.bottom }
+      const targets = [...document.querySelectorAll<HTMLElement>('.dtCanvasNode:not(.is-dimmed), .dtaPanel')]
+      return { painted, toolbar: toolbar.toJSON(), collisions: targets.filter(target => {
+        const r = target.getBoundingClientRect()
+        return painted.left < r.right && painted.right > r.left && painted.top < r.bottom && painted.bottom > r.top
+      }).map(target => target.dataset.nodeId ?? target.className) }
+    })
+    expect(bounds.painted.top).toBeGreaterThanOrEqual(bounds.toolbar.top)
+    expect(bounds.painted.bottom).toBeLessThanOrEqual(bounds.toolbar.bottom)
+    expect(bounds.collisions).toEqual([])
+    await info.attach(`notice-${dock}`, { body: await page.screenshot(), contentType: 'image/png' })
+  }
+  expect(visibleNotices).toBeGreaterThan(0)
+})
+
+test('late linked-card height measurement preserves a usable foreground story', async ({ page }, info) => {
+  await open(page)
+  await body(page, 'pr-6')
+  await page.waitForTimeout(1400)
+  const source = (await page.locator('[data-node-id="pr-6"]').boundingBox())!
+  const before = await paint(page)
+  await page.addStyleTag({ content: '[data-node-id="hlr-128"] > * { padding-bottom: 26px !important; font-family: Georgia, serif !important; }' })
+  await waitForCanvasSettled(page)
+  const after = await paint(page)
+  expect(after.display).toEqual(before.display)
+  expect(after.emphasisId).toBe('pr-6')
+  const now = (await page.locator('[data-node-id="pr-6"]').boundingBox())!
+  expect(Math.abs(now.y - source.y)).toBeLessThan(0.5)
+  const proof = await page.evaluate(() => {
+    const p = (window as any).__1046.filter((e: any) => e.kind === 'paint').at(-1)
+    const v = document.querySelector('.dtCanvas')!.getBoundingClientRect()
+    return ['hlr-128', 'hlr-134'].map(id => {
+      const r = document.querySelector(`[data-node-id="${id}"]`)!.getBoundingClientRect()
+      return { id, top: r.top, bottom: r.bottom, frameTop: v.top + p.box.y, frameBottom: v.top + p.box.y + p.box.height }
+    })
+  })
+  expect(after.heights.find(([id]: [string]) => id === 'hlr-128')[1]).toBeGreaterThan(before.heights.find(([id]: [string]) => id === 'hlr-128')[1])
+  for (const r of proof) {
+    expect(r.top).toBeGreaterThanOrEqual(r.frameTop)
+    expect(r.bottom).toBeLessThanOrEqual(r.frameBottom)
+  }
+  await info.attach('late-measurement', { body: JSON.stringify({ before, after, proof }), contentType: 'application/json' })
+  await evidence(page, info)
+})
+
+test('external page movement preserves hover until deliberate pointer movement', async ({ page }, info) => {
+  await open(page)
+  await body(page, 'pr-6')
+  await page.waitForTimeout(1400)
+  // Simulate surrounding page content changing position, not a reveal moving its own source.
+  await page.locator('.dtCanvas').evaluate(element => { (element as HTMLElement).style.transform = 'translateY(180px)' })
+  await page.waitForTimeout(900)
+  expect((await paint(page)).emphasisId).toBe('pr-6')
+  await page.mouse.move(5, 5)
+  await page.waitForTimeout(900)
+  expect((await paint(page)).emphasisId).toBeNull()
+  await evidence(page, info)
+})
+
+test('Tab never rests behind foreground and native focusability returns after clearing', async ({ page }, info) => {
+  await open(page, '/tests/fixtures/digital-thread-1046.html')
+  await body(page, 'pr-6')
+  await page.waitForTimeout(1400)
+  const covered = await page.locator('[data-occluded="true"]:has(a)').first().getAttribute('data-node-id')
+  expect(covered).toBeTruthy()
+  const background = page.locator(`[data-node-id="${covered}"]`)
+  const originalHref = await background.locator('a').first().getAttribute('href')
+  await page.locator('[data-node-id="pr-6"]').focus()
+  let canvasStops = 0
+  for (let i = 0; i < 24; i++) {
+    await page.keyboard.press('Tab')
+    await waitForCanvasSettled(page)
+    const focus = await page.evaluate(() => {
+      const active = document.activeElement as HTMLElement
+      const own = active.closest<HTMLElement>('.dtCanvasNode')
+      if (!own) return null
+      const r = active.getBoundingClientRect()
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest<HTMLElement>('.dtCanvasNode')
+      return { id: own.dataset.nodeId, hit: hit?.dataset.nodeId, name: active.textContent, tab: active.tabIndex }
+    })
+    if (!focus) continue
+    canvasStops++
+    expect(focus.hit).toBe(focus.id)
+    expect(focus.name?.trim()).toBeTruthy()
+    expect(focus.tab).toBeGreaterThanOrEqual(0)
+  }
+  expect(canvasStops).toBeGreaterThan(2)
+  await page.mouse.move(5, 5)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(1000)
+  await background.focus() // Deliberate access to its restored canonical row.
+  await waitForCanvasSettled(page)
+  const native = background.locator('a').first()
+  await expect(native).not.toHaveAttribute('tabindex', '-1')
+  await expect(native).toHaveAttribute('href', originalHref!)
+  await native.focus()
+  await expect(native).toBeFocused()
   await evidence(page, info)
 })

@@ -30,11 +30,13 @@ function Harness() {
   const [parked, setParked] = useState(false)
   const parking = new URLSearchParams(location.search).get("case") === "parking"
   const growth = new URLSearchParams(location.search).get("case") === "growth"
+  const range = new URLSearchParams(location.search).get("case") === "range"
   const tall = new URLSearchParams(location.search).get("case") === "tall"
   const growthNodes = [
     { id: "subj", lane: 0, row: 1 },
     { id: "resident-0", lane: 1, row: 0 },
     { id: "resident-2", lane: 1, row: 2 },
+    { id: "neighbor", lane: 1, row: 3 },
     { id: "link", lane: 1, row: 8 },
   ]
   return (
@@ -46,19 +48,19 @@ function Harness() {
         <button onClick={() => setMounted(value => !value)}>Toggle canvas</button>
       </div>}
       {mounted && <DigitalThreadCanvas
-        lanes={growth || tall || parking ? ["Subject", "Linked"] : lanes}
-        nodes={parking ? [{ id: "subj", lane: 0, row: 1 }, { id: "link", lane: 1, row: parked ? 1 : 12 }] : tall ? [{ id: "subj", lane: 0, row: 0 }, { id: "link", lane: 1, row: 0 }] : growth ? growthNodes : nodes}
-        edges={edges}
+        lanes={growth || tall || parking || range ? ["Subject", "Linked"] : lanes}
+        nodes={range ? [{ id: "subj", lane: 0, row: 1 }, { id: "background", lane: 1, row: 0 }, { id: "neighbor", lane: 1, row: 1 }, { id: "link", lane: 1, row: 2 }] : parking ? [{ id: "subj", lane: 0, row: 1 }, { id: "link", lane: 1, row: parked ? 1 : 12 }] : tall ? [{ id: "subj", lane: 0, row: 0 }, { id: "link", lane: 1, row: 0 }] : growth ? growthNodes : nodes}
+        edges={growth || range ? [...edges, { from: "link", to: "neighbor", label: "related" }] : edges}
         scopeKey="contract|hidden-lane"
         selectedId={selectedId}
         onSelect={setSelectedId}
         renderCard={node => (
           <div
             className={`probeCard probe-${node.id}`}
-            style={{ height: tall && node.id === "link" ? 900 : growth ? (node.id === "link" && grown ? 200 : 106) : "100%", boxSizing: "border-box", padding: 8, border: "1px solid #cbd6df", borderRadius: 6, background: "#fff", display: "flex", flexDirection: "column", justifyContent: "space-between" }}
+            style={{ height: (tall || range) && node.id === "link" ? 900 : growth || range ? (node.id === "link" && grown ? 200 : 106) : "100%", boxSizing: "border-box", padding: 8, border: "1px solid #cbd6df", borderRadius: 6, background: "#fff", display: "flex", flexDirection: "column", justifyContent: "space-between" }}
           >
             <strong>{node.id}</strong>
-            {tall && node.id === "link" && <button onClick={() => setActivated(true)}>{activated ? "Action activated" : "Native tail action"}</button>}
+            {(tall || range) && node.id === "link" && <button onClick={() => setActivated(true)}>{activated ? "Action activated" : "Native tail action"}</button>}
           </div>
         )}
       />}

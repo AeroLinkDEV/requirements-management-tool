@@ -584,9 +584,9 @@ export default function DigitalThreadCanvas({
      * First useful exposure.
      *
      * The plan is recomputed when the subject changes, when the traced relationships or measured heights
-     * change, when the tier changes, or when an *unvisited* lane becomes usable — never for ordinary lane or
-     * vertical camera movement, and never for a lane the reader has already had in front of them (visited) or
-     * has taken ownership of (frozen).
+     * change, when the tier changes, or when an *unvisited* lane becomes usable. Measurement changes may repair
+     * an already exposed foreground arrangement; ordinary navigation cannot repeatedly re-land it, and lanes
+     * the reader has taken ownership of remain frozen to their chosen positions.
      */
     if (subjectOwnership.current !== emphasisId) {
       // Preserve where a record was actually painted when it becomes the new subject. Retaining a numerical
@@ -619,7 +619,8 @@ export default function DigitalThreadCanvas({
     // offsetHeight is an integer border-box measurement. Camera and lane offsets are deliberately absent:
     // ordinary navigation cannot reset delivery, while same-tier wrapping must reconcile real collisions.
     const contentKey = `${sourceSignature}|${edgesKey}|${result.tier}|${[...measuredCardHeights].map(([id, height]) => `${id}:${height}`).join(",")}`
-    if (contentSignature.current !== contentKey) {
+    const contentChanged = contentSignature.current !== contentKey
+    if (contentChanged) {
       const oldBase = previous && contentPositionsForNodes(nodes, previous.geometry, measuredHeightsRef.current)
       const newBase = contentPositionsForNodes(nodes, result.geometry, measuredCardHeights)
       if (oldBase && emphasisId && !selectedId && !revealTargets.current.has(emphasisId)) {
@@ -664,7 +665,7 @@ export default function DigitalThreadCanvas({
         // reconciled when it arrives rather than being frozen by its earlier, unseen preparation.
         frozenLanes: new Set([
           ...frozenLanes.current,
-          ...[...visitedLanes.current].filter(() => cameraOwned.current || (!constraintsChanged && !selectedId)),
+          ...[...visitedLanes.current].filter(() => cameraOwned.current || (!constraintsChanged && !contentChanged && !selectedId)),
         ]),
         existing: retained,
         bandHeight: result.bandHeight,
@@ -1058,9 +1059,6 @@ export default function DigitalThreadCanvas({
     if (placementNotice) {
       const unavailable = [...labelPositions.values()].some(position => !position.available)
       placementNotice.hidden = !unavailable
-      placementNotice.style.left = `${box.x + 12}px`
-      placementNotice.style.right = `${(viewportRef.current?.clientWidth ?? 0) - box.x - box.width + 12}px`
-      placementNotice.style.bottom = `${Math.max(68, (viewportRef.current?.clientHeight ?? 0) - box.y - box.height + 4)}px`
       placementNotice.textContent = unavailable
         ? "A relation label cannot fit without covering other content. Enlarge the canvas to show it on its connector."
         : ""
@@ -1893,8 +1891,8 @@ export default function DigitalThreadCanvas({
         <button type="button" disabled={!framing} onClick={fitSelection}>Fit selected story</button>
         <button type="button" disabled={!framing} onClick={fitStory}>Fit entire story</button>
         <button type="button" onClick={fitAll} title="Fit the projected board; tall lanes remain independently scrollable">Fit board</button>
+        <span className="dtCanvasPlacementNotice" role="status" aria-live="polite" hidden />
       </div>
-      <div className="dtCanvasPlacementNotice" role="status" aria-live="polite" hidden />
       {/* Directional continuation cues: one per lane, positioned by paint at the usable boundary. */}
       <div className="dtCanvasContinuations" aria-hidden="true">
         {lanes.flatMap((_, lane) => (["up", "down", "left", "right"] as const).map(direction => (

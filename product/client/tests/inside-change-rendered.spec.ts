@@ -24,12 +24,9 @@ test("a System change labels mixed downstream verification without claiming its 
 })
 
 const selectModifyProposal = async (page: Page) => {
-  // Arrival now frames the opened CR at readable size. Its tall proposal lane may need the explicit reveal
-  // action; a raw click on an offscreen card would bypass the reader's actual navigation path.
+  // The linked proposal must be usable on arrival, before the ordinary pointer click.
   await expect(page.locator('.dtCanvas')).toBeVisible()
   await page.waitForTimeout(700)
-  const reveal = page.getByRole('button', { name: 'Show SR-00010.01', exact: true })
-  if (await reveal.isVisible()) await reveal.click()
   await expect(page.locator('[data-node-id="SR-00010.01"]')).not.toHaveClass(/is-offscreen/)
   await page.locator('.dticProposal:has-text("SR-00010.01")').click()
   await expect(page.locator('[data-node-id="SR-00010.01"]')).toHaveAttribute('aria-pressed', 'true')
@@ -392,10 +389,22 @@ test.describe("the detail panel never rests on a directly linked record", () => 
       for (const name of names) {
         const card = page.locator(`.dtCanvasNode:has(.dticCard:has-text("${name}"))`).first()
         expect(await card.count(), `${name} is a direct link and must be on the board`).toBeGreaterThan(0)
-        if ((await card.getAttribute('class'))?.includes('is-offscreen')) {
-          const reveal = page.getByRole('button', { name: `Show ${name}`, exact: true })
-          await expect(reveal, `${name} must never be silently hidden`).toBeVisible()
-          await reveal.click()
+        const initial = (await card.boundingBox())!
+        if (mode === 'Bottom' && initial.y + initial.height > panel.y - 12) {
+          const capacity = await card.evaluate(element => {
+            const x = element.getBoundingClientRect().left
+            const foreground = [...document.querySelectorAll<HTMLElement>('.dtCanvasNode')]
+              .filter(node => Number(node.style.zIndex) > 1 && Math.abs(node.getBoundingClientRect().left - x) < 1)
+            const toolbar = document.querySelector('.dtCanvasControls')!.getBoundingClientRect()
+            const heading = document.querySelector('.dtCanvasLaneHead')!
+            const top = toolbar.bottom + Math.max(0, -parseFloat(getComputedStyle(heading).top)) + 8
+            const bottom = document.querySelector('.dticPanel')!.getBoundingClientRect().top - 12
+            return { height: foreground.reduce((sum, node) => sum + node.getBoundingClientRect().height, 0), room: bottom - top }
+          })
+          expect(capacity.height, 'recovery requires real foreground overflow, not background obstacles').toBeGreaterThan(capacity.room)
+          await card.focus()
+        } else if ((await card.getAttribute('class'))?.includes('is-offscreen')) {
+          await card.focus() // Deliberately explore remaining content in a crowded/horizontally hidden lane.
           await expect(page.locator('.dtCanvasNode[aria-pressed="true"]')).toHaveAttribute('data-node-id', pinned!)
         }
         await expect(card, `${name} is hidden rather than fitted beside the ${mode} panel`)

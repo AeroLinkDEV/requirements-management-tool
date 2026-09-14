@@ -250,13 +250,16 @@ due-date, or age-in-state behavior is implied.
 The middle displayed lane combines canonical Review and Approval obligations. Compact cards show all next-action
 holders with their active stage purposes and truthful Assigned Build; routine metadata remains in expandable Details.
 Digital Thread hover emphasises the directed connected story **without moving the view**: no pan, zoom, or density
-change, and only records with no measured intersection with the usable window receive a temporary lane-local
-displacement, in their own lane, with directional continuation where the thread continues beyond the boundary.
-A single click selects the exact record, retains the displayed arrangement and owns the thread until the reader
+change. Linked foreground cards, including clipped cards, receive temporary vertical displacement in their own
+lanes when they fit, taking visual space over canonically unchanged background cards. Deterministic partial fit
+keeps smaller fitting cards usable even when another candidate is oversized; truthful directional continuation
+and deliberate keyboard, touch and scrolling preserve access to overflow. A single click selects the exact
+record, retains and reconciles the displayed arrangement against measured heights and actual tray clearance,
+and owns the thread until the reader
 clears it or selects another; hovering cannot preview or replace a selection, the selected root may leave the
-viewport by deliberate navigation, and clearing holds the current camera. Offscreen connected records keep their
-truthfully labelled reveal actions, Case and Procedure changes have distinct lanes, and opening a change selects its
-exact subject on arrival (DEC-126, superseded for hover and framing by DEC-127).
+viewport by deliberate navigation, and clearing holds the current camera. The Show-ID strip and its additional
+selected-state reservation are removed. Case and Procedure changes have distinct lanes, and opening a change
+selects its exact subject on arrival (DEC-126, DEC-127 and the narrow foreground-reveal supersession in DEC-129).
 
 ## Problem Reports
 

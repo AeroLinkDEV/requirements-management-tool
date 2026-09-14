@@ -581,9 +581,7 @@ test.describe("shared canvas behaviour", () => {
     for (const identity of identities.slice(0, 2)) {
       const card = page.locator(`.dtCanvasNode:has(.dtaCard:has-text("${identity}"))`).first()
       if ((await card.getAttribute("class"))?.includes("is-offscreen")) {
-        const reveal = page.getByRole("button", { name: `Show ${identity}`, exact: true })
-        await expect(reveal, `${identity} must never be silently unreachable`).toBeVisible()
-        await reveal.click()
+        await card.focus() // Deliberate keyboard exploration retains the selected identity.
       }
       await expect(card, `${identity} is still unreachable`).not.toHaveClass(/is-offscreen/)
       await expect(page.locator('.dtCanvasNode[aria-pressed="true"]')).toHaveAttribute("data-node-id", selected!)
@@ -620,9 +618,7 @@ test.describe("shared canvas behaviour", () => {
           && before.y < panel.y + panel.height && before.y + before.height > panel.y
         if ((await card.getAttribute("class"))?.includes("is-offscreen") || intersectsPanel ||
           before.x < canvas.x || before.x + before.width > canvas.x + canvas.width) {
-          const reveal = page.getByRole("button", { name: `Show ${name}`, exact: true })
-          await expect(reveal, `${name} must never be silently hidden`).toBeVisible()
-          await reveal.click()
+          await card.focus() // Deliberate navigation for content outside the current window.
           await page.waitForTimeout(150)
         }
         await expect(card, `${name} is unreachable beside the ${mode} panel`)
@@ -1011,12 +1007,11 @@ test.describe("a rolled lane survives a re-render", () => {
     expect(names.length).toBeGreaterThan(0)
     for (const name of names) {
       const card = page.locator(`.dtCanvasNode:has(.dtaCard:has-text("${name}"))`).first()
-      const reveal = page.getByRole("button", { name: `Show ${name}`, exact: true })
-      // A painted fragment can still be clipped by the inspector. The explicit route must make the
-      // complete target usable, not merely remove the entirely-offscreen class.
-      if (await reveal.isVisible()) {
-        await reveal.click()
-      }
+      // Vertical reveal does not pan horizontally hidden lanes around a right inspector.
+      // Only that measured horizontal overflow uses deliberate keyboard navigation.
+      const before = (await card.boundingBox())!
+      const canvas = (await page.locator('.dtCanvas').boundingBox())!
+      if (before.x < canvas.x || before.x + before.width > panel.x) await card.focus()
       await expect(card).not.toHaveClass(/is-offscreen/)
       await card.click({ trial: true })
     }
@@ -1071,11 +1066,7 @@ test.describe("a graph change still re-syncs and re-frames", () => {
     expect(after.selected).toBe(before.selected)
     expect(after.lanes).toBe(before.lanes)
     if (after.offscreen) {
-      const identity = await page.locator(`[data-node-id="${FAR_RUN}"]`).evaluate(node =>
-        node.querySelector(".dtaId")?.textContent ?? "")
-      const reveal = page.getByRole("button", { name: `Show ${identity}`, exact: true })
-      await expect(reveal, `${identity} must never be silently unreachable`).toBeVisible()
-      await reveal.click()
+      await page.locator(`[data-node-id="${FAR_RUN}"]`).focus()
       await expect(page.locator(`[data-node-id="${FAR_RUN}"]`)).not.toHaveClass(/is-offscreen/)
       await expect(page.locator(".dtaCard.is-selected")).toHaveCount(1)
     }
@@ -1135,9 +1126,7 @@ test.describe("a selection made before the viewport settled", () => {
     expect(selectedBox.x + selectedBox.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width + 1)
     expect(after.clearOfPanel).toBe(true)
     if (after.offscreen) {
-      const identity = await page.locator(`[data-node-id="${FAR_RUN}"]`).evaluate(node =>
-        node.querySelector(".dtaId")?.textContent ?? "")
-      await page.getByRole("button", { name: `Show ${identity}`, exact: true }).click()
+      await page.locator(`[data-node-id="${FAR_RUN}"]`).focus()
     }
     const reached = page.locator(`[data-node-id="${FAR_RUN}"]`)
     await expect(reached).not.toHaveClass(/is-offscreen/)
