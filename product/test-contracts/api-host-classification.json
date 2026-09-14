@@ -14,9 +14,9 @@
       "unknownCaseTests": 0
     },
     "fresh-host": {
-      "classes": 52,
-      "tests": 316,
-      "knownCases": 356,
+      "classes": 53,
+      "tests": 317,
+      "knownCases": 357,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -26,9 +26,9 @@
       "unknownCaseTests": 0
     },
     "reusable-host": {
-      "classes": 52,
-      "tests": 322,
-      "knownCases": 362,
+      "classes": 51,
+      "tests": 321,
+      "knownCases": 361,
       "unknownCaseTests": 0
     }
   },
@@ -959,6 +959,17 @@
       ]
     },
     {
+      "cls": "ManagedDocumentApiTests.ProjectSetup",
+      "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Host use is unknown for one or more invocations; isolate it until method-level evidence is completed.",
+      "intents": [
+        "in-process-logic"
+      ]
+    },
+    {
       "cls": "ManagedDocumentRecoveryApiTests",
       "tests": 1,
       "knownCases": 1,
@@ -1673,17 +1684,6 @@
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy"
-      ]
-    },
-    {
-      "cls": "ManagedDocumentApiTests.ProjectSetup",
-      "tests": 1,
-      "knownCases": 1,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "http-boundary"
       ]
     },
     {

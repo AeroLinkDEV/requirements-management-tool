@@ -12,6 +12,25 @@ public sealed class WordDocumentStructureTests
     private const string PRel = "http://schemas.openxmlformats.org/package/2006/relationships";
     private const string HeaderContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml";
 
+    [Theory]
+    [InlineData(".45", true)]
+    [InlineData("0.45", true)]
+    [InlineData("29491f", true)] // Actual Microsoft Word save: nearest 16.16 fixed-point encoding of 45%.
+    [InlineData("0f", false)]
+    [InlineData("65536f", false)]
+    [InlineData("29490f", false)]
+    [InlineData(".1", false)]
+    public void Word_saved_controlled_opacity_is_accepted_without_accepting_altered_watermarks(string opacity, bool accepted)
+    {
+        var bytes = Package(
+            ("[Content_Types].xml", ContentTypes("/word/header1.xml")),
+            ("word/document.xml", Document("<w:p><w:r><w:t>Body</w:t></w:r></w:p>", Section(("default", "rId1")))),
+            ("word/_rels/document.xml.rels", Rels(("rId1", HeaderType, "header1.xml", false))),
+            ("word/header1.xml", HeaderWithWatermark().Replace("opacity=\".45\"", $"opacity=\"{opacity}\"", StringComparison.Ordinal)));
+        if (accepted) ManagedDocumentFileService.ValidateDocx(bytes, requireDraftWatermark: true);
+        else Assert.Throws<DomainException>(() => ManagedDocumentFileService.ValidateDocx(bytes, requireDraftWatermark: true));
+    }
+
     [Fact]
     public void Orphan_header_marker_does_not_satisfy_the_rendered_draft_watermark_requirement()
     {

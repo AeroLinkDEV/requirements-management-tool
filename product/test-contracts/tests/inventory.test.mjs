@@ -280,9 +280,9 @@ test('reviewed #563 holds keep every unsafe reusable class out of reuse headroom
     assert.equal(row?.reason, override.reason, cls)
     assert.match(row?.reason ?? '', /^Reviewed #563 hold:/, cls)
   }
-  assert.deepEqual(hostArtifact.summary['reusable-host'], { classes: 52, tests: 322, knownCases: 362, unknownCaseTests: 0 })
+  assert.deepEqual(hostArtifact.summary['reusable-host'], { classes: 51, tests: 321, knownCases: 361, unknownCaseTests: 0 })
   // #1037 adds project setup, service qualification, and PostgreSQL boundary evidence.
-  assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 52, tests: 316, knownCases: 356, unknownCaseTests: 0 })
+  assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 53, tests: 317, knownCases: 357, unknownCaseTests: 0 })
   assert.deepEqual(hostArtifact.summary.converted, { classes: 33, tests: 255, knownCases: 280, unknownCaseTests: 0 })
   // RuntimeIdentityTests (#881) joined this bucket on its own merits: six in-process methods that resolve
   // configuration and assert on the result. It needs no host, which is exactly what migration-candidate
@@ -329,9 +329,9 @@ test('host classification CLI distinguishes known cases from unknown-case method
       join(temporaryDirectory, 'artifact.json'),
     ], { encoding: 'utf8' })
     assert.match(output, /classification\s+classes\s+methods\s+known cases\s+unknown-case methods\s+share of methods/)
-    assert.match(output, /reusable-host\s+52\s+322\s+362\s+0\s+35.6%/)
-    assert.match(output, /fresh-host\s+52\s+316\s+356\s+0\s+35.0%/)
-    assert.match(output, /Remaining reuse headroom:\s+52 classes, 322 methods, 362 known cases/)
+    assert.match(output, /reusable-host\s+51\s+321\s+361\s+0\s+35.5%/)
+    assert.match(output, /fresh-host\s+53\s+317\s+357\s+0\s+35.1%/)
+    assert.match(output, /Remaining reuse headroom:\s+51 classes, 321 methods, 361 known cases/)
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true })
   }
