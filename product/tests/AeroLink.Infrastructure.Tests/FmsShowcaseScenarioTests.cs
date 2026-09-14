@@ -8,6 +8,8 @@ using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -858,6 +860,7 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         var seeder = new FmsShowcaseSeeder(db);
         var summary = showcase.Summary;
 
+        await PrepareHistoricalInterfaceLadderAsync(db, summary.ProjectId);
         var legacy = await SeedLegacyInterfaceScenariosAsync(db, summary.ProgramId, summary.ProjectId, summary.ActiveReleaseId);
         // Reproduce the persistent installation that progressed 1.6 to an exact frozen candidate while the
         // Interface scenario was still selected: that selection is baseline content now. The product
@@ -869,12 +872,12 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
             .SingleAsync(x => x.ReleaseId == summary.ActiveReleaseId);
         activeBaseline.Freeze("cm.fms", materializedAt.AddMinutes(-2));
         await db.SaveChangesAsync();
-        // This call reconstructs the pre-#889 historical database, when Interface was a supported
-        // ladder level. Keep the fixture construction on that explicit legacy policy; the upgrade below
-        // deliberately resolves the current persisted Case-only ladder and must preserve the frozen record.
+        // The copied fixture was placed on an Interface-capable persisted ladder before these historical
+        // records were added. Resolve that persisted configuration through the normal runtime authority.
+        var policyResolver = new EffectiveProjectLadderPolicyResolver(db);
         await new RequirementBaselineMaterializer(db,
-                new VerificationImpactService(db, policy: LegacyLadderPolicy.Instance),
-                policy: LegacyLadderPolicy.Instance)
+                new VerificationImpactService(db, policyResolver: policyResolver),
+                policyResolver: policyResolver)
             .MaterializeAsync(activeBaseline.Id, "cm.fms", materializedAt.AddMinutes(-1), CancellationToken.None);
         // A database upgraded by the pre-#889 code has never recorded the retirement step.
         db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
@@ -946,6 +949,65 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
             .AnyAsync(x => x.SourceChangeRequestId == selected.Id));
         Assert.False(await verify.BaselineRequirements.AsNoTracking()
             .AnyAsync(x => x.BaselineId == baseline.Id));
+    }
+
+    /// <summary>
+    /// Recreates the pre-#889 configuration boundary in the disposable copy before adding its historical
+    /// Interface scenarios. The production resolver then sees a real active persisted ladder throughout
+    /// fixture construction and upgrade; no materializer policy override is involved.
+    /// </summary>
+    private static async Task PrepareHistoricalInterfaceLadderAsync(AeroLinkDbContext db, Guid projectId)
+    {
+        var current = await db.ProjectLadderConfigurations
+            .Include(x => x.Steps).Include(x => x.AllowedUpstream)
+            .SingleAsync(x => x.ProjectId == projectId);
+        var currentHistory = await db.ProjectLadderConfigurationHistories
+            .Where(x => x.ConfigurationId == current.Id && x.ProjectId == projectId)
+            .ToListAsync();
+        db.ProjectLadderConfigurationHistories.RemoveRange(currentHistory);
+        db.ProjectLadderConfigurations.Remove(current);
+        await db.SaveChangesAsync();
+
+        var now = DateTimeOffset.UtcNow;
+        var historical = ProjectLadderConfiguration.CreateDraft(projectId, now);
+        var levels = new[]
+        {
+            RequirementLevel.System, RequirementLevel.HighLevel, RequirementLevel.LowLevel,
+            RequirementLevel.Interface,
+        };
+        var steps = levels.Select((level, index) => new ProjectLadderStep(
+            historical.Id, projectId, level, index + 1,
+            LegacyLadderPolicy.Instance.Definition(level).Capabilities, now)).ToArray();
+        foreach (var step in steps) historical.Steps.Add(step);
+        historical.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            historical.Id, projectId, steps[0].Id, steps[1].Id, now));
+        historical.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            historical.Id, projectId, steps[1].Id, steps[2].Id, now));
+
+        // This is a historical active configuration, so obtain the same readiness evidence a normal activation
+        // would produce from the application's registered consumers before making it effective.
+        var applicationServices = new ServiceCollection().AddAeroLinkInfrastructure(
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Database:Provider"] = "Sqlite",
+                ["ConnectionStrings:AeroLink"] = "Data Source=:memory:"
+            }).Build());
+        var activationAuthority = new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance,
+            applicationServices.Where(x => x.ServiceType == typeof(ILadderConsumerRegistration))
+                .Select(x => (ILadderConsumerRegistration)x.ImplementationInstance!),
+            applicationServices.Where(x => x.ServiceType == typeof(IVerificationArtifactConsumerRegistration))
+                .Select(x => (IVerificationArtifactConsumerRegistration)x.ImplementationInstance!));
+        var activation = activationAuthority.PrepareActivationForCreation(historical, "legacy.fms", now);
+        db.ProjectLadderConfigurations.Add(historical);
+        db.ProjectLadderConfigurationHistories.Add(new ProjectLadderConfigurationHistory(
+            historical.Id, projectId, historical.Version, "legacy.fms", now,
+            "Reconstructed the pre-#889 Interface-capable FMS ladder for historical fixture data.",
+            activation.CanonicalSnapshot, ProjectLadderSnapshot.Hash(activation.CanonicalSnapshot),
+            historical.VerificationProfileSchemaVersion));
+        await db.SaveChangesAsync();
+
+        var resolved = await new EffectiveProjectLadderPolicyResolver(db).ResolveAsync(projectId);
+        Assert.Contains(RequirementLevel.Interface, resolved.OrderedLevels);
     }
 
     /// <summary>
