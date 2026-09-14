@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AuthUser } from "./IdentityCenter";
 import PortalHeader from "./PortalHeader";
-import { apiRequest, operationError } from "./apiClient";
+import { ApiError, apiRequest, operationError } from "./apiClient";
 import { buildVersionOrder, officialBuildName } from "./presentation";
 import { isSetupStep, type SetupStep } from "./projectSetupDrafts";
 import {
@@ -11,6 +11,11 @@ import {
   leadershipAuthorities,
   parseAuthorityToken,
 } from "./workflowAuthorities";
+import ProjectSetupSourcePanel, {
+  SourceAcceptanceFields,
+} from "./ProjectSetupSourcePanel";
+import { decodeSourceView, sourceFinalizationPayload } from "./projectSetupSource";
+import type { SourceDraftState, SourceKind } from "./projectSetupSource";
 import "./ProjectSetupWalkthrough.css";
 
 type StartKind = "Fresh" | "AeroLinkBaseline" | "ExternalBaseline";
@@ -82,6 +87,12 @@ type SetupValues = {
   mapping: unknown;
 };
 
+const emptySourceState = (): SourceDraftState => ({
+  source: null,
+  assertionAccepted: false,
+  password: "",
+});
+
 const steps: { id: SetupStep; label: string }[] = [
   { id: "Details", label: "Project details" },
   { id: "StartingPoint", label: "Starting point" },
@@ -121,12 +132,6 @@ const capabilityLabels = [
   "Requirements document",
   "Code traceability",
 ];
-const inheritedCategories = [
-  { id: "Requirements", label: "Requirements and traceability" },
-  { id: "Verification", label: "Verification artifacts and evidence" },
-  { id: "ChangeRequests", label: "Change requests and decisions" },
-];
-
 const defaultLadder = (): LadderDefinition => ({
   steps: levelCatalogue.slice(0, 3).map((level, index) => ({
     catalogueEntry: level.id,
@@ -366,7 +371,9 @@ function requestBody(values: SetupValues, currentStep: SetupStep, expectedVersio
       provider: values.repository.provider || "GitLab",
       endpoint: values.repository.mode === "ConnectNow" ? values.repository.endpoint || null : null,
     },
-    mapping: values.mapping,
+    // Source mappings have their own optimistic versioned endpoint. Sending a stale setup-level
+    // mapping after a source reconciliation could overwrite that server-owned source state.
+    ...(values.startKind === "Fresh" ? { mapping: values.mapping } : {}),
   };
 }
 
@@ -398,6 +405,7 @@ export default function ProjectSetupWalkthrough({
   const [finalizing, setFinalizing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [sourceState, setSourceState] = useState<SourceDraftState>(emptySourceState);
   const finalizationKey = useRef<string | undefined>(undefined);
 
   const loadDraft = useCallback(
@@ -408,7 +416,26 @@ export default function ProjectSetupWalkthrough({
         const loaded = await apiRequest<SetupDraft>(`${api}/api/project-setups/${id}`);
         setDraft(loaded);
         setValues(valuesFromDraft(loaded));
+        setSourceState(emptySourceState());
         setCurrentStep(loaded.currentStep);
+        if (loaded.start?.kind === "AeroLinkBaseline" || loaded.start?.kind === "ExternalBaseline") {
+          try {
+            const sourceEnvelope = await apiRequest<unknown>(`${api}/api/project-setups/${id}/source`);
+            const sourceRecord = asObject(sourceEnvelope);
+            const source = decodeSourceView(sourceRecord.source ?? sourceEnvelope);
+            const sourceVersion = typeof sourceRecord.draftVersion === "number" ? sourceRecord.draftVersion : loaded.version;
+            if (source) {
+              setSourceState({ source, assertionAccepted: false, password: "" });
+              if (sourceVersion >= loaded.version) setDraft((current) => current ? { ...current, version: sourceVersion } : current);
+            }
+          } catch (failure) {
+            // A missing source is a truthful pending state on a resumable draft. Other failures are
+            // surfaced while leaving the already loaded project answers available for retry.
+            if (!(failure instanceof ApiError && failure.status === 404)) {
+              setError(operationError(failure, "The saved source could not be loaded. Earlier project answers remain available."));
+            }
+          }
+        }
       } catch (failure) {
         setError(
           operationError(
@@ -443,6 +470,7 @@ export default function ProjectSetupWalkthrough({
         const createdDraft = draftFromCreate(created);
         setDraft(createdDraft);
         setValues(valuesFromDraft(createdDraft));
+        setSourceState(emptySourceState());
         setCurrentStep("Details");
       })
       .catch((failure) => {
@@ -550,6 +578,20 @@ export default function ProjectSetupWalkthrough({
     values.ladder.steps.length > 0 &&
     values.reviewRulesAccepted &&
     reviewRulesAreComplete(values.reviewRulesDefinition);
+  const sourceComplete =
+    values?.startKind !== "Fresh" &&
+    Boolean(values?.projectName.trim()) &&
+    Boolean(values?.softwareProduct.trim()) &&
+    versionOrder !== undefined &&
+    Boolean(values?.ladder.steps.length) &&
+    values?.reviewRulesAccepted === true &&
+    reviewRulesAreComplete(values?.reviewRulesDefinition) &&
+    Boolean(
+      sourceState.source?.reconciliation?.ready &&
+        sourceState.source.assertion?.hash &&
+        sourceState.assertionAccepted &&
+        sourceState.password,
+    );
   const reviewRulesDelta = reviewRulesSubjectDelta(
     values?.reviewRulesDefinition,
     values?.suggestedReviewRulesDefinition,
@@ -560,13 +602,13 @@ export default function ProjectSetupWalkthrough({
 
   const saveDraft = async (exitAfterSave = false, stepToSave = currentStep) => {
     if (!draft || !values) return false;
-    if (values.startKind === "AeroLinkBaseline" && !isUuid(values.sourceBaselineId)) {
+    if (values.startKind === "AeroLinkBaseline" && values.sourceBaselineId && !isUuid(values.sourceBaselineId)) {
       setError(
         "Enter the exact authorized AeroLink baseline ID as a UUID before saving this starting point.",
       );
       return false;
     }
-    if (values.startKind === "ExternalBaseline" && !isUuid(values.sourceImportId)) {
+    if (values.startKind === "ExternalBaseline" && values.sourceImportId && !isUuid(values.sourceImportId)) {
       setError(
         "Enter the exact staged external import ID as a UUID before saving this starting point.",
       );
@@ -590,7 +632,7 @@ export default function ProjectSetupWalkthrough({
       setCurrentStep(saved.currentStep);
       setNotice("Saved on the server. You can resume this setup after signing out or restarting.");
       if (exitAfterSave) onExit();
-      return true;
+      return saved;
     } catch (failure) {
       setError(
         operationError(
@@ -604,8 +646,57 @@ export default function ProjectSetupWalkthrough({
     }
   };
 
+  const ensureSourceSaved = async () => {
+    if (!draft || !values) return null;
+    const persisted = valuesFromDraft(draft);
+    const pendingSourceChoice =
+      values.startKind !== "Fresh" &&
+      !values.sourceBaselineId &&
+      !values.sourceImportId &&
+      values.projectName === persisted.projectName &&
+      values.softwareProduct === persisted.softwareProduct &&
+      values.buildVersion === persisted.buildVersion &&
+      JSON.stringify(values.selectedCategories) === JSON.stringify(persisted.selectedCategories) &&
+      JSON.stringify(values.ladder) === JSON.stringify(persisted.ladder) &&
+      JSON.stringify(values.reviewRulesDefinition) === JSON.stringify(persisted.reviewRulesDefinition) &&
+      values.reviewRulesAccepted === persisted.reviewRulesAccepted &&
+      JSON.stringify(values.repository) === JSON.stringify(persisted.repository);
+    // The source route is the durable first step for a not-yet-selected source. The setup PUT
+    // contract quite correctly rejects an incomplete non-Fresh identity, so retain this one local
+    // choice until native selection or upload returns the exact source identity. All other answers
+    // must still be committed before any source call.
+    if (pendingSourceChoice) return draft.version;
+    if (!hasUnsavedChanges) return draft.version;
+    const saved = await saveDraft(false, currentStep);
+    return saved ? saved.version : null;
+  };
+
+  const updateSourceVersion = useCallback((version: number) => {
+    setDraft((current) => (current && version >= current.version ? { ...current, version } : current));
+  }, []);
+
+  const updateSourceCategories = useCallback((categories: string[]) => {
+    setValues((current) => {
+      if (!current || JSON.stringify(current.selectedCategories) === JSON.stringify(categories)) return current;
+      return { ...current, selectedCategories: categories };
+    });
+  }, []);
+
+  const updateSourceIdentity = useCallback((id: string) => {
+    setValues((current) => {
+      if (!current) return current;
+      const key = current.startKind === "AeroLinkBaseline" ? "sourceBaselineId" : "sourceImportId";
+      if (current[key] === id) return current;
+      return { ...current, [key]: id };
+    });
+  }, []);
+
+  const updateSourceState = useCallback((next: SourceDraftState) => {
+    setSourceState(next);
+  }, []);
+
   const finalize = async () => {
-    if (!draft || !values || !freshComplete) return;
+    if (!draft || !values || (!freshComplete && !sourceComplete)) return;
     setFinalizing(true);
     setError("");
     setNotice("");
@@ -623,6 +714,9 @@ export default function ProjectSetupWalkthrough({
           body: JSON.stringify({
             expectedVersion: draft.version,
             idempotencyKey: finalizationKey.current,
+            ...(sourceComplete && values.startKind !== "Fresh"
+              ? sourceFinalizationPayload(draft.version, finalizationKey.current, sourceState)
+              : {}),
           }),
         },
       );
@@ -772,6 +866,9 @@ export default function ProjectSetupWalkthrough({
                   onChange={() => {
                     update("startKind", kind);
                     update("selectedCategories", kind === "Fresh" ? [] : values.selectedCategories);
+                    update("sourceBaselineId", "");
+                    update("sourceImportId", "");
+                    setSourceState(emptySourceState());
                   }}
                 />
                 {kind === "Fresh"
@@ -787,51 +884,21 @@ export default function ProjectSetupWalkthrough({
               </label>
             ))}
           </fieldset>
-          {values.startKind === "AeroLinkBaseline" && (
-            <label className="setupWideField">
-              Exact AeroLink baseline ID
-              <input
-                value={values.sourceBaselineId}
-                onChange={(event) => update("sourceBaselineId", event.target.value)}
-                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              />
-            </label>
-          )}
-          {values.startKind === "ExternalBaseline" && (
-            <label className="setupWideField">
-              Staged external import ID
-              <input
-                value={values.sourceImportId}
-                onChange={(event) => update("sourceImportId", event.target.value)}
-                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              />
-            </label>
-          )}
-          {values.startKind && values.startKind !== "Fresh" && (
-            <fieldset className="setupChoiceList">
-              <legend>Inherited categories</legend>
-              {inheritedCategories.map((category) => (
-                <label key={category.id}>
-                  <input
-                    type="checkbox"
-                    checked={values.selectedCategories.includes(category.id)}
-                    onChange={(event) =>
-                      update(
-                        "selectedCategories",
-                        event.target.checked
-                          ? [...values.selectedCategories, category.id]
-                          : values.selectedCategories.filter((item) => item !== category.id),
-                      )
-                    }
-                  />
-                  {category.label}
-                </label>
-              ))}
-              <small>
-                Dependency and source checks remain server-owned. Finalization stays unavailable
-                until the source pipeline is delivered.
-              </small>
-            </fieldset>
+          {values.startKind && values.startKind !== "Fresh" && draft && (
+            <ProjectSetupSourcePanel
+              api={api}
+              draftId={draft.draftId}
+              draftVersion={draft.version}
+              kind={values.startKind as SourceKind}
+              selectedCategories={values.selectedCategories}
+              levelOptions={levelCatalogue.map((level) => ({ id: level.id, label: level.label }))}
+              initialState={sourceState}
+              onSelectedCategoriesChange={updateSourceCategories}
+              beforeSourceCall={ensureSourceSaved}
+              onSourceVersion={updateSourceVersion}
+              onSourceIdentity={updateSourceIdentity}
+              onSourceStateChange={updateSourceState}
+            />
           )}
         </section>
       );
@@ -1265,10 +1332,27 @@ export default function ProjectSetupWalkthrough({
             </dd>
           </div>
         </dl>
-        {values.startKind !== "Fresh" && (
+        {values.startKind !== "Fresh" && sourceState.source && (
+          <>
+            <p className={sourceComplete ? "setupReadyNotice" : "setupPendingNotice"} role="status">
+              {sourceComplete
+                ? "The exact source snapshot is reconciled and explicitly accepted. Finalization will create the new working build while retaining source facts separately."
+                : sourceState.source.reconciliation?.errors.length
+                  ? "The source is saved but has reconciliation findings. Resolve them in the Starting point step before finalization."
+                  : "The source path is saved for recovery. Reconcile the selected categories and mappings, then accept the server assertion before finalization."}
+            </p>
+            <SourceAcceptanceFields
+              source={sourceState.source}
+              accepted={sourceState.assertionAccepted}
+              password={sourceState.password}
+              onAcceptedChange={(accepted) => setSourceState((current) => ({ ...current, assertionAccepted: accepted }))}
+              onPasswordChange={(password) => setSourceState((current) => ({ ...current, password }))}
+            />
+          </>
+        )}
+        {values.startKind !== "Fresh" && !sourceState.source && (
           <p className="setupPendingNotice" role="status">
-            This source path is saved for recovery, but this installation's source pipeline has not
-            reported a materializable result. Finalization remains blocked until it does.
+            This source path is saved for recovery, but no source snapshot is available yet. Finalization remains blocked until a supported source pipeline returns an exact source assertion.
           </p>
         )}
         {values.startKind === "Fresh" && !freshComplete && (
@@ -1292,7 +1376,7 @@ export default function ProjectSetupWalkthrough({
         <button
           type="button"
           className="setupFinalizeButton"
-          disabled={finalizing || saving || !freshComplete || hasUnsavedChanges}
+          disabled={finalizing || saving || (!freshComplete && !sourceComplete) || hasUnsavedChanges}
           onClick={() => void finalize()}
         >
           {finalizing ? "Finalizing…" : "Create Project"}

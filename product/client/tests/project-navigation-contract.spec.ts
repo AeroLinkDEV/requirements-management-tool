@@ -7,6 +7,13 @@ import {
   resolveWorkspaceContext,
 } from "../src/workspaceContext";
 import { decodeProjectSetupDraftSummaries } from "../src/projectSetupDrafts";
+import {
+  decodeNativeSourceOptions,
+  decodeSourceView,
+  sourceConfigurationPayload,
+  sourceFinalizationPayload,
+  sourceUploadAccept,
+} from "../src/projectSetupSource";
 
 const wireWorkspaces = [
   {
@@ -149,4 +156,93 @@ test("official build names and ordering use the maintained SW-NN.NN format", () 
   expect(buildVersionOrder("1.3")).toBe(buildVersionOrder("1.30"));
   for (const value of ["", "NaN", "1", "1.", ".3", "1.2.3", "-1.2", "100.0", "1.100"])
     expect(officialBuildName(value)).toBeUndefined();
+});
+
+test("source envelopes retain exact identity and configuration payload omits server observations", () => {
+  const source = decodeSourceView({
+    id: "source-1",
+    kind: "ExternalBaseline",
+    displayName: "Imported navigation",
+    fileName: "navigation.reqif",
+    format: "ReqIF",
+    sha256: "abc123",
+    metadata: { sourceSystem: "Other Tool" },
+    categories: [
+      { key: "Requirements", count: 2, requires: [], supported: true },
+      { key: "Cases", count: 1, requires: ["Requirements"], supported: true },
+    ],
+    selectedCategories: ["Requirements", "Cases"],
+    modules: [{
+      key: "requirements",
+      name: "Requirements",
+      objectCount: 2,
+      attributes: [{ key: "priority", name: "Priority" }],
+      mappings: [{
+        sourceAttribute: "priority",
+        destination: "Statement",
+        valueMappings: [{ sourceValue: "high", destinationValue: "High" }],
+      }],
+      include: true,
+    }],
+    relations: [{ sourceType: "satisfies", count: 1, include: true, sourceIsParent: true }],
+    findings: [],
+    findingResolutions: {},
+    reconciliation: { ready: false, observedObjects: 2, includedObjects: 2, excludedObjects: 0, observedRelations: 1, includedRelations: 1, excludedRelations: 0, errors: [] },
+    assertion: null,
+  });
+  expect(source?.id).toBe("source-1");
+  expect(source?.sha256).toBe("abc123");
+  expect(source?.modules[0].objectCount).toBe(2);
+  const payload = sourceConfigurationPayload(source!, 7, ["Requirements"]);
+  expect(payload).toMatchObject({ expectedVersion: 7, selectedCategories: ["Requirements"] });
+  expect(payload.modules).toEqual([{
+    key: "requirements",
+    level: null,
+    include: true,
+    attributes: [{
+      sourceAttribute: "priority",
+      destination: "Statement",
+      valueMappings: [{ sourceValue: "high", destinationValue: "High" }],
+    }],
+  }]);
+  expect(JSON.stringify(payload)).not.toContain("objectCount");
+  expect(JSON.stringify(payload)).not.toContain("password");
+  expect(sourceUploadAccept).toContain(".reqif");
+  expect(sourceUploadAccept).toContain(".csv");
+  expect(sourceUploadAccept).toContain(".xlsx");
+  const finalization = sourceFinalizationPayload(8, "attempt-103", {
+    source: { ...source!, assertion: { text: "accepted source", hash: "assertion-hash" } },
+    assertionAccepted: true,
+    password: "memory-only-password",
+  });
+  expect(finalization).toEqual({
+    expectedVersion: 8,
+    idempotencyKey: "attempt-103",
+    password: "memory-only-password",
+    sourceAssertionHash: "assertion-hash",
+    sourceAssertionAccepted: true,
+  });
+});
+
+test("native source option pages are authoritative and keep server paging visible", () => {
+  const page = decodeNativeSourceOptions({
+    total: 101,
+    offset: 50,
+    limit: 50,
+    items: [{
+      baselineId: "baseline-2",
+      projectId: "project-2",
+      projectName: "Navigation",
+      name: "Frozen baseline",
+      displayNumber: "SW-01.02",
+      state: "Frozen",
+      requirementsCount: 3,
+      casesCount: 1,
+      proceduresCount: 1,
+      evidenceCount: 1,
+    }],
+  });
+  expect(page.offset).toBe(50);
+  expect(page.total).toBe(101);
+  expect(page.items[0]).toMatchObject({ baselineId: "baseline-2", state: "Frozen" });
 });
