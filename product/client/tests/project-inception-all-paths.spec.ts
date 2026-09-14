@@ -153,6 +153,41 @@ function configurationFor(view: Source) {
   };
 }
 
+async function configureSimpleExternalSource(page: Page) {
+  const requirements = page.getByRole("checkbox", { name: /^Requirements / });
+  if (!(await requirements.isChecked())) await requirements.check();
+
+  const objectPanels = page.locator("section.setupSourceObjectMapping");
+  const objectCount = await objectPanels.count();
+  expect(objectCount, "the parsed source must expose at least one exact object for mapping").toBeGreaterThan(0);
+  for (let panelIndex = 0; panelIndex < objectCount; panelIndex += 1) {
+    const objectPanel = objectPanels.nth(panelIndex);
+    await objectPanel.getByRole("combobox").first().selectOption("System");
+    const attributeSelects = objectPanel.locator('select[aria-label^="Mapping for "]');
+    for (let attributeIndex = 0; attributeIndex < await attributeSelects.count(); attributeIndex += 1) {
+      const select = attributeSelects.nth(attributeIndex);
+      const rawLabel = await select.getAttribute("aria-label") ?? "";
+      const label = rawLabel.toLocaleLowerCase();
+      const destination = label.endsWith("statement")
+        ? "Statement"
+        : label.endsWith("rationale")
+          ? "Rationale"
+          : label.endsWith("identifier") || label.endsWith(":id")
+            ? "SourceIdentifier"
+            : "SourceOnly";
+      await select.selectOption(destination);
+      if (destination === "SourceOnly") {
+        const reasonLabel = rawLabel.replace(/^Mapping for /i, "");
+        const reason = objectPanel.locator(`input[aria-label="Reason for ${reasonLabel}"]`);
+        await expect(reason).toHaveCount(1);
+        await reason.fill("Retain the exact foreign value as a source fact.");
+      }
+    }
+  }
+  await page.getByRole("button", { name: "Save choices and reconcile" }).click();
+  await expect(page.getByText("Reconciliation ready", { exact: true })).toBeVisible({ timeout: 180_000 });
+}
+
 async function beginSetup(page: Page, name: string, startLabel: string) {
   await page.goto("/projects/new");
   await page.getByLabel("Project name").fill(name);
@@ -248,10 +283,10 @@ test("inherits an authorized native baseline with exact mapped traces and discov
   await login(page, "admin", { openProject: false });
   const { setupUrl, draftId } = await beginSetup(page, `Native inception ${Date.now()}`, "Existing authorized AeroLink baseline");
   await expect(page.getByRole("button", { name: "Select exact baseline" }).first()).toBeVisible({ timeout: 120_000 });
-  const options = await json<Array<{ baselineId: string; projectName: string; name: string; displayNumber: string; state: string; requirementsCount: number }>>(
+  const options = await json<{ items: Array<{ baselineId: string; projectName: string; name: string; displayNumber: string; state: string; requirementsCount: number }> }>(
     await page.request.get(`${apiBase}/api/project-setups/source-options?offset=0&limit=50`),
   );
-  const option = options.find((item) => item.projectName === "FMS Product Development" && ["Frozen", "Released"].includes(item.state));
+  const option = options.items.find((item) => item.projectName === "FMS Product Development" && ["Frozen", "Released"].includes(item.state));
   expect(option, "an authorized materialized native baseline").toBeTruthy();
   const nativeRow = page.locator("tr").filter({ hasText: option!.name }).filter({ hasText: option!.displayNumber });
   await nativeRow.getByRole("button", { name: "Select exact baseline" }).click();
@@ -326,7 +361,7 @@ test("source upload and mapping survive save-exit and a new signed-in browser co
     await expect(resumedPage.getByRole("heading", { name: "Choose a starting point", level: 2 })).toBeVisible();
     await expect(resumedPage.getByText("Exact source", { exact: true })).toBeVisible({ timeout: 120_000 });
     await expect(resumedPage.getByText("Reconciliation ready", { exact: true })).toBeVisible();
-    await expect(resumedPage.getByLabel(/Mapping for Attributes in Source objects attribute:statement$/)).toHaveValue("Statement");
+    await expect(resumedPage.getByLabel(/Mapping for Source objects REQ-SYS attribute:statement$/)).toHaveValue("Statement");
     await resumedPage.screenshot({ path: testInfo.outputPath("source-recovery-resumed.png"), fullPage: true });
   } finally {
     await resumedContext.close();
@@ -406,17 +441,15 @@ for (const fixture of externalFixtures) {
       await page.getByLabel(/Relation direction for/i).selectOption("child");
       await page.getByRole("button", { name: "Save choices and reconcile" }).click();
       await expect(page.getByText("Reconciliation ready", { exact: true })).toBeVisible({ timeout: 180_000 });
+    } else {
+      await configureSimpleExternalSource(page);
     }
     await moveToRepository(page, fixture.format === "REQIF" ? (fixture.name.includes("root") ? "1.10" : "1.07") : fixture.format === "CSV" ? "1.08" : "1.09");
-    if (fixture.name === "ReqIF hierarchical") {
-      // Source configuration does not implicitly change the setup step. Persist the repository
-      // choice and enter the review step explicitly before the finalization helper reloads it.
-      await page.getByRole("button", { name: "Continue" }).click();
-      await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
-    }
-    const reconciled = fixture.name === "ReqIF hierarchical"
-      ? await source(page.request, draftId)
-      : await reconcile(page, draftId, [...fixture.categories]);
+    // Source configuration does not implicitly change the setup step. Persist the repository
+    // choice and enter the review step explicitly before the finalization helper reloads it.
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
+    const reconciled = await source(page.request, draftId);
     expect(reconciled.reconciliation?.ready).toBeTruthy();
     expect(reconciled.assertion?.hash).toMatch(/^[0-9a-f]{64}$/i);
     const projectId = await finalizeSource(page, setupUrl, testInfo, `external-${fixture.name.toLocaleLowerCase().replaceAll(" ", "-")}`);

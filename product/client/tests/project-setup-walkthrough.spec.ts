@@ -136,6 +136,37 @@ test("stages an external XLSX source through the server reconciliation envelope"
   };
   let uploadedBytes = 0;
   let configurationBody: Record<string, unknown> | undefined;
+  // The source calls are mocked in this focused browser contract test, so the disposable setup service
+  // cannot know that the uploaded source ID is valid. Keep the setup PUT in the same current wire shape
+  // and return its durable draft snapshot; the source endpoints below still own the parser/reconciliation
+  // envelope assertions this test is intended to exercise.
+  await page.route(/\/api\/project-setups\/[0-9a-f-]{36}$/i, async (route) => {
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    const path = new URL(route.request().url()).pathname;
+    const draftId = path.split("/").pop() ?? "";
+    const expectedVersion = typeof body.expectedVersion === "number" ? body.expectedVersion : 0;
+    const draft = {
+      draftId,
+      state: "Draft",
+      currentStep: body.currentStep ?? "StartingPoint",
+      version: expectedVersion + 1,
+      lastSavedAt: new Date().toISOString(),
+      project: body.project ?? { name: "", softwareProduct: "" },
+      start: body.start ?? { kind: "Fresh", sourceBaselineId: null, sourceImportId: null },
+      build: body.build ?? { version: "" },
+      selectedCategories: body.selectedCategories ?? [],
+      ladder: body.ladder ?? { steps: [], relationships: [] },
+      reviewRules: body.reviewRules ?? null,
+      repository: body.repository ?? null,
+      mapping: body.mapping ?? null,
+      finalization: null,
+    };
+    await route.fulfill({ json: draft });
+  });
   await page.route(/\/api\/project-setups\/[^/]+\/source$/, async (route) => {
     await route.fulfill({ json: { draftVersion: 2, source: null } });
   });
