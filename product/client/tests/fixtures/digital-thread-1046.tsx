@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import '../../src/index.css'
 import DigitalThreadNetwork from '../../src/DigitalThreadNetwork'
 import DigitalThreadPage, { type DigitalThreadPageProps } from '../../src/DigitalThreadPage'
@@ -50,10 +50,23 @@ window.fetch = async (input, init) => {
   return body === undefined ? new Response('Unexpected fixture read', { status: 500 }) : Response.json(body)
 }
 function PageHarness() {
-  const [route, setRoute] = useState<Parameters<DigitalThreadPageProps['onRoute']>[0]>({ view: 'network' })
+  const readRoute = (): Parameters<DigitalThreadPageProps['onRoute']>[0] => {
+    const focalId = new URLSearchParams(location.search).get('focal') ?? undefined
+    return { view: 'network', focalId, focalKind: focalId ? 'change-request' : undefined }
+  }
+  const [route, setRoute] = useState(readRoute)
+  useEffect(() => {
+    const pop = () => setRoute(readRoute())
+    window.addEventListener('popstate', pop)
+    return () => window.removeEventListener('popstate', pop)
+  }, [])
   return <DigitalThreadPage api="/fixture-api" projectId={projection.projectId} releaseId={projection.releaseId}
     buildLabel="Build 1.6" {...route} onRoute={next => {
       (window as any).__1046?.push({ kind: 'route', t: performance.now(), previous: route, next })
+      const url = new URL(location.href)
+      if (next.focalId) url.searchParams.set('focal', next.focalId)
+      else url.searchParams.delete('focal')
+      history.pushState(null, '', url)
       setRoute(next)
     }} traceArtifactHref={node => `#exact-${node.id}`} />
 }

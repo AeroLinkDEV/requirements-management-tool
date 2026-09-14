@@ -146,7 +146,7 @@ export default function DigitalThreadCanvas({
   // Framing, expansion and the tray reservation belong to a persistent selection only. Hover emphasis is a
   // visual treatment: it must never resize the source card or move its neighbours, so it never owns them.
   const selectedId = pinnedId
-  const frameInset = { ...inspectorInset, bottom: (inspectorInset?.bottom ?? 0) + (selectedId ? 64 : 0) }
+  const frameInset = { ...inspectorInset, bottom: inspectorInset?.bottom ?? 0 }
   const story = useMemo(() => emphasisId ? trace(emphasisId, edges) : null, [emphasisId, edges])
   /**
    * Canonical rows, never re-ordered.
@@ -238,6 +238,7 @@ export default function DigitalThreadCanvas({
     cameraOwned.current = false
     landRef.current()
   }, [scopeKey])
+  const hoverPointer = useRef<{ x: number; y: number; id: string | null } | null>(null)
   const clearPreviewTimer = () => {
     if (previewTimer.current !== null) clearTimeout(previewTimer.current)
     previewTimer.current = null
@@ -262,7 +263,13 @@ export default function DigitalThreadCanvas({
     // automatic motion, but it must not suppress the correction this selection is allowed to make. Clearing
     // is the opposite: it must not re-authorise automatic framing, or a later resize would move a camera the
     // reader positioned while clearing.
-    if (id !== null) cameraOwned.current = false
+    if (id !== null) {
+      cameraOwned.current = false
+      retainedSubjectY.current = lastPaintedPositions.current.get(id)?.y ?? null
+      frozenLanes.current.clear()
+      visitedLanes.current.clear()
+      revealSignature.current = ""
+    }
     onPin?.(id)
   }, [onHover, onPin])
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -298,9 +305,9 @@ export default function DigitalThreadCanvas({
       easeTimer.current = null
     }
     cameraOwned.current = true
+    for (const lane of new Set([...visitedLanes.current, ...usableLanesRef.current])) frozenLanes.current.add(lane)
   }, [])
   const edgeLayerRef = useRef<SVGSVGElement | null>(null)
-  const offscreenRefs = useRef(new Map<string, HTMLButtonElement>())
   const continuationRefs = useRef(new Map<string, HTMLElement>())
   const cardRefs = useRef(new Map<string, HTMLDivElement>())
   const edgeRefs = useRef<
@@ -615,6 +622,11 @@ export default function DigitalThreadCanvas({
     if (contentSignature.current !== contentKey) {
       const oldBase = previous && contentPositionsForNodes(nodes, previous.geometry, measuredHeightsRef.current)
       const newBase = contentPositionsForNodes(nodes, result.geometry, measuredCardHeights)
+      if (oldBase && emphasisId && !selectedId && !revealTargets.current.has(emphasisId)) {
+        const last = lastPaintedPositions.current.get(emphasisId)
+        const lane = nodeLaneRef.current.get(emphasisId)
+        if (last && lane !== undefined) retainedSubjectY.current = last.y
+      }
       if (oldBase) for (const id of revealTargets.current.keys()) {
         const shift = (oldBase.get(id) ?? 0) - (newBase.get(id) ?? 0)
         revealTargets.current.set(id, revealTargets.current.get(id)! + shift)
@@ -645,13 +657,14 @@ export default function DigitalThreadCanvas({
         measuredHeights: measuredCardHeights,
         storyIds: story?.nodes ?? new Set<string>(),
         subjectId: emphasisId ?? null,
+        stationarySubject: !selectedId,
         windowByLane: contentWindows,
         // Only lanes whose reveal has arrived *and been seen* (or that the reader owns) keep their
         // arrangement. A lane prepared while still hidden has not had its first useful exposure, so it is
         // reconciled when it arrives rather than being frozen by its earlier, unseen preparation.
         frozenLanes: new Set([
           ...frozenLanes.current,
-          ...[...visitedLanes.current].filter(() => !constraintsChanged),
+          ...[...visitedLanes.current].filter(() => cameraOwned.current || (!constraintsChanged && !selectedId)),
         ]),
         existing: retained,
         bandHeight: result.bandHeight,
@@ -817,9 +830,13 @@ export default function DigitalThreadCanvas({
       const position = positions.get(node.id) ?? nodePosition(node, geometry, offsets.current)
       card.style.transform = `translate(${position.x}px,${position.y}px)`
       card.style.width = `${geometry.laneWidth}px`
+      card.style.zIndex = node.id === emphasisId ? "3" : story?.nodes.has(node.id) ? "2" : "1"
     }
     const paintedHeights = new Map(nodes.map(node => [node.id,
       cardRefs.current.get(node.id)?.offsetHeight || geometry.cardHeight]))
+    const stackingOrder = new Map([...nodes].sort((a, b) => a.lane - b.lane || a.row - b.row)
+      .map((node, index) => [node.id, index]))
+    const exposed = new Map<string, { left: number; right: number; top: number; bottom: number; priority: number }>()
     const controlFrames: { card: HTMLDivElement; offscreen: boolean; top: number; bottom: number }[] = []
     for (const node of nodes) {
       const position = positions.get(node.id) ?? nodePosition(node, geometry, offsets.current)
@@ -830,23 +847,18 @@ export default function DigitalThreadCanvas({
       const left = position.x * display.zoom + display.x
       const right = left + geometry.laneWidth * display.zoom
       // A partially exposed card retains its position and an explicit route to the rest of its content.
-      const inFrame = left >= box.x - 1 && right <= box.x + box.width + 1
       const top = position.y * display.zoom + display.y
       const bottom = top + paintedHeights.get(node.id)! * display.zoom
-      const fullyVisible = inFrame && top >= box.y - 1 && bottom <= box.y + box.height + 1 && isVisible(position.y, geometry, bandHeight)
       const visibleTop = Math.max(box.y, selectedId === node.id ? box.y : display.y)
       const visibleBottom = Math.min(box.y + box.height,
         selectedId === node.id ? box.y + box.height : display.y + bandHeight * display.zoom)
       const anyVisible = right > box.x && left < box.x + box.width && bottom > visibleTop && top < visibleBottom
+      if (anyVisible) exposed.set(node.id, {
+        left: Math.max(left, box.x), right: Math.min(right, box.x + box.width),
+        top: Math.max(top, visibleTop), bottom: Math.min(bottom, visibleBottom),
+        priority: (node.id === emphasisId ? 3 : story?.nodes.has(node.id) ? 2 : 1) * (nodes.length + 1) + stackingOrder.get(node.id)!,
+      })
       card.style.clipPath = `inset(${Math.max(0, visibleTop - top) / display.zoom}px ${Math.max(0, right - box.x - box.width) / display.zoom}px ${Math.max(0, bottom - visibleBottom) / display.zoom}px ${Math.max(0, box.x - left) / display.zoom}px)`
-      const indicator = offscreenRefs.current.get(node.id)
-      if (indicator) {
-        const filtered = Boolean(card.querySelector(".is-filtered"))
-        indicator.hidden = fullyVisible && !filtered
-        indicator.disabled = filtered
-        const label = `${filtered ? "Excluded by filters:" : "Show"} ${card.querySelector(".dtnId, .dticId, .dtaId, .exactArtifactLink, strong")?.textContent ?? "connected record"}`
-        if (indicator.textContent !== label) indicator.textContent = label
-      }
       card.classList.toggle(
         "is-offscreen",
         !anyVisible && selectedId !== node.id,
@@ -854,11 +866,26 @@ export default function DigitalThreadCanvas({
       const offscreen = card.classList.contains("is-offscreen")
       controlFrames.push({ card, offscreen, top: visibleTop, bottom: visibleBottom })
     }
+    const intersects = (a: { left: number; right: number; top: number; bottom: number },
+      b: { left: number; right: number; top: number; bottom: number }) =>
+      a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+    const covered = (id: string, rect: { left: number; right: number; top: number; bottom: number }) => {
+      const own = exposed.get(id)
+      if (!own) return false
+      return [...exposed].some(([otherId, other]) => otherId !== id && other.priority > own.priority && intersects(rect, other))
+    }
+    for (const [id, card] of cardRefs.current) {
+      const rect = exposed.get(id)
+      card.dataset.occluded = String(Boolean(rect && covered(id, rect)))
+    }
     const viewport = viewportRef.current!.getBoundingClientRect()
     const controlVisibility = controlFrames.flatMap(({ card, offscreen, top, bottom }) =>
       [...card.querySelectorAll<HTMLElement>("a,button,input,select,textarea,summary,[role='link']")].map(control => {
         const rect = control.getBoundingClientRect()
-        return { control, usable: !offscreen && rect.left >= viewport.left + box.x - 1
+        return { control, usable: !offscreen && !covered(card.dataset.nodeId!, {
+          left: rect.left - viewport.left, right: rect.right - viewport.left,
+          top: rect.top - viewport.top, bottom: rect.bottom - viewport.top,
+        }) && rect.left >= viewport.left + box.x - 1
           && rect.right <= viewport.left + box.x + box.width + 1
           && rect.top >= viewport.top + top - 1 && rect.bottom <= viewport.top + bottom + 1 }
       }))
@@ -897,7 +924,7 @@ export default function DigitalThreadCanvas({
         const right = left + geometry.laneWidth * display.zoom
         const top = position.y * display.zoom + display.y
         const bottom = top + (paintedHeights.get(candidate.id) ?? geometry.cardHeight) * display.zoom
-        return isVisible(position.y, geometry, bandHeight)
+        return cardRefs.current.get(candidate.id)?.dataset.occluded !== "true" && isVisible(position.y, geometry, bandHeight)
           && left >= box.x - 1 && right <= box.x + box.width + 1
           && top >= box.y - 1 && bottom <= box.y + box.height + 1
       })
@@ -907,7 +934,7 @@ export default function DigitalThreadCanvas({
         drawn[0]?.id ??
         // A lane entirely outside the free frame keeps a stop rather than losing it: dropping it would make
         // that lane unreachable by keyboard, and `onFocus` reveals the card before focus rests on it.
-        bucket[0]?.id ??
+        bucket.find(candidate => story?.nodes.has(candidate.id))?.id ?? bucket[0]?.id ??
         null
       for (const candidate of bucket) {
         const card = cardRefs.current.get(candidate.id)
@@ -1743,8 +1770,10 @@ export default function DigitalThreadCanvas({
             return ay - by || a.row - b.row || a.id.localeCompare(b.id)
           })
         : bucket
-      const index = ordered.findIndex((candidate: CanvasNode) => candidate.id === node.id)
-      const next = ordered[Math.min(ordered.length - 1, Math.max(0, index + delta))]
+      const navigable = ordered.filter(candidate => candidate.id === node.id ||
+        cardRefs.current.get(candidate.id)?.dataset.occluded !== "true")
+      const index = navigable.findIndex((candidate: CanvasNode) => candidate.id === node.id)
+      const next = navigable[Math.min(navigable.length - 1, Math.max(0, index + delta))]
       if (!next || next.id === node.id) return
       setRoving(current => ({ ...current, [node.lane]: next.id }))
       reveal(next)
@@ -1808,7 +1837,21 @@ export default function DigitalThreadCanvas({
       tabIndex={0}
       onWheel={onWheel}
       onPointerDown={onPointerDown}
-      onPointerLeave={exitHover}
+      onPointerLeave={() => { hoverPointer.current = null; exitHover() }}
+      onPointerMove={event => {
+        if (event.pointerType !== "mouse" || event.buttons || pinnedId) return
+        const previous = hoverPointer.current
+        if (previous && previous.x === event.clientX && previous.y === event.clientY) return
+        const id = (event.target as HTMLElement).closest<HTMLElement>("[data-node-id]")?.dataset.nodeId ?? null
+        hoverPointer.current = { x: event.clientX, y: event.clientY, id }
+        if (previous?.id === id) return
+        clearPreviewTimer()
+        if (!id) { exitHover(); return }
+        previewTimer.current = setTimeout(() => {
+          setHoverId(id)
+          onHover?.(id)
+        }, 300)
+      }}
       /**
        * A native text or image drag started from a card cancels the pointer a few moves into a gesture, which
        * reduced later lane drags to a single step and never delivered a pointerup (measured in the gesture
@@ -1868,24 +1911,6 @@ export default function DigitalThreadCanvas({
           />
         )))}
       </div>
-      {story && <nav className="dtCanvasOffscreen" style={{ bottom: (inspectorInset?.bottom ?? 0) + 6,
-        left: (inspectorInset?.left ?? 0) + 12,
-        maxWidth: `min(320px, calc(100% - ${(inspectorInset?.left ?? 0) + (inspectorInset?.right ?? 0) + 24}px))`,
-      }} aria-label="Connected records outside view" onPointerDown={event => event.stopPropagation()}
-        onWheel={event => {
-          event.stopPropagation()
-          // A conventional vertical wheel explores this horizontal strip instead of zooming the canvas.
-          // Trackpad horizontal scrolling and native touch/keyboard scrolling keep their browser behavior.
-          if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
-            event.currentTarget.scrollLeft += event.deltaY
-          }
-        }}>
-        {sourceNodes.filter(node => story.nodes.has(node.id)).map(({ id }) => <button key={id} type="button"
-          ref={element => { if (element) offscreenRefs.current.set(id, element); else offscreenRefs.current.delete(id) }}
-          onClick={() => { const node = nodes.find(candidate => candidate.id === id); if (node) reveal(node) }}>
-          Show connected record
-        </button>)}
-      </nav>}
       <div className="dtCanvasScene" ref={sceneRef}>
         <div className="dtCanvasBands">
           {lanes.map((title, lane) => {
@@ -1988,23 +2013,7 @@ export default function DigitalThreadCanvas({
                 if (element) cardRefs.current.set(node.id, element)
                 else cardRefs.current.delete(node.id)
               }}
-              onPointerEnter={event => {
-                // Once something is selected, no hover may replace or preview another thread — not even
-                // after the dwell. The guard is on the persistent selection, not on the current emphasis.
-                if (event.pointerType !== "mouse" || event.buttons || pinnedId || node.id === hoverId) return
-                clearPreviewTimer()
-                previewTimer.current = setTimeout(() => {
-                  setHoverId(node.id)
-                  onHover?.(node.id)
-                }, 300)
-              }}
-              onPointerLeave={() => {
-                clearPreviewTimer()
-                // Leaving the card under the pointer ends only the temporary emphasis. It never touches the
-                // camera, a persistent selection, or the reader's lane positions.
-                setHoverId(current => (current === node.id ? null : current))
-                onHover?.(null)
-              }}
+
             >
               {renderCard(node)}
             </div>

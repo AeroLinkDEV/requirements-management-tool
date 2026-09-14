@@ -27,6 +27,8 @@ function Harness() {
   const [grown, setGrown] = useState(false)
   const [mounted, setMounted] = useState(true)
   const [activated, setActivated] = useState(false)
+  const [parked, setParked] = useState(false)
+  const parking = new URLSearchParams(location.search).get("case") === "parking"
   const growth = new URLSearchParams(location.search).get("case") === "growth"
   const tall = new URLSearchParams(location.search).get("case") === "tall"
   const growthNodes = [
@@ -37,13 +39,15 @@ function Harness() {
   ]
   return (
     <div style={{ height: "100%" }}>
+      {parking && <button style={{ position: "absolute", right: 10, top: 5, zIndex: 200 }}
+        onClick={() => setTimeout(() => setParked(true), 700)}>Move fixture card</button>}
       {growth && <div style={{ position: "absolute", right: 10, top: 5, zIndex: 200 }}>
         <button onClick={() => setGrown(value => !value)}>Change text size</button>
         <button onClick={() => setMounted(value => !value)}>Toggle canvas</button>
       </div>}
       {mounted && <DigitalThreadCanvas
-        lanes={growth || tall ? ["Subject", "Linked"] : lanes}
-        nodes={tall ? [{ id: "subj", lane: 0, row: 0 }, { id: "link", lane: 1, row: 0 }] : growth ? growthNodes : nodes}
+        lanes={growth || tall || parking ? ["Subject", "Linked"] : lanes}
+        nodes={parking ? [{ id: "subj", lane: 0, row: 1 }, { id: "link", lane: 1, row: parked ? 1 : 12 }] : tall ? [{ id: "subj", lane: 0, row: 0 }, { id: "link", lane: 1, row: 0 }] : growth ? growthNodes : nodes}
         edges={edges}
         scopeKey="contract|hidden-lane"
         selectedId={selectedId}

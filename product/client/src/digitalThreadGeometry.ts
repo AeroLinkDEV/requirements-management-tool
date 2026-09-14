@@ -289,6 +289,8 @@ export interface RevealPlanInput {
   measuredHeights?: ReadonlyMap<string, number>
   storyIds: ReadonlySet<string>
   subjectId: string | null
+  /** Hover source is immutable; selection may reconcile its expanded rectangle. */
+  stationarySubject?: boolean
   /** Usable window per lane in content coordinates; a hidden lane has no entry. */
   windowByLane: ReadonlyMap<number, RevealWindow>
   /** Retain these lanes' valid placements; only real collisions may require a local repair. */
@@ -313,7 +315,7 @@ export interface RevealPlan {
 
 /**
  * Lane-local reveal: bring eligible linked cards into the usable window, or directly below it, without
- * moving any card that stays put and without ever placing a card above the window (that would need a
+ * using foreground-only obstacles and without placing a revealed card above the window (that would need a
  * positive lane offset, which the reader's scroll cannot supply).
  */
 export const planReveal = (input: RevealPlanInput): RevealPlan => {
@@ -324,130 +326,75 @@ export const planReveal = (input: RevealPlanInput): RevealPlan => {
   const content = contentPositionsForNodes(nodes, geometry, measuredHeights)
   const lanes = new Map<number, CanvasNode[]>()
   for (const node of nodes) {
-    const bucket = lanes.get(node.lane)
-    if (bucket) bucket.push(node)
-    else lanes.set(node.lane, [node])
+    if (!storyIds.has(node.id)) continue
+    const bucket = lanes.get(node.lane) ?? []
+    bucket.push(node)
+    lanes.set(node.lane, bucket)
   }
   for (const [lane, bucket] of lanes) {
     bucket.sort((a, b) => a.row - b.row || a.id.localeCompare(b.id))
     const window = windowByLane.get(lane) ?? { top: 0, bottom: bandHeight }
-    const cue = { up: false, down: false }
-    cues.set(lane, cue)
+    const frozen = frozenLanes.has(lane)
+    const blocks: { start: number; end: number }[] = []
+    const base = (node: CanvasNode) => content.get(node.id) ?? 0
+    const prior = (node: CanvasNode) => base(node) + (input.existing?.get(node.id) ?? 0)
+    const fits = (node: CanvasNode, top: number) => top >= window.top && top + heights(node.id) <= window.bottom
+    const record = (node: CanvasNode, top: number) => {
+      if (top !== base(node) || input.existing?.has(node.id)) deltas.set(node.id, top - base(node))
+      blocks.push({ start: top, end: top + heights(node.id) })
+    }
+    const safe = (node: CanvasNode, top: number) => top >= 0 && blocks.every(block =>
+      top + heights(node.id) + MEASURED_CARD_GAP <= block.start || top >= block.end + MEASURED_CARD_GAP)
+    const nearest = (node: CanvasNode, inside: boolean): number | undefined => {
+      const height = heights(node.id), old = prior(node)
+      return [old, Math.max(0, window.top), window.bottom - height, 0,
+        ...blocks.flatMap(block => [block.start - height - MEASURED_CARD_GAP, block.end + MEASURED_CARD_GAP])]
+        .filter(top => safe(node, top) && (!inside || fits(node, top)))
+        .sort((a, b) => Math.abs(a - old) - Math.abs(b - old) || a - b)[0]
+    }
+    const subject = bucket.find(node => node.id === subjectId)
+    if (subject) {
+      // Hover cannot move its source, including retained zero-delta and collision-repair paths.
+      // Frozen lanes preserve deliberate offscreen navigation, even for a selected subject.
+      const fixed = input.stationarySubject ?? !input.existing?.has(subject.id)
+      record(subject, fixed || frozen ? prior(subject) : nearest(subject, true) ?? prior(subject))
+    }
+    const pending: CanvasNode[] = []
     for (const node of bucket) {
-      if (!storyIds.has(node.id)) continue
-      // The window arrives in content coordinates, so cues are decided there too: a card above the window
-      // would need a positive offset and is reachable only by moving the camera, which the cue says plainly.
-      const cardTop = content.get(node.id) ?? 0
-      if (cardTop + heights(node.id) <= window.top) cue.up = true
-      else if (cardTop >= window.bottom) cue.down = true
+      if (node === subject) continue
+      const old = prior(node)
+      if (frozen) {
+        // Canonical foreground anchors stay fixed. Retained foreground growth may repair locally;
+        // window visibility is deliberately not a condition on reader-owned placements.
+        if (!input.existing?.has(node.id) && safe(node, base(node))) record(node, base(node))
+        else pending.push(node)
+      } else if (fits(node, old) && safe(node, old)) record(node, old)
+      else pending.push(node)
     }
-    if (frozenLanes.has(lane)) {
-      const retained = bucket.filter(node => input.existing?.has(node.id) && storyIds.has(node.id))
-      const blocks = bucket.filter(node => !retained.includes(node)).map(node => ({
-        start: content.get(node.id) ?? 0,
-        end: (content.get(node.id) ?? 0) + heights(node.id),
-      }))
-      // Validity is independent of visibility: preserve a reader-panned offscreen placement. If measured
-      // growth creates a collision, move only that temporary card to the nearest safe content position.
-      for (const node of retained.sort((a, b) => Number(b.id === subjectId) - Number(a.id === subjectId) ||
-        ((content.get(a.id) ?? 0) + input.existing!.get(a.id)!) - ((content.get(b.id) ?? 0) + input.existing!.get(b.id)!))) {
-        const base = content.get(node.id) ?? 0
-        const oldTop = base + input.existing!.get(node.id)!
-        const height = heights(node.id)
-        const safe = (top: number) => top >= 0 && blocks.every(block =>
-          top + height + MEASURED_CARD_GAP <= block.start || top >= block.end + MEASURED_CARD_GAP)
-        const candidates = [oldTop, 0, ...blocks.flatMap(block => [block.start - height - MEASURED_CARD_GAP, block.end + MEASURED_CARD_GAP])]
-          .filter(safe).sort((a, b) => Math.abs(a - oldTop) - Math.abs(b - oldTop) || a - b)
-        const top = candidates[0] ?? oldTop
-        deltas.set(node.id, top - base)
-        blocks.push({ start: top, end: top + height })
+    if (frozen) {
+      for (const node of pending.sort((a, b) => prior(a) - prior(b) || a.id.localeCompare(b.id)))
+        record(node, nearest(node, false) ?? prior(node))
+    } else {
+      const overflow: CanvasNode[] = []
+      // Try every fitting candidate before allocating overflow: an oversized first record cannot
+      // consume the window or strand a later fitting record. Background is never an obstacle.
+      for (const node of pending) {
+        const top = nearest(node, true)
+        if (top === undefined) overflow.push(node)
+        else record(node, top)
       }
-      continue
-    }
-
-    const eligible = bucket.filter(node => {
-      if (node.id === subjectId || !storyIds.has(node.id)) return false
-      const cardTop = content.get(node.id) ?? 0
-      // Only a card with no measured intersection with the window is eligible: partially visible cards stay.
-      return cardTop + heights(node.id) <= window.top || cardTop >= window.bottom
-    })
-    if (!eligible.length) continue
-
-    const stationary = bucket.filter(node => !eligible.includes(node) )
-    const blocks = stationary.map(node => ({
-      start: content.get(node.id) ?? 0,
-      end: (content.get(node.id) ?? 0) + heights(node.id),
-    }))
-    const gap = MEASURED_CARD_GAP
-    const contentEnd = Math.max(geometry.pad, ...bucket.map(node => (content.get(node.id) ?? 0) + heights(node.id) + geometry.pad))
-    /**
-     * The search region must include the usable window itself, not only the lane's existing content.
-     *
-     * A short lane can sit entirely above the current viewing height with empty usable space below it; the
-     * card belongs in that space. Bounding the search by the previous content end reported "no room" and
-     * dropped the card just past its ordinary end — still outside the window — while hundreds of usable units
-     * sat unused. Nothing here changes the camera, the lanes or canonical rows.
-     */
-    const searchEnd = Math.max(contentEnd, window.bottom + geometry.cardHeight)
-    const spans: { start: number; end: number }[] = []
-    let cursor = 0
-    for (const block of [...blocks].sort((a, b) => a.start - b.start)) {
-      if (block.start - gap > cursor) spans.push({ start: cursor, end: block.start - gap })
-      cursor = Math.max(cursor, block.end + gap)
-    }
-    if (searchEnd > cursor) spans.push({ start: cursor, end: searchEnd })
-
-    // Split at the window so a placed card is fully inside it or fully below it, and drop the part above it.
-    const top = window.top
-    const bottom = window.bottom
-    const candidates = spans.flatMap(span => {
-      const parts: { start: number; end: number }[] = []
-      const insideTop = Math.max(span.start, top)
-      const insideBottom = Math.min(span.end, bottom)
-      if (insideBottom > insideTop) parts.push({ start: insideTop, end: insideBottom })
-      if (span.end > Math.max(bottom, span.start)) parts.push({ start: Math.max(bottom, span.start), end: span.end })
-      return parts.filter(part => part.end - part.start >= 1)
-    })
-    const anchor = (top + bottom) / 2
-    candidates.sort((a, b) =>
-      Math.abs((a.start + a.end) / 2 - anchor) - Math.abs((b.start + b.end) / 2 - anchor) || a.start - b.start)
-
-    const queue = [...eligible]
-    let tail = Math.max(contentEnd, ...candidates.map(c => c.end))
-    for (const span of candidates) {
-      let at = span.start
-      while (queue.length) {
-        const next = queue[0]
-        const height = heights(next.id)
-        if (span.end - at < height) break
-        deltas.set(next.id, at - (content.get(next.id) ?? 0))
-        if (at >= bottom) cue.down = true
-        at += height + gap
-        queue.shift()
+      for (const node of overflow) {
+        const top = Math.max(window.bottom, 0, ...blocks.map(block => block.end + MEASURED_CARD_GAP))
+        record(node, top)
       }
     }
-    for (const next of queue) {
-      deltas.set(next.id, tail - (content.get(next.id) ?? 0))
-      cue.down = true
-      tail += heights(next.id) + gap
+    const cue = { up: false, down: false }
+    for (const node of bucket) {
+      const top = base(node) + (deltas.get(node.id) ?? 0)
+      if (top < window.top) cue.up = true
+      if (top + heights(node.id) > window.bottom) cue.down = true
     }
-  }
-  // Promotion retains its effective position even in a lane being planned for its first exposure. Measured
-  // growth can invalidate that position: preserve it only while it clears the final positions of neighbours.
-  const subject = nodes.find(node => node.id === subjectId)
-  if (subject && input.existing?.has(subject.id) && !deltas.has(subject.id)) {
-    const base = content.get(subject.id) ?? 0
-    const oldTop = base + input.existing.get(subject.id)!
-    const height = heights(subject.id)
-    const blocks = (lanes.get(subject.lane) ?? []).filter(node => node.id !== subject.id).map(node => {
-      const start = (content.get(node.id) ?? 0) + (deltas.get(node.id) ?? 0)
-      return { start, end: start + heights(node.id) }
-    })
-    const safe = (top: number) => top >= 0 && blocks.every(block =>
-      top + height + MEASURED_CARD_GAP <= block.start || top >= block.end + MEASURED_CARD_GAP)
-    const top = [oldTop, 0, ...blocks.flatMap(block => [block.start - height - MEASURED_CARD_GAP, block.end + MEASURED_CARD_GAP])]
-      .filter(safe).sort((a, b) => Math.abs(a - oldTop) - Math.abs(b - oldTop) || a - b)[0] ?? oldTop
-    deltas.set(subject.id, top - base)
+    cues.set(lane, cue)
   }
   return { deltas, cues }
 }

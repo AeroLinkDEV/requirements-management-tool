@@ -57,7 +57,7 @@ export function usePanelDock(
         const rect = probe.getBoundingClientRect()
         const width = canvasRect.width - (candidate === "bottom" ? 0 : candidate === "left"
           ? rect.right - canvasRect.left + 12 : canvasRect.right - rect.left + 12)
-        const height = canvasRect.height - top - 64 - (candidate === "bottom" ? canvasRect.bottom - rect.top + 12 : 0)
+        const height = canvasRect.height - top - (candidate === "bottom" ? canvasRect.bottom - rect.top + 12 : 0)
         return { fits: cardRect.width + 24 <= width && cardRect.height + 24 <= height,
           room: Math.min(width / cardRect.width, height / cardRect.height) }
       } finally { probe.remove() }
