@@ -855,6 +855,15 @@ disposable connection may skip these tests; that run is not provider evidence. T
 both selected test projects by default; `-NoBuild` is only for callers that already built the exact candidate.
 Its test boundary refuses persistent port 54329 and non-loopback servers.
 
+For stored visual branch qualification, run `product/scripts/Test-ProjectSetupLineage.ps1` after installing
+the normal client/Playwright dependencies. It builds the complete solution and creates a new temporary SQLite
+fixture through the domain model: released 9.0 has released 10.5 and in-work 11.0 as sibling children. The normal
+API and browser verify canonical ordering, exact predecessor relationships, lifecycle cards and explicit child
+selection. These synthetic fixture states prove navigation, not engineering release approval. The script never
+opens an existing database and retains the fixture, screenshot, logs and before/after source identity under the
+temporary directory. `-ApiPort` and `-ClientPort` select free qualification ports; no persistent installation is
+started or upgraded. This supplements the PostgreSQL persistence qualification above.
+
 ## Attended production restore
 
 1. Confirm the selected archive, its date, and its `.sha256` sidecar; copy both to `product/.local/backups` if necessary.

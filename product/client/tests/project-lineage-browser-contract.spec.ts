@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { routePath } from "../src/routing";
 import { apiBase, login } from "./auth";
+import { readFileSync } from "node:fs";
 
 test("actual authorized build identities, states and predecessors drive visual selection", async ({ page }, testInfo) => {
   await login(page, "admin", { openProject: false });
@@ -14,10 +15,22 @@ test("actual authorized build identities, states and predecessors drive visual s
     }> }>;
   }>;
   const choices = workspaces.flatMap(workspace => workspace.projects.map(project => ({ workspace, project })));
-  const choice = choices.find(({ project }) => project.releases.some(release => release.isReleased)
-    && project.releases.some(release => !release.isReleased && release.predecessorReleaseId));
+  const fixture = process.env.AEROLINK_E2E_LINEAGE_FIXTURE
+    ? JSON.parse(readFileSync(process.env.AEROLINK_E2E_LINEAGE_FIXTURE, "utf8")) as {
+      projectId: string; rootReleaseId: string; childReleaseIds: string[];
+    } : undefined;
+  const choice = choices.find(({ project }) => fixture ? project.project.id === fixture.projectId
+    : project.releases.some(release => release.isReleased)
+      && project.releases.some(release => !release.isReleased && release.predecessorReleaseId));
   expect(choice, "the isolated seeded installation contains actual historical and working builds").toBeTruthy();
   const { workspace, project } = choice!;
+  if (fixture) {
+    expect(project.releases.map(release => release.version)).toEqual(["9.0", "10.5", "11.0"]);
+    expect(project.releases.filter(release => release.predecessorReleaseId === fixture.rootReleaseId)
+      .map(release => release.id).sort()).toEqual([...fixture.childReleaseIds].sort());
+    expect(project.releases.filter(release => release.isReleased)).toHaveLength(2);
+    expect(project.releases.filter(release => !release.isReleased)).toHaveLength(1);
+  }
   await page.goto(`/projects/${project.project.id}/builds`);
   await expect(page.getByRole("heading", { name: "Software Builds", level: 1 })).toBeVisible();
   await expect(page.locator("[data-build-card]")).toHaveCount(project.releases.length);
@@ -32,6 +45,15 @@ test("actual authorized build identities, states and predecessors drive visual s
   await page.locator(`[data-build-id="${selected.id}"]`).getByRole("button", { name: /Open build/ }).click();
   await expect(page).toHaveURL(routePath({ programId: workspace.program.id,
     projectId: project.project.id, releaseId: selected.id }, "dashboard"));
+  for (const childId of fixture?.childReleaseIds ?? []) {
+    await page.goto(`/projects/${project.project.id}/builds`);
+    const card = page.locator(`[data-build-id="${childId}"]`);
+    await expect(card).toContainText("SW-09.00");
+    await card.getByRole("button", { name: /Open build/ }).click();
+    await expect(page).toHaveURL(routePath({ programId: workspace.program.id,
+      projectId: project.project.id, releaseId: childId }, "dashboard"));
+    await expect(page.getByRole("heading", { name: "Command Center", level: 1 })).toBeVisible();
+  }
 });
 
 const branchWorkspace = {
