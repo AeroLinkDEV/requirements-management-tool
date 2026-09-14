@@ -1,5 +1,6 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
@@ -868,10 +869,12 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
             .SingleAsync(x => x.ReleaseId == summary.ActiveReleaseId);
         activeBaseline.Freeze("cm.fms", materializedAt.AddMinutes(-2));
         await db.SaveChangesAsync();
-        var policyResolver = new EffectiveProjectLadderPolicyResolver(db);
+        // This call reconstructs the pre-#889 historical database, when Interface was a supported
+        // ladder level. Keep the fixture construction on that explicit legacy policy; the upgrade below
+        // deliberately resolves the current persisted Case-only ladder and must preserve the frozen record.
         await new RequirementBaselineMaterializer(db,
-                new VerificationImpactService(db, policyResolver: policyResolver),
-                policyResolver: policyResolver)
+                new VerificationImpactService(db, policy: LegacyLadderPolicy.Instance),
+                policy: LegacyLadderPolicy.Instance)
             .MaterializeAsync(activeBaseline.Id, "cm.fms", materializedAt.AddMinutes(-1), CancellationToken.None);
         // A database upgraded by the pre-#889 code has never recorded the retirement step.
         db.ShowcaseUpgradeSteps.Remove(await db.ShowcaseUpgradeSteps.SingleAsync(x => x.ProgramId == summary.ProgramId
@@ -901,6 +904,48 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         Assert.True(activeTrace.Holds, string.Join(" ", activeTrace.Problems));
         Assert.True(activeTrace.WaitingForMaterialization);
         Assert.Equal(activeTrace.CurrentChanges, activeTrace.EligibleArtifacts);
+    }
+
+    [Fact]
+    public async Task Current_case_only_ladder_rejects_new_interface_materialization_without_content()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var summary = showcase.Summary;
+
+        // These are newly authored records in the disposable fixture. The persisted FMS ladder is the
+        // current Case-only profile, so a new Interface requirement must fail at materialization rather
+        // than borrowing the legacy compatibility policy used by the historical-fixture test above.
+        var requests = await SeedLegacyInterfaceScenariosAsync(db, summary.ProgramId, summary.ProjectId,
+            summary.ActiveReleaseId);
+        var selected = requests.Single(x => x.State == ChangeRequestState.SelectedForBaseline);
+        var baseline = await db.CandidateBaselines
+            .Include(x => x.Selections)
+            .SingleAsync(x => x.ProjectId == summary.ProjectId && x.ReleaseId == summary.ActiveReleaseId
+                && x.BaseNumber == "SW-01.60");
+        baseline.Freeze("cm.fms", DateTimeOffset.UtcNow);
+        await db.SaveChangesAsync();
+
+        var resolver = new EffectiveProjectLadderPolicyResolver(db);
+        var currentLadder = await resolver.ResolveAsync(summary.ProjectId, CancellationToken.None);
+        Assert.DoesNotContain(RequirementLevel.Interface, currentLadder.OrderedLevels);
+        var failure = await Assert.ThrowsAsync<DomainException>(() =>
+            new RequirementBaselineMaterializer(db,
+                    new VerificationImpactService(db, policyResolver: resolver),
+                    policyResolver: resolver)
+                .MaterializeAsync(baseline.Id, "cm.fms", DateTimeOffset.UtcNow, CancellationToken.None));
+
+        Assert.Contains("Interface", failure.Message, StringComparison.Ordinal);
+        db.ChangeTracker.Clear();
+        await using var verify = database.Context();
+        var persistedBaseline = await verify.CandidateBaselines.AsNoTracking()
+            .SingleAsync(x => x.Id == baseline.Id);
+        Assert.Equal(CandidateBaselineState.Frozen, persistedBaseline.State);
+        Assert.Null(persistedBaseline.RequirementsMaterializedAt);
+        Assert.False(await verify.RequirementRevisions.AsNoTracking()
+            .AnyAsync(x => x.SourceChangeRequestId == selected.Id));
+        Assert.False(await verify.BaselineRequirements.AsNoTracking()
+            .AnyAsync(x => x.BaselineId == baseline.Id));
     }
 
     /// <summary>
