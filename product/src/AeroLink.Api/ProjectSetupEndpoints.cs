@@ -82,7 +82,8 @@ public static class ProjectSetupEndpoints
                 var operationKey = string.IsNullOrWhiteSpace(request.IdempotencyKey)
                     ? http.Request.Headers["Idempotency-Key"].ToString() : request.IdempotencyKey;
                 var result = await service.FinalizeAsync(draftId, http.UserAccount(), request.ExpectedVersion,
-                    operationKey, ct);
+                    operationKey, ct, request.Password, request.SourceAssertionHash,
+                    request.SourceAssertionAccepted);
                 return Results.Ok(new
                 {
                     state = "Completed",
@@ -179,4 +180,5 @@ public sealed class ProjectSetupUpdateRequest
 public sealed record ProjectSetupProjectRequest(string? Name, string? SoftwareProduct);
 public sealed record ProjectSetupStartRequest(ProjectSetupStartKind? Kind, Guid? SourceBaselineId, Guid? SourceImportId);
 public sealed record ProjectSetupBuildRequest(string? Version);
-public sealed record FinalizeProjectSetupRequest(long ExpectedVersion, string? IdempotencyKey = null);
+public sealed record FinalizeProjectSetupRequest(long ExpectedVersion, string? IdempotencyKey = null,
+    string? Password = null, string? SourceAssertionHash = null, bool SourceAssertionAccepted = false);

@@ -8,13 +8,17 @@ using AeroLink.Domain.Traceability;
 
 namespace AeroLink.Infrastructure.Persistence;
 
-public enum InceptionAttributeDestination { SourceOnly, Exclude, Statement, Rationale, VerificationMethod, SourceIdentifier }
+public enum InceptionAttributeDestination
+{
+    SourceOnly, Exclude, Statement, Rationale, VerificationMethod, SourceIdentifier,
+    Title, Objective, Preconditions, Steps, ExpectedResult
+}
 public sealed record InceptionAttributeMapping(string SourceAttribute, InceptionAttributeDestination Destination,
     string? Reason = null, IReadOnlyDictionary<string, string>? ValueMappings = null);
 public sealed record InceptionObjectMapping(string SourceKey, bool Include, string? ExclusionReason,
     RequirementLevel? Level, IReadOnlyList<InceptionAttributeMapping> Attributes);
 public sealed record InceptionRelationMapping(string SourceKey, bool Include, string? ExclusionReason,
-    RequirementTraceType? Type, bool? SourceIsParent);
+    RequirementTraceType? Type, bool? SourceIsParent, string? RelationshipKind = null);
 public sealed record InceptionMapping(string SourceSha256, IReadOnlyList<InceptionObjectMapping> Objects,
     IReadOnlyList<InceptionRelationMapping> Relations, IReadOnlyDictionary<string, string> FindingResolutions);
 public sealed record ReconciledInceptionRequirement(string SourceKey, string SourceModule, string SourceIdentifier,
@@ -24,7 +28,17 @@ public sealed record ReconciledInceptionTrace(string SourceKey, string ParentSou
 public sealed record InceptionReconciliation(bool Ready, int ObservedObjects, int IncludedObjects,
     int ExcludedObjects, int ObservedRelations, int IncludedRelations, int ExcludedRelations,
     IReadOnlyList<string> Errors, IReadOnlyList<ReconciledInceptionRequirement> Requirements,
-    IReadOnlyList<ReconciledInceptionTrace> Traces, string? ManifestHash);
+    IReadOnlyList<ReconciledInceptionTrace> Traces, string? ManifestHash,
+    IReadOnlyList<ReconciledInceptionVerification>? Verifications = null,
+    IReadOnlyList<ReconciledInceptionRelationship>? Relationships = null,
+    IReadOnlyList<ReconciledInceptionSourceFact>? SourceFacts = null);
+public sealed record ReconciledInceptionVerification(string SourceKey, string SourceModule,
+    string SourceIdentifier, RequirementLevel Level, string Kind, string Title, string Objective, string Preconditions,
+    string Steps, string ExpectedResult, string SourceRevision, string SourceState);
+public sealed record ReconciledInceptionRelationship(string SourceKey, string SourceEndpointKey,
+    string TargetEndpointKey, string RelationshipKind);
+public sealed record ReconciledInceptionSourceFact(string SourceKey, string SourceModule,
+    string SourceIdentifier, string FactKind);
 
 /// <summary>
 /// Builds a server-verifiable proposal from a persisted parser observation and explicit mapping. A ready

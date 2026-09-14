@@ -34,6 +34,7 @@ public sealed class ProjectSetupDraft
         InternalProgramId = Guid.NewGuid();
         ProjectId = Guid.NewGuid();
         InitialReleaseId = Guid.NewGuid();
+        InceptionBaselineId = Guid.NewGuid();
         // 30 characters is the current ProgramCode storage limit. This identity is generated once and is
         // never derived again when the visible Project name is edited later.
         InternalProgramCode = $"P-{Id:N}"[..30].ToUpperInvariant();
@@ -61,6 +62,8 @@ public sealed class ProjectSetupDraft
     public string InternalProgramCode { get; private set; } = "";
     public Guid ProjectId { get; private set; }
     public Guid InitialReleaseId { get; private set; }
+    /// <summary>Stable target baseline identity reserved for source inception retries.</summary>
+    public Guid InceptionBaselineId { get; private set; }
 
     public ProjectSetupState State { get; private set; }
     public ProjectSetupStep CurrentStep { get; private set; }

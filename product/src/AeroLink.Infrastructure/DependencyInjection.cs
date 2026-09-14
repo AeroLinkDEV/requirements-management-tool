@@ -97,6 +97,7 @@ public static class DependencyInjection
         services.AddScoped<IdentityService>();
         services.AddScoped<ProjectLadderAuthoringService>();
         services.AddScoped<ProjectSetupService>();
+        services.AddScoped<ProjectSetupInceptionService>();
         services.Configure<ProjectGitLabOptions>(configuration.GetSection("ProjectGitLab"));
         services.AddHttpClient<GitLabProjectConnectionProbe>(client => client.Timeout = TimeSpan.FromSeconds(15))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });

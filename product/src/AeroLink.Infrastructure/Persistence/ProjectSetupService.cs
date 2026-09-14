@@ -1,6 +1,7 @@
 using System.Data;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
@@ -47,7 +48,8 @@ public sealed record ProjectSetupFinalizationResult(
 public sealed class ProjectSetupService(
     AeroLinkDbContext db,
     ProjectLadderAuthoringService ladderAuthoring,
-    TestProcedureDocumentBootstrap procedureDocuments)
+    TestProcedureDocumentBootstrap procedureDocuments,
+    ProjectSetupInceptionService? inception = null)
 {
     private static readonly JsonSerializerOptions WireJson = new(JsonSerializerDefaults.Web)
     {
@@ -131,7 +133,8 @@ public sealed class ProjectSetupService(
     }
 
     public async Task<ProjectSetupFinalizationResult> FinalizeAsync(Guid draftId, AuthenticatedUser actor,
-        long expectedVersion, string operationKey, CancellationToken ct)
+        long expectedVersion, string operationKey, CancellationToken ct, string? password = null,
+        string? sourceAssertionHash = null, bool sourceAssertionAccepted = false)
     {
         RequireAuthenticated(actor);
         if (string.IsNullOrWhiteSpace(operationKey))
@@ -150,7 +153,10 @@ public sealed class ProjectSetupService(
         if (draft.State == ProjectSetupState.Finalizing)
             throw new ProjectSetupConflictException("This setup is already being finalized. Retry after it completes.");
 
-        ValidateFreshAnswers(draft);
+        ValidateCommonAnswers(draft);
+        if (draft.StartKind == ProjectSetupStartKind.Fresh) ValidateFreshAnswers(draft);
+        else if (inception is null)
+            throw new ProjectSetupInvalidException("The selected inception source service is unavailable.");
         try
         {
             if (!draft.BeginFinalization(expectedVersion, operationKey, DateTimeOffset.UtcNow))
@@ -186,6 +192,23 @@ public sealed class ProjectSetupService(
             db.ProjectRepositoryConfigurations.Add(CreateRepositoryConfiguration(project.Id, draft, actor.UserName, now));
             AddReviewRules(project.Id, ladder, draft.ReviewRulesJson, actor.UserName, now);
 
+            CandidateBaseline? inceptionBaseline = null;
+            if (draft.StartKind is ProjectSetupStartKind.AeroLinkBaseline or ProjectSetupStartKind.ExternalBaseline)
+            {
+                inceptionBaseline = new CandidateBaseline(draft.InceptionBaselineId, SoftwareBuildIdentifier.FromVersion(release.Version), 0,
+                    project.Id, release.Id, null, "Inherited source working build", actor.UserName, now);
+                db.CandidateBaselines.Add(inceptionBaseline);
+                var effectivePolicy = new ResolvedProjectLadderPolicy(
+                    ProjectLadderResolver.Resolve(ladder, LegacyLadderPolicy.Instance), LegacyLadderPolicy.Instance);
+                await inception!.MaterializeAsync(draft, project, inceptionBaseline, actor, password,
+                    sourceAssertionHash, sourceAssertionAccepted, effectivePolicy, ct);
+                // The accepted source is the history of inception. The newly created build is a separate,
+                // explicitly In-Work context that points at the materialized target baseline.
+                db.SoftwareBuilds.Add(new SoftwareBuild(project.Id, release.Id, inceptionBaseline.Id,
+                    release.CanonicalIdentity!, "Initial working build materialized from the accepted source.",
+                    actor.UserName, now));
+            }
+
             // This sees the tracked Active ladder through the local aggregate and creates only the empty
             // procedure containers required by the selected profile. It cannot invent engineering content.
             await procedureDocuments.EnsureForProjectAsync(project.Id, ct);
@@ -204,7 +227,10 @@ public sealed class ProjectSetupService(
                 draft.Id.ToString("D"), "Success",
                 $"Created Project {project.Id:D} from a fresh setup draft; no engineering content was inherited.",
                 "local", DateTimeOffset.UtcNow));
-            await db.SaveChangesAsync(ct);
+            var priorSealActor = db.LadderSealActor;
+            db.LadderSealActor = actor.UserName;
+            try { await db.SaveChangesAsync(ct); }
+            finally { db.LadderSealActor = priorSealActor; }
             await transaction.CommitAsync(ct);
             return new(program.Id, project.Id, release.Id, release.Version, release.CanonicalIdentity!, false,
                 resultJson);
@@ -231,19 +257,11 @@ public sealed class ProjectSetupService(
         }
     }
 
-    private static void ValidateFreshAnswers(ProjectSetupDraft draft)
+    private static void ValidateCommonAnswers(ProjectSetupDraft draft)
     {
-        if (draft.StartKind != ProjectSetupStartKind.Fresh)
-            throw new ProjectSetupInvalidException(
-                "This backend foundation finalizes Fresh starts only; select an existing AeroLink or external source for the staged import path.");
-        if (draft.SourceBaselineId is not null || draft.SourceImportId is not null)
-            throw new ProjectSetupInvalidException("A Fresh start cannot carry a source baseline or import.");
         if (string.IsNullOrWhiteSpace(draft.ProjectName) || string.IsNullOrWhiteSpace(draft.SoftwareProduct))
             throw new ProjectSetupInvalidException("Project name and software product are required before finalization.");
         _ = SoftwareBuildIdentifier.Parse(draft.InitialReleaseVersion);
-        var categories = Deserialize<string[]>(draft.SelectedCategoriesJson, "selected categories");
-        if (categories.Length != 0)
-            throw new ProjectSetupInvalidException("Fresh starts cannot inherit content categories.");
         _ = Deserialize<JsonElement>(draft.LadderJson, "ladder");
         _ = Deserialize<JsonElement>(draft.ReviewRulesJson, "review rules");
         _ = Deserialize<JsonElement>(draft.RepositoryJson, "repository settings");
@@ -258,6 +276,17 @@ public sealed class ProjectSetupService(
             throw new ProjectSetupInvalidException("Review and approval rules must retain the concrete definition that was accepted.");
         ValidateRepository(draft.RepositoryJson);
         ValidateReviewRules(draft.ReviewRulesJson);
+    }
+
+    private static void ValidateFreshAnswers(ProjectSetupDraft draft)
+    {
+        if (draft.StartKind != ProjectSetupStartKind.Fresh)
+            throw new ProjectSetupInvalidException("Fresh validation was requested for a sourced setup.");
+        if (draft.SourceBaselineId is not null || draft.SourceImportId is not null)
+            throw new ProjectSetupInvalidException("A Fresh start cannot carry a source baseline or import.");
+        var categories = Deserialize<string[]>(draft.SelectedCategoriesJson, "selected categories");
+        if (categories.Length != 0)
+            throw new ProjectSetupInvalidException("Fresh starts cannot inherit content categories.");
     }
 
     private static void ValidateUpdatePayload(ProjectSetupUpdateCommand command)

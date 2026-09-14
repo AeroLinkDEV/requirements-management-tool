@@ -70,6 +70,15 @@ public sealed class CandidateBaseline
         Event("CandidateBaselineCreated", actorId, $"Created {DisplayNumber}.", now);
     }
 
+    /// <summary>Rehydrates the stable baseline identity reserved by a resumable inception draft.</summary>
+    internal CandidateBaseline(Guid id, string baseNumber, int revision, Guid projectId, Guid releaseId,
+        Guid? predecessorBaselineId, string name, string actorId, DateTimeOffset now)
+        : this(baseNumber, revision, projectId, releaseId, predecessorBaselineId, name, actorId, now)
+    {
+        if (id == Guid.Empty) throw new DomainException("A baseline identity is required.");
+        Id = id;
+    }
+
     public Guid Id { get; private set; }
     public string BaseNumber { get; private set; } = string.Empty;
     public int Revision { get; private set; }
@@ -390,6 +399,21 @@ public sealed class CandidateBaseline
         RequirementsHash = requirementsHash; RequirementsMaterializedAt = now;
         UpdatedAt = now;
         Event("RequirementsMaterialized", actorId, $"Materialized {activeCount} effective requirement revisions with hash {requirementsHash}.", now);
+    }
+
+    /// <summary>
+    /// Freezes an inception baseline whose contents are supplied by an already reconciled source package.
+    /// Source acceptance is a separate signature and does not invent an approved SCR or external package
+    /// selection merely to satisfy the ordinary authoring freeze gate.
+    /// </summary>
+    public void FreezeForInception(string actorId, DateTimeOffset now)
+    {
+        EnsureDraft();
+        if (string.IsNullOrWhiteSpace(actorId)) throw new DomainException("Inception freezing requires an attributable actor.");
+        var manifest = $"inception|{DisplayNumber}|{ProjectId}|{ReleaseId}";
+        ContentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
+        State = CandidateBaselineState.Frozen; FrozenAt = now; UpdatedAt = now;
+        Event("InceptionBaselineFrozen", actorId, $"Frozen {DisplayNumber} from a reconciled source package; no new approval is asserted.", now);
     }
 
     public void MarkReleased(string actorId, DateTimeOffset now)

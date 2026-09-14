@@ -58,6 +58,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
 
     public DbSet<ProgramRecord> Programs => Set<ProgramRecord>();
     public DbSet<ProjectSetupDraft> ProjectSetupDrafts => Set<ProjectSetupDraft>();
+    public DbSet<ProjectSetupSourcePackage> ProjectSetupSourcePackages => Set<ProjectSetupSourcePackage>();
+    public DbSet<ProjectInceptionSourceRecord> ProjectInceptionSourceRecords => Set<ProjectInceptionSourceRecord>();
     public DbSet<ProjectRepositoryConfiguration> ProjectRepositoryConfigurations => Set<ProjectRepositoryConfiguration>();
     public DbSet<IdentifierSequence> IdentifierSequences => Set<IdentifierSequence>();
     public DbSet<ShowcaseUpgradeStep> ShowcaseUpgradeSteps => Set<ShowcaseUpgradeStep>();
@@ -464,8 +466,44 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasIndex(x => x.InternalProgramId).IsUnique();
             b.HasIndex(x => x.ProjectId).IsUnique();
             b.HasIndex(x => x.InitialReleaseId).IsUnique();
+            b.HasIndex(x => x.InceptionBaselineId).IsUnique();
             b.HasIndex(x => new { x.CreatorUserId, x.State });
             b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatorUserId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ProjectSetupSourcePackage>(b =>
+        {
+            b.ToTable("project_setup_source_packages", t => t.HasCheckConstraint("CK_project_setup_source_package_size",
+                "((\"Kind\" = 'AeroLinkBaseline' AND \"SizeBytes\" = 0) OR (\"Kind\" = 'ExternalBaseline' AND \"SizeBytes\" > 0))"));
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.SourceState).HasMaxLength(30);
+            b.Property(x => x.FileName).HasMaxLength(400).IsRequired();
+            b.Property(x => x.Format).HasMaxLength(20).IsRequired();
+            b.Property(x => x.Sha256).HasMaxLength(64).IsRequired();
+            b.Property(x => x.Payload).IsRequired();
+            b.Property(x => x.SourceTool).HasMaxLength(200).IsRequired();
+            b.Property(x => x.MetadataJson).IsRequired(); b.Property(x => x.AnalysisJson).IsRequired();
+            b.Property(x => x.SelectedCategoriesJson).IsRequired(); b.Property(x => x.MappingJson).IsRequired();
+            b.Property(x => x.ReconciliationJson).IsRequired(); b.Property(x => x.ManifestHash).HasMaxLength(64);
+            b.Property(x => x.Stage).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.CapturedBy).HasMaxLength(100).IsRequired(); b.Property(x => x.Version).IsConcurrencyToken();
+            b.Property(x => x.AssertionHash).HasMaxLength(64);
+            b.HasIndex(x => new { x.DraftId, x.Sha256 }).IsUnique();
+            b.HasIndex(x => x.MaterializedProjectId);
+            b.HasOne<ProjectSetupDraft>().WithMany().HasForeignKey(x => x.DraftId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ProjectInceptionSourceRecord>(b =>
+        {
+            b.ToTable("project_inception_source_records"); b.HasKey(x => x.Id);
+            b.Property(x => x.TargetKind).HasMaxLength(40).IsRequired();
+            b.Property(x => x.SourceKey).HasMaxLength(400).IsRequired(); b.Property(x => x.SourceModule).HasMaxLength(300).IsRequired();
+            b.Property(x => x.SourceIdentifier).HasMaxLength(300).IsRequired(); b.Property(x => x.SourceRevision).HasMaxLength(120).IsRequired();
+            b.Property(x => x.SourceState).HasMaxLength(80).IsRequired(); b.Property(x => x.SourceSnapshotJson).IsRequired();
+            b.HasIndex(x => new { x.PackageId, x.SourceKey, x.TargetKind }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.TargetKind, x.TargetId });
+            b.HasOne<ProjectSetupSourcePackage>().WithMany().HasForeignKey(x => x.PackageId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ProjectRepositoryConfiguration>(b =>
         {
@@ -797,11 +835,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.Carries).HasConversion<string>().HasMaxLength(60);
             b.Property(x => x.SourceSystem).HasMaxLength(120).IsRequired();
-            b.Property(x => x.SourceSystemVersion).HasMaxLength(60).IsRequired();
-            b.Property(x => x.SourceBaselineName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.SourceSystemVersion).HasMaxLength(60);
+            b.Property(x => x.SourceBaselineName).HasMaxLength(200);
             b.Property(x => x.ExtractFileName).HasMaxLength(400).IsRequired();
             b.Property(x => x.ExtractSha256).HasMaxLength(64).IsRequired();
-            b.Property(x => x.ExtractedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.ExtractedBy).HasMaxLength(100);
             b.Property(x => x.StartedBy).HasMaxLength(100).IsRequired();
             b.Property(x => x.AcceptedBy).HasMaxLength(100);
             b.Property(x => x.PackageManifestHash).HasMaxLength(64);
@@ -1095,13 +1133,14 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.DerivedRationale).HasMaxLength(4000).IsRequired();
             b.Property(x => x.ParentRevisionIdsJson).IsRequired();
             b.HasIndex(x => new { x.ArtifactId, x.Revision }).IsUnique();
-            b.HasIndex(x => x.SourceChangeRequestId); b.HasIndex(x => x.SourceBaselineImportId); b.HasIndex(x => x.EffectiveBaselineId);
+            b.HasIndex(x => x.SourceChangeRequestId); b.HasIndex(x => x.SourceBaselineImportId); b.HasIndex(x => x.SourceBaselineId); b.HasIndex(x => x.EffectiveBaselineId);
             b.HasOne<RequirementArtifact>().WithMany().HasForeignKey(x => x.ArtifactId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.SourceChangeRequestId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.SourceBaselineImportId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.SourceBaselineId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.EffectiveBaselineId).OnDelete(DeleteBehavior.Restrict);
             b.ToTable(t => t.HasCheckConstraint("CK_requirement_revisions_origin_xor",
-                "((\"OriginKind\" = 'ChangeRequest' AND \"SourceChangeRequestId\" IS NOT NULL AND \"SourceBaselineImportId\" IS NULL) OR (\"OriginKind\" = 'ExternalSourcePackage' AND \"SourceChangeRequestId\" IS NULL AND \"SourceBaselineImportId\" IS NOT NULL))"));
+                "((\"OriginKind\" = 'ChangeRequest' AND \"SourceChangeRequestId\" IS NOT NULL AND \"SourceBaselineImportId\" IS NULL AND \"SourceBaselineId\" IS NULL) OR (\"OriginKind\" = 'ExternalSourcePackage' AND \"SourceChangeRequestId\" IS NULL AND \"SourceBaselineImportId\" IS NOT NULL AND \"SourceBaselineId\" IS NULL) OR (\"OriginKind\" = 'InheritedAeroLinkBaseline' AND \"SourceChangeRequestId\" IS NULL AND \"SourceBaselineImportId\" IS NULL AND \"SourceBaselineId\" IS NOT NULL))"));
         });
         modelBuilder.Entity<BaselineRequirementSelection>(b =>
         {
