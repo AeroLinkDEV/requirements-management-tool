@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 909,
-    "cases": 1020,
-    "classes": 144,
-    "hostedTests": 861,
-    "hostedCases": 950,
+    "tests": 910,
+    "cases": 1021,
+    "classes": 145,
+    "hostedTests": 862,
+    "hostedCases": 951,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 14,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 566,
-      "cases": 635,
+      "tests": 567,
+      "cases": 636,
       "unknownCases": 0,
-      "classes": 111
+      "classes": 112
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -10469,6 +10469,24 @@
       "sourceLines": {
         "start": 18,
         "end": 23
+      }
+    },
+    {
+      "cls": "ProjectSetupSourceOptionsApiTests",
+      "test": "Native_options_page_reports_authorized_total_and_keeps_later_pages_reachable",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 15,
+        "end": 83
       }
     },
     {

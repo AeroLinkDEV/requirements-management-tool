@@ -434,7 +434,7 @@ public sealed class ProjectSetupInceptionService(
         return new ProjectInceptionSourceProjection(projectId, packageView, acceptance, records);
     }
 
-    public async Task<IReadOnlyList<ProjectSetupSourceOption>> ListNativeOptionsAsync(AuthenticatedUser actor,
+    public async Task<ProjectSetupSourceOptionsPage> ListNativeOptionsAsync(AuthenticatedUser actor,
         int offset, int limit, CancellationToken ct)
     {
         RequireAuthenticated(actor);
@@ -482,7 +482,7 @@ public sealed class ProjectSetupInceptionService(
                 row.baseline.DisplayNumber, row.baseline.State.ToString(), ids.Count, caseCount, procedureCount,
                 evidenceFactCount));
         }
-        return result;
+        return new(result, rows.Count, offset, limit);
     }
 
     internal async Task MaterializeAsync(ProjectSetupDraft draft, ProjectRecord project, CandidateBaseline targetBaseline,
@@ -1263,6 +1263,9 @@ public sealed class ProjectSetupInceptionService(
         RequirementTraceType? Type, bool? SourceIsParent, string? RelationshipKind);
     private sealed record SourceAssertion(string Hash, string Meaning);
 }
+
+public sealed record ProjectSetupSourceOptionsPage(IReadOnlyList<ProjectSetupSourceOption> Items, int Total,
+    int Offset, int Limit);
 
 public sealed record InceptionConfigurationCommand(long ExpectedVersion, string SelectedCategoriesJson,
     string MappingJson, string MetadataJson = "{}");
