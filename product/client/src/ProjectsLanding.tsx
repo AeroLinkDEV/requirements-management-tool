@@ -68,6 +68,7 @@ export default function ProjectsLanding({
   onOpenProject: (project: AuthorizedProject) => void;
   onSignOut: () => void;
 }) {
+  const showSetupDrafts = user.isAdministrator || drafts.length > 0 || draftStatus !== "ready";
   return (
     <div className="projectsPage">
       <PortalHeader user={user} onSignOut={onSignOut} />
@@ -90,6 +91,7 @@ export default function ProjectsLanding({
             <div className="projectsEmptyState" role="status">
               <p>Loading authorized projects…</p>
             </div>
+            {showSetupDrafts && <SetupDrafts drafts={drafts} draftStatus={draftStatus} onRetryDrafts={onRetryDrafts} canCreate={user.isAdministrator} onCreateProject={onCreateProject} onResumeSetup={onResumeSetup} />}
           </section>
         ) : workspaceStatus === "error" ? (
           <section className="projectsSections" aria-label="Authorized projects unavailable">
@@ -99,14 +101,14 @@ export default function ProjectsLanding({
               <p>Authorized projects could not be loaded. Retry when workspace access is available.</p>
               <button type="button" onClick={onRetryProjects}>Retry project discovery</button>
             </div>
-            {(user.isAdministrator || drafts.length > 0 || draftStatus !== "ready") && <SetupDrafts drafts={drafts} draftStatus={draftStatus} onRetryDrafts={onRetryDrafts} canCreate={user.isAdministrator} onCreateProject={onCreateProject} onResumeSetup={onResumeSetup} />}
+            {showSetupDrafts && <SetupDrafts drafts={drafts} draftStatus={draftStatus} onRetryDrafts={onRetryDrafts} canCreate={user.isAdministrator} onCreateProject={onCreateProject} onResumeSetup={onResumeSetup} />}
           </section>
         ) : projects.length ? (
           <section className="projectsSections" aria-label="Authorized projects">
             <div className="projectsGrid" data-project-list>
               {projects.map(project => <ProjectCard key={project.id} project={project} onOpen={() => onOpenProject(project)} />)}
             </div>
-            {(user.isAdministrator || drafts.length > 0 || draftStatus !== "ready") && <SetupDrafts drafts={drafts} draftStatus={draftStatus} onRetryDrafts={onRetryDrafts} canCreate={user.isAdministrator} onCreateProject={onCreateProject} onResumeSetup={onResumeSetup} />}
+            {showSetupDrafts && <SetupDrafts drafts={drafts} draftStatus={draftStatus} onRetryDrafts={onRetryDrafts} canCreate={user.isAdministrator} onCreateProject={onCreateProject} onResumeSetup={onResumeSetup} />}
           </section>
         ) : (
           <section className="projectsSections" aria-label="No authorized projects">
@@ -115,7 +117,7 @@ export default function ProjectsLanding({
             <h2>No authorized projects</h2>
             <p>Projects become available here when an AeroLink administrator grants your account access.</p>
             </div>
-            {(user.isAdministrator || drafts.length > 0 || draftStatus !== "ready") && <SetupDrafts drafts={drafts} draftStatus={draftStatus} onRetryDrafts={onRetryDrafts} canCreate={user.isAdministrator} onCreateProject={onCreateProject} onResumeSetup={onResumeSetup} />}
+            {showSetupDrafts && <SetupDrafts drafts={drafts} draftStatus={draftStatus} onRetryDrafts={onRetryDrafts} canCreate={user.isAdministrator} onCreateProject={onCreateProject} onResumeSetup={onResumeSetup} />}
           </section>
         )}
       </main>

@@ -36,16 +36,28 @@ test('a notification link resolves its own context and opens the exact record', 
 
 test('the Projects portal keeps loading state separate from an empty authorized result', async ({ page }) => {
   test.setTimeout(120_000)
+  await login(page, 'admin', { openProject: false })
+  await page.goto('/projects/new')
+  await expect(page.getByRole('heading', { name: 'Create New Project', level: 1 })).toBeVisible()
+  const projectName = `Workspace loading draft ${Date.now()}`
+  await page.getByLabel('Project name').fill(projectName)
+  await page.getByLabel('Software product').fill('Workspace loading software')
+  await page.getByRole('button', { name: 'Save and exit' }).click()
+  await expect(page).toHaveURL(/\/projects$/)
+  await expect(page.locator('[data-setup-draft-id]').filter({ hasText: projectName })).toBeVisible()
+
   let releaseWorkspaces!: () => void
   const workspacesHeld = new Promise<void>(resolve => { releaseWorkspaces = resolve })
   await page.route('**/api/workspaces', async route => {
     await workspacesHeld
     await route.continue()
   })
-
-  await login(page, 'admin', { openProject: false })
+  await page.reload()
   await expect(page.getByRole('status')).toContainText('Loading authorized projects…')
   await expect(page.getByRole('heading', { name: 'No authorized projects' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Setup drafts', level: 2 })).toBeVisible()
+  await expect(page.locator('[data-setup-draft-id]').filter({ hasText: projectName })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Create New Project', exact: true })).toBeVisible()
 
   releaseWorkspaces()
   await expect(page.locator('[data-project-card]').first()).toBeVisible({ timeout: 30_000 })
