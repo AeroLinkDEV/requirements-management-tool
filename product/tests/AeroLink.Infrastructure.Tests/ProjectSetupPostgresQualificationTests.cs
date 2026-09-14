@@ -12,7 +12,7 @@ namespace AeroLink.Infrastructure.Tests;
 /// PostgreSQL proves the forward migration SQL, database-backed optimistic token, and a restart/reload against
 /// the provider used by the product. Each run owns a fresh database on the caller-supplied loopback server.
 /// </summary>
-public sealed class ProjectSetupPostgresQualificationTests
+public sealed partial class ProjectSetupPostgresQualificationTests
 {
     [DisposablePostgresFact]
     public async Task Migration_draft_reload_and_concurrent_edit_are_durable_on_postgresql()

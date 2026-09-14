@@ -138,8 +138,8 @@ public sealed class ProjectSetupService(
             throw new ProjectSetupInvalidException("Finalization requires an idempotency key.");
 
         // SAVE_BOUNDARY requires pre-save reads that participate in a shared unit to be inside that unit. The
-        // serializable transaction also ensures that a concurrent finalizer observes the committed outcome after
-        // the first request releases the draft row lock.
+        // serializable transaction prevents competing finalizers from committing separate outcomes. PostgreSQL
+        // can abort the losing snapshot; that caller must retry in a fresh transaction to recover the result.
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         var draft = await db.ProjectSetupDrafts.SingleOrDefaultAsync(x => x.Id == draftId, ct)
             ?? throw new ProjectSetupNotFoundException();
@@ -155,8 +155,8 @@ public sealed class ProjectSetupService(
         {
             if (!draft.BeginFinalization(expectedVersion, operationKey, DateTimeOffset.UtcNow))
                 return CompletedResult(draft);
-            // Claim first while keeping the transaction open. Another request cannot pass its read until this
-            // transaction commits or rolls back, so duplicate submissions cannot create a second project.
+            // Claim first while keeping the transaction open. A competing snapshot cannot commit this same
+            // draft version, so duplicate submissions cannot create a second project.
             await db.SaveChangesAsync(ct);
 
             var now = DateTimeOffset.UtcNow;
@@ -219,7 +219,13 @@ public sealed class ProjectSetupService(
         {
             throw new ProjectSetupConflictException("Another setup or project creation request won this draft.", ex);
         }
-        catch (DbUpdateException ex) when (IsUniqueConflict(ex) || IsRetryableRace(ex))
+        catch (Exception ex) when (IsRetryableRace(ex))
+        {
+            db.ChangeTracker.Clear();
+            throw new ProjectSetupConflictException(
+                "Another finalization request changed this setup. Retry to recover its completed result.", ex);
+        }
+        catch (DbUpdateException ex) when (IsUniqueConflict(ex))
         {
             throw new ProjectSetupConflictException("A project identity or controlled release identity already exists.", ex);
         }
@@ -539,13 +545,13 @@ public sealed class ProjectSetupService(
             || message.Contains("unique constraint", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsRetryableRace(DbUpdateException exception)
+    private static bool IsRetryableRace(Exception exception)
     {
-        var message = exception.GetBaseException().Message;
-        return message.Contains("40001", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("40P01", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("serialization failure", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("deadlock detected", StringComparison.OrdinalIgnoreCase);
+        // Npgsql's execution strategy wraps transient provider errors in InvalidOperationException. Inspect
+        // typed SQLSTATE through that chain, rather than matching arbitrary error-message text.
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+            if (current is Npgsql.PostgresException { SqlState: "40001" or "40P01" }) return true;
+        return false;
     }
 
     private sealed record LadderDefinitionWire(List<LadderStepWire>? Steps, List<LadderRelationshipWire>? Relationships);
