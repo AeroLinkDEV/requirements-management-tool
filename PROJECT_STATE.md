@@ -95,7 +95,7 @@ creator's draft) over the source hash, selected categories, mapping, reconciliat
 and target build identity. It is an acceptance of source provenance and materialization, not an engineering approval.
 
 Creation drafts, staged uploads, and accepted answers survive sign-out, API restart, and resumed sessions. Draft
-and package version tokens protect edits and finalization; the finalization operation records its result so a
+version tokens protect edits and finalization; the finalization operation records its result so a
 duplicate request or a lost success response returns the same created identities. Creator and administrators can
 resume drafts, while native source access is checked against current source membership at every source boundary.
 The internal backing Program is allocated once and is not a user-entered Program name or code. Repository setup
