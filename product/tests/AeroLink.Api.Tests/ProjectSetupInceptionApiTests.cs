@@ -350,7 +350,8 @@ public sealed class ProjectSetupInceptionApiTests
             Assert.Contains("SW-01.30", text);
             Assert.Contains(projectName, text);
             Assert.Contains(statement, text);
-            Assert.Contains("Accepted source baseline", text);
+            Assert.Contains("Accepted source manifest", text);
+            Assert.Contains("Initial materialized baseline", text, StringComparison.OrdinalIgnoreCase);
             // PDF wraps its cover description into separate text operators; the DOCX keeps the full sentence.
             if (format == "docx") Assert.Contains("Source acceptance is not a new engineering approval", text);
             else
@@ -383,7 +384,8 @@ public sealed class ProjectSetupInceptionApiTests
         var pdf = Encoding.Latin1.GetString(await document.Content.ReadAsByteArrayAsync());
         Assert.Contains("Independent empty peer", pdf);
         Assert.DoesNotContain("The source requirement shall remain attributable", pdf);
-        Assert.DoesNotContain("Accepted source baseline", pdf);
+        Assert.DoesNotContain("Accepted source manifest", pdf);
+        Assert.DoesNotContain("Initial materialized baseline", pdf, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

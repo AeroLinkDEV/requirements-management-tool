@@ -56,7 +56,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         var predecessor = await ReleasedPredecessorBaselineAsync(release.ProjectId, release.PredecessorReleaseId, ct);
         var inception = predecessor is null ? await InceptionBaselineAsync(release.ProjectId, releaseId, ct) : null;
         var sourceBaseline = predecessor ?? inception;
-        var sourceLabel = inception is null ? "Released baseline" : "Accepted source baseline";
+        var sourceLabel = inception is null ? "Released baseline" : "Accepted source manifest";
         var effective = await EffectiveRequirementsAsync(sourceBaseline?.Id, release.ProjectId, releaseId, level.Value, sourceLabel, ct);
         var generatedAt = DateTimeOffset.UtcNow;
 
@@ -91,7 +91,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             {
                 ("Requirements", effective.Count.ToString("N0")),
                 ("Changed by approved change requests", pending.ToString("N0")),
-                (inception is null ? "Released predecessor" : "Accepted source baseline", sourceBaseline?.DisplayNumber ?? "none"),
+                (inception is null ? "Released predecessor" : "Initial materialized baseline", sourceBaseline?.DisplayNumber ?? "none"),
                 ("Status", "Draft - content may still change"),
             },
             [],
