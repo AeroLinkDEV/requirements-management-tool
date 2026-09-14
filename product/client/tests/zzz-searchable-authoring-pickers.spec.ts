@@ -194,8 +194,15 @@ test('a requirement beyond the former 200-row limit is hydrated, searchable and 
   const impactItems = await (await request.get(
     `${apiBase}/api/releases/${workspace.release.id}/verification-impact`,
   )).json()
-  const item = (impactItems as { subjectDisplayNumber: string; requirementRevisionId?: string }[])
-    .find((entry) => entry.subjectDisplayNumber.endsWith('00250.00'))
+  // Other journeys may already have consumed controlled numbers. Identify this draft's
+  // last authored requirement rather than assuming the installation counter starts at one.
+  const introduced = (impactItems as { changeRequestId: string; subjectStatement: string; subjectDisplayNumber: string; requirementRevisionId?: string }[])
+    .filter(entry => entry.changeRequestId === draft.id)
+    .sort((a, b) => a.subjectDisplayNumber.localeCompare(b.subjectDisplayNumber))
+  expect(introduced).toHaveLength(250)
+  const index = introduced.findIndex(entry => entry.subjectStatement === requirementChanges[249].statement)
+  expect(index, 'the authored target must remain beyond the former 200-row limit').toBeGreaterThanOrEqual(200)
+  const item = introduced[index]
   expect(item?.requirementRevisionId).toBeTruthy()
   const subject = item!.subjectDisplayNumber
 
