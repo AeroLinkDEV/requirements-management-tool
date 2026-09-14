@@ -639,7 +639,8 @@ refresh and review the newer answers. Do not create a project by editing databas
 
 External source files are authenticated to the draft and limited to 50 MiB. The API records the exact size and
 SHA-256, parser observations, and source bytes in the draft-owned source package before any destination project or
-baseline exists. The package progresses through captured, analysed, reconciled, and materialized states. The browser
+baseline exists. The package progresses through **Captured**, **Analysed**, and **Reconciled** stages; successful
+finalization records its materialized destination IDs. The browser
 must select categories and account for every supported source object, attribute, relation, and exclusion; the server
 recomputes validation and dependency closure. ReqIF supports Requirements and explicit Traces; CSV/XLSX support
 Requirements. Native AeroLink sources additionally support Cases, Procedures, and Evidence source facts and their
@@ -647,15 +648,17 @@ supported relationships. The ordinary CSV/XLSX proposal preview/commit flow rema
 is not external project inception.
 
 If the API, browser, or client connection stops during upload or setup, sign in again, list the setup drafts, and
-resume the same draft. Re-read the source view before changing answers. A retry of an identical upload, reconcile,
-or finalization operation can recover the existing package/result; a committed finalization whose response was lost
-returns the same project, baseline, release, and build identities. Do not repeat the operation with a new key merely
-because the first response was lost. Source access for a native baseline is checked again on resume and at each
+resume the same draft. Re-read the source view before changing answers. An identical upload can recover its existing
+staged package, and a committed finalization whose response was lost returns the same project, baseline, release, and
+build identities. Reconciliation uses the current saved version token: refresh the source view after a conflict before
+retrying it. Do not repeat a completed finalization with a new key merely because the first response was lost. Source
+access for a native baseline is checked again on resume and at each
 source boundary, so a revoked source membership blocks further use while preserving the staged record for audit.
 
-Finalization requires the actual accepting AeroLink administrator's password. The resulting electronic signature is
-bound to the exact source hash, selected categories, mapping, reconciliation manifest, accepted ladder, target IDs,
-and canonical first-build identity. It records source provenance acceptance, not a new approval, test execution,
+Source acceptance during finalization requires the authorized creator's or AeroLink administrator's password. The
+resulting electronic signature is bound to the exact source hash, selected categories, mapping, reconciliation
+manifest, accepted ladder, target IDs, and canonical first-build identity. It records source provenance acceptance,
+not a new approval, test execution,
 staffing assignment, or target evidence. A different administrator may resume and accept an authorized draft; source
 owners/authors remain source facts and are not copied into the new project's roster. The first target build is always
 created **IN WORK**, and entry opens the visual build-lineage selector for explicit build selection.
@@ -665,7 +668,8 @@ materialization. Parsing, upload streaming, password confirmation, and any confi
 not be wrapped in one long user-interaction transaction. If a retry reports a version conflict, use the supported
 resume path and preserve the latest draft answers. Pending repository configuration remains Pending until the
 installation's server-side GitLab probe verifies the remote identity; unrelated work can continue while it is
-pending.
+pending. Configure later remains Pending; Connect now is ConfiguredUnverified until the server-side GitLab probe
+verifies the remote identity.
 
 Back up the database and the retained draft source package bytes with the supported AeroLink backup procedure before
 planned maintenance or recovery. Restore first into an isolated shadow database/evidence root and complete the

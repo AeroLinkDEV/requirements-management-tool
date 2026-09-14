@@ -90,9 +90,9 @@ Every source path creates one new first build in **IN WORK**. A native or extern
 historical source fact, and its approvals, executions, evidence, identities, and provenance are not recast as
 new-project approvals or target executions. Materialized records retain the exact source identifiers and revision
 links, with target parent/trace IDs recorded separately. Source acceptance is a password-confirmed electronic
-signature by the actual accepting AeroLink administrator (including an administrator resuming another creator's
-draft) over the source hash, selected categories, mapping, reconciliation, accepted ladder, manifest, and target
-build identity. It is an acceptance of source provenance and materialization, not an engineering approval.
+signature by the authorized creator or an AeroLink administrator (including an administrator resuming another
+creator's draft) over the source hash, selected categories, mapping, reconciliation, accepted ladder, manifest,
+and target build identity. It is an acceptance of source provenance and materialization, not an engineering approval.
 
 Creation drafts, staged uploads, and accepted answers survive sign-out, API restart, and resumed sessions. Draft
 and package version tokens protect edits and finalization; the finalization operation records its result so a

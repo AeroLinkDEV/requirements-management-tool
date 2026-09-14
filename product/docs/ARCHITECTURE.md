@@ -114,12 +114,13 @@ operation/result are persisted so sign-out, API restart, duplicate submissions, 
 recovered. A retry with the same operation key returns the committed result; a conflicting edit is rejected for
 refresh rather than silently overwriting another answer.
 
-The service keeps the setup draft and staged source package separate from a usable Project. Uploads are authenticated
-and bounded to 50 MiB, hashed while read, and stored with the draft before a destination Project exists. Parser
-observations and server-derived mapping/reconciliation are durable package state. Source configuration and
-reconciliation are typed and re-derived on the server; browser JSON is not evidence that a mapping or gate passed.
-The package is materialized only after final validation, in a short local persistence transaction. Provider reads,
-parsing, password confirmation, or other external calls are not held inside one interaction-sized transaction.
+The service keeps the setup draft and staged source package separate from a usable Project. Uploads are authenticated,
+bounded to 50 MiB, read into the bounded staged payload, and SHA-256 verified before storage against the draft and
+before a destination Project exists. Parser observations and server-derived mapping/reconciliation are durable
+package state. Source configuration and reconciliation are typed and re-derived on the server; browser JSON is not
+evidence that a mapping or gate passed. Parsing and upload streaming happen before finalization. Finalization uses a
+short serializable local transaction for its required database reads, local validation/password confirmation,
+materialization, and result recording; it never spans a user interaction or an external network call.
 
 There are three inception boundaries:
 
@@ -138,14 +139,13 @@ There are three inception boundaries:
   unmapped, or excluded content is reported rather than fabricated. The source package retains foreign identifiers,
   exact bytes/hash, parser observations, mapping, reconciliation manifest, and materialized source records.
 
-Source acceptance is a separate immutable electronic signature. The actual accepting AeroLink administrator must
-confirm the password; the signature binds the source hash, categories, mapping, reconciliation, accepted ladder,
+Source acceptance is a separate immutable electronic signature. The authorized creator or an AeroLink administrator
+must confirm the password; the signature binds the source hash, categories, mapping, reconciliation, accepted ladder,
 manifest, target IDs, and canonical first-build identity. It records who accepted source provenance and the meaning
 of that assertion. It does not assert that source approvals are new-project approvals, source executions occurred in
 the target project, or source evidence is newly produced. The materialized Project exposes a provenance projection
 with source identities, revisions, states, target links, acceptance person/time/meaning, and safe source snapshots;
-storage keys and unsafe raw attributes are withheld. A later signature cannot replace the signature bound to the
-package assertion hash.
+storage keys are redacted. A later signature cannot replace the signature bound to the package assertion hash.
 
 The accepted ladder becomes effective before source content can be materialized, and first-content persistence is
 serialized against its configuration version. Structural ladder changes remain available only while the project has
@@ -154,11 +154,11 @@ ladder and supported capability profile. The first build uses the canonical `SW-
 **IN WORK**; source baseline state remains historical and distinct. Visual build-lineage entry uses stable project,
 build, lifecycle, and predecessor identities, with explicit user selection even when only one build exists.
 
-Repository setup is a project-scoped configuration seam: Connect now may remain Pending until an installation-approved
-read-only GitLab probe observes a remote identity, while Configure later stays visibly Pending. Neither a URL nor a
-browser-supplied status is a verified connection, and repository setup does not assert merge, CI, or implementation
-evidence. Standard email, managed Word, PDF/DOCX, and code-linkage capabilities retain their existing lifecycle
-prerequisites; an empty project reports pending/empty state rather than fabricated readiness.
+Repository setup is a project-scoped configuration seam: Configure later stays visibly Pending, while Connect now
+records ConfiguredUnverified until an installation-approved read-only GitLab probe observes a remote identity.
+Neither a URL nor a browser-supplied status is a verified connection, and repository setup does not assert merge, CI,
+or implementation evidence. Standard email, managed Word, PDF/DOCX, and code-linkage capabilities retain their
+existing lifecycle prerequisites; an empty project reports pending/empty state rather than fabricated readiness.
 
 Enterprise authoring extends the existing requirement aggregate instead of replacing it. Stable artifacts and immutable requirement revisions remain authoritative; revision profiles add schema-bound rich content and classifications, specification nodes add reusable document placement, and comments/views/jobs preserve collaboration and high-volume operations as separate attributable records. Existing Projects are synchronized idempotently so the new workspace can be introduced without rewriting approved history.
 
