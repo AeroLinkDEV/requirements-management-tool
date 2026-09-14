@@ -361,6 +361,7 @@
         "ProjectRepositoryApiTests",
         "ProjectSetupCodeEvidenceApiTests",
         "ProjectSetupDiscoveryApiTests",
+        "ProjectSetupInceptionApiTests",
         "ProjectSetupPostgresQualificationTests",
         "ProjectSetupServiceQualificationTests",
         "RebaseRequirementChangeTests",
@@ -1776,6 +1777,7 @@
         "ProjectSetupBoundaryRegressionApiTests",
         "ProjectSetupDiscoveryApiTests",
         "ProjectSetupInceptionApiTests",
+        "ProjectSetupKestrelQualificationTests",
         "ProjectSetupLadderCapabilityApiTests",
         "ProjectSetupServiceQualificationTests"
       ]
@@ -1820,7 +1822,8 @@
       "path": "/api/project-setups/{draftId:guid}/source/upload",
       "file": "ProjectSetupSourceEndpoints.cs",
       "coveredBy": [
-        "ProjectSetupInceptionApiTests"
+        "ProjectSetupInceptionApiTests",
+        "ProjectSetupKestrelQualificationTests"
       ]
     },
     {

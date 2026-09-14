@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 905,
-    "cases": 1016,
-    "classes": 143,
-    "hostedTests": 857,
-    "hostedCases": 946,
+    "tests": 908,
+    "cases": 1019,
+    "classes": 144,
+    "hostedTests": 860,
+    "hostedCases": 949,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 14,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 566,
-      "cases": 637,
+      "tests": 567,
+      "cases": 638,
       "unknownCases": 0,
       "classes": 111
     },
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 97,
-      "cases": 101,
+      "tests": 98,
+      "cases": 102,
       "unknownCases": 0,
-      "classes": 58
+      "classes": 59
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -61,10 +61,10 @@
     "startup-config": {
       "label": "Startup, hosting and configuration",
       "level": "API (must stay hosted)",
-      "tests": 8,
-      "cases": 8,
+      "tests": 9,
+      "cases": 9,
       "unknownCases": 0,
-      "classes": 6
+      "classes": 7
     },
     "rule-matrix": {
       "label": "Business-rule matrix over data variations",
@@ -10293,8 +10293,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 274,
-        "end": 394
+        "start": 449,
+        "end": 581
       }
     },
     {
@@ -10311,8 +10311,43 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 163,
-        "end": 272
+        "start": 338,
+        "end": 447
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Native_source_rechecks_current_membership_after_capture_and_allows_admin_resume",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 91,
+        "end": 199
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Source_assertion_binds_official_build_and_start_kind_after_build_edit",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 27,
+        "end": 89
       }
     },
     {
@@ -10328,8 +10363,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 109,
-        "end": 161
+        "start": 284,
+        "end": 336
       }
     },
     {
@@ -10345,8 +10380,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 94,
-        "end": 107
+        "start": 269,
+        "end": 282
       }
     },
     {
@@ -10362,8 +10397,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 26,
-        "end": 92
+        "start": 201,
+        "end": 267
+      }
+    },
+    {
+      "cls": "ProjectSetupKestrelQualificationTests",
+      "test": "Real_kestrel_accepts_large_and_chunked_sources_and_rejects_over_limit_without_staging",
+      "kind": "Fact",
+      "intent": "startup-config",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 17,
+        "end": 65
       }
     },
     {
