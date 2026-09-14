@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 903,
-    "cases": 1013,
+    "tests": 904,
+    "cases": 1014,
     "classes": 142,
-    "hostedTests": 856,
-    "hostedCases": 944,
+    "hostedTests": 857,
+    "hostedCases": 945,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 13,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 565,
-      "cases": 635,
+      "tests": 566,
+      "cases": 636,
       "unknownCases": 0,
       "classes": 111
     },
@@ -10297,8 +10297,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 220,
-        "end": 340
+        "start": 274,
+        "end": 394
       }
     },
     {
@@ -10315,8 +10315,25 @@
         "factory-services"
       ],
       "sourceLines": {
+        "start": 163,
+        "end": 272
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Source_reconcile_route_revalidates_the_durable_token_and_replays_only_current_source",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
         "start": 109,
-        "end": 218
+        "end": 161
       }
     },
     {

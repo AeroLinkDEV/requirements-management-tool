@@ -1906,6 +1906,12 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.MergeRequestReference).HasMaxLength(80); b.Property(x => x.MergeRequestTitle).HasMaxLength(500);
             b.Property(x => x.MergeRequestUrl).HasMaxLength(1000); b.Property(x => x.MergeCommitSha).HasMaxLength(64);
             b.Property(x => x.NoCodeChangeRationale).HasMaxLength(4000); b.Property(x => x.RecordedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.VerifiedRemoteProjectId);
+            b.Property(x => x.VerifiedRepositoryEndpoint).HasMaxLength(500);
+            b.Property(x => x.VerifiedRepositoryPath).HasMaxLength(300);
+            b.Property(x => x.RepositoryConfigurationVersion);
+            b.Property(x => x.RepositoryVerifiedAt);
+            b.Property(x => x.RepositoryVerifiedBy).HasMaxLength(100);
             b.HasIndex(x => new { x.ReleaseId, x.RequirementRevisionId }).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.ReleaseId });
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);

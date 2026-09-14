@@ -2,6 +2,7 @@ using System.Text.Json;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace AeroLink.Api;
 
@@ -43,6 +44,11 @@ public static class ProjectSetupSourceEndpoints
         app.MapPost("/api/project-setups/{draftId:guid}/source/upload", async (Guid draftId, HttpRequest request,
             HttpContext http, ProjectSetupInceptionService service, CancellationToken ct) =>
         {
+            // Kestrel's default request limit is commonly below the product's 50 MiB source bound. Set the
+            // endpoint feature before consuming the body, while the service still enforces max+1 for every
+            // hosting surface (including chunked requests and TestServer).
+            var sizeFeature = http.Features.Get<IHttpMaxRequestBodySizeFeature>();
+            if (sizeFeature is { IsReadOnly: false }) sizeFeature.MaxRequestBodySize = MaxUploadBytes;
             if (request.ContentLength is > MaxUploadBytes)
                 return Results.BadRequest(new { code = "invalid_source", error = "Source files must be between 1 byte and 50 MB." });
             if (!long.TryParse(request.Query["expectedVersion"], out var expectedVersion))

@@ -280,7 +280,7 @@ test('reviewed #563 holds keep every unsafe reusable class out of reuse headroom
     assert.equal(row?.reason, override.reason, cls)
     assert.match(row?.reason ?? '', /^Reviewed #563 hold:/, cls)
   }
-  assert.deepEqual(hostArtifact.summary['reusable-host'], { classes: 52, tests: 321, knownCases: 361, unknownCaseTests: 0 })
+  assert.deepEqual(hostArtifact.summary['reusable-host'], { classes: 52, tests: 322, knownCases: 362, unknownCaseTests: 0 })
   // #1037 adds project setup, service qualification, and PostgreSQL boundary evidence.
   assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 52, tests: 316, knownCases: 356, unknownCaseTests: 0 })
   assert.deepEqual(hostArtifact.summary.converted, { classes: 33, tests: 255, knownCases: 280, unknownCaseTests: 0 })
@@ -317,8 +317,8 @@ test('host-classification case totals join exactly to the intent inventory', () 
   assert.equal(hostArtifact.totals.knownCases, intentArtifact.totals.cases)
   assert.equal(hostArtifact.totals.unknownCaseTests, intentArtifact.totals.unknownCaseTests)
   const reusable = hostArtifact.summary['reusable-host']
-  assert.equal(reusable.tests - reusable.classes, 269)
-  assert.equal(reusable.knownCases - reusable.classes, 309)
+  assert.equal(reusable.tests - reusable.classes, 270)
+  assert.equal(reusable.knownCases - reusable.classes, 310)
 })
 
 test('host classification CLI distinguishes known cases from unknown-case methods', () => {
@@ -329,9 +329,9 @@ test('host classification CLI distinguishes known cases from unknown-case method
       join(temporaryDirectory, 'artifact.json'),
     ], { encoding: 'utf8' })
     assert.match(output, /classification\s+classes\s+methods\s+known cases\s+unknown-case methods\s+share of methods/)
-    assert.match(output, /reusable-host\s+52\s+321\s+361\s+0\s+35.5%/)
+    assert.match(output, /reusable-host\s+52\s+322\s+362\s+0\s+35.6%/)
     assert.match(output, /fresh-host\s+52\s+316\s+356\s+0\s+35.0%/)
-    assert.match(output, /Remaining reuse headroom:\s+52 classes, 321 methods, 361 known cases/)
+    assert.match(output, /Remaining reuse headroom:\s+52 classes, 322 methods, 362 known cases/)
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true })
   }
@@ -339,12 +339,12 @@ test('host classification CLI distinguishes known cases from unknown-case method
 
 test('committed inventories expose per-row case and host evidence', () => {
   assert.equal(intentArtifact.schemaVersion, 'aerolink-api-test-intent/v2')
-  assert.equal(intentArtifact.totals.tests, 903)
-  assert.equal(intentArtifact.totals.cases, 1013)
+  assert.equal(intentArtifact.totals.tests, 904)
+  assert.equal(intentArtifact.totals.cases, 1014)
   assert.equal(intentArtifact.totals.criterion7, 'unresolved')
   assert.ok(intentArtifact.tests.every((row) => Object.hasOwn(row, 'cases') && Object.hasOwn(row, 'hosted') && Array.isArray(row.hostEvidence) && row.sourceLines.start <= row.sourceLines.end))
   assert.equal(hostArtifact.schemaVersion, 'aerolink-api-host-classification/v3')
-  assert.equal(hostArtifact.totals.knownCases, 1013)
+  assert.equal(hostArtifact.totals.knownCases, 1014)
   assert.equal(hostArtifact.totals.unknownCaseTests, 0)
   assert.ok(hostArtifact.classes.every((row) => Number.isInteger(row.knownCases) && Number.isInteger(row.unknownCaseTests)))
   for (const cls of ['ReleasedExecutionEvidenceApiTests', 'ReleasedExecutionEvidenceAuthorityMismatchTests', 'ProblemReportPagingApiTests', 'ProductionRoutingTests', 'MainCurrencyTests']) {

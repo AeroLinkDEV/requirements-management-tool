@@ -107,6 +107,60 @@ public sealed class ProjectSetupInceptionApiTests
     }
 
     [Fact]
+    public async Task Source_reconcile_route_revalidates_the_durable_token_and_replays_only_current_source()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+        using var created = await client.PostAsJsonAsync("/api/project-setups", new { projectName = "Route source" });
+        using var createdBody = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+        var draftId = createdBody.RootElement.GetProperty("draftId").GetGuid();
+        using var details = await client.PutAsJsonAsync($"/api/project-setups/{draftId}", new
+        {
+            expectedVersion = 1, currentStep = "StartingPoint",
+            project = new { name = "Route source", softwareProduct = "Route source product" },
+            build = new { version = "1.3" }, selectedCategories = Array.Empty<string>(), ladder = new { },
+            reviewRules = new { }, reviewRulesAccepted = true, repository = new { mode = "ConfigureLater" }, mapping = new { },
+        });
+        Assert.Equal(HttpStatusCode.OK, details.StatusCode);
+        using var upload = new HttpRequestMessage(HttpMethod.Post,
+            $"/api/project-setups/{draftId}/source/upload?expectedVersion=2&fileName=source.csv")
+        { Content = new ByteArrayContent(CreateSource("source.csv")) };
+        upload.Content.Headers.ContentType = new("application/octet-stream");
+        using var uploaded = await client.SendAsync(upload);
+        Assert.Equal(HttpStatusCode.OK, uploaded.StatusCode);
+        using var uploadedBody = JsonDocument.Parse(await uploaded.Content.ReadAsStringAsync());
+        var uploadVersion = uploadedBody.RootElement.GetProperty("draftVersion").GetInt64();
+
+        using var sourceResponse = await client.GetAsync($"/api/project-setups/{draftId}/source");
+        using var source = JsonDocument.Parse(await sourceResponse.Content.ReadAsStringAsync());
+        using var configured = await client.PutAsJsonAsync($"/api/project-setups/{draftId}/source/configuration", new
+        {
+            expectedVersion = uploadVersion, selectedCategories = new[] { "Requirements" },
+            mapping = BuildMapping(source.RootElement, "source.csv"), metadata = new { },
+        });
+        Assert.Equal(HttpStatusCode.OK, configured.StatusCode);
+        using var configuredBody = JsonDocument.Parse(await configured.Content.ReadAsStringAsync());
+        var configuredVersion = configuredBody.RootElement.GetProperty("draftVersion").GetInt64();
+
+        // Exercise the actual POST route after configuration has already persisted a valid mapping. The route
+        // must advance the same durable draft token and return the server reconciliation, not trust browser JSON.
+        using var reconciled = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/source/reconcile", new
+        { expectedVersion = configuredVersion });
+        Assert.Equal(HttpStatusCode.OK, reconciled.StatusCode);
+        using var reconciledBody = JsonDocument.Parse(await reconciled.Content.ReadAsStringAsync());
+        Assert.Equal(configuredVersion + 1, reconciledBody.RootElement.GetProperty("draftVersion").GetInt64());
+        Assert.True(reconciledBody.RootElement.GetProperty("reconciliation").GetProperty("ready").GetBoolean());
+
+        // A stale route request cannot replay or overwrite a newer reconciliation.
+        using var stale = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/source/reconcile", new
+        { expectedVersion = configuredVersion });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        using var staleBody = JsonDocument.Parse(await stale.Content.ReadAsStringAsync());
+        Assert.Equal("draft_conflict", staleBody.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
     public async Task Native_capture_reconcile_and_materialize_preserves_source_authorship_without_staffing_target()
     {
         using var factory = new AeroLinkApiFactory();

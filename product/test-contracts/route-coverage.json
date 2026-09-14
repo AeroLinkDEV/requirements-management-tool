@@ -1809,7 +1809,9 @@
       "method": "POST",
       "path": "/api/project-setups/{draftId:guid}/source/reconcile",
       "file": "ProjectSetupSourceEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "ProjectSetupInceptionApiTests"
+      ]
     },
     {
       "method": "POST",

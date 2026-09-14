@@ -29,7 +29,10 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             // server host starts. The original factory and all request scopes are disposed.
             await using (var db = new AeroLinkDbContext(new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options))
                 await db.Database.MigrateAsync();
-            using var restarted = new AeroLinkApiFactory(postgresConnection: connection);
+            // Exercise the supported restart path with demo-account seeding enabled. The seeder must be
+            // idempotent and preserve the deliberately configured project roster/leadership across host startup.
+            using var restarted = new AeroLinkApiFactory(seedDemoAccounts: true, allowDemoAccounts: true,
+                postgresConnection: connection);
             using var client = restarted.CreateClient();
             using var login = await client.PostAsJsonAsync("/api/auth/login", new
             {

@@ -71,7 +71,12 @@ public static class ProjectRepositoryEndpoints
                     record.RecordVerificationFailure(http.UserAccount().UserName, DateTimeOffset.UtcNow);
                 Audit(db, http, projectId, "RepositoryConnectionObserved", new { result.Verified, result.Code, result.RemoteProjectId, result.RemotePath, record.Version });
                 await db.SaveChangesAsync(ct);
-                return Results.Ok(new { repository = View(record), observation = result });
+                // Return the committed provider representation. PostgreSQL stores DateTimeOffset at microsecond
+                // precision; the tracked value can retain finer local ticks and would otherwise disagree with
+                // the immutable evidence snapshot read by the next request.
+                var persisted = await db.ProjectRepositoryConfigurations.AsNoTracking()
+                    .SingleAsync(x => x.ProjectId == projectId, ct);
+                return Results.Ok(new { repository = View(persisted), observation = result });
             }
             catch (DbUpdateConcurrencyException) { return Changed(); }
         });
