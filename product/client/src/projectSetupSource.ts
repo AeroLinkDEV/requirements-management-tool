@@ -42,6 +42,18 @@ export type SourceObject = {
   attributes: Record<string, string>;
 };
 
+/**
+ * The server stores mapping decisions per exact source object.  A module is only a
+ * presentation grouping; its objects may legitimately have different include,
+ * ladder, exclusion, and attribute decisions.
+ */
+export type SourceObjectMapping = {
+  include: boolean;
+  level?: string;
+  exclusionReason?: string;
+  mappings: SourceAttributeMapping[];
+};
+
 export type SourceModule = {
   key: string;
   name: string;
@@ -53,6 +65,7 @@ export type SourceModule = {
   mappings: SourceAttributeMapping[];
   include: boolean;
   exclusionReason?: string;
+  objectMappings?: Record<string, SourceObjectMapping>;
 };
 
 export type SourceRelation = {
@@ -276,14 +289,34 @@ function decodeModules(value: unknown, mappingValue?: unknown): SourceModule[] {
     );
     const objectMappingEntries = objects.flatMap((object) => {
       const mapping = mappingsByObject.get(object.key);
-      return mapping ? [mapping] : [];
+      return mapping ? [{ object, mapping }] : [];
     });
-    const firstObjectMapping = objectMappingEntries[0];
+    const firstObjectMapping = objectMappingEntries[0]?.mapping;
     const mappings = decodeAttributes(firstObjectMapping?.attributes ?? row.mappings);
     const observedMappings = uniqueAttributes.map((attribute) => ({
       sourceAttribute: attribute.key,
       destination: "SourceOnly" as const,
     }));
+    const objectMappings = Object.fromEntries(
+      objectMappingEntries.map(({ object, mapping }) => [
+        object.key,
+        {
+          include: boolean(mapping.include, true),
+          ...(text(mapping.level).trim() ? { level: text(mapping.level).trim() } : {}),
+          ...(text(mapping.exclusionReason).trim()
+            ? { exclusionReason: text(mapping.exclusionReason).trim() }
+            : {}),
+          mappings: decodeAttributes(mapping.attributes),
+        },
+      ]),
+    ) as Record<string, SourceObjectMapping>;
+    const firstObjectDecision = objectMappingEntries[0]
+      ? objectMappings[objectMappingEntries[0].object.key]
+      : undefined;
+    const hasDivergentObjectMappings = objectMappingEntries.length > 0
+      && (objectMappingEntries.length !== objects.length
+        || objectMappingEntries.some(({ object }) =>
+          JSON.stringify(objectMappings[object.key]) !== JSON.stringify(firstObjectDecision)));
     const objectKeys = Array.isArray(row.objectKeys)
       ? row.objectKeys.filter((item): item is string => typeof item === "string" && item.trim() !== "")
       : objects.map((object) => object.key);
@@ -303,11 +336,12 @@ function decodeModules(value: unknown, mappingValue?: unknown): SourceModule[] {
         attributes: uniqueAttributes,
         mappings: mappings.length ? mappings : observedMappings,
         include: firstObjectMapping
-          ? objectMappingEntries.every((mapping) => boolean(mapping.include, true))
+          ? objectMappingEntries.every(({ mapping }) => boolean(mapping.include, true))
           : boolean(row.include, true),
         ...(text(firstObjectMapping?.exclusionReason ?? row.exclusionReason).trim()
           ? { exclusionReason: text(firstObjectMapping?.exclusionReason ?? row.exclusionReason).trim() }
           : {}),
+        ...(hasDivergentObjectMappings ? { objectMappings } : {}),
       },
     ];
   });
@@ -609,12 +643,17 @@ export function sourceConfigurationPayload(
           kind: "",
           attributes: {},
         }));
-    return objects.map((object) => ({
+    return objects.map((object) => {
+      const exact = module.objectMappings?.[object.key];
+      const mappings = exact?.mappings ?? module.mappings;
+      return {
       sourceKey: object.key,
-      include: module.include,
-      ...(module.exclusionReason?.trim() ? { exclusionReason: module.exclusionReason.trim() } : {}),
-      ...(module.level ? { level: module.level } : {}),
-      attributes: module.mappings.map((mapping) => ({
+      include: exact?.include ?? module.include,
+      ...(exact?.exclusionReason?.trim() || module.exclusionReason?.trim()
+        ? { exclusionReason: (exact?.exclusionReason ?? module.exclusionReason)!.trim() }
+        : {}),
+      ...(exact?.level || module.level ? { level: exact?.level ?? module.level } : {}),
+      attributes: mappings.map((mapping) => ({
         sourceAttribute: mapping.sourceAttribute,
         destination: mapping.destination,
         ...(mapping.reason?.trim() ? { reason: mapping.reason.trim() } : {}),
@@ -622,7 +661,8 @@ export function sourceConfigurationPayload(
           ? { valueMappings: Object.fromEntries(mapping.valueMappings.map((value) => [value.sourceValue, value.destinationValue])) }
           : {}),
       })),
-    }));
+      };
+    });
   });
   const relations = source.relations.map((relation) => ({
     sourceKey: relation.key ?? relation.sourceKey ?? relation.sourceType,

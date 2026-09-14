@@ -12,6 +12,8 @@ import {
   type SourceKind,
   type SourceMappingDestination,
   type SourceModule,
+  type SourceObjectMapping,
+  type SourceAttributeMapping,
   type SourceRelation,
   type SourceLadderSuggestion,
   type SourceView,
@@ -105,6 +107,29 @@ function updateModule(source: SourceView, index: number, patch: Partial<SourceMo
   };
 }
 
+function updateObjectMapping(
+  source: SourceView,
+  moduleIndex: number,
+  objectKey: string,
+  patch: Partial<SourceObjectMapping>,
+): SourceView {
+  return {
+    ...source,
+    modules: source.modules.map((module, currentIndex) => {
+      if (currentIndex !== moduleIndex || !module.objectMappings) return module;
+      const current = module.objectMappings[objectKey];
+      if (!current) return module;
+      return {
+        ...module,
+        objectMappings: {
+          ...module.objectMappings,
+          [objectKey]: { ...current, ...patch },
+        },
+      };
+    }),
+  };
+}
+
 function updateRelation(
   source: SourceView,
   index: number,
@@ -116,6 +141,101 @@ function updateRelation(
       currentIndex === index ? { ...relation, ...patch } : relation,
     ),
   };
+}
+
+function AttributeMappingTable({
+  title,
+  mappings,
+  onChange,
+}: {
+  title: string;
+  mappings: SourceAttributeMapping[];
+  onChange: (mappings: SourceAttributeMapping[]) => void;
+}) {
+  return (
+    <div className="setupSourceAttributeTableWrap">
+      <table className="setupSourceAttributeTable">
+        <caption>{title}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Source attribute</th>
+            <th scope="col">Destination</th>
+            <th scope="col">Reason</th>
+            <th scope="col">Values</th>
+          </tr>
+        </thead>
+        <tbody>
+          {mappings.map((mapping, mappingIndex) => (
+            <tr key={`${title}-${mapping.sourceAttribute}`}>
+              <td>{mapping.sourceAttribute}</td>
+              <td>
+                <select
+                  aria-label={`Mapping for ${title} ${mapping.sourceAttribute}`}
+                  value={mapping.destination}
+                  onChange={(event) => {
+                    onChange(mappings.map((current, currentIndex) =>
+                      currentIndex === mappingIndex
+                        ? { ...current, destination: event.target.value as SourceMappingDestination }
+                        : current,
+                    ));
+                  }}
+                >
+                  {mappingDestinations.map((item) => (
+                    <option value={item.value} key={item.value}>{item.label}</option>
+                  ))}
+                </select>
+              </td>
+              <td>
+                <input
+                  aria-label={`Reason for ${title} ${mapping.sourceAttribute}`}
+                  value={mapping.reason ?? ""}
+                  onChange={(event) => {
+                    onChange(mappings.map((current, currentIndex) =>
+                      currentIndex === mappingIndex ? { ...current, reason: event.target.value } : current,
+                    ));
+                  }}
+                />
+              </td>
+              <td>
+                {mapping.valueMappings?.length ? (
+                  <div className="setupSourceValues">
+                    {mapping.valueMappings.map((valueMapping, valueIndex) => (
+                      <label key={`${mapping.sourceAttribute}-${valueIndex}`}>
+                        {valueMapping.sourceValue}
+                        <input
+                          aria-label={`Destination value for ${title} ${mapping.sourceAttribute} ${valueMapping.sourceValue}`}
+                          value={valueMapping.destinationValue}
+                          onChange={(event) => {
+                            onChange(mappings.map((current, currentIndex) =>
+                              currentIndex === mappingIndex
+                                ? {
+                                    ...current,
+                                    valueMappings: current.valueMappings?.map((row, rowIndex) =>
+                                      rowIndex === valueIndex
+                                        ? { ...row, destinationValue: event.target.value }
+                                        : row,
+                                    ),
+                                  }
+                                : current,
+                            ));
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="setupSourceMuted">No enumerated source values</span>
+                )}
+              </td>
+            </tr>
+          ))}
+          {!mappings.length && (
+            <tr><td colSpan={4}>No source attributes were observed.</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export function SourceAcceptanceFields({
@@ -993,111 +1113,88 @@ export default function ProjectSetupSourcePanel({
                     disabled={module.include}
                   />
                 </label>
-                <div className="setupSourceAttributeTableWrap">
-                  <table className="setupSourceAttributeTable">
-                    <caption>Attributes in {module.name}</caption>
-                    <thead>
-                      <tr>
-                        <th scope="col">Source attribute</th>
-                        <th scope="col">Destination</th>
-                        <th scope="col">Reason</th>
-                        <th scope="col">Values</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {module.mappings.map((mapping, mappingIndex) => (
-                        <tr key={`${module.key}-${mapping.sourceAttribute}`}>
-                          <td>{mapping.sourceAttribute}</td>
-                          <td>
-                            <select
-                              aria-label={`Mapping for ${module.name} ${mapping.sourceAttribute}`}
-                              value={mapping.destination}
-                              onChange={(event) => {
-                                const mappings = module.mappings.map((current, currentIndex) =>
-                                  currentIndex === mappingIndex
-                                    ? {
-                                        ...current,
-                                        destination: event.target.value as SourceMappingDestination,
-                                      }
-                                    : current,
-                                );
-                                updateSourceAndNotice(
-                                  updateModule(source, moduleIndex, { mappings }),
-                                );
-                              }}
-                            >
-                              {mappingDestinations.map((item) => (
-                                <option value={item.value} key={item.value}>
-                                  {item.label}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td>
-                            <input
-                              aria-label={`Reason for ${module.name} ${mapping.sourceAttribute}`}
-                              value={mapping.reason ?? ""}
-                              onChange={(event) => {
-                                const mappings = module.mappings.map((current, currentIndex) =>
-                                  currentIndex === mappingIndex
-                                    ? { ...current, reason: event.target.value }
-                                    : current,
-                                );
-                                updateSourceAndNotice(
-                                  updateModule(source, moduleIndex, { mappings }),
-                                );
-                              }}
-                            />
-                          </td>
-                          <td>
-                            {mapping.valueMappings?.length ? (
-                              <div className="setupSourceValues">
-                                {mapping.valueMappings.map((valueMapping, valueIndex) => (
-                                  <label key={`${mapping.sourceAttribute}-${valueIndex}`}>
-                                    {valueMapping.sourceValue}
-                                    <input
-                                      aria-label={`Destination value for ${module.name} ${mapping.sourceAttribute} ${valueMapping.sourceValue}`}
-                                      value={valueMapping.destinationValue}
-                                      onChange={(event) => {
-                                        const mappings = module.mappings.map(
-                                          (current, currentIndex) =>
-                                            currentIndex === mappingIndex
-                                              ? {
-                                                  ...current,
-                                                  valueMappings: current.valueMappings?.map(
-                                                    (row, rowIndex) =>
-                                                      rowIndex === valueIndex
-                                                        ? {
-                                                            ...row,
-                                                            destinationValue: event.target.value,
-                                                          }
-                                                        : row,
-                                                  ),
-                                                }
-                                              : current,
-                                        );
-                                        updateSourceAndNotice(
-                                          updateModule(source, moduleIndex, { mappings }),
-                                        );
-                                      }}
-                                    />
-                                  </label>
+                {module.objectMappings ? (
+                  <div className="setupSourceObjectMappings">
+                    <p className="setupSourceHint">
+                      This module has decisions that differ between source objects. Review each
+                      exact object below; the module heading is only a presentation grouping.
+                    </p>
+                    {(module.objects ?? []).map((object) => {
+                      const decision = module.objectMappings?.[object.key];
+                      if (!decision) return null;
+                      return (
+                        <section className="setupSourceObjectMapping" key={object.key}>
+                          <header>
+                            <strong>{object.sourceIdentifier || object.key}</strong>
+                            <small>{object.key} · {object.kind || "Source object"}</small>
+                          </header>
+                          <div className="setupSourceObjectControls">
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={decision.include}
+                                onChange={(event) => updateSourceAndNotice(updateObjectMapping(
+                                  source,
+                                  moduleIndex,
+                                  object.key,
+                                  { include: event.target.checked },
                                 ))}
-                              </div>
-                            ) : (
-                              <span className="setupSourceMuted">No enumerated source values</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                      {!module.mappings.length && (
-                        <tr>
-                          <td colSpan={4}>No source attributes were observed.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                              /> Include this source object
+                            </label>
+                            <label>
+                              Ladder level
+                              <select
+                                value={decision.level ?? ""}
+                                onChange={(event) => updateSourceAndNotice(updateObjectMapping(
+                                  source,
+                                  moduleIndex,
+                                  object.key,
+                                  { level: event.target.value || undefined },
+                                ))}
+                              >
+                                <option value="">Choose supported level</option>
+                                {levelOptions.map((level) => (
+                                  <option value={level.id} key={level.id}>{level.label}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label>
+                              Exclusion reason
+                              <input
+                                value={decision.exclusionReason ?? ""}
+                                onChange={(event) => updateSourceAndNotice(updateObjectMapping(
+                                  source,
+                                  moduleIndex,
+                                  object.key,
+                                  { exclusionReason: event.target.value },
+                                ))}
+                                disabled={decision.include}
+                              />
+                            </label>
+                          </div>
+                          <AttributeMappingTable
+                            title={`${module.name} ${object.sourceIdentifier || object.key}`}
+                            mappings={decision.mappings}
+                            onChange={(mappings) => updateSourceAndNotice(updateObjectMapping(
+                              source,
+                              moduleIndex,
+                              object.key,
+                              { mappings },
+                            ))}
+                          />
+                        </section>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <AttributeMappingTable
+                    title={`Attributes in ${module.name}`}
+                    mappings={module.mappings}
+                    onChange={(mappings) => updateSourceAndNotice(
+                      updateModule(source, moduleIndex, { mappings }),
+                    )}
+                  />
+                )}
               </article>
             ))}
           </section>

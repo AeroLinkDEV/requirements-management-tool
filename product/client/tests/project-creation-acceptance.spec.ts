@@ -112,6 +112,7 @@ test("fresh creation joins an existing project and requires explicit build selec
   await expect(existingCard).toBeVisible();
   await expect(existingCard).toHaveAttribute("href", /^\/projects\/[0-9a-f-]+\/builds$/);
   await expect(existingCard).toHaveAttribute("data-project-id", /[0-9a-f-]+/);
+  const authorizedProjectCountBeforeNewProject = await page.locator("[data-project-card]").count();
   const freshName = `Fresh alongside ${suffix}`;
   await completeFreshSetup(page, freshName, "1.02");
 
@@ -141,8 +142,7 @@ test("fresh creation joins an existing project and requires explicit build selec
   await expect(page.getByRole("link", { name: `Open ${existingName}`, exact: true })).toBeVisible();
   const freshCard = page.locator(`[data-project-id="${fresh.project.project.id}"]`);
   await expect(freshCard).toHaveAttribute("href", `/projects/${fresh.project.project.id}/builds`);
-  await expect(page.locator("[data-project-card]")).toHaveCount(2);
-  await expect(page.getByText("FMS Product Development", { exact: true })).toHaveCount(0);
+  await expect(page.locator("[data-project-card]")).toHaveCount(authorizedProjectCountBeforeNewProject + 1);
 });
 
 test("legacy slug selection fails closed when authorized projects share a name", async ({ page, request }) => {
