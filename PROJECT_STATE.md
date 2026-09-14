@@ -77,10 +77,37 @@ build. Explicit build links retain their exact authorized target. Repository set
 configured later; a server-observed GitLab connection is separate from controlled implementation evidence.
 See [Architecture](product/docs/ARCHITECTURE.md) and [Operations](product/docs/OPERATIONS.md).
 
-The current creation surface completes Fresh starts. Existing-baseline inheritance and external-file inception
-remain unavailable until their server materialization and acceptance composition is qualified. The source
-analysis/reconciliation foundation does not itself claim a usable imported project. Complete delivery and
-acceptance remain tracked in [issue #1037](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1037).
+The creation surface has three server-owned starting paths: Fresh, an exact authorized AeroLink baseline, and
+an external ReqIF, CSV, or XLSX source. Fresh creates only the empty structure required by the selected ladder
+and leaves engineering content, approvals, executions, evidence, and staffing empty. Native inception accepts a
+Frozen or Released source baseline with its exact project, baseline, revision, relationship, and supported source
+facts. External inception stages the uploaded bytes, parser observations, selected categories, mapping, and
+server reconciliation before materialization. The supported matrix is Requirements, Traces, Cases, Procedures,
+and Evidence for native sources; Requirements and Traces for ReqIF; and Requirements for CSV/XLSX. Unsupported
+or excluded objects and relationships remain explicit source findings; the service does not invent missing facts.
+
+Every source path creates one new first build in **IN WORK**. A native or external source remains a distinct
+historical source fact, and its approvals, executions, evidence, identities, and provenance are not recast as
+new-project approvals or target executions. Materialized records retain the exact source identifiers and revision
+links, with target parent/trace IDs recorded separately. Source acceptance is a password-confirmed electronic
+signature by the actual accepting AeroLink administrator (including an administrator resuming another creator's
+draft) over the source hash, selected categories, mapping, reconciliation, accepted ladder, manifest, and target
+build identity. It is an acceptance of source provenance and materialization, not an engineering approval.
+
+Creation drafts, staged uploads, and accepted answers survive sign-out, API restart, and resumed sessions. Draft
+and package version tokens protect edits and finalization; the finalization operation records its result so a
+duplicate request or a lost success response returns the same created identities. Creator and administrators can
+resume drafts, while native source access is checked against current source membership at every source boundary.
+The internal backing Program is allocated once and is not a user-entered Program name or code. Repository setup
+can remain visibly Pending and be configured later; it does not claim a connection without a server-observed
+verification. Project entry opens the actual visual build-lineage selector, including a one-build project, and
+requires explicit selection.
+
+This state describes the implemented product boundary; qualification, protected integration, and final acceptance
+remain tracked in [issue #1037](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1037). Ordinary
+CSV/XLSX requirement proposal preview/commit remains a separate change-request workflow and must not be confused
+with external inception. Recovery uses the supported backup/restore procedures for the database and retained draft
+source bytes; it does not use ad-hoc SQL, reset/reseed, or an installer-wide recovery claim.
 
 ## Current requirements architecture
 

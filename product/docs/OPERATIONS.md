@@ -629,6 +629,52 @@ overwriting the newer answer. Missing installation settings and remote failures 
 Local handler/capture tests establish request and lifecycle behavior only. Actual service access requires an
 operator-authorized check against the configured installation and target; it must not be inferred from mocks.
 
+## Recoverable project setup, source uploads, and recovery
+
+Use the Create New Project flow for all three supported starting paths: an empty Fresh project, an exact authorized
+AeroLink baseline, or an external ReqIF, CSV, or XLSX source. The server creates a discoverable setup draft before
+the project is usable. The creator and AeroLink administrators can use **Save and exit** and **Resume setup** across
+sessions. A draft's version token is shown through the API contract and must be sent back on edits; a conflict means
+refresh and review the newer answers. Do not create a project by editing database rows or by copying the FMS showcase.
+
+External source files are authenticated to the draft and limited to 50 MiB. The API records the exact size and
+SHA-256, parser observations, and source bytes in the draft-owned source package before any destination project or
+baseline exists. The package progresses through captured, analysed, reconciled, and materialized states. The browser
+must select categories and account for every supported source object, attribute, relation, and exclusion; the server
+recomputes validation and dependency closure. ReqIF supports Requirements and explicit Traces; CSV/XLSX support
+Requirements. Native AeroLink sources additionally support Cases, Procedures, and Evidence source facts and their
+supported relationships. The ordinary CSV/XLSX proposal preview/commit flow remains a change-request operation and
+is not external project inception.
+
+If the API, browser, or client connection stops during upload or setup, sign in again, list the setup drafts, and
+resume the same draft. Re-read the source view before changing answers. A retry of an identical upload, reconcile,
+or finalization operation can recover the existing package/result; a committed finalization whose response was lost
+returns the same project, baseline, release, and build identities. Do not repeat the operation with a new key merely
+because the first response was lost. Source access for a native baseline is checked again on resume and at each
+source boundary, so a revoked source membership blocks further use while preserving the staged record for audit.
+
+Finalization requires the actual accepting AeroLink administrator's password. The resulting electronic signature is
+bound to the exact source hash, selected categories, mapping, reconciliation manifest, accepted ladder, target IDs,
+and canonical first-build identity. It records source provenance acceptance, not a new approval, test execution,
+staffing assignment, or target evidence. A different administrator may resume and accept an authorized draft; source
+owners/authors remain source facts and are not copied into the new project's roster. The first target build is always
+created **IN WORK**, and entry opens the visual build-lineage selector for explicit build selection.
+
+Operators should allow the setup API to perform short database transactions only for local state changes and final
+materialization. Parsing, upload streaming, password confirmation, and any configured read-only provider check must
+not be wrapped in one long user-interaction transaction. If a retry reports a version conflict, use the supported
+resume path and preserve the latest draft answers. Pending repository configuration remains Pending until the
+installation's server-side GitLab probe verifies the remote identity; unrelated work can continue while it is
+pending.
+
+Back up the database and the retained draft source package bytes with the supported AeroLink backup procedure before
+planned maintenance or recovery. Restore first into an isolated shadow database/evidence root and complete the
+documented integrity checks. A restore must retain draft version/finalization records, source hashes, parser state,
+mapping, reconciliation, signatures, and materialized provenance. Never reset, truncate, reseed, or repair a setup
+draft with ad-hoc SQL, and never claim that an installer-wide backup includes application state unless its documented
+backup manifest proves the database and source package bytes are covered. Any live-installation migration or
+production upgrade requires the separately supported operator procedure and authorization.
+
 ## Production first-install administrator
 
 Production does not seed identities. Before the first API start against an empty database, set `Identity__BootstrapSecret` in the service environment to a randomly generated value of at least 32 characters. Do not place it in `appsettings.json`, source control, a command-line argument, or an operator transcript. `GET /api/setup/status` reports only whether bootstrap is required and enabled.
