@@ -47,6 +47,11 @@ export type ProjectSetupSourcePanelProps = {
 
 type SourceEnvelope = { draftVersion?: number; source?: unknown };
 
+// FMS-sized baselines can contain hundreds of source objects. Keep the complete mapping in
+// memory and in the versioned payload, but bound the number of expensive object editors mounted
+// at once so an existing authorized baseline remains usable in the browser.
+const SOURCE_OBJECT_PAGE_SIZE = 20;
+
 const mappingDestinations: { value: SourceMappingDestination; label: string }[] = [
   { value: "SourceOnly", label: "Keep as source-only attribute" },
   { value: "Statement", label: "Requirement statement" },
@@ -381,6 +386,7 @@ export default function ProjectSetupSourcePanel({
   const [optionsBusy, setOptionsBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [objectPages, setObjectPages] = useState<Record<string, number>>({});
   const requestNumber = useRef(0);
   const previousLadderRevision = useRef(ladderRevision);
 
@@ -396,6 +402,12 @@ export default function ProjectSetupSourcePanel({
       return current.filter((category) => allowed.has(category));
     });
   }, [source]);
+
+  useEffect(() => {
+    // A newly selected source may reuse a module key. Start its object editor at the first page,
+    // while ordinary mapping edits keep the current page so edits survive a local re-render.
+    setObjectPages({});
+  }, [source?.id, source?.sha256, kind]);
 
   useEffect(() => {
     if (previousLadderRevision.current === ladderRevision) return;
@@ -1178,77 +1190,117 @@ export default function ProjectSetupSourcePanel({
                 </label>
                 {(module.objects ?? []).length > 0 ? (
                   <div className="setupSourceObjectMappings">
-                    <p className="setupSourceHint">
-                      {module.hasDivergentObjectMappings
-                        ? "This module has decisions that differ between source objects. Review each exact object below; the module heading is only a presentation grouping."
-                        : "Review each exact source object below. Initial choices copy the module defaults and can be changed independently."}
-                    </p>
-                    {(module.objects ?? []).map((object) => {
-                      const decision = module.objectMappings?.[object.key]
-                        ?? defaultSourceObjectMapping(module);
-                      return (
-                        <section className="setupSourceObjectMapping" key={object.key}>
-                          <header>
-                            <strong>{object.sourceIdentifier || object.key}</strong>
-                            <small>{object.key} · {object.kind || "Source object"}</small>
-                          </header>
-                          <div className="setupSourceObjectControls">
-                            <label>
-                              <input
-                                type="checkbox"
-                                checked={decision.include}
-                                onChange={(event) => updateSourceAndNotice(updateObjectMapping(
-                                  source,
-                                  moduleIndex,
-                                  object.key,
-                                  { include: event.target.checked },
-                                ))}
-                              /> Include this source object
-                            </label>
-                            <label>
-                              Ladder level
-                              <select
-                                value={decision.level ?? ""}
-                                onChange={(event) => updateSourceAndNotice(updateObjectMapping(
-                                  source,
-                                  moduleIndex,
-                                  object.key,
-                                  { level: event.target.value || undefined },
-                                ))}
-                              >
-                                <option value="">Choose supported level</option>
-                                {levelOptions.map((level) => (
-                                  <option value={level.id} key={level.id}>{level.label}</option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              Exclusion reason
-                              <input
-                                value={decision.exclusionReason ?? ""}
-                                onChange={(event) => updateSourceAndNotice(updateObjectMapping(
-                                  source,
-                                  moduleIndex,
-                                  object.key,
-                                  { exclusionReason: event.target.value },
-                                ))}
-                                disabled={decision.include}
-                              />
-                            </label>
-                          </div>
-                          <AttributeMappingTable
-                            title={`${module.name} ${object.sourceIdentifier || object.key}`}
-                            mappings={decision.mappings}
-                            onChange={(mappings) => updateSourceAndNotice(updateObjectMapping(
-                              source,
-                              moduleIndex,
-                              object.key,
-                              { mappings },
-                            ))}
-                          />
-                        </section>
+                    {(() => {
+                      const objects = module.objects ?? [];
+                      const pageCount = Math.ceil(objects.length / SOURCE_OBJECT_PAGE_SIZE);
+                      const requestedPage = objectPages[module.key] ?? 0;
+                      const page = Math.min(requestedPage, Math.max(0, pageCount - 1));
+                      const pageStart = page * SOURCE_OBJECT_PAGE_SIZE;
+                      const visibleObjects = objects.slice(
+                        pageStart,
+                        pageStart + SOURCE_OBJECT_PAGE_SIZE,
                       );
-                    })}
+                      return (
+                        <>
+                          <p className="setupSourceHint">
+                            {module.hasDivergentObjectMappings
+                              ? "This module has decisions that differ between source objects. Review each exact object below; the module heading is only a presentation grouping."
+                              : "Review each exact source object below. Initial choices copy the module defaults and can be changed independently."}
+                          </p>
+                          {visibleObjects.map((object) => {
+                            const decision = module.objectMappings?.[object.key]
+                              ?? defaultSourceObjectMapping(module);
+                            return (
+                              <section className="setupSourceObjectMapping" key={object.key}>
+                                <header>
+                                  <strong>{object.sourceIdentifier || object.key}</strong>
+                                  <small>{object.key} · {object.kind || "Source object"}</small>
+                                </header>
+                                <div className="setupSourceObjectControls">
+                                  <label>
+                                    <input
+                                      type="checkbox"
+                                      checked={decision.include}
+                                      onChange={(event) => updateSourceAndNotice(updateObjectMapping(
+                                        source,
+                                        moduleIndex,
+                                        object.key,
+                                        { include: event.target.checked },
+                                      ))}
+                                    /> Include this source object
+                                  </label>
+                                  <label>
+                                    Ladder level
+                                    <select
+                                      value={decision.level ?? ""}
+                                      onChange={(event) => updateSourceAndNotice(updateObjectMapping(
+                                        source,
+                                        moduleIndex,
+                                        object.key,
+                                        { level: event.target.value || undefined },
+                                      ))}
+                                    >
+                                      <option value="">Choose supported level</option>
+                                      {levelOptions.map((level) => (
+                                        <option value={level.id} key={level.id}>{level.label}</option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label>
+                                    Exclusion reason
+                                    <input
+                                      value={decision.exclusionReason ?? ""}
+                                      onChange={(event) => updateSourceAndNotice(updateObjectMapping(
+                                        source,
+                                        moduleIndex,
+                                        object.key,
+                                        { exclusionReason: event.target.value },
+                                      ))}
+                                      disabled={decision.include}
+                                    />
+                                  </label>
+                                </div>
+                                <AttributeMappingTable
+                                  title={`${module.name} ${object.sourceIdentifier || object.key}`}
+                                  mappings={decision.mappings}
+                                  onChange={(mappings) => updateSourceAndNotice(updateObjectMapping(
+                                    source,
+                                    moduleIndex,
+                                    object.key,
+                                    { mappings },
+                                  ))}
+                                />
+                              </section>
+                            );
+                          })}
+                          <div className="setupSourcePager setupSourceObjectPager" aria-label={`${module.name} object pages`}>
+                            <button
+                              type="button"
+                              onClick={() => setObjectPages((current) => ({
+                                ...current,
+                                [module.key]: Math.max(0, page - 1),
+                              }))}
+                              disabled={page === 0 || busy}
+                            >
+                              Previous objects page
+                            </button>
+                            <span>
+                              {pageStart + 1}–{Math.min(pageStart + SOURCE_OBJECT_PAGE_SIZE, objects.length)} of {objects.length} source objects
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setObjectPages((current) => ({
+                                ...current,
+                                [module.key]: Math.min(pageCount - 1, page + 1),
+                              }))}
+                              disabled={page >= pageCount - 1 || busy}
+                            >
+                              Next objects page
+                            </button>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 ) : (
                   <AttributeMappingTable

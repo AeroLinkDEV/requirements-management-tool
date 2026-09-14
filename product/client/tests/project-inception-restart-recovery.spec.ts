@@ -45,7 +45,9 @@ type RecoveryRecord = {
   sourceId?: string;
   sourceBaselineId?: string;
   sourceSha256?: string;
+  assertionHash?: string;
   expectedSourceKey?: string;
+  expectedSourceAttribute?: string;
   expectedMappingDestination?: string;
 };
 
@@ -83,6 +85,10 @@ function attributeNameMatches(key: string, name: string) {
   const normalized = key.toLocaleLowerCase();
   const expected = name.toLocaleLowerCase();
   return normalized === expected || normalized.endsWith(`:${expected}`);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function sourceMapping(view: Record<string, unknown>) {
@@ -211,13 +217,16 @@ async function captureExternal(page: Page, draft: Draft, format: "ReqIF" | "CSV"
   const reconciledSource = (reconciled.source ?? reconciled) as Record<string, unknown>;
   const reconciledState = (reconciledSource.reconciliation ?? {}) as Record<string, unknown>;
   expect(reconciledState.ready).toBe(true);
+  const assertion = (reconciledSource.assertion ?? {}) as Record<string, unknown>;
   const mapping = sourceMapping(reconciledSource) as { objects: { sourceKey: string; attributes: { sourceAttribute: string; destination: string }[] }[] };
   const first = mapping.objects[0];
   const mappedStatement = first?.attributes.find((attribute) => attribute.destination === "Statement");
   return {
     sourceId: String(reconciledSource.id),
     sourceSha256: String(reconciledSource.sha256),
+    assertionHash: String(assertion.hash ?? ""),
     expectedSourceKey: first?.sourceKey,
+    expectedSourceAttribute: mappedStatement?.sourceAttribute,
     expectedMappingDestination: mappedStatement?.destination,
   };
 }
@@ -295,6 +304,12 @@ test("prepare five disposable drafts for a separate API-process recovery invocat
     sourceId: String(nativeSource.id),
     sourceBaselineId: nativeSourceBaselineId,
     sourceSha256: String(nativeSource.sha256),
+    assertionHash: String((nativeSource.assertion as Record<string, unknown> | undefined)?.hash ?? ""),
+    expectedSourceKey: (sourceMapping(nativeSource) as { objects: { sourceKey: string }[] }).objects[0]?.sourceKey,
+    expectedSourceAttribute: ((sourceMapping(nativeSource) as {
+      objects: { sourceKey: string; attributes: { sourceAttribute: string; destination: string }[] }[];
+    }).objects[0]?.attributes.find((attribute) => attribute.destination === "Statement"))?.sourceAttribute,
+    expectedMappingDestination: "Statement",
   });
 
   for (const format of ["ReqIF", "CSV", "XLSX"] as const) {
@@ -345,12 +360,45 @@ test("resume all five drafts after the API process has been restarted", async ({
     if (record.expectedSourceKey) expect(mapping?.objects?.some((object) => object.sourceKey === record.expectedSourceKey)).toBe(true);
     if (record.expectedMappingDestination) expect(JSON.stringify(mapping)).toContain(record.expectedMappingDestination);
     await page.getByRole("button", { name: /2\. Starting point/ }).click();
-    await expect(page.getByRole("heading", { name: "Choose a starting point", level: 2 })).toBeVisible();
+    // Native source snapshots may contain hundreds of exact object controls; allow the browser
+    // to finish painting that authoritative panel before asserting its retained choices.
+    await expect(page.getByRole("heading", { name: "Choose a starting point", level: 2 })).toBeVisible({ timeout: 60_000 });
     await expect(page.getByText("Exact source", { exact: true })).toBeVisible();
     await expect(page.getByText("Reconciliation ready", { exact: true })).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: /^Requirements/ })).toBeChecked();
+    if (record.expectedSourceKey) {
+      const sourceObject = page.locator("section.setupSourceObjectMapping").filter({ hasText: record.expectedSourceKey });
+      await expect(sourceObject).toHaveCount(1);
+      if (record.expectedSourceAttribute) {
+        const statementMapping = sourceObject
+          .getByLabel(new RegExp(` ${escapeRegExp(record.expectedSourceAttribute)}$`))
+          .first();
+        await expect(statementMapping).toHaveValue(record.expectedMappingDestination ?? "Statement");
+      } else {
+        throw new Error(`The source mapping has no explicit statement attribute for ${record.expectedSourceKey}.`);
+      }
+    }
     // Native baselines can contain hundreds of exact source objects. Capture the visible
     // selection/reconciliation state without asking Chromium to rasterize the entire long panel.
     await page.screenshot({ path: testInfo.outputPath(`restart-recovery-${record.kind}-${record.draftId}.png`) });
+    const afterSource = await getDraft(page.request, record.draftId);
+    const finalization = await responseJson<{ state: string; projectId: string; releaseId: string }>(
+      await page.request.post(`${apiBase}/api/project-setups/${record.draftId}/finalize`, {
+        headers: { "Idempotency-Key": `restart-recovery-${record.draftId}` },
+        data: {
+          expectedVersion: afterSource.version,
+          idempotencyKey: `restart-recovery-${record.draftId}`,
+          ...(record.kind === "Fresh" ? {} : {
+            sourceAssertionHash: record.assertionHash,
+            sourceAssertionAccepted: true,
+            password: "AeroLink!2026",
+          }),
+        },
+      }),
+    );
+    expect(finalization.state).toBe("Completed");
+    expect(finalization.projectId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(finalization.releaseId).toMatch(/^[0-9a-f-]{36}$/i);
     await page.getByRole("button", { name: "Sign out" }).click();
     await login(page, "admin", { openProject: false });
   }

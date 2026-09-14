@@ -303,6 +303,16 @@ test("unmapped heterogeneous source objects can be configured independently", as
   // individual override, otherwise the UI would show one decision while the payload retained old
   // per-object defaults.
   const module = page.locator("article.setupSourceModule").filter({ hasText: "Requirements" }).first();
+  const moduleInclude = module.getByLabel("Include Requirements");
+  await moduleInclude.uncheck();
+  await expect(system.getByLabel("Include this source object")).not.toBeChecked();
+  await expect(high.getByLabel("Include this source object")).not.toBeChecked();
+  await module.getByLabel(/Exclusion reason for this module/).fill("Excluded by the module bulk decision.");
+  await expect(system.getByLabel("Exclusion reason", { exact: true })).toHaveValue("Excluded by the module bulk decision.");
+  await expect(high.getByLabel("Exclusion reason", { exact: true })).toHaveValue("Excluded by the module bulk decision.");
+  await moduleInclude.check();
+  await expect(system.getByLabel("Include this source object")).toBeChecked();
+  await expect(high.getByLabel("Include this source object")).toBeChecked();
   await module.getByLabel("Ladder level for Requirements").selectOption("LowLevel");
   await system.getByRole("combobox").first().selectOption("System");
   await high.getByLabel("Include this source object").uncheck();
@@ -329,6 +339,144 @@ test("unmapped heterogeneous source objects can be configured independently", as
   expect(highMapping?.level).toBe("LowLevel");
   expect(highMapping?.exclusionReason).toBe("Not included in this project start.");
   await page.screenshot({ path: testInfo.outputPath("heterogeneous-object-mappings.png"), fullPage: true });
+});
+
+test("large source modules page object editors without losing exact mapping decisions", async ({ page }, testInfo) => {
+  const sourceId = "00000000-0000-4000-8000-000000000205";
+  const objects = Array.from({ length: 45 }, (_, index) => ({
+    key: `source-${index + 1}`,
+    module: "requirements",
+    sourceIdentifier: `REQ-${String(index + 1).padStart(2, "0")}`,
+    kind: "Requirement",
+    attributes: {
+      Statement: `Requirement ${index + 1} statement`,
+      Level: index < 20 ? "System" : "HighLevel",
+    },
+  }));
+  let sourceReady = false;
+  let configurationBody: Record<string, unknown> | undefined;
+  let source: Record<string, unknown> = {
+    id: sourceId,
+    kind: "ExternalBaseline",
+    displayName: "Paged source module",
+    fileName: "paged.csv",
+    format: "CSV",
+    sha256: "source-sha-205",
+    metadata: { sourceSystem: "Paged source tool" },
+    selectedCategories: [],
+    categories: [{ key: "Requirements", count: objects.length, requires: [], supported: true }],
+    modules: [{
+      key: "requirements",
+      name: "Requirements",
+      objectCount: objects.length,
+      include: true,
+      objects,
+    }],
+    relations: [],
+    findings: [],
+    findingResolutions: {},
+    reconciliation: null,
+    assertion: null,
+  };
+
+  await page.route(/\/api\/project-setups\/[^/]+\/source$/, async (route) => {
+    await route.fulfill({ json: sourceReady ? source : { draftVersion: 2, source: null } });
+  });
+  await page.route(/\/api\/project-setups\/[^/]+\/source\/upload\?/, async (route) => {
+    sourceReady = true;
+    await route.fulfill({ json: { id: sourceId, stage: "Analysed", sha256: "source-sha-205", draftVersion: 2 } });
+  });
+  await page.route(/\/api\/project-setups\/[^/]+\/source\/configuration$/, async (route) => {
+    configurationBody = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    source = {
+      ...source,
+      selectedCategories: ["Requirements"],
+      reconciliation: {
+        ready: true,
+        observedObjects: objects.length,
+        includedObjects: objects.length,
+        excludedObjects: 0,
+        observedRelations: 0,
+        includedRelations: 0,
+        excludedRelations: 0,
+        errors: [],
+        manifestHash: "manifest-205",
+      },
+      assertion: { text: "Paged source source-sha-205 was reconciled.", hash: "assertion-205" },
+    };
+    await route.fulfill({ json: { id: sourceId, stage: "Reconciled", manifestHash: "manifest-205", draftVersion: 3 } });
+  });
+  await page.route(/\/api\/project-setups\/[^/]+(?:\/save-and-exit)?$/, async (route) => {
+    if (!["PUT", "POST"].includes(route.request().method())) {
+      await route.continue();
+      return;
+    }
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    await route.fulfill({
+      json: {
+        draftId: route.request().url().split("/").at(-1),
+        state: "Draft",
+        currentStep: typeof body.currentStep === "string" ? body.currentStep : "StartingPoint",
+        version: Number(body.expectedVersion ?? 1) + 1,
+        project: body.project ?? { name: "Paged source", softwareProduct: "Paged software" },
+        start: body.start ?? { kind: "ExternalBaseline", sourceImportId: sourceId },
+        build: body.build ?? { version: "1.02", officialName: "SW-01.02" },
+        selectedCategories: Array.isArray(body.selectedCategories) ? body.selectedCategories : [],
+        ladder: body.ladder ?? {},
+        reviewRules: { accepted: body.reviewRulesAccepted === true, definition: body.reviewRules ?? {} },
+        repository: body.repository ?? { mode: "ConfigureLater", provider: "GitLab", endpoint: null },
+        mapping: body.mapping ?? {},
+      },
+    });
+  });
+
+  await login(page, "admin", { openProject: false });
+  await page.goto("/projects/new");
+  await page.getByLabel("Project name").fill(`Paged source ${Date.now()}`);
+  await page.getByLabel("Software product").fill("Paged software");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel("External baseline from another tool").check();
+  await page.getByLabel("Baseline file (ReqIF, CSV, or XLSX)").setInputFiles({
+    name: "paged.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("foreign-id,statement\nREQ-01,Requirement 1 statement\n"),
+  });
+  await page.getByRole("button", { name: "Upload and analyze source" }).click();
+  await expect(page.getByText("Paged source module", { exact: true })).toBeVisible();
+
+  const module = page.locator("article.setupSourceModule").filter({ hasText: "Requirements" }).first();
+  await expect(module.getByText("1–20 of 45 source objects", { exact: true })).toBeVisible();
+  const first = module.locator("section.setupSourceObjectMapping").filter({ hasText: "REQ-01" });
+  await expect(first).toHaveCount(1);
+  await first.getByLabel("Mapping for Requirements REQ-01 Statement").selectOption("Rationale");
+
+  await module.getByRole("button", { name: "Next objects page" }).click();
+  await expect(module.getByText("21–40 of 45 source objects", { exact: true })).toBeVisible();
+  const pageTwo = module.locator("section.setupSourceObjectMapping").filter({ hasText: "REQ-21" });
+  await expect(pageTwo).toHaveCount(1);
+  await pageTwo.getByLabel("Mapping for Requirements REQ-21 Statement").selectOption("SourceOnly");
+
+  await module.getByRole("button", { name: "Previous objects page" }).click();
+  await expect(module.getByText("1–20 of 45 source objects", { exact: true })).toBeVisible();
+  await expect(first.getByLabel("Mapping for Requirements REQ-01 Statement")).toHaveValue("Rationale");
+  await module.getByRole("button", { name: "Next objects page" }).click();
+  await expect(pageTwo.getByLabel("Mapping for Requirements REQ-21 Statement")).toHaveValue("SourceOnly");
+
+  await module.getByRole("button", { name: "Previous objects page" }).click();
+  await page.getByRole("checkbox", { name: /^Requirements / }).check();
+  await page.getByRole("button", { name: "Save choices and reconcile" }).click();
+  await expect(page.getByText("Reconciliation ready", { exact: true })).toBeVisible();
+  expect(configurationBody).toBeDefined();
+  if (!configurationBody) throw new Error("The paged source configuration request was not captured.");
+  const mappedObjects = ((configurationBody.mapping as {
+    objects?: Array<{ sourceKey: string; attributes: Array<{ sourceAttribute: string; destination: string }> }>;
+  }).objects ?? []);
+  expect(mappedObjects).toHaveLength(objects.length);
+  expect(mappedObjects.find((item) => item.sourceKey === "source-1")?.attributes
+    .find((item) => item.sourceAttribute === "Statement")?.destination).toBe("Rationale");
+  expect(mappedObjects.find((item) => item.sourceKey === "source-21")?.attributes
+    .find((item) => item.sourceAttribute === "Statement")?.destination).toBe("SourceOnly");
+  await page.screenshot({ path: testInfo.outputPath("paged-source-object-mappings.png"), fullPage: false });
 });
 
 test("native source picker follows an authoritative page total past the first 50 baselines", async ({ page }, testInfo) => {
