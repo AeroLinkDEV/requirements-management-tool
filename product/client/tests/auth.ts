@@ -9,9 +9,57 @@ export type ShowcaseSeed = {
   releasedBaselineId: string
 }
 
+export type LoginOptions = {
+  openProject?: boolean
+  /** Stable server identity to open after signing in. */
+  projectId?: string
+  /** Stable server identity of the build to open after selecting the project. */
+  releaseId?: string
+}
+
 let cachedShowcase: ShowcaseSeed | undefined
 
-export async function login(page:Page,userName='admin',options:{openProject?:boolean}={}){
+function configuredShowcase(): ShowcaseSeed | undefined {
+  const raw = process.env.AEROLINK_SHOWCASE_SEED
+  if (!raw) return undefined
+  try {
+    const value = JSON.parse(raw) as Partial<ShowcaseSeed>
+    if ([value.programId, value.projectId, value.activeReleaseId, value.releasedBaselineId]
+      .every(item => typeof item === 'string' && item.length > 0)) return value as ShowcaseSeed
+  } catch {
+    // A missing or malformed optional seed must not turn an authentication helper into a second auth path.
+  }
+  return undefined
+}
+
+type WorkspaceSummary = {
+  program: { id: string; name: string; code?: string }
+  projects: { project: { id: string; name?: string; softwareProduct?: string }; releases: { id: string; version?: string; isReleased: boolean }[] }[]
+}
+
+async function discoverFmsTarget(page: Page): Promise<Pick<ShowcaseSeed, 'programId' | 'projectId' | 'activeReleaseId'> | undefined> {
+  const configured = configuredShowcase()
+  if (configured) return configured
+  // This request uses the page's already-authenticated cookie. In particular, it must not call apiLogin:
+  // ordinary-role journeys deliberately remain ordinary while opening their authorized Project.
+  try {
+    const response = await page.request.get(`${apiBase}/api/workspaces`)
+    if (!response.ok()) return undefined
+    const workspaces = await response.json() as WorkspaceSummary[]
+    const programs = workspaces.filter(item => item.program.code === 'FMSLIVE')
+    if (programs.length !== 1 || programs[0].projects.length !== 1) return undefined
+    const project = programs[0].projects[0]
+    const inWork = project.releases.filter(item => !item.isReleased)
+    if (inWork.length !== 1) return undefined
+    return { programId: programs[0].program.id, projectId: project.project.id, activeReleaseId: inWork[0].id }
+  } catch {
+    // Isolated component fixtures may deliberately leave the API unavailable; their strict DOM fallback below
+    // still proves that a single fixture identity is present.
+    return undefined
+  }
+}
+
+export async function login(page:Page,userName='admin',options:LoginOptions={}){
   await page.goto('/')
   // A journey may change users without creating a new BrowserContext. The shell redirects an already
   // authenticated session straight to Projects, so clear that session before looking for the login form.
@@ -27,9 +75,29 @@ export async function login(page:Page,userName='admin',options:{openProject?:boo
   await page.getByRole('button',{name:/Sign in securely/}).click()
   await expect(page.getByRole('heading',{name:/Create your first program|Projects/})).toBeVisible()
   if(options.openProject!==false&&await page.getByRole('heading',{name:'Projects'}).count()){
-    await page.getByRole('link',{name:'Open FMS Product Development'}).click()
+    // The display name is intentionally non-unique. Use the exact server identity supplied by global setup;
+    // the strict fallback preserves old isolated fixtures without silently picking an arbitrary duplicate.
+    const seed = await discoverFmsTarget(page)
+    const projectId = options.projectId ?? seed?.projectId
+    const project = projectId
+      ? page.locator(`[data-project-card][data-project-id="${projectId}"]`)
+      : page.getByRole('link',{name:'Open FMS Product Development'})
+    await expect(project, projectId
+      ? `Project card ${projectId} must be present exactly once`
+      : 'FMS Product Development must identify exactly one project when no showcase seed is configured')
+      .toHaveCount(1)
+    await project.click()
     await expect(page.getByRole('heading',{name:'Software Builds'})).toBeVisible()
-    await page.getByRole('button',{name:'Open build 1.6'}).click()
+    const releaseId = options.releaseId ?? seed?.activeReleaseId
+    const build = releaseId
+      ? page.locator(`[data-build-card][data-build-id="${releaseId}"]`)
+          .getByRole('button', { name: /^Open build / })
+      : page.getByRole('button',{name:'Open build 1.6'})
+    await expect(build, releaseId
+      ? `Build card ${releaseId} must be present exactly once`
+      : 'Build 1.6 must identify exactly one build when no showcase seed is configured')
+      .toHaveCount(1)
+    await build.click()
     await expect(page.getByRole('heading',{name:'Command Center'})).toBeVisible()
   }
 }
@@ -55,7 +123,25 @@ export async function showcaseSeed(request:APIRequestContext){
   cachedShowcase=JSON.parse(body) as ShowcaseSeed
   return cachedShowcase
 }
-export async function selectProgram(page:Page,label:string){
+export async function selectProgram(page:Page,label:string, target?: { projectId?: string; releaseId?: string }){
+  const seed = await discoverFmsTarget(page)
+  if (label === 'Flight Management System Live Program' && !target && seed) {
+    // Keep the selection visible and user-driven: the stable ids select the intended cards, while the
+    // current session remains the caller's session. A direct route would prove identity resolution but
+    // would skip the visual project/build selection contract.
+    await page.goto('/')
+    await expect(page.getByRole('heading',{name:'Projects', exact:true})).toBeVisible()
+    const project = page.locator(`[data-project-card][data-project-id="${seed.projectId}"]`)
+    await expect(project, `Project card ${seed.projectId} must be present exactly once`).toHaveCount(1)
+    await project.click()
+    await expect(page.getByRole('heading',{name:'Software Builds'})).toBeVisible()
+    const build = page.locator(`[data-build-card][data-build-id="${seed.activeReleaseId}"]`)
+      .getByRole('button', { name: /^Open build / })
+    await expect(build, `Build card ${seed.activeReleaseId} must be present exactly once`).toHaveCount(1)
+    await build.click()
+    await expect(page.getByRole('heading',{name:'Command Center'})).toBeVisible()
+    return
+  }
   const response=await page.request.get(`${apiBase}/api/workspaces`)
   const body=await response.text()
   expect(response.ok(),body).toBeTruthy()
@@ -63,12 +149,21 @@ export async function selectProgram(page:Page,label:string){
     program:{id:string;name:string};
     projects:{project:{id:string};releases:{id:string;isReleased:boolean}[]}[]
   }[]
-  const workspace=workspaces.find(item=>item.program.name===label)
-  expect(workspace,`Program context "${label}"`).toBeTruthy()
-  const project=workspace!.projects[0]
-  const release=project?.releases.find(item=>!item.isReleased)??project?.releases[0]
-  expect(project&&release,`Build workspace for "${label}"`).toBeTruthy()
-  await page.goto(`/programs/${workspace!.program.id}/projects/${project.project.id}/releases/${release!.id}/command-center`)
+  const matches=workspaces.filter(item=>item.program.name===label)
+  expect(matches,`Program context "${label}" must identify exactly one program`).toHaveLength(1)
+  const workspace=matches[0]
+  const projects=target?.projectId
+    ? workspace.projects.filter(item=>item.project.id===target.projectId)
+    : workspace.projects
+  expect(projects,`Project in program "${label}" must identify exactly one project`).toHaveLength(1)
+  const project=projects[0]
+  const releases=target?.releaseId
+    ? project.releases.filter(item=>item.id===target.releaseId)
+    : project.releases.filter(item=>!item.isReleased)
+  const selectedReleases=releases.length>0 ? releases : project.releases
+  expect(selectedReleases,`Build in project "${project.project.id}" must identify exactly one target`).toHaveLength(1)
+  const release=selectedReleases[0]
+  await page.goto(`/programs/${workspace.program.id}/projects/${project.project.id}/releases/${release.id}/command-center`)
   await expect(page.getByRole('heading',{name:'Command Center'})).toBeVisible()
 }
 export async function openNavigationGroup(page:Page,name:string){

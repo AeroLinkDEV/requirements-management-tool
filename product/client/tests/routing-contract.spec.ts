@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { artifactPath, coverageExplorerPath, exactTraceArtifactPath, parseRoute, problemReportSnapshotPath, routePath } from '../src/routing'
+import { artifactPath, coverageExplorerPath, exactTraceArtifactPath, parseRoute, problemReportSnapshotPath, projectConfigurationRepositoryPath, routePath } from '../src/routing'
 
 const context = {
   programId: 'program-a',
@@ -12,7 +12,17 @@ test('the authenticated project selector has a context-free route', () => {
   expect(parseRoute('/projects')).toMatchObject({ view: 'projects', discipline: 'system' })
   expect(routePath(context, 'projects')).toBe('/projects')
   expect(parseRoute('/projects/fms-product-development/builds')).toMatchObject({ view: 'builds', discipline: 'system' })
-  expect(routePath(context, 'builds')).toBe('/projects/fms-product-development/builds')
+  expect(routePath(context, 'builds')).toBe('/projects/project-a/builds')
+})
+
+test('repository setup is a stable project configuration route', () => {
+  const address = projectConfigurationRepositoryPath('project-a')
+  expect(address).toBe('/projects/project-a/configuration/repository')
+  expect(parseRoute(address)).toMatchObject({
+    view: 'projectConfiguration',
+    projectId: 'project-a',
+    projectConfigurationSection: 'repository',
+  })
 })
 
 test('change-request route generation and parsing preserve both engineering disciplines', () => {

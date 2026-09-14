@@ -605,6 +605,80 @@ the five-attempt limit become dead-lettered during that repair.
 - `Integrations__AllowPrivateWebhookTargets=true` (isolated development only) exempts addresses from the prohibition check, but the endpoint must still resolve to at least one connectable address, the connection remains pinned to a validated address, and connections are still never reused across deliveries. It does not relax the HTTPS rule.
 - Automatic redirects are disabled. A `3xx` response is recorded as a failed delivery attempt; AeroLink never connects to a redirect target.
 
+### Project repository setup
+
+Each project keeps its own repository setup. **Configure later** is `Pending`; entering a URL is
+`ConfiguredUnverified`. Neither status asserts remote access or implementation evidence. An authorized
+project Configuration Manager, Program Manager or project administrator can configure it later and request
+a read-only connection check. Unrelated engineering work remains available while setup is pending.
+
+The supported connection probe uses the installation's GitLab service configuration:
+
+- `ProjectGitLab__BaseUrl`: the approved HTTPS GitLab server, including its deployment subpath if applicable.
+- `ProjectGitLab__ReadAccessToken`: a credential with read access to the intended existing GitLab projects.
+  Supply it through the installation's protected secret configuration, never a browser form or repository file.
+
+The probe sends only an exact-project `GET` to the configured server. Automatic redirects and cookies are
+disabled, requests time out after 15 seconds, and responses must identify the requested project. A verified
+connection records the observed GitLab numeric project identity and namespace path. It does not establish a
+merge, code review, CI result, commit-in-build fact or requirement implementation. Those retain their existing
+controlled-evidence prerequisites. URL changes clear verification; a failed recheck removes current verified
+status while retaining the last-success audit. A concurrent configuration change prevents an older probe from
+overwriting the newer answer. Missing installation settings and remote failures remain explicitly unverified.
+
+Local handler/capture tests establish request and lifecycle behavior only. Actual service access requires an
+operator-authorized check against the configured installation and target; it must not be inferred from mocks.
+
+## Recoverable project setup, source uploads, and recovery
+
+Use the Create New Project flow for all three supported starting paths: an empty Fresh project, an exact authorized
+AeroLink baseline, or an external ReqIF, CSV, or XLSX source. The server creates a discoverable setup draft before
+the project is usable. The creator and AeroLink administrators can use **Save and exit** and **Resume setup** across
+sessions. A draft's version token is shown through the API contract and must be sent back on edits; a conflict means
+refresh and review the newer answers. Do not create a project by editing database rows or by copying the FMS showcase.
+
+External source files are authenticated to the draft and limited to 50 MiB. The API records the exact size and
+SHA-256, parser observations, and source bytes in the draft-owned source package before any destination project or
+baseline exists. The package progresses through **Captured**, **Analysed**, and **Reconciled** stages; successful
+finalization records its materialized destination IDs. The browser must select categories and account for every
+supported source object, attribute, relation, and exclusion; the server
+recomputes validation and dependency closure. ReqIF supports Requirements and explicit Traces; CSV/XLSX support
+Requirements. Native AeroLink sources additionally support Cases, Procedures, and Evidence source facts and their
+supported relationships. The ordinary CSV/XLSX proposal preview/commit flow remains a change-request operation and
+is not external project inception.
+
+If the API, browser, or client connection stops during upload or setup, sign in again, list the setup drafts, and
+resume the same draft. An upload interrupted before storage must be selected and retried; partial bytes are not
+exposed as a staged source. Re-read the source view before changing answers. An identical upload can recover its existing
+staged package, and a committed finalization whose response was lost returns the same project, baseline, release, and
+build identities. Reconciliation uses the current saved version token: refresh the source view after a conflict before
+retrying it. Do not repeat a completed finalization with a new key merely because the first response was lost. Source
+access for a native baseline is checked again on resume and at each
+source boundary, so a revoked source membership blocks further use while preserving the staged record for audit.
+
+Source acceptance during finalization requires the current AeroLink administrator's password. The resulting
+electronic signature is bound to the exact source hash, selected categories, mapping, reconciliation
+manifest, accepted ladder, target IDs, and canonical first-build identity. It records source provenance acceptance,
+not a new approval, test execution, staffing assignment, or target evidence. A different administrator may resume
+and accept an authorized draft; source
+owners/authors remain source facts and are not copied into the new project's roster. The first target build is always
+created **IN WORK**, and entry opens the visual build-lineage selector for explicit build selection.
+
+Operators should allow the setup API to perform short database transactions only for local state changes and final
+materialization. Parsing, upload streaming, password confirmation, and any configured read-only provider check must
+not be wrapped in one long user-interaction transaction. If a retry reports a version conflict, use the supported
+resume path and preserve the latest draft answers. Configure later remains Pending; Connect now is
+ConfiguredUnverified until the server-side GitLab probe verifies the remote identity. Unrelated work can continue
+in either state.
+
+Back up the database and the retained draft source package bytes with the supported AeroLink backup procedure before
+planned maintenance or recovery. Restore first into an isolated shadow database/evidence root and complete the
+documented integrity checks. A restore must retain draft version/finalization records, source hashes, parser state,
+mapping, reconciliation, signatures, and materialized provenance. Never reset, truncate, reseed, or repair a setup
+draft with ad-hoc SQL, and never claim that an installer-wide backup includes application state unless its documented
+backup manifest proves the database and source package bytes are covered. Any live-installation migration or
+production upgrade requires the separately supported operator procedure and authorization.
+
 ## Production first-install administrator
 
 Production does not seed identities. Before the first API start against an empty database, set `Identity__BootstrapSecret` in the service environment to a randomly generated value of at least 32 characters. Do not place it in `appsettings.json`, source control, a command-line argument, or an operator transcript. `GET /api/setup/status` reports only whether bootstrap is required and enabled.
@@ -770,6 +844,39 @@ migration experimentation, prefer a genuinely disposable PostgreSQL cluster (for
 `initdb`/`pg_ctl` instance on a non-default port) rather than a database on the persistent server, and never
 point design-time EF at `aerolink` itself. Ordinary AeroLink startup applies runtime migrations normally via
 `Database.MigrateAsync()`; design-time EF is a separate, explicitly connected workflow.
+
+The Full changed-area planner and hosted PostgreSQL lane also execute
+`product/scripts/Test-ProjectSetupPostgres.ps1` against their owned disposable server. The runner requires
+an explicit `AEROLINK_MIGRATIONS_CONNECTION`, requires PostgreSQL qualification, and checks that its TRX
+contains passing project-setup tests with no skipped results in both Infrastructure and API suites. The API
+probe forces normal release creation and legacy import acceptance to overlap at the database write boundary,
+qualifying one canonical identity across entry points. A normal test run without a
+disposable connection may skip these tests; that run is not provider evidence. The standalone runner builds
+both selected test projects by default; `-NoBuild` is only for callers that already built the exact candidate.
+Its test boundary refuses persistent port 54329 and non-loopback servers.
+
+For stored visual branch qualification, run `product/scripts/Test-ProjectSetupLineage.ps1` after installing
+the normal client/Playwright dependencies. It builds the complete solution and creates a new temporary SQLite
+fixture through the domain model: released 9.0 has released 10.5 and in-work 11.0 as sibling children. The normal
+API and browser verify canonical ordering, exact predecessor relationships, lifecycle cards and explicit child
+selection. These synthetic fixture states prove navigation, not engineering release approval. The script never
+opens an existing database and retains the fixture, screenshot, logs and before/after source identity under the
+temporary directory. `-ApiPort` and `-ClientPort` select free qualification ports; no persistent installation is
+started or upgraded. This supplements the PostgreSQL persistence qualification above.
+
+For browser recovery across an API-process restart, run `node scripts/run-restart-recovery-pg.mjs` from
+`product/client` in a clean checkout with the normal client/Playwright dependencies installed. Set
+`AEROLINK_E2E_CONNECTION_STRING` explicitly to an owned disposable PostgreSQL database using the strict
+`Host=...;Port=...;Database=...;Username=...;Password=...` form. The host must be loopback, the port must be
+explicit and different from 54329, and the database name must start with `aerolink_1037_`. The runner builds
+the complete solution and client, prepares Fresh/native/ReqIF/CSV/XLSX drafts, then starts a separate API
+process to resume them. The supported showcase seed supplies the representative FMS source only inside that
+disposable database. These are qualification fixtures, never owner-created projects or persistent demo state.
+The runner retains a source/run manifest, separate phase logs, API logs and browser artifacts under a new
+temporary directory. It refuses existing artifact paths and source changes during qualification; retain a
+failed run when diagnosing recovery or mapping failures. `AEROLINK_E2E_API_PORT` and
+`AEROLINK_E2E_CLIENT_PORT` select free qualification ports. The runner does not upgrade the persistent
+installation or qualify live email/GitLab delivery.
 
 ## Attended production restore
 

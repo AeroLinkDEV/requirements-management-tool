@@ -1,3 +1,4 @@
+using AeroLink.Domain.Common;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Documents;
 using AeroLink.Domain.Identity;
@@ -22,6 +23,11 @@ namespace AeroLink.Api;
 /// </summary>
 public static class WorkspaceEndpoints
 {
+    private static List<SoftwareRelease> OrderReleasesAscending(IEnumerable<SoftwareRelease> releases) =>
+        SoftwareReleaseOrdering.Ascending(releases);
+
+    private static SoftwareRelease? SelectEntryRelease(IEnumerable<SoftwareRelease> releases) =>
+        SoftwareReleaseOrdering.PreferredContext(releases);
     public static void MapWorkspaceEndpoints(this WebApplication app)
     {
         // Unsubscribe is reachable without signing in, because it is followed from a mail client. The signed
@@ -70,7 +76,8 @@ public static class WorkspaceEndpoints
             // legitimately read as failed without any seeded invariant being violated.
             object? distribution = null;
             var projectId = await db.Projects.AsNoTracking().Where(x => x.ProgramId == program.Id).Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct);
-            var activeReleaseId = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).OrderByDescending(x => x.Version).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+            var showcaseReleases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
+            var activeReleaseId = SelectEntryRelease(showcaseReleases)?.Id;
             if (projectId is { } distProjectId && activeReleaseId is { } distReleaseId)
             {
                 var board = await teamWork.ProjectAsync(distProjectId, ct);
@@ -147,36 +154,54 @@ public static class WorkspaceEndpoints
             return Results.Ok(await db.Programs.AsNoTracking().Where(p=>allowed==null||allowed.Contains(p.Id)).Select(p => new { p.Id, p.Name, p.Code }).ToListAsync(ct));
         });
 
-        app.MapPost("/api/workspaces", async (CreateWorkspaceRequest request, HttpContext http, AeroLinkDbContext db, TestProcedureDocumentBootstrap procedureDocuments, CancellationToken ct) =>
+        app.MapPost("/api/workspaces", async (CreateWorkspaceRequest request, HttpContext http, AeroLinkDbContext db, TestProcedureDocumentBootstrap procedureDocuments, ProjectLadderAuthoringService ladderAuthoring, SoftwareReleaseIdentityAuthority releaseIdentity, CancellationToken ct) =>
         {
             if(!http.UserAccount().IsAdministrator)return Results.Forbid();
             if (await db.Programs.AnyAsync(x => x.Code == request.ProgramCode.Trim().ToUpper(), ct))
                 return Results.Conflict(new { error = "A program with that code already exists." });
             try
             {
+                await using var transaction = await db.Database.BeginTransactionAsync(ct);
                 var program = new ProgramRecord(request.ProgramName, request.ProgramCode);
                 var project = new ProjectRecord(program.Id, request.ProjectName, request.SoftwareProduct);
+                _ = await releaseIdentity.ValidateNewAsync(project.Id, request.InitialRelease, ct);
                 var release = new SoftwareRelease(project.Id, request.InitialRelease, request.InitialReleaseIsReleased);
-                // #726: new projects default to the full software Procedure tier ([Case, Procedure]) as an
-                // authored Draft, so the owner can deliberately remove Procedure before sealing. The
-                // historical legacy Case-only factory remains for pre-#726 rows only.
-                var ladder = NewProjectLadderFactory.Create(project.Id, DateTimeOffset.UtcNow);
+                // #726: new projects default to the full software Procedure tier ([Case, Procedure]). The
+                // ladder must become the effective authority in this same creation unit before any content
+                // can be authored. The historical legacy Case-only factory remains for pre-#726 rows only.
+                var now = DateTimeOffset.UtcNow;
+                var ladder = NewProjectLadderFactory.Create(project.Id, now);
+                var activation = ladderAuthoring.PrepareActivationForCreation(ladder, http.UserAccount().UserName, now);
                 // A project is born carrying its verification-method vocabulary (#701), in the same unit of
                 // work as the project row. Authoring needs the permitted set from the first requirement
                 // onward, and a project that had to acquire one later would spend that window accepting the
                 // uncontrolled free text the issue exists to stop.
-                var vocabulary = ProjectVerificationVocabulary.Founding(project.Id, DateTimeOffset.UtcNow);
+                var vocabulary = ProjectVerificationVocabulary.Founding(project.Id, now);
                 db.AddRange(program, project, release, ladder, vocabulary);
-                var actor = http.UserAccount(); db.ProgramMemberships.Add(new ProgramMembership(actor.Id, program.Id, ProgramRole.Administrator, actor.UserName, DateTimeOffset.UtcNow));
+                db.ProjectLadderConfigurationHistories.Add(new ProjectLadderConfigurationHistory(
+                    ladder.Id, project.Id, ladder.Version, http.UserAccount().UserName, now,
+                    "Activated the new project ladder before first project content.", activation.CanonicalSnapshot,
+                    ProjectLadderSnapshot.Hash(activation.CanonicalSnapshot), activation.SnapshotSchemaVersion));
+                var actor = http.UserAccount(); db.ProgramMemberships.Add(new ProgramMembership(actor.Id, program.Id, ProgramRole.Administrator, actor.UserName, now));
                 await db.SaveChangesAsync(ct);
                 // Every Project has its three test procedure documents from the moment it exists. The startup
                 // bootstrap backfills projects created before this existed; it cannot help a project created
                 // after it ran, and the Explorer's document rail would be empty until the next restart.
                 await procedureDocuments.EnsureForProjectAsync(project.Id, ct);
                 await db.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
                 return Results.Created($"/api/programs/{program.Id}", ApiMap.Workspace(program, project, release));
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new { error = "The project or build identity changed concurrently. Refresh and retry." });
+            }
+            catch (DbUpdateException ex) when (ReleaseIdentityPersistencePolicy.IsIdentityRace(ex))
+            {
+                return Results.Conflict(new { error = "The project or build identity already exists or changed concurrently. Refresh and retry." });
+            }
         });
 
         app.MapGet("/api/workspaces", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
@@ -191,17 +216,22 @@ public static class WorkspaceEndpoints
                 projects = projects.Where(x => x.ProgramId == program.Id).Select(project => new
                 {
                     project = new { project.Id, project.Name, project.SoftwareProduct },
-                    releases = releases.Where(x => x.ProjectId == project.Id).OrderBy(x => x.Version)
+                    releases = OrderReleasesAscending(releases.Where(x => x.ProjectId == project.Id))
                         .Select(x => new { x.Id, x.Version, x.IsReleased, x.PredecessorReleaseId })
                 })
             }));
         });
 
-        app.MapGet("/api/context", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) => { var actor=http.UserAccount(); var allowed=actor.IsAdministrator?null:actor.Programs.Select(x=>x.ProgramId).ToHashSet(); var programs=await db.Programs.AsNoTracking().Where(x=>allowed==null||allowed.Contains(x.Id)).ToListAsync(ct); var programIds=programs.Select(x=>x.Id).ToList(); var projects=await db.Projects.AsNoTracking().Where(x=>programIds.Contains(x.ProgramId)).ToListAsync(ct); return Results.Ok(new
+        app.MapGet("/api/context", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
-            programs, projects,
-            releases = await db.Releases.AsNoTracking().Where(x=>projects.Select(p=>p.Id).Contains(x.ProjectId)).OrderBy(x => x.Version).ToListAsync(ct)
-        }); });
+            var actor=http.UserAccount();
+            var allowed=actor.IsAdministrator?null:actor.Programs.Select(x=>x.ProgramId).ToHashSet();
+            var programs=await db.Programs.AsNoTracking().Where(x=>allowed==null||allowed.Contains(x.Id)).ToListAsync(ct);
+            var programIds=programs.Select(x=>x.Id).ToList();
+            var projects=await db.Projects.AsNoTracking().Where(x=>programIds.Contains(x.ProgramId)).ToListAsync(ct);
+            var releases=await db.Releases.AsNoTracking().Where(x=>projects.Select(p=>p.Id).Contains(x.ProjectId)).ToListAsync(ct);
+            return Results.Ok(new { programs, projects, releases = OrderReleasesAscending(releases) });
+        });
 
         app.MapGet("/api/build-context", async (Guid projectId, Guid releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
@@ -231,7 +261,7 @@ public static class WorkspaceEndpoints
         app.MapGet("/api/release-planning", async (Guid projectId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
-            var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
+            var releases = OrderReleasesAscending(await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct));
             var baselines = await db.CandidateBaselines.AsNoTracking().Where(x => x.ProjectId == projectId)
                 .Select(x => new { x.Id, x.ReleaseId, x.PredecessorBaselineId, x.DisplayNumber, x.Name, state = x.State.ToString(), x.RequirementsMaterializedAt, selectionCount = x.Selections.Count }).ToListAsync(ct);
             var campaigns = await db.ReleaseCampaigns.AsNoTracking().Where(x => x.ProjectId == projectId)
@@ -241,29 +271,45 @@ public static class WorkspaceEndpoints
             return Results.Ok(new { releases = releases.Select(x => new { x.Id, x.Version, x.IsReleased, x.ReleasedAt, x.PredecessorReleaseId }), baselines, campaigns, changes });
         });
 
-        app.MapPost("/api/releases", async (CreateReleaseRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapPost("/api/releases", async (CreateReleaseRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, SoftwareReleaseIdentityAuthority releaseIdentity, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
-            var version = request.Version.Trim();
+            // Nullable JSON values can reach this non-nullable record property at runtime. Validate before
+            // calling Trim so malformed client input is a controlled 400 rather than a null dereference.
+            var version = request.Version?.Trim();
             if (string.IsNullOrWhiteSpace(version)) return Results.BadRequest(new { error = "A release version is required." });
             var current = await db.Releases.AsNoTracking().FirstOrDefaultAsync(x => x.ProjectId == request.ProjectId && !x.IsReleased, ct);
             if (current is not null) return Results.Conflict(new { error = $"Release {current.Version} is still in work. Release or formally close it before planning its successor." });
-            if (await db.Releases.AnyAsync(x => x.ProjectId == request.ProjectId && x.Version.ToLower() == version.ToLower(), ct)) return Results.Conflict(new { error = $"Release {version} already exists in this project." });
-            if (request.PredecessorReleaseId is not null)
+            try { _ = await releaseIdentity.ValidateNewAsync(request.ProjectId, version, ct); }
+            catch (DomainException ex) { return Results.Conflict(new { error = ex.Message }); }
+            try
             {
-                var predecessor = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.PredecessorReleaseId && x.ProjectId == request.ProjectId, ct);
-                if (predecessor is null) return Results.BadRequest(new { error = "The predecessor release does not belong to this project." });
-                if (!predecessor.IsReleased) return Results.BadRequest(new { error = "A successor release can only branch from a released product version." });
+                if (request.PredecessorReleaseId is not null)
+                {
+                    var predecessor = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.PredecessorReleaseId && x.ProjectId == request.ProjectId, ct);
+                    if (predecessor is null) return Results.BadRequest(new { error = "The predecessor release does not belong to this project." });
+                    if (!predecessor.IsReleased) return Results.BadRequest(new { error = "A successor release can only branch from a released product version." });
+                }
+                var release = new SoftwareRelease(request.ProjectId, version, false, request.PredecessorReleaseId); db.Releases.Add(release);
+                var actor = http.UserAccount(); db.SecurityAuditEvents.Add(new SecurityAuditEvent("ReleaseCreated", actor.UserName, $"Release:{release.Id}", "Success", $"Created in-work release {version} from predecessor {request.PredecessorReleaseId?.ToString() ?? "none"}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow));
+                await db.SaveChangesAsync(ct); return Results.Created($"/api/releases/{release.Id}", new { release.Id, release.Version, release.IsReleased, request.PredecessorReleaseId });
             }
-            var release = new SoftwareRelease(request.ProjectId, version, false, request.PredecessorReleaseId); db.Releases.Add(release);
-            var actor = http.UserAccount(); db.SecurityAuditEvents.Add(new SecurityAuditEvent("ReleaseCreated", actor.UserName, $"Release:{release.Id}", "Success", $"Created in-work release {version} from predecessor {request.PredecessorReleaseId?.ToString() ?? "none"}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow));
-            await db.SaveChangesAsync(ct); return Results.Created($"/api/releases/{release.Id}", new { release.Id, release.Version, release.IsReleased, request.PredecessorReleaseId });
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new { error = "The release changed concurrently. Refresh and retry." });
+            }
+            catch (DbUpdateException ex) when (ReleaseIdentityPersistencePolicy.IsIdentityRace(ex))
+            {
+                return Results.Conflict(new { error = "That canonical build identity already exists or changed concurrently. Refresh and retry." });
+            }
         });
 
         app.MapGet("/api/showcase/overview", async (Guid projectId, Guid? releaseId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
-            var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).OrderBy(x => x.Version).ToListAsync(ct);
+            var releases = OrderReleasesAscending(await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct));
             var selectedReleaseIds = releaseId is null ? releases.Select(x => x.Id).ToArray() : [releaseId.Value];
             var requests = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId && selectedReleaseIds.Contains(x.TargetReleaseId));
             var effectiveBaselineId = releaseId is null ? null : await BuildScope.EffectiveBaselineAsync(db, projectId, releaseId.Value, ct);
@@ -705,9 +751,12 @@ public static class WorkspaceEndpoints
             if (projectWide) return Results.Redirect($"/programs/{programId}/projects/{projectId}{tail}");
             // A record that does not carry a release of its own opens in the one being worked, which is where
             // the reader would have gone looking for it anyway.
-            releaseId ??= await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId)
-                .OrderBy(x => x.IsReleased).ThenByDescending(x => x.Version)
-                .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+            if (releaseId is null)
+            {
+                var projectReleases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId)
+                    .ToListAsync(ct);
+                releaseId = SelectEntryRelease(projectReleases)?.Id;
+            }
             if (releaseId is null) return Results.Redirect("/");
             return Results.Redirect($"/programs/{programId}/projects/{projectId}/releases/{releaseId}{tail}");
         });

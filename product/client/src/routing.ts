@@ -1,5 +1,5 @@
 export type View =
-  | "projects" | "builds" | "baselineImports" | "personnel" | "approvalConfiguration" | "projectConfiguration" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "createInterfaceChange" | "scr" | "baselines" | "history" | "requirements"
+  | "projects" | "projectSetup" | "builds" | "baselineImports" | "personnel" | "approvalConfiguration" | "projectConfiguration" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "createInterfaceChange" | "scr" | "baselines" | "history" | "requirements"
   | "verification" | "testingCoverage" | "testChangeRequests" | "testChangeRequest" | "createTestChangeRequest" | "procedureExplorer" | "testResults" | "documents" | "managedDocuments" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "teamwork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
@@ -75,8 +75,10 @@ export type AppRoute = {
   discipline: Discipline;
   programId?: string;
   projectId?: string;
-  /// A Project addressed by name, on the two pages that sit above any build.
+  /// Legacy name-derived Project segment retained only for parsing older callers; new routes use projectId.
   projectSlug?: string;
+  /// The durable draft identity used to resume a recoverable Create New Project setup.
+  projectSetupDraftId?: string;
   releaseId?: string;
   artifactId?: string;
   artifactKind?: string;
@@ -103,7 +105,7 @@ export type AppRoute = {
   testChangeRequestProposalId?: string;
   /// An immutable ProblemReportRevision.Id for the read-only historical Problem Report page.
   historicalProblemReportSnapshotId?: string;
-  projectConfigurationSection?: "ladder" | "assurance" | "history" | "readiness" | "approvals";
+  projectConfigurationSection?: "ladder" | "assurance" | "history" | "readiness" | "approvals" | "repository";
   /** Opens the existing Explorer's authoritative coverage report, never the legacy assessment workspace. */
   coverageReport?: boolean;
 };
@@ -120,31 +122,36 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   const query = new URLSearchParams(search);
   if (!parts.length || (parts.length === 1 && parts[0] === "projects"))
     return { view: "projects", discipline: "system" };
-  // Addressed by the Project's own name rather than a fixed one. These two pages sit above a build — you
-  // reach them without having entered one — so they carry no release, and a second Project needs its own
-  // slug rather than the single hardcoded one these used to assume.
+  if (parts.length === 2 && parts[0] === "projects" && parts[1] === "new")
+    return { view: "projectSetup", discipline: "system" };
+  if (parts.length === 3 && parts[0] === "projects" && parts[1] === "setup" && parts[2])
+    return { view: "projectSetup", discipline: "system", projectSetupDraftId: decoded(parts[2]) };
+  // These pages sit above a build. New links carry the stable Project id; the resolver may read an older
+  // name-derived segment only when it identifies one authorized Project.
   if (parts.length === 3 && parts[0] === "projects" && parts[2] === "builds")
-    return { view: "builds", discipline: "system", projectSlug: decoded(parts[1]) };
+    return { view: "builds", discipline: "system", projectId: decoded(parts[1]) };
   // Alongside Software Builds rather than inside a build, because an import does not belong to a build — it
   // creates one. There is no build to have entered when this page is the thing you need.
   if (parts.length === 3 && parts[0] === "projects" && parts[2] === "imported-baselines")
-    return { view: "baselineImports", discipline: "system", projectSlug: decoded(parts[1]) };
+    return { view: "baselineImports", discipline: "system", projectId: decoded(parts[1]) };
   if (parts[0] === "programs" && parts[2] === "projects" && parts[4] === "documentation-center" && parts.length <= 6)
     return { programId: decoded(parts[1]), projectId: decoded(parts[3]), view: "managedDocuments", discipline: "system", artifactId: decoded(parts[5]) };
   // Also above a build: who is on the Project, and what they are authorised to do, is the same across every
   // build the Project has. A person is not added to 1.6 and withheld from 1.5.
   if (parts.length === 3 && parts[0] === "projects" && parts[2] === "personnel")
-    return { view: "personnel", discipline: "system", projectSlug: decoded(parts[1]) };
+    return { view: "personnel", discipline: "system", projectId: decoded(parts[1]) };
   // What each artifact requires before release is a property of the Project, and answering whether anybody
   // can sign it needs the roster — which is also above any one build.
   if (parts.length === 3 && parts[0] === "projects" && parts[2] === "approval-configuration")
-    return { view: "approvalConfiguration", discipline: "system", projectSlug: decoded(parts[1]) };
+    return { view: "approvalConfiguration", discipline: "system", projectId: decoded(parts[1]) };
   if (parts.length === 4 && parts[0] === "projects" && parts[2] === "configuration" && parts[3] === "approvals")
-    return { view: "projectConfiguration", discipline: "system", projectSlug: decoded(parts[1]), projectConfigurationSection: "approvals" };
+    return { view: "projectConfiguration", discipline: "system", projectId: decoded(parts[1]), projectConfigurationSection: "approvals" };
   if (parts.length === 4 && parts[0] === "projects" && parts[2] === "configuration" && parts[3] === "assurance")
-    return { view: "projectConfiguration", discipline: "system", projectSlug: decoded(parts[1]), projectConfigurationSection: "assurance" };
+    return { view: "projectConfiguration", discipline: "system", projectId: decoded(parts[1]), projectConfigurationSection: "assurance" };
+  if (parts.length === 4 && parts[0] === "projects" && parts[2] === "configuration" && parts[3] === "repository")
+    return { view: "projectConfiguration", discipline: "system", projectId: decoded(parts[1]), projectConfigurationSection: "repository" };
   if (parts.length === 3 && parts[0] === "projects" && parts[2] === "configuration")
-    return { view: "projectConfiguration", discipline: "system", projectSlug: decoded(parts[1]) };
+    return { view: "projectConfiguration", discipline: "system", projectId: decoded(parts[1]) };
   if (parts[0] !== "programs" || parts[2] !== "projects" || parts[4] !== "releases")
     return { view: "notFound", discipline: "system" };
 
@@ -285,9 +292,7 @@ export function readRoute(): AppRoute {
 
 export type RouteContext = { programId: string; projectId: string; releaseId: string };
 
-/// A Project's name as a URL segment. The two pages above a build address Projects by name, so this is what
-/// makes "fms-product-development" a consequence of the Project being called FMS Product Development rather
-/// than a constant that happened to match it.
+/// Compatibility helper for pre-stable Project links. New links use projectAreaPath with the server identity.
 export const projectSlugOf = (name: string) =>
   name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
@@ -299,14 +304,21 @@ const projectAreaSegments = {
   projectConfiguration: "configuration",
 } as const;
 
-export const projectAreaPath = (slug: string, area: keyof typeof projectAreaSegments) =>
-  `/projects/${slug}/${projectAreaSegments[area]}`;
+/** Stable project identity is the route authority. The parameter is intentionally an ID, not a display slug. */
+export const projectAreaPath = (projectId: string, area: keyof typeof projectAreaSegments) =>
+  `/projects/${encodeURIComponent(projectId)}/${projectAreaSegments[area]}`;
 
-export const projectConfigurationApprovalsPath = (slug: string) =>
-  `${projectAreaPath(slug, "projectConfiguration")}/approvals`;
+export const projectSetupPath = (draftId?: string) =>
+  draftId ? `/projects/setup/${encodeURIComponent(draftId)}` : "/projects/new";
 
-export const projectConfigurationAssurancePath = (slug: string) =>
-  `${projectAreaPath(slug, "projectConfiguration")}/assurance`;
+export const projectConfigurationApprovalsPath = (projectId: string) =>
+  `${projectAreaPath(projectId, "projectConfiguration")}/approvals`;
+
+export const projectConfigurationAssurancePath = (projectId: string) =>
+  `${projectAreaPath(projectId, "projectConfiguration")}/assurance`;
+
+export const projectConfigurationRepositoryPath = (projectId: string) =>
+  `${projectAreaPath(projectId, "projectConfiguration")}/repository`;
 
 export function routePath(context: RouteContext, view: View, discipline: Discipline = "system", artifactId?: string, artifactKind?: string, stateIntent?: HistoryStateIntent, typeIntent?: HistoryTypeIntent, selectionId?: string, proposalId?: string, artifactRevisionId?: string, threadView?: ThreadView) {
   const root = `/programs/${context.programId}/projects/${context.projectId}/releases/${context.releaseId}`;
@@ -322,13 +334,12 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
   };
   switch (view) {
     case "projects": return "/projects";
-    // Both are reached through projectAreaPath, which knows the Project's name. These remain so a stray
-    // routePath call still lands somewhere real rather than on Not Found.
-    case "builds": return projectAreaPath("fms-product-development", "builds");
-    case "baselineImports": return projectAreaPath("fms-product-development", "baselineImports");
-    case "personnel": return projectAreaPath("fms-product-development", "personnel");
-    case "approvalConfiguration": return projectAreaPath("fms-product-development", "approvalConfiguration");
-    case "projectConfiguration": return projectAreaPath("fms-product-development", "projectConfiguration");
+    // Context-free project pages use the stable project identity, never the mutable display name.
+    case "builds": return projectAreaPath(context.projectId, "builds");
+    case "baselineImports": return projectAreaPath(context.projectId, "baselineImports");
+    case "personnel": return projectAreaPath(context.projectId, "personnel");
+    case "approvalConfiguration": return projectAreaPath(context.projectId, "approvalConfiguration");
+    case "projectConfiguration": return projectAreaPath(context.projectId, "projectConfiguration");
     case "dashboard": return `${root}/command-center`;
     case "mywork": return `${root}/my-work`;
     case "teamwork": return `${root}/team-work`;

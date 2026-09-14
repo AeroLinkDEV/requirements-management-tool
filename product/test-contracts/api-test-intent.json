@@ -1,19 +1,19 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 886,
-    "cases": 994,
-    "classes": 132,
-    "hostedTests": 841,
-    "hostedCases": 927,
-    "nonHostedTests": 32,
-    "nonHostedCases": 46,
-    "unknownHostTests": 13,
-    "unknownHostCases": 21,
-    "hostedCandidateTests": 16,
-    "hostedCandidateCases": 16,
-    "unknownCandidateTests": 7,
-    "unknownCandidateCases": 15,
+    "tests": 913,
+    "cases": 1024,
+    "classes": 146,
+    "hostedTests": 865,
+    "hostedCases": 954,
+    "nonHostedTests": 34,
+    "nonHostedCases": 48,
+    "unknownHostTests": 14,
+    "unknownHostCases": 22,
+    "hostedCandidateTests": 18,
+    "hostedCandidateCases": 18,
+    "unknownCandidateTests": 8,
+    "unknownCandidateCases": 16,
     "unknownCaseTests": 0,
     "criterion7": "unresolved"
   },
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 555,
-      "cases": 623,
+      "tests": 568,
+      "cases": 637,
       "unknownCases": 0,
-      "classes": 106
+      "classes": 112
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -37,18 +37,18 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 94,
-      "cases": 98,
+      "tests": 102,
+      "cases": 108,
       "unknownCases": 0,
-      "classes": 55
+      "classes": 61
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 37,
-      "cases": 37,
+      "tests": 42,
+      "cases": 42,
       "unknownCases": 0,
-      "classes": 14
+      "classes": 18
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -61,10 +61,10 @@
     "startup-config": {
       "label": "Startup, hosting and configuration",
       "level": "API (must stay hosted)",
-      "tests": 8,
-      "cases": 8,
+      "tests": 9,
+      "cases": 9,
       "unknownCases": 0,
-      "classes": 6
+      "classes": 7
     },
     "rule-matrix": {
       "label": "Business-rule matrix over data variations",
@@ -5769,6 +5769,56 @@
       }
     },
     {
+      "cls": "ManagedDocumentApiTests.BuildIdentity",
+      "test": "Release_link_pages_and_quality_trends_use_canonical_numeric_order",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 14,
+        "end": 47
+      }
+    },
+    {
+      "cls": "ManagedDocumentApiTests.BuildIdentity",
+      "test": "Targetless_problem_report_link_keeps_project_scope_without_inventing_a_build",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 49,
+        "end": 85
+      }
+    },
+    {
+      "cls": "ManagedDocumentApiTests.ProjectSetup",
+      "test": "Fresh_setup_project_supports_local_connector_check_in_review_and_exact_controlled_release",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 14,
+        "end": 16
+      }
+    },
+    {
       "cls": "ManagedDocumentAssignmentPolicyTests",
       "test": "Project_engineer_position_holder_is_accepted_and_base_only_configuration_manager_is_refused",
       "kind": "Fact",
@@ -9567,8 +9617,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 381,
-        "end": 413
+        "start": 481,
+        "end": 513
       }
     },
     {
@@ -9585,8 +9635,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 415,
-        "end": 427
+        "start": 515,
+        "end": 527
       }
     },
     {
@@ -9603,8 +9653,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 346,
-        "end": 379
+        "start": 446,
+        "end": 479
       }
     },
     {
@@ -9621,8 +9671,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 116,
-        "end": 269
+        "start": 216,
+        "end": 369
       }
     },
     {
@@ -9640,7 +9690,7 @@
       ],
       "sourceLines": {
         "start": 58,
-        "end": 114
+        "end": 115
       }
     },
     {
@@ -9657,8 +9707,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 501,
-        "end": 572
+        "start": 601,
+        "end": 672
       }
     },
     {
@@ -9675,8 +9725,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 441,
-        "end": 499
+        "start": 541,
+        "end": 599
+      }
+    },
+    {
+      "cls": "ProjectConfigurationApiTests",
+      "test": "Empty_active_ladder_can_be_corrected_until_first_content_then_projection_and_write_lock_agree",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 117,
+        "end": 214
       }
     },
     {
@@ -9693,8 +9761,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 271,
-        "end": 344
+        "start": 371,
+        "end": 444
       }
     },
     {
@@ -9711,8 +9779,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 429,
-        "end": 439
+        "start": 529,
+        "end": 539
       }
     },
     {
@@ -10109,6 +10177,370 @@
       "sourceLines": {
         "start": 286,
         "end": 298
+      }
+    },
+    {
+      "cls": "ProjectRepositoryApiTests",
+      "test": "AProbeCannotOverwriteConfigurationChangedWhileGitLabWasResponding",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 18,
+        "end": 50
+      }
+    },
+    {
+      "cls": "ProjectRepositoryApiTests",
+      "test": "DeferredSetupCanBeConfiguredLaterWithTruthfulUnconfiguredServiceAndStaleEditRefusal",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 52,
+        "end": 76
+      }
+    },
+    {
+      "cls": "ProjectRepositoryApiTests",
+      "test": "RepositoryAuthorityIsProjectScopedAndOrdinaryMembershipCannotConfigureOrProbe",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 78,
+        "end": 93
+      }
+    },
+    {
+      "cls": "ProjectSetupApiTests",
+      "test": "Administrator_can_resume_finalize_and_replay_fresh_setup_without_inheriting_content",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 21,
+        "end": 182
+      }
+    },
+    {
+      "cls": "ProjectSetupAuthorizationApiTests",
+      "test": "Demoted_native_creator_can_resume_but_current_administrator_must_accept_source",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 94,
+        "end": 239
+      }
+    },
+    {
+      "cls": "ProjectSetupAuthorizationApiTests",
+      "test": "Former_creator_can_resume_and_save_but_current_administrator_must_finalize",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 18,
+        "end": 92
+      }
+    },
+    {
+      "cls": "ProjectSetupBoundaryRegressionApiTests",
+      "test": "Setup_rejects_unsupported_repository_provider_but_accepts_gitlab_without_network_call",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 14,
+        "end": 69
+      }
+    },
+    {
+      "cls": "ProjectSetupCodeEvidenceApiTests",
+      "test": "Fresh_project_defers_repository_then_requires_observed_matching_identity_for_GitLab_evidence",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 18,
+        "end": 23
+      }
+    },
+    {
+      "cls": "ProjectSetupDiscoveryApiTests",
+      "test": "CreatorCanSaveExitAndResumeWhileAnUnrelatedEmployeeCannotReadOrEditTheDraft",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 16,
+        "end": 59
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Administrator_can_reconcile_and_accept_each_supported_external_format",
+      "kind": "Theory",
+      "intent": "auth-policy",
+      "cases": 3,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 639,
+        "end": 885
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Native_capture_reconcile_and_materialize_preserves_source_authorship_without_staffing_target",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 528,
+        "end": 637
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Native_source_rechecks_current_membership_after_capture_and_allows_admin_resume",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 109,
+        "end": 285
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Source_assertion_binds_official_build_and_start_kind_after_build_edit",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 27,
+        "end": 107
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Source_reconcile_route_revalidates_the_durable_token_and_replays_only_current_source",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 474,
+        "end": 526
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Source_upload_rejects_content_over_the_50_mib_bound",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 459,
+        "end": 472
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Source_upload_retries_are_idempotent_and_stale_assertions_cannot_finalize",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 391,
+        "end": 457
+      }
+    },
+    {
+      "cls": "ProjectSetupKestrelQualificationTests",
+      "test": "Real_kestrel_accepts_large_and_chunked_sources_and_rejects_over_limit_without_staging",
+      "kind": "Fact",
+      "intent": "startup-config",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 86,
+        "end": 134
+      }
+    },
+    {
+      "cls": "ProjectSetupKestrelQualificationTests",
+      "test": "Real_kestrel_denies_anonymous_and_outsider_chunked_uploads_without_raising_the_body_limit",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 22,
+        "end": 69
+      }
+    },
+    {
+      "cls": "ProjectSetupLadderCapabilityApiTests",
+      "test": "Fresh_capability_subset_has_no_inapplicable_review_workflow",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 2,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 11,
+        "end": 43
+      }
+    },
+    {
+      "cls": "ProjectSetupServiceQualificationTests",
+      "test": "Fresh_project_supports_deliberate_staffing_ordinary_review_documents_and_durable_roster",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 18,
+        "end": 23
+      }
+    },
+    {
+      "cls": "ProjectSetupSourceOptionsApiTests",
+      "test": "Native_options_page_reports_authorized_total_and_keeps_later_pages_reachable",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 15,
+        "end": 83
       }
     },
     {
@@ -14014,7 +14446,7 @@
       ],
       "sourceLines": {
         "start": 159,
-        "end": 214
+        "end": 218
       }
     },
     {
@@ -14049,8 +14481,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 220,
-        "end": 250
+        "start": 224,
+        "end": 254
       }
     },
     {
@@ -15475,6 +15907,34 @@
       "sourceLines": {
         "start": 228,
         "end": 266
+      }
+    },
+    {
+      "cls": "WorkspaceReleaseOrderingTests",
+      "test": "Historical_rows_without_canonical_identity_still_use_their_valid_raw_identity",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 26,
+        "end": 43
+      }
+    },
+    {
+      "cls": "WorkspaceReleaseOrderingTests",
+      "test": "Release_projections_sort_by_canonical_numeric_identity_and_preserve_raw_values",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 9,
+        "end": 24
       }
     }
   ]

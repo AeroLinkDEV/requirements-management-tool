@@ -28,10 +28,10 @@ public sealed class BaselineImport
 {
     private BaselineImport() { }
 
-    public BaselineImport(Guid projectId, string sourceSystem, string sourceSystemVersion,
-        string sourceBaselineName, DateTimeOffset sourceBaselineDate, string extractFileName,
+    public BaselineImport(Guid projectId, string sourceSystem, string? sourceSystemVersion,
+        string? sourceBaselineName, DateTimeOffset? sourceBaselineDate, string extractFileName,
         string extractSha256, long extractSizeBytes, ImportedArtifactKinds carries,
-        string extractedBy, DateTimeOffset extractedAt, string startedBy, DateTimeOffset now)
+        string? extractedBy, DateTimeOffset? extractedAt, string startedBy, DateTimeOffset now)
     {
         if (projectId == Guid.Empty) throw new DomainException("A baseline import requires its Project.");
         if (carries == ImportedArtifactKinds.None)
@@ -40,14 +40,14 @@ public sealed class BaselineImport
         Id = Guid.NewGuid();
         ProjectId = projectId;
         SourceSystem = Required(sourceSystem, "source system");
-        SourceSystemVersion = Required(sourceSystemVersion, "source system version");
-        SourceBaselineName = Required(sourceBaselineName, "source baseline name");
+        SourceSystemVersion = sourceSystemVersion?.Trim();
+        SourceBaselineName = sourceBaselineName?.Trim();
         SourceBaselineDate = sourceBaselineDate;
         ExtractFileName = Required(extractFileName, "extract file name");
         ExtractSha256 = Sha256(extractSha256);
         ExtractSizeBytes = extractSizeBytes;
         Carries = carries;
-        ExtractedBy = Required(extractedBy, "person who took the extract");
+        ExtractedBy = extractedBy?.Trim();
         ExtractedAt = extractedAt;
         StartedBy = Required(startedBy, "person starting the import");
         StartedAt = now;
@@ -59,9 +59,9 @@ public sealed class BaselineImport
     public BaselineImportState State { get; private set; }
 
     public string SourceSystem { get; private set; } = "";
-    public string SourceSystemVersion { get; private set; } = "";
-    public string SourceBaselineName { get; private set; } = "";
-    public DateTimeOffset SourceBaselineDate { get; private set; }
+    public string? SourceSystemVersion { get; private set; }
+    public string? SourceBaselineName { get; private set; }
+    public DateTimeOffset? SourceBaselineDate { get; private set; }
 
     public string ExtractFileName { get; private set; } = "";
     /// <summary>What makes the claim checkable years later, rather than a story about a file nobody kept.</summary>
@@ -69,8 +69,8 @@ public sealed class BaselineImport
     public long ExtractSizeBytes { get; private set; }
     public ImportedArtifactKinds Carries { get; private set; }
 
-    public string ExtractedBy { get; private set; } = "";
-    public DateTimeOffset ExtractedAt { get; private set; }
+    public string? ExtractedBy { get; private set; }
+    public DateTimeOffset? ExtractedAt { get; private set; }
     public string StartedBy { get; private set; } = "";
     public DateTimeOffset StartedAt { get; private set; }
 

@@ -65,8 +65,24 @@ LLR revision in one build. The Code center and release readiness use the same re
 mappings are included in the signed review manifest. Released-build mutation protection applies server-side
 at the endpoint even when a caller does not supply browser workspace context.
 
-The first integration is manual evidence capture and a small, conspicuously labelled FMS demonstration set.
-Webhook synchronization, GitLab project allow-lists, CI state, many-to-many MR/LLR mapping, and automated
+Project repository configuration persists separately from those evidence records and from the creation draft. A URL
+starts unverified; an installation-scoped read-only GitLab probe can record the exact remote project identity.
+The browser cannot supply connection verification, and edits or failed rechecks clear current verified status.
+No database transaction spans the probe; optimistic configuration versions prevent stale observations from
+overwriting a newer connection. Deferred setup remains pending and does not block unrelated engineering work.
+For projects carrying this configuration, recording a GitLab merge requires current verified repository identity:
+the namespace path, HTTPS origin, repository URL path and merge-request number must match. The Code overview
+exposes this prerequisite; no-code decisions remain available subject to their normal baseline prerequisites.
+An observed repository connection does not assert that a manually supplied merge or commit exists. Existing
+projects without a setup record retain their prior capture contract, and historical evidence is never rewritten
+or hidden when connection configuration changes.
+Acceptance locks the observed configuration row for the short local evidence transaction, so a concurrent
+edit or failed verification cannot clear the prerequisite before that record commits. Each new GitLab mapping
+retains the observed remote project ID, endpoint/path, configuration version, verification actor and time.
+Later connection changes cannot rewrite that immutable snapshot; legacy and no-code records retain null values.
+
+Implementation evidence capture remains manual, with a small, conspicuously labelled FMS demonstration set.
+Webhook synchronization, CI state, many-to-many MR/LLR mapping, and automated
 commit-in-build proof remain later integration depth. AeroLink never clones a repository or approves a merge.
 
 ## Persistence
@@ -87,9 +103,75 @@ states before beginning another logical unit of work.
 
 Fresh installations contain no assumed program. The onboarding transaction creates the Program, its first Project/software product, and its initial release together. FMS records are optional demo data controlled by configuration and are disabled by default.
 
+### Recoverable project creation and source inception
+
+New-project creation is a durable, typed setup draft rather than a browser-only wizard. An AeroLink administrator
+creates the draft; its creator and administrators may read, save, resume, and upload it, while only a current
+AeroLink administrator may finalize it. The draft
+allocates its internal backing Program, Project, initial release, and inception-baseline identities once, without
+asking the user for a Program name or code. A numeric draft version is the optimistic concurrency token. The setup
+state, current step, selected start kind, source choice, configuration, acceptance hashes, and finalization
+operation/result are persisted so sign-out, API restart, duplicate submissions, and a lost HTTP response can be
+recovered. A retry with the same operation key returns the committed result; a conflicting edit is rejected for
+refresh rather than silently overwriting another answer.
+
+The service keeps the setup draft and staged source package separate from a usable Project. Uploads are authenticated,
+bounded to 50 MiB, read into the bounded staged payload, and SHA-256 verified before storage against the draft and
+before a destination Project exists. Parser observations and server-derived mapping/reconciliation are durable
+package state. Source configuration and reconciliation are typed and re-derived on the server; browser JSON is not
+evidence that a mapping or gate passed. Parsing and upload streaming happen before finalization. Finalization uses a
+short serializable local transaction for its required database reads, local validation/password confirmation,
+materialization, and result recording; it never spans a user interaction or an external network call.
+
+There are three inception boundaries:
+
+- **Fresh** creates the necessary empty containers for the accepted effective ladder, review configuration, creator
+  management access, and one new **IN WORK** build. It has no inherited FMS roster, leadership, requirements, cases,
+  procedures, evidence, repository settings, or other project content.
+- **AeroLink baseline** requires an exact source Project and CandidateBaseline whose state is Frozen or Released and
+  whose materialized source manifest is present. Current source-project membership/access is checked when options
+  are listed, when the source is captured, and when a resumed draft is read, configured, reconciled, or finalized.
+  The selected source revision, state, relationships, parent IDs, source owners/authors, and evidence/execution
+  facts remain source attribution. Target verification artifacts are unassigned until the new project manages them.
+- **External baseline** accepts ReqIF, CSV, and XLSX through the existing parser/import foundations, then requires
+  explicit category selection, object/attribute/relation mapping, exclusion reasons, dependency closure, and
+  server reconciliation. ReqIF supports Requirements and explicit Traces; CSV and XLSX support Requirements. Native
+  sources additionally support Cases, Procedures, and Evidence source facts and supported relationships. Unsupported,
+  unmapped, or excluded content is reported rather than fabricated. The source package retains foreign identifiers,
+  exact bytes/hash, parser observations, mapping, reconciliation manifest, and materialized source records.
+
+Source acceptance is a separate immutable electronic signature. A current AeroLink administrator must confirm the
+password; the signature binds the source hash, categories, mapping, reconciliation, accepted ladder,
+manifest, target IDs, and canonical first-build identity. It records who accepted source provenance and the meaning
+of that assertion. It does not assert that source approvals are new-project approvals, source executions occurred in
+the target project, or source evidence is newly produced. The materialized Project exposes a provenance projection
+with source identities, revisions, states, target links, acceptance person/time/meaning, and safe source snapshots;
+storage keys are redacted. A later signature cannot replace the signature bound to the package assertion hash.
+
+The accepted ladder becomes effective before source content can be materialized, and first-content persistence is
+serialized against its configuration version. Structural ladder changes remain available only while the project has
+no authored or inherited engineering content; empty containers do not count. All source consumers use the effective
+ladder and supported capability profile. The first build uses the canonical `SW-NN.NN` identity and is explicitly
+**IN WORK**; source baseline state remains historical and distinct. Visual build-lineage entry uses stable project,
+build, lifecycle, and predecessor identities, with explicit user selection even when only one build exists.
+The initial inherited build's living requirement documents read its completed setup's exact frozen inception
+manifest plus approved project changes when there is no released predecessor. They label the basis as an accepted
+source manifest and identify the initial materialized target baseline separately; source acceptance does not confer
+new engineering approval. Independent fresh builds remain empty.
+
+Repository setup is a project-scoped configuration seam: Configure later stays visibly Pending, while Connect now
+records ConfiguredUnverified until an installation-approved read-only GitLab probe observes a remote identity.
+Neither a URL nor a browser-supplied status is a verified connection, and repository setup does not assert merge, CI,
+or implementation evidence. Standard email, managed Word, PDF/DOCX, and code-linkage capabilities retain their
+existing lifecycle prerequisites; an empty project reports pending/empty state rather than fabricated readiness.
+
 Enterprise authoring extends the existing requirement aggregate instead of replacing it. Stable artifacts and immutable requirement revisions remain authoritative; revision profiles add schema-bound rich content and classifications, specification nodes add reusable document placement, and comments/views/jobs preserve collaboration and high-volume operations as separate attributable records. Existing Projects are synchronized idempotently so the new workspace can be introduced without rewriting approved history.
 
-CSV/XLSX interchange is a two-step preview/commit workflow. Files are size- and expansion-limited, hashed, parsed into persisted validation results, and cannot create approved requirements directly. A successful commit creates a Draft change request containing the proposed requirement changes, preserving the established review and baseline authority boundary.
+CSV/XLSX interchange also has an older two-step preview/commit workflow. Files are size- and expansion-limited,
+hashed, parsed into persisted validation results, and cannot create approved requirements directly. A successful
+proposal commit creates a Draft change request containing proposed requirement changes. That ordinary proposal path
+is separate from external inception: it does not create a new Project, does not stage a draft-owned inception package,
+and does not satisfy source mapping, reconciliation, or source-acceptance gates.
 
 ## Security boundary
 

@@ -16,7 +16,7 @@ internal static class InspectorTraceProjection
         Guid baselineId, Guid? releaseId, ArtifactThreadFocalKind kind, Guid revisionId,
         IProjectLadderPolicyResolver policies, CancellationToken ct)
     {
-        var graph = await ArtifactThreadProjection.BuildAsync(db, projectId, baselineId, null, kind, revisionId, ct);
+        var graph = await ArtifactThreadProjection.BuildAsync(db, projectId, baselineId, null, kind, revisionId, ct, policies);
         if (graph is null) return new(null, 0);
         var requirements = (await db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId)
             .Select(x => x.RevisionId).ToListAsync(ct)).ToHashSet();

@@ -34,6 +34,82 @@ test('a notification link resolves its own context and opens the exact record', 
   await expect(page).toHaveURL(new RegExp(`/programs/[^/]+/projects/[^/]+/releases/[^/]+/(systems|software)/change-requests/${scr.id}$`))
 })
 
+test('the Projects portal keeps loading state separate from an empty authorized result', async ({ page }) => {
+  test.setTimeout(120_000)
+  await login(page, 'admin', { openProject: false })
+  await page.goto('/projects/new')
+  await expect(page.getByRole('heading', { name: 'Create New Project', level: 1 })).toBeVisible()
+  const projectName = `Workspace loading draft ${Date.now()}`
+  await page.getByLabel('Project name').fill(projectName)
+  await page.getByLabel('Software product').fill('Workspace loading software')
+  await page.getByRole('button', { name: 'Save and exit' }).click()
+  await expect(page).toHaveURL(/\/projects$/)
+  await expect(page.locator('[data-setup-draft-id]').filter({ hasText: projectName })).toBeVisible()
+
+  let releaseWorkspaces!: () => void
+  const workspacesHeld = new Promise<void>(resolve => { releaseWorkspaces = resolve })
+  let releaseDrafts!: () => void
+  const draftsHeld = new Promise<void>(resolve => { releaseDrafts = resolve })
+  await page.route('**/api/workspaces', async route => {
+    await workspacesHeld
+    await route.continue()
+  })
+  await page.route('**/api/project-setups', async route => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    await draftsHeld
+    await route.continue()
+  })
+  await page.reload()
+  const projectsLoading = page.getByRole('region', { name: 'Authorized projects loading' })
+  await expect(projectsLoading.locator(':scope > .projectsEmptyState[role="status"]')).toContainText('Loading authorized projects…')
+  await expect(page.getByRole('status').filter({ hasText: 'Loading saved setup drafts…' })).toHaveCount(1)
+  await expect(page.getByRole('heading', { name: 'No authorized projects' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Setup drafts', level: 2 })).toBeVisible()
+  releaseDrafts()
+  await expect(page.locator('[data-setup-draft-id]').filter({ hasText: projectName })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Create New Project', exact: true })).toBeVisible()
+
+  releaseWorkspaces()
+  await expect(page.locator('[data-project-card]').first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'No authorized projects' })).toHaveCount(0)
+  await page.unroute('**/api/workspaces')
+  await page.unroute('**/api/project-setups')
+})
+
+test('workspace discovery errors keep saved setup drafts available to administrators', async ({ page }, testInfo) => {
+  test.setTimeout(120_000)
+  await login(page, 'admin', { openProject: false })
+  await page.goto('/projects/new')
+  await expect(page.getByRole('heading', { name: 'Create New Project', level: 1 })).toBeVisible()
+
+  const projectName = `Workspace outage draft ${Date.now()}`
+  await page.getByLabel('Project name').fill(projectName)
+  await page.getByLabel('Software product').fill('Workspace outage software')
+  await page.getByRole('button', { name: 'Save and exit' }).click()
+  await expect(page).toHaveURL(/\/projects$/)
+  await expect(page.locator('[data-setup-draft-id]').filter({ hasText: projectName })).toBeVisible()
+
+  await page.route('**/api/workspaces', async route => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'workspace discovery unavailable for this test' }),
+    })
+  })
+  await page.reload()
+
+  await expect(page.getByRole('heading', { name: 'Projects unavailable', level: 2 })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Retry project discovery' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Setup drafts', level: 2 })).toBeVisible()
+  await expect(page.locator('[data-setup-draft-id]').filter({ hasText: projectName })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Create New Project', exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('workspace-error-keeps-draft.png'), fullPage: true })
+  await page.unroute('**/api/workspaces')
+})
+
 test('an unknown record and an unauthenticated reader are answered identically', async ({ page, baseURL }) => {
   test.setTimeout(120_000)
 
@@ -48,7 +124,10 @@ test('an unknown record and an unauthenticated reader are answered identically',
   // Read the address only once the app has settled. The resolver decides where to send an unresolvable link
   // after the session is known, so sampling the path on `load` alone catches it mid-decision and returns
   // whichever answer won that run — this assertion failed in both directions before the wait was added.
-  await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible({ timeout: 30_000 })
+  // The empty portal state also contains the heading "No authorized projects". Use the page title's
+  // exact accessible name so the readiness wait cannot become ambiguous when the signed-in user has no
+  // authorized project rows.
+  await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible({ timeout: 30_000 })
   const signedInUnknown = new URL(page.url()).pathname
 
   // Each reader is returned to their own starting point and told nothing about the record: signed out that is

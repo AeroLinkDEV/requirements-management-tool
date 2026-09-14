@@ -117,6 +117,45 @@ body:has(.projectsPage) { min-width: 0; }
   gap: 26px;
 }
 
+.projectsEmptyState {
+  max-width: 540px;
+  border: 1px solid #dce3ea;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, .96);
+  padding: 30px;
+  text-align: center;
+  box-shadow: 0 7px 22px rgba(17, 35, 58, .055);
+}
+
+.projectsEmptyIcon {
+  width: 58px;
+  height: 58px;
+  display: inline-grid;
+  place-items: center;
+  color: #61748a;
+}
+
+.projectsEmptyIcon svg { width: 54px; height: 54px; }
+.projectsEmptyState h2 { margin: 13px 0 6px; font: 650 18px/1.25 var(--font-display); }
+.projectsEmptyState p { margin: 0; color: var(--ink-500); font-size: 13px; line-height: 1.5; }
+.projectsEmptyState button { margin-top: 16px; border: 1px solid #236b9f; border-radius: 7px; background: #236b9f; color: white; padding: 8px 11px; font: 700 12px var(--font-body); cursor: pointer; }
+.projectsEmptyState button:hover { background: #174f79; }
+
+.setupDraftsSection { border-top: 1px solid #dce3ea; padding-top: 22px; }
+.setupDraftsHeading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.setupDraftsHeading h2 { margin: 0 0 4px; font: 700 16px/1.25 var(--font-display); }
+.setupDraftsHeading p, .setupDraftsEmpty { margin: 0; color: var(--ink-500); font-size: 12px; }
+.setupDraftsError { margin: 0 0 12px; color: #8f2f3d; font-size: 12px; line-height: 1.45; }
+.setupDraftsError button { border: 0; background: transparent; color: #236b9f; padding: 0; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
+.setupDraftsHeading button, .setupDraftCard button { border: 1px solid #236b9f; border-radius: 7px; background: #236b9f; color: white; padding: 8px 11px; font: 700 12px var(--font-body); cursor: pointer; white-space: nowrap; }
+.setupDraftsHeading button:hover, .setupDraftCard button:hover { background: #174f79; }
+.setupDraftsList { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.setupDraftCard { display: grid; gap: 9px; border: 1px solid #d9e4e8; border-radius: 8px; background: rgba(255,255,255,.9); padding: 14px; }
+.setupDraftCard > div { display: flex; flex-direction: column; gap: 4px; }
+.setupDraftCard strong { color: var(--ink-900); font: 700 14px var(--font-display); overflow-wrap: anywhere; }
+.setupDraftCard span, .setupDraftCard small { color: var(--ink-500); font-size: 11px; line-height: 1.4; }
+.setupDraftCard button { justify-self: start; }
+
 .projectsPrimaryGrid {
   grid-template-columns: minmax(280px, 1fr);
   max-width: 390px;
@@ -336,6 +375,8 @@ body:has(.projectsPage) { min-width: 0; }
   .projectUtilitySection .projectsGrid,
   .projectsCreateGrid { grid-template-columns: 1fr; max-width: none; }
   .projectCard { min-height: 196px; }
+  .setupDraftsHeading { align-items: flex-start; flex-direction: column; }
+  .setupDraftsHeading button { align-self: flex-start; }
 }
 
 @media (prefers-reduced-motion: reduce) {

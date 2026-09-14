@@ -19,6 +19,29 @@ namespace AeroLink.Infrastructure.Tests;
 /// </summary>
 public sealed class TestProcedureDocumentBootstrapTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_tracked_persisted_envelope_does_not_replace_its_complete_effective_graph(bool stepsAlreadyLoaded)
+    {
+        var fixture = await DatabaseAsync();
+        await using var db = fixture.Db;
+        db.ChangeTracker.Clear();
+        // This is the SecondShowcaseSeeder retry shape: the envelope is tracked by an earlier query, while
+        // its child graph is either absent or only partly loaded. A nonempty Steps collection is not proof
+        // that AllowedUpstream is loaded.
+        var tracked = stepsAlreadyLoaded
+            ? await db.ProjectLadderConfigurations.Include(x => x.Steps).SingleAsync(x => x.ProjectId == fixture.ProjectId)
+            : await db.ProjectLadderConfigurations.SingleAsync(x => x.ProjectId == fixture.ProjectId);
+        Assert.False(db.Entry(tracked).Collection(x => x.AllowedUpstream).IsLoaded);
+        await new TestProcedureDocumentBootstrap(db).EnsureAllAsync();
+        Assert.Equal(3, await db.TestProcedureDocuments.CountAsync(x => x.ProjectId == fixture.ProjectId));
+        Assert.Equal(2, tracked.AllowedUpstream.Count);
+        var identifiers = await db.TestProcedureDocuments.OrderBy(x => x.Id).Select(x => x.Id).ToArrayAsync();
+        await new TestProcedureDocumentBootstrap(db).EnsureAllAsync();
+        Assert.Equal(identifiers, await db.TestProcedureDocuments.OrderBy(x => x.Id).Select(x => x.Id).ToArrayAsync());
+    }
+
     private sealed record Fixture(AeroLinkDbContext Db, Guid ProjectId, Guid SystemProcedureId,
         Guid HighLevelProcedureId, Guid LowLevelProcedureId);
 

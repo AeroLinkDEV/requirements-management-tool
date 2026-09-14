@@ -1,5 +1,6 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
@@ -7,6 +8,8 @@ using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -857,6 +860,7 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         var seeder = new FmsShowcaseSeeder(db);
         var summary = showcase.Summary;
 
+        await PrepareHistoricalInterfaceLadderAsync(db, summary.ProjectId);
         var legacy = await SeedLegacyInterfaceScenariosAsync(db, summary.ProgramId, summary.ProjectId, summary.ActiveReleaseId);
         // Reproduce the persistent installation that progressed 1.6 to an exact frozen candidate while the
         // Interface scenario was still selected: that selection is baseline content now. The product
@@ -868,6 +872,8 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
             .SingleAsync(x => x.ReleaseId == summary.ActiveReleaseId);
         activeBaseline.Freeze("cm.fms", materializedAt.AddMinutes(-2));
         await db.SaveChangesAsync();
+        // The copied fixture was placed on an Interface-capable persisted ladder before these historical
+        // records were added. Resolve that persisted configuration through the normal runtime authority.
         var policyResolver = new EffectiveProjectLadderPolicyResolver(db);
         await new RequirementBaselineMaterializer(db,
                 new VerificationImpactService(db, policyResolver: policyResolver),
@@ -901,6 +907,107 @@ public sealed class FmsShowcaseScenarioTests(ShowcaseDatabaseFixture showcase)
         Assert.True(activeTrace.Holds, string.Join(" ", activeTrace.Problems));
         Assert.True(activeTrace.WaitingForMaterialization);
         Assert.Equal(activeTrace.CurrentChanges, activeTrace.EligibleArtifacts);
+    }
+
+    [Fact]
+    public async Task Current_case_only_ladder_rejects_new_interface_materialization_without_content()
+    {
+        using var database = showcase.Create();
+        await using var db = database.Context();
+        var summary = showcase.Summary;
+
+        // These are newly authored records in the disposable fixture. The persisted FMS ladder is the
+        // current Case-only profile, so a new Interface requirement must fail at materialization rather
+        // than borrowing the legacy compatibility policy used by the historical-fixture test above.
+        var requests = await SeedLegacyInterfaceScenariosAsync(db, summary.ProgramId, summary.ProjectId,
+            summary.ActiveReleaseId);
+        var selected = requests.Single(x => x.State == ChangeRequestState.SelectedForBaseline);
+        var baseline = await db.CandidateBaselines
+            .Include(x => x.Selections)
+            .SingleAsync(x => x.ProjectId == summary.ProjectId && x.ReleaseId == summary.ActiveReleaseId
+                && x.BaseNumber == "SW-01.60");
+        baseline.Freeze("cm.fms", DateTimeOffset.UtcNow);
+        await db.SaveChangesAsync();
+
+        var resolver = new EffectiveProjectLadderPolicyResolver(db);
+        var currentLadder = await resolver.ResolveAsync(summary.ProjectId, CancellationToken.None);
+        Assert.DoesNotContain(RequirementLevel.Interface, currentLadder.OrderedLevels);
+        var failure = await Assert.ThrowsAsync<DomainException>(() =>
+            new RequirementBaselineMaterializer(db,
+                    new VerificationImpactService(db, policyResolver: resolver),
+                    policyResolver: resolver)
+                .MaterializeAsync(baseline.Id, "cm.fms", DateTimeOffset.UtcNow, CancellationToken.None));
+
+        Assert.Contains("Interface", failure.Message, StringComparison.Ordinal);
+        db.ChangeTracker.Clear();
+        await using var verify = database.Context();
+        var persistedBaseline = await verify.CandidateBaselines.AsNoTracking()
+            .SingleAsync(x => x.Id == baseline.Id);
+        Assert.Equal(CandidateBaselineState.Frozen, persistedBaseline.State);
+        Assert.Null(persistedBaseline.RequirementsMaterializedAt);
+        Assert.False(await verify.RequirementRevisions.AsNoTracking()
+            .AnyAsync(x => x.SourceChangeRequestId == selected.Id));
+        Assert.False(await verify.BaselineRequirements.AsNoTracking()
+            .AnyAsync(x => x.BaselineId == baseline.Id));
+    }
+
+    /// <summary>
+    /// Recreates the pre-#889 configuration boundary in the disposable copy before adding its historical
+    /// Interface scenarios. The production resolver then sees a real active persisted ladder throughout
+    /// fixture construction and upgrade; no materializer policy override is involved.
+    /// </summary>
+    private static async Task PrepareHistoricalInterfaceLadderAsync(AeroLinkDbContext db, Guid projectId)
+    {
+        var current = await db.ProjectLadderConfigurations
+            .Include(x => x.Steps).Include(x => x.AllowedUpstream)
+            .SingleAsync(x => x.ProjectId == projectId);
+        var currentHistory = await db.ProjectLadderConfigurationHistories
+            .Where(x => x.ConfigurationId == current.Id && x.ProjectId == projectId)
+            .ToListAsync();
+        db.ProjectLadderConfigurationHistories.RemoveRange(currentHistory);
+        db.ProjectLadderConfigurations.Remove(current);
+        await db.SaveChangesAsync();
+
+        var now = DateTimeOffset.UtcNow;
+        var historical = ProjectLadderConfiguration.CreateDraft(projectId, now);
+        var levels = new[]
+        {
+            RequirementLevel.System, RequirementLevel.HighLevel, RequirementLevel.LowLevel,
+            RequirementLevel.Interface,
+        };
+        var steps = levels.Select((level, index) => new ProjectLadderStep(
+            historical.Id, projectId, level, index + 1,
+            LegacyLadderPolicy.Instance.Definition(level).Capabilities, now)).ToArray();
+        foreach (var step in steps) historical.Steps.Add(step);
+        historical.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            historical.Id, projectId, steps[0].Id, steps[1].Id, now));
+        historical.AllowedUpstream.Add(new ProjectLadderAllowedUpstream(
+            historical.Id, projectId, steps[1].Id, steps[2].Id, now));
+
+        // This is a historical active configuration, so obtain the same readiness evidence a normal activation
+        // would produce from the application's registered consumers before making it effective.
+        var applicationServices = new ServiceCollection().AddAeroLinkInfrastructure(
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Database:Provider"] = "Sqlite",
+                ["ConnectionStrings:AeroLink"] = "Data Source=:memory:"
+            }).Build());
+        var activationAuthority = new ProjectLadderAuthoringService(db, LegacyLadderPolicy.Instance,
+            applicationServices.Where(x => x.ServiceType == typeof(ILadderConsumerRegistration))
+                .Select(x => (ILadderConsumerRegistration)x.ImplementationInstance!),
+            applicationServices.Where(x => x.ServiceType == typeof(IVerificationArtifactConsumerRegistration))
+                .Select(x => (IVerificationArtifactConsumerRegistration)x.ImplementationInstance!));
+        var activation = activationAuthority.PrepareActivationForCreation(historical, "legacy.fms", now);
+        db.ProjectLadderConfigurations.Add(historical);
+        db.ProjectLadderConfigurationHistories.Add(new ProjectLadderConfigurationHistory(
+            historical.Id, projectId, historical.Version, "legacy.fms", now,
+            "Reconstructed the pre-#889 Interface-capable FMS ladder for historical fixture data.",
+            activation.CanonicalSnapshot, ProjectLadderSnapshot.Hash(activation.CanonicalSnapshot),
+            historical.VerificationProfileSchemaVersion));
+        await db.SaveChangesAsync();
+
+        var resolved = await new EffectiveProjectLadderPolicyResolver(db).ResolveAsync(projectId);
+        Assert.Contains(RequirementLevel.Interface, resolved.OrderedLevels);
     }
 
     /// <summary>

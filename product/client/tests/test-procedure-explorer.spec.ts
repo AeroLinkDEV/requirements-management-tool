@@ -12,6 +12,11 @@ const browserFixtureWorkspaces = [{
   }],
 }]
 
+const browserFixtureLoginTarget = {
+  projectId: browserFixtureWorkspaces[0].projects[0].project.id,
+  releaseId: browserFixtureWorkspaces[0].projects[0].releases.find(release => !release.isReleased)!.id,
+}
+
 async function useBrowserFixture(page: import('@playwright/test').Page) {
   await page.route('**/api/workspaces', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify(browserFixtureWorkspaces) }))
   await page.route('**/api/projects/project-786/configuration', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({
@@ -385,7 +390,7 @@ test('released Build 1.5 procedures remain readable without create or edit actio
 test('the Procedure explorer change chooser is exact, bounded, and keyboard dismissible', async ({ page }) => {
   test.setTimeout(120_000)
   await useBrowserFixture(page)
-  await login(page, 'admin')
+  await login(page, 'admin', browserFixtureLoginTarget)
   await page.route('**/api/test-procedures?*', async route => {
     const url = new URL(route.request().url())
     if (url.searchParams.get('scope') !== 'System') return route.continue()
@@ -539,7 +544,7 @@ test('the Procedure explorer change chooser is exact, bounded, and keyboard dism
 test('the combined Explorer carries Case identity into the verification change chooser', async ({ page }) => {
   test.setTimeout(120_000)
   await useBrowserFixture(page)
-  await login(page, 'admin')
+  await login(page, 'admin', browserFixtureLoginTarget)
   await page.route('**/api/verification-artifacts?*', async route => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
       page: 1, pageSize: 25, totalCount: 1, totalPages: 1, views: [],
@@ -588,7 +593,7 @@ test('the combined Explorer carries Case identity into the verification change c
 test('the Case chooser adds an exact eligible Draft and focuses its persisted proposal', async ({ page }) => {
   test.setTimeout(120_000)
   await useBrowserFixture(page)
-  await login(page, 'admin')
+  await login(page, 'admin', browserFixtureLoginTarget)
   await page.route('**/api/verification-artifacts?*', async route => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
       page: 1, pageSize: 25, totalCount: 1, totalPages: 1, views: [],

@@ -25,9 +25,16 @@ test('draft updates preserve controlled identities and normalize new proposals o
   const introduced=updated.requirementChanges.find((item:{statement:string})=>item.statement==='The system shall allocate another controlled identifier.');expect(introduced.baseNumber).toMatch(/^SYSR-\d{6}$/);expect(introduced.baseNumber).not.toBe(original.baseNumber);expect(introduced.revision).toBe(0)
   expect(updated.requirementChanges).toContainEqual(expect.objectContaining({baseNumber:authoritative.baseNumber,revision:authoritative.nextRevision,level:'System',kind:'Modify'}))
 
-  const baselinedResponse=await request.get(`${apiBase}/api/requirements?projectId=${showcase.projectId}&baselineId=${showcase.releasedBaselineId}&scope=System&page=1&pageSize=2`)
-  expect(baselinedResponse.ok(),await baselinedResponse.text()).toBeTruthy();const baselined=(await baselinedResponse.json()).items;expect(baselined).toHaveLength(2)
-  const trace=await request.post(`${apiBase}/api/trace-links`,{data:{projectId:showcase.projectId,sourceRevisionId:baselined[0].revisionId,targetRevisionId:baselined[1].revisionId,type:'DerivedFrom',rationale:'Controlled-history deletion probe.'}})
-  expect(trace.ok(),await trace.text()).toBeTruthy();const deletion=await request.delete(`${apiBase}/api/trace-links/${(await trace.json()).id}`)
+  // Use an exact persisted relationship from the released baseline. Creating a new relationship from the
+  // first two rows is nondeterministic: the seeded graph already contains some of those pairs, and the
+  // unique constraint should never be the thing that proves controlled-history protection.
+  const traceabilityResponse=await request.get(`${apiBase}/api/traceability?projectId=${showcase.projectId}&baselineId=${showcase.releasedBaselineId}&page=1&pageSize=200`)
+  expect(traceabilityResponse.ok(),await traceabilityResponse.text()).toBeTruthy()
+  const traceability=(await traceabilityResponse.json()).items as Array<{level:string;displayNumber:string;parents:Array<{linkId:string;level:string;type:string}>}>
+  const highLevelWithSystemParent=traceability.filter(item=>item.level==='HighLevel').sort((a,b)=>a.displayNumber.localeCompare(b.displayNumber)).find(item=>item.parents.some(parent=>parent.level==='System'&&parent.type==='DerivedFrom'))
+  expect(highLevelWithSystemParent,'The released baseline must expose an exact HighLevel-to-System DerivedFrom trace').toBeTruthy()
+  const trace=highLevelWithSystemParent!.parents.find(parent=>parent.level==='System'&&parent.type==='DerivedFrom')!
+  expect(trace.linkId).toMatch(/^[0-9a-f-]{36}$/)
+  const deletion=await request.delete(`${apiBase}/api/trace-links/${trace.linkId}`)
   expect(deletion.status(),await deletion.text()).toBe(409);expect((await deletion.json()).code).toBe('controlled_trace_history')
 })

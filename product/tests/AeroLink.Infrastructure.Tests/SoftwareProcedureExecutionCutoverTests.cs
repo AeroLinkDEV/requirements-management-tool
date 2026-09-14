@@ -394,15 +394,22 @@ public sealed class SoftwareProcedureExecutionCutoverTests
         db.ProjectLadderConfigurations.Add(configuration);
         await db.SaveChangesAsync();
         var contentKind = LadderBoundContentCatalog.Current.First().Id;
-        var seal = await new ProjectLadderSealAuthority(db).SealAsync(project.Id, contentKind,
-            "matrix-content", "test.sealer", now);
-        Assert.Equal(ProjectLadderSealResultKind.Sealed, seal.Kind);
         if (activate)
         {
             configuration.Activate("project.owner", now, LadderConsumerManifestCatalog.VersionV2,
                 new string('0', 64));
-            await db.SaveChangesAsync();
+            var seal = await new ProjectLadderSealAuthority(db).SealAsync(project.Id, contentKind,
+                "matrix-content", "test.sealer", now);
+            Assert.Equal(ProjectLadderSealResultKind.Sealed, seal.Kind);
         }
+        else
+        {
+            // Preserve the intentionally malformed historical fixture: before the effective-ladder guard,
+            // this row could be sealed while still Draft. It is already-sealed evidence, so the authority
+            // must continue to return AlreadySealed without rewriting the row or making it effective.
+            configuration.Seal(contentKind, "matrix-content", "test.sealer", now);
+        }
+        await db.SaveChangesAsync();
         return project.Id;
     }
 

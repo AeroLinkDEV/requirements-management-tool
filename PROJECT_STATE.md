@@ -53,6 +53,62 @@ The application under `product/` is the single demonstrable software product. Th
 
 See [product/docs/ARCHITECTURE.md](product/docs/ARCHITECTURE.md).
 
+## Project creation and entry
+
+Projects with creation-time repository configuration require verified repository identity before recording
+GitLab merge evidence. The namespace, configured origin/path and merge-request number must match;
+No-code decisions retain their ordinary lifecycle prerequisites. Repository verification does not verify
+the supplied merge/commit facts, and existing projects without setup configuration retain compatibility.
+
+Administrators can create a server-side setup draft and resume it across sessions. The creator and
+administrators may edit it; unfinished setup is distinct from a usable project. Fresh completion atomically
+creates an isolated internal backing scope, the accepted effective ladder and review rules, necessary empty
+containers, creator management access, and the chosen first **IN WORK** build. It inherits no FMS team or
+engineering content. Canonical `SW-NN.NN` identity validation governs new build allocation without renumbering
+historical records. Empty-project ladder corrections preserve configuration history and synchronize containers;
+authored or inherited engineering content locks structural changes.
+
+Supported capability subsets remain valid. Setup offers review subjects only for the configured change-control
+and verification capabilities; artifact threads and traceability publications distinguish unavailable verification
+from missing coverage using the effective ladder.
+
+Project entry uses stable identity and opens the actual visual build-lineage selector, including for a single
+build. Explicit build links retain their exact authorized target. Repository setup can remain Pending and be
+configured later; a server-observed GitLab connection is separate from controlled implementation evidence.
+See [Architecture](product/docs/ARCHITECTURE.md) and [Operations](product/docs/OPERATIONS.md).
+
+The creation surface has three server-owned starting paths: Fresh, an exact authorized AeroLink baseline, and
+an external ReqIF, CSV, or XLSX source. Fresh creates only the empty structure required by the selected ladder
+and leaves engineering content, approvals, executions, evidence, and staffing empty. Native inception accepts a
+Frozen or Released source baseline with its exact project, baseline, revision, relationship, and supported source
+facts. External inception stages the uploaded bytes, parser observations, selected categories, mapping, and
+server reconciliation before materialization. The supported matrix is Requirements, Traces, Cases, Procedures,
+and Evidence for native sources; Requirements and Traces for ReqIF; and Requirements for CSV/XLSX. Unsupported
+or excluded objects and relationships remain explicit source findings; the service does not invent missing facts.
+
+Every source path creates one new first build in **IN WORK**. A native or external source remains a distinct
+historical source fact, and its approvals, executions, evidence, identities, and provenance are not recast as
+new-project approvals or target executions. Materialized records retain the exact source identifiers and revision
+links, with target parent/trace IDs recorded separately. Source acceptance is a password-confirmed electronic
+signature by the current AeroLink administrator over the source hash, selected categories, mapping, reconciliation,
+accepted ladder, manifest, and target build identity, including when that administrator resumes another creator's
+draft. It is an acceptance of source provenance and materialization, not an engineering approval.
+
+Creation drafts, staged uploads, and accepted answers survive sign-out, API restart, and resumed sessions. Draft
+version tokens protect edits and finalization; the finalization operation records its result so a
+duplicate request or a lost success response returns the same created identities. Creator and administrators can
+resume drafts, while native source access is checked against current source membership at every source boundary.
+The internal backing Program is allocated once and is not a user-entered Program name or code. Repository setup
+can remain visibly Pending and be configured later; it does not claim a connection without a server-observed
+verification. Project entry opens the actual visual build-lineage selector, including a one-build project, and
+requires explicit selection.
+
+This state describes the implemented product boundary; qualification, protected integration, and final acceptance
+remain tracked in [issue #1037](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1037). Ordinary
+CSV/XLSX requirement proposal preview/commit remains a separate change-request workflow and must not be confused
+with external inception. Recovery uses the supported backup/restore procedures for the database and retained draft
+source bytes; it does not use ad-hoc SQL, reset/reseed, or an installer-wide recovery claim.
+
 ## Current requirements architecture
 
 The normal software-oriented lifecycle is:
@@ -265,6 +321,9 @@ See [FMS Live Showcase Dataset](docs/showcase/FMS_LIVE_SHOWCASE_DATASET.md) and 
 AeroLink supports controlled generated publications over structured artifacts and a Managed Documentation Center for externally authored Word documents.
 
 Generated outputs are derived from controlled data/templates/effectivity and carry provenance rather than becoming independent masters. Managed Word documents retain their controlled DOCX/PDF candidates/revisions while Word remains the authoring application.
+
+Publications for projects created through setup identify the user-facing Project; their isolated internal backing
+scope is not a cover or document-control label. Existing project labels and retained source manifests remain unchanged.
 
 See [Controlled Document Publication Standard](docs/product-definition/CONTROLLED_DOCUMENT_PUBLICATION_STANDARD.md) and [product/docs/MANAGED_DOCUMENTATION_CENTER.md](product/docs/MANAGED_DOCUMENTATION_CENTER.md).
 

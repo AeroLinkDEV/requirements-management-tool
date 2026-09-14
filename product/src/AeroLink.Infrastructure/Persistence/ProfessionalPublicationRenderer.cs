@@ -62,10 +62,11 @@ public static class ProfessionalPublicationRenderer
             {
                 body.Append(P(publication.DocumentNumber + "  |  REVISION " + publication.Revision, "CoverNumber")).Append(P(publication.Status.ToUpperInvariant(), "CoverStatus"));
             }
-            body.Append(P($"{publication.Product}  |  Release {publication.Release}", "CoverMeta")).Append(P($"{publication.Program}  |  {publication.Project}", "CoverMeta"));
-            body.Append(P("APPROVALS RECORDED FOR THIS PUBLICATION", "CoverApprovalHeading"));
+            body.Append(P($"{publication.Product}  |  Release {publication.Release}", "CoverMeta")).Append(P(ProjectLabel(publication), "CoverMeta"));
+            body.Append(P(publication.ControlledStatusControls && publication.Approvals.Count == 0
+                ? "APPROVAL EVIDENCE" : "APPROVALS RECORDED FOR THIS PUBLICATION", "CoverApprovalHeading"));
             var coverApprovals = publication.Approvals.Take(5).ToList();
-            if (coverApprovals.Count == 0) body.Append(P("Approval pending - no completed approval decision is recorded.", "CoverApproval"));
+            if (coverApprovals.Count == 0) body.Append(P(ApprovalEvidenceNotice(publication), "CoverApproval"));
             foreach (var approval in coverApprovals) body.Append(P($"{approval.Name}  |  {approval.Role}  |  {ApprovalDecision(approval)}", "CoverApproval"));
             if (publication.Approvals.Count > coverApprovals.Count) body.Append(P($"+ {publication.Approvals.Count - coverApprovals.Count} additional approvals in the Document Control register", "CoverApproval"));
             body.Append(P("CONTROLLED COPY  |  Verify manifest hash before use", "CoverNotice")).Append(PageBreak());
@@ -78,9 +79,11 @@ public static class ProfessionalPublicationRenderer
                 : Table(Array.Empty<string>(), controlRows, new[] { 2700, 6660 }, true));
             body.Append(P("Approval Register", "Heading2"));
             var approvalRows = publication.Approvals.Select(x => (IReadOnlyList<string>)new[] { x.Role, x.Name + " (" + x.UserId + ")", ApprovalDecision(x) }).ToList();
-            if (approvalRows.Count == 0) approvalRows.Add(new[] { "Approval", "Not yet recorded", "Pending" });
+            if (approvalRows.Count == 0) approvalRows.Add(publication.ControlledStatusControls
+                ? new[] { "Exact revision and file hash", "See AeroLink", "Consult the controlled approval record" }
+                : new[] { "Approval", "Not yet recorded", "Pending" });
             body.Append(Table(new[] { "Authority", "Approver", "Decision" }, approvalRows, new[] { 2400, 3600, 3360 }, false));
-            body.Append(P("Revision History", "Heading2"));
+            body.Append(P(publication.ControlledStatusControls ? "Revision history at source generation" : "Revision History", "Heading2"));
             body.Append(Table(new[] { "Revision", "Status", "Date", "Author / owner" }, publication.RevisionHistory.Select(x => (IReadOnlyList<string>)new[] { x.Revision, x.Status, x.Date, x.Author }).ToList(), new[] { 1400, 1900, 2200, 3860 }, false));
             body.Append(P("Authority and use", "Heading2")).Append(P("This publication is a deterministic rendering of authoritative lifecycle records. The database records, exact revision identities, approval decisions, baseline membership, and manifest hashes remain the source of truth. Printed or downloaded copies must be verified against the displayed manifest before use.", "Callout"));
 
@@ -98,6 +101,12 @@ public static class ProfessionalPublicationRenderer
         }
         return output.ToArray();
     }
+
+    private static string ProjectLabel(ProfessionalPublication p) => p.ControlledStatusControls || string.IsNullOrWhiteSpace(p.Program)
+        ? p.Project : p.Program + "  |  " + p.Project;
+    private static string ApprovalEvidenceNotice(ProfessionalPublication p) => p.ControlledStatusControls
+        ? "Consult AeroLink for approval evidence bound to this exact revision and file hash."
+        : "Approval pending - no completed approval decision is recorded.";
 
     private static string Styles() => "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">" +
         Style("Normal", "Normal", 22, "25364D", false, 0, 120, 300) + Style("CoverKicker", "Cover Kicker", 20, "168578", true, 1500, 160, 280) + Style("CoverTitle", "Cover Title", 60, "102A43", true, 0, 120, 280) + Style("CoverSubtitle", "Cover Subtitle", 28, "526274", false, 0, 360, 300) + Style("CoverNumber", "Cover Number", 24, "2E74B5", true, 0, 80, 280) + Style("CoverStatus", "Cover Status", 20, "7A5A00", true, 0, 300, 280) + Style("CoverMeta", "Cover Meta", 20, "526274", false, 0, 60, 280) + Style("CoverApprovalHeading", "Cover Approval Heading", 18, "168578", true, 560, 100, 280) + Style("CoverApproval", "Cover Approval", 18, "25364D", false, 0, 80, 280) + Style("CoverNotice", "Cover Notice", 16, "718096", true, 620, 0, 280) + Style("Heading1", "Heading 1", 32, "2E74B5", true, 360, 200, 300) + Style("Heading2", "Heading 2", 26, "2E74B5", true, 280, 140, 300) + Style("Heading3", "Heading 3", 24, "1F4D78", true, 200, 100, 300) + Style("Lead", "Lead", 22, "526274", false, 0, 180, 300) + Style("RecordTitle", "Record Title", 22, "25364D", true, 0, 80, 300) + Style("RecordMeta", "Record Meta", 18, "718096", false, 0, 80, 280) + Style("TableText", "Table Text", 18, "25364D", false, 0, 40, 260) + Style("TableHeader", "Table Header", 18, "102A43", true, 0, 40, 260) + Style("Callout", "Callout", 20, "25364D", false, 120, 120, 300, "F4F6F9") + "</w:styles>";
@@ -419,9 +428,9 @@ public static class ProfessionalPublicationRenderer
         var control = new List<PdfLine> { new("DOCUMENT CONTROL", 18, true, "2E74B5", 0, 10) };
         var metadata = new List<(string Label, string Value)> { ("Document type",p.DocumentType),("Document number",p.DocumentNumber),("Revision",p.Revision),("Status",p.Status),("Release",p.Release),("Baseline",p.Baseline),("Prepared by",p.PreparedBy),("Generated",p.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm UTC")),("Manifest SHA-256",p.ManifestHash) }; metadata.AddRange(p.Metadata);
         foreach (var item in metadata) { control.Add(new(item.Label.ToUpperInvariant(), 7, true, "718096", 0, 1)); control.AddRange(Wrap(item.Value, 92).Select(x => new PdfLine(x, 9, false, "25364D", 0, 5))); }
-        control.Add(new("APPROVAL REGISTER", 14, true, "2E74B5", 0, 7)); if (p.Approvals.Count == 0) control.Add(new("Approval pending - no completed approval decision is recorded.", 9, false));
+        control.Add(new("APPROVAL REGISTER", 14, true, "2E74B5", 0, 7)); if (p.Approvals.Count == 0) control.AddRange(Wrap(ApprovalEvidenceNotice(p), 92).Select(x => new PdfLine(x, 9, false)));
         foreach (var approval in p.Approvals) control.Add(new($"{approval.Role}: {approval.Name} ({approval.UserId}) - {ApprovalDecision(approval)}", 8, true, "25364D", 0, 5));
-        control.Add(new("REVISION HISTORY", 14, true, "2E74B5", 0, 7)); foreach (var revision in p.RevisionHistory) control.Add(new($"Rev {revision.Revision} | {revision.Status} | {revision.Date} | {revision.Author}", 8, false, "25364D", 0, 5));
+        control.Add(new(p.ControlledStatusControls ? "REVISION HISTORY AT SOURCE GENERATION" : "REVISION HISTORY", 14, true, "2E74B5", 0, 7)); foreach (var revision in p.RevisionHistory) control.Add(new($"Rev {revision.Revision} | {revision.Status} | {revision.Date} | {revision.Author}", 8, false, "25364D", 0, 5));
         pageStreams.AddRange(Paginate(control, p, true));
         foreach (var section in p.Sections)
         {
@@ -435,11 +444,11 @@ public static class ProfessionalPublicationRenderer
         Text(s, p.Product.ToUpperInvariant() + "  |  CONTROLLED LIFECYCLE PUBLICATION", 54, 760, 9, true, "FFFFFF"); Text(s, p.DocumentType.ToUpperInvariant(), 64, 650, 10, true, "65D3C3");
         var y = 610; foreach (var line in Wrap(p.Title, 38)) { Text(s, line, 64, y, 25, true, "FFFFFF"); y -= 32; } foreach (var line in Wrap(p.Subtitle, 65)) { Text(s, line, 64, y - 4, 11, false, "B7C5D4"); y -= 17; }
         y -= 20; Text(s, p.DocumentNumber + "  |  REVISION " + p.Revision, 64, y, 12, true, "65D3C3"); Text(s, p.Status.ToUpperInvariant(), 64, y - 24, 10, true, "F0C96A");
-        s.Append("0.105 0.235 0.340 rg 54 118 504 190 re f\n"); Text(s, "APPROVALS RECORDED FOR THIS PUBLICATION", 72, 282, 8, true, "65D3C3"); var ay = 258;
-        if (p.Approvals.Count == 0) Text(s, "Approval pending - no completed approval decision is recorded.", 72, ay, 9, false, "FFFFFF");
+        s.Append("0.105 0.235 0.340 rg 54 118 504 190 re f\n"); Text(s, p.ControlledStatusControls && p.Approvals.Count == 0 ? "APPROVAL EVIDENCE" : "APPROVALS RECORDED FOR THIS PUBLICATION", 72, 282, 8, true, "65D3C3"); var ay = 258;
+        if (p.Approvals.Count == 0) foreach (var line in Wrap(ApprovalEvidenceNotice(p), 70)) { Text(s, line, 72, ay, 9, false, "FFFFFF"); ay -= 14; }
         foreach (var approval in p.Approvals.Take(5)) { Text(s, approval.Name, 72, ay, 10, true, "FFFFFF"); Text(s, approval.Role + " | " + ApprovalDecision(approval), 72, ay - 13, 7, false, "B7C5D4"); ay -= 31; }
         if (p.Approvals.Count > 5) Text(s, "+ additional approvals in Document Control", 72, ay, 8, false, "B7C5D4");
-        Text(s, p.Program + " | " + p.Project + " | Release " + p.Release, 64, 84, 8, false, "B7C5D4"); Text(s, "CONTROLLED COPY - Verify manifest hash before use", 64, 58, 8, true, "F0C96A"); return s.Append("ET").ToString();
+        Text(s, ProjectLabel(p) + " | Release " + p.Release, 64, 84, 8, false, "B7C5D4"); Text(s, "CONTROLLED COPY - Verify manifest hash before use", 64, 58, 8, true, "F0C96A"); return s.Append("ET").ToString();
     }
     private static IEnumerable<string> Paginate(IReadOnlyList<PdfLine> lines, ProfessionalPublication p, bool control)
     {

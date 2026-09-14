@@ -41,19 +41,23 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             ? (policy ?? LegacyLadderPolicy.Instance)
             : await policyResolver.ResolveAsync(project.Id, ct);
         var program = await db.Programs.AsNoTracking().SingleAsync(x => x.Id == project.ProgramId, ct);
+        var releaseLabel = await PublicationProgramContext.ResolveReleaseLabelAsync(db, project, program, release, ct);
 
         var artifactKey = ladderPolicy.Definitions.Where(level => level.VerificationProfile is not null)
             .SelectMany(level => level.VerificationProfile!.Definitions)
             .SingleOrDefault(artifact => artifact.DocumentType == type)?.Key;
         if (artifactKey is not null)
             return await GenerateProcedureDraftAsync(release, project, program, type, artifactKey.Value,
-                format, preparedBy, ladderPolicy, ct);
+                format: format, releaseLabel: releaseLabel, preparedBy: preparedBy, ladderPolicy: ladderPolicy, ct: ct);
 
         var level = RequirementLevelFor(type, ladderPolicy);
         if (level is null) return null;
 
         var predecessor = await ReleasedPredecessorBaselineAsync(release.ProjectId, release.PredecessorReleaseId, ct);
-        var effective = await EffectiveRequirementsAsync(predecessor?.Id, release.ProjectId, releaseId, level.Value, ct);
+        var inception = predecessor is null ? await InceptionBaselineAsync(release.ProjectId, releaseId, ct) : null;
+        var sourceBaseline = predecessor ?? inception;
+        var sourceLabel = inception is null ? "Released baseline" : "Accepted source manifest";
+        var effective = await EffectiveRequirementsAsync(sourceBaseline?.Id, release.ProjectId, releaseId, level.Value, sourceLabel, ct);
         var generatedAt = DateTimeOffset.UtcNow;
 
         var revisionIds = effective.Where(x => x.RevisionId is not null).Select(x => x.RevisionId!.Value).ToList();
@@ -73,11 +77,13 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         var pending = effective.Count(x => x.Origin.Length > 0);
 
         var publication = new ProfessionalPublication(
-            project.SoftwareProduct, $"{program.Name} ({program.Code})", project.Name, DocumentTypeName(type),
+            project.SoftwareProduct, await PublicationProgramContext.ResolveAsync(db, project, program, ct), project.Name, DocumentTypeName(type),
             $"{project.SoftwareProduct} {DocumentTypeName(type)}",
-            $"Draft for release {release.Version}. Released content plus every approved change not yet baselined.",
-            documentNumber, revision.ToString("D2"), "DRAFT - NOT APPROVED", release.Version,
-            predecessor?.DisplayNumber ?? "No released predecessor", preparedBy, generatedAt,
+            inception is null
+                ? $"Draft for release {releaseLabel}. Released content plus every approved change not yet baselined."
+                : $"Draft for release {releaseLabel}. Accepted source content plus approved project changes. Source acceptance is not a new engineering approval.",
+            documentNumber, revision.ToString("D2"), "DRAFT - NOT APPROVED", releaseLabel,
+            sourceBaseline?.DisplayNumber ?? "No released predecessor", preparedBy, generatedAt,
             // No manifest hash: a hash asserts that this content is fixed and reproducible, and this content is
             // neither. Printing one would be the most misleading thing on the page.
             "not applicable to a draft",
@@ -85,7 +91,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             {
                 ("Requirements", effective.Count.ToString("N0")),
                 ("Changed by approved change requests", pending.ToString("N0")),
-                ("Released predecessor", predecessor?.DisplayNumber ?? "none"),
+                (inception is null ? "Released predecessor" : "Initial materialized baseline", sourceBaseline?.DisplayNumber ?? "none"),
                 ("Status", "Draft - content may still change"),
             },
             [],
@@ -93,14 +99,16 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             new[]
             {
                 new PublicationSection("Effective Requirements",
-                    $"The released baseline for this product with every approved change to release {release.Version} applied. Rows marked as changed are not yet part of any frozen baseline.",
+                    inception is null
+                        ? $"The released baseline for this product with every approved change to release {releaseLabel} applied. Rows marked as changed are not yet part of any frozen baseline."
+                        : $"The exact accepted source manifest with approved changes to release {releaseLabel} applied. Source approvals remain source facts; this draft does not approve inherited content.",
                     records),
             })
         {
             Watermark = "DRAFT",
         };
 
-        return ProfessionalPublicationRenderer.Render(publication, format, $"DRAFT_{documentNumber}.{revision:D2}_{release.Version}");
+        return ProfessionalPublicationRenderer.Render(publication, format, $"DRAFT_{documentNumber}.{revision:D2}_{releaseLabel}");
 
         string Supplementary(EffectiveRequirement item)
         {
@@ -116,7 +124,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
 
     private async Task<GeneratedOutput> GenerateProcedureDraftAsync(SoftwareRelease release, ProjectRecord project,
         ProgramRecord program, ControlledDocumentType type, VerificationArtifactKey artifactKey, string format,
-        string preparedBy, ILadderPolicy ladderPolicy, CancellationToken ct)
+        string releaseLabel, string preparedBy, ILadderPolicy ladderPolicy, CancellationToken ct)
     {
         var level = VerificationArtifactVocabulary.Definition(artifactKey).ProcedureLevel;
         var isCaseDocument = artifactKey.Kind == VerificationArtifactKind.Case;
@@ -158,10 +166,10 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         var documentNumber = DocumentNumber(type, release.Version, ladderPolicy);
         var revisionNumber = await NextRevisionAsync(project.Id, type, ct);
         var publication = new ProfessionalPublication(
-            project.SoftwareProduct, $"{program.Name} ({program.Code})", project.Name, DocumentTypeName(type),
+            project.SoftwareProduct, await PublicationProgramContext.ResolveAsync(db, project, program, ct), project.Name, DocumentTypeName(type),
             $"{project.SoftwareProduct} {DocumentTypeName(type)}",
             $"Living draft for software build {SoftwareBuildIdentifier.FromVersion(release.Version)}.",
-            documentNumber, revisionNumber.ToString("D2"), "DRAFT - NOT APPROVED", release.Version,
+            documentNumber, revisionNumber.ToString("D2"), "DRAFT - NOT APPROVED", releaseLabel,
             SoftwareBuildIdentifier.FromVersion(release.Version), preparedBy, generatedAt,
             "not applicable to a draft",
             new[]
@@ -189,8 +197,17 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             Watermark = "DRAFT"
         };
         return ProfessionalPublicationRenderer.Render(publication, format,
-            $"DRAFT_{documentNumber}.{revisionNumber:D2}_{release.Version}");
+            $"DRAFT_{documentNumber}.{revisionNumber:D2}_{releaseLabel}");
     }
+
+    private Task<CandidateBaseline?> InceptionBaselineAsync(Guid projectId, Guid releaseId, CancellationToken ct) =>
+        (from setup in db.ProjectSetupDrafts.AsNoTracking()
+         where setup.State == ProjectSetupState.Completed && setup.StartKind != ProjectSetupStartKind.Fresh
+             && setup.CompletedProjectId == projectId && setup.CompletedReleaseId == releaseId
+         join baseline in db.CandidateBaselines.AsNoTracking() on setup.InceptionBaselineId equals baseline.Id
+         where baseline.ProjectId == projectId && baseline.ReleaseId == releaseId
+             && baseline.State == CandidateBaselineState.Frozen && baseline.RequirementsMaterializedAt != null
+         select baseline).SingleOrDefaultAsync(ct);
 
     /// <summary>The materialized baseline of the released predecessor, or null for a first release.</summary>
     private async Task<CandidateBaseline?> ReleasedPredecessorBaselineAsync(Guid projectId, Guid? predecessorReleaseId, CancellationToken ct)
@@ -224,7 +241,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
     /// from has been made.
     /// </summary>
     private async Task<List<EffectiveRequirement>> EffectiveRequirementsAsync(Guid? baselineId, Guid projectId,
-        Guid releaseId, RequirementLevel level, CancellationToken ct)
+        Guid releaseId, RequirementLevel level, string sourceLabel, CancellationToken ct)
     {
         var effective = new Dictionary<string, EffectiveRequirement>(StringComparer.OrdinalIgnoreCase);
         if (baselineId is not null)
@@ -236,7 +253,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
                 .ToListAsync(ct);
             foreach (var row in rows)
                 effective[row.BaseNumber] = new(row.BaseNumber, row.Revision, row.Statement, row.Rationale,
-                    row.VerificationMethod, "Released baseline", "", row.RevisionId, "");
+                    row.VerificationMethod, sourceLabel, "", row.RevisionId, "");
         }
 
         // Approved and allocated both count: the engineering is signed for in each, and whether it has been

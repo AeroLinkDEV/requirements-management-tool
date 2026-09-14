@@ -60,6 +60,14 @@ public sealed record ProjectLadderReadModel(
     /// change applicability before its activation succeeds.
     /// </summary>
     public IReadOnlyList<LadderRelationshipDraft> EffectiveRelationships { get; init; } = [];
+
+    /// <summary>
+    /// Whether the current project authority may make a structural change without first creating a new
+    /// effective configuration. Empty Active non-default configurations remain editable until the first
+    /// authored or inherited engineering record seals the ladder; this is deliberately computed by the
+    /// persistence authority rather than inferred from the lifecycle label in a client.
+    /// </summary>
+    public bool CanEditStructure { get; init; }
 }
 
 public sealed record ProjectLadderEditResult(
@@ -75,6 +83,14 @@ public sealed record ProjectLadderActivationResult(
 public enum ProjectLadderActivationResultKind { NotFound, Success, Refused, Conflict, Invalid }
 
 /// <summary>
+/// The readiness evidence produced when a newly-created project's ladder is made effective. Creation uses this
+/// in its own transaction so the ladder is Active before any inherited or authored engineering content can be
+/// committed. No database write occurs in this preparation method.
+/// </summary>
+public sealed record ProjectLadderCreationActivation(
+    string ManifestVersion, string ManifestHash, string CanonicalSnapshot, int SnapshotSchemaVersion);
+
+/// <summary>
 /// The one application authority for project-ladder edits and activation attempts. The edit operation never
 /// accepts lifecycle fields, and activation succeeds only after every stable matrix consumer is registered and
 /// the persisted graph passes readiness/concurrency checks. No seeder, migration, or aggregate operation can
@@ -82,12 +98,56 @@ public enum ProjectLadderActivationResultKind { NotFound, Success, Refused, Conf
 /// </summary>
 public sealed class ProjectLadderAuthoringService(
     AeroLinkDbContext db, ILadderPolicy policy, IEnumerable<ILadderConsumerRegistration> consumerRegistrations,
-    IEnumerable<IVerificationArtifactConsumerRegistration>? artifactConsumerRegistrations = null)
+    IEnumerable<IVerificationArtifactConsumerRegistration>? artifactConsumerRegistrations = null,
+    TestProcedureDocumentBootstrap? procedureDocuments = null)
 {
     private readonly IReadOnlyList<ILadderConsumerRegistration> _consumerRegistrations =
         consumerRegistrations?.ToArray() ?? throw new ArgumentNullException(nameof(consumerRegistrations));
     private readonly IReadOnlyList<IVerificationArtifactConsumerRegistration> _artifactConsumerRegistrations =
         artifactConsumerRegistrations?.ToArray() ?? [];
+    private readonly TestProcedureDocumentBootstrap? _procedureDocuments = procedureDocuments;
+
+    /// <summary>
+    /// Validates and activates a brand-new ladder already attached to a new project aggregate. This deliberately
+    /// does not call SaveChanges: the caller must add the immutable activation history and save it together with
+    /// the project, vocabulary, roster, and other first-creation facts inside one explicit transaction.
+    /// </summary>
+    public ProjectLadderCreationActivation PrepareActivationForCreation(
+        ProjectLadderConfiguration configuration, string actor, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        if (configuration.Classification != ProjectLadderConfigurationClassification.NonDefault
+            || configuration.State != ProjectLadderConfigurationState.Draft)
+            throw new DomainException("A new project ladder must be a non-default draft before activation.");
+        if (configuration.IsSealed)
+            throw new DomainException("A new project ladder cannot be sealed before its first working content exists.");
+        if (string.IsNullOrWhiteSpace(actor)) throw new DomainException("Ladder activation requires an attributable actor.");
+
+        _ = ProjectLadderResolver.Resolve(configuration, policy);
+        var readiness = LadderConsumerManifestCatalog.BuildForRegistrations(_consumerRegistrations);
+        var artifactReadiness = BuildArtifactReadiness(configuration);
+        if (!readiness.IsReady || !artifactReadiness.IsReady)
+        {
+            var blockers = string.Join(", ", readiness.MissingOrUnrouted.Select(x => x.Id)
+                .Concat(readiness.UnknownRegistrations.Select(x => $"unknown:{x.Id}"))
+                .Concat(artifactReadiness.MissingArtifactCoverage.Select(x =>
+                    $"artifact:{x.ArtifactKey}:{x.RequiredCapabilities}")));
+            throw new DomainException($"The new project ladder is not ready for activation: {blockers}.");
+        }
+
+        var steps = configuration.Steps.OrderBy(x => x.Position)
+            .Select(x => new LadderStepDraft(x.CatalogueEntry, x.Position, x.Capabilities, x.EnabledArtifactKinds))
+            .ToArray();
+        var byId = configuration.Steps.ToDictionary(x => x.Id);
+        var relationships = configuration.AllowedUpstream
+            .Select(x => new LadderRelationshipDraft(byId[x.ParentStepId].CatalogueEntry,
+                byId[x.ChildStepId].CatalogueEntry)).ToArray();
+        var snapshotSchemaVersion = configuration.VerificationProfileSchemaVersion;
+        var canonical = ProjectLadderSnapshot.CanonicalizeForSchema(snapshotSchemaVersion, steps, relationships, policy);
+        var snapshotHash = ProjectLadderSnapshot.Hash(canonical);
+        configuration.Activate(actor, now, artifactReadiness.Version, artifactReadiness.Hash);
+        return new(artifactReadiness.Version, artifactReadiness.Hash, canonical, snapshotSchemaVersion);
+    }
 
     public async Task<ProjectLadderReadModel?> ReadAsync(Guid projectId, CancellationToken ct, bool canManage = false)
     {
@@ -113,6 +173,11 @@ public sealed class ProjectLadderAuthoringService(
                 Error: ProjectLadderSealAuthority.ConflictExplanation(configuration));
         if (configuration.Version != command.ExpectedVersion)
             return new(ProjectLadderEditResultKind.Conflict, Error: "Another ladder edit was saved. Refresh before editing again.");
+        var preserveActiveEffectiveState = configuration.Classification == ProjectLadderConfigurationClassification.NonDefault
+            && configuration.State == ProjectLadderConfigurationState.Active;
+        if (preserveActiveEffectiveState && await HasLadderBoundContentAsync(projectId, ct))
+            return new(ProjectLadderEditResultKind.Conflict,
+                Error: "Structural ladder edits are locked once authored or inherited engineering content exists.");
 
         IReadOnlyList<LadderStepDraft> steps;
         IReadOnlyList<LadderRelationshipDraft> relationships;
@@ -154,7 +219,8 @@ public sealed class ProjectLadderAuthoringService(
             return new(ProjectLadderEditResultKind.NotFound, Error: "The project has no ladder configuration.");
         if (configuration.Version != command.ExpectedVersion)
             return new(ProjectLadderEditResultKind.Conflict, Error: "Another ladder edit was saved. Refresh before editing again.");
-        configuration.BeginDraftEdit(now);
+        if (preserveActiveEffectiveState) configuration.BeginEmptyActiveCorrection(now);
+        else configuration.BeginDraftEdit(now);
         try
         {
             await db.SaveChangesAsync(ct);
@@ -167,6 +233,12 @@ public sealed class ProjectLadderAuthoringService(
         {
             return Conflict();
         }
+        // The first read is only an early response. Re-check after the version claim inside the transaction so a
+        // content writer racing this request cannot leave an Active ladder editable. Returning before commit rolls
+        // back the claim and all child changes together.
+        if (preserveActiveEffectiveState && await HasLadderBoundContentAsync(projectId, ct))
+            return new(ProjectLadderEditResultKind.Conflict,
+                Error: "Structural ladder edits are locked once authored or inherited engineering content exists.");
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"DELETE FROM \"project_ladder_allowed_upstreams\" WHERE \"ConfigurationId\" = {configuration.Id} AND \"ProjectId\" = {projectId}", ct);
         await db.Database.ExecuteSqlInterpolatedAsync(
@@ -188,6 +260,9 @@ public sealed class ProjectLadderAuthoringService(
         db.ProjectLadderAllowedUpstreams.AddRange(configuration.AllowedUpstream);
         db.ProjectLadderConfigurationHistories.Add(new ProjectLadderConfigurationHistory(configuration.Id, projectId,
             configuration.Version, actor, now, command.Reason, canonical, hash, snapshotSchemaVersion));
+        if (preserveActiveEffectiveState)
+            await (_procedureDocuments ?? new TestProcedureDocumentBootstrap(db, policy))
+                .EnsureForProjectAsync(projectId, ct);
         try
         {
             await db.SaveChangesAsync(ct);
@@ -273,6 +348,10 @@ public sealed class ProjectLadderAuthoringService(
             db.ProjectLadderConfigurationHistories.Add(new ProjectLadderConfigurationHistory(
                 configuration.Id, projectId, configuration.Version, actor, now,
                 $"Activated ladder: {command.Reason.Trim()}", canonical, snapshotHash, snapshotSchemaVersion));
+            // Activation makes the selected ladder effective. Synchronize the empty procedure containers in the
+            // same SaveChanges unit so a restart or a separate refresh is never needed to reveal them.
+            await (_procedureDocuments ?? new TestProcedureDocumentBootstrap(db, policy))
+                .EnsureForProjectAsync(projectId, ct);
             await db.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException)
@@ -307,6 +386,19 @@ public sealed class ProjectLadderAuthoringService(
         return new(ProjectLadderActivationResultKind.Refused,
             Error: $"Activation is refused until routing is complete. Unrouted consumers: {blockers}.",
             Readiness: readiness, ArtifactReadiness: artifactReadiness);
+    }
+
+    private async Task<bool> HasLadderBoundContentAsync(Guid projectId, CancellationToken ct)
+    {
+        if (await db.SystemChangeRequests.AsNoTracking().AnyAsync(x => x.ProjectId == projectId, ct)) return true;
+        if (await db.Requirements.AsNoTracking().AnyAsync(x => x.ProjectId == projectId, ct)) return true;
+        if (await (from revision in db.RequirementRevisions.AsNoTracking()
+                   join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+                   where artifact.ProjectId == projectId select revision.Id).AnyAsync(ct)) return true;
+        if (await db.TestProcedures.AsNoTracking().AnyAsync(x => x.ProjectId == projectId, ct)) return true;
+        if (await db.TestChangeReviews.AsNoTracking().AnyAsync(x => x.ProjectId == projectId, ct)) return true;
+        if (await db.RequirementTraces.AsNoTracking().AnyAsync(x => x.ProjectId == projectId, ct)) return true;
+        return await db.CodeTraceabilityRecords.AsNoTracking().AnyAsync(x => x.ProjectId == projectId, ct);
     }
 
     private LadderConsumerManifestV2 BuildArtifactReadiness(ProjectLadderConfiguration configuration)
@@ -349,6 +441,14 @@ public sealed class ProjectLadderAuthoringService(
     private async Task<ProjectLadderReadModel> ToReadModelAsync(ProjectLadderConfiguration configuration, CancellationToken ct, bool canManage = false)
     {
         var effectivePolicy = ProjectLadderPolicyStorage.ResolvePersisted(configuration, configuration.ProjectId, policy);
+        // Keep this projection aligned with EditAsync's authoritative pre-save and post-claim checks. The
+        // Active state alone does not mean immutable: a new project may correct an empty effective ladder.
+        // Once any ladder-bound engineering content exists, the service returns false and EditAsync refuses
+        // the same request under its transaction/version guard.
+        var canEditStructure = canManage && !configuration.IsSealed
+            && (configuration.State != ProjectLadderConfigurationState.Active
+                || configuration.Classification != ProjectLadderConfigurationClassification.NonDefault
+                || !await HasLadderBoundContentAsync(configuration.ProjectId, ct));
         var history = await db.ProjectLadderConfigurationHistories.AsNoTracking()
             .Where(x => x.ConfigurationId == configuration.Id).OrderByDescending(x => x.Revision)
             .Select(x => new ProjectLadderHistoryReadModel(x.Revision, x.Actor, x.OccurredAt, x.Reason, x.CanonicalSnapshot,
@@ -389,6 +489,7 @@ public sealed class ProjectLadderAuthoringService(
         {
             EffectiveSteps = effectiveSteps,
             EffectiveRelationships = effectiveRelationships,
+            CanEditStructure = canEditStructure,
         };
     }
 }

@@ -12,7 +12,8 @@ const other = { program: { id: "other-program", name: "Other Program", code: "OT
   releases: [{ id: "other-build", version: "1.6", isReleased: false }],
 }] };
 const workspaces = [other, fms];
-const fmsPath = projectAreaPath(projectSlugOf("FMS Product Development"), "builds");
+const fmsPath = projectAreaPath("fms-project", "builds");
+const legacyFmsPath = projectAreaPath(projectSlugOf("FMS Product Development"), "builds");
 const context = { programId: "fms-program", projectId: "fms-project", releaseId: "fms-current" };
 
 async function mockShell(page: Page, load: () => Promise<unknown> = async () => workspaces) {
@@ -38,11 +39,17 @@ test("an authenticated root destination canonicalizes to the Projects portal", a
 test("delayed hydration retains a real project-card selection and exact build scope", async ({ page }) => {
   let deliver: (value: unknown) => void = () => { throw new Error("Workspace request has not started"); };
   const pending = new Promise(resolve => { deliver = resolve; });
-  await mockShell(page, () => pending);
+  let started = () => {};
+  const requested = new Promise<void>(resolve => { started = resolve; });
+  await mockShell(page, () => { started(); return pending; });
   await page.goto("/projects");
-  await page.getByRole("link", { name: "Open FMS Product Development", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Opening workspace" })).toBeVisible();
+  await requested;
+  // Cards must come from authorized server data, including the familiar FMS project.
+  await expect(page.locator("[data-project-card]")).toHaveCount(0);
   deliver(workspaces);
+  await page.getByRole("link", { name: "Open FMS Product Development", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(fmsPath + "$"));
+  await expect(page.locator(".contextBar")).toHaveCount(0);
   const build = page.getByRole("button", { name: /Open Build 1.6/i });
   await expect(build).toBeEnabled();
   await build.click();
@@ -68,13 +75,22 @@ test("project switches and browser history resolve the named project's own reque
   await mockShell(page);
   await page.goto(fmsPath);
   await page.getByRole("button", { name: "Projects", exact: true }).click();
-  const imported = page.waitForRequest(request => request.url().includes("/api/baseline-imports?projectId=other-project"));
+  const importRequests: string[] = [];
+  page.on("request", request => { if (request.url().includes("/api/baseline-imports?")) importRequests.push(request.url()); });
   await page.getByRole("link", { name: "Open DOORS Import Practice", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(projectAreaPath("other-project", "builds") + "$"));
+  await expect(page.getByRole("heading", { name: "DOORS Import Practice", exact: true })).toBeVisible();
+  expect(importRequests).toEqual([]);
+  const imported = page.waitForRequest(request => request.url().includes("/api/baseline-imports?projectId=other-project"));
+  await page.getByRole("button", { name: "Imported baselines", exact: true }).click();
   await imported;
   await page.getByRole("button", { name: "← Software Builds", exact: true }).click();
   await expect(page.getByRole("heading", { name: "DOORS Import Practice", exact: true })).toBeVisible();
   await page.goBack();
   await page.goBack();
+  await expect(page.getByRole("heading", { name: "DOORS Import Practice", exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/projects$/);
   await page.goBack();
   await expect(page.getByRole("heading", { name: "FMS Product Development", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /Open build 1.6/i })).toBeEnabled();
@@ -85,6 +101,13 @@ test("legacy project-wide document links discard obsolete build context", async 
   await page.goto("/programs/fms-program/projects/fms-project/releases/removed/documentation-center");
   await expect(page).toHaveURL(/\/programs\/fms-program\/projects\/fms-project\/documentation-center$/);
   await expect(page.getByRole("heading", { name: "Workspace unavailable", exact: true })).toHaveCount(0);
+});
+
+test("a legacy Project slug remains readable when it identifies one authorized Project", async ({ page }) => {
+  await mockShell(page);
+  await page.goto(legacyFmsPath);
+  await expect(page.getByRole("heading", { name: "FMS Product Development", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp("/projects/fms-product-development/builds$"));
 });
 
 test("workspace failures have a truthful retry state", async ({ page }) => {

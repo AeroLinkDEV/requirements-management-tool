@@ -7,6 +7,25 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class ManagedDocumentFileTests
 {
     [Fact]
+    public void Managed_template_preserves_external_approval_authority_through_release_without_exposing_backing_scope()
+    {
+        var publication = ControlledPublication("Draft", "DRAFT") with { Program = "Internal backing scope 1037" };
+        var draft = ProfessionalPublicationRenderer.Render(publication, "docx", "SDP-000001.01").Content;
+        var released = ManagedDocumentFileService.ApplyReleaseMarking(draft);
+        foreach (var bytes in new[] { draft, released })
+        {
+            var xml = WordDocumentStructure.ReadWordParts(bytes)["word/document.xml"];
+            Assert.DoesNotContain("Internal backing scope", xml);
+            Assert.DoesNotContain("Approval pending", xml);
+            Assert.Contains("Consult AeroLink for approval evidence bound to this exact revision and file hash.", xml);
+            Assert.Contains("Revision history at source generation", xml);
+        }
+        // Generated engineering publications still report the approval facts in their own exact snapshot.
+        var generated = ProfessionalPublicationRenderer.Render(publication with { ControlledStatusControls = false }, "docx", "generated").Content;
+        Assert.Contains("Approval pending", WordDocumentStructure.ReadWordParts(generated)["word/document.xml"]);
+    }
+
+    [Fact]
     public void Draft_renderer_places_the_named_watermark_in_the_word_header()
     {
         var bytes = ProfessionalPublicationRenderer.Render(Publication("Draft", "DRAFT"), "docx", "SDP-000001.01").Content;

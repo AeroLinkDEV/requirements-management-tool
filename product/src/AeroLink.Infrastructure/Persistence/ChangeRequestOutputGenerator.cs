@@ -11,6 +11,7 @@ public sealed class ChangeRequestOutputGenerator(AeroLinkDbContext db)
     {
         var scr = await db.SystemChangeRequests.AsNoTracking().Include(x => x.RequirementChanges).Include(x => x.ReviewCycles).ThenInclude(x => x.Steps).Include(x => x.AuditEvents).SingleOrDefaultAsync(x => x.Id == changeRequestId, ct); if (scr is null) return null;
         var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == scr.ProjectId, ct); var program = await db.Programs.AsNoTracking().SingleAsync(x => x.Id == project.ProgramId, ct); var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == scr.TargetReleaseId, ct);
+        var releaseLabel = await PublicationProgramContext.ResolveReleaseLabelAsync(db, project, program, release, ct);
         var actorIds = scr.AuditEvents.Select(x => x.ActorId).Append(scr.AuthorId).Distinct().ToList();
         var people = await db.UserAccounts.AsNoTracking().Where(x => actorIds.Contains(x.UserName)).ToDictionaryAsync(x => x.UserName, x => x.DisplayName, ct);
         string Person(string userName) => people.GetValueOrDefault(userName, userName);
@@ -30,9 +31,9 @@ public sealed class ChangeRequestOutputGenerator(AeroLinkDbContext db)
             ChangeRequestType.Interface => "Interface Control Change Request",
             _ => "Software Change Request",
         };
-        var publication = new ProfessionalPublication(project.SoftwareProduct, program.Name + " (" + program.Code + ")", project.Name, publicationTitle, scr.Title,
-            "Controlled change case, requirement impact, review decisions, and audit history", scr.BaseNumber, scr.Revision.ToString("D2"), Humanize(scr.State.ToString()), release.Version, "Not yet baseline-effective", Person(scr.AuthorId), scr.UpdatedAt, manifest,
-            new[] { ("Author", Person(scr.AuthorId)), ("Change-request type", scr.Type.ToString()), ("Target release", release.Version), ("Created", scr.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'")), ("Last updated", scr.UpdatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'")), ("Review cycle", latest is null ? "Not submitted" : latest.Sequence + " - " + latest.State), ("Review snapshot hash", latest?.SnapshotHash ?? "Not yet frozen for review") }, approvals,
+        var publication = new ProfessionalPublication(project.SoftwareProduct, await PublicationProgramContext.ResolveAsync(db, project, program, ct), project.Name, publicationTitle, scr.Title,
+            "Controlled change case, requirement impact, review decisions, and audit history", scr.BaseNumber, scr.Revision.ToString("D2"), Humanize(scr.State.ToString()), releaseLabel, "Not yet baseline-effective", Person(scr.AuthorId), scr.UpdatedAt, manifest,
+            new[] { ("Author", Person(scr.AuthorId)), ("Change-request type", scr.Type.ToString()), ("Target release", releaseLabel), ("Created", scr.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'")), ("Last updated", scr.UpdatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'")), ("Review cycle", latest is null ? "Not submitted" : latest.Sequence + " - " + latest.State), ("Review snapshot hash", latest?.SnapshotHash ?? "Not yet frozen for review") }, approvals,
             new[] { (scr.Revision.ToString("D2"), Humanize(scr.State.ToString()), scr.UpdatedAt.UtcDateTime.ToString("yyyy-MM-dd"), Person(scr.AuthorId)) }, sections);
         return ProfessionalPublicationRenderer.Render(publication, format, scr.DisplayNumber + "_" + SafeFileName(scr.Title));
     }

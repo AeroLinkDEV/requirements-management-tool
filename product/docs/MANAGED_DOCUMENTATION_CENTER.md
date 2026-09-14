@@ -95,6 +95,13 @@ operator refreshes from page one; they cannot shift records between pages in an 
 cross-filter, or oversized cursors fail closed with `400`. The browser shows the total register size and loads
 additional records on request, while a direct document URL loads the current record independently of its page.
 
+Release relationship targets are an existing exception to the first-page snapshot guarantee: releases have
+no immutable creation timestamp. Their bounded database pages use canonical numeric build identity, retained
+historical text and a stable ID tie-breaker; a concurrently created build may appear after the current cursor,
+and a build inserted before it requires refreshing page one. [Issue #1040](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1040)
+tracks a genuine snapshot boundary. A Problem Report without a target build retains its Project link; an
+explicit target resolves only that exact authorized Project/build and never falls back to a different build.
+
 Production PostgreSQL indexes cover the Project/type/steward/register orders, document/state/revision heads,
 review assignee/state, check-in time, attachment revision/logical version, relationship revision/time, and event
 document/time paths. Qualification targets a maximum response page of 100 and verifies multi-page uniqueness,
@@ -136,6 +143,20 @@ requires a new submission and signatures over a new snapshot.
 Install once per Windows user with `INSTALL_AEROLINK_DOCUMENT_CONNECTOR.bat`. The installer requires no local
 administrator rights and registers the `aerolink://` protocol for that user. Word must be installed only for
 editing and final PDF production.
+
+The explicit Windows qualification entry point is
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File product/scripts/Test-ProjectSetupWord.ps1`.
+Close existing Word sessions first. It creates a disposable Fresh project through the API test host, assigns
+its own fixture people through the personnel APIs, checks out a plan, edits/saves with installed Word, checks
+in, signs the technical review, invokes the production connector's Word release renderer, and accepts/signs
+the exact DOCX/PDF pair. Source/run records are retained under `product/artifacts/project-setup-word`; owned
+document hashes and Word version are retained in the temporary directory named in the log. A changed checkout
+or failed operation invalidates the run. No persistent AeroLink database or evidence store is used.
+
+This qualifies installed Word authoring/rendering with the new-project API lifecycle. Signed installation,
+protocol-handler enrollment, desktop connector UI/recovery and the supported Windows/Office matrix require
+their separate production-path qualification. Word's equivalent fixed-point watermark opacity is accepted
+without relaxing the required controlled shape, text, color or placement.
 
 Connector trust controls are deliberately small: HTTPS is required for remote servers; loopback HTTP is allowed
 for the local demonstration; launch tokens are one-use and short-lived; session access is scoped to one revision;

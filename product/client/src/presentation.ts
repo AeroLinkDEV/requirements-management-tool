@@ -372,14 +372,31 @@ export const targetsFor = (scope: 'System' | 'Software', level?: string): Docume
 /**
  * The one official software-build name, mirroring SoftwareBuildIdentifier.FromVersion on the server.
  *
- * This existed as three separate copies — the navigation identity, the builds landing page, and the domain —
- * and two of them read the minor part as a count and multiplied it by ten, so `1.10` produced `SW-01.100`.
- * The minor part is the decimal it is written as: `1.6` is six tenths and `1.10` is ten hundredths.
+ * Invalid persisted or user-entered text has no official identity. Returning `undefined` lets callers show an
+ * honest unavailable state instead of ever rendering `SW-NaN` or inventing a fallback build name.
  */
-export const officialBuildName = (version: string) => {
-  const [major, minor = ''] = (version ?? '').split('.')
-  const fraction = minor.length === 1 ? Number(minor) * 10 : Number(minor)
-  return `SW-${String(Number(major)).padStart(2, '0')}.${String(fraction).padStart(2, '0')}`
+export const officialBuildName = (version: string): string | undefined => {
+  const normalized = version.trim()
+  const match = /^(\d{1,2})\.(\d{1,2})$/.exec(normalized)
+  if (!match) return undefined
+  const major = Number(match[1])
+  const minorText = match[2]
+  const minor = Number(minorText)
+  if (!Number.isInteger(major) || !Number.isInteger(minor) || major > 99 || minor > 99) return undefined
+  const fraction = minorText.length === 1 ? minor * 10 : minor
+  return `SW-${String(major).padStart(2, '0')}.${String(fraction).padStart(2, '0')}`
+}
+
+/** Numeric key for version ordering. It does not imply ancestry or choose a build. */
+export const buildVersionOrder = (version: string): number | undefined => {
+  const normalized = version.trim()
+  const match = /^(\d{1,2})\.(\d{1,2})$/.exec(normalized)
+  if (!match) return undefined
+  const major = Number(match[1])
+  const minorText = match[2]
+  const minor = Number(minorText)
+  if (!Number.isInteger(major) || !Number.isInteger(minor) || major > 99 || minor > 99) return undefined
+  return major * 100 + (minorText.length === 1 ? minor * 10 : minor)
 }
 
 /**

@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { apiBase, apiLogin, login, openNavigationGroup, showcaseSeed } from './auth'
+import { buildVersionOrder } from '../src/presentation'
 
 test('Command Center renders the build-scoped software verification population', async ({ page, request }) => {
   await apiLogin(request)
@@ -33,41 +34,37 @@ test('Command Center renders the build-scoped software verification population',
   }
 })
 
-test('FMS selection opens the ordered, accessible Software Builds lineage', async ({ page }) => {
+test('FMS selection opens the actual, ordered Software Builds lineage', async ({ page, request }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(request)
+  const workspaces = await (await request.get(`${apiBase}/api/workspaces`)).json() as Array<{
+    program: { name: string }
+    projects: Array<{ project: { name: string }; releases: Array<{ version: string; isReleased: boolean; predecessorReleaseId?: string | null }> }>
+  }>
+  const project = workspaces.flatMap(workspace => workspace.projects).find(entry => entry.project.name === 'FMS Product Development')
+  expect(project).toBeTruthy()
+  const expectedVersions = project!.releases.map(release => release.version).sort((left, right) =>
+    (buildVersionOrder(left) ?? Number.MAX_SAFE_INTEGER) - (buildVersionOrder(right) ?? Number.MAX_SAFE_INTEGER))
   await login(page, 'admin', { openProject: false })
   await page.getByRole('link', { name: 'Open FMS Product Development' }).click()
 
-  await expect(page).toHaveURL(/\/projects\/fms-product-development\/builds$/)
+  await expect(page).toHaveURL(/\/projects\/[^/]+\/builds$/)
   await expect(page.getByRole('heading', { name: 'Software Builds', level: 1 })).toBeVisible()
   await expect(page.getByText('Select a build to explore or work on.')).toBeVisible()
 
   const cards = page.locator('[data-build-card]')
-  await expect(cards).toHaveCount(5)
+  await expect(cards).toHaveCount(expectedVersions.length)
   expect(await cards.evaluateAll(items => items.map(item => item.getAttribute('data-build-version'))))
-    .toEqual(['0.5', '1.0', '1.5', '1.6', 'next'])
-  await expect(page.getByText('Released', { exact: true })).toHaveCount(3)
+    .toEqual(expectedVersions)
+  await expect(page.getByText('Build lineage', { exact: true })).toBeVisible()
+  await expect(page.getByText('Future-build placeholder', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('Plan next build', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('Identity unavailable', { exact: true })).toHaveCount(0)
+  await expect(cards.locator('button:not(:disabled)')).toHaveCount(expectedVersions.length)
   await expect(cards.filter({ hasText: '1.6' }).getByText('In Work', { exact: true })).toBeVisible()
-  await expect(cards.filter({ hasText: '1.6' })).toHaveClass(/current/)
-  const plan = cards.filter({ hasText: 'Plan next build' })
-  await expect(plan).toContainText('Future-build placeholder')
-  await expect(plan).not.toContainText('Build 1.7')
-  await expect(page.getByRole('button', { name: 'Plan next build placeholder' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Plan next build placeholder' })).toHaveAttribute('title', 'No future build record has been created')
-
-  await expect(page.getByRole('button', { name: 'Open build 0.5' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Open build 1.0' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Open build 0.5' })).toHaveAttribute('title', 'Controlled workspace not available')
-  await expect(page.getByRole('button', { name: 'Open build 1.0' })).toHaveAttribute('title', 'Controlled workspace not available')
-  await expect(page.getByText(/shown for lineage only|controlled workspace is not available/)).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Open build 1.5' })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Open build 1.6' })).toBeEnabled()
-
-  const selectorUrl = page.url()
-  await page.getByRole('button', { name: 'Open build 0.5' }).click({ force: true })
-  await expect(page).toHaveURL(selectorUrl)
-  await expect(page.getByText(/requirement totals|traceability percentage|verification percentage/i)).toHaveCount(0)
-  await expect(page.getByText('Recent Activity', { exact: true })).toHaveCount(0)
+  const current = cards.filter({ hasText: '1.6' })
+  await expect(current.getByRole('button', { name: /Open build 1\.6/ })).toBeEnabled()
+  await expect(current).toContainText('Predecessor')
 
   if (process.env.AEROLINK_BUILDS_SCREENSHOT)
     await page.screenshot({ path: process.env.AEROLINK_BUILDS_SCREENSHOT, fullPage: true })
@@ -139,7 +136,7 @@ test('released Build 1.5 is a durable read-only workspace and exits explicitly',
 
   await page.locator('.requirementInspector').getByRole('button', { name: 'Close procedure detail' }).click()
   await page.getByRole('button', { name: 'Back to Software Builds' }).click()
-  await expect(page).toHaveURL(/\/projects\/fms-product-development\/builds$/)
+  await expect(page).toHaveURL(/\/projects\/[^/]+\/builds$/)
   await page.getByRole('button', { name: 'Open build 1.6' }).click()
   await expect(page.getByLabel('Active build 1.6')).toContainText('In work')
 })

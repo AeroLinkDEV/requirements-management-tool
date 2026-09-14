@@ -80,7 +80,6 @@
     "POST /api/release-campaigns/{}/reconcile-lifecycle-links",
     "POST /api/release-campaigns/{}/release",
     "POST /api/release-campaigns/{}/review",
-    "POST /api/releases",
     "POST /api/releases/{}/test-sets/{}/procedures",
     "POST /api/reqif/jobs/{}/cancel",
     "POST /api/reqif/jobs/{}/reject",

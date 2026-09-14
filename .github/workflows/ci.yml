@@ -949,6 +949,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./product/scripts/Get-AeroLinkTestPlan.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Windows test planner contract failed.' }
+      - name: Validate required project-setup provider evidence contracts
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/Test-ProjectSetupPostgres.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Project-setup PostgreSQL evidence contract failed.' }
       - name: Validate the durable test-diagnostics contract
         shell: powershell
         run: |
@@ -1569,6 +1575,11 @@ jobs:
             --logger "console;verbosity=normal" \
             --logger "trx;LogFileName=maintenance-qualification.trx" \
             --results-directory TestResults --blame-hang-timeout 6m
+      - name: Qualify project setup against PostgreSQL without skipped evidence
+        shell: pwsh
+        env:
+          AEROLINK_MIGRATIONS_CONNECTION: Host=127.0.0.1;Port=5432;Database=postgres;Username=aerolink;Password=ci-only-password
+        run: ./product/scripts/Test-ProjectSetupPostgres.ps1 -NoBuild -ResultsDirectory TestResults
       - name: Mark test complete
         if: always()
         continue-on-error: true
@@ -1579,7 +1590,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: postgresql-maintenance-qualification-${{ github.run_attempt }}
-          path: TestResults/maintenance-qualification.trx
+          path: |
+            TestResults/maintenance-qualification.trx
+            TestResults/project-setup-postgres-*.trx
           if-no-files-found: ignore
           retention-days: 7
       - name: Upload PostgreSQL startup diagnostics

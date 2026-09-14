@@ -248,6 +248,10 @@ export default function ApprovalConfigurationCenter({
     () => (data?.artifacts ?? []).reduce((total, item) => total + item.blockingStages, 0),
     [data],
   )
+  const unconfiguredTotal = useMemo(
+    () => (data?.artifacts ?? []).filter(item => !item.configured).length,
+    [data],
+  )
   const savedStages = useMemo(() => (artifact?.stages ?? []).map(stage => ({
     name: stage.name,
     kind: stage.kind,
@@ -343,6 +347,12 @@ export default function ApprovalConfigurationCenter({
                 requires a position nobody on this project holds, and work submitted under it will stop there.
               </p>
             )}
+            {unconfiguredTotal > 0 && (
+              <p className="approvalConfigAlarm" role="status">
+                <strong>{unconfiguredTotal} artifact type{unconfiguredTotal === 1 ? '' : 's'} require configuration.</strong>
+                A review or approval cannot complete until an authorized project manager configures and accepts its rule.
+              </p>
+            )}
 
             <div className="approvalConfigLayout">
               <nav className="artifactList" aria-label="Artifact types">
@@ -367,7 +377,7 @@ export default function ApprovalConfigurationCenter({
                             ? <>v{item.version} · {item.blockingStages > 0
                                 ? <span className="pill blocked">Cannot complete</span>
                                 : <span className="pill active">Active</span>}</>
-                            : <span className="pill muted">Not configured</span>}
+                            : <span className="pill blocked">Configuration required</span>}
                         </span>
                       </button>
                     </li>
@@ -384,9 +394,9 @@ export default function ApprovalConfigurationCenter({
                   <div className="procedureEmpty">
                     <h2>{subjectLabels[artifact.subject] ?? artifact.subject}</h2>
                     {!editing && <p>
-                      No procedure is recorded, so an author selects their own reviewers at submission and
-                      nothing checks the result against a written rule. This is not a blocked state — a rule
-                      nobody has written down yet does not stop work.
+                      No procedure is recorded or accepted for this artifact type. Work submitted under it cannot
+                      complete until an authorized project manager configures and explicitly accepts a standard
+                      ladder-appropriate review or approval rule.
                     </p>}
                     {data.canManage && !editing && <button type="button" className="primaryConfigAction" onClick={beginEdit}>Configure this artifact</button>}
                     {data.canManage && editing && <ConfigurationEditor

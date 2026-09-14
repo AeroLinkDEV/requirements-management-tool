@@ -405,11 +405,11 @@ test('Documentation Center back navigation retains a non-showcase Project across
   await page.getByRole('button', { name: new RegExp(`SQAP-${suffix}|Navigation SQAP ${suffix}`) }).click()
   await page.getByRole('button', { name: /Back to Software Builds/ }).click()
 
-  await expect(page).toHaveURL(new RegExp(`/projects/review-back-project-${suffix}/builds$`))
+  await expect(page).toHaveURL(`/projects/${workspace.project.id}/builds`)
   await page.reload({ waitUntil: 'load' })
-  await expect(page).toHaveURL(new RegExp(`/projects/review-back-project-${suffix}/builds$`))
+  await expect(page).toHaveURL(`/projects/${workspace.project.id}/builds`)
   await page.getByRole('button', { name: 'Imported baselines' }).click()
-  await expect(page).toHaveURL(new RegExp(`/projects/review-back-project-${suffix}/imported-baselines$`))
+  await expect(page).toHaveURL(`/projects/${workspace.project.id}/imported-baselines`)
 })
 
 test('the status filter shows human state labels while querying exact enum values', async ({ page, request }) => {

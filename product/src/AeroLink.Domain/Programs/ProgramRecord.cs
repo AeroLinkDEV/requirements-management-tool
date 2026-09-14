@@ -1,13 +1,20 @@
+using AeroLink.Domain.Common;
+
 namespace AeroLink.Domain.Programs;
 
 public sealed class ProgramRecord
 {
     private ProgramRecord() { }
     public ProgramRecord(string name, string code)
+        : this(Guid.NewGuid(), name, code) { }
+
+    /// <summary>Rehydrates an identity allocated by a resumable project setup draft.</summary>
+    internal ProgramRecord(Guid id, string name, string code)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Program name is required.", nameof(name));
         if (string.IsNullOrWhiteSpace(code)) throw new ArgumentException("Program code is required.", nameof(code));
-        Id = Guid.NewGuid();
+        if (id == Guid.Empty) throw new ArgumentException("Program identity is required.", nameof(id));
+        Id = id;
         Name = name.Trim();
         Code = code.Trim().ToUpperInvariant();
     }
@@ -21,11 +28,16 @@ public sealed class ProjectRecord
 {
     private ProjectRecord() { }
     public ProjectRecord(Guid programId, string name, string softwareProduct)
+        : this(Guid.NewGuid(), programId, name, softwareProduct) { }
+
+    /// <summary>Rehydrates an identity allocated by a resumable project setup draft.</summary>
+    internal ProjectRecord(Guid id, Guid programId, string name, string softwareProduct)
     {
         if (programId == Guid.Empty) throw new ArgumentException("Program is required.", nameof(programId));
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Project name is required.", nameof(name));
         if (string.IsNullOrWhiteSpace(softwareProduct)) throw new ArgumentException("Software product is required.", nameof(softwareProduct));
-        Id = Guid.NewGuid();
+        if (id == Guid.Empty) throw new ArgumentException("Project identity is required.", nameof(id));
+        Id = id;
         ProgramId = programId;
         Name = name.Trim();
         SoftwareProduct = softwareProduct.Trim();
@@ -41,12 +53,18 @@ public sealed class SoftwareRelease
 {
     private SoftwareRelease() { }
     public SoftwareRelease(Guid projectId, string version, bool isReleased, Guid? predecessorReleaseId = null)
+        : this(Guid.NewGuid(), projectId, version, isReleased, predecessorReleaseId) { }
+
+    /// <summary>Rehydrates an identity allocated by a resumable project setup draft.</summary>
+    internal SoftwareRelease(Guid id, Guid projectId, string version, bool isReleased, Guid? predecessorReleaseId = null)
     {
         if (projectId == Guid.Empty) throw new ArgumentException("Project is required.", nameof(projectId));
         if (string.IsNullOrWhiteSpace(version)) throw new ArgumentException("Release version is required.", nameof(version));
-        Id = Guid.NewGuid();
+        if (id == Guid.Empty) throw new ArgumentException("Release identity is required.", nameof(id));
+        Id = id;
         ProjectId = projectId;
         Version = version.Trim();
+        CanonicalIdentity = SoftwareBuildIdentifier.FromVersion(Version);
         IsReleased = isReleased;
         PredecessorReleaseId = predecessorReleaseId;
     }
@@ -54,9 +72,16 @@ public sealed class SoftwareRelease
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
     public string Version { get; private set; } = string.Empty;
+    /// <summary>
+    /// The canonical controlled identity for releases created after the canonical build authority was added.
+    /// Historical rows may be null until an explicit, audited migration backfills them; raw Version is never
+    /// rewritten in that process.
+    /// </summary>
+    public string? CanonicalIdentity { get; private set; }
     public Guid? PredecessorReleaseId { get; private set; }
     public bool IsReleased { get; private set; }
     public DateTimeOffset? ReleasedAt { get; private set; }
+    internal void SetCanonicalIdentity(string canonicalIdentity) => CanonicalIdentity = canonicalIdentity;
     public void MarkReleased(DateTimeOffset now) { if (IsReleased) throw new InvalidOperationException("The software release is already released."); IsReleased = true; ReleasedAt = now; }
 }
 

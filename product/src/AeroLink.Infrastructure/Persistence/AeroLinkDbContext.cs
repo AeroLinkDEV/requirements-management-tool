@@ -57,6 +57,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         => PendingLadderSeals.Add(new(configuration.Id, projectId, kind, identity));
 
     public DbSet<ProgramRecord> Programs => Set<ProgramRecord>();
+    public DbSet<ProjectSetupDraft> ProjectSetupDrafts => Set<ProjectSetupDraft>();
+    public DbSet<ProjectSetupSourcePackage> ProjectSetupSourcePackages => Set<ProjectSetupSourcePackage>();
+    public DbSet<ProjectInceptionSourceRecord> ProjectInceptionSourceRecords => Set<ProjectInceptionSourceRecord>();
+    public DbSet<ProjectRepositoryConfiguration> ProjectRepositoryConfigurations => Set<ProjectRepositoryConfiguration>();
     public DbSet<IdentifierSequence> IdentifierSequences => Set<IdentifierSequence>();
     public DbSet<ShowcaseUpgradeStep> ShowcaseUpgradeSteps => Set<ShowcaseUpgradeStep>();
     public DbSet<ProjectRecord> Projects => Set<ProjectRecord>();
@@ -328,6 +332,27 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         // proposed requirement/revision in a bulk import or fresh showcase seed.
         var localRequests = SystemChangeRequests.Local.ToDictionary(x => x.Id);
         var localRequirements = Requirements.Local.ToDictionary(x => x.Id);
+        // An unassigned target verification artifact is valid only when the same unit of work proves the full
+        // inception chain: a tracked source record for this project and target, its reconciled/materialized
+        // package, and the completed draft that owns that package. Ordinary authoring with a blank owner must
+        // still fail closed, even when another valid candidate in this batch has already sealed the ladder.
+        var inceptionVerificationTargets = (from record in ProjectInceptionSourceRecords.Local
+                                             join package in ProjectSetupSourcePackages.Local on record.PackageId equals package.Id
+                                             join draft in ProjectSetupDrafts.Local on package.DraftId equals draft.Id
+                                             join baseline in CandidateBaselines.Local on record.BaselineId equals baseline.Id
+                                             join target in TestProcedures.Local on record.TargetId equals target.Id
+                                             where record.TargetKind is "TestCase" or "TestProcedure"
+                                                 && record.ProjectId == package.MaterializedProjectId
+                                                 && record.BaselineId == package.MaterializedBaselineId
+                                                 && baseline.ProjectId == record.ProjectId
+                                                 && target.ProjectId == record.ProjectId
+                                                 && ((record.TargetKind == "TestCase" && target.ArtifactKind == VerificationArtifactKind.Case)
+                                                     || (record.TargetKind == "TestProcedure" && target.ArtifactKind == VerificationArtifactKind.Procedure))
+                                                 && package.Stage == ProjectSetupSourceStage.Reconciled
+                                                 && !string.IsNullOrWhiteSpace(package.AssertionHash)
+                                                 && draft.State == ProjectSetupState.Completed
+                                                 && draft.CompletedProjectId == record.ProjectId
+                                             select (record.ProjectId, record.TargetId, record.TargetKind)).ToHashSet();
 
         foreach (var entry in ChangeTracker.Entries<RequirementChange>().Where(x => x.State == EntityState.Added))
         {
@@ -367,7 +392,13 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             candidates.Add((entry.Entity.ProjectId,
                 entry.Entity.ArtifactKind == VerificationArtifactKind.Case ? "test-case" : "test-procedure",
                 entry.Entity.BaseNumber,
-                entry.Entity.OwnerId));
+                // Inherited inception verification starts unassigned by policy. Only a tracked source record
+                // proves that this is such a materialization; ordinary authoring still needs an explicit owner.
+                string.IsNullOrWhiteSpace(entry.Entity.OwnerId)
+                    ? inceptionVerificationTargets.Contains((entry.Entity.ProjectId, entry.Entity.Id,
+                        entry.Entity.ArtifactKind == VerificationArtifactKind.Case ? "TestCase" : "TestProcedure"))
+                        ? LadderSealActor ?? "" : ""
+                    : entry.Entity.OwnerId));
         foreach (var entry in ChangeTracker.Entries<TestChangeReview>().Where(x => x.State == EntityState.Added))
             candidates.Add((entry.Entity.ProjectId, "test-change-review",
                 string.IsNullOrWhiteSpace(entry.Entity.DisplayNumber) ? entry.Entity.Id.ToString("D") : entry.Entity.DisplayNumber,
@@ -434,6 +465,88 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Name).HasMaxLength(200).IsRequired();
             b.Property(x => x.SoftwareProduct).HasMaxLength(200).IsRequired();
             b.HasIndex(x => new { x.ProgramId, x.Name }).IsUnique();
+        });
+        modelBuilder.Entity<ProjectSetupDraft>(b =>
+        {
+            b.ToTable("project_setup_drafts", t => t.HasCheckConstraint("CK_project_setup_draft_version", "\"Version\" > 0"));
+            b.HasKey(x => x.Id);
+            b.Property(x => x.CreatorUserName).HasMaxLength(100).IsRequired();
+            b.Property(x => x.InternalProgramName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.InternalProgramCode).HasMaxLength(30).IsRequired();
+            b.Property(x => x.ProjectName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.SoftwareProduct).HasMaxLength(200).IsRequired();
+            b.Property(x => x.InitialReleaseVersion).HasMaxLength(40).IsRequired();
+            b.Property(x => x.InitialReleaseCanonicalIdentity).HasMaxLength(40).IsRequired();
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.CurrentStep).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.StartKind).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.SelectedCategoriesJson).IsRequired();
+            b.Property(x => x.LadderJson).IsRequired();
+            b.Property(x => x.ReviewRulesJson).IsRequired();
+            b.Property(x => x.RepositoryJson).IsRequired();
+            b.Property(x => x.MappingJson).IsRequired();
+            b.Property(x => x.ReviewRulesAcceptanceHash).HasMaxLength(64);
+            b.Property(x => x.FinalizationOperationKey).HasMaxLength(200);
+            b.Property(x => x.FinalizationResultJson);
+            b.Property(x => x.Version).IsConcurrencyToken();
+            b.HasIndex(x => x.InternalProgramCode).IsUnique();
+            b.HasIndex(x => x.InternalProgramId).IsUnique();
+            b.HasIndex(x => x.ProjectId).IsUnique();
+            b.HasIndex(x => x.InitialReleaseId).IsUnique();
+            b.HasIndex(x => x.InceptionBaselineId).IsUnique();
+            b.HasIndex(x => new { x.CreatorUserId, x.State });
+            b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatorUserId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ProjectSetupSourcePackage>(b =>
+        {
+            b.ToTable("project_setup_source_packages", t => t.HasCheckConstraint("CK_project_setup_source_package_size",
+                "((\"Kind\" = 'AeroLinkBaseline' AND \"SizeBytes\" = 0) OR (\"Kind\" = 'ExternalBaseline' AND \"SizeBytes\" > 0))"));
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.SourceState).HasMaxLength(30);
+            b.Property(x => x.FileName).HasMaxLength(400).IsRequired();
+            b.Property(x => x.Format).HasMaxLength(20).IsRequired();
+            b.Property(x => x.Sha256).HasMaxLength(64).IsRequired();
+            b.Property(x => x.Payload).IsRequired();
+            b.Property(x => x.SourceTool).HasMaxLength(200).IsRequired();
+            b.Property(x => x.MetadataJson).IsRequired(); b.Property(x => x.AnalysisJson).IsRequired();
+            b.Property(x => x.SelectedCategoriesJson).IsRequired(); b.Property(x => x.MappingJson).IsRequired();
+            b.Property(x => x.ReconciliationJson).IsRequired(); b.Property(x => x.ManifestHash).HasMaxLength(64);
+            b.Property(x => x.Stage).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.CapturedBy).HasMaxLength(100).IsRequired(); b.Property(x => x.Version).IsConcurrencyToken();
+            b.Property(x => x.AssertionHash).HasMaxLength(64);
+            b.HasIndex(x => new { x.DraftId, x.Sha256 }).IsUnique();
+            b.HasIndex(x => x.MaterializedProjectId);
+            b.HasOne<ProjectSetupDraft>().WithMany().HasForeignKey(x => x.DraftId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ProjectInceptionSourceRecord>(b =>
+        {
+            b.ToTable("project_inception_source_records"); b.HasKey(x => x.Id);
+            b.Property(x => x.TargetKind).HasMaxLength(40).IsRequired();
+            b.Property(x => x.SourceKey).HasMaxLength(400).IsRequired(); b.Property(x => x.SourceModule).HasMaxLength(300).IsRequired();
+            b.Property(x => x.SourceIdentifier).HasMaxLength(300).IsRequired(); b.Property(x => x.SourceRevision).HasMaxLength(120).IsRequired();
+            b.Property(x => x.SourceState).HasMaxLength(80).IsRequired(); b.Property(x => x.SourceSnapshotJson).IsRequired();
+            b.HasIndex(x => new { x.PackageId, x.SourceKey, x.TargetKind }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.TargetKind, x.TargetId });
+            b.HasOne<ProjectSetupSourcePackage>().WithMany().HasForeignKey(x => x.PackageId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ProjectRepositoryConfiguration>(b =>
+        {
+            b.ToTable("project_repository_configurations");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Mode).HasConversion<string>().HasMaxLength(30).IsRequired();
+            b.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.Provider).HasMaxLength(80);
+            b.Property(x => x.Endpoint).HasMaxLength(500);
+            b.Property(x => x.ConfiguredBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.LastVerifiedBy).HasMaxLength(100);
+            b.Property(x => x.RemotePathWithNamespace).HasMaxLength(300);
+            b.Property(x => x.LastVerificationFailureBy).HasMaxLength(100);
+            b.Property(x => x.Version).IsConcurrencyToken();
+            b.HasIndex(x => x.ProjectId).IsUnique();
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<ProjectLadderConfiguration>(b =>
         {
@@ -623,7 +736,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             b.ToTable("software_releases"); b.HasKey(x => x.Id);
             b.Property(x => x.Version).HasMaxLength(40).IsRequired();
+            b.Property(x => x.CanonicalIdentity).HasMaxLength(40);
             b.HasIndex(x => new { x.ProjectId, x.Version }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.CanonicalIdentity }).IsUnique();
             b.HasIndex(x => x.PredecessorReleaseId);
             b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.PredecessorReleaseId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -747,11 +862,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.State).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.Carries).HasConversion<string>().HasMaxLength(60);
             b.Property(x => x.SourceSystem).HasMaxLength(120).IsRequired();
-            b.Property(x => x.SourceSystemVersion).HasMaxLength(60).IsRequired();
-            b.Property(x => x.SourceBaselineName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.SourceSystemVersion).HasMaxLength(60);
+            b.Property(x => x.SourceBaselineName).HasMaxLength(200);
             b.Property(x => x.ExtractFileName).HasMaxLength(400).IsRequired();
             b.Property(x => x.ExtractSha256).HasMaxLength(64).IsRequired();
-            b.Property(x => x.ExtractedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.ExtractedBy).HasMaxLength(100);
             b.Property(x => x.StartedBy).HasMaxLength(100).IsRequired();
             b.Property(x => x.AcceptedBy).HasMaxLength(100);
             b.Property(x => x.PackageManifestHash).HasMaxLength(64);
@@ -1045,13 +1160,14 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.DerivedRationale).HasMaxLength(4000).IsRequired();
             b.Property(x => x.ParentRevisionIdsJson).IsRequired();
             b.HasIndex(x => new { x.ArtifactId, x.Revision }).IsUnique();
-            b.HasIndex(x => x.SourceChangeRequestId); b.HasIndex(x => x.SourceBaselineImportId); b.HasIndex(x => x.EffectiveBaselineId);
+            b.HasIndex(x => x.SourceChangeRequestId); b.HasIndex(x => x.SourceBaselineImportId); b.HasIndex(x => x.SourceBaselineId); b.HasIndex(x => x.EffectiveBaselineId);
             b.HasOne<RequirementArtifact>().WithMany().HasForeignKey(x => x.ArtifactId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SystemChangeRequest>().WithMany().HasForeignKey(x => x.SourceChangeRequestId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<BaselineImport>().WithMany().HasForeignKey(x => x.SourceBaselineImportId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.SourceBaselineId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.EffectiveBaselineId).OnDelete(DeleteBehavior.Restrict);
             b.ToTable(t => t.HasCheckConstraint("CK_requirement_revisions_origin_xor",
-                "((\"OriginKind\" = 'ChangeRequest' AND \"SourceChangeRequestId\" IS NOT NULL AND \"SourceBaselineImportId\" IS NULL) OR (\"OriginKind\" = 'ExternalSourcePackage' AND \"SourceChangeRequestId\" IS NULL AND \"SourceBaselineImportId\" IS NOT NULL))"));
+                "((\"OriginKind\" = 'ChangeRequest' AND \"SourceChangeRequestId\" IS NOT NULL AND \"SourceBaselineImportId\" IS NULL AND \"SourceBaselineId\" IS NULL) OR (\"OriginKind\" = 'ExternalSourcePackage' AND \"SourceChangeRequestId\" IS NULL AND \"SourceBaselineImportId\" IS NOT NULL AND \"SourceBaselineId\" IS NULL) OR (\"OriginKind\" = 'InheritedAeroLinkBaseline' AND \"SourceChangeRequestId\" IS NULL AND \"SourceBaselineImportId\" IS NULL AND \"SourceBaselineId\" IS NOT NULL))"));
         });
         modelBuilder.Entity<BaselineRequirementSelection>(b =>
         {
@@ -1814,6 +1930,12 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.MergeRequestReference).HasMaxLength(80); b.Property(x => x.MergeRequestTitle).HasMaxLength(500);
             b.Property(x => x.MergeRequestUrl).HasMaxLength(1000); b.Property(x => x.MergeCommitSha).HasMaxLength(64);
             b.Property(x => x.NoCodeChangeRationale).HasMaxLength(4000); b.Property(x => x.RecordedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.VerifiedRemoteProjectId);
+            b.Property(x => x.VerifiedRepositoryEndpoint).HasMaxLength(500);
+            b.Property(x => x.VerifiedRepositoryPath).HasMaxLength(300);
+            b.Property(x => x.RepositoryConfigurationVersion);
+            b.Property(x => x.RepositoryVerifiedAt);
+            b.Property(x => x.RepositoryVerifiedBy).HasMaxLength(100);
             b.HasIndex(x => new { x.ReleaseId, x.RequirementRevisionId }).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.ReleaseId });
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
@@ -2017,6 +2139,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                          .Where(x => x.State is EntityState.Added or EntityState.Modified))
                 entry.Entity.ValidateOriginForPersistence();
 
+            await ValidateReleaseCanonicalIdentitiesAsync(cancellationToken);
+
             // The save contract is intentionally visible here. Each phase may mutate tracked state or perform
             // pre-save I/O, but only EF's base save writes. Callers that need all pre-save reads and the write
             // in one transaction must provide an explicit transaction; EF's implicit transaction starts at base
@@ -2046,6 +2170,58 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         {
             PendingLadderSeals.Clear();
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Enforces canonical release identity at the save boundary as well as at HTTP entry points. Historical rows
+    /// can predate CanonicalIdentity, so they are parsed and checked here before any new row is written; an
+    /// invalid or colliding historical inventory fails closed instead of relying on nullable-index behavior.
+    /// </summary>
+    private async Task ValidateReleaseCanonicalIdentitiesAsync(CancellationToken ct)
+    {
+        ChangeTracker.DetectChanges();
+        var added = ChangeTracker.Entries<SoftwareRelease>()
+            .Where(x => x.State == EntityState.Added).Select(x => x.Entity).ToArray();
+        if (added.Length == 0) return;
+
+        foreach (var projectId in added.Select(x => x.ProjectId).Distinct())
+        {
+            var existing = await Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
+            var seen = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var release in existing)
+            {
+                SoftwareBuildIdentifier.Parsed parsed;
+                try { parsed = SoftwareBuildIdentifier.Parse(release.Version); }
+                catch (DomainException ex)
+                {
+                    throw new DomainException($"Release identity review is required before saving another build: existing raw version '{release.Version}' is invalid. {ex.Message}");
+                }
+                var key = parsed.OfficialName;
+                if (seen.TryGetValue(key, out var prior))
+                    throw new DomainException($"Release identity review is required: '{prior}' and '{release.Version}' share canonical identity {key}.");
+                seen[key] = release.Version;
+                if (release.CanonicalIdentity is not null && !string.Equals(release.CanonicalIdentity, key, StringComparison.Ordinal))
+                    throw new DomainException($"Release identity review is required: stored canonical identity for '{release.Version}' is inconsistent.");
+            }
+
+            foreach (var release in added.Where(x => x.ProjectId == projectId))
+            {
+                SoftwareBuildIdentifier.Parsed parsed;
+                try { parsed = SoftwareBuildIdentifier.Parse(release.Version); }
+                catch (DomainException ex) { throw new DomainException($"Invalid software build version: {ex.Message}"); }
+                var key = parsed.OfficialName;
+                if (release.CanonicalIdentity is null)
+                    release.SetCanonicalIdentity(key);
+                if (!string.Equals(release.CanonicalIdentity, key, StringComparison.Ordinal))
+                    throw new DomainException($"Release '{release.Version}' has an incorrect canonical identity.");
+                if (seen.TryGetValue(key, out var prior))
+                    throw new DomainException($"Build '{release.Version}' conflicts with existing canonical identity {key} from '{prior}'.");
+                if (added.Count(x => x.ProjectId == projectId &&
+                        string.Equals(x.CanonicalIdentity ?? SoftwareBuildIdentifier.FromVersion(x.Version), key, StringComparison.Ordinal)) > 1)
+                    throw new DomainException($"The project cannot save more than one release with canonical identity {key}.");
+                seen[key] = release.Version;
+            }
         }
     }
 }

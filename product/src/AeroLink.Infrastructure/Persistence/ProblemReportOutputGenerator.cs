@@ -39,6 +39,9 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
             ? await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == releaseId && x.ProjectId == snapshot.ProjectId, ct)
             : null;
         if (snapshot.TargetReleaseId is not null && release is null) return null;
+        var releaseLabel = release is null
+            ? "Unassigned"
+            : await PublicationProgramContext.ResolveReleaseLabelAsync(db, project, program, release, ct);
 
         var richValues = RichValues(snapshot);
         // A frozen snapshot is allowed to read the immutable bytes of an attachment that was subsequently
@@ -81,7 +84,7 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
             ("Priority", snapshot.Priority),
             ("Origin", snapshot.Origin),
             ("Affected configuration", snapshot.AffectedConfiguration),
-            ("Target build", release?.Version ?? "Unassigned"),
+            ("Target build", releaseLabel),
             ("Snapshot schema", snapshotSchema.ToString()),
             ("Snapshot SHA-256", snapshotHash),
         };
@@ -89,7 +92,7 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
             metadata.Insert(1, ("Legacy type", legacyType));
         var publication = new ProfessionalPublication(
             project.SoftwareProduct,
-            program.Name + " (" + program.Code + ")",
+            await PublicationProgramContext.ResolveAsync(db, project, program, ct),
             project.Name,
             "Problem Report",
             snapshot.Title,
@@ -97,7 +100,7 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
             snapshot.DisplayNumber,
             snapshot.Revision.ToString("D2"),
             snapshot.State,
-            release?.Version ?? "Unassigned",
+            releaseLabel,
             "Project-scoped controlled record",
             snapshot.ReportedBy,
             snapshot.UpdatedAt,

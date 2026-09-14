@@ -328,6 +328,7 @@
         "LegacyProcedureManifestBootstrapApiTests",
         "LiveTestRegressionApiTests",
         "ManagedDocumentApiTests",
+        "ManagedDocumentApiTests.ProjectSetup",
         "ManagedDocumentRecoveryApiTests",
         "ManualTestChangeRequestApiTests",
         "NotificationOperationsApiTests",
@@ -357,6 +358,15 @@
         "ProjectConfigurationApiTests",
         "ProjectLeadershipApiTests",
         "ProjectPersonnelApiTests",
+        "ProjectRepositoryApiTests",
+        "ProjectSetupAuthorizationApiTests",
+        "ProjectSetupCodeEvidenceApiTests",
+        "ProjectSetupDiscoveryApiTests",
+        "ProjectSetupInceptionApiTests",
+        "ProjectSetupKestrelQualificationTests",
+        "ProjectSetupPostgresQualificationTests",
+        "ProjectSetupServiceQualificationTests",
+        "ProjectSetupSourceOptionsApiTests",
         "RebaseRequirementChangeTests",
         "ReleaseCampaignExactIntentApiTests",
         "ReleasedExecutionEvidenceApiTests",
@@ -463,7 +473,8 @@
       "path": "/api/baseline-imports/{id:guid}/accept",
       "file": "BaselineImportEndpoints.cs",
       "coveredBy": [
-        "BaselineImportApiTests"
+        "BaselineImportApiTests",
+        "ProjectSetupPostgresQualificationTests"
       ]
     },
     {
@@ -637,6 +648,7 @@
         "ProblemReportImpactEvidenceApiTests",
         "ProgramRoleAuthorityApiTests",
         "ProjectConfigurationApiTests",
+        "ProjectSetupServiceQualificationTests",
         "SoftwareChangeRequestLevelHistoryTests",
         "VerificationVocabularyApiTests"
       ]
@@ -659,6 +671,7 @@
       "file": "ChangeRequestEndpoints.cs",
       "coveredBy": [
         "ChangeRequestReviewRationaleApiTests",
+        "ProjectSetupServiceQualificationTests",
         "RestartReviewApiTests",
         "ReviewCommentApiTests",
         "TestChangeRequestReviewWorkflowTests"
@@ -773,6 +786,7 @@
         "AuthoredSectionTests",
         "ChangeRequestReviewRationaleApiTests",
         "ChangeRequestUpstreamTraceApiTests",
+        "ProjectSetupServiceQualificationTests",
         "TestChangeRequestReviewWorkflowTests",
         "VerificationVocabularyApiTests",
         "WithdrawChangeRequestApiTests"
@@ -791,7 +805,8 @@
       "path": "/api/code-traceability",
       "file": "CodeTraceabilityEndpoints.cs",
       "coveredBy": [
-        "CodeTraceabilityApiTests"
+        "CodeTraceabilityApiTests",
+        "ProjectSetupCodeEvidenceApiTests"
       ]
     },
     {
@@ -906,7 +921,8 @@
       "path": "/api/document-connector/{grantId:guid}/release-candidate",
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
-        "ManagedDocumentApiTests"
+        "ManagedDocumentApiTests",
+        "ManagedDocumentApiTests.ProjectSetup"
       ]
     },
     {
@@ -915,6 +931,7 @@
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
         "ManagedDocumentApiTests",
+        "ManagedDocumentApiTests.ProjectSetup",
         "ManagedDocumentRecoveryApiTests"
       ]
     },
@@ -1276,6 +1293,8 @@
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
         "ManagedDocumentApiTests",
+        "ManagedDocumentApiTests.BuildIdentity",
+        "ManagedDocumentApiTests.ProjectSetup",
         "ManagedDocumentRecoveryApiTests"
       ]
     },
@@ -1284,7 +1303,8 @@
       "path": "/api/managed-documents/{id:guid}/links",
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
-        "ManagedDocumentApiTests"
+        "ManagedDocumentApiTests",
+        "ManagedDocumentApiTests.BuildIdentity"
       ]
     },
     {
@@ -1340,6 +1360,7 @@
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
         "ManagedDocumentApiTests",
+        "ManagedDocumentApiTests.ProjectSetup",
         "ManagedDocumentRecoveryApiTests"
       ]
     },
@@ -1374,6 +1395,7 @@
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
         "ManagedDocumentApiTests",
+        "ManagedDocumentApiTests.ProjectSetup",
         "ManagedDocumentRecoveryApiTests"
       ]
     },
@@ -1751,6 +1773,67 @@
     },
     {
       "method": "POST",
+      "path": "/api/project-setups",
+      "file": "ProjectSetupEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupApiTests",
+        "ProjectSetupAuthorizationApiTests",
+        "ProjectSetupBoundaryRegressionApiTests",
+        "ProjectSetupDiscoveryApiTests",
+        "ProjectSetupInceptionApiTests",
+        "ProjectSetupKestrelQualificationTests",
+        "ProjectSetupLadderCapabilityApiTests",
+        "ProjectSetupServiceQualificationTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/project-setups/{draftId:guid}/finalize",
+      "file": "ProjectSetupEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupApiTests",
+        "ProjectSetupAuthorizationApiTests",
+        "ProjectSetupInceptionApiTests",
+        "ProjectSetupLadderCapabilityApiTests",
+        "ProjectSetupServiceQualificationTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/project-setups/{draftId:guid}/save-and-exit",
+      "file": "ProjectSetupEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupDiscoveryApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/project-setups/{draftId:guid}/source/native",
+      "file": "ProjectSetupSourceEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupAuthorizationApiTests",
+        "ProjectSetupInceptionApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/project-setups/{draftId:guid}/source/reconcile",
+      "file": "ProjectSetupSourceEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupInceptionApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/project-setups/{draftId:guid}/source/upload",
+      "file": "ProjectSetupSourceEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupInceptionApiTests",
+        "ProjectSetupKestrelQualificationTests"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/projects/{projectId:guid}/configuration/activate",
       "file": "ProjectConfigurationEndpoints.cs",
       "coveredBy": [
@@ -1783,9 +1866,11 @@
       "path": "/api/projects/{projectId:guid}/personnel",
       "file": "PersonnelEndpoints.cs",
       "coveredBy": [
+        "ManagedDocumentApiTests.ProjectSetup",
         "PersonnelDirectoryApiTests",
         "ProjectLeadershipApiTests",
         "ProjectPersonnelApiTests",
+        "ProjectSetupServiceQualificationTests",
         "RosterAuthoritySeparationTests",
         "WorkflowAuthorityCutoverApiTests"
       ]
@@ -1797,6 +1882,15 @@
       "coveredBy": [
         "ApprovalConfigurationApiTests",
         "WorkflowAuthorityCutoverApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{projectId:guid}/repository/verify",
+      "file": "ProjectRepositoryEndpoints.cs",
+      "coveredBy": [
+        "ProjectRepositoryApiTests",
+        "ProjectSetupCodeEvidenceApiTests"
       ]
     },
     {
@@ -1938,7 +2032,10 @@
       "method": "POST",
       "path": "/api/releases",
       "file": "WorkspaceEndpoints.cs",
-      "coveredBy": []
+      "coveredBy": [
+        "ProjectSetupBoundaryRegressionApiTests",
+        "ProjectSetupPostgresQualificationTests"
+      ]
     },
     {
       "method": "POST",
@@ -2376,6 +2473,8 @@
       "coveredBy": [
         "NotificationOperationsApiTests",
         "ProcedureDiscussionApiTests",
+        "ProjectSetupApiTests",
+        "ProjectSetupBoundaryRegressionApiTests",
         "SecurityHardeningTests",
         "TestProcedureDocumentApiTests",
         "VerificationVocabularyApiTests"
@@ -2464,6 +2563,29 @@
     },
     {
       "method": "PUT",
+      "path": "/api/project-setups/{draftId:guid}",
+      "file": "ProjectSetupEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupApiTests",
+        "ProjectSetupAuthorizationApiTests",
+        "ProjectSetupBoundaryRegressionApiTests",
+        "ProjectSetupDiscoveryApiTests",
+        "ProjectSetupInceptionApiTests",
+        "ProjectSetupLadderCapabilityApiTests",
+        "ProjectSetupServiceQualificationTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/project-setups/{draftId:guid}/source/configuration",
+      "file": "ProjectSetupSourceEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupAuthorizationApiTests",
+        "ProjectSetupInceptionApiTests"
+      ]
+    },
+    {
+      "method": "PUT",
       "path": "/api/projects/{projectId:guid}/approval-configuration/{subject}",
       "file": "ApprovalConfigurationEndpoints.cs",
       "coveredBy": [
@@ -2497,6 +2619,16 @@
       "file": "ProjectLeadershipEndpoints.cs",
       "coveredBy": [
         "ProjectLeadershipApiTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/{projectId:guid}/repository",
+      "file": "ProjectRepositoryEndpoints.cs",
+      "coveredBy": [
+        "ProjectRepositoryApiTests",
+        "ProjectSetupCodeEvidenceApiTests",
+        "ProjectSetupPostgresQualificationTests.Repository"
       ]
     },
     {

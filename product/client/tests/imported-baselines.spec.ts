@@ -13,7 +13,7 @@ test.describe('imported baselines', () => {
 
   async function openImports(page: import('@playwright/test').Page) {
     await login(page, 'admin', { openProject: false })
-    if (await page.getByRole('heading', { name: 'Projects' }).count()) {
+    if (await page.getByRole('heading', { name: 'Projects', exact: true }).count()) {
       await page.getByRole('link', { name: 'Open FMS Product Development' }).click()
       await expect(page.getByRole('heading', { name: 'Software Builds' })).toBeVisible()
     }
@@ -23,28 +23,22 @@ test.describe('imported baselines', () => {
     await expect(page.getByRole('heading', { name: 'Imported baselines' })).toBeVisible()
   }
 
-  test('the practice project opens its own import page, and stays on it', async ({ page }) => {
-    await login(page, 'admin', { openProject: false })
+  test('an authorized project opens its own import page, and stays on it', async ({ page }) => {
+    await openImports(page)
+    const projectId = new URL(page.url()).pathname.split('/')[2]
+    expect(projectId).toMatch(/^[0-9a-f-]{36}$/i)
 
-    // A Program of its own, so the abandoned attempts it takes to get a mapping right never land in a
-    // Program somebody is working in.
-    await page.getByRole('link', { name: 'Open DOORS Import Practice' }).click()
-    await expect(page.getByRole('heading', { name: 'Imported baselines' })).toBeVisible()
-    expect(new URL(page.url()).pathname).toBe('/projects/doors-import-practice/imported-baselines')
-
-    // Reloading a pasted link lands on the Project the URL names, not on whichever comes first.
+    // Reloading a pasted link lands on the Project the stable URL names, not on whichever comes first.
     await page.reload()
     await expect(page.getByRole('heading', { name: 'Imported baselines' })).toBeVisible()
 
     // Its own Project has no builds. Going back must not silently switch which Project you are in.
     await page.getByRole('button', { name: '← Software Builds' }).click()
-    expect(new URL(page.url()).pathname).toBe('/projects/doors-import-practice/builds')
+    expect(new URL(page.url()).pathname).toBe(`/projects/${projectId}/builds`)
   })
 
   test('an import is started from the page, and lands on its first gate', async ({ page }) => {
-    await login(page, 'admin', { openProject: false })
-    await page.getByRole('link', { name: 'Open DOORS Import Practice' }).click()
-    await expect(page.getByRole('heading', { name: 'Imported baselines' })).toBeVisible()
+    await openImports(page)
 
     // The empty state has somewhere to go. Without this the page states the problem and offers nothing.
     await expect(page.getByText('No program has been brought in from another tool yet.')).toBeVisible()
@@ -148,7 +142,9 @@ test.describe('imported baselines', () => {
     await expect(page.getByText('DOORS CR-1402')).toBeVisible()
 
     // The import itself shows what it holds, with the two kinds of record kept apart.
-    await page.getByRole('button', { name: /FMS Sys Req v4.2/ }).click()
+    // A seeded disposable fixture may already contain an import with the same source baseline name. Select
+    // the row created by this test by its current Draft state so the assertions inspect the requested record.
+    await page.locator('li').filter({ hasText: 'FMS Sys Req v4.2' }).filter({ hasText: 'Draft' }).getByRole('button').click()
     // Exact, because the search result above says "In the imported baseline." and the tile says it without
     // the stop — a substring match claims both and cannot tell which one it proved.
     await expect(page.getByText('In the imported baseline', { exact: true })).toBeVisible()

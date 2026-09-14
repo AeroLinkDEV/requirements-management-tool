@@ -5,7 +5,7 @@ using AeroLink.Domain.Hierarchy;
 namespace AeroLink.Domain.Requirements;
 
 public enum RequirementRevisionState { Active, Superseded, Retired }
-public enum RequirementRevisionOriginKind { ChangeRequest, ExternalSourcePackage }
+public enum RequirementRevisionOriginKind { ChangeRequest, ExternalSourcePackage, InheritedAeroLinkBaseline }
 /// <summary>How a configured non-root requirement revision answers its exact upstream obligation.</summary>
 public enum RequirementParentKind { Unspecified, Allocated, Derived }
 
@@ -63,10 +63,45 @@ public sealed class RequirementRevision
         ParentRevisionIdsJson = "[]";
     }
 
+    private RequirementRevision(Guid artifactId, int revision, string statement, string rationale,
+        RequirementRevisionState state, Guid sourceBaselineId, Guid effectiveBaselineId, DateTimeOffset createdAt,
+        string sourceRevisionIdentity, string verificationMethod)
+    {
+        if (revision < 0) throw new DomainException("Requirement revision cannot be negative.");
+        if (sourceBaselineId == Guid.Empty) throw new DomainException("An inherited revision requires its exact source baseline.");
+        if (state == RequirementRevisionState.Active && string.IsNullOrWhiteSpace(statement))
+            throw new DomainException("An active requirement revision needs a statement.");
+        if (string.IsNullOrWhiteSpace(sourceRevisionIdentity)) throw new DomainException("An inherited revision requires its source revision identity.");
+        Id = Guid.NewGuid(); ArtifactId = artifactId; Revision = revision; Statement = statement.Trim();
+        Rationale = (rationale ?? "").Trim(); VerificationMethod = (verificationMethod ?? "").Trim(); State = state;
+        OriginKind = RequirementRevisionOriginKind.InheritedAeroLinkBaseline;
+        SourceBaselineId = sourceBaselineId; EffectiveBaselineId = effectiveBaselineId; CreatedAt = createdAt;
+        ParentKind = RequirementParentKind.Unspecified;
+        DerivedRationale = string.Empty; ParentRevisionIdsJson = "[]";
+    }
+
     public static RequirementRevision FromExternalSourcePackage(Guid artifactId, int revision, string statement,
         string rationale, RequirementRevisionState state, Guid sourceBaselineImportId, Guid effectiveBaselineId,
-        DateTimeOffset createdAt) => new(artifactId, revision, statement, rationale, state, sourceBaselineImportId,
-            effectiveBaselineId, createdAt);
+        DateTimeOffset createdAt, string verificationMethod = "",
+        RequirementParentKind parentKind = RequirementParentKind.Unspecified,
+        IEnumerable<Guid>? parentRevisionIds = null) => new(artifactId, revision, statement, rationale, state, sourceBaselineImportId,
+            effectiveBaselineId, createdAt)
+        {
+            VerificationMethod = verificationMethod.Trim(),
+            ParentKind = parentKind,
+            ParentRevisionIdsJson = CanonicalParentIds(parentRevisionIds, parentKind, ""),
+        };
+    public static RequirementRevision FromAeroLinkBaseline(Guid artifactId, int revision, string statement,
+        string rationale, RequirementRevisionState state, Guid sourceBaselineId, Guid effectiveBaselineId,
+        DateTimeOffset createdAt, string sourceRevisionIdentity, string verificationMethod = "",
+        RequirementParentKind parentKind = RequirementParentKind.Unspecified,
+        IEnumerable<Guid>? parentRevisionIds = null) => new(artifactId,
+            revision, statement, rationale, state, sourceBaselineId, effectiveBaselineId, createdAt,
+            sourceRevisionIdentity, verificationMethod)
+        {
+            ParentKind = parentKind,
+            ParentRevisionIdsJson = CanonicalParentIds(parentRevisionIds, parentKind, ""),
+        };
     public Guid Id { get; private set; }
     public Guid ArtifactId { get; private set; }
     public int Revision { get; private set; }
@@ -78,6 +113,8 @@ public sealed class RequirementRevision
     public RequirementRevisionOriginKind Origin => OriginKind;
     public Guid? SourceChangeRequestId { get; private set; }
     public Guid? SourceBaselineImportId { get; private set; }
+    /// <summary>Exact native AeroLink baseline that supplied this inherited revision, when applicable.</summary>
+    public Guid? SourceBaselineId { get; private set; }
     public Guid EffectiveBaselineId { get; private set; }
     /// <summary>Typed exact-parent classification captured on the immutable revision.</summary>
     public RequirementParentKind ParentKind { get; private set; }
