@@ -45,6 +45,10 @@ async function projectSearchShell(page: Page) {
   page.on('request', request => { if (request.url().includes('/api/')) requests.push(request.url()) })
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname
+    if (path === '/api/managed-documents/document-id') {
+      await route.fulfill({ status: 404, json: { error: 'This navigation fixture does not materialize a document.' } })
+      return
+    }
     const json = path === '/api/auth/me'
       ? { id: 'reader', userName: 'reader', displayName: 'Reader', isAdministrator: false, programs: [] }
       : path === '/api/workspaces'
@@ -52,6 +56,10 @@ async function projectSearchShell(page: Page) {
           project: { id: 'search-project', name: 'Search Project', softwareProduct: 'Search Product' },
           releases: [{ id: 'search-build', version: '1.6', isReleased: false }],
         }] }]
+        : path === '/api/managed-documents'
+          ? { items: [], totalCount: 0, hasMore: false }
+          : path === '/api/managed-documents/dashboard'
+            ? { total: 0, released: 0, inWork: 0, inReview: 0, returned: 0, checkedOut: 0 }
         : path.endsWith('/configuration')
           ? { effectiveSteps: [{ catalogueEntry: 'System', capabilities: 15 }] }
           : path === '/api/search'
@@ -68,7 +76,7 @@ async function projectSearchShell(page: Page) {
   return requests
 }
 
-test('project-wide search keeps mixed results and opens documents without an invented build', async ({ page }) => {
+test('project-wide search keeps mixed results and opens documents without an invented build', async ({ page }, testInfo) => {
   const requests = await projectSearchShell(page)
   expect(await dispatchShortcut(page, 'ctrlKey')).toBeTruthy()
   const palette = page.getByRole('dialog', { name: 'Quick navigation' })
@@ -78,6 +86,7 @@ test('project-wide search keeps mixed results and opens documents without an inv
   const search = new URL(requests.find(url => url.includes('/api/search?'))!)
   expect(search.searchParams.get('projectId')).toBe('search-project')
   expect(search.searchParams.has('releaseId')).toBeFalsy()
+  await page.screenshot({ path: testInfo.outputPath('project-wide-search.png') })
   const document = palette.getByRole('link', { name: /DOC-000001/ })
   await expect(document).toHaveAttribute('href', `${projectDocumentPath}/document-id`)
   await document.click()
