@@ -1775,6 +1775,7 @@
         "ProjectSetupApiTests",
         "ProjectSetupBoundaryRegressionApiTests",
         "ProjectSetupDiscoveryApiTests",
+        "ProjectSetupInceptionApiTests",
         "ProjectSetupServiceQualificationTests"
       ]
     },
@@ -1784,6 +1785,7 @@
       "file": "ProjectSetupEndpoints.cs",
       "coveredBy": [
         "ProjectSetupApiTests",
+        "ProjectSetupInceptionApiTests",
         "ProjectSetupServiceQualificationTests"
       ]
     },
@@ -1793,6 +1795,28 @@
       "file": "ProjectSetupEndpoints.cs",
       "coveredBy": [
         "ProjectSetupDiscoveryApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/project-setups/{draftId:guid}/source/native",
+      "file": "ProjectSetupSourceEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupInceptionApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/project-setups/{draftId:guid}/source/reconcile",
+      "file": "ProjectSetupSourceEndpoints.cs",
+      "coveredBy": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/project-setups/{draftId:guid}/source/upload",
+      "file": "ProjectSetupSourceEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupInceptionApiTests"
       ]
     },
     {
@@ -2532,7 +2556,16 @@
         "ProjectSetupApiTests",
         "ProjectSetupBoundaryRegressionApiTests",
         "ProjectSetupDiscoveryApiTests",
+        "ProjectSetupInceptionApiTests",
         "ProjectSetupServiceQualificationTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/project-setups/{draftId:guid}/source/configuration",
+      "file": "ProjectSetupSourceEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupInceptionApiTests"
       ]
     },
     {

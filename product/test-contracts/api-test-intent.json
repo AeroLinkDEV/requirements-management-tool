@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 899,
-    "cases": 1007,
-    "classes": 141,
-    "hostedTests": 852,
-    "hostedCases": 938,
+    "tests": 903,
+    "cases": 1013,
+    "classes": 142,
+    "hostedTests": 856,
+    "hostedCases": 944,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 13,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 561,
-      "cases": 629,
+      "tests": 565,
+      "cases": 635,
       "unknownCases": 0,
-      "classes": 110
+      "classes": 111
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -10281,6 +10281,76 @@
       "sourceLines": {
         "start": 16,
         "end": 59
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Administrator_can_reconcile_and_accept_each_supported_external_format",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 3,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 220,
+        "end": 340
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Native_capture_reconcile_and_materialize_preserves_source_authorship_without_staffing_target",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 109,
+        "end": 218
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Source_upload_rejects_content_over_the_50_mib_bound",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 94,
+        "end": 107
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Source_upload_retries_are_idempotent_and_stale_assertions_cannot_finalize",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 26,
+        "end": 92
       }
     },
     {
