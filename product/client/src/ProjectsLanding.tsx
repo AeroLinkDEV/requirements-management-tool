@@ -99,6 +99,7 @@ export default function ProjectsLanding({
               <p>Authorized projects could not be loaded. Retry when workspace access is available.</p>
               <button type="button" onClick={onRetryProjects}>Retry project discovery</button>
             </div>
+            {(user.isAdministrator || drafts.length > 0 || draftStatus !== "ready") && <SetupDrafts drafts={drafts} draftStatus={draftStatus} onRetryDrafts={onRetryDrafts} canCreate={user.isAdministrator} onCreateProject={onCreateProject} onResumeSetup={onResumeSetup} />}
           </section>
         ) : projects.length ? (
           <section className="projectsSections" aria-label="Authorized projects">

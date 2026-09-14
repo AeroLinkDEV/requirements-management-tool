@@ -53,6 +53,37 @@ test('the Projects portal keeps loading state separate from an empty authorized 
   await page.unroute('**/api/workspaces')
 })
 
+test('workspace discovery errors keep saved setup drafts available to administrators', async ({ page }, testInfo) => {
+  test.setTimeout(120_000)
+  await login(page, 'admin', { openProject: false })
+  await page.goto('/projects/new')
+  await expect(page.getByRole('heading', { name: 'Create New Project', level: 1 })).toBeVisible()
+
+  const projectName = `Workspace outage draft ${Date.now()}`
+  await page.getByLabel('Project name').fill(projectName)
+  await page.getByLabel('Software product').fill('Workspace outage software')
+  await page.getByRole('button', { name: 'Save and exit' }).click()
+  await expect(page).toHaveURL(/\/projects$/)
+  await expect(page.locator('[data-setup-draft-id]').filter({ hasText: projectName })).toBeVisible()
+
+  await page.route('**/api/workspaces', async route => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'workspace discovery unavailable for this test' }),
+    })
+  })
+  await page.reload()
+
+  await expect(page.getByRole('heading', { name: 'Projects unavailable', level: 2 })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Retry project discovery' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Setup drafts', level: 2 })).toBeVisible()
+  await expect(page.locator('[data-setup-draft-id]').filter({ hasText: projectName })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Create New Project', exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('workspace-error-keeps-draft.png'), fullPage: true })
+  await page.unroute('**/api/workspaces')
+})
+
 test('an unknown record and an unauthenticated reader are answered identically', async ({ page, baseURL }) => {
   test.setTimeout(120_000)
 
