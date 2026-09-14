@@ -125,9 +125,8 @@ function updateModule(source: SourceView, index: number, patch: Partial<SourceMo
     modules: source.modules.map((module, currentIndex) => {
       if (currentIndex !== index) return module;
       const nextModule = { ...module, ...patch };
-      // The module heading is a useful bulk-edit affordance, but a module is only a
-      // presentation grouping. Keep its exact object decisions in sync with the bulk
-      // action so the visible change is what the versioned payload will serialize.
+      // The module heading is a useful bulk-edit affordance. Keep each exact object decision in
+      // sync with the bulk action so the visible change is what the versioned payload serializes.
       if (!module.objects?.length) return nextModule;
       const objectMappings = Object.fromEntries(module.objects.map((object) => {
         const current = module.objectMappings?.[object.key] ?? defaultSourceObjectMapping(module);
@@ -1204,8 +1203,8 @@ export default function ProjectSetupSourcePanel({
                         <>
                           <p className="setupSourceHint">
                             {module.hasDivergentObjectMappings
-                              ? "This module has decisions that differ between source objects. Review each exact object below; the module heading is only a presentation grouping."
-                              : "Review each exact source object below. Initial choices copy the module defaults and can be changed independently."}
+                              ? "This module has decisions that differ between source objects. Review each exact object below. Module controls apply to every object on every page; individual controls override them."
+                              : "Review each exact source object below. Module controls apply to every object on every page; individual controls can override the copied defaults."}
                           </p>
                           {visibleObjects.map((object) => {
                             const decision = module.objectMappings?.[object.key]

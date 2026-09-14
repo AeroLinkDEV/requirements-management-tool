@@ -49,6 +49,20 @@ type RecoveryRecord = {
   expectedSourceKey?: string;
   expectedSourceAttribute?: string;
   expectedMappingDestination?: string;
+  offPageModuleName?: string;
+  offPageSourceKey?: string;
+  offPageSourceAttribute?: string;
+  offPageMappingDestination?: string;
+  offPageLevel?: string;
+  offPageExclusionReason?: string;
+};
+
+type RecoveryMappingObject = {
+  sourceKey: string;
+  include: boolean;
+  level?: string;
+  exclusionReason?: string;
+  attributes: { sourceAttribute: string; destination: string }[];
 };
 
 function responseJson<T>(response: Awaited<ReturnType<APIRequestContext["get"]>>): Promise<T> {
@@ -288,8 +302,59 @@ test("prepare five disposable drafts for a separate API-process recovery invocat
   const nativeViewEnvelope = await getSource(page.request, native.draftId);
   const nativeView = (nativeViewEnvelope.source ?? nativeViewEnvelope) as Record<string, unknown>;
   const nativeDraft = await getDraft(page.request, native.draftId);
+  const nativeMapping = sourceMapping(nativeView) as {
+    objects: RecoveryMappingObject[];
+    relations: { sourceKey: string; include: boolean; exclusionReason?: string }[];
+  };
+  const nativeModules = Array.isArray(nativeView.modules) ? nativeView.modules as Record<string, unknown>[] : [];
+  const offPageModule = nativeModules[0];
+  const offPageObjects = Array.isArray(offPageModule?.objects)
+    ? offPageModule.objects as Record<string, unknown>[]
+    : [];
+  expect(offPageModule?.name, "native source module for off-page UI recovery proof").toBeTruthy();
+  expect(offPageObjects.length, "native source object page two for recovery proof").toBeGreaterThan(20);
+  const nativeRelations = Array.isArray(nativeView.relations)
+    ? nativeView.relations as Record<string, unknown>[]
+    : [];
+  const relatedObjectKeys = new Set(nativeRelations.flatMap((relation) => [
+    String(relation.sourceKey ?? ""),
+    String(relation.targetKey ?? ""),
+  ]));
+  const pageTwoCandidates = offPageObjects.slice(20, 40).filter((object) => {
+    const mapping = nativeMapping.objects.find((item) => item.sourceKey === String(object.key ?? ""));
+    return mapping?.attributes.some((attribute) => attribute.destination === "Statement");
+  });
+  const offPageObject = pageTwoCandidates.find((object) => !relatedObjectKeys.has(String(object.key ?? "")))
+    ?? pageTwoCandidates[0];
+  expect(offPageObject, "native page-two source object with a statement mapping").toBeTruthy();
+  const offPageSourceKey = String(offPageObject?.key ?? "");
+  const offPageMapping = nativeMapping.objects.find((mapping) => mapping.sourceKey === offPageSourceKey);
+  expect(offPageMapping, "native page-two source mapping").toBeTruthy();
+  const offPageStatement = offPageMapping?.attributes.find((attribute) => attribute.destination === "Statement");
+  expect(offPageStatement, "native page-two statement mapping").toBeTruthy();
+  const offPageExclusionReason = "Excluded from this restart recovery UI proof.";
+  if (!offPageMapping || !offPageStatement) throw new Error("Native off-page mapping fixture is incomplete.");
+  offPageMapping.include = false;
+  offPageMapping.level = "System";
+  offPageMapping.exclusionReason = offPageExclusionReason;
+  offPageMapping.attributes = offPageMapping.attributes.map((attribute) =>
+    attribute.sourceAttribute === offPageStatement.sourceAttribute
+      ? { ...attribute, destination: "Rationale" }
+      : attribute,
+  );
+  // If the selected page-two object participates in a source relation, exclude that exact
+  // relation as well. This keeps the fixture's dependency graph honest while retaining every
+  // unrelated source row for the restart proof.
+  const affectedRelationKeys = new Set(nativeRelations
+    .filter((relation) => [String(relation.sourceKey ?? ""), String(relation.targetKey ?? "")].includes(offPageSourceKey))
+    .map((relation) => String(relation.key ?? relation.sourceKey ?? "")));
+  nativeMapping.relations = nativeMapping.relations.map((relation) =>
+    affectedRelationKeys.has(relation.sourceKey)
+      ? { ...relation, include: false, exclusionReason: offPageExclusionReason }
+      : relation,
+  );
   const nativeConfigured = await responseJson<Record<string, unknown>>(await page.request.put(`${apiBase}/api/project-setups/${native.draftId}/source/configuration`, {
-    data: { expectedVersion: nativeDraft.version, selectedCategories: ["Requirements", "Traces"], mapping: sourceMapping(nativeView), metadata: {} },
+    data: { expectedVersion: nativeDraft.version, selectedCategories: ["Requirements", "Traces"], mapping: nativeMapping, metadata: {} },
   }));
   expect(String(nativeConfigured.id)).toBe(String(nativeCapture.id));
   const nativeSourceEnvelope = await getSource(page.request, native.draftId);
@@ -310,6 +375,12 @@ test("prepare five disposable drafts for a separate API-process recovery invocat
       objects: { sourceKey: string; attributes: { sourceAttribute: string; destination: string }[] }[];
     }).objects[0]?.attributes.find((attribute) => attribute.destination === "Statement"))?.sourceAttribute,
     expectedMappingDestination: "Statement",
+    offPageModuleName: String(offPageModule?.name ?? ""),
+    offPageSourceKey,
+    offPageSourceAttribute: offPageStatement.sourceAttribute,
+    offPageMappingDestination: "Rationale",
+    offPageLevel: "System",
+    offPageExclusionReason,
   });
 
   for (const format of ["ReqIF", "CSV", "XLSX"] as const) {
@@ -349,6 +420,26 @@ test("resume all five drafts after the API process has been restarted", async ({
       await page.getByRole("button", { name: /2\. Starting point/ }).click();
       await expect(page.getByRole("heading", { name: "Choose a starting point", level: 2 })).toBeVisible();
       await expect(page.getByText("Exact source", { exact: true })).toHaveCount(0);
+      const freshAfterSource = await getDraft(page.request, record.draftId);
+      const freshFinalization = await responseJson<{ state: string; projectId: string; releaseId: string }>(
+        await page.request.post(`${apiBase}/api/project-setups/${record.draftId}/finalize`, {
+          headers: { "Idempotency-Key": `restart-recovery-${record.draftId}` },
+          data: {
+            expectedVersion: freshAfterSource.version,
+            idempotencyKey: `restart-recovery-${record.draftId}`,
+          },
+        }),
+      );
+      expect(freshFinalization.state).toBe("Completed");
+      expect(freshFinalization.projectId).toMatch(/^[0-9a-f-]{36}$/i);
+      expect(freshFinalization.releaseId).toMatch(/^[0-9a-f-]{36}$/i);
+      await page.goto(`/projects/${freshFinalization.projectId}/builds`);
+      await expect(page.getByRole("heading", { name: "Software Builds", level: 1 })).toBeVisible();
+      await expect(page.locator("[data-build-card]")).toHaveCount(1);
+      await expect(page.locator("[data-build-card]").getByText("In Work", { exact: true })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath(`restart-recovery-${record.kind}-${record.draftId}.png`) });
+      await page.getByRole("button", { name: "Sign out" }).click();
+      await login(page, "admin", { openProject: false });
       continue;
     }
     const sourceEnvelope = await getSource(page.request, record.draftId);
@@ -376,6 +467,22 @@ test("resume all five drafts after the API process has been restarted", async ({
         await expect(statementMapping).toHaveValue(record.expectedMappingDestination ?? "Statement");
       } else {
         throw new Error(`The source mapping has no explicit statement attribute for ${record.expectedSourceKey}.`);
+      }
+    }
+    if (record.offPageSourceKey && record.offPageModuleName) {
+      const offPageModule = page.locator("article.setupSourceModule").filter({ hasText: record.offPageModuleName }).first();
+      await expect(offPageModule).toHaveCount(1);
+      await offPageModule.getByRole("button", { name: "Next objects page" }).click();
+      const offPageObject = offPageModule.locator("section.setupSourceObjectMapping").filter({ hasText: record.offPageSourceKey });
+      await expect(offPageObject).toHaveCount(1);
+      await expect(offPageObject.getByLabel("Include this source object")).not.toBeChecked();
+      await expect(offPageObject.getByLabel("Ladder level")).toHaveValue(record.offPageLevel ?? "System");
+      await expect(offPageObject.getByLabel("Exclusion reason", { exact: true })).toHaveValue(record.offPageExclusionReason ?? "");
+      if (record.offPageSourceAttribute) {
+        const offPageMapping = offPageObject
+          .getByLabel(new RegExp(` ${escapeRegExp(record.offPageSourceAttribute)}$`))
+          .first();
+        await expect(offPageMapping).toHaveValue(record.offPageMappingDestination ?? "Rationale");
       }
     }
     // Native baselines can contain hundreds of exact source objects. Capture the visible

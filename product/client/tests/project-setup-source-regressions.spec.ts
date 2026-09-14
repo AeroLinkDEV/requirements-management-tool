@@ -449,18 +449,37 @@ test("large source modules page object editors without losing exact mapping deci
   const first = module.locator("section.setupSourceObjectMapping").filter({ hasText: "REQ-01" });
   await expect(first).toHaveCount(1);
   await first.getByLabel("Mapping for Requirements REQ-01 Statement").selectOption("Rationale");
+  const moduleInclude = module.getByLabel("Include Requirements");
+  await moduleInclude.uncheck();
+  await expect(first.getByLabel("Include this source object")).not.toBeChecked();
+  await module.getByLabel(/Exclusion reason for this module/).fill("Bulk exclusion before per-object review.");
+  await expect(first.getByLabel("Exclusion reason", { exact: true })).toHaveValue("Bulk exclusion before per-object review.");
+  await moduleInclude.check();
+  await module.getByLabel("Ladder level for Requirements").selectOption("HighLevel");
+  await expect(first.getByLabel("Ladder level")).toHaveValue("HighLevel");
 
   await module.getByRole("button", { name: "Next objects page" }).click();
   await expect(module.getByText("21–40 of 45 source objects", { exact: true })).toBeVisible();
   const pageTwo = module.locator("section.setupSourceObjectMapping").filter({ hasText: "REQ-21" });
   await expect(pageTwo).toHaveCount(1);
+  await expect(pageTwo.getByLabel("Include this source object")).toBeChecked();
+  await expect(pageTwo.getByLabel("Ladder level")).toHaveValue("HighLevel");
   await pageTwo.getByLabel("Mapping for Requirements REQ-21 Statement").selectOption("SourceOnly");
+  await pageTwo.getByLabel("Ladder level").selectOption("LowLevel");
+  await pageTwo.getByLabel("Include this source object").uncheck();
+  await pageTwo.getByLabel("Exclusion reason", { exact: true }).fill("Per-object exclusion on page two.");
 
   await module.getByRole("button", { name: "Previous objects page" }).click();
   await expect(module.getByText("1–20 of 45 source objects", { exact: true })).toBeVisible();
   await expect(first.getByLabel("Mapping for Requirements REQ-01 Statement")).toHaveValue("Rationale");
+  await expect(first.getByLabel("Include this source object")).toBeChecked();
+  await expect(first.getByLabel("Ladder level")).toHaveValue("HighLevel");
+  await expect(first.getByLabel("Exclusion reason", { exact: true })).toHaveValue("Bulk exclusion before per-object review.");
   await module.getByRole("button", { name: "Next objects page" }).click();
   await expect(pageTwo.getByLabel("Mapping for Requirements REQ-21 Statement")).toHaveValue("SourceOnly");
+  await expect(pageTwo.getByLabel("Include this source object")).not.toBeChecked();
+  await expect(pageTwo.getByLabel("Ladder level")).toHaveValue("LowLevel");
+  await expect(pageTwo.getByLabel("Exclusion reason", { exact: true })).toHaveValue("Per-object exclusion on page two.");
 
   await module.getByRole("button", { name: "Previous objects page" }).click();
   await page.getByRole("checkbox", { name: /^Requirements / }).check();
@@ -469,12 +488,30 @@ test("large source modules page object editors without losing exact mapping deci
   expect(configurationBody).toBeDefined();
   if (!configurationBody) throw new Error("The paged source configuration request was not captured.");
   const mappedObjects = ((configurationBody.mapping as {
-    objects?: Array<{ sourceKey: string; attributes: Array<{ sourceAttribute: string; destination: string }> }>;
+    objects?: Array<{
+      sourceKey: string;
+      include: boolean;
+      level?: string;
+      exclusionReason?: string;
+      attributes: Array<{ sourceAttribute: string; destination: string }>;
+    }>;
   }).objects ?? []);
   expect(mappedObjects).toHaveLength(objects.length);
-  expect(mappedObjects.find((item) => item.sourceKey === "source-1")?.attributes
+  const firstMapping = mappedObjects.find((item) => item.sourceKey === "source-1");
+  const pageTwoMapping = mappedObjects.find((item) => item.sourceKey === "source-21");
+  const untouchedPageTwoMapping = mappedObjects.find((item) => item.sourceKey === "source-22");
+  expect(firstMapping?.include).toBe(true);
+  expect(firstMapping?.level).toBe("HighLevel");
+  expect(firstMapping?.exclusionReason).toBe("Bulk exclusion before per-object review.");
+  expect(pageTwoMapping?.include).toBe(false);
+  expect(pageTwoMapping?.level).toBe("LowLevel");
+  expect(pageTwoMapping?.exclusionReason).toBe("Per-object exclusion on page two.");
+  expect(untouchedPageTwoMapping?.include).toBe(true);
+  expect(untouchedPageTwoMapping?.level).toBe("HighLevel");
+  expect(untouchedPageTwoMapping?.exclusionReason).toBe("Bulk exclusion before per-object review.");
+  expect(firstMapping?.attributes
     .find((item) => item.sourceAttribute === "Statement")?.destination).toBe("Rationale");
-  expect(mappedObjects.find((item) => item.sourceKey === "source-21")?.attributes
+  expect(pageTwoMapping?.attributes
     .find((item) => item.sourceAttribute === "Statement")?.destination).toBe("SourceOnly");
   await page.screenshot({ path: testInfo.outputPath("paged-source-object-mappings.png"), fullPage: false });
 });
