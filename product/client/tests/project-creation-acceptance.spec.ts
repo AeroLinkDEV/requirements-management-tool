@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
 import { apiBase, apiLogin, login } from "./auth";
+import { routePath } from "../src/routing";
 
 type WorkspaceProjection = {
   program: { id: string; name: string; code: string };
@@ -263,6 +264,49 @@ test("a committed fresh finalization survives a lost client response and retry k
   expect(afterReload.project.releases).toHaveLength(1);
   expect(afterReload.project.releases[0].id).toBe(firstRelease.id);
   await page.screenshot({ path: testInfo.outputPath("lost-response-recovered.png"), fullPage: true });
+});
+
+test("fresh standard services show empty content and pending prerequisites across the real workspace", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  await login(page, "admin", { openProject: false });
+  const projectName = `Empty services ${Date.now().toString(36)}`;
+  await completeFreshSetup(page, projectName, "0.01");
+  const fresh = projectByName(await getWorkspaces(page), projectName);
+  const context = { programId: fresh.workspace.program.id, projectId: fresh.project.project.id,
+    releaseId: fresh.project.releases[0].id };
+  await page.getByRole("button", { name: /Open build 0\.01/ }).click();
+  await expect(page.getByRole("heading", { name: "Command Center", level: 1 })).toBeVisible();
+
+  await page.goto(routePath(context, "requirements"));
+  await expect(page.getByRole("heading", { name: "No system requirements yet" })).toBeVisible();
+  await page.goto(routePath(context, "requirements", "software"));
+  await expect(page.getByRole("heading", { name: "No software requirements yet" })).toBeVisible();
+  await page.goto(routePath(context, "procedureExplorer", "systemTest"));
+  await expect(page.locator(".procedureEmpty")).toContainText("This build has no controlled");
+  await page.goto(routePath(context, "testResults", "systemTest"));
+  await expect(page.getByText("Nothing has been chosen for this build yet", { exact: true })).toBeVisible();
+  await expect(page.locator(".testSetSummary article b")).toHaveText(["0", "0", "0", "0"]);
+  await page.goto(routePath(context, "teamwork"));
+  await expect(page.getByText("No controlled work is recorded in this project yet.", { exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("fresh-empty-team-work.png"), fullPage: true });
+  await page.goto(routePath(context, "problemReports"));
+  await expect(page.getByText("No Problem Reports are recorded for this Project.", { exact: true })).toBeVisible();
+  await page.goto(routePath(context, "managedDocuments"));
+  await expect(page.getByText("No controlled documents match these filters.", { exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("fresh-empty-managed-documents.png"), fullPage: true });
+  await page.goto(routePath(context, "code"));
+  await expect(page.getByText("Repository Pending", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Not evaluated yet", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ Record code mapping", exact: true })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("fresh-pending-code.png"), fullPage: true });
+  await page.goto(routePath(context, "baselines"));
+  await expect(page.getByText("No candidate baseline exists for this release.", { exact: true })).toBeVisible();
+  await page.goto(routePath(context, "release"));
+  await expect(page.getByRole("heading", { name: "Release readiness is not configured", exact: true })).toBeVisible();
+  await expect(page.getByText("No lifecycle decision package is available for this build.", { exact: true })).toBeVisible();
+  await page.goto(routePath(context, "releaseOperations"));
+  await expect(page.getByRole("heading", { name: "No release campaign for this version", exact: true })).toBeVisible();
+  await expect(page.getByText(/Create a campaign from an eligible candidate baseline/)).toBeVisible();
 });
 
 test("a Customer-only fresh project displays a concrete empty standard and truthful empty work state", async ({ page }, testInfo) => {
