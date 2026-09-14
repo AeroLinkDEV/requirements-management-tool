@@ -25,9 +25,16 @@ test('draft updates preserve controlled identities and normalize new proposals o
   const introduced=updated.requirementChanges.find((item:{statement:string})=>item.statement==='The system shall allocate another controlled identifier.');expect(introduced.baseNumber).toMatch(/^SYSR-\d{6}$/);expect(introduced.baseNumber).not.toBe(original.baseNumber);expect(introduced.revision).toBe(0)
   expect(updated.requirementChanges).toContainEqual(expect.objectContaining({baseNumber:authoritative.baseNumber,revision:authoritative.nextRevision,level:'System',kind:'Modify'}))
 
-  const baselinedResponse=await request.get(`${apiBase}/api/requirements?projectId=${showcase.projectId}&baselineId=${showcase.releasedBaselineId}&scope=System&page=1&pageSize=2`)
-  expect(baselinedResponse.ok(),await baselinedResponse.text()).toBeTruthy();const baselined=(await baselinedResponse.json()).items;expect(baselined).toHaveLength(2)
-  const trace=await request.post(`${apiBase}/api/trace-links`,{data:{projectId:showcase.projectId,sourceRevisionId:baselined[0].revisionId,targetRevisionId:baselined[1].revisionId,type:'DerivedFrom',rationale:'Controlled-history deletion probe.'}})
+  // A configured FMS ladder accepts a DerivedFrom trace from a High-Level software child to its direct
+  // System parent. Two System revisions used to work only under the legacy permissive policy; keep this
+  // deletion probe on a legitimate cross-level pair so it proves controlled-history protection rather than
+  // an obsolete self-level trace shape.
+  const systemBaselinedResponse=await request.get(`${apiBase}/api/requirements?projectId=${showcase.projectId}&baselineId=${showcase.releasedBaselineId}&scope=System&page=1&pageSize=1`)
+  expect(systemBaselinedResponse.ok(),await systemBaselinedResponse.text()).toBeTruthy();const systemBaselined=(await systemBaselinedResponse.json()).items;expect(systemBaselined).toHaveLength(1)
+  const highLevelBaselinedResponse=await request.get(`${apiBase}/api/requirements?projectId=${showcase.projectId}&baselineId=${showcase.releasedBaselineId}&scope=HighLevelSoftware&page=1&pageSize=1`)
+  expect(highLevelBaselinedResponse.ok(),await highLevelBaselinedResponse.text()).toBeTruthy();const highLevelBaselined=(await highLevelBaselinedResponse.json()).items;expect(highLevelBaselined).toHaveLength(1)
+  expect(systemBaselined[0].level).toBe('System');expect(highLevelBaselined[0].level).toBe('HighLevel')
+  const trace=await request.post(`${apiBase}/api/trace-links`,{data:{projectId:showcase.projectId,sourceRevisionId:highLevelBaselined[0].revisionId,targetRevisionId:systemBaselined[0].revisionId,type:'DerivedFrom',rationale:'Controlled-history deletion probe.'}})
   expect(trace.ok(),await trace.text()).toBeTruthy();const deletion=await request.delete(`${apiBase}/api/trace-links/${(await trace.json()).id}`)
   expect(deletion.status(),await deletion.text()).toBe(409);expect((await deletion.json()).code).toBe('controlled_trace_history')
 })
