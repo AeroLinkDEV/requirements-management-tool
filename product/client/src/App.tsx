@@ -419,7 +419,9 @@ function App() {
         || (discipline === "softwareTest" && !ladderHasAny(ladder, ["HighLevel", "LowLevel"], LadderCapability.Verification))));
     if (absentExplicitRoute) updateRoute("view", "notFound");
   }, [ladder, discipline, view, updateRoute]);
-  const paletteShortcutEnabled = !!context && !projectLevelViews.includes(view);
+  const paletteContext = context ?? (view === "managedDocuments" && active && project
+    ? { programId: active.program.id, projectId: project.project.id } : undefined);
+  const paletteShortcutEnabled = !!paletteContext && !projectLevelViews.includes(view);
   useEffect(()=>{const handler=(event:KeyboardEvent)=>{if(paletteShortcutEnabled&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape"){setPaletteOpen(false);setDisplayOpen(false)}};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[paletteShortcutEnabled]);
   useEffect(()=>{document.documentElement.dataset.density=density;localStorage.setItem('aerolink-density',density)},[density]);
   useEffect(()=>{document.documentElement.dataset.motion=motion;localStorage.setItem('aerolink-motion',motion)},[motion]);
@@ -719,7 +721,7 @@ function App() {
   const internalProjectScope = Boolean(active && project && isInternalProjectWorkspace(active, project));
   const displayedProgramName = active && project ? workspaceDisplayName(active, project) : active?.program.name;
   const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb">{!internalProjectScope&&<><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b></>}<span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b>{view!=="managedDocuments"&&<><span>Build {release?.version}</span><b aria-hidden="true">›</b></>}<strong>{scopedLabel}</strong></nav><div className="contextActions"><span className="contextReleaseState">{view==="teamwork"?"Project scope · every build":view==="managedDocuments"?"Project-wide":release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
-   const palette=context?<CommandPalette api={API} context={context} ladder={ladder} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onNavigate={navigate}/>:null;
+   const palette=paletteContext?<CommandPalette api={API} context={paletteContext} ladder={ladder} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onSelectBuild={exitBuild} onNavigate={navigate}/>:null;
   const experience=<ExperienceControls open={displayOpen} density={density} motion={motion} onDensityChange={next=>{setDensity(next);setToast(`${next==='compact'?'Compact':'Comfortable'} density applied`)}} onMotionChange={next=>{setMotion(next);setToast(`${next==='reduced'?'Reduced':'Purposeful'} motion applied`)}} onClose={()=>setDisplayOpen(false)}/>;
   const feedback=toast?<div className="experienceToast" role="status" aria-live="polite"><span>✓</span><b>{toast}</b></div>:null;
   const overlays=<>{palette}{experience}{feedback}</>;
