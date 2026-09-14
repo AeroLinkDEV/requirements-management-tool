@@ -136,10 +136,10 @@ test("stages an external XLSX source through the server reconciliation envelope"
   };
   let uploadedBytes = 0;
   let configurationBody: Record<string, unknown> | undefined;
-  // The source calls are mocked in this focused browser contract test, so the disposable setup service
-  // cannot know that the uploaded source ID is valid. Keep the setup PUT in the same current wire shape
-  // and return its durable draft snapshot; the source endpoints below still own the parser/reconciliation
-  // envelope assertions this test is intended to exercise.
+  // The source calls are mocked in this focused UI serialization contract test, so the disposable setup
+  // service cannot know that the uploaded source ID is valid. Keep the setup PUT in the current wire shape
+  // and return its draft snapshot; the source endpoints below still own the parser/reconciliation envelope
+  // assertions this test is intended to exercise.
   await page.route(/\/api\/project-setups\/[0-9a-f-]{36}$/i, async (route) => {
     if (route.request().method() !== "PUT") {
       await route.continue();

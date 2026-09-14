@@ -142,7 +142,9 @@ test.describe('imported baselines', () => {
     await expect(page.getByText('DOORS CR-1402')).toBeVisible()
 
     // The import itself shows what it holds, with the two kinds of record kept apart.
-    await page.getByRole('button', { name: /FMS Sys Req v4.2/ }).click()
+    // A seeded disposable fixture may already contain an import with the same source baseline name. Select
+    // the row created by this test by its current Draft state so the assertions inspect the requested record.
+    await page.locator('li').filter({ hasText: 'FMS Sys Req v4.2' }).filter({ hasText: 'Draft' }).getByRole('button').click()
     // Exact, because the search result above says "In the imported baseline." and the tile says it without
     // the stop — a substring match claims both and cannot tell which one it proved.
     await expect(page.getByText('In the imported baseline', { exact: true })).toBeVisible()
