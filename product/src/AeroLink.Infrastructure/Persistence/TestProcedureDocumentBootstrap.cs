@@ -43,6 +43,18 @@ public sealed class TestProcedureDocumentBootstrap(AeroLinkDbContext db, ILadder
         // resolver query cannot see those unsaved rows, so prefer the tracked aggregate when one is present;
         // normal backfill and restart paths continue through the persisted effective-policy resolver.
         var localConfiguration = db.ProjectLadderConfigurations.Local.SingleOrDefault(x => x.ProjectId == projectId);
+        if (localConfiguration is not null && db.Entry(localConfiguration).State != EntityState.Added)
+        {
+            // An earlier query may have tracked only the persisted envelope (notably a showcase retry).
+            // Navigation fixup or a nonempty Steps collection does not establish a complete graph. Load both
+            // collections explicitly before resolving it. Added creation graphs have no persisted rows yet;
+            // their complete, accepted aggregate remains the authority inside the completion transaction.
+            var entry = db.Entry(localConfiguration);
+            if (!entry.Collection(x => x.Steps).IsLoaded)
+                await entry.Collection(x => x.Steps).LoadAsync(ct);
+            if (!entry.Collection(x => x.AllowedUpstream).IsLoaded)
+                await entry.Collection(x => x.AllowedUpstream).LoadAsync(ct);
+        }
         // A new project and an empty Active correction carry their effective graph only in this DbContext until
         // the enclosing transaction saves it. Prefer that graph even when the normal DI catalogue is present.
         // Legacy Stored rows remain on the explicitly supplied compatibility policy when a focused caller gives
