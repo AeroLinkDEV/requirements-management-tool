@@ -56,7 +56,7 @@ public sealed class ProjectSetupInceptionService(
         // A client can lose the response after the source package and draft answer commit. Replaying the same
         // immutable native selection is safe and returns the existing package, even though its draft token has
         // advanced. A different selection still goes through the optimistic version check below.
-        var existingPackage = await db.ProjectSetupSourcePackages.AsNoTracking()
+        var existingPackage = await db.ProjectSetupSourcePackages
             .SingleOrDefaultAsync(x => x.DraftId == draft.Id && x.SourceBaselineId == baselineId, ct);
         if (existingPackage is not null && draft.SourceBaselineId == baselineId)
             return new(existingPackage, draft.Version);
@@ -70,6 +70,7 @@ public sealed class ProjectSetupInceptionService(
                 ProjectSetupStartKind.AeroLinkBaseline, baselineId, null, null,
                 existingPackage.SelectedCategoriesJson, null, null, null, null, existingPackage.MappingJson,
                 DateTimeOffset.UtcNow);
+            await RevalidateRestoredConfigurationAsync(draft, existingPackage, ct);
             await db.SaveChangesAsync(ct);
             return new(existingPackage, draft.Version);
         }
@@ -333,8 +334,20 @@ public sealed class ProjectSetupInceptionService(
             ProjectSetupStartKind.ExternalBaseline, null, package.Id, null, package.SelectedCategoriesJson,
             null, null, null, null, package.MappingJson,
             DateTimeOffset.UtcNow);
+        await RevalidateRestoredConfigurationAsync(draft, package, ct);
         await db.SaveChangesAsync(ct);
         return new(package, draft.Version);
+    }
+
+    private async Task RevalidateRestoredConfigurationAsync(ProjectSetupDraft draft, ProjectSetupSourcePackage package,
+        CancellationToken ct)
+    {
+        if (package.Stage != ProjectSetupSourceStage.Reconciled) return;
+        var analysis = ReadAnalysis(package);
+        var current = Reconcile(analysis, ReadMapping(package.MappingJson, analysis),
+            await ResolveDraftPolicyAsync(draft, ct), draft);
+        if (!current.Ready || !string.Equals(current.ManifestHash, package.ManifestHash, StringComparison.OrdinalIgnoreCase))
+            package.RecordConfiguration(package.SelectedCategoriesJson, package.MappingJson, DateTimeOffset.UtcNow);
     }
 
     public async Task<ProjectSetupSourceMutationResult> SaveConfigurationAsync(Guid draftId, AuthenticatedUser actor,

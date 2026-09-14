@@ -202,6 +202,14 @@ public sealed class ProjectSetupInceptionApiTests
         var restoredSource = await restoredSourceResponse.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("Reconciled", restoredSource.GetProperty("stage").GetString());
         Assert.Equal("Requirements", Assert.Single(restoredSource.GetProperty("selectedCategories").EnumerateArray()).GetString());
+        capturedVersion = await AssertReselectionRevalidatesLadderAsync(memberClient, draftId, capturedVersion,
+            async version =>
+            {
+                using var response = await memberClient.PostAsJsonAsync($"/api/project-setups/{draftId}/source/native",
+                    new { expectedVersion = version, baselineId = sourceBaselineId });
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                return await response.Content.ReadFromJsonAsync<JsonElement>();
+            });
 
         // This token was issued while the member still held the source-program role. The persisted role is
         // ended after capture, so every source boundary must reject the stale in-memory Programs snapshot.
@@ -274,6 +282,46 @@ public sealed class ProjectSetupInceptionApiTests
         Assert.Contains("AeroLinkBaseline", completionAudit.Detail, StringComparison.Ordinal);
         Assert.Contains(sourceBaselineId.ToString("D"), completionAudit.Detail, StringComparison.Ordinal);
         Assert.DoesNotContain("no engineering content was inherited", completionAudit.Detail, StringComparison.Ordinal);
+    }
+
+    private static async Task<long> AssertReselectionRevalidatesLadderAsync(HttpClient client, Guid draftId,
+        long version, Func<long, Task<JsonElement>> reselect)
+    {
+        using var fresh = await client.PutAsJsonAsync($"/api/project-setups/{draftId}", new
+        { expectedVersion = version, currentStep = "StartingPoint", start = new { kind = "Fresh" } });
+        Assert.Equal(HttpStatusCode.OK, fresh.StatusCode);
+        version = (await fresh.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        using var changed = await client.PutAsJsonAsync($"/api/project-setups/{draftId}", new
+        {
+            expectedVersion = version, currentStep = "StartingPoint",
+            ladder = new
+            {
+                steps = new[] { new { catalogueEntry = "Customer", position = 1, capabilities = 0,
+                    enabledArtifactKinds = Array.Empty<string>() } },
+                relationships = Array.Empty<object>(),
+            },
+        });
+        Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+        version = (await changed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        var selected = await reselect(version);
+        Assert.Equal("Analysed", selected.GetProperty("stage").GetString());
+        using var source = await client.GetAsync($"/api/project-setups/{draftId}/source");
+        var sourceBody = await source.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Requirements", Assert.Single(sourceBody.GetProperty("selectedCategories").EnumerateArray()).GetString());
+        Assert.Equal(JsonValueKind.Null, sourceBody.GetProperty("assertion").ValueKind);
+        using var restored = await client.PutAsJsonAsync($"/api/project-setups/{draftId}", new
+        {
+            expectedVersion = selected.GetProperty("draftVersion").GetInt64(), currentStep = "Review",
+            ladder = new { }, reviewRulesAccepted = true,
+        });
+        Assert.Equal(HttpStatusCode.OK, restored.StatusCode);
+        version = (await restored.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        using var reconciled = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/source/reconcile",
+            new { expectedVersion = version });
+        Assert.Equal(HttpStatusCode.OK, reconciled.StatusCode);
+        var result = await reconciled.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(result.GetProperty("reconciliation").GetProperty("ready").GetBoolean());
+        return result.GetProperty("draftVersion").GetInt64();
     }
 
     private static async Task AssertInheritedDocumentsAsync(HttpClient client, Guid releaseId,
@@ -685,6 +733,17 @@ public sealed class ProjectSetupInceptionApiTests
         Assert.Equal(uploadedBody.RootElement.GetProperty("id").GetGuid(), restored.GetProperty("id").GetGuid());
         Assert.Equal("Reconciled", restored.GetProperty("stage").GetString());
         configuredVersion = restored.GetProperty("draftVersion").GetInt64();
+        configuredVersion = await AssertReselectionRevalidatesLadderAsync(client, draftId, configuredVersion,
+            async version =>
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post,
+                    $"/api/project-setups/{draftId}/source/upload?expectedVersion={version}&fileName={fileName}")
+                { Content = new ByteArrayContent(sourceBytes) };
+                request.Content.Headers.ContentType = new("application/octet-stream");
+                using var response = await client.SendAsync(request);
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                return await response.Content.ReadFromJsonAsync<JsonElement>();
+            });
 
         using var readyResponse = await client.GetAsync($"/api/project-setups/{draftId}/source");
         Assert.Equal(HttpStatusCode.OK, readyResponse.StatusCode);
