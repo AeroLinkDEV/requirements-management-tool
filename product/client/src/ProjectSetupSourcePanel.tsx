@@ -51,6 +51,10 @@ type SourceEnvelope = { draftVersion?: number; source?: unknown };
 // memory and in the versioned payload, but bound the number of expensive object editors mounted
 // at once so an existing authorized baseline remains usable in the browser.
 const SOURCE_OBJECT_PAGE_SIZE = 20;
+// Source relations carry the same exact decisions as object mappings. Keep the full collection
+// in state and in the configuration payload, but mount a bounded page of relation controls so a
+// large authorized baseline remains usable while every relation stays reachable.
+const SOURCE_RELATION_PAGE_SIZE = 20;
 
 const mappingDestinations: { value: SourceMappingDestination; label: string }[] = [
   { value: "SourceOnly", label: "Keep as source-only attribute" },
@@ -97,6 +101,46 @@ function sourceRelationLabel(value: string) {
     EvidenceExecution: "Evidence to execution",
   };
   return labels[value] ?? value.replace(/([a-z])([A-Z])/g, "$1 $2");
+}
+
+type LadderSuggestionRelationshipSummary = {
+  type: string;
+  sourceLevel: string;
+  targetLevel: string;
+  count: number;
+};
+
+/**
+ * A ladder suggestion describes source relationship patterns, while the source editor below
+ * retains every exact relationship row. Group only identical typed level transitions here so a
+ * large source cannot mount thousands of repeated suggestion rows or lose the fact that several
+ * source relationships support the same transition.
+ */
+function summarizeLadderSuggestionRelationships(
+  relationships: SourceLadderSuggestion["relationships"],
+): LadderSuggestionRelationshipSummary[] {
+  const summaries = new Map<string, LadderSuggestionRelationshipSummary>();
+  for (const relationship of relationships) {
+    // Deliberately preserve server spelling and first-seen order. These are controlled source
+    // facts; case-folding or locale normalization could merge distinct maintained types/levels.
+    const key = JSON.stringify([
+      relationship.type,
+      relationship.sourceLevel,
+      relationship.targetLevel,
+    ]);
+    const existing = summaries.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      summaries.set(key, {
+        type: relationship.type,
+        sourceLevel: relationship.sourceLevel,
+        targetLevel: relationship.targetLevel,
+        count: 1,
+      });
+    }
+  }
+  return Array.from(summaries.values());
 }
 
 function selectedCategoryKeys(source: SourceView, selected: string[]) {
@@ -386,6 +430,7 @@ export default function ProjectSetupSourcePanel({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [objectPages, setObjectPages] = useState<Record<string, number>>({});
+  const [relationPage, setRelationPage] = useState(0);
   const requestNumber = useRef(0);
   const previousLadderRevision = useRef(ladderRevision);
 
@@ -406,7 +451,18 @@ export default function ProjectSetupSourcePanel({
     // A newly selected source may reuse a module key. Start its object editor at the first page,
     // while ordinary mapping edits keep the current page so edits survive a local re-render.
     setObjectPages({});
+    // Relation paging follows the source identity, not ordinary mapping or reconciliation edits;
+    // a save must not move the creator away from the relation they are reviewing.
+    setRelationPage(0);
   }, [source?.id, source?.sha256, kind]);
+
+  useEffect(() => {
+    // A refreshed source can legitimately contain fewer relation rows after server analysis. Clamp
+    // the presentation page to the new collection without discarding any source decisions.
+    const relationCount = source?.relations.length ?? 0;
+    const lastPage = Math.max(0, Math.ceil(relationCount / SOURCE_RELATION_PAGE_SIZE) - 1);
+    setRelationPage((current) => Math.min(current, lastPage));
+  }, [source?.relations.length]);
 
   useEffect(() => {
     if (previousLadderRevision.current === ladderRevision) return;
@@ -794,6 +850,9 @@ export default function ProjectSetupSourcePanel({
       .toLocaleLowerCase()
       .includes(search.trim().toLocaleLowerCase()),
   );
+  const suggestionRelationships = source?.ladderSuggestion
+    ? summarizeLadderSuggestionRelationships(source.ladderSuggestion.relationships)
+    : [];
 
   return (
     <section className="setupSourcePanel" aria-label="Baseline source configuration">
@@ -1011,11 +1070,18 @@ export default function ProjectSetupSourcePanel({
                 </div>
                 <div>
                   <strong>Typed source relationships</strong>
-                  {source.ladderSuggestion.relationships.length ? (
+                  {suggestionRelationships.length ? (
                     <ul>
-                  {source.ladderSuggestion.relationships.map((relationship, relationshipIndex) => (
-                        <li key={`${relationship.key}-${relationshipIndex}`}>
+                      {suggestionRelationships.map((relationship) => (
+                        <li
+                          key={JSON.stringify([
+                            relationship.type,
+                            relationship.sourceLevel,
+                            relationship.targetLevel,
+                          ])}
+                        >
                           {sourceRelationLabel(relationship.type)}: {relationship.sourceLevel} → {relationship.targetLevel}
+                          {` (${formatCount(relationship.count)} observed source ${relationship.count === 1 ? "relationship" : "relationships"})`}
                         </li>
                       ))}
                     </ul>
@@ -1324,106 +1390,151 @@ export default function ProjectSetupSourcePanel({
                 </p>
               </div>
             </header>
-            {source.relations.map((relation, relationIndex) => (
-              <div
-                className="setupSourceRelation"
-                key={`${relation.key ?? relation.sourceType}-${relation.sourceKey ?? ""}-${relation.targetKey ?? ""}-${relationIndex}`}
-              >
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={relation.include}
-                    onChange={(event) =>
-                      updateSourceAndNotice(
-                        updateRelation(source, relationIndex, { include: event.target.checked }),
-                      )
-                    }
-                  />{" "}
-                  Include {sourceRelationLabel(relation.sourceType)} ({formatCount(relation.count)} observed)
-                </label>
-                <small className="setupSourceRelationType">
-                  Source relationship type: {sourceRelationLabel(relation.type || relation.sourceType)}
-                  {relation.sourceKey && relation.targetKey
-                    ? ` · ${relation.sourceKey} → ${relation.targetKey}`
-                    : ""}
-                  {relation.attributes && Object.keys(relation.attributes).length > 0
-                    ? ` · ${Object.keys(relation.attributes).length} source attributes require explicit handling`
-                    : ""}
-                </small>
-                {relation.include && (
-                  <>
-                    {["RequirementTrace", "AllocatedFrom", "DerivedFrom"].includes(
-                      relation.type ?? relation.sourceType,
-                    ) && (
-                      <label>
-                        Trace type
-                        <select
-                          aria-label={`Trace type for ${relation.sourceType}`}
-                          value={relation.mappingType ?? ""}
-                          onChange={(event) =>
-                            updateSourceAndNotice(
-                              updateRelation(source, relationIndex, {
-                                mappingType:
-                                  event.target.value === ""
-                                    ? undefined
-                                    : (event.target.value as "AllocatedFrom" | "DerivedFrom"),
-                              }),
-                            )
-                          }
-                        >
-                          <option value="">Choose supported trace type</option>
-                          <option value="AllocatedFrom">Allocated from</option>
-                          <option value="DerivedFrom">Derived from</option>
-                        </select>
-                      </label>
-                    )}
-                    {!['CaseProcedure', 'VerificationCoverage', 'EvidenceExecution'].includes(relation.type ?? "") && (
-                      <label>
-                        Direction
-                        <select
-                          aria-label={`Relation direction for ${relation.sourceType}`}
-                          value={
-                            relation.sourceIsParent === undefined
-                              ? ""
-                              : relation.sourceIsParent
-                                ? "parent"
-                                : "child"
-                          }
-                          onChange={(event) =>
-                            updateSourceAndNotice(
-                              updateRelation(source, relationIndex, {
-                                sourceIsParent:
-                                  event.target.value === ""
-                                    ? undefined
-                                    : event.target.value === "parent",
-                              }),
-                            )
-                          }
-                        >
-                          <option value="">Choose direction</option>
-                          <option value="parent">Source is parent</option>
-                          <option value="child">Source is child</option>
-                        </select>
-                      </label>
-                    )}
-                  </>
-                )}
-                <label>
-                  Exclusion reason
-                  <input
-                    value={relation.exclusionReason ?? ""}
-                    onChange={(event) =>
-                      updateSourceAndNotice(
-                        updateRelation(source, relationIndex, {
-                          exclusionReason: event.target.value,
-                        }),
-                      )
-                    }
-                    disabled={relation.include}
-                  />
-                </label>
-              </div>
-            ))}
+            {(() => {
+              const relationCount = source.relations.length;
+              const pageCount = Math.ceil(relationCount / SOURCE_RELATION_PAGE_SIZE);
+              const page = Math.min(relationPage, Math.max(0, pageCount - 1));
+              const pageStart = page * SOURCE_RELATION_PAGE_SIZE;
+              const visibleRelations = source.relations.slice(
+                pageStart,
+                pageStart + SOURCE_RELATION_PAGE_SIZE,
+              );
+              return (
+                <>
+                  {visibleRelations.map((relation, visibleIndex) => {
+                    // The page is presentation only. Always update the relation's original index
+                    // in the canonical complete SourceView so page navigation cannot retarget an
+                    // edit to a different relation.
+                    const relationIndex = pageStart + visibleIndex;
+                    return (
+                      <div
+                        className="setupSourceRelation"
+                        data-source-relation-key={relation.key}
+                        key={`${relation.key ?? relation.sourceType}-${relation.sourceKey ?? ""}-${relation.targetKey ?? ""}-${relationIndex}`}
+                      >
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={relation.include}
+                            onChange={(event) =>
+                              updateSourceAndNotice(
+                                updateRelation(source, relationIndex, { include: event.target.checked }),
+                              )
+                            }
+                          />{" "}
+                          Include {sourceRelationLabel(relation.sourceType)} ({formatCount(relation.count)} observed)
+                        </label>
+                        <small className="setupSourceRelationType">
+                          Source relationship type: {sourceRelationLabel(relation.type || relation.sourceType)}
+                          {relation.sourceKey && relation.targetKey
+                            ? ` · ${relation.sourceKey} → ${relation.targetKey}`
+                            : ""}
+                          {relation.attributes && Object.keys(relation.attributes).length > 0
+                            ? ` · ${Object.keys(relation.attributes).length} source attributes require explicit handling`
+                            : ""}
+                        </small>
+                        {relation.include && (
+                          <>
+                            {["RequirementTrace", "AllocatedFrom", "DerivedFrom"].includes(
+                              relation.type ?? relation.sourceType,
+                            ) && (
+                              <label>
+                                Trace type
+                                <select
+                                  aria-label={`Trace type for ${relation.sourceType}`}
+                                  value={relation.mappingType ?? ""}
+                                  onChange={(event) =>
+                                    updateSourceAndNotice(
+                                      updateRelation(source, relationIndex, {
+                                        mappingType:
+                                          event.target.value === ""
+                                            ? undefined
+                                            : (event.target.value as "AllocatedFrom" | "DerivedFrom"),
+                                      }),
+                                    )
+                                  }
+                                >
+                                  <option value="">Choose supported trace type</option>
+                                  <option value="AllocatedFrom">Allocated from</option>
+                                  <option value="DerivedFrom">Derived from</option>
+                                </select>
+                              </label>
+                            )}
+                            {!['CaseProcedure', 'VerificationCoverage', 'EvidenceExecution'].includes(relation.type ?? "") && (
+                              <label>
+                                Direction
+                                <select
+                                  aria-label={`Relation direction for ${relation.sourceType}`}
+                                  value={
+                                    relation.sourceIsParent === undefined
+                                      ? ""
+                                      : relation.sourceIsParent
+                                        ? "parent"
+                                        : "child"
+                                  }
+                                  onChange={(event) =>
+                                    updateSourceAndNotice(
+                                      updateRelation(source, relationIndex, {
+                                        sourceIsParent:
+                                          event.target.value === ""
+                                            ? undefined
+                                            : event.target.value === "parent",
+                                      }),
+                                    )
+                                  }
+                                >
+                                  <option value="">Choose direction</option>
+                                  <option value="parent">Source is parent</option>
+                                  <option value="child">Source is child</option>
+                                </select>
+                              </label>
+                            )}
+                          </>
+                        )}
+                        <label>
+                          Exclusion reason
+                          <input
+                            value={relation.exclusionReason ?? ""}
+                            onChange={(event) =>
+                              updateSourceAndNotice(
+                                updateRelation(source, relationIndex, {
+                                  exclusionReason: event.target.value,
+                                }),
+                              )
+                            }
+                            disabled={relation.include}
+                          />
+                        </label>
+                      </div>
+                    );
+                  })}
+                  {relationCount > 0 && (
+                    <div
+                      className="setupSourcePager setupSourceRelationPager"
+                      aria-label="Source relationship pages"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setRelationPage((current) => Math.max(0, Math.min(current, page) - 1))}
+                        disabled={page === 0 || busy}
+                      >
+                        Previous relationships page
+                      </button>
+                      <span aria-live="polite">
+                        {pageStart + 1}–{Math.min(pageStart + SOURCE_RELATION_PAGE_SIZE, relationCount)} of {formatCount(relationCount)} source relationships
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setRelationPage((current) => Math.min(pageCount - 1, Math.max(current, page) + 1))}
+                        disabled={page >= pageCount - 1 || busy}
+                      >
+                        Next relationships page
+                      </button>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
             {!source.relations.length && (
               <p className="setupSourcePending">No source relationships were observed.</p>
             )}
