@@ -255,6 +255,9 @@ public sealed class ProjectSetupInceptionApiTests
         Assert.Equal(HttpStatusCode.OK, finalized.StatusCode);
         var outcome = await finalized.Content.ReadFromJsonAsync<JsonElement>();
         var destinationId = outcome.GetProperty("projectId").GetGuid();
+        await AssertInheritedDocumentsAsync(administrator, outcome.GetProperty("releaseId").GetGuid(),
+            "Native revocation destination", "The source requirement shall remain attributable.");
+        await AssertIndependentDocumentAsync(administrator);
         using var provenanceResponse = await administrator.GetAsync($"/api/projects/{destinationId}/inception-source");
         Assert.Equal(HttpStatusCode.OK, provenanceResponse.StatusCode);
         var provenance = await provenanceResponse.Content.ReadFromJsonAsync<JsonElement>();
@@ -271,6 +274,68 @@ public sealed class ProjectSetupInceptionApiTests
         Assert.Contains("AeroLinkBaseline", completionAudit.Detail, StringComparison.Ordinal);
         Assert.Contains(sourceBaselineId.ToString("D"), completionAudit.Detail, StringComparison.Ordinal);
         Assert.DoesNotContain("no engineering content was inherited", completionAudit.Detail, StringComparison.Ordinal);
+    }
+
+    private static async Task AssertInheritedDocumentsAsync(HttpClient client, Guid releaseId,
+        string projectName, string statement)
+    {
+        foreach (var format in new[] { "docx", "pdf" })
+        {
+            using var document = await client.GetAsync($"/api/releases/{releaseId}/draft-document?type=Sysrd&format={format}");
+            var bytes = await document.Content.ReadAsByteArrayAsync();
+            Assert.True(document.IsSuccessStatusCode, Encoding.UTF8.GetString(bytes));
+            Assert.Equal(format == "pdf" ? "application/pdf"
+                : "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                document.Content.Headers.ContentType?.MediaType);
+            string text;
+            if (format == "docx")
+            {
+                using var archive = new ZipArchive(new MemoryStream(bytes));
+                using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open());
+                text = await reader.ReadToEndAsync();
+            }
+            else
+            {
+                text = Encoding.Latin1.GetString(bytes);
+                Assert.StartsWith("%PDF", text);
+            }
+            Assert.Contains("SW-01.30", text);
+            Assert.Contains(projectName, text);
+            Assert.Contains(statement, text);
+            Assert.Contains("Accepted source baseline", text);
+            // PDF wraps its cover description into separate text operators; the DOCX keeps the full sentence.
+            if (format == "docx") Assert.Contains("Source acceptance is not a new engineering approval", text);
+            else
+            {
+                Assert.Contains("Source acceptance", text);
+                Assert.Contains("engineering approval", text);
+            }
+            Assert.DoesNotContain("backing scope", text);
+        }
+    }
+
+    private static async Task AssertIndependentDocumentAsync(HttpClient client)
+    {
+        using var created = await client.PostAsJsonAsync("/api/project-setups", new { projectName = "Independent empty peer" });
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("draftId").GetGuid();
+        using var saved = await client.PutAsJsonAsync($"/api/project-setups/{id}", new
+        {
+            expectedVersion = 1, currentStep = "Review", start = new { kind = "Fresh" },
+            project = new { name = "Independent empty peer", softwareProduct = "Independent peer product" },
+            build = new { version = "1.3" }, ladder = new { }, reviewRules = new { }, reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+        });
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        using var completed = await client.PostAsJsonAsync($"/api/project-setups/{id}/finalize",
+            new { expectedVersion = 2, idempotencyKey = "independent-empty-peer" });
+        Assert.Equal(HttpStatusCode.OK, completed.StatusCode);
+        var releaseId = (await completed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("releaseId").GetGuid();
+        using var document = await client.GetAsync($"/api/releases/{releaseId}/draft-document?type=Sysrd&format=pdf");
+        Assert.Equal(HttpStatusCode.OK, document.StatusCode);
+        var pdf = Encoding.Latin1.GetString(await document.Content.ReadAsByteArrayAsync());
+        Assert.Contains("Independent empty peer", pdf);
+        Assert.DoesNotContain("The source requirement shall remain attributable", pdf);
+        Assert.DoesNotContain("Accepted source baseline", pdf);
     }
 
     [Fact]
@@ -641,6 +706,8 @@ public sealed class ProjectSetupInceptionApiTests
         var projectId = finalizedBody.RootElement.GetProperty("projectId").GetGuid();
         Assert.Equal("Completed", finalizedBody.RootElement.GetProperty("state").GetString());
         Assert.Equal("SW-01.30", finalizedBody.RootElement.GetProperty("officialBuildName").GetString());
+        await AssertInheritedDocumentsAsync(client, finalizedBody.RootElement.GetProperty("releaseId").GetGuid(),
+            $"Inception {fileName}", "Imported exact wording");
 
         using var provenanceResponse = await client.GetAsync($"/api/projects/{projectId}/inception-source");
         Assert.Equal(HttpStatusCode.OK, provenanceResponse.StatusCode);
@@ -730,6 +797,9 @@ public sealed class ProjectSetupInceptionApiTests
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         Assert.Single(await db.Projects.Where(x => x.Id == projectId).ToListAsync());
         Assert.Single(await db.BaselineImports.Where(x => x.ProjectId == projectId).ToListAsync());
+        var completionAudit = await db.SecurityAuditEvents.SingleAsync(x => x.EventType == "ProjectSetupCompleted"
+            && x.Target == draftId.ToString("D"));
+        Assert.Contains($"exact source package {uploadedBody.RootElement.GetProperty("id").GetGuid():D}", completionAudit.Detail);
         var import = await db.BaselineImports.SingleAsync(x => x.ProjectId == projectId);
         Assert.Equal(BaselineImportState.Accepted, import.State);
         Assert.Equal(sourceBytes.LongLength, import.ExtractSizeBytes);

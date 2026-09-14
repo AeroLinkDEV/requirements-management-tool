@@ -153,6 +153,9 @@ no authored or inherited engineering content; empty containers do not count. All
 ladder and supported capability profile. The first build uses the canonical `SW-NN.NN` identity and is explicitly
 **IN WORK**; source baseline state remains historical and distinct. Visual build-lineage entry uses stable project,
 build, lifecycle, and predecessor identities, with explicit user selection even when only one build exists.
+The initial inherited build's living requirement documents read its completed setup's exact frozen inception
+manifest plus approved project changes when there is no released predecessor. They label that basis as an accepted
+source baseline; source acceptance does not confer new engineering approval. Independent fresh builds remain empty.
 
 Repository setup is a project-scoped configuration seam: Configure later stays visibly Pending, while Connect now
 records ConfiguredUnverified until an installation-approved read-only GitLab probe observes a remote identity.
