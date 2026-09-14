@@ -39,11 +39,17 @@ test("an authenticated root destination canonicalizes to the Projects portal", a
 test("delayed hydration retains a real project-card selection and exact build scope", async ({ page }) => {
   let deliver: (value: unknown) => void = () => { throw new Error("Workspace request has not started"); };
   const pending = new Promise(resolve => { deliver = resolve; });
-  await mockShell(page, () => pending);
+  let started = () => {};
+  const requested = new Promise<void>(resolve => { started = resolve; });
+  await mockShell(page, () => { started(); return pending; });
   await page.goto("/projects");
-  await page.getByRole("link", { name: "Open FMS Product Development", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Opening workspace" })).toBeVisible();
+  await requested;
+  // Cards must come from authorized server data, including the familiar FMS project.
+  await expect(page.locator("[data-project-card]")).toHaveCount(0);
   deliver(workspaces);
+  await page.getByRole("link", { name: "Open FMS Product Development", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(fmsPath + "$"));
+  await expect(page.locator(".contextBar")).toHaveCount(0);
   const build = page.getByRole("button", { name: /Open Build 1.6/i });
   await expect(build).toBeEnabled();
   await build.click();
@@ -69,13 +75,22 @@ test("project switches and browser history resolve the named project's own reque
   await mockShell(page);
   await page.goto(fmsPath);
   await page.getByRole("button", { name: "Projects", exact: true }).click();
-  const imported = page.waitForRequest(request => request.url().includes("/api/baseline-imports?projectId=other-project"));
+  const importRequests: string[] = [];
+  page.on("request", request => { if (request.url().includes("/api/baseline-imports?")) importRequests.push(request.url()); });
   await page.getByRole("link", { name: "Open DOORS Import Practice", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(projectAreaPath("other-project", "builds") + "$"));
+  await expect(page.getByRole("heading", { name: "DOORS Import Practice", exact: true })).toBeVisible();
+  expect(importRequests).toEqual([]);
+  const imported = page.waitForRequest(request => request.url().includes("/api/baseline-imports?projectId=other-project"));
+  await page.getByRole("button", { name: "Imported baselines", exact: true }).click();
   await imported;
   await page.getByRole("button", { name: "← Software Builds", exact: true }).click();
   await expect(page.getByRole("heading", { name: "DOORS Import Practice", exact: true })).toBeVisible();
   await page.goBack();
   await page.goBack();
+  await expect(page.getByRole("heading", { name: "DOORS Import Practice", exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/projects$/);
   await page.goBack();
   await expect(page.getByRole("heading", { name: "FMS Product Development", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /Open build 1.6/i })).toBeEnabled();
