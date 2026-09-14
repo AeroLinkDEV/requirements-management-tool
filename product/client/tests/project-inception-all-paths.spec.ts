@@ -277,6 +277,60 @@ test("inherits an authorized native baseline with exact mapped traces and discov
   expect(projection.acceptance?.authority).toBeTruthy();
 });
 
+test("source upload and mapping survive save-exit and a new signed-in browser context", async ({ page, browser }, testInfo) => {
+  test.setTimeout(10 * 60 * 1000);
+  const projectName = `Source recovery ${Date.now()}`;
+  await login(page, "admin", { openProject: false });
+  const { setupUrl, draftId } = await beginSetup(page, projectName, "External baseline from another tool");
+  await page.getByLabel("Baseline file (ReqIF, CSV, or XLSX)").setInputFiles({
+    name: "recovery.reqif",
+    mimeType: "application/xml",
+    buffer: Buffer.from(reqIfRootFixture, "utf8"),
+  });
+  await page.getByRole("button", { name: "Upload and analyze source" }).click();
+  await expect(page.getByText("Exact source", { exact: true })).toBeVisible({ timeout: 120_000 });
+  const reconciled = await reconcile(page, draftId, ["Requirements"]);
+  expect(reconciled.reconciliation?.ready).toBeTruthy();
+
+  // The focused helper reconciles through the versioned source endpoint directly. Refresh once to
+  // model the panel's normal optimistic draft-version update before Save and exit. Reconciliation
+  // moves the durable draft to Review, so verify the server source state before visiting the source
+  // step again; the Review page intentionally summarizes the source rather than repeating its panel.
+  await page.goto(setupUrl);
+  await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible({ timeout: 120_000 });
+  const reloadedSource = await source(page.request, draftId);
+  expect(reloadedSource.reconciliation?.ready, JSON.stringify(reloadedSource.reconciliation)).toBeTruthy();
+  expect(reloadedSource.id).toBe(reconciled.id);
+  expect(reloadedSource.sha256).toBe(reconciled.sha256);
+  expect(reloadedSource.assertion?.hash).toBe(reconciled.assertion?.hash);
+  await page.getByRole("button", { name: "Save and exit" }).click();
+  await expect(page.getByRole("heading", { name: "Projects", level: 1 })).toBeVisible();
+  await expect(page.getByText(projectName, { exact: true })).toBeVisible();
+  await page.context().close();
+
+  const resumedContext = await browser.newContext();
+  const resumedPage = await resumedContext.newPage();
+  try {
+    await login(resumedPage, "admin", { openProject: false });
+    await expect(resumedPage.getByText(projectName, { exact: true })).toBeVisible({ timeout: 30_000 });
+    await resumedPage.getByRole("button", { name: "Resume setup" }).click();
+    await expect(resumedPage.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
+    const resumedSource = await source(resumedPage.request, draftId);
+    expect(resumedSource.reconciliation?.ready, JSON.stringify(resumedSource.reconciliation)).toBeTruthy();
+    expect(resumedSource.id).toBe(reconciled.id);
+    expect(resumedSource.sha256).toBe(reconciled.sha256);
+    expect(resumedSource.assertion?.hash).toBe(reconciled.assertion?.hash);
+    await resumedPage.getByRole("button", { name: /2\. Starting point/ }).click();
+    await expect(resumedPage.getByRole("heading", { name: "Choose a starting point", level: 2 })).toBeVisible();
+    await expect(resumedPage.getByText("Exact source", { exact: true })).toBeVisible({ timeout: 120_000 });
+    await expect(resumedPage.getByText("Reconciliation ready", { exact: true })).toBeVisible();
+    await expect(resumedPage.getByLabel("Mapping for Requirements REQ-SYS Statement")).toHaveValue("Statement");
+    await resumedPage.screenshot({ path: testInfo.outputPath("source-recovery-resumed.png"), fullPage: true });
+  } finally {
+    await resumedContext.close();
+  }
+});
+
 const externalFixtures = [
   {
     name: "ReqIF hierarchical",

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { apiBase, login } from "./auth";
+import { login } from "./auth";
 
 test("source metadata is read-only and source proof expires after mapping or relation edits", async ({ page }, testInfo) => {
   await login(page, "admin", { openProject: false });

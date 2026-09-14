@@ -369,7 +369,12 @@ function requestBody(values: SetupValues, currentStep: SetupStep, expectedVersio
     // An empty build is a legitimate earlier draft state. Omitting it lets the server preserve that state
     // while Details or Starting Point are saved; sending `{ version: "" }` would invoke the parser too early.
     ...(values.buildVersion.trim() ? { build: { version: values.buildVersion } } : {}),
-    selectedCategories: values.selectedCategories,
+    // Once a source package exists, its versioned configuration endpoint owns categories. Keeping
+    // them out of setup PUTs prevents Save-and-exit/resume from racing or overwriting that source
+    // decision; Fresh and not-yet-selected source drafts still retain their local answer here.
+    ...((!values.sourceBaselineId && !values.sourceImportId) || values.startKind === "Fresh"
+      ? { selectedCategories: values.selectedCategories }
+      : {}),
     ladder: values.ladder,
     reviewRules: values.reviewRulesDefinition ?? {},
     reviewRulesAccepted: values.reviewRulesAccepted,
